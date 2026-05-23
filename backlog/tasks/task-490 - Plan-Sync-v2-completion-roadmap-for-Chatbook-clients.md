@@ -61,8 +61,10 @@ Brainstorming decisions captured:
 - Design Section 6 approved: split M1 into server schema/repository, API, Notes materializer, Chat materializer, restore/conflict flows, profile status, Chatbook client integration, and end-to-end verification tasks.
 - Wrote superseding PRD/spec at Docs/superpowers/specs/2026-05-23-chatbook-sync-v2-roadmap-prd-design.md.
 - Spec review loop iteration 1 approved with no blocking issues. Advisory: resolve implementation-planning open questions first, especially database placement, profile/device identity, and encryption primitive selection.
+- Second-pass review fixes applied before implementation planning: explicit `POST /sync/profile/bootstrap`, base-state conflict metadata (`base_server_cursor`, `base_object_revision`, `base_object_hash`, `object_revision`), restore wording clarified so offline Chatbook applies plans/envelopes locally, and M1 encryption boundary now covers both envelope payload storage and materialized Notes/Chat projections.
+- Spec review loop iteration 2 approved with no blocking issues. Advisory: treat DB location, profile/device identity, and at-rest encryption primitive as the first M1 planning gate.
 
-Verification:
+Verification before first commit:
 
 - `git diff --check` passed.
 - Placeholder/stale contradiction scan over the spec passed with no matches.

@@ -2,7 +2,7 @@
 
 Date: 2026-05-23
 Owner: Codex collaboration session
-Status: Approved design direction, pending spec review
+Status: Approved design direction; spec review passed 2026-05-23; pending implementation planning
 Backlog: TASK-490
 Supersedes: `Docs/superpowers/specs/2026-05-10-chatbook-sync-engine-prd-design.md`
 
@@ -47,6 +47,9 @@ Chatbook must support three valid operating modes:
 
 Sync v2 applies only to `server_frontend` and `offline_sync`. It must not make
 `local_only` dependent on server configuration, remote auth, or a sync account.
+Switching between modes must be explicit. A local-only profile should not be
+silently enrolled into server sync, and a server-front-end session should not
+silently create a durable local synced dataset.
 
 ## Goals
 
@@ -92,6 +95,7 @@ M1 is the first implementation milestone and covers:
   messages.
 - Attachment metadata/references, with missing blob warnings during restore.
 - Profile-level `Sync now` and `Restore` surface, with per-domain status details.
+- Explicit device/profile bootstrap for server-connected modes.
 - Restore into either a clean profile or an existing non-empty profile.
 - Whole-object conflict review for Notes and conversation metadata.
 - Append-only non-duplicate Chat message merge by stable message ID.
@@ -188,7 +192,8 @@ Core server components:
 - Conflict Service: detects whole-object conflicts for Notes and conversation
   metadata, plus stable-ID Chat message dedupe/conflicts.
 - Restore Service: previews available server state and applies selected data
-  into an existing or clean Chatbook profile.
+  into server projections when needed. For offline Chatbook restore, it returns
+  restore plans and envelopes for the client to apply locally.
 - Key/Encryption Boundary: M1 uses normal authenticated server use to unlock
   user-private data; later milestones add stricter modes.
 
@@ -207,7 +212,7 @@ All endpoints live under `/api/v1/sync`.
 
 ### `GET /api/v1/sync/profile`
 
-Returns active profile/dataset summary:
+Returns active profile/dataset summary without creating durable sync state:
 
 - server protocol version
 - server capabilities
@@ -217,6 +222,18 @@ Returns active profile/dataset summary:
 - encryption mode
 - device registration/status
 - per-domain status, pending counts, conflicts, and last apply result
+
+### `POST /api/v1/sync/profile/bootstrap`
+
+Idempotently bootstraps server-connected Chatbook use for the authenticated
+user. This endpoint registers or refreshes the current device/profile identity,
+creates the default personal dataset if it does not already exist, returns the
+initial cursor state, and declares whether the client is entering
+`server_frontend` or `offline_sync` mode.
+
+M1 should prefer this explicit write endpoint over hidden side effects in
+`GET /sync/profile`. The response must include stable identifiers the client
+uses in later `push`, `pull`, and `restore/preview` requests.
 
 ### `POST /api/v1/sync/push`
 
@@ -274,6 +291,9 @@ Envelope shape is versioned and domain-neutral. M1 should include:
 - `dataset_id`
 - `device_id`
 - `client_sequence`
+- `base_server_cursor`
+- `base_object_revision`
+- `base_object_hash`
 - `server_cursor`
 - `domain`
 - `operation`
@@ -282,6 +302,7 @@ Envelope shape is versioned and domain-neutral. M1 should include:
 - `schema_version`
 - `payload`
 - `payload_hash`
+- `object_revision`
 - `created_at_client`
 - `received_at_server`
 - `deleted` or `tombstone`
@@ -297,13 +318,25 @@ M1 domains:
 The schema should reserve fields for later retention, compaction, device
 acknowledgments, key policy, and blob availability.
 
+`base_server_cursor`, `base_object_revision`, and `base_object_hash` are required
+for whole-object domains such as `notes.note` and `chat.conversation`. They
+describe the server state the client had observed when the local edit was made.
+Append-only `chat.message` creates may omit object-base fields when the message
+ID is new, but tombstones and edits must include base-state metadata.
+
+The server assigns `server_cursor` and canonical `object_revision` values when
+it accepts an envelope. Clients must not rely on wall-clock timestamps for
+conflict detection.
+
 ## Conflict Policy
 
 M1 conflict handling is conservative and explicit.
 
-Notes and conversation metadata use whole-object conflicts. If both local and
-server changed the same object since the last common cursor, sync pauses that
-object and returns conflict details.
+Notes and conversation metadata use whole-object conflicts. If the server has a
+post-base accepted envelope for the same object and the incoming base revision
+or hash does not match the current server projection, sync pauses that object
+and returns conflict details. Implementations must use cursor/revision/hash
+metadata for this check, not client wall-clock timestamps.
 
 Chat messages are append-only by stable message ID. Duplicate message IDs are
 ignored idempotently when payload hashes match. Distinct messages are merged in
@@ -321,8 +354,8 @@ instead of presenting the restored profile as complete.
 
 M1 supports restore into clean and non-empty Chatbook profiles.
 
-The client sends a local inventory to `/sync/restore/preview`. The server
-returns:
+The client sends a local inventory to `/sync/restore/preview`. The server returns
+a restore plan and the envelope ranges needed to apply it locally:
 
 - objects safe to apply
 - object conflicts
@@ -337,6 +370,11 @@ Restore must preserve usability of Chat threads, so Chat sync includes minimal
 conversation/session metadata with messages. Message-only restore is not
 sufficient.
 
+The server does not directly write into an offline Chatbook local database.
+Chatbook applies the returned restore plan and envelopes to its local profile.
+For `server_frontend` mode, the server's materialized projections are already
+the live state and no client-side restore apply is needed.
+
 ## Security And Encryption
 
 M1 assumes trusted/self-hosted server operation. User-private personal data is
@@ -349,9 +387,19 @@ M1 security posture:
 - authenticated and user-scoped access
 - personal datasets only
 - server-unlocked encryption for user-private personal data
+- both accepted envelope payload storage and materialized Notes/Chat projections
+  are inside the M1 at-rest encryption boundary
 - no client-only opaque payload requirement
 - no plaintext secret logging
 - no cross-user access to datasets, envelopes, conflicts, or restore previews
+
+M1 may satisfy server-unlocked encryption through an implementation-selected
+server-side mechanism such as encrypted per-user database files, an encrypted
+storage volume with documented deployment requirements, or server-managed
+field/table encryption. The implementation plan must choose one explicit
+mechanism before schema work begins. Sync v2 cannot claim M1 encryption if
+envelopes are encrypted but materialized Notes/Chat projections remain outside
+the same at-rest protection boundary.
 
 Later milestones add stricter modes:
 
@@ -381,20 +429,24 @@ compaction, per-device acknowledgment, and safe garbage collection.
 After this PRD is approved and reviewed, M1 should split into Backlog child
 tasks:
 
-1. Server schema/repository for datasets, devices, envelope log, cursors,
-   conflict records, and apply status.
-2. Sync v2 API schemas and endpoints replacing existing `/api/v1/sync`.
-3. Notes materializer with upsert, tombstone, conflict detection, and replay
+1. Resolve implementation-planning gates: Sync v2 table location,
+   profile/device identity, explicit at-rest encryption primitive, and the
+   bootstrap contract.
+2. Server schema/repository for datasets, devices, envelope log, cursors,
+   conflict records, base-state metadata, and apply status.
+3. Sync v2 API schemas and endpoints replacing existing `/api/v1/sync`,
+   including explicit profile bootstrap.
+4. Notes materializer with upsert, tombstone, conflict detection, and replay
    tests.
-4. Chat materializer with conversation metadata, message append/dedupe,
+5. Chat materializer with conversation metadata, message append/dedupe,
    tombstones, and replay tests.
-5. Restore preview and conflict resolution flows for clean and non-empty
+6. Restore preview and conflict resolution flows for clean and non-empty
    profiles.
-6. Profile-level status/readiness response with per-domain details for Chatbook
+7. Profile-level status/readiness response with per-domain details for Chatbook
    UI.
-7. Chatbook client integration in its own repo/worktree: outbox capture, manual
+8. Chatbook client integration in its own repo/worktree: outbox capture, manual
    `Sync now` and `Restore`, status details, and conflict review.
-8. M1 end-to-end verification: two devices plus server, new-device restore,
+9. M1 end-to-end verification: two devices plus server, new-device restore,
    non-empty restore, offline edits, conflicts, tombstones, and auth-scoped
    isolation.
 
@@ -407,7 +459,7 @@ M1 verification should include:
 - API contract tests for profile, push, pull, restore preview, and conflict
   resolution.
 - Repository tests for envelope idempotency, cursor ordering, device scoping,
-  and conflict records.
+  base-state conflict detection, and conflict records.
 - Notes materializer unit and integration tests.
 - Chat materializer unit and integration tests.
 - Replay/repair tests that rebuild projections from envelopes.
@@ -417,6 +469,9 @@ M1 verification should include:
 - Missing-blob restore preview tests for attachment refs.
 - Cross-user access tests for datasets, envelopes, restore previews, and
   conflicts.
+- At-rest encryption boundary tests or deployment checks proving both envelopes
+  and materialized Notes/Chat projections are covered by the selected M1
+  mechanism.
 - Bandit on touched production code.
 
 Manual Chatbook UX verification belongs to the Chatbook-side milestone after
