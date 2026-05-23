@@ -2541,39 +2541,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx:Alert#antd-alert-writingplaygroundmodalhost-type-error-line-22-175t14c",
-    "path": "src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx:Alert#antd-alert-writingplaygroundmodalhost-type-error-line-31-1jyrk",
-    "path": "src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx:Alert#antd-alert-writingplaygroundmodalhost-type-error-line-55-t7t6f2",
-    "path": "src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Quiz/tabs/CreateTab.tsx:Alert#antd-alert-createtab-type-info-line-1003-u954tt",
     "path": "src/components/Quiz/tabs/CreateTab.tsx",
     "rule": "antd-product-state-import",
