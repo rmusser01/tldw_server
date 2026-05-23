@@ -25,6 +25,22 @@ const isAbortLikeError = (error: unknown): boolean => {
   )
 }
 
+const getModelLoadErrorMessage = (error: unknown): string | null => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error
+  }
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === "string" && message.trim()) {
+      return message
+    }
+  }
+  return null
+}
+
 export const AvailableModelsList: React.FC = () => {
   const { t } = useTranslation(['settings', 'common'])
   const { data, status, error, refetch, isFetching } = useQuery({
@@ -74,7 +90,7 @@ export const AvailableModelsList: React.FC = () => {
   }
 
   if (status === 'error') {
-    const errorMessage = error instanceof Error ? error.message : null
+    const errorMessage = getModelLoadErrorMessage(error)
     return (
       <Alert
         type="error"

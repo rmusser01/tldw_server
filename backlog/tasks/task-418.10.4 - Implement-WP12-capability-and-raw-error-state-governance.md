@@ -42,15 +42,26 @@ Touched files:
 - apps/tldw-frontend/e2e/smoke/route-capability-state-governance.spec.ts
 - apps/tldw-frontend/e2e/smoke/smoke.setup.ts
 - apps/tldw-frontend/e2e/smoke/all-pages.spec.ts
+- apps/packages/ui/src/assets/locale/en/common.json
+- apps/packages/ui/src/assets/locale/en/option.json
 - apps/packages/ui/src/components/ui/state/StatePanel.tsx
 - apps/packages/ui/src/components/ui/state/__tests__/state-primitives.test.tsx
 - apps/packages/ui/src/components/Option/Models/AvailableModelsList.tsx
+- apps/packages/ui/src/components/Option/Models/__tests__/AvailableModelsList.test.tsx
 - apps/packages/ui/src/components/Option/Evaluations/components/EvaluationRecoveryCallout.tsx
 - apps/packages/ui/src/components/Option/Evaluations/tabs/RecipesTab.tsx
 - apps/packages/ui/src/components/Option/MCPHub/ToolCatalogsTab.tsx
 - apps/packages/ui/src/components/Option/Skills/SkillsWorkspace.tsx
 - apps/packages/ui/src/components/Option/Speech/SpeechPlaygroundPage.tsx
 - apps/packages/ui/src/components/Option/DataTables/DataTablesList.tsx
+
+Review follow-up pass for PR #1970 addressed the four open inline comments:
+- Rejected invalid smoke allowlist calendar dates such as `2026-99-99` and added a regression check.
+- Moved the MCP Tool Catalog server-inventory guidance and request-details disclosure label to translation keys.
+- Preserved model-load diagnostics for `Error`, string, and plain-object `{ message }` failures.
+- Moved the shared StatePanel diagnostics disclosure label to a translation key.
+
+Review follow-up verification: focused Vitest passed (24 tests across StatePanel primitives, AvailableModelsList, ToolCatalogsTab, and EvaluationRecoveryCallout); focused smoke allowlist Playwright passed (2 tests, rerun with elevated Chromium launch after sandbox permission failure); focused route capability governance Playwright passed (10 tests); `git diff --check` passed; frontend lint exited 0 with existing repo warnings and package-ui path ignore warnings; Bandit scanned touched frontend paths with 0 findings/0 Python LOC. Full frontend `bunx tsc --noEmit --pretty false` remains blocked by unrelated baseline TypeScript errors in Media read-along, Watchlists, WorkspacePlayground, keyboard shortcuts, persona live control, and admin llama.cpp e2e fixtures.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

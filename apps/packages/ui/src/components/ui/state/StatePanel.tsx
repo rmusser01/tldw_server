@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 import {
   type DesignSystemSeverity,
   type DesignSystemStateKey,
@@ -59,9 +60,11 @@ export function StatePanel({
   "data-testid": dataTestId,
   "data-ds-component": dataDesignSystemComponent = "StatePanel"
 }: StatePanelProps) {
+  const { t } = useTranslation("common")
   const definition = getDesignSystemState(state)
   const toneClass = stateToneClasses[state] ?? severityClasses[definition.severity]
   const hasDiagnostics = diagnostics && diagnostics.length > 0
+  const diagnosticsLabel = t("common:diagnostics", "Diagnostics")
 
   return (
     <section
@@ -93,9 +96,9 @@ export function StatePanel({
         {hasDiagnostics ? (
           <details className="rounded-md border border-border bg-surface2 px-3 py-2">
             <summary className="cursor-pointer text-xs font-semibold text-text-muted">
-              Diagnostics
+              {diagnosticsLabel}
             </summary>
-            <dl aria-label="Diagnostics" className="mt-2">
+            <dl aria-label={diagnosticsLabel} className="mt-2">
               {diagnostics.map((diagnostic, index) => (
                 <DiagnosticRow key={index} {...diagnostic} />
               ))}

@@ -780,8 +780,25 @@ const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 function parseAllowlistExpiry(expiresOn: string): number | null {
   if (!ISO_DATE_PATTERN.test(expiresOn)) return null
   const [year, month, day] = expiresOn.split("-").map(Number)
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null
+  }
+  if (month < 1 || month > 12) return null
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  if (day < 1 || day > daysInMonth) return null
+
   const endOfDayUtc = Date.UTC(year, month - 1, day, 23, 59, 59, 999)
-  return Number.isNaN(endOfDayUtc) ? null : endOfDayUtc
+  if (Number.isNaN(endOfDayUtc)) return null
+
+  const reconstructedDate = new Date(endOfDayUtc)
+  if (
+    reconstructedDate.getUTCFullYear() !== year ||
+    reconstructedDate.getUTCMonth() + 1 !== month ||
+    reconstructedDate.getUTCDate() !== day
+  ) {
+    return null
+  }
+  return endOfDayUtc
 }
 
 export function validateSmokeHardGateAllowlist(
@@ -823,7 +840,7 @@ export function validateSmokeHardGateAllowlist(
 
     const expiry = parseAllowlistExpiry(rule.expiresOn || "")
     if (expiry === null) {
-      errors.push(`${label}: expiresOn must use YYYY-MM-DD`)
+      errors.push(`${label}: expiresOn must be a valid YYYY-MM-DD date`)
     } else if (expiry < nowMs) {
       errors.push(`${label}: expired on ${rule.expiresOn}`)
     }

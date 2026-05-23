@@ -91,4 +91,23 @@ describe("AvailableModelsList", () => {
       screen.queryByText("Unable to load models from server")
     ).not.toBeInTheDocument()
   })
+
+  it.each([
+    ["string errors", "Provider registry is offline"],
+    ["plain object message errors", { message: "Provider registry returned 502" }],
+  ])("keeps %s in request details", async (_name, error) => {
+    mocks.getModelsMetadata.mockRejectedValue(error)
+
+    renderWithQueryClient()
+
+    expect(
+      await screen.findByText("Unable to load models from server")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Request details")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        typeof error === "string" ? error : error.message
+      )
+    ).toBeInTheDocument()
+  })
 })

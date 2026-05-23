@@ -35,6 +35,8 @@
   "cancel": "Cancel",
   "saving": "Saving...",
   "retry": "Retry",
+  "requestDetails": "Request details",
+  "diagnostics": "Diagnostics",
   "close": "Close",
   "storageQuota": {
     "exceededTitle": "Storage nearly full",

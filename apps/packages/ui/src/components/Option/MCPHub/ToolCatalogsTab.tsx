@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Button, Card, Empty, Space, Tag, Typography } from "antd"
 import { useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 
 import {
@@ -33,6 +34,7 @@ const describeLoadFailure = (reason: unknown, fallback: string) => {
 
 export const ToolCatalogsTab = ({ onAddServer }: ToolCatalogsTabProps = {}) => {
   const queryClient = useQueryClient()
+  const { t } = useTranslation(["option", "common"])
   const latestLoadRequestId = useRef(0)
   const [entries, setEntries] = useState<McpHubToolRegistryEntry[]>([])
   const [modules, setModules] = useState<McpHubToolRegistryModule[]>([])
@@ -143,14 +145,22 @@ export const ToolCatalogsTab = ({ onAddServer }: ToolCatalogsTabProps = {}) => {
         <Alert
           type="warning"
           showIcon
-          title="Could not load server inventory"
+          title={t(
+            "option:mcpHub.toolCatalogs.serverInventoryErrorTitle",
+            "Could not load server inventory"
+          )}
         >
           <Space orientation="vertical" size={4}>
             <Typography.Text>
-              Tool Catalog guidance may be incomplete until the server list loads.
+              {t(
+                "option:mcpHub.toolCatalogs.serverInventoryGuidance",
+                "Tool Catalog guidance may be incomplete until the server list loads."
+              )}
             </Typography.Text>
             <details>
-              <summary className="cursor-pointer font-medium">Request details</summary>
+              <summary className="cursor-pointer font-medium">
+                {t("common:requestDetails", "Request details")}
+              </summary>
               <Typography.Text code className="whitespace-pre-wrap">
                 {serverInventoryError}
               </Typography.Text>

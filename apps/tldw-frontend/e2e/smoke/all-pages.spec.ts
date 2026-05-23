@@ -16,6 +16,7 @@ import {
   test,
   expect,
   seedAuth,
+  SMOKE_HARD_GATE_ALLOWLIST,
   getCriticalIssues,
   classifySmokeIssues,
   validateSmokeHardGateAllowlist,
@@ -414,6 +415,23 @@ test.describe('Smoke Tests - All Pages', () => {
 
   test('hard-gate allowlist entries have current ownership metadata', () => {
     expectSmokeHardGateAllowlistMetadata();
+  });
+
+  test('hard-gate allowlist rejects invalid calendar expiry metadata', () => {
+    const baseRule = SMOKE_HARD_GATE_ALLOWLIST[0];
+    expect(baseRule).toBeDefined();
+
+    const allowlistProblems = validateSmokeHardGateAllowlist([
+      {
+        ...baseRule!,
+        id: 'invalid-calendar-expiry',
+        expiresOn: '2026-99-99',
+      },
+    ]);
+
+    expect(allowlistProblems).toContain(
+      'invalid-calendar-expiry: expiresOn must be a valid YYYY-MM-DD date'
+    );
   });
 
   // Generate a test for each active page

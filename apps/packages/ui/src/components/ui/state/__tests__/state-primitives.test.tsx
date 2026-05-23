@@ -2,6 +2,12 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { ActionGroup, PermissionNotice, RecoveryCallout, SetupRequiredPanel, StatePanel } from "../"
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, defaultValue?: string) => defaultValue ?? _key
+  })
+}))
+
 describe("state primitives", () => {
   it("renders canonical state labels with accessible primary actions", () => {
     render(

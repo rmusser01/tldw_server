@@ -1602,6 +1602,12 @@
       "startHereBadge": "Start here"
     }
   },
+  "mcpHub": {
+    "toolCatalogs": {
+      "serverInventoryErrorTitle": "Could not load server inventory",
+      "serverInventoryGuidance": "Tool Catalog guidance may be incomplete until the server list loads."
+    }
+  },
   "repo2txt": {
     "nav": "Repo2Txt",
     "title": "Repo2Txt",
