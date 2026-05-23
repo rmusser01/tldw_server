@@ -73,7 +73,7 @@ export const WritingPlaygroundTokenInspectorCard: FC<TokenInspectorCardProps> = 
 <Alert variant="info" className="mb-2" title={tokenInspectorUnavailableReason} />
     ) : null}
     {tokenInspectorError ? (
-      <Alert variant="error" title={tokenInspectorError} />
+<Alert variant="error" className="mb-2" title={tokenInspectorError} />
     ) : null}
     <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
       {hasTokenCountResult && tokenCountValue != null ? (
