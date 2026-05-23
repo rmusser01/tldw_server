@@ -153,18 +153,10 @@ export const resolveRevisionTarget = (input: {
   const { text, action, operation, selection } = input
   const maxAutomaticTargetCharacters =
     input.maxAutomaticTargetCharacters ?? DEFAULT_LARGE_TARGET_CHARS
-  if (selection && selection.start !== selection.end) {
-    return makeRevisionTarget({
-      text,
-      mode: "selection",
-      start: selection.start,
-      end: selection.end,
-      operation,
-      label: "selection"
-    })
-  }
-
-  const cursor = clampIndex(input.cursor ?? text.length, text.length)
+  const cursor = clampIndex(
+    input.cursor ?? selection?.end ?? text.length,
+    text.length
+  )
   if (action === "continue") {
     return makeRevisionTarget({
       text,
@@ -173,6 +165,17 @@ export const resolveRevisionTarget = (input: {
       end: cursor,
       operation: "insert",
       label: cursor === text.length ? "document end" : "cursor"
+    })
+  }
+
+  if (selection && selection.start !== selection.end) {
+    return makeRevisionTarget({
+      text,
+      mode: "selection",
+      start: selection.start,
+      end: selection.end,
+      operation,
+      label: "selection"
     })
   }
 

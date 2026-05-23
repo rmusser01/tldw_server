@@ -3,6 +3,7 @@ import { planRevisionApply } from "../writing-revision-utils"
 import type { WritingRevisionProposal } from "../writing-revision-types"
 import {
   getRevisionsFromPayload,
+  getRevisionPayloadSignature,
   mergeRevisionsIntoPayload,
   type WritingSessionPayload
 } from "./utils"
@@ -42,6 +43,10 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
   )
   const revisionsRef = useRef(revisions)
   const activeSessionIdRef = useRef(activeSessionId)
+  const loadedSessionIdRef = useRef(activeSessionId)
+  const revisionPayloadSignatureRef = useRef(
+    getRevisionPayloadSignature(activeSessionPayload)
+  )
   const revisionListVersionRef = useRef(0)
 
   activeSessionIdRef.current = activeSessionId
@@ -52,6 +57,16 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
 
   useEffect(() => {
     const nextRevisions = getRevisionsFromPayload(activeSessionPayload)
+    const nextSignature = getRevisionPayloadSignature(activeSessionPayload)
+    if (
+      loadedSessionIdRef.current === activeSessionId &&
+      revisionPayloadSignatureRef.current === nextSignature
+    ) {
+      return
+    }
+
+    loadedSessionIdRef.current = activeSessionId
+    revisionPayloadSignatureRef.current = nextSignature
     revisionListVersionRef.current += 1
     revisionsRef.current = nextRevisions
     setRevisions(nextRevisions)
@@ -74,6 +89,7 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
     ) => {
       const nextRevisions = updater(revisionsRef.current)
       revisionListVersionRef.current += 1
+      revisionPayloadSignatureRef.current = JSON.stringify(nextRevisions)
       revisionsRef.current = nextRevisions
       setRevisions(nextRevisions)
       persistRevisions(nextRevisions)

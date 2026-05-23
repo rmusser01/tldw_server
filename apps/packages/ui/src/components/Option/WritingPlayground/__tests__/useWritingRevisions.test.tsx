@@ -265,6 +265,45 @@ describe("useWritingRevisions", () => {
     expect(latestPersistedRevisions(applySessionPayloadPatch)).toHaveLength(2)
   })
 
+  it("keeps a pending regeneration after a same-payload save echo", async () => {
+    const source = buildRevision({ id: "source" })
+    const replacement = buildRevision({ id: "replacement" })
+    const deferred = createDeferred<WritingRevisionProposal>()
+    const createReplacement = vi.fn(() => deferred.promise)
+    const payload = mergeRevisionsIntoPayload({}, [source])
+    const { result, rerender, applyEditorText, applySessionPayloadPatch } = setup({
+      activeSessionPayload: payload
+    })
+
+    await act(async () => {
+      void result.current.regenerateRevision(source.id, createReplacement)
+      await Promise.resolve()
+    })
+
+    rerender({
+      activeSessionId: "session-1",
+      activeSessionPayload: mergeRevisionsIntoPayload({}, [{ ...source }]),
+      editorText: "Alpha beta",
+      applyEditorText,
+      applySessionPayloadPatch
+    })
+
+    await act(async () => {
+      deferred.resolve(replacement)
+      await deferred.promise
+    })
+
+    expect(result.current.revisions).toEqual([
+      expect.objectContaining({ id: source.id, status: "rejected" }),
+      expect.objectContaining({
+        id: replacement.id,
+        regeneratedFromId: source.id,
+        status: "pending"
+      })
+    ])
+    expect(latestPersistedRevisions(applySessionPayloadPatch)).toHaveLength(2)
+  })
+
   it("ignores a pending regeneration when the active session changes before completion", async () => {
     const source = buildRevision({ id: "source" })
     const replacement = buildRevision({
