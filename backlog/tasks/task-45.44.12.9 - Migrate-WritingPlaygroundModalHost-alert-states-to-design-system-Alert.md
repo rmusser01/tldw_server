@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.12.9
 title: Migrate WritingPlaygroundModalHost alert states to design-system Alert
-status: In Progress
+status: Done
 labels:
 - design-system
 - webui
@@ -13,6 +13,7 @@ references:
 - apps/packages/ui/src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
 - Docs/Design/tldw_web_design_system_contract.md
+- https://github.com/rmusser01/tldw_server/pull/1976
 modified_files:
 - apps/packages/ui/src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx
 - apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlaygroundModalHost.design-system-alert.test.tsx
@@ -64,7 +65,9 @@ Migrate WritingPlaygroundModalHost error product-state AntD Alert usages to the 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR: https://github.com/rmusser01/tldw_server/pull/1976
 
+Migrated `WritingPlaygroundModalHost` extra_body JSON, template-load, and theme-load error states to the shared design-system `Alert` primitive. Added focused marker coverage and removed the three migrated product-state baseline rows, bringing the product-state baseline to 272 and Writing/Review to 7.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -73,6 +76,6 @@ Migrate WritingPlaygroundModalHost error product-state AntD Alert usages to the 
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
