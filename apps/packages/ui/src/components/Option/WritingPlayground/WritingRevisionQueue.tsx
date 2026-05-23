@@ -1,6 +1,5 @@
 import React from "react"
 import { Button, Empty, Space, Tag, Typography } from "antd"
-import { Check, Copy, RefreshCw, X } from "lucide-react"
 import { WritingRevisionDiff } from "./WritingRevisionDiff"
 import type { WritingRevisionProposal, WritingRevisionStatus } from "./writing-revision-types"
 
@@ -81,9 +80,6 @@ export function WritingRevisionQueue({
       {proposals.map((proposal) => (
         <article
           key={proposal.id}
-          data-testid="writing-revision-proposal"
-          data-proposal-id={proposal.id}
-          data-regenerated-from-id={proposal.regeneratedFromId ?? undefined}
           className="flex flex-col gap-2 rounded border border-gray-100 p-2"
         >
           <div className="flex flex-wrap items-center gap-2">
@@ -122,28 +118,19 @@ export function WritingRevisionQueue({
 
           <Space wrap size={[6, 6]}>
             {showApply(proposal) ? (
-              <Button
-                size="small"
-                type="primary"
-                icon={<Check size={14} />}
-                onClick={() => onApply(proposal)}
-              >
+              <Button size="small" type="primary" onClick={() => onApply(proposal)}>
                 Apply
               </Button>
             ) : null}
-            <Button size="small" icon={<Copy size={14} />} onClick={() => onCopy(proposal)}>
+            <Button size="small" onClick={() => onCopy(proposal)}>
               Copy
             </Button>
             {showStandardActions(proposal) ? (
               <>
-                <Button size="small" icon={<X size={14} />} onClick={() => onReject(proposal)}>
+                <Button size="small" onClick={() => onReject(proposal)}>
                   Reject
                 </Button>
-                <Button
-                  size="small"
-                  icon={<RefreshCw size={14} />}
-                  onClick={() => onRegenerate(proposal)}
-                >
+                <Button size="small" onClick={() => onRegenerate(proposal)}>
                   Regenerate
                 </Button>
               </>

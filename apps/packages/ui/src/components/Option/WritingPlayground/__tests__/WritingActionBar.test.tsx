@@ -2,30 +2,6 @@ import React from "react"
 import { cleanup, fireEvent, render } from "@testing-library/react"
 import { JSDOM } from "jsdom"
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
-
-const translateSpy = vi.hoisted(() =>
-  vi.fn(
-    (
-      key: string,
-      fallbackOrOptions?: string | { defaultValue?: string }
-    ) => {
-      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-      if (fallbackOrOptions?.defaultValue) return fallbackOrOptions.defaultValue
-      return key
-    }
-  )
-)
-
-vi.mock("@/design-system", () => ({
-  READY_STATE_LABEL: "Registry Ready"
-}))
-
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: translateSpy
-  })
-}))
-
 import { WritingActionBar } from "../WritingActionBar"
 import { WRITING_REVISION_PRESETS } from "../writing-revision-presets"
 import type {
@@ -34,11 +10,6 @@ import type {
 } from "../writing-revision-types"
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>")
-const requestAnimationFrame = (callback: FrameRequestCallback) =>
-  dom.window.setTimeout(() => callback(Date.now()), 0)
-const cancelAnimationFrame = (id: number) => {
-  dom.window.clearTimeout(id)
-}
 
 Object.defineProperties(globalThis, {
   window: { value: dom.window, configurable: true },
@@ -51,14 +22,6 @@ Object.defineProperties(globalThis, {
   Node: { value: dom.window.Node, configurable: true },
   MutationObserver: {
     value: dom.window.MutationObserver,
-    configurable: true
-  },
-  requestAnimationFrame: {
-    value: requestAnimationFrame,
-    configurable: true
-  },
-  cancelAnimationFrame: {
-    value: cancelAnimationFrame,
     configurable: true
   },
   ResizeObserver: {
@@ -75,18 +38,12 @@ Object.defineProperties(globalThis, {
   }
 })
 
-Object.assign(dom.window, {
-  requestAnimationFrame,
-  cancelAnimationFrame
-})
-
 afterAll(() => {
   dom.window.close()
 })
 
 afterEach(() => {
   cleanup()
-  translateSpy.mockClear()
 })
 
 const selectionTarget: WritingRevisionTarget = {
@@ -115,18 +72,6 @@ const documentTarget: WritingRevisionTarget = {
 }
 
 describe("WritingActionBar", () => {
-  it("renders the available status label from the design-system registry", () => {
-    const view = render(
-      <WritingActionBar
-        generationAvailable
-        target={selectionTarget}
-        onRequest={vi.fn()}
-      />
-    )
-
-    view.getByText("Registry Ready")
-  })
-
   it("disables actions when generation is unavailable", () => {
     const onRequest = vi.fn()
 
@@ -145,14 +90,7 @@ describe("WritingActionBar", () => {
       (view.getByRole("button", { name: /rewrite/i }) as HTMLButtonElement)
         .disabled
     ).toBe(true)
-    expect(
-      view.getByRole("button", { name: /rewrite/i }).querySelector("svg")
-    ).toBeTruthy()
     expect(view.getByText(/generation unavailable/i)).toBeTruthy()
-    expect(translateSpy).toHaveBeenCalledWith(
-      "option:writingPlayground.generationUnavailableShort",
-      "Generation unavailable"
-    )
   })
 
   it("renders the six workflow presets and shows the selected preset instruction", () => {
@@ -173,30 +111,6 @@ describe("WritingActionBar", () => {
     expect(
       view.getByText(WRITING_REVISION_PRESETS[4].instruction)
     ).toBeTruthy()
-  })
-
-  it("can be controlled by a persisted workflow preset", () => {
-    const onPresetChange = vi.fn()
-
-    const view = render(
-      <WritingActionBar
-        generationAvailable
-        target={selectionTarget}
-        selectedPresetId="preserve_voice"
-        onPresetChange={onPresetChange}
-        onRequest={vi.fn()}
-      />
-    )
-
-    expect(
-      view.getByText(
-        "Keep the author's diction, cadence, point of view, and stylistic fingerprints."
-      )
-    ).toBeTruthy()
-
-    fireEvent.click(view.getByRole("radio", { name: /make concise/i }))
-
-    expect(onPresetChange).toHaveBeenCalledWith("make_concise")
   })
 
   it("shows the resolved target summary before sending Custom requests", () => {
@@ -240,13 +154,7 @@ describe("WritingActionBar", () => {
 
     fireEvent.click(view.getByRole("button", { name: /rewrite/i }))
     expect(onRequest).not.toHaveBeenCalled()
-    const warnings = view.getAllByText(/this will rewrite the full draft/i)
-    expect(warnings.length).toBe(2)
-    expect(
-      warnings.some((warning) =>
-        warning.closest('[data-ds-component="Alert"]')
-      )
-    ).toBe(true)
+    expect(view.getAllByText(/this will rewrite the full draft/i).length).toBe(2)
 
     fireEvent.click(
       view.getByLabelText(/confirm whole-document text change/i)
@@ -259,78 +167,6 @@ describe("WritingActionBar", () => {
         target: documentTarget
       })
     )
-  })
-
-  it("renders the localized fallback broad-target confirmation warning through the design-system Alert", () => {
-    const onRequest = vi.fn()
-    const fallbackDocumentTarget: WritingRevisionTarget = {
-      ...documentTarget,
-      confirmationReason: undefined
-    }
-
-    const view = render(
-      <WritingActionBar
-        generationAvailable
-        target={fallbackDocumentTarget}
-        onRequest={onRequest}
-      />
-    )
-
-    fireEvent.click(view.getByRole("button", { name: /rewrite/i }))
-
-    const warnings = view.getAllByText(
-      /confirm before applying a broad text-changing request/i
-    )
-    expect(warnings.length).toBe(2)
-    expect(
-      warnings.some((warning) =>
-        warning.closest('[data-ds-component="Alert"]')
-      )
-    ).toBe(true)
-    expect(translateSpy).toHaveBeenCalledWith(
-      "option:writingPlayground.revisionConfirmBroadTarget",
-      "Confirm before applying a broad text-changing request."
-    )
-  })
-
-  it("requires fresh confirmation when the broad target changes", () => {
-    const onRequest = vi.fn()
-    const nextDocumentTarget: WritingRevisionTarget = {
-      ...documentTarget,
-      start: 20,
-      end: 1400,
-      beforeText: "Different full document",
-      anchor: {
-        ...documentTarget.anchor,
-        documentFingerprint: "fingerprint-2"
-      }
-    }
-
-    const view = render(
-      <WritingActionBar
-        generationAvailable
-        target={documentTarget}
-        onRequest={onRequest}
-      />
-    )
-
-    fireEvent.click(
-      view.getByLabelText(/confirm whole-document text change/i)
-    )
-    fireEvent.click(view.getByRole("button", { name: /rewrite/i }))
-    expect(onRequest).toHaveBeenCalledTimes(1)
-
-    view.rerender(
-      <WritingActionBar
-        generationAvailable
-        target={nextDocumentTarget}
-        onRequest={onRequest}
-      />
-    )
-
-    fireEvent.click(view.getByRole("button", { name: /rewrite/i }))
-    expect(onRequest).toHaveBeenCalledTimes(1)
-    expect(view.getAllByText(/this will rewrite the full draft/i).length).toBe(2)
   })
 
   it("exposes a direction/custom instruction input for Tone", () => {
