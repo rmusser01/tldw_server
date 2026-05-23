@@ -2751,7 +2751,9 @@ export const WritingPlayground = () => {
                     <WritingActionBar
                       generationAvailable={canGenerate}
                       target={displayedRevisionTarget}
+                      selectedPresetId={selectedRevisionPresetId}
                       isGenerating={isGenerating}
+                      onPresetChange={persistRevisionPreset}
                       onRequest={(request) => {
                         void handleRevisionRequest(request)
                       }}

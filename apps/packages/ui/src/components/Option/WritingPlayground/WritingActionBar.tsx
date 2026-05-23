@@ -31,7 +31,9 @@ export type WritingActionBarRequest = {
 export type WritingActionBarProps = {
   generationAvailable: boolean
   target: WritingRevisionTarget
+  selectedPresetId?: WritingRevisionPresetId
   isGenerating?: boolean
+  onPresetChange?: (presetId: WritingRevisionPresetId) => void
   onRequest: (request: WritingActionBarRequest) => void
 }
 
@@ -88,10 +90,12 @@ const getTargetIdentity = (target: WritingRevisionTarget): string =>
 export function WritingActionBar({
   generationAvailable,
   target,
+  selectedPresetId,
   isGenerating = false,
+  onPresetChange,
   onRequest
 }: WritingActionBarProps) {
-  const [selectedPresetId, setSelectedPresetId] =
+  const [internalPresetId, setInternalPresetId] =
     useState<WritingRevisionPresetId>("polish_prose")
   const [activeInputAction, setActiveInputAction] =
     useState<WritingRevisionAction | null>(null)
@@ -104,9 +108,10 @@ export function WritingActionBar({
   } | null>(null)
   const toneInputRef = useRef<{ input?: HTMLInputElement | null } | null>(null)
 
+  const activePresetId = selectedPresetId ?? internalPresetId
   const selectedPreset = useMemo(
-    () => getWritingRevisionPreset(selectedPresetId) ?? WRITING_REVISION_PRESETS[0],
-    [selectedPresetId]
+    () => getWritingRevisionPreset(activePresetId) ?? WRITING_REVISION_PRESETS[0],
+    [activePresetId]
   )
   const targetIdentity = useMemo(() => getTargetIdentity(target), [target])
 
@@ -179,8 +184,12 @@ export function WritingActionBar({
 
       <Segmented
         size="small"
-        value={selectedPresetId}
-        onChange={(value) => setSelectedPresetId(value as WritingRevisionPresetId)}
+        value={activePresetId}
+        onChange={(value) => {
+          const nextPresetId = value as WritingRevisionPresetId
+          setInternalPresetId(nextPresetId)
+          onPresetChange?.(nextPresetId)
+        }}
         options={WRITING_REVISION_PRESETS.map((preset) => ({
           label: preset.label,
           value: preset.id

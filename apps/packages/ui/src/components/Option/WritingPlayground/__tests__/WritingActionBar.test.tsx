@@ -10,6 +10,11 @@ import type {
 } from "../writing-revision-types"
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>")
+const requestAnimationFrame = (callback: FrameRequestCallback) =>
+  dom.window.setTimeout(() => callback(Date.now()), 0)
+const cancelAnimationFrame = (id: number) => {
+  dom.window.clearTimeout(id)
+}
 
 Object.defineProperties(globalThis, {
   window: { value: dom.window, configurable: true },
@@ -24,6 +29,14 @@ Object.defineProperties(globalThis, {
     value: dom.window.MutationObserver,
     configurable: true
   },
+  requestAnimationFrame: {
+    value: requestAnimationFrame,
+    configurable: true
+  },
+  cancelAnimationFrame: {
+    value: cancelAnimationFrame,
+    configurable: true
+  },
   ResizeObserver: {
     value: class ResizeObserver {
       observe() {}
@@ -36,6 +49,11 @@ Object.defineProperties(globalThis, {
     value: dom.window.getComputedStyle.bind(dom.window),
     configurable: true
   }
+})
+
+Object.assign(dom.window, {
+  requestAnimationFrame,
+  cancelAnimationFrame
 })
 
 afterAll(() => {
@@ -114,6 +132,30 @@ describe("WritingActionBar", () => {
     expect(
       view.getByText(WRITING_REVISION_PRESETS[4].instruction)
     ).toBeTruthy()
+  })
+
+  it("can be controlled by a persisted workflow preset", () => {
+    const onPresetChange = vi.fn()
+
+    const view = render(
+      <WritingActionBar
+        generationAvailable
+        target={selectionTarget}
+        selectedPresetId="preserve_voice"
+        onPresetChange={onPresetChange}
+        onRequest={vi.fn()}
+      />
+    )
+
+    expect(
+      view.getByText(
+        "Keep the author's diction, cadence, point of view, and stylistic fingerprints."
+      )
+    ).toBeTruthy()
+
+    fireEvent.click(view.getByRole("radio", { name: /make concise/i }))
+
+    expect(onPresetChange).toHaveBeenCalledWith("make_concise")
   })
 
   it("shows the resolved target summary before sending Custom requests", () => {
