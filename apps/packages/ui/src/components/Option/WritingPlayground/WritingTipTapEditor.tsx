@@ -9,6 +9,7 @@ import { AIAnnotationExtension } from "./extensions/AIAnnotationExtension"
 import { tipTapJsonToPlainText } from "./writing-tiptap-utils"
 import {
   createTipTapEditorAdapter,
+  getTipTapSelection,
   type WritingEditorAdapter,
   type WritingEditorSelection
 } from "./writing-editor-adapter"
@@ -57,11 +58,7 @@ export function WritingTipTapEditor({
 
   const handleSelectionUpdate = useCallback(
     ({ editor }: { editor: Editor }) => {
-      const { from, to } = editor.state.selection
-      onSelectionChange?.({
-        start: Math.max(0, from - 1),
-        end: Math.max(0, to - 1)
-      })
+      onSelectionChange?.(getTipTapSelection(editor))
     },
     [onSelectionChange],
   )
