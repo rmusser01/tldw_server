@@ -116,6 +116,7 @@ import {
 } from "./writing-revision-prompt-utils"
 import {
   confirmRevisionTarget,
+  countWords,
   resolveRevisionTarget
 } from "./writing-revision-utils"
 import type {
@@ -1556,6 +1557,24 @@ export const WritingPlayground = () => {
       }),
     [editorText, revisionSelection]
   )
+  const writingWordCount = React.useMemo(
+    () => countWords(editorText),
+    [editorText]
+  )
+  const selectedWordCount = React.useMemo(() => {
+    if (!revisionSelection || revisionSelection.start === revisionSelection.end) {
+      return 0
+    }
+    return countWords(
+      editorText.slice(revisionSelection.start, revisionSelection.end)
+    )
+  }, [editorText, revisionSelection])
+  const pendingRevisionCount = React.useMemo(
+    () =>
+      revisionState.revisions.filter((proposal) => proposal.status === "pending")
+        .length,
+    [revisionState.revisions]
+  )
 
   const handleCopyRevision = React.useCallback(
     async (proposal: WritingRevisionProposal) => {
@@ -2973,6 +2992,33 @@ export const WritingPlayground = () => {
               </WritingPlaygroundEditorPanel>
             </div>
             <div data-testid="writing-playground-statusbar" className="flex items-center gap-3 px-4 py-1.5 border-t border-border bg-surface text-xs text-text-muted flex-shrink-0">
+              <span data-testid="writing-status-word-count">
+                {t(
+                  "option:writingPlayground.wordCountLabel",
+                  writingWordCount === 1
+                    ? `${writingWordCount} word`
+                    : `${writingWordCount} words`,
+                  { count: writingWordCount }
+                )}
+              </span>
+              {selectedWordCount > 0 ? (
+                <span data-testid="writing-status-selected-word-count">
+                  {t(
+                    "option:writingPlayground.selectedWordCountLabel",
+                    `${selectedWordCount} selected`,
+                    { count: selectedWordCount }
+                  )}
+                </span>
+              ) : null}
+              {pendingRevisionCount > 0 ? (
+                <span data-testid="writing-revision-pending-count">
+                  {t(
+                    "option:writingPlayground.pendingRevisionCountLabel",
+                    `${pendingRevisionCount} pending`,
+                    { count: pendingRevisionCount }
+                  )}
+                </span>
+              ) : null}
               {generationTokenCount > 0 && (<span>{t("option:writingPlayground.generationTokensLabel", "{{count}} tokens", { count: generationTokenCount })}</span>)}
               {generationTokensPerSec > 0 && (<span>{t("option:writingPlayground.generationRateLabel", "{{rate}} tok/s", { rate: generationTokensPerSec >= 10 ? generationTokensPerSec.toFixed(1) : generationTokensPerSec.toFixed(2) })}</span>)}
               {isGenerating && generationElapsed > 0 && (<span>{generationElapsed}s</span>)}

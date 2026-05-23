@@ -461,6 +461,26 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(screen.getByTestId("writing-revision-queue")).toBeInTheDocument()
   })
 
+  it("shows document and selected word counts in the status bar", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    seedWritingSession({ prompt: "One two three four." })
+
+    render(<WritingPlayground />)
+
+    expect(screen.getByTestId("writing-status-word-count")).toHaveTextContent(
+      "4 words"
+    )
+    expect(screen.queryByTestId("writing-status-selected-word-count")).toBeNull()
+
+    selectEditorText(getEditor(), "One two")
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("writing-status-selected-word-count")
+      ).toHaveTextContent("2 selected")
+    })
+  })
+
   it("initializes the workflow preset from the active session payload", async () => {
     mockState.storageValues.set("selectedModel", "mock-model")
     mockState.sendResponses.push(structuredReplacement("Voice-preserved line."))
@@ -502,6 +522,9 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(editor.value).toBe("Intro. The old sentence. Outro.")
     expect(mockState.streamCalls).toHaveLength(0)
     expect(mockState.sendCalls).toHaveLength(1)
+    expect(screen.getByTestId("writing-revision-pending-count")).toHaveTextContent(
+      "1 pending"
+    )
 
     fireEvent.click(screen.getByRole("button", { name: /apply/i }))
 
