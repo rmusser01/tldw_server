@@ -13,12 +13,14 @@ const makeReplacementProposal = ({
   start,
   end,
   beforeText,
-  replacementText
+  replacementText,
+  documentText = beforeText
 }: {
   start: number
   end: number
   beforeText: string
   replacementText?: string
+  documentText?: string
 }) => ({
   id: "revision-1",
   sessionId: "session-1",
@@ -30,11 +32,7 @@ const makeReplacementProposal = ({
     start,
     end,
     beforeText,
-    anchor: {
-      documentFingerprint: createDocumentFingerprint(beforeText),
-      prefix: "",
-      suffix: ""
-    },
+    anchor: buildInsertionAnchor(documentText, start),
     label: "current paragraph",
     requiresConfirmation: false
   },
@@ -86,12 +84,17 @@ describe("writing revision utilities", () => {
     expect(findParagraphRange(text, 14)).toEqual({ start: 12, end: 33 })
   })
 
+  it("resolves leading blank paragraphs to the first content paragraph", () => {
+    expect(findParagraphRange("\n\nAlpha", 0)).toEqual({ start: 2, end: 7 })
+  })
+
   it("plans a direct replacement when beforeText still matches", () => {
     const proposal = makeReplacementProposal({
       start: 0,
       end: 5,
       beforeText: "Alpha",
-      replacementText: "Omega"
+      replacementText: "Omega",
+      documentText: "Alpha beta"
     })
     expect(planRevisionApply("Alpha beta", proposal)).toEqual({
       type: "apply",
@@ -105,7 +108,8 @@ describe("writing revision utilities", () => {
     const proposal = makeReplacementProposal({
       start: 0,
       end: 5,
-      beforeText: "Alpha"
+      beforeText: "Alpha",
+      documentText: "Alpha beta"
     })
     expect(planRevisionApply("Alpha beta", proposal)).toMatchObject({
       type: "noop"
@@ -117,7 +121,8 @@ describe("writing revision utilities", () => {
       start: 0,
       end: 5,
       beforeText: "Alpha",
-      replacementText: "Omega"
+      replacementText: "Omega",
+      documentText: "Alpha beta"
     })
     expect(planRevisionApply("Intro Alpha beta Alpha", proposal).type).toBe(
       "conflict"
@@ -134,8 +139,25 @@ describe("writing revision utilities", () => {
       replacementText: " brave",
       anchor
     })
-    expect(planRevisionApply("Intro. Alpha beta", proposal)).toMatchObject({
-      type: "retarget"
+    expect(planRevisionApply("Intro. Alpha beta", proposal)).toEqual({
+      type: "retarget",
+      start: 12,
+      end: 12,
+      nextText: "Intro. Alpha brave beta"
+    })
+  })
+
+  it("conflicts when an insert proposal has a non-zero target", () => {
+    const proposal = makeInsertionProposal({
+      start: 0,
+      end: 5,
+      beforeText: "Alpha",
+      replacementText: " brave",
+      anchor: buildInsertionAnchor("Alpha beta", 0)
+    })
+    expect(planRevisionApply("Alpha beta", proposal)).toMatchObject({
+      type: "conflict",
+      reason: expect.stringContaining("Insert")
     })
   })
 
@@ -169,6 +191,30 @@ describe("writing revision utilities", () => {
       start: 0,
       end: text.length,
       requiresConfirmation: false
+    })
+  })
+
+  it("conflicts when a text-changing target still requires confirmation", () => {
+    const text = "First paragraph.\n\nSecond paragraph."
+    const target = resolveRevisionTarget({
+      text,
+      action: "rewrite",
+      operation: "replace",
+      cursor: 3,
+      preferredTargetMode: "document"
+    })
+    const proposal = {
+      ...makeReplacementProposal({
+        start: target.start,
+        end: target.end,
+        beforeText: target.beforeText,
+        replacementText: "Updated document.",
+        documentText: text
+      }),
+      target
+    }
+    expect(planRevisionApply(text, proposal)).toMatchObject({
+      type: "conflict"
     })
   })
 
