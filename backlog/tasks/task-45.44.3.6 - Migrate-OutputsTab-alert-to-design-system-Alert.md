@@ -4,7 +4,7 @@ title: Migrate OutputsTab alert to design-system Alert
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-23 22:14'
+updated_date: '2026-05-23 22:17'
 labels:
   - design-system
   - webui
@@ -17,6 +17,7 @@ references:
   - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx
   - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__
   - apps/packages/ui/scripts/design-system-product-state-baseline.json
+  - 'https://github.com/rmusser01/tldw_server/pull/2012'
 parent_task_id: TASK-45.44.3
 priority: medium
 ---
