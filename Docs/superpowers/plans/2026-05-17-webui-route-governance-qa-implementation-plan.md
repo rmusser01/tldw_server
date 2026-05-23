@@ -74,6 +74,7 @@ These checks remain evidence-backed but not fully deterministic:
 - Sidepanel screenshots when the route is extension-sidepanel reachable.
 
 Manual evidence must be stored under the relevant task or review artifact path and referenced from the Backlog task final summary.
+Use `apps/tldw-frontend/e2e/smoke/route-evidence-protocol.md` as the route-family evidence format for screenshots, DOM or browser observations, console/request triage, known skips, and Backlog closure notes.
 
 ## Current QA Surface
 
@@ -627,7 +628,7 @@ git commit -m "test: govern responsive route behavior"
 - Modify: `Docs/Reviews/WEBUI_EXTENSION_UX_HCI_AUDIT_2026_05_17.md` only if the user asks to append final evidence links
 - Modify: Backlog tasks for completed slices during implementation
 
-- [ ] **Step 1: Write evidence protocol**
+- [x] **Step 1: Write evidence protocol**
 
 Create `route-evidence-protocol.md` documenting:
 
@@ -639,7 +640,7 @@ Create `route-evidence-protocol.md` documenting:
 - Known-skip format.
 - Backlog task final-summary fields.
 
-- [ ] **Step 2: Add evidence template**
+- [x] **Step 2: Add evidence template**
 
 Include this template:
 
@@ -659,11 +660,11 @@ Include this template:
 - Follow-up task:
 ```
 
-- [ ] **Step 3: Link protocol from governance plan or task docs**
+- [x] **Step 3: Link protocol from governance plan or task docs**
 
 Reference the protocol from Task 12 implementation PRs and route-family Backlog tasks. Do not append screenshot links to the original audit unless the user explicitly asks for a consolidated final report update.
 
-- [ ] **Step 4: Commit evidence protocol**
+- [x] **Step 4: Commit evidence protocol**
 
 ```bash
 git add apps/tldw-frontend/e2e/smoke/route-evidence-protocol.md
