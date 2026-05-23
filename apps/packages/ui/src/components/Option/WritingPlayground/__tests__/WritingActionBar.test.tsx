@@ -124,7 +124,7 @@ describe("WritingActionBar", () => {
       />
     )
 
-    expect(view.getByText("Registry Ready")).toBeTruthy()
+    view.getByText("Registry Ready")
   })
 
   it("disables actions when generation is unavailable", () => {

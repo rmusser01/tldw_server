@@ -61,6 +61,7 @@ Migrate the remaining WritingPlayground advanced-settings product-state AntD Ale
 - Verification run before PR creation: `bunx vitest run src/components/Option/WritingPlayground/__tests__/WritingPlayground.shell-design-system-alert.test.tsx --reporter=dot` (7 passed), `bunx vitest run src/components/Option/WritingPlayground/__tests__/WritingActionBar.test.tsx --reporter=dot` (9 passed), `bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot` (54 passed), `bun run verify:design-system-state` (passed; 265 baseline exceptions), baseline parse check (`total: 265`, `writingRows: 0`), and `git diff --check` (passed).
 - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` exits 2 with existing repo-wide TypeScript debt. The touched source-file diagnostics are on unchanged lines for existing revision-context/stop-string typing in `WritingPlayground/index.tsx` and existing AntD input ref typing in `WritingActionBar.tsx`; this migration does not introduce those diagnostics.
 - PR review follow-up: verified the reported missing `DesignSystemAlert` import was already present in `WritingPlayground/index.tsx`, localized the `WritingActionBar` generation-unavailable and broad-target fallback labels via `react-i18next`, added matching English locale entries, and tightened the AntD input ref types. After the ref cleanup, the TypeScript check still exits 2 on repo-wide debt, but no longer reports `WritingActionBar.tsx`; remaining touched-file diagnostics are the pre-existing `WritingPlayground/index.tsx` revision typing issues.
+- CodeRabbit nitpick follow-up: removed the redundant `.toBeTruthy()` assertion after `getByText("Registry Ready")` in `WritingActionBar.test.tsx`.
 - Bandit is not applicable for this slice because no Python code was touched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
@@ -72,6 +73,7 @@ PR: https://github.com/rmusser01/tldw_server/pull/1998
 Migrated the final WritingPlayground advanced-settings product-state Alert branches to the shared design-system Alert primitive, removed the last three WritingPlayground baseline entries, and resolved the current-dev WritingActionBar guard blockers without adding new baseline exceptions. Focused tests and product-state verification passed on the rebased branch. TypeScript still exits nonzero on existing repo-wide debt; touched-file diagnostics are on unchanged pre-existing lines and are documented in Implementation Notes.
 
 PR review follow-up localized the `WritingActionBar` fallback labels, added English locale entries, and fixed the pre-existing AntD input ref typing in `WritingActionBar`. The `DesignSystemAlert` import comment was verified as already satisfied by the current branch.
+CodeRabbit nitpick follow-up removed the redundant `getByText(...).toBeTruthy()` assertion.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
