@@ -92,9 +92,12 @@ export const findParagraphRange = (
   cursor: number
 ): { start: number; end: number } => {
   const safeCursor = clampIndex(cursor, text.length)
-  const paragraphCursor = text.startsWith("\n\n", safeCursor)
-    ? clampIndex(safeCursor + 2, text.length)
-    : safeCursor
+  const paragraphCursor =
+    safeCursor === 0 && text.startsWith("\n\n")
+      ? clampIndex(safeCursor + 2, text.length)
+      : safeCursor > 0 && text.slice(safeCursor - 1, safeCursor + 1) === "\n\n"
+        ? safeCursor - 1
+      : safeCursor
   const before =
     paragraphCursor === 0 ? -1 : text.lastIndexOf("\n\n", paragraphCursor - 1)
   const after = text.indexOf("\n\n", paragraphCursor)
