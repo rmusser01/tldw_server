@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import { Alert, Button, Checkbox, Input, Segmented, Space, Tag, Typography } from "antd"
 import {
   ArrowRight,
@@ -76,6 +76,15 @@ const getOperationForAction = (
   return "replace"
 }
 
+const getTargetIdentity = (target: WritingRevisionTarget): string =>
+  [
+    target.mode,
+    target.start,
+    target.end,
+    target.beforeText,
+    target.anchor.documentFingerprint
+  ].join("|")
+
 export function WritingActionBar({
   generationAvailable,
   target,
@@ -99,6 +108,12 @@ export function WritingActionBar({
     () => getWritingRevisionPreset(selectedPresetId) ?? WRITING_REVISION_PRESETS[0],
     [selectedPresetId]
   )
+  const targetIdentity = useMemo(() => getTargetIdentity(target), [target])
+
+  useEffect(() => {
+    setConfirmed(false)
+    setConfirmationWarning(false)
+  }, [targetIdentity])
 
   const disabled = !generationAvailable || isGenerating
 
