@@ -6,6 +6,7 @@ import {
   getRevisionPresetIdFromPayload,
   getRevisionsFromPayload,
   getPromptRichFromPayload,
+  mergePendingPayloadIntoSession,
   mergeRevisionsIntoPayload,
   mergePayloadIntoSession
 } from "../hooks/utils"
@@ -131,6 +132,27 @@ describe("writing session payload utils", () => {
     ).toEqual([revision])
   })
 
+  it("ignores revisions with malformed target offsets", () => {
+    const target = buildRevision().target
+    const malformedTargets = [
+      { ...target, start: -1, end: 11 },
+      { ...target, start: 0.5, end: 11 },
+      { ...target, start: 0, end: 10.5 },
+      { ...target, start: 11, end: 0 }
+    ]
+
+    for (const malformedTarget of malformedTargets) {
+      expect(
+        getRevisionsFromPayload({
+          revisions: {
+            schemaVersion: 1,
+            items: [buildRevision({ target: malformedTarget })]
+          }
+        })
+      ).toEqual([])
+    }
+  })
+
   it("preserves a known revision workflow preset id and rejects unknown ids", () => {
     const payload = mergePayloadIntoSession(
       { revision_preset_id: "preserve_voice" },
@@ -170,5 +192,31 @@ describe("writing session payload utils", () => {
     expect(payload.prompt).toBe("Existing draft")
     expect(payload).not.toHaveProperty("revisions")
     expect(getRevisionsFromPayload(payload)).toEqual([])
+  })
+
+  it("uses pending payload state when merging prompt edits into a session payload", () => {
+    const revision = buildRevision()
+    const activePayload = {
+      prompt: "Server draft",
+      settings: DEFAULT_SETTINGS,
+      template_name: null,
+      theme_name: null,
+      chat_mode: false
+    }
+    const pendingPayload = mergeRevisionsIntoPayload(activePayload, [revision])
+
+    const payload = mergePendingPayloadIntoSession(
+      activePayload,
+      pendingPayload,
+      "Typed draft",
+      DEFAULT_SETTINGS,
+      null,
+      null,
+      false,
+      { promptRich: null }
+    )
+
+    expect(payload.prompt).toBe("Typed draft")
+    expect(payload.revisions?.items).toEqual([revision])
   })
 })
