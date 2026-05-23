@@ -1,6 +1,7 @@
 import React from "react"
-import { Alert, Empty, Form, Input, Modal, Select, Spin, Typography } from "antd"
+import { Empty, Form, Input, Modal, Select, Spin, Typography } from "antd"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import type { FlashcardCreate } from "@/services/flashcards"
 import { useFlashcardTemplatesQuery } from "../hooks"
@@ -143,14 +144,13 @@ export const FlashcardTemplateValueModal: React.FC<FlashcardTemplateValueModalPr
         </div>
       ) : templatesQuery.error ? (
         <Alert
-          type="error"
-          message={t("option:flashcards.templatesLoadError", {
+          variant="error"
+          title={t("option:flashcards.templatesLoadError", {
             defaultValue: "Could not load templates."
           })}
-          description={
-            templatesQuery.error instanceof Error ? templatesQuery.error.message : undefined
-          }
-        />
+        >
+          {templatesQuery.error instanceof Error ? templatesQuery.error.message : undefined}
+        </Alert>
       ) : templates.length === 0 ? (
         <Empty
           description={t("option:flashcards.templatesEmpty", {
