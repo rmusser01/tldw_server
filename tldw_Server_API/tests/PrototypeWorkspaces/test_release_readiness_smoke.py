@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import sqlite3
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TypeVar
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     migration_001_create_users_table,
@@ -25,6 +27,16 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
 pytestmark = pytest.mark.integration
 
+_T = TypeVar("_T")
+
+
+def _dict_row(cursor: sqlite3.Cursor, row: Any) -> dict[str, Any] | None:
+    """Convert a SQLite cursor row to a dict when the statement returned columns."""
+    if row is None or cursor.description is None:
+        return None
+    cols = [d[0] for d in cursor.description]
+    return dict(zip(cols, row, strict=True))
+
 
 class _AsyncCursor:
     """Async cursor wrapper that returns dict rows for repository transaction paths."""
@@ -32,12 +44,9 @@ class _AsyncCursor:
     def __init__(self, cursor: sqlite3.Cursor) -> None:
         self._cursor = cursor
 
-    async def fetchone(self) -> dict | None:
+    async def fetchone(self) -> dict[str, Any] | None:
         row = self._cursor.fetchone()
-        if row is None:
-            return None
-        cols = [d[0] for d in self._cursor.description]
-        return dict(zip(cols, row, strict=True))
+        return _dict_row(self._cursor, row)
 
 
 class _FakePool:
@@ -46,20 +55,19 @@ class _FakePool:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
-    async def execute(self, sql: str, params: tuple = ()) -> None:
+    async def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         self._conn.execute(sql, params)
         self._conn.commit()
 
-    async def fetchone(self, sql: str, params: tuple = ()) -> dict | None:
+    async def fetchone(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         cur = self._conn.execute(sql, params)
         row = cur.fetchone()
-        if row is None:
-            return None
-        cols = [d[0] for d in cur.description]
-        return dict(zip(cols, row, strict=True))
+        return _dict_row(cur, row)
 
-    async def fetchall(self, sql: str, params: tuple = ()) -> list[dict]:
+    async def fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         cur = self._conn.execute(sql, params)
+        if cur.description is None:
+            return []
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, row, strict=True)) for row in rows]
@@ -72,19 +80,18 @@ class _FakePool:
             def __init__(self, conn: sqlite3.Connection) -> None:
                 self._conn = conn
 
-            async def execute(self, sql: str, params: tuple = ()) -> _AsyncCursor:
+            async def execute(self, sql: str, params: tuple[Any, ...] = ()) -> _AsyncCursor:
                 return _AsyncCursor(self._conn.execute(sql, params))
 
-            async def fetchone(self, sql: str, params: tuple = ()) -> dict | None:
+            async def fetchone(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
                 cur = self._conn.execute(sql, params)
                 row = cur.fetchone()
-                if row is None:
-                    return None
-                cols = [d[0] for d in cur.description]
-                return dict(zip(cols, row, strict=True))
+                return _dict_row(cur, row)
 
-            async def fetchall(self, sql: str, params: tuple = ()) -> list[dict]:
+            async def fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
                 cur = self._conn.execute(sql, params)
+                if cur.description is None:
+                    return []
                 rows = cur.fetchall()
                 cols = [d[0] for d in cur.description]
                 return [dict(zip(cols, row, strict=True)) for row in rows]
@@ -121,12 +128,12 @@ class _MutablePublishValidator:
         }
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, _T]) -> _T:
     """Run async repo/service calls from synchronous TestClient smoke tests."""
     return asyncio.run(coro)
 
 
-def _assert_prototype_error(response, *, category: str, frontend_state: str) -> None:
+def _assert_prototype_error(response: Response, *, category: str, frontend_state: str) -> None:
     """Assert the stable prototype error contract without parsing messages."""
     detail = response.json()["detail"]
     assert detail["category"] == category
@@ -159,7 +166,7 @@ def _build_release_smoke_app(
     from tldw_Server_API.app.core.Prototype_Workspaces.service import PrototypeWorkspaceService
     from tldw_Server_API.app.core.Sharing.share_token_service import ShareTokenService
 
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn = sqlite3.connect(":memory:", check_same_thread=False, isolation_level=None)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     migration_001_create_users_table(conn)
@@ -175,11 +182,11 @@ def _build_release_smoke_app(
     prototype_repo = PrototypeWorkspacesRepo(db_pool=pool)
     sharing_repo = SharedWorkspaceRepo(db_pool=pool)
     token_service = ShareTokenService(sharing_repo)
-    access_service = PrototypeAccessService(prototype_repo, signing_secret="gate8-session-secret")
+    access_service = PrototypeAccessService(prototype_repo, signing_secret=secrets.token_urlsafe(32))
     preview_broker = PrototypePreviewBroker(
         repo=prototype_repo,
         base_preview_path="/api/v1/prototype-previews",
-        signing_secret="gate8-preview-secret",
+        signing_secret=secrets.token_urlsafe(32),
     )
     validator = _MutablePublishValidator(ok=publish_validation_ok)
     service = PrototypeWorkspaceService(

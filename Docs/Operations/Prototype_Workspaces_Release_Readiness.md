@@ -64,7 +64,8 @@ The negative smoke path must verify revoked and expired prototype share links fa
   - Completed; hydrated ignored workspace dependencies from the existing lockfile.
 - `./node_modules/.bin/vitest run src/components/Option/__tests__/PublicShare.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspaceOwnerView.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspaceSessionView.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspacePage.test.tsx src/hooks/__tests__/usePrototypeWorkspaces.test.tsx --maxWorkers=1 --no-file-parallelism` from `apps/packages/ui/`
   - GREEN: `5 passed (5)`, `30 passed (30)`.
-- Bandit: not run; this slice has no backend production Python changes.
+- Review follow-up: `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/tests/PrototypeWorkspaces/test_release_readiness_smoke.py -s B101 -f json -o /tmp/bandit_prototype_gate8_review.json`
+  - GREEN: `results: []`; `B101` skipped because the touched backend Python path is a pytest file where `assert` is expected.
 
 ## Remaining Risks For Gate 8
 

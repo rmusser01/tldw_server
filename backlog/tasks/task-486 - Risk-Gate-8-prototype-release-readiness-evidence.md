@@ -43,7 +43,8 @@ Implement the first Risk Gate 8 release-readiness slice under tracker #1440. Bui
 - Verified backend/docs with `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_release_readiness_smoke.py tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_docs_contract.py -q`: `5 passed, 5 warnings`.
 - Verified focused frontend prototype workspace coverage with local Vitest after `bun install --frozen-lockfile` hydrated ignored dependencies: `5 passed (5)`, `30 passed (30)`.
 - Verified docs/whitespace with `git diff --check`: no output.
-- Bandit skipped because this slice changes docs, backlog metadata, and tests only; no backend production Python files changed.
+- Review follow-up addressed PR feedback by adding missing helper type hints, guarding SQLite cursor description handling, enabling SQLite autocommit for manual transaction control, and replacing hardcoded test signing secrets with generated test-only secrets.
+- Verified review follow-up with `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/tests/PrototypeWorkspaces/test_release_readiness_smoke.py -s B101 -f json -o /tmp/bandit_prototype_gate8_review.json`: `results: []`; `B101` skipped because the touched backend Python path is a pytest file where `assert` is expected.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
