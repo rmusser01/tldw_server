@@ -13,9 +13,24 @@ labels:
 priority: high
 documentation:
 - Docs/superpowers/specs/2026-05-23-chatbook-sync-v2-roadmap-prd-design.md
+- Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-05-23-chatbook-sync-v2-roadmap-prd-design.md
+- Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md
 - backlog/tasks/task-490 - Plan-Sync-v2-completion-roadmap-for-Chatbook-clients.md
+- backlog/tasks/task-490.1 - Sync-v2-M1-Lock-implementation-decisions-and-API-docs.md
+- backlog/tasks/task-490.2 - Sync-v2-M1-Align-envelope-models-and-storage.md
+- backlog/tasks/task-490.3 - Sync-v2-M1-Add-profile-bootstrap-and-status.md
+- backlog/tasks/task-490.4 - Sync-v2-M1-Materialize-Notes.md
+- backlog/tasks/task-490.5 - Sync-v2-M1-Materialize-Chat.md
+- backlog/tasks/task-490.6 - Sync-v2-M1-Sync-attachment-reference-metadata.md
+- backlog/tasks/task-490.7 - Sync-v2-M1-Wire-push-pull-conflicts-API.md
+- backlog/tasks/task-490.8 - Sync-v2-M1-Route-server-origin-Notes-and-Chat-through-Sync.md
+- backlog/tasks/task-490.9 - Sync-v2-M1-Implement-restore-preview.md
+- backlog/tasks/task-490.10 - Sync-v2-M1-Add-replay-and-repair.md
+- backlog/tasks/task-490.11 - Sync-v2-M1-Verify-end-to-end-and-harden.md
+- backlog/tasks/task-490.12 - Sync-v2-M2-Restore-completeness-and-blobs.md
+- backlog/tasks/task-490.13 - Sync-v2-M3-Polished-multi-device-sync.md
 ---
 
 ## Description
@@ -31,6 +46,12 @@ Design and track the complete Sync v2 roadmap for tldw_server as the sync author
 - [ ] #3 Identify server API/storage responsibilities, client integration expectations, encryption/key-recovery model, restore/selective-sync behavior, conflict handling, and verification strategy.
 - [ ] #4 Create and commit an approved PRD/design spec under Docs/superpowers/specs after brainstorming approval, then break implementation into Backlog child tasks during planning.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
