@@ -39,6 +39,7 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 - Created and completed TASK-45.44.10.2 for the next narrow Document/Workspace slice: DocumentViewer PDF/EPUB Alert migration. PR: https://github.com/rmusser01/tldw_server/pull/1952. Verifier evidence after the slice reduces total baseline exceptions from 300 to 296 and Document/Workspace exceptions from 9 to 5.
 - Created and completed TASK-45.44.10.3 for the next narrow Document/Workspace slice: DocumentWorkspacePage loading/health Alert migration. PR: https://github.com/rmusser01/tldw_server/pull/1955. Verifier evidence after the slice reduces total baseline exceptions from 296 to 294 and Document/Workspace exceptions from 5 to 3.
 - Created and completed TASK-45.44.10.4 to fix the merged PdfDocument design-system Alert translation binding discovered by the TypeScript check. PR: https://github.com/rmusser01/tldw_server/pull/1955.
+- Created and completed TASK-45.44.10.5 for the next narrow Document/Workspace slice: ReferencesTab server-unavailable/error EmptyState migration. PR: https://github.com/rmusser01/tldw_server/pull/1959. Verifier evidence after the slice reduces total baseline exceptions from 294 to 292 and Document/Workspace exceptions from 3 to 1.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
