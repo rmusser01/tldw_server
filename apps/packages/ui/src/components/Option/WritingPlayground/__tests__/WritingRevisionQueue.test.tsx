@@ -6,6 +6,11 @@ import { WritingRevisionQueue } from "../WritingRevisionQueue"
 import type { WritingRevisionProposal } from "../writing-revision-types"
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>")
+const requestAnimationFrame = (callback: FrameRequestCallback) =>
+  dom.window.setTimeout(() => callback(Date.now()), 0)
+const cancelAnimationFrame = (id: number) => {
+  dom.window.clearTimeout(id)
+}
 
 Object.defineProperties(globalThis, {
   window: { value: dom.window, configurable: true },
@@ -20,10 +25,23 @@ Object.defineProperties(globalThis, {
     value: dom.window.MutationObserver,
     configurable: true
   },
+  requestAnimationFrame: {
+    value: requestAnimationFrame,
+    configurable: true
+  },
+  cancelAnimationFrame: {
+    value: cancelAnimationFrame,
+    configurable: true
+  },
   getComputedStyle: {
     value: dom.window.getComputedStyle.bind(dom.window),
     configurable: true
   }
+})
+
+Object.assign(dom.window, {
+  requestAnimationFrame,
+  cancelAnimationFrame
 })
 
 afterAll(() => {

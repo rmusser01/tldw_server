@@ -483,6 +483,30 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(screen.getByTestId("writing-revision-queue")).toBeInTheDocument()
   })
 
+  it("initializes the workflow preset from the active session payload", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    mockState.sendResponses.push(structuredReplacement("Voice-preserved line."))
+    const preserveVoice = WRITING_REVISION_PRESETS.find(
+      (preset) => preset.id === "preserve_voice"
+    )
+    expect(preserveVoice).toBeTruthy()
+    seedWritingSession({
+      prompt: "Keep this voice.",
+      revision_preset_id: "preserve_voice"
+    })
+
+    render(<WritingPlayground />)
+
+    expect(screen.getByText(preserveVoice!.instruction)).toBeInTheDocument()
+    selectEditorText(getEditor(), "Keep this voice.")
+    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+
+    await waitFor(() => {
+      expect(mockState.sendCalls).toHaveLength(1)
+    })
+    expect(latestRevisionPrompt()).toContain(preserveVoice!.instruction)
+  })
+
   it("creates a pending Rewrite proposal for selected text and applies it without mutating early", async () => {
     mockState.storageValues.set("selectedModel", "mock-model")
     mockState.sendResponses.push(structuredReplacement("The sharper sentence."))
