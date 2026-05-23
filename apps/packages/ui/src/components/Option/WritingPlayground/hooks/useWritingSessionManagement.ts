@@ -686,6 +686,36 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
   }, [])
 
   // --- Prompt/settings change helpers ---
+  const applySessionPayloadPatch = React.useCallback(
+    (patcher: (payload: WritingSessionPayload) => WritingSessionPayload) => {
+      if (!activeSessionDetail) return
+      const basePayload =
+        pendingSaveMapRef.current[activeSessionDetail.id] ??
+        mergePayloadIntoSession(
+          activeSessionDetail.payload,
+          editorText,
+          settings,
+          selectedTemplateName,
+          selectedThemeName,
+          chatMode,
+          { promptRich: editorPromptRichRef.current }
+        )
+      const nextPayload = patcher(basePayload)
+      pendingSaveMapRef.current[activeSessionDetail.id] = nextPayload
+      setIsDirty(true)
+      scheduleSave(activeSessionDetail.id, nextPayload)
+    },
+    [
+      activeSessionDetail,
+      chatMode,
+      editorText,
+      scheduleSave,
+      selectedTemplateName,
+      selectedThemeName,
+      settings
+    ]
+  )
+
   const applyPromptValue = React.useCallback(
     (
       nextValue: string,
@@ -966,6 +996,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     handleTemplateChange,
     handleThemeChange,
     handleChatModeChange,
+    applySessionPayloadPatch,
     scheduleSave,
     clearPendingSave,
     computeDirty,

@@ -16,6 +16,14 @@ import {
   type WritingWorldInfoEntry,
   type WritingWorldInfoSettings
 } from "../writing-context-utils"
+import type {
+  WritingRevisionAction,
+  WritingRevisionOperation,
+  WritingRevisionPayload,
+  WritingRevisionPresetId,
+  WritingRevisionProposal,
+  WritingRevisionStatus
+} from "../writing-revision-types"
 import type { BasicStoppingModeType } from "../writing-stop-mode-utils"
 
 // ---------------------------------------------------------------------------
@@ -32,6 +40,8 @@ export type SessionUsageMap = Record<string, SessionUsage>
 export type WritingSessionPayload = Record<string, unknown> & {
   prompt?: string
   prompt_rich?: JSONContent
+  revisions?: WritingRevisionPayload
+  revision_preset_id?: WritingRevisionPresetId | null
   settings?: WritingSessionSettings
   template_name?: string | null
   templateName?: string | null
@@ -143,6 +153,7 @@ export type NonToolMessage = Extract<ChatMessage, { role: NonToolRole }>
 // ---------------------------------------------------------------------------
 
 export const WRITING_SPEECH_PREFS_STORAGE_KEY = "writing:speech-preferences"
+export const WRITING_REVISION_PAYLOAD_SCHEMA_VERSION = 1
 export const SAVE_DEBOUNCE_MS = 800
 export const MAX_MATCHES = 500
 export const MAX_CHUNKS = 80
@@ -154,6 +165,47 @@ export const WORDCLOUD_POLL_DELAY_MS = 600
 
 export const PREDICT_PLACEHOLDER = "{predict}"
 export const FILL_PLACEHOLDER = "{fill}"
+
+const WRITING_REVISION_PRESET_IDS: readonly WritingRevisionPresetId[] = [
+  "draft_freely",
+  "polish_prose",
+  "developmental_edit",
+  "preserve_voice",
+  "make_concise",
+  "expand_sensory_detail"
+]
+
+const WRITING_REVISION_ACTIONS: readonly WritingRevisionAction[] = [
+  "continue",
+  "rewrite",
+  "expand",
+  "tighten",
+  "tone",
+  "outline",
+  "custom"
+]
+
+const WRITING_REVISION_OPERATIONS: readonly WritingRevisionOperation[] = [
+  "insert",
+  "replace",
+  "advisory"
+]
+
+const WRITING_REVISION_STATUSES: readonly WritingRevisionStatus[] = [
+  "pending",
+  "applied",
+  "rejected",
+  "conflict",
+  "raw_suggestion",
+  "advisory"
+]
+
+const WRITING_REVISION_TARGET_MODES = [
+  "selection",
+  "paragraph",
+  "cursor",
+  "document"
+] as const
 
 export const PREDICT_SYSTEM_PROMPT =
   "Continue the text from the prompt. Respond with only the continuation."
@@ -322,6 +374,74 @@ export const cloneDefaultSettings = (): WritingSessionSettings => ({
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+
+const isOneOf = <T extends string>(
+  value: unknown,
+  allowed: readonly T[]
+): value is T => typeof value === "string" && allowed.includes(value as T)
+
+const isOptionalString = (value: unknown): value is string | undefined =>
+  value === undefined || typeof value === "string"
+
+const isOptionalNullableString = (
+  value: unknown
+): value is string | null | undefined =>
+  value == null || typeof value === "string"
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((entry) => typeof entry === "string")
+
+const isWritingRevisionPresetId = (
+  value: unknown
+): value is WritingRevisionPresetId =>
+  isOneOf(value, WRITING_REVISION_PRESET_IDS)
+
+const isWritingRevisionAnchor = (
+  value: unknown
+): value is WritingRevisionProposal["target"]["anchor"] =>
+  isRecord(value) &&
+  typeof value.documentFingerprint === "string" &&
+  typeof value.prefix === "string" &&
+  typeof value.suffix === "string"
+
+const isWritingRevisionTarget = (
+  value: unknown
+): value is WritingRevisionProposal["target"] =>
+  isRecord(value) &&
+  isOneOf(value.mode, WRITING_REVISION_TARGET_MODES) &&
+  typeof value.start === "number" &&
+  Number.isFinite(value.start) &&
+  typeof value.end === "number" &&
+  Number.isFinite(value.end) &&
+  typeof value.beforeText === "string" &&
+  isWritingRevisionAnchor(value.anchor) &&
+  typeof value.label === "string" &&
+  typeof value.requiresConfirmation === "boolean" &&
+  isOptionalString(value.confirmationReason)
+
+const isWritingRevisionProposal = (
+  value: unknown
+): value is WritingRevisionProposal => {
+  if (!isRecord(value)) return false
+  if (typeof value.id !== "string") return false
+  if (typeof value.sessionId !== "string") return false
+  if (!isOneOf(value.action, WRITING_REVISION_ACTIONS)) return false
+  if (!isOneOf(value.operation, WRITING_REVISION_OPERATIONS)) return false
+  if (!isOptionalNullableString(value.presetInstruction)) return false
+  if (value.presetId != null && !isWritingRevisionPresetId(value.presetId)) {
+    return false
+  }
+  if (typeof value.instruction !== "string") return false
+  if (!isWritingRevisionTarget(value.target)) return false
+  if (!isOptionalString(value.replacementText)) return false
+  if (!isOptionalString(value.rawText)) return false
+  if (!isOptionalString(value.rationale)) return false
+  if (!isOptionalString(value.title)) return false
+  if (value.notes !== undefined && !isStringArray(value.notes)) return false
+  if (!isOptionalString(value.regeneratedFromId)) return false
+  if (typeof value.createdAt !== "string") return false
+  return isOneOf(value.status, WRITING_REVISION_STATUSES)
+}
 
 export const buildRegex = (
   pattern: string,
@@ -988,6 +1108,47 @@ export const getChatModeFromPayload = (
   if (!isRecord(payload)) return false
   const raw = payload.chat_mode ?? payload.chatMode
   return Boolean(raw)
+}
+
+export const getRevisionsFromPayload = (
+  payload?: Record<string, unknown> | null
+): WritingRevisionProposal[] => {
+  if (!isRecord(payload) || !isRecord(payload.revisions)) return []
+  if (
+    payload.revisions.schemaVersion !== WRITING_REVISION_PAYLOAD_SCHEMA_VERSION
+  ) {
+    return []
+  }
+  if (!Array.isArray(payload.revisions.items)) return []
+  return payload.revisions.items.filter(isWritingRevisionProposal)
+}
+
+export const mergeRevisionsIntoPayload = (
+  payload: Record<string, unknown> | null | undefined,
+  revisions: WritingRevisionProposal[]
+): WritingSessionPayload => {
+  const base = isRecord(payload) ? payload : {}
+  const next: WritingSessionPayload = { ...base }
+  if (revisions.length > 0) {
+    next.revisions = {
+      schemaVersion: WRITING_REVISION_PAYLOAD_SCHEMA_VERSION,
+      items: revisions
+    }
+  } else {
+    delete next.revisions
+  }
+  return next
+}
+
+export const getRevisionPayloadSignature = (
+  payload?: Record<string, unknown> | null
+): string => JSON.stringify(getRevisionsFromPayload(payload))
+
+export const getRevisionPresetIdFromPayload = (
+  payload?: Record<string, unknown> | null
+): WritingRevisionPresetId | null => {
+  const value = isRecord(payload) ? payload.revision_preset_id : null
+  return isWritingRevisionPresetId(value) ? value : null
 }
 
 export const mergePayloadIntoSession = (
