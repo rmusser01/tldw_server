@@ -143,7 +143,9 @@ describe("RunsTab load-error retry", () => {
     render(<RunsTab />)
 
     await waitFor(() => {
-      expect(screen.getByText("Could not load Activity.")).toBeInTheDocument()
+      const loadErrorTitle = screen.getByText("Could not load Activity.")
+      expect(loadErrorTitle).toBeInTheDocument()
+      expect(loadErrorTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
       expect(screen.getByText("Check server connection and try again. Details: Failed to fetch")).toBeInTheDocument()
     })
 
@@ -190,9 +192,9 @@ describe("RunsTab load-error retry", () => {
     render(<RunsTab />)
 
     await waitFor(() => {
-      expect(
-        screen.getByText("Reliability attention required")
-      ).toBeInTheDocument()
+      const attentionTitle = screen.getByText("Reliability attention required")
+      expect(attentionTitle).toBeInTheDocument()
+      expect(attentionTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
       expect(
         screen.getByText(
           "1 failed run and 1 stalled run need review. The source request timed out. Retry, or lower concurrency for this source."

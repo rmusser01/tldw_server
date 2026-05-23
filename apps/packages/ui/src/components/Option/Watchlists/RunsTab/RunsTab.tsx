@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Alert,
   Button,
   Dropdown,
   Pagination,
@@ -12,6 +11,7 @@ import {
   message
 } from "antd"
 import type { ColumnsType } from "antd/es/table"
+import { Alert } from "@/components/ui/primitives"
 import { ChevronDown, Eye, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useWatchlistsStore } from "@/store/watchlists"
@@ -1235,51 +1235,37 @@ export const RunsTab: React.FC = () => {
 
       {runsAttention && (
         <Alert
-          type="warning"
-          showIcon
+          variant="warning"
           title={t("watchlists:runs.attention.title", "Reliability attention required")}
-          description={
-            `${runsAttention.description}${runsAttention.hint ? ` ${runsAttention.hint}` : ""}`.trim()
-          }
-          action={(
-            <div className="flex flex-wrap gap-2">
-              {runsAttention.newestFailedRunId != null && (
-                <Button
-                  size="small"
-                  onClick={() => openRunDetail(runsAttention.newestFailedRunId as number)}
-                >
-                  {t("watchlists:runs.attention.viewFailedRun", "View newest failed run")}
-                </Button>
-              )}
-              {runsAttention.failedCount > 0 && runsStatusFilter !== "failed" && (
-                <Button
-                  size="small"
-                  onClick={() => setRunsStatusFilter("failed")}
-                >
-                  {t("watchlists:runs.attention.filterFailed", "Show failed runs")}
-                </Button>
-              )}
-            </div>
-          )}
-        />
+          action={runsAttention.newestFailedRunId != null
+            ? {
+                label: t("watchlists:runs.attention.viewFailedRun", "View newest failed run"),
+                onClick: () => openRunDetail(runsAttention.newestFailedRunId as number)
+              }
+            : undefined}
+          secondaryAction={runsAttention.failedCount > 0 && runsStatusFilter !== "failed"
+            ? {
+                label: t("watchlists:runs.attention.filterFailed", "Show failed runs"),
+                onClick: () => setRunsStatusFilter("failed")
+              }
+            : undefined}
+        >
+          {`${runsAttention.description}${runsAttention.hint ? ` ${runsAttention.hint}` : ""}`.trim()}
+        </Alert>
       )}
 
       {runsLoadError && (
         <Alert
-          type={runsLoadError.severity}
-          showIcon
+          variant={runsLoadError.severity}
           title={runsLoadError.title}
-          description={runsLoadError.description}
-          action={(
-            <Button
-              size="small"
-              onClick={() => void loadRuns()}
-              loading={runsLoading}
-            >
-              {t("watchlists:errors.retry", "Retry")}
-            </Button>
-          )}
-        />
+          action={{
+            label: t("watchlists:errors.retry", "Retry"),
+            onClick: () => void loadRuns(),
+            loading: runsLoading
+          }}
+        >
+          {runsLoadError.description}
+        </Alert>
       )}
 
       {isConstrained ? (
