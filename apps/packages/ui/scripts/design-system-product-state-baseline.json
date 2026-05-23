@@ -2596,39 +2596,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/modals/ConnectionWebModal.tsx:Empty#antd-empty-connectionwebmodal-add-characters-or-world-in-13nhe96",
-    "path": "src/components/Option/WritingPlayground/modals/ConnectionWebModal.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Empty",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Empty product-state UI in src/components/Option/WritingPlayground/modals/ConnectionWebModal.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/modals/ConnectionWebModal.tsx:Empty#antd-empty-connectionwebmodal-select-a-project-first-lin-1lvl2ch",
-    "path": "src/components/Option/WritingPlayground/modals/ConnectionWebModal.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Empty",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Empty product-state UI in src/components/Option/WritingPlayground/modals/ConnectionWebModal.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/modals/ConnectionWebModal.tsx:Spin",
-    "path": "src/components/Option/WritingPlayground/modals/ConnectionWebModal.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Spin",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Spin product-state UI in src/components/Option/WritingPlayground/modals/ConnectionWebModal.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx:Alert#antd-alert-writingplaygroundmodalhost-type-error-line-22-175t14c",
     "path": "src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx",
     "rule": "antd-product-state-import",
