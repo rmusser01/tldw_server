@@ -8,6 +8,7 @@ import {
   waitFor,
   within
 } from "@testing-library/react"
+import { useQuery } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockState = vi.hoisted(() => ({
@@ -290,25 +291,28 @@ const seedWritingSession = (
     limit: 200,
     offset: 0
   })
-  mockState.queryData.set("writing-session:session-auto", {
-    id: "session-auto",
-    name: "Auto Session",
-    payload: {
-      prompt: "Seed prompt",
-      settings: {},
-      template_name: null,
-      theme_name: null,
-      chat_mode: false,
-      ...payloadOverrides
-    },
-    schema_version: 1,
-    version_parent_id: null,
-    created_at: "2026-03-16T12:00:00Z",
-    last_modified: "2026-03-16T12:00:00Z",
-    deleted: false,
-    client_id: "test-client",
-    version: 1
-  })
+  mockState.queryData.set(
+    mockState.queryKey(["writing-session", "session-auto"]),
+    {
+      id: "session-auto",
+      name: "Auto Session",
+      payload: {
+        prompt: "Seed prompt",
+        settings: {},
+        template_name: null,
+        theme_name: null,
+        chat_mode: false,
+        ...payloadOverrides
+      },
+      schema_version: 1,
+      version_parent_id: null,
+      created_at: "2026-03-16T12:00:00Z",
+      last_modified: "2026-03-16T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 1
+    }
+  )
 }
 
 const getEditor = () =>
@@ -721,7 +725,7 @@ describe("WritingPlayground phase1 baseline", () => {
       })
     )
     seedWritingSession({ prompt: "Rewrite this line." })
-    mockState.queryData.set("writing-sessions", {
+    mockState.queryData.set(mockState.queryKey(["writing-sessions"]), {
       sessions: [
         {
           id: "session-auto",
@@ -740,24 +744,27 @@ describe("WritingPlayground phase1 baseline", () => {
       limit: 200,
       offset: 0
     })
-    mockState.queryData.set("writing-session:session-other", {
-      id: "session-other",
-      name: "Other Session",
-      payload: {
-        prompt: "Other draft.",
-        settings: {},
-        template_name: null,
-        theme_name: null,
-        chat_mode: false
-      },
-      schema_version: 1,
-      version_parent_id: null,
-      created_at: "2026-03-16T12:00:00Z",
-      last_modified: "2026-03-16T12:05:00Z",
-      deleted: false,
-      client_id: "test-client",
-      version: 1
-    })
+    mockState.queryData.set(
+      mockState.queryKey(["writing-session", "session-other"]),
+      {
+        id: "session-other",
+        name: "Other Session",
+        payload: {
+          prompt: "Other draft.",
+          settings: {},
+          template_name: null,
+          theme_name: null,
+          chat_mode: false
+        },
+        schema_version: 1,
+        version_parent_id: null,
+        created_at: "2026-03-16T12:00:00Z",
+        last_modified: "2026-03-16T12:05:00Z",
+        deleted: false,
+        client_id: "test-client",
+        version: 1
+      }
+    )
 
     render(<WritingPlayground />)
     selectEditorText(getEditor(), "Rewrite this line.")
