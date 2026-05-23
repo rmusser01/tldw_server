@@ -19,11 +19,17 @@ vi.mock("@/services/tts", () => ({
 
 import {
   batchUpdateScrapedItems,
+  applyWatchlistOutputPreset,
+  createWatchlistOutputPreset,
   createWatchlistItemView,
+  deleteWatchlistOutputPreset,
   deleteWatchlistItemView,
   fetchScrapedItems,
   fetchScrapedItemSmartCounts,
+  fetchWatchlistOutputPresets,
   fetchWatchlistItemViews,
+  getWatchlistOutputPreset,
+  updateWatchlistOutputPreset,
   updateWatchlistItemView
 } from "../watchlists"
 
@@ -132,6 +138,75 @@ describe("watchlist item triage service contract", () => {
     await deleteWatchlistItemView(42, 5)
     expect(mocks.bgRequest).toHaveBeenLastCalledWith({
       path: "/api/v1/watchlists/42/item-views/5",
+      method: "DELETE"
+    })
+  })
+
+  it("uses server-backed monitor output preset CRUD and apply routes", async () => {
+    await fetchWatchlistOutputPresets()
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith({
+      path: "/api/v1/watchlists/job-output-presets",
+      method: "GET"
+    })
+
+    await createWatchlistOutputPreset({
+      name: "Daily newsletter",
+      description: "HTML email",
+      output_prefs: {
+        template: { default_name: "newsletter_html", default_format: "html" },
+        generate_audio: true,
+        audio_voice: "nova"
+      },
+      is_default: true
+    })
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith({
+      path: "/api/v1/watchlists/job-output-presets",
+      method: "POST",
+      body: {
+        name: "Daily newsletter",
+        description: "HTML email",
+        output_prefs: {
+          template: { default_name: "newsletter_html", default_format: "html" },
+          generate_audio: true,
+          audio_voice: "nova"
+        },
+        is_default: true
+      }
+    })
+
+    await getWatchlistOutputPreset(7)
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith({
+      path: "/api/v1/watchlists/job-output-presets/7",
+      method: "GET"
+    })
+
+    await updateWatchlistOutputPreset(7, {
+      name: "Executive newsletter",
+      output_prefs: { generate_audio: false }
+    })
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith({
+      path: "/api/v1/watchlists/job-output-presets/7",
+      method: "PATCH",
+      body: {
+        name: "Executive newsletter",
+        output_prefs: { generate_audio: false }
+      }
+    })
+
+    await applyWatchlistOutputPreset(7, {
+      base_output_prefs: { raw_advanced: { preserve: true } }
+    })
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith({
+      path: "/api/v1/watchlists/job-output-presets/7/apply",
+      method: "POST",
+      body: {
+        base_output_prefs: { raw_advanced: { preserve: true } }
+      }
+    })
+
+    await deleteWatchlistOutputPreset(7)
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith({
+      path: "/api/v1/watchlists/job-output-presets/7",
       method: "DELETE"
     })
   })

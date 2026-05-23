@@ -51,6 +51,11 @@ import type {
   WatchlistOutput,
   WatchlistOutputCreate,
   WatchlistOutputEvidenceResponse,
+  WatchlistOutputPreset,
+  WatchlistOutputPresetApplyRequest,
+  WatchlistOutputPresetApplyResponse,
+  WatchlistOutputPresetCreate,
+  WatchlistOutputPresetUpdate,
   WatchlistReportReadiness,
   WatchlistRun,
   WatchlistRunAudioStatus,
@@ -868,6 +873,61 @@ export const deleteWatchlistItemView = async (
 ): Promise<void> => {
   return bgRequest<void>({
     path: `/api/v1/watchlists/${watchlistId}/item-views/${viewId}` as any,
+    method: "DELETE"
+  })
+}
+
+export const fetchWatchlistOutputPresets = async (): Promise<{ items: WatchlistOutputPreset[] }> => {
+  return bgRequest<{ items: WatchlistOutputPreset[] }>({
+    path: "/api/v1/watchlists/job-output-presets" as any,
+    method: "GET"
+  })
+}
+
+export const createWatchlistOutputPreset = async (
+  payload: WatchlistOutputPresetCreate
+): Promise<WatchlistOutputPreset> => {
+  return bgRequest<WatchlistOutputPreset>({
+    path: "/api/v1/watchlists/job-output-presets" as any,
+    method: "POST",
+    body: payload
+  })
+}
+
+export const getWatchlistOutputPreset = async (
+  presetId: number
+): Promise<WatchlistOutputPreset> => {
+  return bgRequest<WatchlistOutputPreset>({
+    path: `/api/v1/watchlists/job-output-presets/${presetId}` as any,
+    method: "GET"
+  })
+}
+
+export const updateWatchlistOutputPreset = async (
+  presetId: number,
+  payload: WatchlistOutputPresetUpdate
+): Promise<WatchlistOutputPreset> => {
+  return bgRequest<WatchlistOutputPreset>({
+    path: `/api/v1/watchlists/job-output-presets/${presetId}` as any,
+    method: "PATCH",
+    body: payload
+  })
+}
+
+export const applyWatchlistOutputPreset = async (
+  presetId: number,
+  payload: WatchlistOutputPresetApplyRequest
+): Promise<WatchlistOutputPresetApplyResponse> => {
+  return bgRequest<WatchlistOutputPresetApplyResponse>({
+    path: `/api/v1/watchlists/job-output-presets/${presetId}/apply` as any,
+    method: "POST",
+    body: payload
+  })
+}
+
+export const deleteWatchlistOutputPreset = async (presetId: number): Promise<void> => {
+  return bgRequest<void>({
+    path: `/api/v1/watchlists/job-output-presets/${presetId}` as any,
     method: "DELETE"
   })
 }

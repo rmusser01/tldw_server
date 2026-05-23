@@ -517,3 +517,170 @@ def test_item_saved_views_are_watchlist_scoped_and_validated(tmp_path):
 
     assert db.delete_item_saved_view(view_id=int(view.id), watchlist_id=watchlist_id) is True
     assert db.delete_item_saved_view(view_id=int(view.id), watchlist_id=watchlist_id) is False
+
+
+def test_output_presets_are_user_scoped_and_validated(tmp_path):
+    db = _make_db(tmp_path, user_id=124)
+    other_db = _make_db(tmp_path, user_id=125)
+
+    preset = db.create_output_preset(
+        name="Daily newsletter",
+        description="HTML email with audio",
+        output_prefs={
+            "template": {"default_name": "newsletter_html", "default_format": "html"},
+            "deliveries": {"email": {"enabled": True, "recipients": ["ops@example.com"]}},
+            "generate_audio": True,
+            "audio_voice": "nova",
+        },
+        is_default=True,
+    )
+    other_db.create_output_preset(
+        name="Other user preset",
+        description=None,
+        output_prefs={"template": {"default_name": "other"}},
+    )
+
+    assert preset.name == "Daily newsletter"
+    assert preset.description == "HTML email with audio"
+    assert json.loads(preset.output_prefs_json)["audio_voice"] == "nova"
+    assert int(preset.is_default) == 1
+    assert [row.name for row in db.list_output_presets()] == ["Daily newsletter"]
+    assert [row.name for row in other_db.list_output_presets()] == ["Other user preset"]
+
+    replacement_default = db.create_output_preset(
+        name="Briefing digest",
+        description=None,
+        output_prefs={"template": {"default_name": "briefing_markdown"}},
+        is_default=True,
+    )
+    refreshed_first = db.get_output_preset(preset_id=int(preset.id))
+    assert int(refreshed_first.is_default) == 0
+    assert int(replacement_default.is_default) == 1
+
+    updated = db.update_output_preset(
+        preset_id=int(preset.id),
+        fields={
+            "name": "Daily executive newsletter",
+            "description": "Renamed",
+            "output_prefs": {"generate_audio": False},
+            "is_default": True,
+        },
+    )
+    assert updated.name == "Daily executive newsletter"
+    assert updated.description == "Renamed"
+    assert json.loads(updated.output_prefs_json) == {"generate_audio": False}
+    assert int(updated.is_default) == 1
+    assert int(db.get_output_preset(preset_id=int(replacement_default.id)).is_default) == 0
+
+    with pytest.raises(ValueError, match="output_preset_name_required"):
+        db.create_output_preset(name=" ", description=None, output_prefs={})
+    with pytest.raises(ValueError, match="output_preset_prefs_invalid"):
+        db.create_output_preset(name="Bad prefs", description=None, output_prefs=["not", "a", "dict"])
+    with pytest.raises(ValueError, match="output_preset_name_exists"):
+        db.create_output_preset(
+            name="daily executive newsletter",
+            description=None,
+            output_prefs={},
+        )
+
+    assert db.delete_output_preset(preset_id=int(preset.id)) is True
+    assert db.delete_output_preset(preset_id=int(preset.id)) is False
+
+
+def test_output_preset_apply_preserves_unknown_fields(tmp_path):
+    db = _make_db(tmp_path)
+    preset = db.create_output_preset(
+        name="Podcast briefing",
+        description=None,
+        output_prefs={
+            "template": {"default_name": "podcast_script", "default_format": "md"},
+            "deliveries": {"chatbook": {"enabled": True, "title": "Daily Brief"}},
+            "generate_audio": False,
+            "preset_custom": {"copied": True},
+        },
+    )
+
+    applied = db.apply_output_preset(
+        preset_id=int(preset.id),
+        base_output_prefs={
+            "template": {
+                "default_name": "old",
+                "default_version": 3,
+                "experimental_renderer": "keep",
+            },
+            "deliveries": {
+                "email": {"enabled": True, "recipients": ["old@example.com"]},
+                "webhook": {"url": "https://hooks.example.com/watchlists"},
+            },
+            "auto_output": {"enabled": True, "type": "briefing_markdown", "custom_flag": "keep"},
+            "generate_audio": True,
+            "audio_voice": "alloy",
+            "target_audio_minutes": 12,
+            "raw_advanced": {"preserve": True},
+        },
+    )
+
+    assert applied["template"] == {
+        "default_name": "podcast_script",
+        "default_format": "md",
+        "experimental_renderer": "keep",
+    }
+    assert applied["deliveries"] == {
+        "chatbook": {"enabled": True, "title": "Daily Brief"},
+        "webhook": {"url": "https://hooks.example.com/watchlists"},
+    }
+    assert applied["auto_output"] == {"custom_flag": "keep"}
+    assert applied["generate_audio"] is False
+    assert "audio_voice" not in applied
+    assert "target_audio_minutes" not in applied
+    assert applied["raw_advanced"] == {"preserve": True}
+    assert applied["preset_custom"] == {"copied": True}
+
+
+def test_output_preset_apply_replaces_legacy_nested_values(tmp_path):
+    db = _make_db(tmp_path)
+    preset = db.create_output_preset(
+        name="Structured output",
+        description=None,
+        output_prefs={
+            "template": {"default_name": "newsletter_html", "default_format": "html"},
+            "deliveries": {"email": {"enabled": True, "recipients": ["team@example.com"]}},
+        },
+    )
+
+    applied = db.apply_output_preset(
+        preset_id=int(preset.id),
+        base_output_prefs={
+            "template": "legacy-template-name",
+            "deliveries": "legacy-delivery-target",
+            "raw_advanced": {"preserve": True},
+        },
+    )
+
+    assert applied["template"] == {"default_name": "newsletter_html", "default_format": "html"}
+    assert applied["deliveries"] == {"email": {"enabled": True, "recipients": ["team@example.com"]}}
+    assert applied["raw_advanced"] == {"preserve": True}
+
+
+def test_output_preset_apply_removes_legacy_nested_values_when_preset_omits_group(tmp_path):
+    db = _make_db(tmp_path)
+    preset = db.create_output_preset(
+        name="Audio only",
+        description=None,
+        output_prefs={"generate_audio": True, "audio_voice": "nova"},
+    )
+
+    applied = db.apply_output_preset(
+        preset_id=int(preset.id),
+        base_output_prefs={
+            "template": "legacy-template-name",
+            "deliveries": "legacy-delivery-target",
+            "raw_advanced": {"preserve": True},
+        },
+    )
+
+    assert "template" not in applied
+    assert "deliveries" not in applied
+    assert applied["generate_audio"] is True
+    assert applied["audio_voice"] == "nova"
+    assert applied["raw_advanced"] == {"preserve": True}
