@@ -165,17 +165,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Flashcards/tabs/ReviewTab.tsx:Alert",
-    "path": "src/components/Flashcards/tabs/ReviewTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Flashcards/tabs/ReviewTab.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Flashcards/tabs/SchedulerTab.tsx:Alert#antd-alert-schedulertab-type-error-line-455-omfdee",
     "path": "src/components/Flashcards/tabs/SchedulerTab.tsx",
     "rule": "antd-product-state-import",

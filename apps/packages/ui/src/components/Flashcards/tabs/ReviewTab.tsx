@@ -1,6 +1,5 @@
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Empty,
@@ -16,6 +15,7 @@ import {
 import { X, Minus, Check, Star, Calendar, Undo2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
+import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import type { DeckReviewPromptSide, Flashcard, FlashcardUpdate } from "@/services/flashcards"
 import { getSetting, setSetting } from "@/services/settings/registry"
@@ -1351,8 +1351,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                     </div>
                     {reviewFailure && (
                       <Alert
-                        showIcon
-                        type={
+                        variant={
                           reviewFailure.code === "FLASHCARDS_VERSION_CONFLICT"
                             ? "warning"
                             : "error"
@@ -1360,9 +1359,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                         title={t("option:flashcards.reviewRetryTitle", {
                           defaultValue: "Review not saved"
                         })}
-                        description={reviewFailure.message}
                         data-testid="flashcards-review-retry-alert"
-                        action={
+                      >
+                        <div className="space-y-2">
+                          <p className="m-0">{reviewFailure.message}</p>
                           <Space orientation="vertical" size={8}>
                             <Button
                               size="small"
@@ -1388,8 +1388,8 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                               </Button>
                             )}
                           </Space>
-                        }
-                      />
+                        </div>
+                      </Alert>
                     )}
                     <Text type="secondary" className="text-xs text-center">
                       {t("option:flashcards.ratingIntervalsMeaning", {
@@ -1540,72 +1540,70 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                 <>
                   {showReviewOnboardingGuide ? (
                     <Alert
-                      type="info"
-                      showIcon
+                      variant="info"
                       className="w-full max-w-2xl text-left"
                       data-testid="flashcards-review-onboarding-guide"
                       title={t("option:flashcards.onboardingTitle", {
                         defaultValue: "How flashcard study works"
                       })}
-                      description={
-                        <div className="space-y-2">
-                          <Text type="secondary" className="block">
-                            {t("option:flashcards.onboardingDescription", {
-                              defaultValue:
-                                "Spaced repetition focuses on cards right before you forget them, so short daily sessions are enough."
-                            })}
-                          </Text>
-                          <ol className="mb-0 list-decimal pl-5 text-xs text-text-muted">
-                            <li>
-                              {t("option:flashcards.onboardingStepCreate", {
-                                defaultValue:
-                                  "Add cards manually, import a deck, or generate cards from text."
-                              })}
-                            </li>
-                            <li>
-                              {t("option:flashcards.onboardingStepReview", {
-                                defaultValue:
-                                  "Review due cards each day and reveal answers with Space."
-                              })}
-                            </li>
-                            <li>
-                              {t("option:flashcards.onboardingStepRate", {
-                                defaultValue:
-                                  "Rate recall with Again/Hard/Good/Easy so the next review is scheduled automatically."
-                              })}
-                            </li>
-                            <li className="text-text-muted">
-                              {t("option:flashcards.onboardingStepLlmNote", {
-                                defaultValue:
-                                  "Card generation and the study assistant require an LLM provider (configure in Settings)."
-                              })}
-                            </li>
-                          </ol>
-                          <a
-                            href={FLASHCARDS_HELP_LINKS.ratings}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-primary hover:underline"
-                            data-testid="flashcards-review-onboarding-doc-link"
-                          >
-                            {t("option:flashcards.onboardingDocLink", {
-                              defaultValue: "Open the full Flashcards study guide"
-                            })}
-                          </a>
-                        </div>
-                      }
-                      action={
-                        <Button
-                          size="small"
-                          onClick={() => setReviewOnboardingDismissed(true)}
-                          data-testid="flashcards-review-onboarding-dismiss"
-                        >
-                          {t("option:flashcards.onboardingDismiss", {
-                            defaultValue: "Hide guide"
+                    >
+                      <div className="space-y-2">
+                        <Text type="secondary" className="block">
+                          {t("option:flashcards.onboardingDescription", {
+                            defaultValue:
+                              "Spaced repetition focuses on cards right before you forget them, so short daily sessions are enough."
                           })}
-                        </Button>
-                      }
-                    />
+                        </Text>
+                        <ol className="mb-0 list-decimal pl-5 text-xs text-text-muted">
+                          <li>
+                            {t("option:flashcards.onboardingStepCreate", {
+                              defaultValue:
+                                "Add cards manually, import a deck, or generate cards from text."
+                            })}
+                          </li>
+                          <li>
+                            {t("option:flashcards.onboardingStepReview", {
+                              defaultValue:
+                                "Review due cards each day and reveal answers with Space."
+                            })}
+                          </li>
+                          <li>
+                            {t("option:flashcards.onboardingStepRate", {
+                              defaultValue:
+                                "Rate recall with Again/Hard/Good/Easy so the next review is scheduled automatically."
+                            })}
+                          </li>
+                          <li className="text-text-muted">
+                            {t("option:flashcards.onboardingStepLlmNote", {
+                              defaultValue:
+                                "Card generation and the study assistant require an LLM provider (configure in Settings)."
+                            })}
+                          </li>
+                        </ol>
+                        <a
+                          href={FLASHCARDS_HELP_LINKS.ratings}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary hover:underline"
+                          data-testid="flashcards-review-onboarding-doc-link"
+                        >
+                          {t("option:flashcards.onboardingDocLink", {
+                            defaultValue: "Open the full Flashcards study guide"
+                          })}
+                        </a>
+                        <div>
+                          <Button
+                            size="small"
+                            onClick={() => setReviewOnboardingDismissed(true)}
+                            data-testid="flashcards-review-onboarding-dismiss"
+                          >
+                            {t("option:flashcards.onboardingDismiss", {
+                              defaultValue: "Hide guide"
+                            })}
+                          </Button>
+                        </div>
+                      </div>
+                    </Alert>
                   ) : (
                     <Button
                       type="link"
