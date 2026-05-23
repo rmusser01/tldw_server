@@ -183,7 +183,7 @@
 
 **Tests:** Domain adapter tests, materializer tests, restore-preview tests, replay/repair tests, and cross-user/workspace isolation tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 - [x] **Step 1: Promote source cache domain**
 
@@ -200,7 +200,7 @@
   Document whether transcripts, summaries, embeddings, and evaluation artifacts
   are source-of-truth sync domains or rebuildable cache.
 
-- [ ] **Step 4: Verify and commit each domain group**
+- [x] **Step 4: Verify and commit each domain group**
 
   Keep commits per domain family.
 
