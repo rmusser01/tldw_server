@@ -12,8 +12,9 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import SyncDeviceUpsert
-from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS
+from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, SyncObjectState
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -51,10 +52,42 @@ def _registry() -> SyncAdapterRegistry:
     )
 
 
-def _build_service(tmp_path: Path, *, encryption=None) -> SyncV2Service:
+class _EndpointOutcomeMaterializer:
+    domain = "notes.note"
+
+    def apply(self, envelope, *, store: SyncV2Store) -> MaterializationResult:
+        if envelope.object_id == "note-fail":
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="failed",
+                apply_error_code="projection_failed",
+                apply_error_message="projection is replayable",
+            )
+            return MaterializationResult(
+                status="failed",
+                error_code="projection_failed",
+                message="projection is replayable",
+            )
+        store.upsert_object_state(
+            SyncObjectState(
+                dataset_id=envelope.dataset_id,
+                domain=envelope.domain,
+                object_id=envelope.object_id,
+                object_revision=envelope.object_revision or 1,
+                object_hash=envelope.payload_hash or "",
+                latest_server_cursor=envelope.server_cursor,
+                deleted=False,
+            )
+        )
+        store.mark_envelope_apply_status(envelope.server_cursor, apply_status="applied")
+        return MaterializationResult(status="applied")
+
+
+def _build_service(tmp_path: Path, *, encryption=None, materializers=None) -> SyncV2Service:
     return SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_v2_endpoints.db")),
         adapters=_registry(),
+        materializers=materializers,
         clock=_clock,
         id_factory=lambda prefix: f"{prefix}-generated",
         settings=SyncV2Settings(
@@ -359,45 +392,167 @@ def test_datasets_enroll_endpoint_fails_closed_when_encryption_is_not_ready(
     assert service.store.list_datasets_for_user("user-1") == []
 
 
-def test_legacy_send_and_get_routes_preserve_existing_policy(
+def _note_envelope_json(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "client_envelope_id": "env-note",
+        "dataset_id": "dataset-1",
+        "device_id": "device-1",
+        "client_sequence": 1,
+        "domain": "notes.note",
+        "operation": "upsert",
+        "object_id": "note-1",
+        "object_revision": 1,
+        "schema_version": 1,
+        "payload": {"title": "Research note", "content": "Body"},
+        "payload_hash": "sha256:note-1",
+        "created_at_client": "2026-05-23T18:12:44+00:00",
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_push_and_pull_endpoint_expose_apply_outcomes_for_replayable_failures(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(
+        tmp_path,
+        materializers={"notes.note": _EndpointOutcomeMaterializer()},
+    )
+    client = _client_for_service(service)
+    client.post(
+        "/api/v1/sync/devices/register",
+        json={"device_id": "device-1", "display_name": "Laptop", "client_type": "chatbook"},
+    )
+    client.post(
+        "/api/v1/sync/devices/register",
+        json={"device_id": "device-2", "display_name": "Phone", "client_type": "chatbook"},
+    )
+    client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-1",
+            "domains": list(M1_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+        },
+    )
+
+    pushed = client.post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                _note_envelope_json(),
+                _note_envelope_json(
+                    client_envelope_id="env-failed",
+                    object_id="note-fail",
+                    client_sequence=2,
+                    payload_hash="sha256:failed",
+                ),
+            ],
+        },
+    )
+    pulled = client.get(
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-2",
+            "cursor": "0",
+            "domain": "notes.note",
+            "include_own_changes": "true",
+        },
+    )
+
+    assert pushed.status_code == 200
+    accepted = pushed.json()["accepted"]
+    assert [
+        (item["client_envelope_id"], item["server_cursor"], item["object_revision"], item["apply_status"])
+        for item in accepted
+    ] == [
+        ("env-note", 1, 1, "applied"),
+        ("env-failed", 2, None, "failed"),
+    ]
+    assert accepted[1]["apply_error_code"] == "projection_failed"
+    assert "replayable" in accepted[1]["apply_error_message"]
+    assert pulled.status_code == 200
+    failed = pulled.json()["envelopes"][1]
+    assert failed["client_envelope_id"] == "env-failed"
+    assert failed["apply_status"] == "failed"
+    assert failed["apply_error_code"] == "projection_failed"
+    assert "replayable" in failed["apply_error_message"]
+
+
+def test_push_endpoint_reports_dataset_mismatch_per_envelope_in_mixed_batch(
+    client: TestClient,
+) -> None:
+    client.post(
+        "/api/v1/sync/devices/register",
+        json={"device_id": "device-1", "display_name": "Laptop", "client_type": "chatbook"},
+    )
+    client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-1",
+            "domains": list(M1_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                _note_envelope_json(),
+                _note_envelope_json(
+                    client_envelope_id="env-wrong-dataset",
+                    dataset_id="dataset-other",
+                    object_id="note-other",
+                    client_sequence=2,
+                    payload_hash="sha256:wrong-dataset",
+                ),
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["client_envelope_id"] for item in body["accepted"]] == ["env-note"]
+    assert body["rejected"][0]["client_envelope_id"] == "env-wrong-dataset"
+    assert body["rejected"][0]["error_code"] == "dataset_mismatch"
+
+
+def test_legacy_send_and_get_routes_return_replaced_gone(
     sync_service: SyncV2Service,
 ) -> None:
     app = FastAPI()
     app.include_router(sync_endpoint.router, prefix="/api/v1/sync")
     app.dependency_overrides[get_request_user] = _test_user
     app.dependency_overrides[sync_endpoint.get_sync_v2_service] = lambda: sync_service
-
-    class _Cursor:
-        def __init__(self, rows: list[tuple[int]]) -> None:
-            self._rows = rows
-
-        def fetchall(self) -> list[tuple[int]]:
-            return self._rows
-
-        def fetchone(self) -> tuple[int] | None:
-            return self._rows[0] if self._rows else None
-
-    class _LegacyDb:
-        db_path_str = "/tmp/legacy-media.db"
-
-        def execute_query(self, query: str, params: tuple[Any, ...] = ()) -> _Cursor:
-            if "MAX(change_id)" in query:
-                return _Cursor([(7,)])
-            if "FROM sync_log" in query:
-                assert params[1] == "legacy-client"
-                return _Cursor([])
-            raise AssertionError(query)
-
-    app.dependency_overrides[get_media_db_for_user] = lambda: _LegacyDb()
     legacy_client = TestClient(app)
 
     send = legacy_client.post("/api/v1/sync/send", json={"client_id": "legacy-client", "changes": []})
+    invalid_send = legacy_client.post("/api/v1/sync/send", json={"not": "a legacy media sync payload"})
     get = legacy_client.get(
         "/api/v1/sync/get",
         params={"client_id": "legacy-client", "since_change_id": 0},
     )
+    invalid_get = legacy_client.get(
+        "/api/v1/sync/get",
+        params={"client_id": "legacy-client", "since_change_id": "not-an-int"},
+    )
 
-    assert send.status_code == 200
-    assert send.json() == {"status": "success", "message": "No changes received."}
-    assert get.status_code == 200
-    assert get.json() == {"changes": [], "latest_change_id": 7}
+    assert send.status_code == 410
+    assert send.json()["detail"]["error_code"] == "sync_legacy_endpoint_replaced"
+    assert send.json()["detail"]["replacement"] == "/api/v1/sync/push"
+    assert invalid_send.status_code == 410
+    assert invalid_send.json()["detail"]["error_code"] == "sync_legacy_endpoint_replaced"
+    assert invalid_send.json()["detail"]["replacement"] == "/api/v1/sync/push"
+    assert get.status_code == 410
+    assert get.json()["detail"]["error_code"] == "sync_legacy_endpoint_replaced"
+    assert get.json()["detail"]["replacement"] == "/api/v1/sync/pull"
+    assert invalid_get.status_code == 410
+    assert invalid_get.json()["detail"]["error_code"] == "sync_legacy_endpoint_replaced"
+    assert invalid_get.json()["detail"]["replacement"] == "/api/v1/sync/pull"

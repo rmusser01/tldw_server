@@ -745,13 +745,12 @@ def resolve_sync_v2_conflicts(
             if resolution.resolution_envelope is not None
             else None
         )
-        service_action = "dismiss" if resolution.action == "skip" else resolution.action
         try:
             conflict = service.resolve_conflict(
                 user_id=user_id,
                 dataset_id=request.dataset_id,
                 conflict_id=resolution.conflict_id,
-                action=service_action,
+                action=resolution.action,
                 resolution_envelope=resolution_envelope,
                 resolved_by_device_id=request.device_id,
                 notes=None,
@@ -941,18 +940,32 @@ def store_sync_v2_key_recovery_bundle(
     return _api_key_record_metadata(record)
 
 
+def _legacy_sync_replaced_error(replacement: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "error_code": "sync_legacy_endpoint_replaced",
+            "message": (
+                "The legacy media sync endpoint has been replaced by the "
+                "Sync v2 M1 envelope API."
+            ),
+            "replacement": replacement,
+        },
+    )
+
+
 @router.post("/send",
-             status_code=status.HTTP_200_OK,
-             summary="Receive changes from a client")
+             status_code=status.HTTP_410_GONE,
+             summary="Legacy sync send endpoint replaced by Sync v2 push")
 async def receive_changes_from_client(
-    payload: ClientChangesPayload,
+    request: Request,
     user_id: User = Depends(get_request_user),
-    db: Any = Depends(get_media_db_for_user)
 ):
-    """
-    Receives a batch of sync log entries from a client, applies them
-    to the user's database on the server synchronously in a thread pool.
-    """
+    """Return a stable replacement response for the removed legacy sync send API."""
+
+    del request, user_id
+    raise _legacy_sync_replaced_error("/api/v1/sync/push")
+
     requesting_client_id = payload.client_id
     if not payload.changes:
         logger.info(f"[{user_id.username}] Received empty change batch from client {requesting_client_id}.")
@@ -1002,20 +1015,17 @@ async def receive_changes_from_client(
 
 
 @router.get("/get",
-            response_model=ServerChangesResponse,
-            summary="Send changes back to a client")
+            status_code=status.HTTP_410_GONE,
+            summary="Legacy sync get endpoint replaced by Sync v2 pull")
 async def send_changes_to_client(
-    client_id: str,
-    since_change_id: int = 0,
+    request: Request,
     user_id: User = Depends(get_request_user),
-    db: Any = Depends(get_media_db_for_user)
 ):
-    """
-    Sends sync log entries from the user's server-side database back to
-    the requesting client, starting after the `since_change_id`.
-    Filters out changes that originated from the requesting client.
-    Uses asyncio.to_thread for DB access.
-    """
+    """Return a stable replacement response for the removed legacy sync get API."""
+
+    del request, user_id
+    raise _legacy_sync_replaced_error("/api/v1/sync/pull")
+
     logger.info(f"[{user_id.username}] Client '{client_id}' requesting changes since server log ID {since_change_id} from DB: {db.db_path_str}.")
 
     def _get_changes_sync():

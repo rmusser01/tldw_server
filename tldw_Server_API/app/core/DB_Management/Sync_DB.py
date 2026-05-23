@@ -718,6 +718,34 @@ def _object_state_from_row(row: dict[str, Any]) -> SyncObjectState:
     )
 
 
+def _conflict_row_has_resolution_claim(row: dict[str, Any]) -> bool:
+    return (
+        row["status"] == "unresolved"
+        and row.get("resolved_at") is None
+        and row.get("resolved_by_envelope_id") is None
+        and (
+            row.get("resolution_action") is not None
+            or row.get("resolved_by_device_id") is not None
+            or row.get("resolution_notes") is not None
+        )
+    )
+
+
+def _conflict_row_matches_resolution_claim(
+    row: dict[str, Any],
+    *,
+    resolved_by_device_id: str | None,
+    resolution_action: str | None,
+    resolution_notes: str | None,
+) -> bool:
+    return (
+        _conflict_row_has_resolution_claim(row)
+        and row.get("resolution_action") == resolution_action
+        and row.get("resolved_by_device_id") == resolved_by_device_id
+        and row.get("resolution_notes") == resolution_notes
+    )
+
+
 def _dataset_domains_from_row(row: dict[str, Any]) -> set[str]:
     domains = decode_json(row.get("domain_set_json"), default=[])
     return {str(domain) for domain in domains}
@@ -1380,6 +1408,25 @@ class SyncDatabase:
 
         return None
 
+    def get_existing_envelope_for_idempotency(
+        self,
+        envelope: SyncEnvelopeCreate,
+    ) -> SyncEnvelope | None:
+        self._validate_envelope_contract(envelope)
+        with self.backend.transaction() as conn:
+            self._require_dataset_domain(
+                envelope.dataset_id,
+                envelope.domain,
+                connection=conn,
+            )
+            existing = self._find_existing_envelope_for_idempotency(
+                envelope,
+                connection=conn,
+            )
+        if existing is None:
+            return None
+        return _envelope_from_row(existing)
+
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         self._validate_envelope_contract(envelope)
         with self.backend.transaction() as conn:
@@ -1923,6 +1970,142 @@ class SyncDatabase:
             return None
         return _conflict_from_row(row)
 
+    def claim_conflict_resolution(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str | None = None,
+        resolved_by_device_id: str | None = None,
+        resolution_action: str | None = None,
+        resolution_notes: str | None = None,
+    ) -> SyncConflict:
+        with self.backend.transaction() as conn:
+            existing = _first(
+                self.execute(
+                    "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
+                    (conflict_id,),
+                    connection=conn,
+                )
+            )
+            if existing is None:
+                raise SyncConflictNotFoundError(f"Sync conflict not found: {conflict_id}")
+            if dataset_id is not None and existing["dataset_id"] != dataset_id:
+                raise SyncConflictNotFoundError(
+                    "Sync conflict was not found or is not accessible"
+                )
+            if existing["status"] != "unresolved":
+                raise SyncStoreError("Sync conflict is already resolved")
+            if _conflict_row_has_resolution_claim(existing):
+                raise SyncStoreError("Sync conflict resolution is already claimed")
+
+            result = self.execute(
+                """
+                UPDATE sync_conflicts
+                   SET resolution_action = ?,
+                       resolved_by_device_id = ?,
+                       resolution_notes = ?
+                 WHERE conflict_id = ?
+                   AND status = 'unresolved'
+                   AND resolved_at IS NULL
+                   AND resolved_by_envelope_id IS NULL
+                   AND resolution_action IS NULL
+                   AND resolved_by_device_id IS NULL
+                   AND resolution_notes IS NULL
+                """,
+                (
+                    resolution_action,
+                    resolved_by_device_id,
+                    resolution_notes,
+                    conflict_id,
+                ),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
+                    (conflict_id,),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncConflictNotFoundError(f"Sync conflict not found: {conflict_id}")
+            if result.rowcount == 0:
+                if row["status"] != "unresolved":
+                    raise SyncStoreError("Sync conflict is already resolved")
+                raise SyncStoreError("Sync conflict resolution is already claimed")
+        return _conflict_from_row(row)
+
+    def release_conflict_resolution_claim(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str | None = None,
+        resolved_by_device_id: str | None = None,
+        resolution_action: str | None = None,
+        resolution_notes: str | None = None,
+    ) -> SyncConflict:
+        with self.backend.transaction() as conn:
+            existing = _first(
+                self.execute(
+                    "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
+                    (conflict_id,),
+                    connection=conn,
+                )
+            )
+            if existing is None:
+                raise SyncConflictNotFoundError(f"Sync conflict not found: {conflict_id}")
+            if dataset_id is not None and existing["dataset_id"] != dataset_id:
+                raise SyncConflictNotFoundError(
+                    "Sync conflict was not found or is not accessible"
+                )
+            result = self.execute(
+                """
+                UPDATE sync_conflicts
+                   SET resolution_action = NULL,
+                       resolved_by_device_id = NULL,
+                       resolution_notes = NULL
+                 WHERE conflict_id = ?
+                   AND status = 'unresolved'
+                   AND resolved_at IS NULL
+                   AND resolved_by_envelope_id IS NULL
+                   AND resolution_action = ?
+                   AND (
+                        resolved_by_device_id = ?
+                        OR (resolved_by_device_id IS NULL AND ? IS NULL)
+                   )
+                   AND (
+                        resolution_notes = ?
+                        OR (resolution_notes IS NULL AND ? IS NULL)
+                   )
+                """,
+                (
+                    conflict_id,
+                    resolution_action,
+                    resolved_by_device_id,
+                    resolved_by_device_id,
+                    resolution_notes,
+                    resolution_notes,
+                ),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_conflicts WHERE conflict_id = ?",
+                    (conflict_id,),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncConflictNotFoundError(f"Sync conflict not found: {conflict_id}")
+            if result.rowcount == 0 and _conflict_row_matches_resolution_claim(
+                row,
+                resolved_by_device_id=resolved_by_device_id,
+                resolution_action=resolution_action,
+                resolution_notes=resolution_notes,
+            ):
+                raise SyncStoreError("Sync conflict resolution claim could not be released")
+        return _conflict_from_row(row)
+
     def resolve_conflict(
         self,
         conflict_id: str,
@@ -1935,6 +2118,20 @@ class SyncDatabase:
         resolution_action: str | None = None,
         resolution_notes: str | None = None,
     ) -> SyncConflict:
+        def _matches_resolution(row: dict[str, Any]) -> bool:
+            if row["status"] != status:
+                return False
+            if server_cursor is not None:
+                stored_cursor = row.get("server_sequence")
+                if stored_cursor is None or int(stored_cursor) != int(server_cursor):
+                    return False
+            return (
+                row.get("resolved_by_envelope_id") == resolved_by_envelope_id
+                and row.get("resolved_by_device_id") == resolved_by_device_id
+                and row.get("resolution_action") == resolution_action
+                and row.get("resolution_notes") == resolution_notes
+            )
+
         now = utcnow_iso()
         with self.backend.transaction() as conn:
             existing = _first(
@@ -1950,7 +2147,20 @@ class SyncDatabase:
                 raise SyncConflictNotFoundError(
                     "Sync conflict was not found or is not accessible"
                 )
-            self.execute(
+            if existing["status"] != "unresolved":
+                if _matches_resolution(existing):
+                    return _conflict_from_row(existing)
+                raise SyncStoreError("Sync conflict is already resolved")
+            if _conflict_row_has_resolution_claim(
+                existing
+            ) and not _conflict_row_matches_resolution_claim(
+                existing,
+                resolved_by_device_id=resolved_by_device_id,
+                resolution_action=resolution_action,
+                resolution_notes=resolution_notes,
+            ):
+                raise SyncStoreError("Sync conflict resolution is already claimed")
+            result = self.execute(
                 """
                 UPDATE sync_conflicts
                    SET status = ?,
@@ -1961,6 +2171,29 @@ class SyncDatabase:
                        resolution_action = ?,
                        resolution_notes = ?
                  WHERE conflict_id = ?
+                   AND status = 'unresolved'
+                   AND (
+                        (
+                            resolved_at IS NULL
+                            AND resolved_by_envelope_id IS NULL
+                            AND resolution_action IS NULL
+                            AND resolved_by_device_id IS NULL
+                            AND resolution_notes IS NULL
+                        )
+                        OR (
+                            resolved_at IS NULL
+                            AND resolved_by_envelope_id IS NULL
+                            AND resolution_action = ?
+                            AND (
+                                resolved_by_device_id = ?
+                                OR (resolved_by_device_id IS NULL AND ? IS NULL)
+                            )
+                            AND (
+                                resolution_notes = ?
+                                OR (resolution_notes IS NULL AND ? IS NULL)
+                            )
+                        )
+                   )
                 """,
                 (
                     status,
@@ -1971,6 +2204,11 @@ class SyncDatabase:
                     resolution_action,
                     resolution_notes,
                     conflict_id,
+                    resolution_action,
+                    resolved_by_device_id,
+                    resolved_by_device_id,
+                    resolution_notes,
+                    resolution_notes,
                 ),
                 connection=conn,
             )
@@ -1981,6 +2219,14 @@ class SyncDatabase:
                     connection=conn,
                 )
             )
+            if row is None:
+                raise SyncConflictNotFoundError(f"Sync conflict not found: {conflict_id}")
+            if result.rowcount == 0:
+                if _matches_resolution(row):
+                    return _conflict_from_row(row)
+                if _conflict_row_has_resolution_claim(row):
+                    raise SyncStoreError("Sync conflict resolution is already claimed")
+                raise SyncStoreError("Sync conflict is already resolved")
         return _conflict_from_row(row)
 
     def store_key_record(self, record: SyncKeyRecordCreate) -> SyncKeyRecord:

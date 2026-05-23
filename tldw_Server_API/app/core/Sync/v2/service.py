@@ -59,6 +59,10 @@ from .security import (
 from .store import SyncV2Store
 
 
+def _safe_projection_error_message(exc: Exception) -> str:
+    return f"Projection failed: {type(exc).__name__}"
+
+
 @dataclass(frozen=True, slots=True)
 class SyncV2Settings:
     """Server settings surfaced through Sync v2 capabilities."""
@@ -120,6 +124,10 @@ class SyncPushAccepted:
     server_sequence: int
     domain: SyncDomain
     entity_id: str
+    object_revision: int | None = None
+    apply_status: str | None = None
+    apply_error_code: str | None = None
+    apply_error_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,7 +160,7 @@ class SyncPushResult:
 @dataclass(frozen=True, slots=True)
 class SyncPullResult:
     dataset_id: str
-    encryption_policy: EncryptionPolicy = "client_private_v1"
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
     envelopes: list[SyncEnvelope] = field(default_factory=list)
     next_cursor: str | None = None
     has_more: bool = False
@@ -527,6 +535,7 @@ class SyncV2Service:
                 continue
             if inserted.apply_status != "applied":
                 materialization = self._materialize_envelope(inserted)
+                inserted = self._envelope_snapshot(inserted)
                 if materialization.status == "conflict":
                     conflicts.append(
                         self._store_materialization_conflict(
@@ -536,14 +545,7 @@ class SyncV2Service:
                         )
                     )
                     continue
-            accepted.append(
-                SyncPushAccepted(
-                    client_envelope_id=inserted.client_envelope_id,
-                    server_sequence=inserted.server_sequence,
-                    domain=inserted.domain,
-                    entity_id=inserted.entity_id,
-                )
-            )
+            accepted.append(self._push_accepted_from_envelope(inserted))
 
         sequences = [item.server_sequence for item in accepted]
         sequences.extend(item.server_sequence for item in conflicts if item.server_sequence is not None)
@@ -840,13 +842,27 @@ class SyncV2Service:
         dataset = self.store.get_dataset(conflict.dataset_id, owner_user_id=user_id)
         if dataset is None:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
+        if action not in {"overwrite", "duplicate_rename", "skip"}:
+            raise SyncStoreError(f"Sync conflict resolution action is not supported: {action}")
+        if conflict.status != "unresolved":
+            if self._is_conflict_resolution_replay(
+                conflict,
+                action=action,
+                resolution_envelope=resolution_envelope,
+                resolved_by_envelope_id=resolved_by_envelope_id,
+                resolved_by_device_id=resolved_by_device_id,
+                notes=notes,
+            ):
+                return conflict
+            raise SyncStoreError("Sync conflict is already resolved")
         if resolved_by_device_id is not None:
             self._require_registered_device(user_id, resolved_by_device_id)
         resolution_server_cursor: int | None = None
-        if action == "duplicate_rename" and resolution_envelope is None:
-            raise SyncStoreError("Sync duplicate_rename requires a resolution envelope")
-        if action == "dismiss" and resolution_envelope is not None:
-            raise SyncStoreError("Sync dismiss must not include a resolution envelope")
+        if action in {"overwrite", "duplicate_rename"} and resolution_envelope is None:
+            raise SyncStoreError(f"Sync {action} requires a resolution envelope")
+        if action == "skip" and resolution_envelope is not None:
+            raise SyncStoreError(f"Sync {action} must not include a resolution envelope")
+        resolution_claim: tuple[str | None, str, str | None] | None = None
         if resolution_envelope is not None:
             resolution_device_id = resolved_by_device_id or resolution_envelope.device_id
             self._require_registered_device(user_id, resolution_device_id or "")
@@ -873,26 +889,116 @@ class SyncV2Service:
                 raise SyncStoreError("Sync resolution envelope private payload validation failed") from exc
             if not isinstance(outcome, AdapterAccepted):
                 raise SyncStoreError("Sync resolution envelope was not accepted")
-            inserted = self.store.insert_envelope(
-                replace(
-                    resolution_envelope,
-                    device_id=resolution_device_id,
-                    status="accepted",
-                )
+            self.store.claim_conflict_resolution(
+                conflict_id,
+                dataset_id=dataset.dataset_id,
+                resolved_by_device_id=resolution_device_id,
+                resolution_action=action,
+                resolution_notes=notes,
             )
+            resolution_claim = (resolution_device_id, action, notes)
+            try:
+                inserted = self.store.insert_envelope(
+                    replace(
+                        resolution_envelope,
+                        device_id=resolution_device_id,
+                        status="accepted",
+                    )
+                )
+                if inserted.apply_status != "applied":
+                    materialization = self._materialize_envelope(inserted)
+                    inserted = self._envelope_snapshot(inserted)
+                    if materialization.status == "conflict":
+                        self._store_materialization_conflict(dataset, inserted, materialization)
+                    if materialization.status in {"failed", "conflict"} or inserted.apply_status in {
+                        "failed",
+                        "conflict",
+                    }:
+                        raise SyncStoreError("Sync resolution envelope was not applied")
+            except Exception:
+                self.store.release_conflict_resolution_claim(
+                    conflict_id,
+                    dataset_id=dataset.dataset_id,
+                    resolved_by_device_id=resolution_device_id,
+                    resolution_action=action,
+                    resolution_notes=notes,
+                )
+                raise
             resolved_by_envelope_id = inserted.envelope_id
             resolution_server_cursor = inserted.server_cursor
             resolved_by_device_id = resolution_device_id
-        return self.store.resolve_conflict(
-            conflict_id,
-            dataset_id=dataset.dataset_id,
-            server_cursor=resolution_server_cursor,
-            status="dismissed" if action == "dismiss" else "resolved",
-            resolved_by_envelope_id=resolved_by_envelope_id,
-            resolved_by_device_id=resolved_by_device_id,
-            resolution_action=action,
-            resolution_notes=notes,
-        )
+        resolved_status: ConflictStatus = "dismissed" if action == "skip" else "resolved"
+        try:
+            return self.store.resolve_conflict(
+                conflict_id,
+                dataset_id=dataset.dataset_id,
+                server_cursor=resolution_server_cursor,
+                status=resolved_status,
+                resolved_by_envelope_id=resolved_by_envelope_id,
+                resolved_by_device_id=resolved_by_device_id,
+                resolution_action=action,
+                resolution_notes=notes,
+            )
+        except Exception:
+            if resolution_claim is not None:
+                claim_device_id, claim_action, claim_notes = resolution_claim
+                self.store.release_conflict_resolution_claim(
+                    conflict_id,
+                    dataset_id=dataset.dataset_id,
+                    resolved_by_device_id=claim_device_id,
+                    resolution_action=claim_action,
+                    resolution_notes=claim_notes,
+                )
+            raise
+
+    def _is_conflict_resolution_replay(
+        self,
+        conflict: SyncConflict,
+        *,
+        action: str,
+        resolution_envelope: SyncEnvelopeCreate | None,
+        resolved_by_envelope_id: str | None,
+        resolved_by_device_id: str | None,
+        notes: str | None,
+    ) -> bool:
+        if action != conflict.resolution_action or notes != conflict.resolution_notes:
+            return False
+        effective_device_id = resolved_by_device_id
+        if effective_device_id is None and resolution_envelope is not None:
+            effective_device_id = resolution_envelope.device_id
+        if effective_device_id != conflict.resolved_by_device_id:
+            return False
+        effective_envelope_id = resolved_by_envelope_id
+        if effective_envelope_id is None and resolution_envelope is not None:
+            existing = self._find_existing_resolution_envelope(
+                conflict.dataset_id,
+                resolution_envelope,
+                effective_device_id=effective_device_id,
+            )
+            if existing is None:
+                return False
+            effective_envelope_id = existing.envelope_id
+        return effective_envelope_id == conflict.resolved_by_envelope_id
+
+    def _find_existing_resolution_envelope(
+        self,
+        dataset_id: str,
+        resolution_envelope: SyncEnvelopeCreate,
+        *,
+        effective_device_id: str | None,
+    ) -> SyncEnvelope | None:
+        if resolution_envelope.dataset_id != dataset_id:
+            return None
+        try:
+            return self.store.get_existing_envelope_for_idempotency(
+                replace(
+                    resolution_envelope,
+                    device_id=effective_device_id,
+                    status="accepted",
+                )
+            )
+        except SyncIdempotencyConflictError:
+            return None
 
     def store_key_recovery_bundle(
         self,
@@ -1048,7 +1154,60 @@ class SyncV2Service:
         materializer = self.materializers.get(envelope.domain)
         if materializer is None:
             return MaterializationResult(status="skipped")
-        return materializer.apply(envelope, store=self.store)
+        try:
+            return materializer.apply(envelope, store=self.store)
+        except Exception as exc:
+            error_code = "sync_projection_failed"
+            error_message = _safe_projection_error_message(exc)
+            if envelope.server_cursor is not None:
+                self.store.mark_envelope_apply_status(
+                    envelope.server_cursor,
+                    apply_status="failed",
+                    apply_error_code=error_code,
+                    apply_error_message=error_message,
+                )
+            return MaterializationResult(
+                status="failed",
+                error_code=error_code,
+                message=error_message,
+            )
+
+    def _envelope_snapshot(self, envelope: SyncEnvelope) -> SyncEnvelope:
+        """Reload an envelope after projection updates apply status fields."""
+
+        if envelope.server_cursor is None:
+            return envelope
+        candidates = self.store.list_envelopes_after(
+            envelope.dataset_id,
+            max(envelope.server_cursor - 1, 0),
+            limit=1,
+            domains=[envelope.domain],
+            status=None,
+        )
+        for candidate in candidates:
+            if candidate.server_cursor == envelope.server_cursor:
+                return candidate
+        return envelope
+
+    def _push_accepted_from_envelope(self, envelope: SyncEnvelope) -> SyncPushAccepted:
+        object_revision = envelope.object_revision
+        state = self.store.get_object_state(
+            envelope.dataset_id,
+            envelope.domain,
+            envelope.object_id,
+        )
+        if state is not None and state.latest_server_cursor == envelope.server_cursor:
+            object_revision = state.object_revision
+        return SyncPushAccepted(
+            client_envelope_id=envelope.client_envelope_id,
+            server_sequence=envelope.server_sequence,
+            domain=envelope.domain,
+            entity_id=envelope.entity_id,
+            object_revision=object_revision,
+            apply_status=envelope.apply_status,
+            apply_error_code=envelope.apply_error_code,
+            apply_error_message=envelope.apply_error_message,
+        )
 
     def _store_materialization_conflict(
         self,

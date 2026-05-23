@@ -60,6 +60,12 @@ class SyncV2Store:
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         return self.db.insert_envelope(envelope)
 
+    def get_existing_envelope_for_idempotency(
+        self,
+        envelope: SyncEnvelopeCreate,
+    ) -> SyncEnvelope | None:
+        return self.db.get_existing_envelope_for_idempotency(envelope)
+
     def list_envelopes_after(
         self,
         dataset_id: str,
@@ -179,6 +185,40 @@ class SyncV2Store:
             dataset_id,
             local_envelope_id=local_envelope_id,
             server_sequence=server_sequence,
+        )
+
+    def claim_conflict_resolution(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str | None = None,
+        resolved_by_device_id: str | None = None,
+        resolution_action: str | None = None,
+        resolution_notes: str | None = None,
+    ) -> SyncConflict:
+        return self.db.claim_conflict_resolution(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+        )
+
+    def release_conflict_resolution_claim(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str | None = None,
+        resolved_by_device_id: str | None = None,
+        resolution_action: str | None = None,
+        resolution_notes: str | None = None,
+    ) -> SyncConflict:
+        return self.db.release_conflict_resolution_claim(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
         )
 
     def resolve_conflict(

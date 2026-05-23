@@ -331,7 +331,7 @@ def test_conflict_batch_endpoint_resolves_locked_m1_request_shape():
 
         def resolve_conflict(self, **kwargs):
             self.calls.append(kwargs)
-            public_action = "skip" if kwargs["action"] == "dismiss" else kwargs["action"]
+            public_action = kwargs["action"]
             server_cursor = 123 if public_action == "duplicate_rename" else 12
             envelope_id = (
                 "srv_env_000000000123"
@@ -403,7 +403,7 @@ def test_conflict_batch_endpoint_resolves_locked_m1_request_shape():
     ]
     assert service.calls[1]["resolution_envelope"].client_envelope_id == "env-resolution"
     assert service.calls[1].get("resolved_by_envelope_id") is None
-    assert service.calls[2]["action"] == "dismiss"
+    assert service.calls[2]["action"] == "skip"
     response_payload = response.model_dump(exclude_none=True)
     assert response_payload["resolved"][1]["envelope_id"] == "srv_env_000000000123"
     assert response_payload["resolved"][1]["server_cursor"] == 123
@@ -441,24 +441,21 @@ def test_push_response_reports_per_envelope_outcomes():
     assert response.conflicts[0].conflict_id == "conflict-1"
 
 
-def test_push_request_rejects_envelope_dataset_mismatch():
-    with pytest.raises(ValidationError) as exc_info:
-        SyncPushRequest.model_validate(
-            {
-                "dataset_id": "dataset-1",
-                "device_id": "device-1",
-                "envelopes": [
-                    _m1_envelope_payload(
-                        client_envelope_id="env-2",
-                        dataset_id="dataset-2",
-                    )
-                ],
-            }
-        )
-
-    assert "envelope dataset_id must match SyncPushRequest.dataset_id" in str(
-        exc_info.value
+def test_push_request_allows_dataset_mismatch_for_per_envelope_outcomes():
+    request = SyncPushRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                _m1_envelope_payload(
+                    client_envelope_id="env-2",
+                    dataset_id="dataset-2",
+                )
+            ],
+        }
     )
+
+    assert request.envelopes[0].dataset_id == "dataset-2"
 
 
 def test_push_request_rejects_oversized_envelope_batches():

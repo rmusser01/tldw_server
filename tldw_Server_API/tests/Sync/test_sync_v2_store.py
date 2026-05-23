@@ -825,6 +825,115 @@ def test_conflict_insert_list_and_resolve_lifecycle(sync_store: SyncV2Store):
     assert sync_store.list_conflicts("dataset-1", status="resolved") == [resolved]
 
 
+def test_resolve_conflict_preserves_existing_resolution_metadata(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset())
+    sync_store.insert_conflict(_conflict())
+
+    first = sync_store.resolve_conflict(
+        "conflict-1",
+        server_cursor=10,
+        status="resolved",
+        resolved_by_envelope_id="srv_env_first",
+        resolved_by_device_id="device-1",
+        resolution_action="overwrite",
+        resolution_notes="first decision",
+    )
+    replayed = sync_store.resolve_conflict(
+        "conflict-1",
+        server_cursor=10,
+        status="resolved",
+        resolved_by_envelope_id="srv_env_first",
+        resolved_by_device_id="device-1",
+        resolution_action="overwrite",
+        resolution_notes="first decision",
+    )
+
+    assert replayed == first
+
+    with pytest.raises(SyncStoreError, match="already resolved"):
+        sync_store.resolve_conflict(
+            "conflict-1",
+            server_cursor=11,
+            status="resolved",
+            resolved_by_envelope_id="srv_env_second",
+            resolved_by_device_id="device-2",
+            resolution_action="duplicate_rename",
+            resolution_notes="second decision",
+        )
+
+    assert sync_store.get_conflict("conflict-1") == first
+
+
+def test_conflict_resolution_claim_and_finalize_lifecycle(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset())
+    sync_store.insert_conflict(_conflict())
+
+    claimed = sync_store.claim_conflict_resolution(
+        "conflict-1",
+        dataset_id="dataset-1",
+        resolved_by_device_id="device-1",
+        resolution_action="overwrite",
+        resolution_notes="first decision",
+    )
+
+    assert claimed.status == "unresolved"
+    assert claimed.resolution_action == "overwrite"
+    assert claimed.resolved_by_device_id == "device-1"
+    assert claimed.resolution_notes == "first decision"
+    assert claimed.resolved_by_envelope_id is None
+
+    with pytest.raises(SyncStoreError, match="already claimed"):
+        sync_store.claim_conflict_resolution(
+            "conflict-1",
+            dataset_id="dataset-1",
+            resolved_by_device_id="device-2",
+            resolution_action="duplicate_rename",
+            resolution_notes="second decision",
+        )
+
+    assert sync_store.get_conflict("conflict-1") == claimed
+
+    resolved = sync_store.resolve_conflict(
+        "conflict-1",
+        dataset_id="dataset-1",
+        server_cursor=10,
+        status="resolved",
+        resolved_by_envelope_id="srv_env_first",
+        resolved_by_device_id="device-1",
+        resolution_action="overwrite",
+        resolution_notes="first decision",
+    )
+    replayed = sync_store.resolve_conflict(
+        "conflict-1",
+        dataset_id="dataset-1",
+        server_cursor=10,
+        status="resolved",
+        resolved_by_envelope_id="srv_env_first",
+        resolved_by_device_id="device-1",
+        resolution_action="overwrite",
+        resolution_notes="first decision",
+    )
+
+    assert resolved.status == "resolved"
+    assert resolved.resolution_action == "overwrite"
+    assert resolved.resolved_by_envelope_id == "srv_env_first"
+    assert replayed == resolved
+
+    with pytest.raises(SyncStoreError, match="already resolved"):
+        sync_store.resolve_conflict(
+            "conflict-1",
+            dataset_id="dataset-1",
+            server_cursor=11,
+            status="resolved",
+            resolved_by_envelope_id="srv_env_second",
+            resolved_by_device_id="device-2",
+            resolution_action="duplicate_rename",
+            resolution_notes="second decision",
+        )
+
+    assert sync_store.get_conflict("conflict-1") == resolved
+
+
 def test_conflict_rejects_missing_dataset_and_unenrolled_domain(sync_store: SyncV2Store):
     with pytest.raises(SyncDatasetNotFoundError):
         sync_store.insert_conflict(_conflict(dataset_id="missing-dataset"))

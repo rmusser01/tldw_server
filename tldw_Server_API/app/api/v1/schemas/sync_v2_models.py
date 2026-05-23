@@ -13,6 +13,7 @@ DatasetScopeType = Literal["personal", "workspace"]
 EncryptionPolicy = Literal["server_trusted_v1"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
 ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
+SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
 SyncProfileBootstrapMode = Literal["server_frontend", "offline_sync"]
 
 M1_SYNC_DOMAINS: list[SyncDomain] = [
@@ -378,7 +379,10 @@ class SyncV2Envelope(BaseModel):
     routing_metadata: dict[str, Any] = Field(default_factory=dict)
     stable_key: str | None = None
     status: str | None = None
-    apply_status: str | None = None
+    apply_status: SyncApplyStatus | None = None
+    apply_error_code: str | None = None
+    apply_error_message: str | None = None
+    applied_at: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -480,13 +484,6 @@ class SyncPushRequest(BaseModel):
     idempotency_key: str | None = None
     last_known_cursor: str | None = None
 
-    @model_validator(mode="after")
-    def _validate_envelope_dataset_ids(self) -> "SyncPushRequest":
-        for envelope in self.envelopes:
-            if envelope.dataset_id != self.dataset_id:
-                raise ValueError("envelope dataset_id must match SyncPushRequest.dataset_id")
-        return self
-
 
 class SyncPushAcceptedEnvelope(BaseModel):
     """Accepted push outcome for one client envelope."""
@@ -495,6 +492,10 @@ class SyncPushAcceptedEnvelope(BaseModel):
     server_cursor: int = Field(..., ge=0, validation_alias=AliasChoices("server_cursor", "server_sequence"))
     domain: SyncDomain | None = None
     object_id: str | None = Field(None, validation_alias=AliasChoices("object_id", "entity_id"))
+    object_revision: int | None = Field(None, ge=0)
+    apply_status: SyncApplyStatus | None = None
+    apply_error_code: str | None = None
+    apply_error_message: str | None = None
 
     @property
     def server_sequence(self) -> int:
@@ -757,6 +758,7 @@ __all__ = [
     "SyncKeyRecoveryBundleRequest",
     "SyncKeyRecoveryBundleRecord",
     "SyncOperation",
+    "SyncApplyStatus",
     "SyncProfileBootstrapMode",
     "SyncProfileBootstrapRequest",
     "SyncProfileBootstrapResponse",
