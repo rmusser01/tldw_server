@@ -81,6 +81,9 @@ export function WritingRevisionQueue({
       {proposals.map((proposal) => (
         <article
           key={proposal.id}
+          data-testid="writing-revision-proposal"
+          data-proposal-id={proposal.id}
+          data-regenerated-from-id={proposal.regeneratedFromId ?? undefined}
           className="flex flex-col gap-2 rounded border border-gray-100 p-2"
         >
           <div className="flex flex-wrap items-center gap-2">

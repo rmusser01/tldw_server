@@ -137,10 +137,20 @@ vi.mock("@/services/writing-playground", () => ({
 
 vi.mock("../WritingTipTapEditor", () => ({
   WritingTipTapEditor: ({
+    content,
     onAdapterReady,
     onContentChange,
     placeholder
   }: {
+    content?: {
+      type?: string
+      text?: string
+      content?: Array<{
+        type?: string
+        text?: string
+        content?: Array<{ type?: string; text?: string }>
+      }>
+    } | null
     onAdapterReady: (adapter: {
       getSelection: () => { start: number; end: number }
       setSelection: (selection: { start: number; end: number }) => void
@@ -151,6 +161,19 @@ vi.mock("../WritingTipTapEditor", () => ({
     placeholder?: string
   }) => {
     const [selection, setSelection] = React.useState({ start: 0, end: 0 })
+    const [value, setValue] = React.useState("")
+
+    React.useEffect(() => {
+      const text =
+        content?.content
+          ?.map((node) =>
+            node.text ??
+            node.content?.map((child) => child.text ?? "").join("") ??
+            ""
+          )
+          .join("\n") ?? ""
+      setValue(text)
+    }, [content])
 
     React.useEffect(() => {
       onAdapterReady({
@@ -166,9 +189,11 @@ vi.mock("../WritingTipTapEditor", () => ({
       <textarea
         aria-label="Mock rich editor"
         placeholder={placeholder}
-        onChange={(event) =>
+        value={value}
+        onChange={(event) => {
+          setValue(event.target.value)
           onContentChange({ type: "doc" }, event.target.value)
-        }
+        }}
         onSelect={(event) => {
           const node = event.currentTarget
           setSelection({
@@ -641,6 +666,12 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(within(queue).getByText("rejected")).toBeInTheDocument()
     expect(within(queue).getAllByText("pending")).toHaveLength(1)
     expect(screen.getByText(/regenerated from/i)).toBeInTheDocument()
+    const proposals = within(queue).getAllByTestId("writing-revision-proposal")
+    expect(proposals).toHaveLength(2)
+    expect(proposals[1]).toHaveAttribute(
+      "data-regenerated-from-id",
+      proposals[0].getAttribute("data-proposal-id")
+    )
   })
 
   it("shows manual-apply guidance for rich editor apply without mutating content", async () => {
@@ -651,6 +682,8 @@ describe("WritingPlayground phase1 baseline", () => {
 
     render(<WritingPlayground />)
     fireEvent.click(screen.getByRole("radio", { name: "Rich" }))
+    const richEditor = await screen.findByLabelText("Mock rich editor")
+    expect(richEditor).toHaveValue("Rich original.")
     fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
 
     await waitFor(() => {
@@ -664,6 +697,7 @@ describe("WritingPlayground phase1 baseline", () => {
       ).toBeInTheDocument()
     })
     expect(screen.getByText(/rich editor/i)).toBeInTheDocument()
+    expect(richEditor).toHaveValue("Rich original.")
   })
 
   it("allows confirmed whole-document text-changing targets to create applyable proposals", async () => {
