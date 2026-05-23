@@ -13,6 +13,7 @@ SyncDomain = Literal[
     "attachment.ref",
     "workspaces.workspace",
     "workspaces.source_ref",
+    "source_cache.entry",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -69,10 +70,19 @@ WORKSPACE_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "workspaces.workspace": ["upsert", "tombstone"],
     "workspaces.source_ref": ["upsert", "tombstone"],
 }
-SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = list(M1_SYNC_DOMAINS) + list(WORKSPACE_SYNC_DOMAINS)
+SOURCE_CACHE_SYNC_DOMAINS: list[SyncDomain] = ["source_cache.entry"]
+SOURCE_CACHE_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    "source_cache.entry": ["upsert", "tombstone"],
+}
+SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
+    list(M1_SYNC_DOMAINS)
+    + list(WORKSPACE_SYNC_DOMAINS)
+    + list(SOURCE_CACHE_SYNC_DOMAINS)
+)
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
     **WORKSPACE_SYNC_OPERATIONS,
+    **SOURCE_CACHE_SYNC_OPERATIONS,
 }
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_MAX_PUSH_ENVELOPES = 100
@@ -922,7 +932,7 @@ class SyncV2Envelope(BaseModel):
 
     @model_validator(mode="after")
     def _validate_m1_contract(self) -> SyncV2Envelope:
-        allowed_operations = M1_SYNC_OPERATIONS[self.domain]
+        allowed_operations = SYNC_V2_SUPPORTED_OPERATIONS[self.domain]
         if self.operation not in allowed_operations:
             raise ValueError(f"{self.operation} is not supported for {self.domain}")
 
@@ -1311,6 +1321,8 @@ __all__ = [
     "EncryptionPolicy",
     "M1_SYNC_DOMAINS",
     "M1_SYNC_OPERATIONS",
+    "SOURCE_CACHE_SYNC_DOMAINS",
+    "SOURCE_CACHE_SYNC_OPERATIONS",
     "SYNC_V2_SUPPORTED_DOMAINS",
     "SYNC_V2_SUPPORTED_OPERATIONS",
     "SYNC_V2_MAX_PUSH_ENVELOPES",

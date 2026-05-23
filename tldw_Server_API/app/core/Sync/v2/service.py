@@ -2823,7 +2823,7 @@ def _build_restore_domain_details(
             if item.download_status in {"verified", "verified_complete"}:
                 bucket["verified_blob_count"] += 1
 
-    domain_order = {domain: index for index, domain in enumerate(M1_SYNC_DOMAINS)}
+    domain_order = {domain: index for index, domain in enumerate(SYNC_V2_SUPPORTED_DOMAINS)}
     details: list[SyncRestoreDomainCompleteness] = []
     for domain, values in sorted(
         counts.items(),

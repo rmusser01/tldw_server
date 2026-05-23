@@ -42,7 +42,7 @@ def _dataset(*, domains: list[str] | None = None) -> SyncDataset:
         owner_user_id="user-1",
         scope_type="personal",
         encryption_policy="client_private_v1",
-        domains=domains or ["notes", "chat", "workspaces", "source_cache", "media"],
+        domains=domains or ["notes", "chat", "workspaces", "source_cache.entry", "media"],
         workspace_id=None,
         metadata={},
         created_at="2026-05-10T00:00:00+00:00",
@@ -135,16 +135,17 @@ def _adapter_for_domain(domain: str):
         "notes": NotesDomainAdapter,
         "chat": ChatDomainAdapter,
         "workspaces": WorkspacesDomainAdapter,
-        "source_cache": SourceCacheAdapter,
+        "source_cache.entry": SourceCacheAdapter,
     }[domain]()
 
 
 def _domain_payload(domain: str) -> dict[str, object]:
-    if domain == "source_cache":
+    if domain == "source_cache.entry":
         return {
             "entity_kind": "source_cache_entry",
             "source_id": "source-1",
-            "payload_hash": "content-a",
+            "content_hash": "sha256:content-a",
+            "provenance": {"kind": "url", "uri": "https://example.test/source"},
         }
     return {"entity_kind": domain.rstrip("s")}
 
@@ -505,8 +506,32 @@ def test_lineage_direct_dependency_identifiers_reference_head_without_entity_ide
         )
 
 
-@pytest.mark.parametrize("domain", ["notes", "chat", "workspaces", "source_cache"])
-def test_domain_adapters_accept_linear_delete_after_upsert(domain: str):
+def test_lineage_m1_base_cursor_and_object_hash_reference_head():
+    head = _stored(
+        _envelope(
+            client_envelope_id="note-head",
+            entity_id="note-1",
+            stable_key="note:note-1",
+            entity_version="note-v2",
+            object_revision=2,
+            payload_hash="sha256:note-v2",
+        ),
+        sequence=7,
+    )
+
+    assert incoming_references_head(
+        _envelope(
+            client_envelope_id="note-child",
+            base_server_cursor=7,
+            base_object_revision=2,
+            base_object_hash="sha256:note-v2",
+        ),
+        head,
+    )
+
+
+@pytest.mark.parametrize("domain", ["notes", "chat", "workspaces", "source_cache.entry"])
+def test_domain_adapters_accept_linear_tombstone_after_upsert(domain: str):
     prior = _stored(
         _envelope(
             client_envelope_id=f"{domain}-update",
@@ -518,11 +543,11 @@ def test_domain_adapters_accept_linear_delete_after_upsert(domain: str):
     )
     incoming_payload = {**_domain_payload(domain), "deleted": True}
     incoming = _envelope(
-        client_envelope_id=f"{domain}-delete",
+        client_envelope_id=f"{domain}-tombstone",
         domain=domain,
-        operation="delete",
+        operation="tombstone",
         payload_clear=incoming_payload,
-        payload_hash=f"sha256:{domain}-delete",
+        payload_hash=f"sha256:{domain}-tombstone",
         base_version=f"{domain}-v1",
         entity_version=f"{domain}-v2",
     )
@@ -533,11 +558,11 @@ def test_domain_adapters_accept_linear_delete_after_upsert(domain: str):
         context=_context(prior),
     )
 
-    assert outcome == AdapterAccepted(client_envelope_id=f"{domain}-delete")
+    assert outcome == AdapterAccepted(client_envelope_id=f"{domain}-tombstone")
 
 
-@pytest.mark.parametrize("domain", ["notes", "chat", "workspaces", "source_cache"])
-def test_domain_adapters_conflict_stale_delete_after_upsert(domain: str):
+@pytest.mark.parametrize("domain", ["notes", "chat", "workspaces", "source_cache.entry"])
+def test_domain_adapters_conflict_stale_tombstone_after_upsert(domain: str):
     prior = _stored(
         _envelope(
             client_envelope_id=f"{domain}-update",
@@ -549,11 +574,11 @@ def test_domain_adapters_conflict_stale_delete_after_upsert(domain: str):
     )
     incoming_payload = {**_domain_payload(domain), "deleted": True}
     incoming = _envelope(
-        client_envelope_id=f"{domain}-delete",
+        client_envelope_id=f"{domain}-tombstone",
         domain=domain,
-        operation="delete",
+        operation="tombstone",
         payload_clear=incoming_payload,
-        payload_hash=f"sha256:{domain}-delete",
+        payload_hash=f"sha256:{domain}-tombstone",
         base_version=f"{domain}-v1",
         entity_version=f"{domain}-v3",
     )
@@ -726,28 +751,30 @@ def test_source_cache_adapter_allows_same_source_id_with_different_content_hashe
     prior = _stored(
         _envelope(
             client_envelope_id="cache-a",
-            domain="source_cache",
+            domain="source_cache.entry",
             entity_id="source-1:content-a",
-            stable_key="source_cache:source-1:content-a",
+            stable_key="source_cache.entry:source-1:content-a",
             routing_metadata={"entity_kind": "source_cache_entry"},
             payload_clear={
                 "entity_kind": "source_cache_entry",
                 "source_id": "source-1",
-                "payload_hash": "content-a",
+                "content_hash": "sha256:content-a",
+                "provenance": {"kind": "url", "uri": "https://example.test/a"},
             },
             payload_hash="sha256:cache-a",
         )
     )
     incoming = _envelope(
         client_envelope_id="cache-b",
-        domain="source_cache",
+        domain="source_cache.entry",
         entity_id="source-1:content-b",
-        stable_key="source_cache:source-1:content-b",
+        stable_key="source_cache.entry:source-1:content-b",
         routing_metadata={"entity_kind": "source_cache_entry"},
         payload_clear={
             "entity_kind": "source_cache_entry",
             "source_id": "source-1",
-            "payload_hash": "content-b",
+            "content_hash": "sha256:content-b",
+            "provenance": {"kind": "url", "uri": "https://example.test/b"},
         },
         payload_hash="sha256:cache-b",
     )
@@ -765,28 +792,30 @@ def test_source_cache_adapter_conflicts_same_source_content_hash_with_different_
     prior = _stored(
         _envelope(
             client_envelope_id="cache-a",
-            domain="source_cache",
+            domain="source_cache.entry",
             entity_id="source-1:content-a",
-            stable_key="source_cache:source-1:content-a",
+            stable_key="source_cache.entry:source-1:content-a",
             routing_metadata={"entity_kind": "source_cache_entry"},
             payload_clear={
                 "entity_kind": "source_cache_entry",
                 "source_id": "source-1",
-                "payload_hash": "content-a",
+                "content_hash": "sha256:content-a",
+                "provenance": {"kind": "url", "uri": "https://example.test/a"},
             },
             payload_hash="sha256:cache-a",
         )
     )
     incoming = _envelope(
         client_envelope_id="cache-b",
-        domain="source_cache",
+        domain="source_cache.entry",
         entity_id="source-1:content-a",
-        stable_key="source_cache:source-1:content-a",
+        stable_key="source_cache.entry:source-1:content-a",
         routing_metadata={"entity_kind": "source_cache_entry"},
         payload_clear={
             "entity_kind": "source_cache_entry",
             "source_id": "source-1",
-            "payload_hash": "content-a",
+            "content_hash": "sha256:content-a",
+            "provenance": {"kind": "url", "uri": "https://example.test/a"},
         },
         payload_hash="sha256:cache-b",
     )
@@ -799,6 +828,29 @@ def test_source_cache_adapter_conflicts_same_source_content_hash_with_different_
 
     assert isinstance(outcome, AdapterConflict)
     assert outcome.conflict_type == "source_cache_hash_mismatch"
+
+
+def test_source_cache_adapter_rejects_missing_provenance_metadata():
+    outcome = SourceCacheAdapter().evaluate_envelope(
+        _envelope(
+            client_envelope_id="cache-missing-provenance",
+            domain="source_cache.entry",
+            entity_id="source-1:content-a",
+            stable_key="source_cache.entry:source-1:content-a",
+            routing_metadata={"entity_kind": "source_cache_entry"},
+            payload_clear={
+                "entity_kind": "source_cache_entry",
+                "source_id": "source-1",
+                "content_hash": "sha256:content-a",
+            },
+            payload_hash="sha256:cache-a",
+        ),
+        dataset=_dataset(),
+        context=_context(),
+    )
+
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "missing_source_cache_provenance"
 
 
 def test_service_persists_domain_adapter_conflicts(tmp_path: Path):
@@ -874,5 +926,8 @@ def test_default_sync_v2_registry_advertises_personal_and_workspace_metadata_dom
             assert isinstance(registry.get(domain), StaticSyncAdapter)
     for domain in WORKSPACE_SYNC_DOMAINS:
         assert isinstance(registry.get(domain), WorkspacesDomainAdapter)
+    assert isinstance(registry.get("source_cache.entry"), SourceCacheAdapter)
+    with pytest.raises(KeyError):
+        registry.get("source_cache")
     with pytest.raises(KeyError):
         registry.get("media")

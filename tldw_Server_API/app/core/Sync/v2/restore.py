@@ -6,13 +6,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
 
-from .models import M1_SYNC_DOMAINS, SyncDomain
+from .models import SyncDomain
 
 WHOLE_OBJECT_RESTORE_DOMAINS: frozenset[SyncDomain] = frozenset(
     {"notes.note", "chat.conversation"}
 )
 OBJECT_RESTORE_DOMAINS: frozenset[SyncDomain] = frozenset(
-    {"notes.note", "chat.conversation", "chat.message"}
+    {"notes.note", "chat.conversation", "chat.message", "source_cache.entry"}
 )
 
 
@@ -42,7 +42,7 @@ def build_local_inventory_index(
         object_id = _string_value(raw.get("object_id") or raw.get("entity_id"))
         if not domain or not object_id:
             continue
-        if domain not in M1_SYNC_DOMAINS:
+        if domain not in OBJECT_RESTORE_DOMAINS:
             continue
         item = LocalRestoreInventoryItem(
             dataset_id=_string_value(raw.get("dataset_id")),

@@ -167,6 +167,32 @@ def _attachment_ref_envelope(**overrides: Any) -> SyncEnvelopeCreate:
     return SyncEnvelopeCreate(**payload)
 
 
+def _source_cache_envelope(**overrides: Any) -> SyncEnvelopeCreate:
+    payload: dict[str, Any] = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "env-source-cache-1",
+        "domain": "source_cache.entry",
+        "operation": "upsert",
+        "object_id": "source-1:sha256-source",
+        "device_id": "device-1",
+        "client_sequence": 40,
+        "object_revision": 1,
+        "payload": {
+            "entity_kind": "source_cache_entry",
+            "source_id": "source-1",
+            "content_hash": "sha256:source",
+            "provenance": {"kind": "url", "uri": "https://example.test/source"},
+        },
+        "payload_hash": "sha256:source-cache-entry",
+        "payload_size_bytes": 128,
+        "created_at_client": "2026-05-23T18:04:00+00:00",
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+        "stable_key": "source_cache.entry:source-1:sha256-source",
+    }
+    payload.update(overrides)
+    return SyncEnvelopeCreate(**payload)
+
+
 def _push(service: SyncV2Service, *envelopes: SyncEnvelopeCreate) -> None:
     result = service.push(
         user_id="user-1",
@@ -341,6 +367,47 @@ def test_restore_preview_includes_attachment_refs_and_missing_blob_warning(
         "sync_key_recovery_missing",
         "sync_attachment_blob_missing",
     ]
+
+
+def test_restore_preview_includes_source_cache_entries_and_local_conflicts(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=[*M1_SYNC_DOMAINS, "source_cache.entry"],
+    )
+    _push(sync_service, _source_cache_envelope())
+
+    empty_inventory = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["source_cache.entry"],
+        local_inventory=[],
+    )
+    divergent_inventory = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["source_cache.entry"],
+        local_inventory=[
+            {
+                "domain": "source_cache.entry",
+                "object_id": "source-1:sha256-source",
+                "object_revision": 1,
+                "object_hash": "sha256:local-source-cache",
+                "deleted": False,
+            }
+        ],
+    )
+
+    assert empty_inventory.total_counts == {"source_cache.entry": 1}
+    assert [(item.domain, item.object_id, item.action) for item in empty_inventory.safe_applies] == [
+        ("source_cache.entry", "source-1:sha256-source", "apply")
+    ]
+    assert [
+        (item.domain, item.object_id, item.conflict_type)
+        for item in divergent_inventory.object_conflicts
+    ] == [("source_cache.entry", "source-1:sha256-source", "stable_id_conflict")]
 
 
 def test_restore_preview_endpoint_blocks_requested_cross_user_dataset(

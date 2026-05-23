@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     SyncAdapterRegistry,
 )
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.source_cache import SourceCacheAdapter
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
@@ -191,6 +192,35 @@ def _workspace_envelope(**overrides) -> SyncEnvelopeCreate:
     return SyncEnvelopeCreate(**payload)
 
 
+def _source_cache_envelope(**overrides) -> SyncEnvelopeCreate:
+    payload = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "source-cache-env-1",
+        "domain": "source_cache.entry",
+        "operation": "upsert",
+        "object_id": "source-1:sha256-source",
+        "device_id": "device-1",
+        "client_sequence": 1,
+        "object_revision": 1,
+        "schema_version": 1,
+        "stable_key": "source_cache.entry:source-1:sha256-source",
+        "routing_metadata": {"entity_kind": "source_cache_entry"},
+        "payload": {
+            "entity_kind": "source_cache_entry",
+            "source_id": "source-1",
+            "content_hash": "sha256:source",
+            "provenance": {"kind": "url", "uri": "https://example.test/source"},
+        },
+        "payload_hash": "sha256:source-cache-entry",
+        "payload_size_bytes": 128,
+        "created_at_client": "2026-05-10T00:00:00+00:00",
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+        "adapter_version": 1,
+    }
+    payload.update(overrides)
+    return SyncEnvelopeCreate(**payload)
+
+
 def _register_devices(
     service: SyncV2Service,
     user_id: str,
@@ -280,6 +310,7 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
         "attachment.ref",
         "workspaces.workspace",
         "workspaces.source_ref",
+        "source_cache.entry",
     ]
     assert capabilities.max_batch_size == 10
     assert capabilities.max_envelope_payload_bytes == 1024
@@ -695,6 +726,14 @@ def test_adapter_registry_accepts_workspace_metadata_domains():
     assert registry.get(cast(SyncDomain, "workspaces.source_ref")).domain == "workspaces.source_ref"
 
 
+def test_adapter_registry_accepts_source_cache_entry_without_legacy_source_cache():
+    registry = SyncAdapterRegistry([SourceCacheAdapter()])
+
+    assert registry.get(cast(SyncDomain, "source_cache.entry")).domain == "source_cache.entry"
+    with pytest.raises(KeyError):
+        registry.get(cast(SyncDomain, "source_cache"))
+
+
 def test_workspace_dataset_enrollment_requires_workspace_sync_permission(
     sync_store: SyncV2Store,
 ):
@@ -919,6 +958,100 @@ def test_workspace_dataset_access_is_rechecked_for_dataset_scoped_operations(
     for call in denied_calls:
         with pytest.raises(SyncStoreError, match="not found or is not accessible"):
             call()
+
+
+def test_source_cache_envelopes_materialize_and_repair_object_state(
+    sync_store: SyncV2Store,
+):
+    from tldw_Server_API.app.core.Sync.v2.materializers.source_cache import SourceCacheMaterializer
+
+    registry = SyncAdapterRegistry([SourceCacheAdapter()])
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        materializers={"source_cache.entry": SourceCacheMaterializer()},
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=[cast(SyncDomain, "source_cache.entry")],
+    )
+
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_source_cache_envelope()],
+    )
+    state = sync_store.get_object_state(
+        "dataset-1",
+        cast(SyncDomain, "source_cache.entry"),
+        "source-1:sha256-source",
+    )
+
+    assert pushed.rejected == []
+    assert pushed.conflicts == []
+    assert pushed.accepted[0].apply_status == "applied"
+    assert state is not None
+    assert state.object_hash == "sha256:source-cache-entry"
+    assert state.deleted is False
+
+    sync_store.mark_envelope_apply_status(
+        pushed.accepted[0].server_sequence,
+        apply_status="failed",
+        apply_error_code="projection_failed",
+        apply_error_message="retry source cache projection",
+    )
+    repaired = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        domains=[cast(SyncDomain, "source_cache.entry")],
+        failed_only=True,
+    )
+
+    assert repaired.applied_count == 1
+    assert repaired.failed_count == 0
+
+    tombstoned = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _source_cache_envelope(
+                client_envelope_id="source-cache-tombstone",
+                operation="tombstone",
+                client_sequence=2,
+                object_revision=2,
+                payload={
+                    "entity_kind": "source_cache_entry",
+                    "source_id": "source-1",
+                    "content_hash": "sha256:source",
+                    "provenance": {"kind": "url", "uri": "https://example.test/source"},
+                    "tombstone": True,
+                },
+                payload_hash="sha256:source-cache-tombstone",
+                base_server_cursor=pushed.accepted[0].server_sequence,
+                base_object_revision=1,
+                base_object_hash="sha256:source-cache-entry",
+            )
+        ],
+    )
+    deleted_state = sync_store.get_object_state(
+        "dataset-1",
+        cast(SyncDomain, "source_cache.entry"),
+        "source-1:sha256-source",
+    )
+
+    assert tombstoned.rejected == []
+    assert tombstoned.conflicts == []
+    assert deleted_state is not None
+    assert deleted_state.deleted is True
+    assert deleted_state.object_revision == 2
 
 
 def test_push_supports_legacy_adapter_without_context_keyword(sync_store: SyncV2Store):

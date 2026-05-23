@@ -6,6 +6,7 @@ from .attachment_refs import AttachmentRefMaterializer
 from .base import MaterializationResult, SyncMaterializer
 from .chat import ChatConversationMaterializer, ChatMessageMaterializer
 from .notes import NotesMaterializer
+from .source_cache import SourceCacheMaterializer
 
 __all__ = [
     "AttachmentRefMaterializer",
@@ -13,5 +14,6 @@ __all__ = [
     "ChatMessageMaterializer",
     "MaterializationResult",
     "NotesMaterializer",
+    "SourceCacheMaterializer",
     "SyncMaterializer",
 ]

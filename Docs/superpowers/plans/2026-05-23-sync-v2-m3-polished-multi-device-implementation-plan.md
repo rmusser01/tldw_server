@@ -183,9 +183,9 @@
 
 **Tests:** Domain adapter tests, materializer tests, restore-preview tests, replay/repair tests, and cross-user/workspace isolation tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
-- [ ] **Step 1: Promote source cache domain**
+- [x] **Step 1: Promote source cache domain**
 
   Write failing adapter/materializer/restore tests, then implement the smallest
   projection path.

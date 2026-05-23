@@ -37,7 +37,6 @@ KNOWN_SYNC_DOMAINS: frozenset[str] = frozenset(
         "notes",
         "chat",
         "workspaces",
-        "source_cache",
         "media",
     }
 )

@@ -29,7 +29,8 @@ from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelope as CoreSyncEnve
 
 M1_DOMAINS = ["notes.note", "chat.conversation", "chat.message", "attachment.ref"]
 WORKSPACE_DOMAINS = ["workspaces.workspace", "workspaces.source_ref"]
-SUPPORTED_DOMAINS = M1_DOMAINS + WORKSPACE_DOMAINS
+SOURCE_CACHE_DOMAINS = ["source_cache.entry"]
+SUPPORTED_DOMAINS = M1_DOMAINS + WORKSPACE_DOMAINS + SOURCE_CACHE_DOMAINS
 
 
 def _m1_envelope_payload(**overrides):
@@ -72,6 +73,7 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         "attachment.ref": ["upsert", "tombstone"],
         "workspaces.workspace": ["upsert", "tombstone"],
         "workspaces.source_ref": ["upsert", "tombstone"],
+        "source_cache.entry": ["upsert", "tombstone"],
     }
     assert capabilities.encryption["policy"] == "server_trusted_v1"
     assert capabilities.encryption["ready"] is True
@@ -107,6 +109,15 @@ def test_dataset_enroll_request_accepts_explicit_workspace_metadata_domains():
     assert request.scope_type == "workspace"
     assert request.workspace_id == "workspace-1"
     assert request.domains == WORKSPACE_DOMAINS
+
+
+def test_dataset_enroll_request_accepts_explicit_source_cache_domain():
+    request = SyncDatasetEnrollRequest.model_validate(
+        {"domains": SOURCE_CACHE_DOMAINS}
+    )
+
+    assert request.scope_type == "personal"
+    assert request.domains == SOURCE_CACHE_DOMAINS
 
 
 def test_background_policy_lease_and_status_models_validate_m3_shapes():
@@ -201,11 +212,30 @@ def test_sync_envelope_accepts_m1_fields_and_legacy_transition_aliases():
     assert envelope.encryption_metadata == {"policy": "server_trusted_v1"}
 
 
-def test_sync_envelope_rejects_domains_outside_m1_contract():
-    with pytest.raises(ValidationError) as exc_info:
-        SyncV2Envelope.model_validate(_m1_envelope_payload(domain="media"))
+def test_sync_envelope_accepts_source_cache_entry_domain():
+    envelope = SyncV2Envelope.model_validate(
+        _m1_envelope_payload(
+            domain="source_cache.entry",
+            object_id="source-1:sha256-source",
+            stable_key="source_cache.entry:source-1:sha256-source",
+            payload={
+                "source_id": "source-1",
+                "content_hash": "sha256:source",
+                "provenance": {"kind": "url", "uri": "https://example.test/source"},
+            },
+            payload_hash="sha256:source-cache-entry",
+        )
+    )
 
-    assert "media" in str(exc_info.value)
+    assert envelope.domain == "source_cache.entry"
+    assert envelope.operation == "upsert"
+
+
+def test_sync_envelope_rejects_legacy_source_cache_domain():
+    with pytest.raises(ValidationError) as exc_info:
+        SyncV2Envelope.model_validate(_m1_envelope_payload(domain="source_cache"))
+
+    assert "source_cache" in str(exc_info.value)
 
 
 def test_sync_envelope_rejects_client_private_as_m1_default():
