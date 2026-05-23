@@ -281,6 +281,8 @@ export const WritingPlayground = () => {
     React.useState<WritingRevisionPresetId>(
       WRITING_REVISION_PRESETS[0]?.id ?? "polish_prose"
     )
+  const [revisionSelection, setRevisionSelection] =
+    React.useState<WritingEditorSelection | null>(null)
 
   // --- Refs (local only) ---
   const generationServiceRef = React.useRef(new TldwChatService())
@@ -450,15 +452,6 @@ export const WritingPlayground = () => {
   React.useEffect(() => {
     setRevisionSelection(null)
   }, [activeSessionDetail?.id, editorMode])
-
-  React.useEffect(() => {
-    const persistedPresetId = getRevisionPresetIdFromPayload(
-      activeSessionDetail?.payload
-    )
-    setSelectedRevisionPresetId(
-      persistedPresetId ?? WRITING_REVISION_PRESETS[0]?.id ?? "polish_prose"
-    )
-  }, [activeSessionDetail?.id, activeSessionDetail?.payload])
 
   // =====================================================================
   // Hook 2: Template Library
@@ -1423,7 +1416,7 @@ export const WritingPlayground = () => {
 
   const resolveFreshRevisionTarget = React.useCallback(
     (request: WritingActionBarRequest): WritingRevisionTarget | null => {
-      const adapterSelection = getCurrentEditorAdapter()?.getSelection()
+      const adapterSelection = refreshRevisionSelection()
       const freshTarget = resolveRevisionTarget({
         text: editorText,
         action: request.action,
@@ -1454,17 +1447,17 @@ export const WritingPlayground = () => {
       )
       return null
     },
-    [editorText, getCurrentEditorAdapter, t]
+    [editorText, refreshRevisionSelection, t]
   )
 
   const handleRevisionRequest = React.useCallback(
     async (request: WritingActionBarRequest) => {
-      if (isGenerating) return
+      if (isGenerating || isRevisionGenerating) return
       const target = resolveFreshRevisionTarget(request)
       if (!target) return
 
       persistRevisionPreset(request.presetId)
-      setIsGenerating(true)
+      setIsRevisionGenerating(true)
       try {
         const proposal = await createRevisionProposal({
           action: request.action,
@@ -1486,12 +1479,13 @@ export const WritingPlayground = () => {
           t("option:writingPlayground.generateError", "Generation failed: {{detail}}", { detail })
         )
       } finally {
-        setIsGenerating(false)
+        setIsRevisionGenerating(false)
       }
     },
     [
       createRevisionProposal,
       isGenerating,
+      isRevisionGenerating,
       persistRevisionPreset,
       resolveFreshRevisionTarget,
       revisionState,
@@ -1501,8 +1495,8 @@ export const WritingPlayground = () => {
 
   const handleRegenerateRevision = React.useCallback(
     async (proposal: WritingRevisionProposal) => {
-      if (isGenerating) return
-      setIsGenerating(true)
+      if (isGenerating || isRevisionGenerating) return
+      setIsRevisionGenerating(true)
       try {
         await revisionState.regenerateRevision(proposal.id, async (source) => {
           const preset =
@@ -1539,12 +1533,13 @@ export const WritingPlayground = () => {
           t("option:writingPlayground.generateError", "Generation failed: {{detail}}", { detail })
         )
       } finally {
-        setIsGenerating(false)
+        setIsRevisionGenerating(false)
       }
     },
     [
       createRevisionProposal,
       isGenerating,
+      isRevisionGenerating,
       revisionState,
       selectedRevisionPresetId,
       t
@@ -1557,10 +1552,10 @@ export const WritingPlayground = () => {
         text: editorText,
         action: "rewrite",
         operation: "replace",
-        selection: getCurrentEditorAdapter()?.getSelection(),
-        cursor: getCurrentEditorAdapter()?.getSelection()?.end ?? editorText.length
+        selection: revisionSelection,
+        cursor: revisionSelection?.end ?? 0
       }),
-    [editorText, getCurrentEditorAdapter]
+    [editorText, revisionSelection]
   )
 
   const handleCopyRevision = React.useCallback(
@@ -2818,10 +2813,10 @@ export const WritingPlayground = () => {
                       <Button size="small" icon={searchOpen ? <X className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />} onClick={() => setSearchOpen((open) => !open)} title={searchOpen ? t("option:writingPlayground.searchClose", "Close search") : t("option:writingPlayground.searchToggle", "Find")} />
                     </div>
                     <WritingActionBar
-                      generationAvailable={canGenerate}
+                      generationAvailable={canGenerate && !isRevisionGenerating}
                       target={displayedRevisionTarget}
                       selectedPresetId={selectedRevisionPresetId}
-                      isGenerating={isGenerating}
+                      isGenerating={isRevisionGenerating}
                       onPresetChange={persistRevisionPreset}
                       onRequest={(request) => {
                         void handleRevisionRequest(request)
