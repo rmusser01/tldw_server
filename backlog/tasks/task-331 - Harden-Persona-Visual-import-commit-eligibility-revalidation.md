@@ -1,11 +1,11 @@
 ---
 id: TASK-331
 title: Harden Persona Visual import-commit eligibility revalidation
-status: In Progress
+status: Done
 assignee:
   - codex
 created_date: '2026-05-14 03:19'
-updated_date: '2026-05-14 04:05'
+updated_date: '2026-05-23'
 labels:
   - persona
 dependencies: []
@@ -47,8 +47,8 @@ Add a narrow Persona/Buddy visual-pack hardening slice for GitHub #1657. Current
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -82,4 +82,12 @@ Verification after review fix: `python -m pytest tldw_Server_API/tests/Persona/t
 Verification after review fix: `git diff --check` passed.
 
 Verification after review fix: `python -m bandit tldw_Server_API/app/core/Persona/visual_portability/commit_eligibility.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py` reported no issues.
+
+Closeout 2026-05-23: PR #1678 is merged into `dev` at `7f426d80f155b900b999884d829065ee9a27f47e`; no active PR or review blocker remains for this task. The implementation and review-fix verification above satisfy the acceptance criteria. No additional code changes were made in this closeout.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed the Persona Visual import-commit eligibility hardening task. The merged implementation fails closed for non-committable revalidated previews, rejects known commit-ineligible stored preview metadata before queuing, prevents blocked renderer previews from creating draft assets, and includes focused backend tests plus Bandit verification from PR #1678.
+<!-- SECTION:FINAL_SUMMARY:END -->

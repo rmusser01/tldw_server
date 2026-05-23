@@ -1,7 +1,8 @@
 ---
 id: TASK-419
 title: Reconcile Buddy default Codex-compatible catalog docs
-status: In Progress
+status: Done
+updated_date: '2026-05-23'
 labels:
 - persona
 - buddy
@@ -54,6 +55,8 @@ Verification:
 - `git diff --name-only` plus `git ls-files --others --exclude-standard` confirmed touched files are docs and Backlog task files only.
 - `rg -n "research-buddy-basic|minimal-helper-basic|three basic|3 basic|nine bundled|nine scaffold|nine default|nine immutable|Simple Buddy|simple tldw draft-pack" Docs backlog -S` now reports only explicit supersession notes and current compatibility wording.
 - Bandit skipped because this is docs/Backlog/GitHub tracker-only.
+
+Closeout 2026-05-23: PR #1818 is merged into `dev` at `89e17c12d37a55ac202a5cf521f746ea2c5ffbbf`; no active PR or review blocker remains for this task. No additional code changes were made in this closeout.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
