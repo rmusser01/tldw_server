@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Alert,
   Button,
   InputNumber,
   Input,
@@ -26,6 +25,7 @@ import {
   XCircle
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   createWatchlistOutput,
@@ -1079,8 +1079,7 @@ export const OutputsTab: React.FC = () => {
 
       {outputsWithDeliveryIssues.length > 0 && (
         <Alert
-          type="warning"
-          showIcon
+          variant="warning"
           data-testid="watchlists-outputs-delivery-issues-banner"
           title={t(
             "watchlists:outputs.deliveryIssuesBannerTitle",
@@ -1090,11 +1089,14 @@ export const OutputsTab: React.FC = () => {
               plural: outputsWithDeliveryIssues.length === 1 ? "" : "s"
             }
           )}
-          description={t(
-            "watchlists:outputs.deliveryIssuesBannerDescription",
-            "Review failed or partial deliveries and open Activity to investigate monitor/run failures."
-          )}
-          action={(
+        >
+          <div className="space-y-2">
+            <p className="m-0">
+              {t(
+                "watchlists:outputs.deliveryIssuesBannerDescription",
+                "Review failed or partial deliveries and open Activity to investigate monitor/run failures."
+              )}
+            </p>
             <Space size={8} wrap>
               <Button
                 size="small"
@@ -1116,8 +1118,8 @@ export const OutputsTab: React.FC = () => {
                 {t("watchlists:outputs.deliveryIssuesOpenRuns", "Open failed runs")}
               </Button>
             </Space>
-          )}
-        />
+          </div>
+        </Alert>
       )}
 
       {isConstrained ? (
