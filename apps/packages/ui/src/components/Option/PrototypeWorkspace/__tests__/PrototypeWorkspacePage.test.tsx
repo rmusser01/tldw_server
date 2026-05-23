@@ -66,6 +66,7 @@ vi.mock("../PrototypeWorkspaceSessionView", () => ({
 
 describe("PrototypeWorkspacePage", () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     searchParamsState.value = new URLSearchParams()
     locationState.value = null
     usePrototypeWorkspaceStore.getState().reset()
@@ -152,6 +153,7 @@ describe("PrototypeWorkspacePage", () => {
 
   it("keeps the collaborator session view after token-bearing routes are cleaned up", () => {
     usePrototypeWorkspaceStore.getState().setCollaboratorEntry({
+      collaboratorWorkspaceId: "pw_collab",
       collaboratorSessionId: "pss_collab",
       collaboratorSessionToken: "session-token-1",
       collaboratorShareToken: "share-token-1",
@@ -169,6 +171,37 @@ describe("PrototypeWorkspacePage", () => {
     ).toHaveTextContent("Workspace:pw_collab Session:none Share:none")
     expect(
       screen.queryByTestId("prototype-workspace-owner-view")
+    ).not.toBeInTheDocument()
+  })
+
+  it("ignores stale stored collaborator sessions for a different owner workspace", () => {
+    usePrototypeWorkspaceStore.getState().setCollaboratorEntry({
+      collaboratorWorkspaceId: "pw_previous_collab",
+      collaboratorSessionId: "pss_stale",
+      collaboratorSessionToken: "session-token-stale",
+      collaboratorShareToken: "share-token-stale",
+      sharedActorId: "psa_stale"
+    })
+    searchParamsState.value = new URLSearchParams({
+      workspace: "pw_owner"
+    })
+    hookState.usePrototypeWorkspace.mockReturnValue({
+      data: {
+        id: "pw_owner",
+        viewer_role: "owner",
+        sessions: [],
+        snapshots: []
+      }
+    })
+
+    render(<PrototypeWorkspacePage />)
+
+    expect(hookState.usePrototypeWorkspace).toHaveBeenCalledWith("pw_owner")
+    expect(
+      screen.getByTestId("prototype-workspace-owner-view")
+    ).toHaveTextContent("Owner:pw_owner")
+    expect(
+      screen.queryByTestId("prototype-workspace-session-view")
     ).not.toBeInTheDocument()
   })
 

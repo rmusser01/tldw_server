@@ -3,6 +3,7 @@ import { createWithEqualityFn } from "zustand/traditional"
 type PrototypeWorkspaceStoreState = {
   activeWorkspaceId: string | null
   ownerSessionId: string | null
+  collaboratorWorkspaceId: string | null
   collaboratorSessionId: string | null
   collaboratorSessionToken: string | null
   collaboratorShareToken: string | null
@@ -11,6 +12,7 @@ type PrototypeWorkspaceStoreState = {
   setActiveWorkspaceId: (workspaceId: string | null) => void
   setOwnerSessionId: (sessionId: string | null) => void
   setCollaboratorEntry: (entry: {
+    collaboratorWorkspaceId?: string | null
     collaboratorSessionId?: string | null
     collaboratorSessionToken?: string | null
     collaboratorShareToken?: string | null
@@ -23,6 +25,7 @@ type PrototypeWorkspaceStoreState = {
 const initialState = {
   activeWorkspaceId: null,
   ownerSessionId: null,
+  collaboratorWorkspaceId: null,
   collaboratorSessionId: null,
   collaboratorSessionToken: null,
   collaboratorShareToken: null,
@@ -37,6 +40,10 @@ export const usePrototypeWorkspaceStore =
     setOwnerSessionId: (ownerSessionId) => set({ ownerSessionId }),
     setCollaboratorEntry: (entry) =>
       set({
+        collaboratorWorkspaceId:
+          entry.collaboratorWorkspaceId !== undefined
+            ? entry.collaboratorWorkspaceId
+            : initialState.collaboratorWorkspaceId,
         collaboratorSessionId:
           entry.collaboratorSessionId !== undefined
             ? entry.collaboratorSessionId

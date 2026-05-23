@@ -16,6 +16,9 @@ export const PrototypeWorkspacePage = () => {
   const activeWorkspaceId = usePrototypeWorkspaceStore(
     (state) => state.activeWorkspaceId
   )
+  const collaboratorWorkspaceId = usePrototypeWorkspaceStore(
+    (state) => state.collaboratorWorkspaceId
+  )
   const collaboratorSessionId = usePrototypeWorkspaceStore(
     (state) => state.collaboratorSessionId
   )
@@ -54,7 +57,9 @@ export const PrototypeWorkspacePage = () => {
   }, [sessionToken, shareToken, setCollaboratorEntry])
 
   const hasStoredCollaboratorEntry = Boolean(
-    workspaceId && (collaboratorSessionId || collaboratorSessionToken)
+    workspaceId &&
+      collaboratorWorkspaceId === workspaceId &&
+      (collaboratorSessionId || collaboratorSessionToken)
   )
   const isCollaboratorEntry = Boolean(
     sessionToken || shareToken || hasStoredCollaboratorEntry
