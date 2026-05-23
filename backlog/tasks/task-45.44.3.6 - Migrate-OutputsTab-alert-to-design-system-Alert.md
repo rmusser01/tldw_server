@@ -3,7 +3,7 @@ id: TASK-45.44.3.6
 title: Migrate OutputsTab alert to design-system Alert
 status: Done
 assignee: []
-created_date: ''
+created_date: '2026-05-23 22:17'
 updated_date: '2026-05-23 22:17'
 labels:
   - design-system
@@ -46,7 +46,7 @@ Replace the Watchlists OutputsTab AntD Alert product-state callout with the shar
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-TDD red/green completed. Added a focused OutputsTab assertion requiring the delivery-issues banner to carry data-ds-component="Alert"; the red run failed because the AntD Alert mock did not expose the marker. Replaced the banner with the shared design-system Alert primitive, preserved the warning title, description, Show failed only and Open failed runs actions, and removed the single OutputsTab baseline exception. Verification: focused OutputsTab advanced-filters test passed 6/6; product-state guard passed 54/54; bun run verify:design-system-state passed with 258 total baseline exceptions and 23 Jobs/Scheduler/Watchlists exceptions; baseline parse reported targetRows 0; git diff --check passed. Bandit skipped because this slice touched frontend TSX/test/JSON/Backlog markdown only.
+TDD red/green completed. Added a focused OutputsTab assertion requiring the delivery-issues banner to carry data-ds-component="Alert"; the red run failed because the AntD Alert mock did not expose the marker. Replaced the banner with the shared design-system Alert primitive, preserved the warning title, description, Show failed only and Open failed runs actions, and removed the single OutputsTab baseline exception. Verification: focused OutputsTab advanced-filters test passed 6/6; product-state guard passed 54/54; bun run verify:design-system-state passed with 258 total baseline exceptions and 23 Jobs/Scheduler/Watchlists exceptions; baseline parse reported OutputsTab target rows 1 -> 0; git diff --check passed. Bandit skipped because this slice touched frontend TSX/test/JSON/Backlog markdown only.
 
 TypeScript: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false still exits 2 on 347 existing diagnostics; no diagnostics mention OutputsTab, OutputsTab.advanced-filters, the baseline, or TASK-45.44.3.6.
 <!-- SECTION:NOTES:END -->
