@@ -8,31 +8,41 @@ import {
   waitFor,
   within
 } from "@testing-library/react"
+import { useQuery } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockState = vi.hoisted(() => ({
   storageValues: new Map<string, unknown>(),
   queryData: new Map<string, unknown>(),
+  queryKey: (queryKey: unknown) =>
+    JSON.stringify(Array.isArray(queryKey) ? queryKey : [queryKey]),
   resolveApiProviderForModel: vi.fn(async () => null as string | null),
   streamCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
   sendCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
   sendResponses: [] as Array<string | Promise<string>>
 }))
 
+type MockQueryResult = {
+  data: unknown
+  isLoading: boolean
+  isFetching: boolean
+  error: unknown
+}
+
 vi.mock("@tanstack/react-query", () => {
   const resolveQueryData = (queryKey: unknown): unknown => {
-    const key = Array.isArray(queryKey) ? queryKey[0] : queryKey
-    if (key === "writing-session" && Array.isArray(queryKey)) {
-      return mockState.queryData.get(
-        `writing-session:${String(queryKey[1] || "")}`
-      )
-    }
-    return mockState.queryData.get(String(key))
+    return mockState.queryData.get(mockState.queryKey(queryKey))
   }
 
   return {
-    useQuery: ({ queryKey }: { queryKey: unknown }) => ({
-      data: resolveQueryData(queryKey),
+    useQuery: ({
+      queryKey,
+      enabled = true
+    }: {
+      queryKey: unknown
+      enabled?: boolean
+    }) => ({
+      data: enabled === false ? undefined : resolveQueryData(queryKey),
       isLoading: false,
       isFetching: false,
       error: null
@@ -268,7 +278,7 @@ const seedWritingSession = (
     activeSessionId: "session-auto",
     activeSessionName: "Auto Session"
   })
-  mockState.queryData.set("writing-sessions", {
+  mockState.queryData.set(mockState.queryKey(["writing-sessions"]), {
     sessions: [
       {
         id: "session-auto",
@@ -281,25 +291,28 @@ const seedWritingSession = (
     limit: 200,
     offset: 0
   })
-  mockState.queryData.set("writing-session:session-auto", {
-    id: "session-auto",
-    name: "Auto Session",
-    payload: {
-      prompt: "Seed prompt",
-      settings: {},
-      template_name: null,
-      theme_name: null,
-      chat_mode: false,
-      ...payloadOverrides
-    },
-    schema_version: 1,
-    version_parent_id: null,
-    created_at: "2026-03-16T12:00:00Z",
-    last_modified: "2026-03-16T12:00:00Z",
-    deleted: false,
-    client_id: "test-client",
-    version: 1
-  })
+  mockState.queryData.set(
+    mockState.queryKey(["writing-session", "session-auto"]),
+    {
+      id: "session-auto",
+      name: "Auto Session",
+      payload: {
+        prompt: "Seed prompt",
+        settings: {},
+        template_name: null,
+        theme_name: null,
+        chat_mode: false,
+        ...payloadOverrides
+      },
+      schema_version: 1,
+      version_parent_id: null,
+      created_at: "2026-03-16T12:00:00Z",
+      last_modified: "2026-03-16T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 1
+    }
+  )
 }
 
 const getEditor = () =>
@@ -332,27 +345,33 @@ beforeEach(() => {
   mockState.sendCalls.length = 0
   mockState.sendResponses.length = 0
 
-  mockState.queryData.set("writing-capabilities", DEFAULT_WRITING_CAPABILITIES)
-  mockState.queryData.set("writing-defaults", { templates: [], themes: [] })
-  mockState.queryData.set("writing-sessions", {
+  mockState.queryData.set(
+    mockState.queryKey(["writing-capabilities"]),
+    DEFAULT_WRITING_CAPABILITIES
+  )
+  mockState.queryData.set(
+    mockState.queryKey(["writing-defaults"]),
+    { templates: [], themes: [] }
+  )
+  mockState.queryData.set(mockState.queryKey(["writing-sessions"]), {
     sessions: [],
     total: 0,
     limit: 200,
     offset: 0
   })
-  mockState.queryData.set("writing-templates", {
+  mockState.queryData.set(mockState.queryKey(["writing-templates"]), {
     templates: [],
     total: 0,
     limit: 200,
     offset: 0
   })
-  mockState.queryData.set("writing-themes", {
+  mockState.queryData.set(mockState.queryKey(["writing-themes"]), {
     themes: [],
     total: 0,
     limit: 200,
     offset: 0
   })
-  mockState.queryData.set("writing-session:", null)
+  mockState.queryData.set(mockState.queryKey(["writing-session", null]), null)
 
   useWritingPlaygroundStore.setState({
     activeSessionId: null,
@@ -367,6 +386,45 @@ afterEach(() => {
 })
 
 describe("WritingPlayground phase1 baseline", () => {
+  it("test mock returns empty query state when a query is disabled", () => {
+    const result = useQuery({
+      queryKey: ["writing-capabilities"],
+      queryFn: vi.fn(),
+      enabled: false
+    } as never) as MockQueryResult
+
+    expect(result).toEqual({
+      data: undefined,
+      isLoading: false,
+      isFetching: false,
+      error: null
+    })
+  })
+
+  it("test mock distinguishes full array query keys", () => {
+    mockState.queryData.clear()
+    mockState.queryData.set(
+      mockState.queryKey(["writing-capabilities"]),
+      { source: "base" }
+    )
+    mockState.queryData.set(
+      mockState.queryKey(["writing-capabilities", "requested", "model-a", ""]),
+      { source: "requested" }
+    )
+
+    const baseResult = useQuery({
+      queryKey: ["writing-capabilities"],
+      queryFn: vi.fn()
+    } as never) as { data: unknown }
+    const requestedResult = useQuery({
+      queryKey: ["writing-capabilities", "requested", "model-a", ""],
+      queryFn: vi.fn()
+    } as never) as { data: unknown }
+
+    expect(baseResult.data).toEqual({ source: "base" })
+    expect(requestedResult.data).toEqual({ source: "requested" })
+  })
+
   it("renders key empty-state landmarks without crashing", () => {
     render(<WritingPlayground />)
 
@@ -667,7 +725,7 @@ describe("WritingPlayground phase1 baseline", () => {
       })
     )
     seedWritingSession({ prompt: "Rewrite this line." })
-    mockState.queryData.set("writing-sessions", {
+    mockState.queryData.set(mockState.queryKey(["writing-sessions"]), {
       sessions: [
         {
           id: "session-auto",
@@ -686,24 +744,27 @@ describe("WritingPlayground phase1 baseline", () => {
       limit: 200,
       offset: 0
     })
-    mockState.queryData.set("writing-session:session-other", {
-      id: "session-other",
-      name: "Other Session",
-      payload: {
-        prompt: "Other draft.",
-        settings: {},
-        template_name: null,
-        theme_name: null,
-        chat_mode: false
-      },
-      schema_version: 1,
-      version_parent_id: null,
-      created_at: "2026-03-16T12:00:00Z",
-      last_modified: "2026-03-16T12:05:00Z",
-      deleted: false,
-      client_id: "test-client",
-      version: 1
-    })
+    mockState.queryData.set(
+      mockState.queryKey(["writing-session", "session-other"]),
+      {
+        id: "session-other",
+        name: "Other Session",
+        payload: {
+          prompt: "Other draft.",
+          settings: {},
+          template_name: null,
+          theme_name: null,
+          chat_mode: false
+        },
+        schema_version: 1,
+        version_parent_id: null,
+        created_at: "2026-03-16T12:00:00Z",
+        last_modified: "2026-03-16T12:05:00Z",
+        deleted: false,
+        client_id: "test-client",
+        version: 1
+      }
+    )
 
     render(<WritingPlayground />)
     selectEditorText(getEditor(), "Rewrite this line.")

@@ -3,6 +3,8 @@ import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 vi.mock("@tanstack/react-query", () => {
+  const serializeQueryKey = (key: unknown) =>
+    JSON.stringify(Array.isArray(key) ? key : [key])
   const writingCaps = {
     server: {
       sessions: true,
@@ -24,29 +26,36 @@ vi.mock("@tanstack/react-query", () => {
     }
   }
 
-  const resolveQueryData = (queryKey: unknown): unknown => {
-    const key = Array.isArray(queryKey) ? queryKey[0] : queryKey
-    switch (key) {
-      case "writing-capabilities":
-        return writingCaps
-      case "writing-defaults":
-        return { templates: [], themes: [] }
-      case "writing-sessions":
-        return { sessions: [], total: 0, limit: 200, offset: 0 }
-      case "writing-templates":
-        return { templates: [], total: 0, limit: 200, offset: 0 }
-      case "writing-themes":
-        return { themes: [], total: 0, limit: 200, offset: 0 }
-      case "writing-session":
-        return null
-      default:
-        return undefined
-    }
-  }
+  const queryResults = new Map<string, unknown>([
+    [serializeQueryKey(["writing-capabilities"]), writingCaps],
+    [serializeQueryKey(["writing-defaults"]), { templates: [], themes: [] }],
+    [
+      serializeQueryKey(["writing-sessions"]),
+      { sessions: [], total: 0, limit: 200, offset: 0 }
+    ],
+    [
+      serializeQueryKey(["writing-templates"]),
+      { templates: [], total: 0, limit: 200, offset: 0 }
+    ],
+    [
+      serializeQueryKey(["writing-themes"]),
+      { themes: [], total: 0, limit: 200, offset: 0 }
+    ],
+    [serializeQueryKey(["writing-session", null]), null]
+  ])
 
   return {
-    useQuery: ({ queryKey }: { queryKey: unknown }) => ({
-      data: resolveQueryData(queryKey),
+    useQuery: ({
+      queryKey,
+      enabled = true
+    }: {
+      queryKey: unknown
+      enabled?: boolean
+    }) => ({
+      data:
+        enabled === false
+          ? undefined
+          : queryResults.get(serializeQueryKey(queryKey)),
       isLoading: false,
       isFetching: false,
       error: null
