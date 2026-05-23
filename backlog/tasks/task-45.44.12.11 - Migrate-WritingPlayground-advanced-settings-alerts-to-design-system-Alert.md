@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.12.11
 title: Migrate WritingPlayground advanced settings alerts to design-system Alert
-status: In Progress
+status: Done
 labels:
 - design-system
 - webui
@@ -32,12 +32,12 @@ Migrate the remaining WritingPlayground advanced-settings product-state AntD Ale
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The logprobs-unavailable advanced-settings info state renders through the shared design-system Alert primitive.
-- [ ] #2 The unsupported advanced sampler info state renders through the shared design-system Alert primitive.
-- [ ] #3 The logit-bias validation error state renders through the shared design-system Alert primitive.
-- [ ] #4 The remaining three WritingPlayground advanced-settings Alert exceptions are removed from the product-state baseline, leaving zero WritingPlayground rows.
-- [ ] #5 Focused tests and design-system guard verification are recorded in this task.
-- [ ] #6 Current-dev WritingActionBar product-state guard findings are resolved without adding new baseline exceptions.
+- [x] #1 The logprobs-unavailable advanced-settings info state renders through the shared design-system Alert primitive.
+- [x] #2 The unsupported advanced sampler info state renders through the shared design-system Alert primitive.
+- [x] #3 The logit-bias validation error state renders through the shared design-system Alert primitive.
+- [x] #4 The remaining three WritingPlayground advanced-settings Alert exceptions are removed from the product-state baseline, leaving zero WritingPlayground rows.
+- [x] #5 Focused tests and design-system guard verification are recorded in this task.
+- [x] #6 Current-dev WritingActionBar product-state guard findings are resolved without adding new baseline exceptions.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -64,15 +64,17 @@ Migrate the remaining WritingPlayground advanced-settings product-state AntD Ale
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR: https://github.com/rmusser01/tldw_server/pull/1998
 
+Migrated the final WritingPlayground advanced-settings product-state Alert branches to the shared design-system Alert primitive, removed the last three WritingPlayground baseline entries, and resolved the current-dev WritingActionBar guard blockers without adding new baseline exceptions. Focused tests and product-state verification passed on the rebased branch. TypeScript still exits nonzero on existing repo-wide debt; touched-file diagnostics are on unchanged pre-existing lines and are documented in Implementation Notes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
