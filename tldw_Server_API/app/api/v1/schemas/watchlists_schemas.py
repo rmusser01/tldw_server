@@ -832,6 +832,42 @@ class WatchlistItemSavedViewsList(BaseModel):
     items: list[WatchlistItemSavedView]
 
 
+class WatchlistOutputPresetCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    output_prefs: dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+
+
+class WatchlistOutputPresetUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    output_prefs: dict[str, Any] | None = None
+    is_default: bool | None = None
+
+
+class WatchlistOutputPreset(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    output_prefs: dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+    created_at: str
+    updated_at: str
+
+
+class WatchlistOutputPresetsList(BaseModel):
+    items: list[WatchlistOutputPreset]
+
+
+class WatchlistOutputPresetApplyRequest(BaseModel):
+    base_output_prefs: dict[str, Any] = Field(default_factory=dict)
+
+
+class WatchlistOutputPresetApplyResponse(BaseModel):
+    output_prefs: dict[str, Any] = Field(default_factory=dict)
+
+
 class WatchlistReportReadinessWarning(BaseModel):
     code: str
     severity: WatchlistReportReadinessWarningSeverity = "warning"

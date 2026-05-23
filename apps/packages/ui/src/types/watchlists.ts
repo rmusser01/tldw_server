@@ -141,7 +141,9 @@ export interface JobScope {
 }
 
 export interface JobOutputPrefs {
+  [key: string]: unknown
   auto_output?: {
+    [key: string]: unknown
     enabled?: boolean
     type?: string
     format?: "md" | "html"
@@ -167,16 +169,20 @@ export interface JobOutputPrefs {
   voice_map?: Record<string, string>
   audio_cast?: WatchlistAudioCast
   retention?: {
+    [key: string]: unknown
     default_seconds?: number
     temporary_seconds?: number
   }
   template?: {
+    [key: string]: unknown
     default_name?: string
     default_format?: "md" | "html"
     default_version?: number
   }
   deliveries?: {
+    [key: string]: unknown
     email?: {
+      [key: string]: unknown
       enabled?: boolean
       recipients?: string[]
       body_format?: "auto" | "text" | "html"
@@ -186,6 +192,7 @@ export interface JobOutputPrefs {
       reply_to?: string
     }
     chatbook?: {
+      [key: string]: unknown
       enabled?: boolean
       title?: string
       description?: string
@@ -205,6 +212,38 @@ export interface JobOutputPrefs {
     email_format?: "auto" | "text" | "html"
     create_chatbook?: boolean
   }
+}
+
+export interface WatchlistOutputPresetCreate {
+  name: string
+  description?: string | null
+  output_prefs: JobOutputPrefs
+  is_default?: boolean
+}
+
+export interface WatchlistOutputPresetUpdate {
+  name?: string
+  description?: string | null
+  output_prefs?: JobOutputPrefs
+  is_default?: boolean
+}
+
+export interface WatchlistOutputPreset {
+  id: number
+  name: string
+  description?: string | null
+  output_prefs: JobOutputPrefs
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface WatchlistOutputPresetApplyRequest {
+  base_output_prefs?: JobOutputPrefs
+}
+
+export interface WatchlistOutputPresetApplyResponse {
+  output_prefs: JobOutputPrefs
 }
 
 export interface WatchlistJob {

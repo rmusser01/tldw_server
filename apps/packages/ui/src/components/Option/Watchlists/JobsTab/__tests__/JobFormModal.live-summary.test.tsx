@@ -7,11 +7,16 @@ import { JobFormModal } from "../JobFormModal"
 import { setViewport } from "../../__tests__/test-utils/viewport"
 
 const servicesMock = vi.hoisted(() => ({
+  applyWatchlistOutputPreset: vi.fn(),
   createWatchlistJob: vi.fn(),
+  createWatchlistOutputPreset: vi.fn(),
+  deleteWatchlistOutputPreset: vi.fn(),
   updateWatchlistJob: vi.fn(),
+  updateWatchlistOutputPreset: vi.fn(),
   fetchWatchlistSources: vi.fn(),
   fetchWatchlistGroups: vi.fn(),
   fetchJobOutputTemplates: vi.fn(),
+  fetchWatchlistOutputPresets: vi.fn(),
   fetchWatchlistTemplates: vi.fn(),
   previewWatchlistJob: vi.fn(),
   testWatchlistAudioSettings: vi.fn()
@@ -65,11 +70,16 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  applyWatchlistOutputPreset: (...args: unknown[]) => servicesMock.applyWatchlistOutputPreset(...args),
   createWatchlistJob: (...args: unknown[]) => servicesMock.createWatchlistJob(...args),
+  createWatchlistOutputPreset: (...args: unknown[]) => servicesMock.createWatchlistOutputPreset(...args),
+  deleteWatchlistOutputPreset: (...args: unknown[]) => servicesMock.deleteWatchlistOutputPreset(...args),
   updateWatchlistJob: (...args: unknown[]) => servicesMock.updateWatchlistJob(...args),
+  updateWatchlistOutputPreset: (...args: unknown[]) => servicesMock.updateWatchlistOutputPreset(...args),
   fetchWatchlistSources: (...args: unknown[]) => servicesMock.fetchWatchlistSources(...args),
   fetchWatchlistGroups: (...args: unknown[]) => servicesMock.fetchWatchlistGroups(...args),
   fetchJobOutputTemplates: (...args: unknown[]) => servicesMock.fetchJobOutputTemplates(...args),
+  fetchWatchlistOutputPresets: (...args: unknown[]) => servicesMock.fetchWatchlistOutputPresets(...args),
   fetchWatchlistTemplates: (...args: unknown[]) => servicesMock.fetchWatchlistTemplates(...args),
   previewWatchlistJob: (...args: unknown[]) => servicesMock.previewWatchlistJob(...args),
   testWatchlistAudioSettings: (...args: unknown[]) => servicesMock.testWatchlistAudioSettings(...args)
@@ -204,9 +214,34 @@ describe("JobFormModal live summary", () => {
       items: [],
       total: 0
     })
+    servicesMock.fetchWatchlistOutputPresets.mockResolvedValue({
+      items: []
+    })
     servicesMock.fetchWatchlistTemplates.mockResolvedValue({
       items: []
     })
+    servicesMock.createWatchlistOutputPreset.mockImplementation(async (payload) => ({
+      id: 44,
+      name: payload.name,
+      description: payload.description ?? null,
+      output_prefs: payload.output_prefs,
+      is_default: Boolean(payload.is_default),
+      created_at: "2026-01-15T00:00:00Z",
+      updated_at: "2026-01-15T00:00:00Z"
+    }))
+    servicesMock.updateWatchlistOutputPreset.mockImplementation(async (presetId, payload) => ({
+      id: presetId,
+      name: payload.name ?? "Saved preset",
+      description: payload.description ?? null,
+      output_prefs: payload.output_prefs ?? {},
+      is_default: Boolean(payload.is_default),
+      created_at: "2026-01-15T00:00:00Z",
+      updated_at: "2026-01-16T00:00:00Z"
+    }))
+    servicesMock.applyWatchlistOutputPreset.mockResolvedValue({
+      output_prefs: {}
+    })
+    servicesMock.deleteWatchlistOutputPreset.mockResolvedValue(undefined)
     servicesMock.previewWatchlistJob.mockResolvedValue({
       items: [],
       total: 0,
@@ -489,6 +524,198 @@ describe("JobFormModal live summary", () => {
         })
       })
     )
+  }, 15_000)
+
+  it("saves the current output, delivery, and audio setup as a server-backed preset", async () => {
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistOutputPresets).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    fireEvent.click(screen.getByTestId("job-form-audio-enabled-switch"))
+    fireEvent.change(screen.getByTestId("job-form-output-preset-name-input"), {
+      target: { value: "Narrated newsletter" }
+    })
+    fireEvent.click(screen.getByTestId("job-form-output-preset-save-button"))
+
+    await waitFor(() => {
+      expect(servicesMock.createWatchlistOutputPreset).toHaveBeenCalledTimes(1)
+    })
+
+    expect(servicesMock.createWatchlistOutputPreset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Narrated newsletter",
+        output_prefs: expect.objectContaining({
+          generate_audio: true,
+          audio_voice: "alloy",
+          audio_speed: 1,
+          target_audio_minutes: 8
+        })
+      })
+    )
+  }, 15_000)
+
+  it("applies server-backed presets without losing unknown output prefs on save", async () => {
+    servicesMock.fetchWatchlistOutputPresets.mockResolvedValueOnce({
+      items: [
+        {
+          id: 12,
+          name: "Podcast preset",
+          description: "Narrated digest",
+          output_prefs: {
+            template: { default_name: "podcast_script", default_format: "md" },
+            generate_audio: true,
+            audio_voice: "nova"
+          },
+          is_default: false,
+          created_at: "2026-01-15T00:00:00Z",
+          updated_at: "2026-01-15T00:00:00Z"
+        }
+      ]
+    })
+    servicesMock.applyWatchlistOutputPreset.mockResolvedValueOnce({
+      output_prefs: {
+        template: {
+          default_name: "podcast_script",
+          default_format: "md",
+          experimental_renderer: "keep"
+        },
+        deliveries: {
+          email: { enabled: true, recipients: ["ops@example.com"] },
+          webhook: { url: "https://hooks.example.com/watchlists" }
+        },
+        generate_audio: true,
+        audio_voice: "nova",
+        raw_advanced: { preserve: true }
+      }
+    })
+    servicesMock.updateWatchlistJob.mockResolvedValueOnce({ id: 78 })
+
+    render(
+      <JobFormModal
+        open
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        initialValues={{
+          id: 78,
+          name: "Existing raw prefs monitor",
+          description: "existing",
+          scope: { sources: [1] },
+          schedule_expr: "0 9 * * *",
+          timezone: "UTC",
+          active: true,
+          output_prefs: {
+            template: { default_name: "old", experimental_renderer: "keep" },
+            deliveries: {
+              webhook: { url: "https://hooks.example.com/watchlists" }
+            },
+            raw_advanced: { preserve: true }
+          },
+          job_filters: null,
+          created_at: "2026-01-15T00:00:00Z"
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistOutputPresets).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    fireEvent.mouseDown(screen.getByTestId("job-form-output-preset-select"))
+    fireEvent.click(await screen.findByText("Podcast preset"))
+    fireEvent.click(screen.getByTestId("job-form-output-preset-apply-button"))
+
+    await waitFor(() => {
+      expect(servicesMock.applyWatchlistOutputPreset).toHaveBeenCalledWith(12, {
+        base_output_prefs: expect.objectContaining({
+          raw_advanced: { preserve: true }
+        })
+      })
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      expect(servicesMock.updateWatchlistJob).toHaveBeenCalledTimes(1)
+    })
+
+    const [, payload] = servicesMock.updateWatchlistJob.mock.calls[0]
+    expect(payload.output_prefs).toEqual(
+      expect.objectContaining({
+        template: expect.objectContaining({
+          default_name: "podcast_script",
+          default_format: "md",
+          experimental_renderer: "keep"
+        }),
+        deliveries: expect.objectContaining({
+          email: expect.objectContaining({
+            enabled: true,
+            recipients: ["ops@example.com"]
+          }),
+          webhook: { url: "https://hooks.example.com/watchlists" }
+        }),
+        generate_audio: true,
+        audio_voice: "nova",
+        raw_advanced: { preserve: true }
+      })
+    )
+  }, 15_000)
+
+  it("updates and deletes selected server-backed output presets", async () => {
+    servicesMock.fetchWatchlistOutputPresets.mockResolvedValueOnce({
+      items: [
+        {
+          id: 34,
+          name: "Reusable newsletter",
+          description: null,
+          output_prefs: { template: { default_name: "newsletter_html" } },
+          is_default: false,
+          created_at: "2026-01-15T00:00:00Z",
+          updated_at: "2026-01-15T00:00:00Z"
+        }
+      ]
+    })
+
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistOutputPresets).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    fireEvent.mouseDown(screen.getByTestId("job-form-output-preset-select"))
+    fireEvent.click(await screen.findByText("Reusable newsletter"))
+    fireEvent.click(screen.getByTestId("job-form-audio-enabled-switch"))
+    fireEvent.click(screen.getByTestId("job-form-output-preset-update-button"))
+
+    await waitFor(() => {
+      expect(servicesMock.updateWatchlistOutputPreset).toHaveBeenCalledTimes(1)
+    })
+
+    expect(servicesMock.updateWatchlistOutputPreset).toHaveBeenCalledWith(
+      34,
+      expect.objectContaining({
+        name: "Reusable newsletter",
+        output_prefs: expect.objectContaining({ generate_audio: true })
+      })
+    )
+
+    vi.mocked(Modal.confirm).mockClear()
+    fireEvent.click(screen.getByTestId("job-form-output-preset-delete-button"))
+    expect(Modal.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Delete output preset?"
+      })
+    )
+    await waitFor(() => {
+      expect(servicesMock.deleteWatchlistOutputPreset).toHaveBeenCalledWith(34)
+    })
   }, 15_000)
 
   it("sends an explicit disabled auto_output record when scheduled reports are turned off during edit", async () => {

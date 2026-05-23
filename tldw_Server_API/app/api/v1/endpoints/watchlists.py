@@ -222,6 +222,12 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     WatchlistItemSavedViewCreate,
     WatchlistItemSavedViewsList,
     WatchlistItemSavedViewUpdate,
+    WatchlistOutputPreset,
+    WatchlistOutputPresetApplyRequest,
+    WatchlistOutputPresetApplyResponse,
+    WatchlistOutputPresetCreate,
+    WatchlistOutputPresetsList,
+    WatchlistOutputPresetUpdate,
     WatchlistOnboardingTelemetryIngestRequest,
     WatchlistOnboardingTelemetryIngestResponse,
     WatchlistOnboardingTelemetrySummaryResponse,
@@ -1195,6 +1201,34 @@ def _row_to_item_saved_view(row) -> WatchlistItemSavedView:
         name=row.name,
         filters=filters,
         sort=row.sort,
+        is_default=bool(getattr(row, "is_default", 0)),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _row_to_output_preset(row) -> WatchlistOutputPreset:
+    output_prefs: dict[str, Any] = {}
+    try:
+        parsed = json.loads(row.output_prefs_json or "{}")
+    except json.JSONDecodeError:
+        logger.opt(exception=True).warning(
+            "Invalid output_prefs_json for watchlist output preset id={}",
+            getattr(row, "id", "unknown"),
+        )
+        raise
+    if not isinstance(parsed, dict):
+        logger.warning(
+            "Invalid non-object output_prefs_json for watchlist output preset id={}",
+            getattr(row, "id", "unknown"),
+        )
+        raise ValueError("output_preset_prefs_invalid")
+    output_prefs = parsed
+    return WatchlistOutputPreset(
+        id=int(row.id),
+        name=row.name,
+        description=getattr(row, "description", None),
+        output_prefs=output_prefs,
         is_default=bool(getattr(row, "is_default", 0)),
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -6150,6 +6184,126 @@ async def delete_item_saved_view(
     deleted = db.delete_item_saved_view(view_id=view_id, watchlist_id=watchlist_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="item_saved_view_not_found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _output_preset_error_status(exc: ValueError) -> int:
+    detail = str(exc)
+    if detail == "output_preset_name_exists":
+        return status.HTTP_409_CONFLICT
+    return status.HTTP_400_BAD_REQUEST
+
+
+@router.get(
+    "/job-output-presets",
+    response_model=WatchlistOutputPresetsList,
+    summary="List saved monitor output presets",
+)
+async def list_output_presets(
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    rows = db.list_output_presets()
+    return WatchlistOutputPresetsList(items=[_row_to_output_preset(row) for row in rows])
+
+
+@router.post(
+    "/job-output-presets",
+    response_model=WatchlistOutputPreset,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a saved monitor output preset",
+)
+async def create_output_preset(
+    payload: WatchlistOutputPresetCreate,
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    try:
+        row = db.create_output_preset(
+            name=payload.name,
+            description=payload.description,
+            output_prefs=payload.output_prefs,
+            is_default=payload.is_default,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=_output_preset_error_status(exc), detail=str(exc)) from exc
+    return _row_to_output_preset(row)
+
+
+@router.get(
+    "/job-output-presets/{preset_id}",
+    response_model=WatchlistOutputPreset,
+    summary="Get a saved monitor output preset",
+)
+async def get_output_preset(
+    preset_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    try:
+        row = db.get_output_preset(preset_id=preset_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="output_preset_not_found") from None
+    return _row_to_output_preset(row)
+
+
+@router.patch(
+    "/job-output-presets/{preset_id}",
+    response_model=WatchlistOutputPreset,
+    summary="Update a saved monitor output preset",
+)
+async def update_output_preset(
+    payload: WatchlistOutputPresetUpdate,
+    preset_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    fields = payload.model_dump(exclude_unset=True)
+    try:
+        row = db.update_output_preset(preset_id=preset_id, fields=fields)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="output_preset_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=_output_preset_error_status(exc), detail=str(exc)) from exc
+    return _row_to_output_preset(row)
+
+
+@router.post(
+    "/job-output-presets/{preset_id}/apply",
+    response_model=WatchlistOutputPresetApplyResponse,
+    summary="Apply a saved monitor output preset to output preferences",
+)
+async def apply_output_preset(
+    payload: WatchlistOutputPresetApplyRequest,
+    preset_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    try:
+        output_prefs = db.apply_output_preset(
+            preset_id=preset_id,
+            base_output_prefs=payload.base_output_prefs,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="output_preset_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=_output_preset_error_status(exc), detail=str(exc)) from exc
+    return WatchlistOutputPresetApplyResponse(output_prefs=output_prefs)
+
+
+@router.delete(
+    "/job-output-presets/{preset_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a saved monitor output preset",
+)
+async def delete_output_preset(
+    preset_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    deleted = db.delete_output_preset(preset_id=preset_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="output_preset_not_found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

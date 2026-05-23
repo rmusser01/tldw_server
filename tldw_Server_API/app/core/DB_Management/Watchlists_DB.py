@@ -29,6 +29,8 @@ Tables (per-user, colocated with Media DB):
                 details_json, created_at)
 - watchlist_item_saved_views(id, user_id, watchlist_id, name, filters_json,
                 sort, is_default, created_at, updated_at)
+- watchlist_output_presets(id, user_id, name, description, output_prefs_json,
+                is_default, created_at, updated_at)
 
 Notes:
 - Backed by DatabaseBackendFactory; default to per-user SQLite Media DB path.
@@ -101,6 +103,26 @@ _VALID_ITEM_SAVED_VIEW_FILTER_KEYS = {
     "smart_filter",
 }
 _VALID_ITEM_SAVED_VIEW_SMART_FILTERS = {"all", "today", "today_unread", "todayUnread", "unread", "reviewed", "queued"}
+_OUTPUT_PRESET_TEMPLATE_KEYS = {"default_name", "default_version", "default_format"}
+_OUTPUT_PRESET_RETENTION_KEYS = {"default_seconds", "temporary_seconds"}
+_OUTPUT_PRESET_DELIVERY_CHANNEL_KEYS = {"email", "chatbook"}
+_OUTPUT_PRESET_AUTO_OUTPUT_KEYS = {"enabled", "type", "format", "template_name", "template_version"}
+_OUTPUT_PRESET_TOP_LEVEL_KEYS = {
+    "generate_audio",
+    "audio_voice",
+    "audio_speed",
+    "target_audio_minutes",
+    "background_audio_uri",
+    "voice_map",
+    "retention_days",
+    "template_name",
+    "delivery_config",
+}
+_OUTPUT_PRESET_NAME_CONSTRAINT_MARKERS = (
+    "ux_output_presets_user_name",
+    "watchlist_output_presets_user_id_lower_idx",
+    "watchlist_output_presets_user_id_name_key",
+)
 _NESTED_REGEX_QUANTIFIER_RE = re.compile(
     r"\((?:[^()\\]|\\.)*(?:\*|\+|\{\d+(?:,\d*)?\})(?:[^()\\]|\\.)*\)\s*(?:\*|\+|\{\d+(?:,\d*)?\})"
 )
@@ -291,6 +313,18 @@ class WatchlistItemSavedViewRow:
     name: str
     filters_json: str
     sort: str
+    is_default: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class WatchlistOutputPresetRow:
+    id: int
+    user_id: str
+    name: str
+    description: str | None
+    output_prefs_json: str
     is_default: int
     created_at: str
     updated_at: str
@@ -747,6 +781,21 @@ class WatchlistsDatabase:
             CREATE INDEX IF NOT EXISTS idx_item_saved_views_user_watchlist
                 ON watchlist_item_saved_views(user_id, watchlist_id);
 
+            CREATE TABLE IF NOT EXISTS watchlist_output_presets (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                output_prefs_json TEXT NOT NULL,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_output_presets_user_updated
+                ON watchlist_output_presets(user_id, updated_at DESC);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_output_presets_user_name
+                ON watchlist_output_presets(user_id, LOWER(name));
+
             CREATE TABLE IF NOT EXISTS watchlist_clusters (
                 job_id BIGINT NOT NULL,
                 cluster_id BIGINT NOT NULL,
@@ -1049,6 +1098,21 @@ class WatchlistsDatabase:
             );
             CREATE INDEX IF NOT EXISTS idx_item_saved_views_user_watchlist
                 ON watchlist_item_saved_views(user_id, watchlist_id);
+
+            CREATE TABLE IF NOT EXISTS watchlist_output_presets (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                output_prefs_json TEXT NOT NULL,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_output_presets_user_updated
+                ON watchlist_output_presets(user_id, updated_at DESC);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_output_presets_user_name
+                ON watchlist_output_presets(user_id, LOWER(name));
 
             CREATE TABLE IF NOT EXISTS watchlist_clusters (
                 job_id INTEGER NOT NULL,
@@ -3255,6 +3319,304 @@ class WatchlistsDatabase:
             (int(view_id), self.user_id, int(watchlist_id)),
         )
         return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    @staticmethod
+    def _normalize_output_preset_name(name: str) -> str:
+        value = str(name or "").strip()
+        if not value:
+            raise ValueError("output_preset_name_required")
+        if len(value) > 120:
+            raise ValueError("output_preset_name_too_long")
+        return value
+
+    @staticmethod
+    def _normalize_output_preset_description(description: str | None) -> str | None:
+        if description is None:
+            return None
+        value = str(description).strip()
+        if not value:
+            return None
+        if len(value) > 500:
+            raise ValueError("output_preset_description_too_long")
+        return value
+
+    @staticmethod
+    def _normalize_output_prefs_payload(output_prefs: Any) -> dict[str, Any]:
+        if output_prefs is None:
+            return {}
+        if not isinstance(output_prefs, dict):
+            raise ValueError("output_preset_prefs_invalid")
+        try:
+            serialized = json.dumps(output_prefs, sort_keys=True)
+            parsed = json.loads(serialized)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError("output_preset_prefs_invalid") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("output_preset_prefs_invalid")
+        return parsed
+
+    def _check_output_preset_name_available(self, *, name: str, exclude_id: int | None = None) -> None:
+        row = self.backend.execute(
+            """
+            SELECT id
+            FROM watchlist_output_presets
+            WHERE user_id = ? AND LOWER(name) = LOWER(?)
+            """,
+            (self.user_id, name),
+        ).first
+        if not row:
+            return
+        existing_id = row.get("id")
+        if existing_id is None:
+            return
+        if exclude_id is not None and int(existing_id) == int(exclude_id):
+            return
+        raise ValueError("output_preset_name_exists")
+
+    @staticmethod
+    def _is_output_preset_name_constraint_error(exc: _DatabaseError) -> bool:
+        message = str(exc).lower()
+        if any(marker in message for marker in _OUTPUT_PRESET_NAME_CONSTRAINT_MARKERS):
+            return True
+        if "duplicate key value" in message and "watchlist_output_presets" in message:
+            return True
+        return "unique constraint failed" in message and "watchlist_output_presets" in message and "name" in message
+
+    @classmethod
+    def _raise_output_preset_constraint_error(cls, exc: _DatabaseError) -> None:
+        if cls._is_output_preset_name_constraint_error(exc):
+            raise ValueError("output_preset_name_exists") from exc
+        raise exc
+
+    def create_output_preset(
+        self,
+        *,
+        name: str,
+        description: str | None = None,
+        output_prefs: dict[str, Any] | None = None,
+        is_default: bool = False,
+    ) -> WatchlistOutputPresetRow:
+        clean_name = self._normalize_output_preset_name(name)
+        clean_description = self._normalize_output_preset_description(description)
+        clean_output_prefs = self._normalize_output_prefs_payload(output_prefs)
+        self._check_output_preset_name_available(name=clean_name)
+        now = _utcnow_iso()
+        if is_default:
+            self.backend.execute(
+                "UPDATE watchlist_output_presets SET is_default = 0, updated_at = ? WHERE user_id = ?",
+                (now, self.user_id),
+            )
+        try:
+            res = self._execute_insert(
+                """
+                INSERT INTO watchlist_output_presets
+                    (user_id, name, description, output_prefs_json, is_default, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self.user_id,
+                    clean_name,
+                    clean_description,
+                    json.dumps(clean_output_prefs, sort_keys=True),
+                    1 if is_default else 0,
+                    now,
+                    now,
+                ),
+            )
+        except _DatabaseError as exc:
+            self._raise_output_preset_constraint_error(exc)
+        preset_id = self._extract_lastrowid(res)
+        if not preset_id:
+            raise RuntimeError("failed_to_create_output_preset")
+        return self.get_output_preset(preset_id=int(preset_id))
+
+    def get_output_preset(self, *, preset_id: int) -> WatchlistOutputPresetRow:
+        row = self.backend.execute(
+            """
+            SELECT id, user_id, name, description, output_prefs_json, is_default, created_at, updated_at
+            FROM watchlist_output_presets
+            WHERE id = ? AND user_id = ?
+            """,
+            (int(preset_id), self.user_id),
+        ).first
+        if not row:
+            raise KeyError("output_preset_not_found")
+        return WatchlistOutputPresetRow(**row)
+
+    def list_output_presets(self) -> list[WatchlistOutputPresetRow]:
+        rows = self.backend.execute(
+            """
+            SELECT id, user_id, name, description, output_prefs_json, is_default, created_at, updated_at
+            FROM watchlist_output_presets
+            WHERE user_id = ?
+            ORDER BY is_default DESC, updated_at DESC, id DESC
+            """,
+            (self.user_id,),
+        ).rows
+        return [WatchlistOutputPresetRow(**row) for row in rows]
+
+    def update_output_preset(
+        self,
+        *,
+        preset_id: int,
+        fields: dict[str, Any],
+    ) -> WatchlistOutputPresetRow:
+        current = self.get_output_preset(preset_id=int(preset_id))
+        if not fields:
+            return current
+        sets: list[str] = []
+        params: list[Any] = []
+        if "name" in fields and fields["name"] is not None:
+            clean_name = self._normalize_output_preset_name(str(fields["name"]))
+            self._check_output_preset_name_available(name=clean_name, exclude_id=int(preset_id))
+            sets.append("name = ?")
+            params.append(clean_name)
+        if "description" in fields:
+            sets.append("description = ?")
+            params.append(self._normalize_output_preset_description(fields["description"]))
+        if "output_prefs" in fields and fields["output_prefs"] is not None:
+            clean_output_prefs = self._normalize_output_prefs_payload(fields["output_prefs"])
+            sets.append("output_prefs_json = ?")
+            params.append(json.dumps(clean_output_prefs, sort_keys=True))
+        if "is_default" in fields and fields["is_default"] is not None:
+            is_default = bool(fields["is_default"])
+            if is_default:
+                now = _utcnow_iso()
+                self.backend.execute(
+                    """
+                    UPDATE watchlist_output_presets
+                    SET is_default = 0, updated_at = ?
+                    WHERE user_id = ? AND id != ?
+                    """,
+                    (now, self.user_id, int(preset_id)),
+                )
+            sets.append("is_default = ?")
+            params.append(1 if is_default else 0)
+        if not sets:
+            return current
+        sets.append("updated_at = ?")
+        params.append(_utcnow_iso())
+        params.extend([int(preset_id), self.user_id])
+        try:
+            self.backend.execute(
+                f"""
+                UPDATE watchlist_output_presets
+                SET {', '.join(sets)}
+                WHERE id = ? AND user_id = ?
+                """,  # nosec B608
+                tuple(params),
+            )
+        except _DatabaseError as exc:
+            self._raise_output_preset_constraint_error(exc)
+        return self.get_output_preset(preset_id=int(preset_id))
+
+    def delete_output_preset(self, *, preset_id: int) -> bool:
+        result = self.backend.execute(
+            "DELETE FROM watchlist_output_presets WHERE id = ? AND user_id = ?",
+            (int(preset_id), self.user_id),
+        )
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    @staticmethod
+    def _clone_output_prefs_value(value: Any) -> Any:
+        try:
+            return json.loads(json.dumps(value, sort_keys=True))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return value
+
+    @classmethod
+    def _apply_known_nested_output_prefs(
+        cls,
+        *,
+        base_value: Any,
+        preset_value: Any,
+        preset_has_key: bool,
+        known_keys: set[str],
+    ) -> Any | None:
+        if not preset_has_key:
+            if not isinstance(base_value, dict):
+                return None
+            preserved = {
+                key: cls._clone_output_prefs_value(value)
+                for key, value in base_value.items()
+                if key not in known_keys
+            }
+            return preserved or None
+        if preset_value is None:
+            return None
+        if not isinstance(preset_value, dict):
+            return cls._clone_output_prefs_value(preset_value)
+        preserved = (
+            {
+                key: cls._clone_output_prefs_value(value)
+                for key, value in base_value.items()
+                if key not in known_keys
+            }
+            if isinstance(base_value, dict)
+            else {}
+        )
+        for key, value in preset_value.items():
+            preserved[key] = cls._clone_output_prefs_value(value)
+        return preserved or None
+
+    @classmethod
+    def apply_output_prefs_preset(
+        cls,
+        *,
+        base_output_prefs: dict[str, Any] | None,
+        preset_output_prefs: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        base = cls._normalize_output_prefs_payload(base_output_prefs)
+        preset = cls._normalize_output_prefs_payload(preset_output_prefs)
+        result = cls._clone_output_prefs_value(base)
+        if not isinstance(result, dict):
+            result = {}
+
+        nested_specs = {
+            "template": _OUTPUT_PRESET_TEMPLATE_KEYS,
+            "retention": _OUTPUT_PRESET_RETENTION_KEYS,
+            "deliveries": _OUTPUT_PRESET_DELIVERY_CHANNEL_KEYS,
+            "auto_output": _OUTPUT_PRESET_AUTO_OUTPUT_KEYS,
+        }
+        for key, known_keys in nested_specs.items():
+            merged_value = cls._apply_known_nested_output_prefs(
+                base_value=base.get(key),
+                preset_value=preset.get(key),
+                preset_has_key=key in preset,
+                known_keys=known_keys,
+            )
+            if merged_value is None:
+                result.pop(key, None)
+            else:
+                result[key] = merged_value
+
+        for key in _OUTPUT_PRESET_TOP_LEVEL_KEYS:
+            result.pop(key, None)
+            if key in preset and preset[key] is not None:
+                result[key] = cls._clone_output_prefs_value(preset[key])
+
+        handled_keys = set(nested_specs) | _OUTPUT_PRESET_TOP_LEVEL_KEYS
+        for key, value in preset.items():
+            if key not in handled_keys:
+                result[key] = cls._clone_output_prefs_value(value)
+
+        return result
+
+    def apply_output_preset(
+        self,
+        *,
+        preset_id: int,
+        base_output_prefs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        preset = self.get_output_preset(preset_id=int(preset_id))
+        try:
+            preset_output_prefs = json.loads(preset.output_prefs_json or "{}")
+        except json.JSONDecodeError:
+            preset_output_prefs = {}
+        return self.apply_output_prefs_preset(
+            base_output_prefs=base_output_prefs,
+            preset_output_prefs=preset_output_prefs if isinstance(preset_output_prefs, dict) else {},
+        )
 
     def list_items(
         self,

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from importlib import import_module
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.endpoints.watchlists import _row_to_output_preset
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 
@@ -355,3 +358,122 @@ def test_item_saved_views_endpoint_crud_and_validation(client_with_user):
     deleted = client.delete(f"/api/v1/watchlists/{watchlist_id}/item-views/{view['id']}")
     assert deleted.status_code == 204
     assert client.get(f"/api/v1/watchlists/{watchlist_id}/item-views").json()["items"] == []
+
+
+def test_output_presets_endpoint_crud_and_apply(client_with_user):
+    client = client_with_user
+
+    created = client.post(
+        "/api/v1/watchlists/job-output-presets",
+        json={
+            "name": "Daily newsletter",
+            "description": "HTML email plus audio",
+            "output_prefs": {
+                "template": {"default_name": "newsletter_html", "default_format": "html"},
+                "deliveries": {"email": {"enabled": True, "recipients": ["ops@example.com"]}},
+                "generate_audio": True,
+                "audio_voice": "nova",
+            },
+            "is_default": True,
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    preset = created.json()
+    assert preset["name"] == "Daily newsletter"
+    assert preset["description"] == "HTML email plus audio"
+    assert preset["output_prefs"]["audio_voice"] == "nova"
+    assert preset["is_default"] is True
+
+    listed = client.get("/api/v1/watchlists/job-output-presets")
+    assert listed.status_code == 200, listed.text
+    assert [row["id"] for row in listed.json()["items"]] == [preset["id"]]
+
+    applied = client.post(
+        f"/api/v1/watchlists/job-output-presets/{preset['id']}/apply",
+        json={
+            "base_output_prefs": {
+                "template": {"default_name": "old", "experimental_renderer": "keep"},
+                "deliveries": {
+                    "chatbook": {"enabled": True, "title": "Old"},
+                    "webhook": {"url": "https://hooks.example.com/watchlists"},
+                },
+                "generate_audio": False,
+                "raw_advanced": {"preserve": True},
+            }
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    applied_prefs = applied.json()["output_prefs"]
+    assert applied_prefs["template"] == {
+        "default_name": "newsletter_html",
+        "default_format": "html",
+        "experimental_renderer": "keep",
+    }
+    assert applied_prefs["deliveries"] == {
+        "email": {"enabled": True, "recipients": ["ops@example.com"]},
+        "webhook": {"url": "https://hooks.example.com/watchlists"},
+    }
+    assert applied_prefs["audio_voice"] == "nova"
+    assert applied_prefs["raw_advanced"] == {"preserve": True}
+
+    updated = client.patch(
+        f"/api/v1/watchlists/job-output-presets/{preset['id']}",
+        json={
+            "name": "Daily executive newsletter",
+            "description": None,
+            "output_prefs": {"generate_audio": False},
+            "is_default": False,
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["name"] == "Daily executive newsletter"
+    assert updated.json()["description"] is None
+    assert updated.json()["output_prefs"] == {"generate_audio": False}
+    assert updated.json()["is_default"] is False
+
+    missing = client.post(
+        "/api/v1/watchlists/job-output-presets/999999/apply",
+        json={"base_output_prefs": {}},
+    )
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "output_preset_not_found"
+
+    deleted = client.delete(f"/api/v1/watchlists/job-output-presets/{preset['id']}")
+    assert deleted.status_code == 204
+    assert client.get("/api/v1/watchlists/job-output-presets").json()["items"] == []
+
+
+def test_output_preset_apply_rejects_null_base_output_prefs(client_with_user):
+    client = client_with_user
+
+    created = client.post(
+        "/api/v1/watchlists/job-output-presets",
+        json={
+            "name": "Null apply guard",
+            "output_prefs": {"generate_audio": True},
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    response = client.post(
+        f"/api/v1/watchlists/job-output-presets/{created.json()['id']}/apply",
+        json={"base_output_prefs": None},
+    )
+
+    assert response.status_code == 422
+
+
+def test_output_preset_projection_rejects_corrupt_prefs():
+    row = SimpleNamespace(
+        id=1,
+        name="Corrupt preset",
+        description=None,
+        output_prefs_json="{not-json",
+        is_default=0,
+        created_at="2026-05-23T00:00:00Z",
+        updated_at="2026-05-23T00:00:00Z",
+    )
+
+    with pytest.raises(json.JSONDecodeError):
+        _row_to_output_preset(row)
