@@ -90,6 +90,9 @@ describe("WritingActionBar", () => {
       (view.getByRole("button", { name: /rewrite/i }) as HTMLButtonElement)
         .disabled
     ).toBe(true)
+    expect(
+      view.getByRole("button", { name: /rewrite/i }).querySelector("svg")
+    ).toBeTruthy()
     expect(view.getByText(/generation unavailable/i)).toBeTruthy()
   })
 
