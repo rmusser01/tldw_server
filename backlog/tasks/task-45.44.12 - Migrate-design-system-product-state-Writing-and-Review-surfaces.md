@@ -35,7 +35,7 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-- Created TASK-45.44.12.2 for the narrow Review slice covering `MediaReviewReadingPane` failed-load Alert migration. Verification on the slice reduced the product-state baseline from 291 to 290 and `Writing and Review surfaces` from 21 to 20.
+- Created TASK-45.44.12.2 for the narrow Review slice covering `MediaReviewReadingPane` failed-load Alert migration. Verification on the slice reduced the product-state baseline from 291 to 290 and `Writing and Review surfaces` from 21 to 20. PR: https://github.com/rmusser01/tldw_server/pull/1964
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
