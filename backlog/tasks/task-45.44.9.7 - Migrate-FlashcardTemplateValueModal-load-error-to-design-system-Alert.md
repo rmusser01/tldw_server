@@ -16,6 +16,7 @@ references:
 - apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.templates.test.tsx
 - apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardTemplateValueModal.test.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/pull/2000
 modified_files:
 - apps/packages/ui/src/components/Flashcards/components/FlashcardTemplateValueModal.tsx
 - apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardTemplateValueModal.test.tsx
