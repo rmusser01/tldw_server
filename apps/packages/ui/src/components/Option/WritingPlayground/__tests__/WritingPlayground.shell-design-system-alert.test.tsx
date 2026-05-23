@@ -20,17 +20,31 @@ const mockState = vi.hoisted(() => ({
   sendCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
 }))
 
-const queryKeyId = (queryKey: unknown): string => {
-  const key = Array.isArray(queryKey) ? queryKey[0] : queryKey
-  if (key === "writing-session" && Array.isArray(queryKey)) {
-    return `writing-session:${String(queryKey[1] || "")}`
-  }
-  return String(key)
+const serializeQueryKey = (queryKey: unknown): string =>
+  JSON.stringify(Array.isArray(queryKey) ? queryKey : [queryKey])
+
+const setQueryResult = (queryKey: unknown, result: QueryResult) => {
+  mockState.queryResults.set(serializeQueryKey(queryKey), result)
 }
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: ({ queryKey }: { queryKey: unknown }) => {
-    const result = mockState.queryResults.get(queryKeyId(queryKey)) ?? {}
+  useQuery: ({
+    queryKey,
+    enabled = true,
+  }: {
+    queryKey: unknown
+    enabled?: boolean
+  }) => {
+    if (enabled === false) {
+      return {
+        data: undefined,
+        isLoading: false,
+        isFetching: false,
+        error: null,
+      }
+    }
+
+    const result = mockState.queryResults.get(serializeQueryKey(queryKey)) ?? {}
     return {
       data: result.data,
       isLoading: result.isLoading ?? false,
@@ -175,13 +189,13 @@ const DEFAULT_WRITING_CAPABILITIES = {
 }
 
 const seedDefaultQueries = () => {
-  mockState.queryResults.set("writing-capabilities", {
+  setQueryResult(["writing-capabilities"], {
     data: DEFAULT_WRITING_CAPABILITIES,
   })
-  mockState.queryResults.set("writing-defaults", {
+  setQueryResult(["writing-defaults"], {
     data: { templates: [], themes: [] },
   })
-  mockState.queryResults.set("writing-sessions", {
+  setQueryResult(["writing-sessions"], {
     data: {
       sessions: [],
       total: 0,
@@ -189,7 +203,7 @@ const seedDefaultQueries = () => {
       offset: 0,
     },
   })
-  mockState.queryResults.set("writing-templates", {
+  setQueryResult(["writing-templates"], {
     data: {
       templates: [],
       total: 0,
@@ -197,7 +211,7 @@ const seedDefaultQueries = () => {
       offset: 0,
     },
   })
-  mockState.queryResults.set("writing-themes", {
+  setQueryResult(["writing-themes"], {
     data: {
       themes: [],
       total: 0,
@@ -205,7 +219,7 @@ const seedDefaultQueries = () => {
       offset: 0,
     },
   })
-  mockState.queryResults.set("writing-session:", { data: null })
+  setQueryResult(["writing-session", null], { data: null })
 }
 
 const seedActiveSession = () => {
@@ -213,7 +227,7 @@ const seedActiveSession = () => {
     activeSessionId: "session-auto",
     activeSessionName: "Auto Session",
   })
-  mockState.queryResults.set("writing-sessions", {
+  setQueryResult(["writing-sessions"], {
     data: {
       sessions: [
         {
@@ -258,7 +272,7 @@ describe("WritingPlayground shell product-state alerts", () => {
   })
 
   it("renders the unsupported shell state through the design-system Alert", () => {
-    mockState.queryResults.set("writing-capabilities", {
+    setQueryResult(["writing-capabilities"], {
       data: {
         ...DEFAULT_WRITING_CAPABILITIES,
         server: { ...DEFAULT_WRITING_CAPABILITIES.server, sessions: false },
@@ -274,7 +288,7 @@ describe("WritingPlayground shell product-state alerts", () => {
   })
 
   it("renders the sessions-load error through the design-system Alert", () => {
-    mockState.queryResults.set("writing-sessions", {
+    setQueryResult(["writing-sessions"], {
       data: undefined,
       error: new Error("Session list unavailable"),
     })
@@ -287,7 +301,7 @@ describe("WritingPlayground shell product-state alerts", () => {
 
   it("renders the active-session editor error through the design-system Alert", () => {
     seedActiveSession()
-    mockState.queryResults.set("writing-session:session-auto", {
+    setQueryResult(["writing-session", "session-auto"], {
       data: undefined,
       error: new Error("Session detail unavailable"),
     })
