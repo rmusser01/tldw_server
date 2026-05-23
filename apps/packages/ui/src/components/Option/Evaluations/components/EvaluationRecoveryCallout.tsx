@@ -1,6 +1,6 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { RecoveryCallout } from "@/components/ui/state"
+import { RecoveryCallout, type StateAction } from "@/components/ui/state"
 
 type ApiResponseLike = {
   ok?: boolean
@@ -14,6 +14,8 @@ type EvaluationRecoveryCalloutProps = {
   error?: unknown
   response?: ApiResponseLike | null
   message?: React.ReactNode
+  primaryAction?: StateAction
+  secondaryActions?: StateAction[]
   className?: string
   "data-testid"?: string
 }
@@ -71,6 +73,8 @@ export const EvaluationRecoveryCallout: React.FC<EvaluationRecoveryCalloutProps>
   error,
   response,
   message,
+  primaryAction,
+  secondaryActions,
   className,
   "data-testid": dataTestId
 }) => {
@@ -107,6 +111,8 @@ export const EvaluationRecoveryCallout: React.FC<EvaluationRecoveryCalloutProps>
         })
       }
       diagnostics={diagnostics}
+      primaryAction={primaryAction}
+      secondaryActions={secondaryActions}
       className={className}
       data-testid={dataTestId}
     />

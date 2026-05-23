@@ -16,8 +16,10 @@ import {
   test,
   expect,
   seedAuth,
+  SMOKE_HARD_GATE_ALLOWLIST,
   getCriticalIssues,
   classifySmokeIssues,
+  validateSmokeHardGateAllowlist,
 } from './smoke.setup';
 import { waitForAppShell } from '../utils/helpers';
 import { PAGES, PageEntry, getActivePages, PAGE_COUNT, ACTIVE_PAGE_COUNT } from './page-inventory';
@@ -140,6 +142,14 @@ const TRANSIENT_RUNTIME_OVERLAY_PATTERNS = [
 const keyNavEntries: PageEntry[] = KEY_NAV_TARGETS.map((targetPath) =>
   PAGES.find((entry) => entry.path === targetPath)
 ).filter((entry): entry is PageEntry => Boolean(entry));
+
+function expectSmokeHardGateAllowlistMetadata(): void {
+  const allowlistProblems = validateSmokeHardGateAllowlist();
+  expect(
+    allowlistProblems,
+    `Smoke hard-gate allowlist metadata problems:\n${allowlistProblems.join('\n')}`
+  ).toEqual([]);
+}
 
 /**
  * Format diagnostics for console output
@@ -396,8 +406,31 @@ test.describe('Smoke Tests - All Pages', () => {
 
   // Log test suite info
   test.beforeAll(() => {
+    expectSmokeHardGateAllowlistMetadata();
+
     console.log(
       `\nSmoke test suite: ${ACTIVE_PAGE_COUNT} pages (${PAGE_COUNT - ACTIVE_PAGE_COUNT} skipped)\n`
+    );
+  });
+
+  test('hard-gate allowlist entries have current ownership metadata', () => {
+    expectSmokeHardGateAllowlistMetadata();
+  });
+
+  test('hard-gate allowlist rejects invalid calendar expiry metadata', () => {
+    const baseRule = SMOKE_HARD_GATE_ALLOWLIST[0];
+    expect(baseRule).toBeDefined();
+
+    const allowlistProblems = validateSmokeHardGateAllowlist([
+      {
+        ...baseRule!,
+        id: 'invalid-calendar-expiry',
+        expiresOn: '2026-99-99',
+      },
+    ]);
+
+    expect(allowlistProblems).toContain(
+      'invalid-calendar-expiry: expiresOn must be a valid YYYY-MM-DD date'
     );
   });
 

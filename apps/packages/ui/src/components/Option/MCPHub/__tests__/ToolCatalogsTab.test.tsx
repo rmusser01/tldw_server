@@ -17,6 +17,12 @@ vi.mock("@tanstack/react-query", () => ({
   })
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, defaultValue?: string) => defaultValue ?? _key
+  })
+}))
+
 vi.mock("@/services/tldw/mcp-hub", () => ({
   describeExternalServerDiscoveryRefreshFailure: (result: { message?: string | null; errors?: Record<string, string> }) => {
     const errorText = Object.entries(result.errors ?? {})

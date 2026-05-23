@@ -330,7 +330,9 @@ export const RecipesTab: React.FC = () => {
     data: manifestsResp,
     isLoading: manifestsLoading,
     isError: manifestsError,
-    error: manifestsErrorValue
+    error: manifestsErrorValue,
+    refetch: refetchManifests,
+    isFetching: manifestsFetching
   } = useRecipeManifests()
   const { data: datasetsResp } = useDatasetsList({ limit: 100, offset: 0 })
   const validateMutation = useValidateRecipeDataset()
@@ -343,7 +345,9 @@ export const RecipesTab: React.FC = () => {
     data: reportResp,
     isLoading: reportLoading,
     isError: reportError,
-    error: reportErrorValue
+    error: reportErrorValue,
+    refetch: refetchReport,
+    isFetching: reportFetching
   } = useRecipeRunReport(currentRunId)
 
   const manifests = Array.isArray(manifestsResp?.data) ? manifestsResp.data : []
@@ -1486,6 +1490,15 @@ export const RecipesTab: React.FC = () => {
             })}
             endpoint="/api/v1/evaluations/recipes"
             error={manifestsErrorValue}
+            primaryAction={{
+              label: t("evaluations:tryAgainAction", {
+                defaultValue: "Try again"
+              }),
+              onClick: () => {
+                void refetchManifests()
+              },
+              loading: manifestsFetching
+            }}
           />
         ) : manifests.length === 0 ? (
           <Empty
@@ -1968,6 +1981,15 @@ export const RecipesTab: React.FC = () => {
                     : "/api/v1/evaluations/recipe-runs/{run_id}/report"
                 }
                 error={reportErrorValue}
+                primaryAction={{
+                  label: t("evaluations:tryAgainAction", {
+                    defaultValue: "Try again"
+                  }),
+                  onClick: () => {
+                    void refetchReport()
+                  },
+                  loading: reportFetching
+                }}
               />
             ) : report ? (
               <div className="space-y-4">
