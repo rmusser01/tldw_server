@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.12.8
 title: Migrate ConnectionWebModal empty and loading states to design-system feedback
-status: In Progress
+status: Done
 labels:
 - design-system
 - webui
@@ -13,6 +13,7 @@ references:
 - apps/packages/ui/src/components/Option/WritingPlayground/modals/ConnectionWebModal.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
 - Docs/Design/tldw_web_design_system_contract.md
+- https://github.com/rmusser01/tldw_server/pull/1974
 modified_files:
 - apps/packages/ui/src/components/Option/WritingPlayground/modals/ConnectionWebModal.tsx
 - apps/packages/ui/src/components/Option/WritingPlayground/__tests__/ConnectionWebModal.design-system-feedback.test.tsx
@@ -64,7 +65,9 @@ Migrate the Connection Web modal project-required, no-data, and loading product-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR: https://github.com/rmusser01/tldw_server/pull/1974
 
+Migrated `ConnectionWebModal` project-required, loading, and no-data feedback branches to shared design-system `EmptyState`/`LoadingState` primitives. Added focused marker coverage and removed the three migrated product-state baseline rows, bringing the product-state baseline to 280 and Writing/Review to 10.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -73,6 +76,6 @@ Migrate the Connection Web modal project-required, no-data, and loading product-
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
