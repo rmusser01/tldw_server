@@ -4,10 +4,41 @@ import struct
 import wave
 from io import BytesIO
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSResponse
+
+if TYPE_CHECKING:
+    from Helper_Scripts.TTS_Installers.smoke_test_omnivoice_sidecar import (
+        OmniVoiceSmokeConfig,
+    )
+
+
+def _valid_smoke_config(tmp_path: Path) -> OmniVoiceSmokeConfig:
+    from Helper_Scripts.TTS_Installers import smoke_test_omnivoice_sidecar as smoke
+
+    model_path = tmp_path / "models" / "OmniVoice"
+    model_path.mkdir(parents=True)
+    sidecar_python = tmp_path / "models" / "omnivoice_sidecar" / ".venv" / "bin" / "python"
+    sidecar_python.parent.mkdir(parents=True)
+    sidecar_python.write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    sidecar_python.chmod(0o755)
+
+    return smoke.OmniVoiceSmokeConfig(
+        repo_root=tmp_path,
+        model_path=model_path,
+        sidecar_python=sidecar_python,
+        runtime_path=tmp_path / "models" / "omnivoice_sidecar" / "runtime",
+        scratch_dir=tmp_path / "models" / "omnivoice_sidecar" / "runtime" / "scratch",
+        output_path=tmp_path / "smoke.wav",
+        text="Hello from the managed sidecar.",
+        port=8844,
+        num_step=8,
+        speed=1.0,
+        timeout=123.0,
+    )
 
 
 def _wav_bytes(samples: list[int], *, sample_rate: int = 24000, channels: int = 1) -> bytes:
@@ -60,7 +91,9 @@ def test_smoke_helper_parse_args_accepts_operator_inputs(tmp_path):
 
 @pytest.mark.unit
 def test_smoke_helper_builds_provider_config_with_managed_sidecar_paths(tmp_path):
-    from Helper_Scripts.TTS_Installers.smoke_test_omnivoice_sidecar import build_sidecar_provider_config
+    from Helper_Scripts.TTS_Installers.smoke_test_omnivoice_sidecar import (
+        build_sidecar_provider_config,
+    )
 
     model_path = tmp_path / "models" / "OmniVoice"
     sidecar_python = tmp_path / "models" / "omnivoice_sidecar" / ".venv" / "bin" / "python"
@@ -96,7 +129,10 @@ def test_smoke_helper_builds_provider_config_with_managed_sidecar_paths(tmp_path
 
 @pytest.mark.unit
 def test_smoke_helper_preserves_sidecar_python_symlink_when_resolving_config(tmp_path):
-    from Helper_Scripts.TTS_Installers.smoke_test_omnivoice_sidecar import build_smoke_config, parse_args
+    from Helper_Scripts.TTS_Installers.smoke_test_omnivoice_sidecar import (
+        build_smoke_config,
+        parse_args,
+    )
 
     repo_root = tmp_path / "repo"
     (repo_root / "tldw_Server_API").mkdir(parents=True)
@@ -124,6 +160,38 @@ def test_smoke_helper_preserves_sidecar_python_symlink_when_resolving_config(tmp
 
     assert config.sidecar_python == sidecar_python
     assert config.sidecar_python != base_python.resolve()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("speed", 0.0, "OmniVoice sidecar smoke speed"),
+        ("num_step", 0, "OmniVoice sidecar smoke num_step"),
+    ],
+)
+def test_smoke_helper_rejects_invalid_generation_controls(tmp_path, field, value, message):
+    from dataclasses import replace
+
+    from Helper_Scripts.TTS_Installers.smoke_test_omnivoice_sidecar import validate_smoke_config
+
+    config = replace(_valid_smoke_config(tmp_path), **{field: value})
+
+    with pytest.raises(ValueError, match=message):
+        validate_smoke_config(config)
+
+
+@pytest.mark.unit
+def test_smoke_helper_rejects_non_executable_sidecar_python(tmp_path):
+    from dataclasses import replace
+
+    from Helper_Scripts.TTS_Installers.smoke_test_omnivoice_sidecar import validate_smoke_config
+
+    config = _valid_smoke_config(tmp_path)
+    config.sidecar_python.chmod(0o644)
+
+    with pytest.raises(ValueError, match="executable"):
+        validate_smoke_config(replace(config, sidecar_python=config.sidecar_python))
 
 
 @pytest.mark.unit
@@ -160,6 +228,20 @@ def test_smoke_helper_validates_non_silent_24000_mono_wav():
 
 
 @pytest.mark.unit
+def test_smoke_helper_limits_wav_sample_analysis_window():
+    from Helper_Scripts.TTS_Installers.smoke_test_omnivoice_sidecar import validate_wav_audio
+
+    summary = validate_wav_audio(
+        _wav_bytes([1000, 0, 3000, 0], sample_rate=4),
+        expected_sample_rate=4,
+        max_analysis_seconds=0.25,
+    )
+
+    assert summary.frame_count == 4
+    assert summary.peak == 1000
+
+
+@pytest.mark.unit
 def test_smoke_helper_rejects_silent_wav():
     from Helper_Scripts.TTS_Installers.smoke_test_omnivoice_sidecar import validate_wav_audio
 
@@ -185,7 +267,10 @@ def test_smoke_helper_rejects_invalid_wav_shape(audio_bytes, message):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_smoke_helper_runs_existing_sidecar_adapter_path_and_shuts_down(tmp_path, monkeypatch):
+async def test_smoke_helper_runs_existing_sidecar_adapter_path_and_shuts_down(
+    tmp_path,
+    monkeypatch,
+):
     from Helper_Scripts.TTS_Installers import smoke_test_omnivoice_sidecar as smoke
 
     audio_bytes = _wav_bytes([0, 600, -600, 1200, -1200])
@@ -249,7 +334,93 @@ async def test_smoke_helper_runs_existing_sidecar_adapter_path_and_shuts_down(tm
     assert summary.frame_count == 5
     assert supervisor_instances[0].shutdown_called is True
     assert supervisor_instances[0].repo_root == tmp_path
-    assert supervisor_instances[0].provider_config["extra_params"]["python_path"] == str(config.sidecar_python)
+    assert supervisor_instances[0].provider_config["extra_params"]["python_path"] == str(
+        config.sidecar_python,
+    )
     assert adapter_instances[0].supervisor is supervisor_instances[0]
     assert adapter_instances[0].request.stream is False
     assert adapter_instances[0].request.format is AudioFormat.WAV
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_smoke_helper_preserves_primary_error_when_shutdown_fails(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from Helper_Scripts.TTS_Installers import smoke_test_omnivoice_sidecar as smoke
+
+    class _FailingShutdownSupervisor:
+        def __init__(self, provider_config, repo_root):
+            pass
+
+        async def shutdown(self):
+            raise RuntimeError("shutdown failed")
+
+    class _FailingAdapter:
+        def __init__(self, config):
+            pass
+
+        def set_supervisor(self, supervisor):
+            pass
+
+        async def initialize(self):
+            raise RuntimeError("primary failed")
+
+    monkeypatch.setattr(
+        smoke,
+        "OmniVoiceSidecarSupervisor",
+        _FailingShutdownSupervisor,
+        raising=True,
+    )
+    monkeypatch.setattr(smoke, "OmniVoiceAdapter", _FailingAdapter, raising=True)
+
+    with pytest.raises(RuntimeError, match="primary failed"):
+        await smoke.run_smoke(_valid_smoke_config(tmp_path))
+
+    assert "shutdown failed" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_smoke_helper_reports_shutdown_error_after_success(tmp_path, monkeypatch):
+    from Helper_Scripts.TTS_Installers import smoke_test_omnivoice_sidecar as smoke
+
+    class _FailingShutdownSupervisor:
+        def __init__(self, provider_config, repo_root):
+            pass
+
+        async def shutdown(self):
+            raise RuntimeError("shutdown failed")
+
+    class _SuccessfulAdapter:
+        def __init__(self, config):
+            pass
+
+        def set_supervisor(self, supervisor):
+            pass
+
+        async def initialize(self):
+            return True
+
+        async def generate(self, request):
+            return TTSResponse(
+                audio_data=_wav_bytes([0, 600, -600, 1200, -1200]),
+                format=AudioFormat.WAV,
+                sample_rate=24000,
+                channels=1,
+                provider="omnivoice",
+                model="omnivoice",
+            )
+
+    monkeypatch.setattr(
+        smoke,
+        "OmniVoiceSidecarSupervisor",
+        _FailingShutdownSupervisor,
+        raising=True,
+    )
+    monkeypatch.setattr(smoke, "OmniVoiceAdapter", _SuccessfulAdapter, raising=True)
+
+    with pytest.raises(RuntimeError, match="Failed to shut down OmniVoice sidecar supervisor"):
+        await smoke.run_smoke(_valid_smoke_config(tmp_path))

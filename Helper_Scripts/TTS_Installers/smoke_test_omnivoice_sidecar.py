@@ -10,18 +10,25 @@ from __future__ import annotations
 import argparse
 import asyncio
 import math
+import os
 import sys
 import wave
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Iterator, Optional, Sequence
 
 
 def _bootstrap_repo_root() -> Path:
+    """Find the checkout root and add it to sys.path for direct CLI execution."""
+
     probe = Path(__file__).resolve()
     for candidate in (probe,) + tuple(probe.parents):
-        if (candidate / "pyproject.toml").exists() and (candidate / "tldw_Server_API").is_dir():
+        is_repo_root = (
+            (candidate / "pyproject.toml").exists()
+            and (candidate / "tldw_Server_API").is_dir()
+        )
+        if is_repo_root:
             candidate_str = str(candidate)
             if candidate_str not in sys.path:
                 sys.path.insert(0, candidate_str)
@@ -48,6 +55,7 @@ DEFAULT_TIMEOUT_SECONDS = 180.0
 DEFAULT_HEALTHCHECK_TIMEOUT_SECONDS = 30.0
 DEFAULT_NUM_STEP = 8
 DEFAULT_SPEED = 1.0
+DEFAULT_MAX_ANALYSIS_SECONDS = 10.0
 
 
 @dataclass(frozen=True)
@@ -96,6 +104,8 @@ def resolve_repo_root(start: Optional[Path] = None) -> Path:
 
 
 def _resolve_path(path_value: str | Path, repo_root: Path) -> Path:
+    """Resolve a user path relative to the checkout root."""
+
     candidate = Path(path_value).expanduser()
     if not candidate.is_absolute():
         candidate = repo_root / candidate
@@ -103,6 +113,8 @@ def _resolve_path(path_value: str | Path, repo_root: Path) -> Path:
 
 
 def _resolve_path_preserving_symlink(path_value: str | Path, repo_root: Path) -> Path:
+    """Resolve a user path while preserving the final symlink component."""
+
     candidate = Path(path_value).expanduser()
     if not candidate.is_absolute():
         candidate = repo_root / candidate
@@ -110,32 +122,67 @@ def _resolve_path_preserving_symlink(path_value: str | Path, repo_root: Path) ->
 
 
 def _default_runtime_path(repo_root: Path) -> Path:
+    """Return the default managed sidecar runtime directory."""
+
     return (repo_root / DEFAULT_RUNTIME_BASE / "runtime").resolve(strict=False)
 
 
 def _default_scratch_dir(runtime_path: Path) -> Path:
+    """Return the default sidecar scratch directory."""
+
     return (runtime_path / "scratch").resolve(strict=False)
 
 
 def _default_output_path(runtime_path: Path) -> Path:
+    """Return the default smoke output WAV path."""
+
     return (runtime_path / DEFAULT_OUTPUT_NAME).resolve(strict=False)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     """Parse CLI arguments for the sidecar smoke test."""
 
-    parser = argparse.ArgumentParser(description="Smoke test real OmniVoice audio through the managed sidecar")
+    parser = argparse.ArgumentParser(
+        description="Smoke test real OmniVoice audio through the managed sidecar",
+    )
     parser.add_argument("--model-path", required=True, help="Local OmniVoice model directory")
-    parser.add_argument("--sidecar-python", required=True, help="Python interpreter from the OmniVoice sidecar venv")
-    parser.add_argument("--repo-root", help="Repository root; defaults to the current script checkout")
+    parser.add_argument(
+        "--sidecar-python",
+        required=True,
+        help="Python interpreter from the OmniVoice sidecar venv",
+    )
+    parser.add_argument(
+        "--repo-root",
+        help="Repository root; defaults to the current script checkout",
+    )
     parser.add_argument("--runtime-path", help="Managed sidecar runtime directory")
     parser.add_argument("--scratch-dir", help="Managed scratch/reference directory")
     parser.add_argument("--output", help="Output WAV file path")
     parser.add_argument("--text", default=DEFAULT_TEXT, help="Text to synthesize")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Starting loopback port for the sidecar")
-    parser.add_argument("--num-step", type=int, default=DEFAULT_NUM_STEP, help="OmniVoice generation num_step")
-    parser.add_argument("--speed", type=float, default=DEFAULT_SPEED, help="OmniVoice generation speed")
-    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS, help="Synthesis timeout in seconds")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help="Starting loopback port for the sidecar",
+    )
+    parser.add_argument(
+        "--num-step",
+        type=int,
+        default=DEFAULT_NUM_STEP,
+        help="OmniVoice generation num_step",
+    )
+    parser.add_argument(
+        "--speed",
+        type=float,
+        default=DEFAULT_SPEED,
+        help="OmniVoice generation speed",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help="Synthesis timeout in seconds",
+    )
     return parser.parse_args(argv)
 
 
@@ -179,11 +226,21 @@ def validate_smoke_config(config: OmniVoiceSmokeConfig) -> None:
     if not config.model_path.is_dir():
         raise ValueError(f"OmniVoice model path is not a directory: {config.model_path}")
     if not config.sidecar_python.is_file():
-        raise ValueError(f"OmniVoice sidecar Python interpreter does not exist: {config.sidecar_python}")
+        raise ValueError(
+            f"OmniVoice sidecar Python interpreter does not exist: {config.sidecar_python}",
+        )
+    if not os.access(config.sidecar_python, os.X_OK):
+        raise ValueError(
+            f"OmniVoice sidecar Python interpreter is not executable: {config.sidecar_python}",
+        )
     if config.port <= 0 or config.port > 65535:
         raise ValueError(f"OmniVoice sidecar port must be between 1 and 65535: {config.port}")
     if config.timeout <= 0:
         raise ValueError("OmniVoice sidecar smoke timeout must be positive")
+    if config.speed <= 0:
+        raise ValueError(f"OmniVoice sidecar smoke speed must be positive: {config.speed}")
+    if config.num_step is not None and config.num_step <= 0:
+        raise ValueError(f"OmniVoice sidecar smoke num_step must be positive: {config.num_step}")
     if not config.text.strip():
         raise ValueError("OmniVoice sidecar smoke text must not be empty")
 
@@ -249,7 +306,9 @@ def build_tts_request(
     )
 
 
-def _iter_pcm_samples(frames: bytes, sample_width: int):
+def _iter_pcm_samples(frames: bytes, sample_width: int) -> Iterator[int]:
+    """Yield signed PCM samples from a WAV frame buffer."""
+
     if sample_width == 1:
         for value in frames:
             yield value - 128
@@ -270,11 +329,14 @@ def validate_wav_audio(
     expected_sample_rate: int = DEFAULT_SAMPLE_RATE,
     expected_channels: int = 1,
     min_rms: float = 1.0,
+    max_analysis_seconds: float = DEFAULT_MAX_ANALYSIS_SECONDS,
 ) -> WavAudioSummary:
     """Validate parseable, mono, non-silent WAV audio."""
 
     if not audio_bytes:
         raise ValueError("OmniVoice sidecar returned empty audio")
+    if max_analysis_seconds <= 0:
+        raise ValueError("OmniVoice WAV analysis window must be positive")
 
     try:
         with wave.open(BytesIO(audio_bytes), "rb") as wav_file:
@@ -282,7 +344,11 @@ def validate_wav_audio(
             sample_width = wav_file.getsampwidth()
             sample_rate = wav_file.getframerate()
             frame_count = wav_file.getnframes()
-            frames = wav_file.readframes(frame_count)
+            analysis_frame_count = min(
+                frame_count,
+                max(1, int(sample_rate * max_analysis_seconds)),
+            )
+            frames = wav_file.readframes(analysis_frame_count)
     except (EOFError, wave.Error) as exc:
         raise ValueError("OmniVoice sidecar output is not a parseable WAV file") from exc
 
@@ -336,6 +402,7 @@ async def run_smoke(config: OmniVoiceSmokeConfig) -> WavAudioSummary:
     adapter = OmniVoiceAdapter(provider_config)
     adapter.set_supervisor(supervisor)
 
+    primary_exception: BaseException | None = None
     try:
         initialized = await adapter.initialize()
         if not initialized:
@@ -348,8 +415,22 @@ async def run_smoke(config: OmniVoiceSmokeConfig) -> WavAudioSummary:
         config.output_path.parent.mkdir(parents=True, exist_ok=True)
         config.output_path.write_bytes(audio_bytes)
         return summary
+    except BaseException as exc:
+        primary_exception = exc
+        raise
     finally:
-        await supervisor.shutdown()
+        try:
+            await supervisor.shutdown()
+        except Exception as shutdown_exc:
+            if primary_exception is None:
+                raise RuntimeError(
+                    "Failed to shut down OmniVoice sidecar supervisor",
+                ) from shutdown_exc
+            print(
+                f"Warning: failed to shut down OmniVoice sidecar supervisor after "
+                f"smoke failure: {shutdown_exc}",
+                file=sys.stderr,
+            )
 
 
 def format_summary(config: OmniVoiceSmokeConfig, summary: WavAudioSummary) -> str:
