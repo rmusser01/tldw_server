@@ -1,5 +1,11 @@
 # Main /chat True Cockpit Controls Gap Design
 
+## Closeout Status - 2026-05-23
+
+This gap design is closed as the originating specification for the main WebUI `/chat` cockpit work. It stayed scoped to the main `/chat` route, excluded browser-extension sidepanel/sidebar work, separated parity gaps from true cockpit-control completion, and defined the component plus real-server verification bar.
+
+The work continued through the first-slice plan and implementation, the mature rail completion design, the P-series completion tracker, and merge certification. PR #1582 merged into `dev` at `ef1390857fee0e322f26756f7f1da48115373272`. Later post-merge UX maturity planning is tracked in `Docs/superpowers/specs/2026-05-15-main-chat-cockpit-maturity-roadmap-design.md`; do not treat this historical gap spec as the active backlog for additional `/chat` cockpit enhancements.
+
 ## Scope
 
 This spec covers only the main WebUI `/chat` page, routed through `apps/tldw-frontend/pages/chat/index.tsx` into the shared `Playground` surface. It explicitly excludes the browser-extension sidepanel, sidepanel sidebar, settings pages, onboarding, character library pages, backend API design, MCP Hub, evaluations, media ingestion, and repo-wide architecture unless a point directly affects the main `/chat` user experience.
