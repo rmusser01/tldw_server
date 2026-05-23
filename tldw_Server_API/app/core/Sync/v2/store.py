@@ -302,6 +302,23 @@ class SyncV2Store:
     def complete_blob_upload(self, blob: SyncBlobObjectCreate) -> SyncBlobObject:
         return self.db.complete_blob_upload(blob)
 
+    def get_blob_object(
+        self,
+        dataset_id: str,
+        *,
+        attachment_id: str | None = None,
+        blob_id: str | None = None,
+        payload_hash: str | None = None,
+        owner_user_id: str | None = None,
+    ) -> SyncBlobObject | None:
+        return self.db.get_blob_object(
+            dataset_id,
+            attachment_id=attachment_id,
+            blob_id=blob_id,
+            payload_hash=payload_hash,
+            owner_user_id=owner_user_id,
+        )
+
     def summarize_blob_quota(
         self,
         owner_user_id: str,

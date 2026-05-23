@@ -3084,6 +3084,169 @@ def test_store_attachment_uses_blob_upload_commit_path_for_small_blobs(
     assert quota.used_blob_bytes == len(payload)
 
 
+def test_blob_download_manifest_and_bytes_for_available_blob(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+    tmp_path: Path,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
+        settings=SyncV2Settings(
+            supports_attachments=True,
+            max_attachment_bytes=64,
+            max_blob_bytes=64,
+            max_chunk_bytes=8,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    payload = b"downloadable payload"
+    service.store_attachment(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domain="notes.note",
+        entity_id="note-1",
+        attachment_id="attachment-download",
+        content_type="application/octet-stream",
+        size_bytes=len(payload),
+        payload_ciphertext=payload.decode("utf-8"),
+        payload_hash=_sha256(payload),
+    )
+
+    manifest = service.blob_download_manifest(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        attachment_id="attachment-download",
+        chunk_size=8,
+    )
+    body = service.read_blob_bytes(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        attachment_id="attachment-download",
+        offset=5,
+        size=8,
+    )
+
+    assert manifest.availability == "available"
+    assert manifest.size_bytes == len(payload)
+    assert manifest.payload_hash == _sha256(payload)
+    assert [chunk.chunk_index for chunk in manifest.chunks] == [0, 1, 2]
+    assert manifest.chunks[0].chunk_hash == _sha256(payload[:8])
+    assert body == payload[5:13]
+
+
+def test_blob_download_manifest_reports_metadata_only_attachment_ref(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+    tmp_path: Path,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
+        settings=SyncV2Settings(
+            supports_attachments=True,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(
+                client_envelope_id="attachment-ref",
+                domain="attachment.ref",
+                entity_id="attachment-meta",
+                stable_key="attachment:meta",
+                payload_hash=_sha256(b"metadata-only"),
+                payload={
+                    "attachment_id": "attachment-meta",
+                    "parent_domain": "notes.note",
+                    "parent_object_id": "note-1",
+                    "content_type": "text/plain",
+                    "size_bytes": 13,
+                    "payload_hash": _sha256(b"metadata-only"),
+                    "availability": "metadata_only",
+                },
+            )
+        ],
+    )
+
+    manifest = service.blob_download_manifest(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        attachment_id="attachment-meta",
+    )
+
+    assert manifest.availability == "metadata_only"
+    assert manifest.content_type == "text/plain"
+    assert manifest.chunks == []
+
+
+def test_blob_download_rejects_missing_and_cross_user_blob(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+    tmp_path: Path,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
+        settings=SyncV2Settings(
+            supports_attachments=True,
+            max_attachment_bytes=64,
+            max_blob_bytes=64,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.register_device(
+        user_id="user-2",
+        device_id="device-2",
+        display_name="Other",
+        client_type="chatbook",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    service.enroll_dataset(user_id="user-2", dataset_id="dataset-2", domains=["notes.note", "attachment.ref"])
+    payload = b"private payload"
+    service.store_attachment(
+        user_id="user-2",
+        dataset_id="dataset-2",
+        domain="notes.note",
+        entity_id="note-2",
+        attachment_id="attachment-private",
+        content_type="application/octet-stream",
+        size_bytes=len(payload),
+        payload_ciphertext=payload.decode("utf-8"),
+        payload_hash=_sha256(payload),
+    )
+
+    with pytest.raises(SyncStoreError, match="not found|not accessible"):
+        service.blob_download_manifest(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            attachment_id="missing",
+        )
+    with pytest.raises(SyncStoreError, match="not found|not accessible"):
+        service.read_blob_bytes(
+            user_id="user-1",
+            dataset_id="dataset-2",
+            attachment_id="attachment-private",
+        )
+
+
 def test_store_attachment_rejects_blob_transfer_in_m1(
     sync_service: SyncV2Service,
 ):

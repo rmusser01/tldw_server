@@ -567,6 +567,21 @@ class SyncBlobDownloadChunk:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncBlobDownloadManifest:
+    """Core manifest describing resumable Sync v2 M2 blob download availability."""
+
+    dataset_id: str
+    attachment_id: str
+    availability: SyncBlobAvailabilityStatus
+    content_type: str
+    size_bytes: int
+    payload_hash: str
+    chunks: list[SyncBlobDownloadChunk] = field(default_factory=list)
+    blob_id: str | None = None
+    expires_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SyncRestoreDomainCompleteness:
     """Per-domain restore completeness counters for Sync v2 M2."""
 
@@ -624,6 +639,7 @@ __all__ = [
     "SyncBlobChunk",
     "SyncBlobChunkCreate",
     "SyncBlobDownloadChunk",
+    "SyncBlobDownloadManifest",
     "SyncBlobObject",
     "SyncBlobObjectCreate",
     "SyncBlobQuotaUsage",

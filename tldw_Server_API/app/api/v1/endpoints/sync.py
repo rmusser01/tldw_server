@@ -15,6 +15,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     status,
 )
 from loguru import logger
@@ -29,6 +30,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncAttachmentUploadRequest,
     SyncAttachmentUploadResponse,
     SyncBlobChunkUploadResponse,
+    SyncBlobDownloadManifestResponse,
     SyncBlobUploadCompleteResponse,
     SyncBlobUploadCreateRequest,
     SyncBlobUploadSessionResponse,
@@ -1030,20 +1032,73 @@ async def upload_sync_v2_attachment(
 
 
 @router.get(
+    "/attachments/{attachment_id}/manifest",
+    response_model=SyncBlobDownloadManifestResponse,
+    summary="Return a Sync v2 M2 attachment blob download manifest",
+)
+def get_sync_v2_attachment_download_manifest(
+    attachment_id: str,
+    dataset_id: str = Query(...),
+    chunk_size: int | None = Query(None, ge=1),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        manifest = service.blob_download_manifest(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            attachment_id=attachment_id,
+            chunk_size=chunk_size,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            attachment_id=attachment_id,
+        ) from exc
+    return SyncBlobDownloadManifestResponse.model_validate(asdict(manifest))
+
+
+@router.get(
     "/attachments/{attachment_id}",
     summary="Download a Sync v2 attachment blob",
 )
 def download_sync_v2_attachment(
     attachment_id: str,
     dataset_id: str = Query(...),
+    offset: int = Query(0, ge=0),
+    size: int | None = Query(None, ge=1),
     user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
 ):
-    del user, dataset_id, attachment_id
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "error_code": "sync_blob_transfer_not_supported",
-            "message": "Sync v2 M1 does not support binary blob transfer.",
+    try:
+        manifest = service.blob_download_manifest(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            attachment_id=attachment_id,
+            chunk_size=size,
+        )
+        payload = service.read_blob_bytes(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            attachment_id=attachment_id,
+            offset=offset,
+            size=size,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            attachment_id=attachment_id,
+        ) from exc
+    return Response(
+        content=payload,
+        media_type=manifest.content_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "X-Sync-Payload-Hash": manifest.payload_hash,
         },
     )
 

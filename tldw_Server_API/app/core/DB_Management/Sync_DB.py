@@ -2942,6 +2942,60 @@ class SyncDatabase:
                 )
             return _blob_object_from_row(row)
 
+    def get_blob_object(
+        self,
+        dataset_id: str,
+        *,
+        attachment_id: str | None = None,
+        blob_id: str | None = None,
+        payload_hash: str | None = None,
+        owner_user_id: str | None = None,
+    ) -> SyncBlobObject | None:
+        """Return an available blob object scoped by dataset and optional identity filters."""
+
+        self._require_dataset(dataset_id)
+        row = _first(
+            self.execute(
+                """
+                SELECT *
+                  FROM sync_blob_objects
+                 WHERE dataset_id = ?
+                   AND status = 'available'
+                   AND (? IS NULL OR owner_user_id = ?)
+                   AND (? IS NULL OR blob_id = ?)
+                   AND (? IS NULL OR payload_hash = ?)
+                   AND (
+                        ? IS NULL
+                        OR attachment_id = ?
+                        OR payload_hash IN (
+                            SELECT payload_hash
+                              FROM sync_attachments
+                             WHERE dataset_id = ?
+                               AND attachment_id = ?
+                        )
+                   )
+                 ORDER BY updated_at DESC, blob_id ASC
+                 LIMIT 1
+                """,
+                (
+                    dataset_id,
+                    owner_user_id,
+                    owner_user_id,
+                    blob_id,
+                    blob_id,
+                    payload_hash,
+                    payload_hash,
+                    attachment_id,
+                    attachment_id,
+                    dataset_id,
+                    attachment_id,
+                ),
+            )
+        )
+        if row is None:
+            return None
+        return _blob_object_from_row(row)
+
     def summarize_blob_quota(
         self,
         owner_user_id: str,

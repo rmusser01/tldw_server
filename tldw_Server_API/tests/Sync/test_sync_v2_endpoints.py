@@ -725,3 +725,79 @@ def test_small_attachment_endpoint_uses_blob_commit_path(
     assert body["stored"] is True
     assert body["payload_hash"] == _sha256(payload)
     assert quota.used_blob_bytes == len(payload)
+
+
+def test_attachment_download_manifest_and_byte_serving_are_dataset_scoped(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    id_counter = {"value": 0}
+
+    def next_id(prefix: str) -> str:
+        id_counter["value"] += 1
+        return f"{prefix}-{id_counter['value']}"
+
+    service.id_factory = next_id
+    client = _client_for_service(service)
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+    )
+    service.register_device(
+        user_id="user-2",
+        device_id="device-2",
+        display_name="Other",
+        client_type="chatbook",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    service.enroll_dataset(user_id="user-2", dataset_id="dataset-2", domains=["notes.note", "attachment.ref"])
+    payload = b"downloadable payload"
+    service.store_attachment(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domain="notes.note",
+        entity_id="note-1",
+        attachment_id="attachment-download",
+        content_type="application/octet-stream",
+        size_bytes=len(payload),
+        payload_ciphertext=payload.decode("utf-8"),
+        payload_hash=_sha256(payload),
+    )
+    private_payload = b"private payload"
+    service.store_attachment(
+        user_id="user-2",
+        dataset_id="dataset-2",
+        domain="notes.note",
+        entity_id="note-2",
+        attachment_id="attachment-private",
+        content_type="application/octet-stream",
+        size_bytes=len(private_payload),
+        payload_ciphertext=private_payload.decode("utf-8"),
+        payload_hash=_sha256(private_payload),
+    )
+
+    manifest_response = client.get(
+        "/api/v1/sync/attachments/attachment-download/manifest",
+        params={"dataset_id": "dataset-1", "chunk_size": 8},
+    )
+    bytes_response = client.get(
+        "/api/v1/sync/attachments/attachment-download",
+        params={"dataset_id": "dataset-1", "offset": 5, "size": 8},
+    )
+    forbidden_response = client.get(
+        "/api/v1/sync/attachments/attachment-private",
+        params={"dataset_id": "dataset-2"},
+    )
+
+    assert manifest_response.status_code == 200
+    manifest = manifest_response.json()
+    assert manifest["availability"] == "available"
+    assert manifest["payload_hash"] == _sha256(payload)
+    assert [chunk["chunk_index"] for chunk in manifest["chunks"]] == [0, 1, 2]
+    assert manifest["chunks"][0]["chunk_hash"] == _sha256(payload[:8])
+    assert bytes_response.status_code == 200
+    assert bytes_response.content == payload[5:13]
+    assert bytes_response.headers["content-type"] == "application/octet-stream"
+    assert forbidden_response.status_code == 404
