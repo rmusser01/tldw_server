@@ -51,6 +51,9 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncKeyRecoveryBundleListResponse,
     SyncKeyRecoveryBundleRequest,
     SyncKeyRecoveryBundleRecord,
+    SyncProfileBootstrapRequest,
+    SyncProfileBootstrapResponse,
+    SyncProfileResponse,
     SyncPullResponse,
     SyncPushAcceptedEnvelope,
     SyncPushConflictEnvelope,
@@ -78,9 +81,13 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
 )
 from tldw_Server_API.app.core.Sync.v2.factory import (
     default_sync_v2_registry,
+    sync_v2_storage_exists_for_user,
     sync_v2_service_for_user,
 )
 from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate
+from tldw_Server_API.app.core.Sync.v2.security import (
+    server_trusted_encryption_status_from_env,
+)
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
@@ -186,6 +193,17 @@ def get_sync_v2_service(
     return sync_v2_service_for_user(_sync_user_id(user))
 
 
+def get_sync_v2_profile_service(
+    user: User = Depends(get_request_user),
+) -> SyncV2Service | None:
+    """Build a profile service only when Sync v2 storage already exists."""
+
+    user_id = _sync_user_id(user)
+    if not sync_v2_storage_exists_for_user(user_id):
+        return None
+    return sync_v2_service_for_user(user_id)
+
+
 def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException:
     safe_context = {
         key: value
@@ -213,6 +231,17 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        if "sync_encryption_attestation_required" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail={
+                    "error_code": "sync_encryption_attestation_required",
+                    "message": (
+                        "Sync v2 M1 requires deployment-level at-rest encryption "
+                        "coverage before profile bootstrap or dataset enrollment."
+                    ),
+                },
+            )
         if "attachment payload exceeds" in lowered:
             return HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -226,6 +255,10 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
             or "page_size" in lowered
             or "resolution envelope" in lowered
             or "payload exceeds" in lowered
+            or "bootstrap mode" in lowered
+            or "requested unsupported domains" in lowered
+            or "client_family" in lowered
+            or "client_profile_id" in lowered
         ):
             return HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -308,6 +341,40 @@ def _api_capabilities_from_core(capabilities: Any) -> SyncCapabilitiesResponse:
     return SyncCapabilitiesResponse(**asdict(capabilities))
 
 
+def _api_profile_from_core(profile: Any) -> SyncProfileResponse:
+    return SyncProfileResponse(**asdict(profile))
+
+
+def _api_bootstrap_profile_from_core(profile: Any) -> SyncProfileBootstrapResponse:
+    return SyncProfileBootstrapResponse(**asdict(profile))
+
+
+def _api_empty_profile(user_id: str, device_id: str | None) -> SyncProfileResponse:
+    encryption_status = server_trusted_encryption_status_from_env()
+    device = None
+    if device_id is not None:
+        device = {
+            "device_id": device_id,
+            "registered": False,
+        }
+    return SyncProfileResponse(
+        protocol_version="sync-v2-m1",
+        min_supported_protocol_version="sync-v2-m1",
+        profile_bootstrapped=False,
+        user_id=user_id,
+        active_dataset_id=None,
+        device=device,
+        dataset=None,
+        server_cursor=0,
+        capabilities=SyncCapabilitiesResponse(
+            encryption=encryption_status.encryption,
+            warnings=encryption_status.warnings,
+        ),
+        domain_status=[],
+        warnings=list(encryption_status.warnings),
+    )
+
+
 def _api_key_record_metadata(record: Any) -> dict[str, Any]:
     return {
         "key_record_id": record.key_record_id,
@@ -344,6 +411,64 @@ def get_sync_v2_capabilities(
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
     return _api_capabilities_from_core(service.capabilities())
+
+
+@router.get(
+    "/profile",
+    response_model=SyncProfileResponse,
+    summary="Return Sync v2 M1 profile state",
+)
+def get_sync_v2_profile(
+    device_id: str | None = Query(None),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service | None = Depends(get_sync_v2_profile_service),
+):
+    user_id = _sync_user_id(user)
+    if service is None:
+        return _api_empty_profile(user_id, device_id)
+    try:
+        profile = service.profile(
+            user_id=user_id,
+            device_id=device_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=user_id,
+            device_id=device_id,
+        ) from exc
+    return _api_profile_from_core(profile)
+
+
+@router.post(
+    "/profile/bootstrap",
+    response_model=SyncProfileBootstrapResponse,
+    summary="Bootstrap a Sync v2 M1 Chatbook profile",
+)
+def bootstrap_sync_v2_profile(
+    request: SyncProfileBootstrapRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        profile = service.bootstrap_profile(
+            user_id=_sync_user_id(user),
+            mode=request.mode,
+            device_id=request.device_id,
+            device_name=request.device_name,
+            client_profile_id=request.client_profile_id,
+            client_family=request.client_family,
+            client_instance=request.client_instance,
+            requested_domains=request.requested_domains,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            device_id=request.device_id,
+            mode=request.mode,
+        ) from exc
+    return _api_bootstrap_profile_from_core(profile)
 
 
 @router.post(

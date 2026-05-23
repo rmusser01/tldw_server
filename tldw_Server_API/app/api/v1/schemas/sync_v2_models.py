@@ -13,6 +13,7 @@ DatasetScopeType = Literal["personal", "workspace"]
 EncryptionPolicy = Literal["server_trusted_v1"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
 ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
+SyncProfileBootstrapMode = Literal["server_frontend", "offline_sync"]
 
 M1_SYNC_DOMAINS: list[SyncDomain] = [
     "notes.note",
@@ -92,6 +93,7 @@ class SyncCapabilitiesResponse(BaseModel):
     """Server-supported Sync v2 M1 protocol capabilities."""
 
     protocol_version: str = "sync-v2-m1"
+    min_supported_protocol_version: str = "sync-v2-m1"
     domains: list[SyncDomain] = Field(
         default_factory=lambda: list(M1_SYNC_DOMAINS),
         validation_alias=AliasChoices("domains", "supported_domains"),
@@ -109,8 +111,9 @@ class SyncCapabilitiesResponse(BaseModel):
     supports_attachments: bool = False
     compatibility_flags: dict[str, bool] = Field(default_factory=dict)
     server_time: str | None = None
+    warnings: list[dict[str, str]] = Field(default_factory=list)
 
-    @field_validator("protocol_version", mode="before")
+    @field_validator("protocol_version", "min_supported_protocol_version", mode="before")
     @classmethod
     def _normalize_protocol_version(cls, value: Any) -> str:
         if value in (None, 2, "2"):
@@ -181,6 +184,79 @@ class SyncDatasetEnrollResponse(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SyncProfileDeviceStatusResponse(BaseModel):
+    """Device registration status in profile responses."""
+
+    device_id: str | None = None
+    registered: bool = False
+    client_profile_id: str | None = None
+    last_seen_at: str | None = None
+    mode: SyncProfileBootstrapMode | None = None
+    client_type: str | None = None
+    client_version: str | None = None
+
+
+class SyncProfileDatasetStatusResponse(BaseModel):
+    """Default personal dataset metadata in profile responses."""
+
+    dataset_id: str
+    scope: DatasetScopeType
+    default_personal: bool
+    client_family: str | None = None
+    domains: list[SyncDomain] = Field(default_factory=list)
+    created_at: str | None = None
+    updated_at: str | None = None
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+
+
+class SyncProfileDomainStatusResponse(BaseModel):
+    """Per-domain Sync v2 M1 status summary."""
+
+    domain: SyncDomain
+    last_server_cursor: int = Field(0, ge=0)
+    envelope_count: int = Field(0, ge=0)
+    pending_apply_count: int = Field(0, ge=0)
+    pending_apply: int = Field(0, ge=0)
+    failed_apply_count: int = Field(0, ge=0)
+    unresolved_conflicts: int = Field(0, ge=0)
+    last_apply_status: str | None = None
+    last_apply_result: dict[str, Any] = Field(default_factory=dict)
+
+
+class SyncProfileResponse(BaseModel):
+    """Read-only Sync v2 M1 profile/status response."""
+
+    protocol_version: str = "sync-v2-m1"
+    min_supported_protocol_version: str = "sync-v2-m1"
+    profile_bootstrapped: bool
+    user_id: str
+    active_dataset_id: str | None = None
+    device: SyncProfileDeviceStatusResponse | None = None
+    dataset: SyncProfileDatasetStatusResponse | None = None
+    server_cursor: int = Field(0, ge=0)
+    capabilities: SyncCapabilitiesResponse = Field(default_factory=SyncCapabilitiesResponse)
+    domain_status: list[SyncProfileDomainStatusResponse] = Field(default_factory=list)
+    warnings: list[dict[str, str]] = Field(default_factory=list)
+
+
+class SyncProfileBootstrapRequest(BaseModel):
+    """Request to bootstrap a server-connected Chatbook profile."""
+
+    client_family: str = "chatbook"
+    mode: SyncProfileBootstrapMode
+    device_id: str | None = None
+    device_name: str | None = None
+    client_profile_id: str | None = None
+    client_instance: dict[str, Any] = Field(default_factory=dict)
+    requested_domains: list[SyncDomain] = Field(default_factory=lambda: list(M1_SYNC_DOMAINS))
+
+
+class SyncProfileBootstrapResponse(SyncProfileResponse):
+    """Response from explicit profile bootstrap."""
+
+    created: bool = False
 
 
 class SyncRestoreManifestDataset(BaseModel):
@@ -634,6 +710,13 @@ __all__ = [
     "SyncKeyRecoveryBundleRequest",
     "SyncKeyRecoveryBundleRecord",
     "SyncOperation",
+    "SyncProfileBootstrapMode",
+    "SyncProfileBootstrapRequest",
+    "SyncProfileBootstrapResponse",
+    "SyncProfileDatasetStatusResponse",
+    "SyncProfileDeviceStatusResponse",
+    "SyncProfileDomainStatusResponse",
+    "SyncProfileResponse",
     "SyncPullResponse",
     "SyncPushAcceptedEnvelope",
     "SyncPushConflictEnvelope",

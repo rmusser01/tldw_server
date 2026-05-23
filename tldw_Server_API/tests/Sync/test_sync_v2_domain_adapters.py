@@ -9,6 +9,7 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import (
     AdapterAccepted,
     AdapterConflict,
+    StaticSyncAdapter,
     SyncAdapterContext,
     SyncAdapterRegistry,
 )
@@ -18,8 +19,16 @@ from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaCompatib
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.source_cache import SourceCacheAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.workspaces import WorkspacesDomainAdapter
-from tldw_Server_API.app.core.Sync.v2.models import SyncDataset, SyncEnvelope, SyncEnvelopeCreate
-from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
+from tldw_Server_API.app.core.Sync.v2.models import (
+    M1_SYNC_DOMAINS,
+    SyncDataset,
+    SyncEnvelope,
+    SyncEnvelopeCreate,
+)
+from tldw_Server_API.app.core.Sync.v2.security import (
+    server_trusted_encryption_status_from_config,
+)
+from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
 
@@ -106,6 +115,16 @@ def _domain_payload(domain: str) -> dict[str, object]:
             "payload_hash": "content-a",
         }
     return {"entity_kind": domain.rstrip("s")}
+
+
+def _ready_sync_settings() -> SyncV2Settings:
+    return SyncV2Settings(
+        server_trusted_encryption=server_trusted_encryption_status_from_config(
+            mode="encrypted_volume",
+            server_trusted_enabled=True,
+            auth_mode="multi_user",
+        )
+    )
 
 
 def test_notes_adapter_accepts_metadata_only_tag_status_merge():
@@ -699,11 +718,12 @@ def test_source_cache_adapter_conflicts_same_source_content_hash_with_different_
 
 
 def test_service_persists_domain_adapter_conflicts(tmp_path: Path):
-    registry = SyncAdapterRegistry([ChatDomainAdapter()])
+    registry = SyncAdapterRegistry([ChatDomainAdapter(domain="chat.message")])
     service = SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_domain_adapters.db")),
         adapters=registry,
         id_factory=lambda prefix: f"{prefix}-generated",
+        settings=_ready_sync_settings(),
     )
     service.register_device(
         user_id="user-1",
@@ -711,7 +731,11 @@ def test_service_persists_domain_adapter_conflicts(tmp_path: Path):
         client_type="chatbook",
         device_id="device-1",
     )
-    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["chat"])
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["chat.message"],
+    )
 
     accepted = service.push(
         user_id="user-1",
@@ -720,7 +744,8 @@ def test_service_persists_domain_adapter_conflicts(tmp_path: Path):
         envelopes=[
             _envelope(
                 client_envelope_id="message-a",
-                domain="chat",
+                domain="chat.message",
+                operation="append",
                 entity_id="message-1",
                 stable_key="chat_message:message-1",
                 routing_metadata={"entity_kind": "message"},
@@ -736,7 +761,8 @@ def test_service_persists_domain_adapter_conflicts(tmp_path: Path):
         envelopes=[
             _envelope(
                 client_envelope_id="message-b",
-                domain="chat",
+                domain="chat.message",
+                operation="append",
                 entity_id="message-1",
                 stable_key="chat_message:message-1",
                 routing_metadata={"entity_kind": "message"},
@@ -753,11 +779,11 @@ def test_service_persists_domain_adapter_conflicts(tmp_path: Path):
     assert conflicts[0].local_envelope_id == "message-b"
 
 
-def test_default_sync_v2_registry_uses_concrete_v1_domain_adapters():
+def test_default_sync_v2_registry_advertises_only_m1_domains():
     registry = sync_endpoint._default_sync_v2_registry()
 
-    assert isinstance(registry.get("notes"), NotesDomainAdapter)
-    assert isinstance(registry.get("chat"), ChatDomainAdapter)
-    assert isinstance(registry.get("workspaces"), WorkspacesDomainAdapter)
-    assert isinstance(registry.get("source_cache"), SourceCacheAdapter)
-    assert isinstance(registry.get("media"), MediaCompatibilityAdapter)
+    assert registry.supported_domains == sorted(M1_SYNC_DOMAINS)
+    for domain in M1_SYNC_DOMAINS:
+        assert isinstance(registry.get(domain), StaticSyncAdapter)
+    with pytest.raises(KeyError):
+        registry.get("media")

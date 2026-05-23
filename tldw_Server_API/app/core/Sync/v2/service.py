@@ -25,7 +25,10 @@ from .errors import (
 )
 from .models import (
     ConflictStatus,
+    DEFAULT_M1_ENCRYPTION_POLICY,
     EncryptionPolicy,
+    M1_SYNC_DOMAINS,
+    M1_SYNC_OPERATIONS,
     SyncAttachment,
     SyncAttachmentCreate,
     SyncConflict,
@@ -40,8 +43,15 @@ from .models import (
     SyncEnvelopeCreate,
     SyncKeyRecord,
     SyncKeyRecordCreate,
+    SyncOperation,
 )
-from .security import PrivatePayloadValidationError, validate_private_payload
+from .profile import SyncProfileStatus, SyncV2ProfileManager
+from .security import (
+    PrivatePayloadValidationError,
+    SyncV2ServerTrustedEncryptionStatus,
+    server_trusted_encryption_status_from_env,
+    validate_private_payload,
+)
 from .store import SyncV2Store
 
 
@@ -49,28 +59,37 @@ from .store import SyncV2Store
 class SyncV2Settings:
     """Server settings surfaced through Sync v2 capabilities."""
 
-    protocol_version: int = 2
-    min_supported_protocol_version: int = 2
+    protocol_version: str = "sync-v2-m1"
+    min_supported_protocol_version: str = "sync-v2-m1"
     max_batch_size: int = 100
     max_pull_page_size: int = 100
     max_envelope_payload_bytes: int = 262_144
     max_attachment_bytes: int = 1_048_576
-    supports_attachments: bool = True
+    supports_attachments: bool = False
+    supported_domains: list[SyncDomain] = field(default_factory=lambda: list(M1_SYNC_DOMAINS))
+    operations: dict[SyncDomain, list[SyncOperation]] = field(
+        default_factory=lambda: {
+            domain: list(operations)
+            for domain, operations in M1_SYNC_OPERATIONS.items()
+        }
+    )
     encryption_policies: list[EncryptionPolicy] = field(
-        default_factory=lambda: [
-            "client_private_v1",
-            "server_trusted",
-            "shared_workspace_v1",
-        ]
+        default_factory=lambda: [DEFAULT_M1_ENCRYPTION_POLICY]
+    )
+    server_trusted_encryption: SyncV2ServerTrustedEncryptionStatus = field(
+        default_factory=server_trusted_encryption_status_from_env
     )
     restore_manifest_scan_limit: int = 10_000
 
 
 @dataclass(frozen=True, slots=True)
 class SyncV2Capabilities:
-    protocol_version: int
-    min_supported_protocol_version: int
+    protocol_version: str
+    min_supported_protocol_version: str
     supported_domains: list[SyncDomain]
+    operations: dict[SyncDomain, list[SyncOperation]]
+    encryption: dict[str, object]
+    blob_transfer: dict[str, bool]
     encryption_policies: list[EncryptionPolicy]
     max_batch_size: int
     max_envelope_payload_bytes: int
@@ -79,6 +98,7 @@ class SyncV2Capabilities:
     supports_conflicts: bool = True
     supports_attachments: bool = True
     server_time: str | None = None
+    warnings: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,13 +216,20 @@ class SyncV2Service:
         return SyncV2Capabilities(
             protocol_version=self.settings.protocol_version,
             min_supported_protocol_version=self.settings.min_supported_protocol_version,
-            supported_domains=self.adapters.supported_domains,
+            supported_domains=list(self.settings.supported_domains),
+            operations={
+                domain: list(operations)
+                for domain, operations in self.settings.operations.items()
+            },
+            encryption=self.settings.server_trusted_encryption.encryption,
+            blob_transfer={"supported": False},
             encryption_policies=list(self.settings.encryption_policies),
             max_batch_size=self.settings.max_batch_size,
             max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
             max_attachment_bytes=self.settings.max_attachment_bytes,
             supports_attachments=self.settings.supports_attachments,
             server_time=self.clock() or None,
+            warnings=self.settings.server_trusted_encryption.warnings,
         )
 
     def register_device(
@@ -234,11 +261,12 @@ class SyncV2Service:
         dataset_id: str | None = None,
         scope_type: str = "personal",
         domains: Sequence[SyncDomain] | None = None,
-        encryption_policy: EncryptionPolicy = "client_private_v1",
+        encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY,
         workspace_id: str | None = None,
         metadata: dict[str, object] | None = None,
     ) -> SyncDatasetEnrollment:
-        enrolled_domains = list(domains or self.adapters.supported_domains)
+        self._require_server_trusted_encryption_ready()
+        enrolled_domains = list(domains or self.settings.supported_domains)
         dataset = self.store.enroll_dataset(
             SyncDatasetCreate(
                 dataset_id=dataset_id or self.id_factory("dataset"),
@@ -253,7 +281,59 @@ class SyncV2Service:
         return SyncDatasetEnrollment(
             dataset=dataset,
             cursors={domain: "0" for domain in dataset.domains},
-            key_setup_required=dataset.encryption_policy == "client_private_v1",
+            key_setup_required=False,
+        )
+
+    def profile(
+        self,
+        *,
+        user_id: str,
+        device_id: str | None = None,
+    ) -> SyncProfileStatus:
+        """Return current profile state without creating sync records."""
+
+        return self._profile_manager().profile(user_id=user_id, device_id=device_id)
+
+    def bootstrap_profile(
+        self,
+        *,
+        user_id: str,
+        mode: str,
+        device_id: str | None = None,
+        device_name: str | None = None,
+        client_profile_id: str | None = None,
+        client_family: str = "chatbook",
+        client_version: str | None = None,
+        client_instance: dict[str, object] | None = None,
+        requested_domains: Sequence[SyncDomain] | None = None,
+    ) -> SyncProfileStatus:
+        """Idempotently bootstrap the user's default Sync v2 M1 profile."""
+
+        return self._profile_manager().bootstrap_profile(
+            user_id=user_id,
+            mode=mode,
+            device_id=device_id,
+            device_name=device_name,
+            client_profile_id=client_profile_id,
+            client_family=client_family,
+            client_version=client_version,
+            client_instance=dict(client_instance or {}),
+            requested_domains=requested_domains,
+        )
+
+    def profile_status(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str | None = None,
+    ) -> SyncProfileStatus:
+        """Return profile-level and per-domain status for an existing dataset."""
+
+        return self._profile_manager().profile_status(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            device_id=device_id,
         )
 
     def push(
@@ -759,6 +839,13 @@ class SyncV2Service:
                 return device
         raise SyncStoreError("Sync device was not found or is not accessible")
 
+    def _require_server_trusted_encryption_ready(self) -> None:
+        if not self.settings.server_trusted_encryption.encryption.get("ready", False):
+            raise SyncStoreError(
+                "sync_encryption_attestation_required: Sync v2 M1 requires "
+                "server_trusted_v1 at-rest encryption readiness before dataset enrollment"
+            )
+
     def _payload_exceeds_size_limit(self, envelope: SyncEnvelopeCreate) -> bool:
         max_bytes = self.settings.max_envelope_payload_bytes
         if envelope.payload_size_bytes is not None and envelope.payload_size_bytes > max_bytes:
@@ -822,7 +909,7 @@ class SyncV2Service:
     ) -> int:
         if cursor is not None:
             return self._parse_cursor(cursor)
-        cursor_domains = list(domains or self.adapters.supported_domains)
+        cursor_domains = list(domains or self.settings.supported_domains)
         cursors: list[int] = []
         for domain in cursor_domains:
             stored = self.store.get_device_cursor(dataset_id, device_id, domain)
@@ -848,6 +935,14 @@ class SyncV2Service:
         allowed = set(dataset.domains)
         requested = list(domains or dataset.domains)
         return [domain for domain in requested if domain in allowed and self.adapters.has_domain(domain)]
+
+    def _profile_manager(self) -> SyncV2ProfileManager:
+        return SyncV2ProfileManager(
+            store=self.store,
+            capabilities_factory=self.capabilities,
+            id_factory=self.id_factory,
+            scan_limit=self.settings.restore_manifest_scan_limit,
+        )
 
     def _update_cursors(
         self,

@@ -18,8 +18,12 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     AdapterRejected,
     SyncAdapterRegistry,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.models import SyncDataset, SyncEnvelopeCreate
-from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
+from tldw_Server_API.app.core.Sync.v2.security import (
+    server_trusted_encryption_status_from_config,
+)
+from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
 
@@ -60,6 +64,16 @@ def _envelope(**overrides) -> SyncEnvelopeCreate:
     }
     payload.update(overrides)
     return SyncEnvelopeCreate(**payload)
+
+
+def _ready_sync_settings() -> SyncV2Settings:
+    return SyncV2Settings(
+        server_trusted_encryption=server_trusted_encryption_status_from_config(
+            mode="encrypted_volume",
+            server_trusted_enabled=True,
+            auth_mode="multi_user",
+        )
+    )
 
 
 @pytest.mark.parametrize(
@@ -143,17 +157,19 @@ def test_media_adapter_rejects_invalid_legacy_semantics(
     assert outcome.error_code == error_code
 
 
-def test_default_sync_v2_registry_uses_media_compatibility_adapter():
+def test_default_sync_v2_registry_excludes_legacy_media_adapter():
     registry = sync_endpoint._default_sync_v2_registry()
 
-    assert isinstance(registry.get("media"), MediaCompatibilityAdapter)
+    with pytest.raises(KeyError):
+        registry.get("media")
 
 
-def test_media_adapter_unsupported_versions_are_rejected_through_service(tmp_path: Path):
+def test_media_dataset_enrollment_is_rejected_by_m1_service(tmp_path: Path):
     registry = SyncAdapterRegistry([MediaCompatibilityAdapter()])
     service = SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_v2_media.db")),
         adapters=registry,
+        settings=_ready_sync_settings(),
     )
     service.register_device(
         user_id="user-1",
@@ -161,23 +177,13 @@ def test_media_adapter_unsupported_versions_are_rejected_through_service(tmp_pat
         client_type="chatbook",
         device_id="device-1",
     )
-    service.enroll_dataset(
-        user_id="user-1",
-        dataset_id="dataset-1",
-        domains=["media"],
-        encryption_policy="client_private_v1",
-    )
 
-    result = service.push(
-        user_id="user-1",
-        dataset_id="dataset-1",
-        device_id="device-1",
-        envelopes=[_envelope(adapter_version=99)],
-    )
-
-    assert not result.accepted
-    assert result.rejected[0].client_envelope_id == "env-1"
-    assert result.rejected[0].error_code == "unsupported_adapter_version"
+    with pytest.raises(SyncStoreError, match="unsupported domains: media"):
+        service.enroll_dataset(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            domains=["media"],
+        )
 
 
 def test_legacy_media_sync_log_translates_without_private_plaintext_leakage():
