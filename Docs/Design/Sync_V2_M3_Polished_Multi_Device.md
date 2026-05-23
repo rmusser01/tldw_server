@@ -158,6 +158,40 @@ M3 should add domains in tiers:
 4. Derived content domains such as transcripts, summaries, embeddings, and
    evaluation artifacts only after source-of-truth ownership is clear.
 
+### Derived Content Reassessment
+
+M3 should not advertise derived content domains. Source cache and media metadata
+give enough stable anchors for restore, while the derived artifacts need a
+separate ownership model because some are user-authored knowledge and others are
+rebuildable compute output.
+
+| Content class | M3 decision | Rationale | Later promotion path |
+| --- | --- | --- | --- |
+| Transcripts | Deferred source-of-truth candidate | Generated STT text may later be corrected by the user, split into segments, or tied to media blobs. Syncing transcript bodies before stable segment IDs and edit ownership exist would create hard conflicts and large private payloads. | Promote after transcript segment identity, user-edited vs generated provenance, tombstones, and restore conflict review are defined. Metadata may reference transcript availability, but bodies stay out of M3 media metadata. |
+| Summaries | Deferred source-of-truth candidate only when user-pinned or edited | Model-generated summaries are rebuildable from source text, prompt, model, and parameters; user-pinned or edited summaries become personal knowledge. | Add a future summary domain with input hashes, prompt/model provenance, pinned/edited flags, and whole-object conflict review. Unpinned generated summaries remain cache. |
+| Embeddings | Rebuildable cache | Embeddings are opaque, model-specific indexes over content already represented elsewhere. Syncing vectors would add storage and privacy risk without making restore more faithful. | Do not promote as a source-of-truth domain. Rebuild per device/server from synced content and model configuration; store only diagnostic/index status. |
+| Evaluation artifacts | Split and defer | Evaluation projects, datasets, human labels, and run configs can be user-authored source-of-truth. Generated run outputs and metrics are derived artifacts tied to model versions and execution environment. | Later split into explicit eval config/label domains and generated run reference/artifact metadata. Generated outputs need retention, redaction, and blob policy before sync. |
+
+Derived domains must meet the same admission bar as promoted M3 domains before
+implementation:
+
+- stable object identity and parent/source lineage;
+- clear generated vs user-authored ownership;
+- payload hash and base-state conflict rules;
+- tombstone semantics;
+- materializer ownership for personal and workspace datasets;
+- restore preview behavior that distinguishes apply, skip, rebuild, and
+  manual-conflict cases;
+- redaction rules for diagnostics and conflict summaries;
+- encryption policy that prevents server-front-end mode from exposing opaque
+  client-private content.
+
+Until those gates are met, derived content may be represented only through
+existing anchors: `source_cache.entry` provenance, `media.*` metadata,
+`attachment.ref` metadata, and M2 blob transfer for explicitly referenced
+artifacts. These anchors must not smuggle transcript bodies, summary text,
+vectors, or evaluation result payloads into metadata-only envelopes.
+
 Each domain needs:
 
 - stable object identity;
@@ -278,7 +312,8 @@ M3 should land in this order:
 4. Workspace dataset design and first storage/API slice: dataset scope,
    membership checks, and workspace metadata domains.
 5. Broader domain expansion: source cache and media metadata before derived
-   content.
+   content. Derived content is documented in M3 but remains unadvertised until
+   the transcript, summary, embedding, and evaluation ownership gates are met.
 6. Stricter encryption/key rotation: passphrase/device wrapped policies before
    client-private datasets.
 7. Retention/GC and observability: dry-run first, then safe deletion paths.

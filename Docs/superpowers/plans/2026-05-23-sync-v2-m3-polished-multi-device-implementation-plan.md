@@ -195,7 +195,7 @@
   Add `media.item`, `media.keyword`, and `media.keyword_link` with metadata-only
   semantics and blob references through M2 attachment/blob paths.
 
-- [ ] **Step 3: Reassess derived content**
+- [x] **Step 3: Reassess derived content**
 
   Document whether transcripts, summaries, embeddings, and evaluation artifacts
   are source-of-truth sync domains or rebuildable cache.

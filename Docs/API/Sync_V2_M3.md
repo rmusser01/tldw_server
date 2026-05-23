@@ -63,6 +63,31 @@ M3 adds capability-gated surfaces for:
 Servers may advertise any subset. Clients must not assume all M3 features are
 available just because `protocol_version` starts with `sync-v2-m3`.
 
+### Derived Content Domain Policy
+
+M3 capabilities must not include transcript, summary, embedding, or evaluation
+artifact domains. Those objects are not rejected as product ideas; they are
+deferred until Sync v2 can distinguish source-of-truth user data from
+rebuildable compute output.
+
+Current M3 classification:
+
+- transcripts: deferred source-of-truth candidate, especially when
+  user-corrected or segmented; no transcript body sync in M3;
+- summaries: generated summaries are rebuildable cache, while user-pinned or
+  edited summaries are deferred source-of-truth candidates;
+- embeddings: rebuildable cache only, never advertised as an M3 sync domain;
+- evaluation artifacts: split and defer; future eval project/config/dataset
+  and human-label domains may be source-of-truth, while generated run outputs
+  need artifact metadata, retention, and redaction policy first.
+
+Clients must treat absent derived domains as intentional capability gating. A
+client that needs offline derived content in M3 can rebuild it from synced
+source/media objects or attach an explicit artifact through `attachment.ref` and
+the M2 blob APIs. Metadata-only domains must not carry transcript bodies,
+summary text, embedding vectors, generated metric payloads, or raw derived
+artifacts.
+
 ## Device Lifecycle
 
 ### `GET /api/v1/sync/devices`
