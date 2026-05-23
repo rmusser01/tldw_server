@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.12.10
 title: Migrate WritingPlayground shell alerts to design-system Alert
-status: In Progress
+status: Done
 labels:
 - design-system
 - webui
@@ -63,7 +63,7 @@ Migrate the WritingPlayground shell/session/editor product-state AntD Alert usag
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Migrated the four targeted `WritingPlayground` shell/session/editor product-state alerts to the shared design-system `Alert` primitive and added focused coverage for each branch. Removed the four migrated product-state baseline exceptions while preserving the three advanced-settings exceptions for a follow-up slice. PR: https://github.com/rmusser01/tldw_server/pull/1979
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -72,6 +72,6 @@ Migrate the WritingPlayground shell/session/editor product-state AntD Alert usag
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
