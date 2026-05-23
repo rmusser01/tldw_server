@@ -172,6 +172,7 @@ export const PrototypeWorkspaceSessionView = ({
       return
     }
     setCollaboratorEntry({
+      collaboratorWorkspaceId: null,
       collaboratorSessionId: null,
       collaboratorSessionToken: sessionToken ?? null,
       collaboratorShareToken: shareToken ?? null,
@@ -195,6 +196,7 @@ export const PrototypeWorkspaceSessionView = ({
       password: password || undefined
     })
     setCollaboratorEntry({
+      collaboratorWorkspaceId: null,
       collaboratorSessionToken: result.session_token,
       collaboratorShareToken: shareToken,
       sharedActorId: result.shared_actor_id
@@ -210,6 +212,7 @@ export const PrototypeWorkspaceSessionView = ({
     })
     setActiveWorkspaceId(result.prototype_workspace_id)
     setCollaboratorEntry({
+      collaboratorWorkspaceId: result.prototype_workspace_id,
       collaboratorSessionId: result.prototype_session_id,
       collaboratorSessionToken: effectiveSessionToken,
       collaboratorShareToken: shareToken,

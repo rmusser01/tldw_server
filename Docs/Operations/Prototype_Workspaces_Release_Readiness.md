@@ -8,6 +8,8 @@ Parent tracker: https://github.com/rmusser01/tldw_server/issues/1440
 
 Risk Gate 8: https://github.com/rmusser01/tldw_server/issues/1461
 
+Final signoff follow-up: https://github.com/rmusser01/tldw_server/issues/1977
+
 ## Backend Verification Matrix
 
 | Area | Evidence | Status |
@@ -32,7 +34,7 @@ Risk Gate 8: https://github.com/rmusser01/tldw_server/issues/1461
 | Contract fixture states | Frozen Risk Gate 4 states remain available to frontend tests | Covered by `contract-states.json` and docs-contract tests. |
 | Owner review UI | Pending, terminal, validation, conflict, and failure states render distinctly | Covered by `PrototypeWorkspaceOwnerView` tests and Gate 8 frontend verification. |
 | Owner action gating | Review actions are disabled when state/backend semantics would reject them | Covered by `PrototypeWorkspaceOwnerView` tests and Gate 8 frontend verification. |
-| Browser-observed UX | Final manual browser pass for owner and collaborator flows | Remaining Gate 8 evidence item. |
+| Browser-observed UX | Final browser pass for owner and collaborator flows against the real WebUI route with API-shaped Playwright stubs | Complete; see 2026-05-23 signoff evidence. |
 
 ## Gate 8 CI Smoke Path
 
@@ -48,6 +50,37 @@ The first Gate 8 smoke test must exercise this path without external runtime ser
 8. Owner approval with a passing publish validator returns `status = "promoted"` and advances canonical state.
 
 The negative smoke path must verify revoked and expired prototype share links fail without confirming whether the token, workspace, or actor exists.
+
+## 2026-05-23 Final Browser Signoff Evidence
+
+Browser evidence was captured against the local Next WebUI at `http://127.0.0.1:18027` using the real `/share/{token}` and `/prototype-workspaces` pages with Playwright network stubs for the prototype APIs. Screenshots were written to `/private/tmp/prototype-final-signoff-1977/`.
+
+During the first probe, `/share/proto-token` rendered the prototype public handoff, but `/prototype-workspaces` resolved to the WebUI 404 because the shared route had no Next page shim. This was fixed with `apps/tldw-frontend/pages/prototype-workspaces.tsx` and guarded by `apps/tldw-frontend/__tests__/navigation/prototype-workspaces-route.test.tsx`.
+
+The full browser pass then observed:
+
+- Owner empty/create route: `owner-empty.png`, `owner-created.png`.
+- Owner private-link creation: `owner-share-link.png` with `/share/proto-token`.
+- Owner promotion review: `owner-review-pending.png`.
+- Owner validation failure handling: `owner-validation-failed.png`.
+- Owner promotion success handling: `owner-promoted.png`.
+- Public share handoff: `collaborator-public-share.png` to `/prototype-workspaces?share_token=proto-token`.
+- Collaborator link exchange and session creation: `collaborator-link-handoff.png`, `collaborator-link-exchanged.png`, `collaborator-session-started.png`.
+- Collaborator promotion submission: `collaborator-promotion-submitted.png`.
+
+The collaborator pass also verified that the UI remains on the collaborator session surface after token-bearing route cleanup. This is guarded by `PrototypeWorkspacePage.test.tsx` so `/prototype-workspaces?workspace=...` does not fall back to the owner view when the collaborator session is already stored.
+
+## 2026-05-23 Private-Link And Session-Token Signoff
+
+| Invariant | Evidence | Signoff |
+| --- | --- | --- |
+| Prototype token ownership | `create_token` calls `_get_owned_prototype_workspace()` for `prototype_workspace` resources before `ShareTokenService.generate_token()`. | Pass. Non-owners cannot mint prototype links for another owner's workspace. |
+| Revocation | `ShareTokenService.validate_token()` rejects revoked tokens; public exchange returns `link_unavailable`; repo/session/service paths reject revoked shared actors, sessions, and preview handles. | Pass. Covered by link-exchange, endpoint, service, and preview broker tests. |
+| Expiration | Share-token expiry, session-token `exp`, shared actor expiry, active-session lookup, and preview grant expiry are all checked before use. | Pass. Expired links and actors fail without confirming resource existence. |
+| Resume-cookie flags | `public_prototype_session_exchange()` sets `prototype_shared_actor` with `HttpOnly`, `SameSite=Lax`, and `secure=_request_is_secure(request)`, where `_request_is_secure()` honors `X-Forwarded-Proto: https` before falling back to request scheme. | Pass. Secure-cookie behavior matches proxy-aware HTTPS detection. |
+| Non-enumerating errors | Public prototype exchange maps missing, revoked, expired, exhausted, missing-workspace, and owner-mismatch cases to stable `invalid_or_unavailable_link` / `link_unavailable` responses. | Pass. Covered by focused link-exchange tests and the Gate 8 negative smoke path. |
+| Preview grants | `PrototypePreviewBroker` issues opaque handles, signs short-lived grants, persists active scope handles, renews only still-authorized handles, and invalidates grants when sessions/shared actors are revoked or expired. | Pass. Covered by preview broker and endpoint renewal tests. |
+| Promotion authority | Promotion submission validates the session token workspace, branch session, shared actor, snapshot ownership, and active actor/session state; review is limited to workspace owner or designated promoters. | Pass. Covered by endpoint and promotion service tests. |
 
 ## Verification Log
 
@@ -67,8 +100,28 @@ The negative smoke path must verify revoked and expired prototype share links fa
 - Review follow-up: `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/tests/PrototypeWorkspaces/test_release_readiness_smoke.py -s B101 -f json -o /tmp/bandit_prototype_gate8_review.json`
   - GREEN: `results: []`; `B101` skipped because the touched backend Python path is a pytest file where `assert` is expected.
 
+2026-05-23:
+
+- `bun install --frozen-lockfile` from `apps/`
+  - GREEN: workspace dependencies hydrated from the existing lockfile.
+- Initial Playwright route probe via `/private/tmp/prototype-signoff-probe.mjs`
+  - RED: `/prototype-workspaces` returned the WebUI 404 while `/share/proto-token` rendered the prototype handoff.
+- `bunx vitest run __tests__/navigation/prototype-workspaces-route.test.tsx --maxWorkers=1 --no-file-parallelism` from `apps/tldw-frontend/`
+  - RED before adding the page shim; GREEN after adding `pages/prototype-workspaces.tsx`: `1 passed`.
+- `bunx vitest run src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspacePage.test.tsx --maxWorkers=1 --no-file-parallelism` from `apps/packages/ui/`
+  - RED before preserving stored collaborator context after token cleanup; GREEN after the page-state fix: `6 passed`.
+- `bunx vitest run src/components/Option/__tests__/PublicShare.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspaceOwnerView.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspaceSessionView.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspacePage.test.tsx src/hooks/__tests__/usePrototypeWorkspaces.test.tsx --maxWorkers=1 --no-file-parallelism` from `apps/packages/ui/`
+  - GREEN: `5 passed (5)`, `31 passed (31)`.
+- Full Playwright signoff flow via `/private/tmp/prototype-signoff-flow.mjs`
+  - GREEN: owner create/share/review/failure/success and collaborator public-share/link-exchange/session/promotion states observed; screenshots written to `/private/tmp/prototype-final-signoff-1977/`.
+- `../../.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_release_readiness_smoke.py tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_docs_contract.py -q`
+  - GREEN: `5 passed, 5 warnings`.
+- `git diff --check`
+  - GREEN: no output.
+- `../../.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/sharing.py tldw_Server_API/app/api/v1/endpoints/prototype_workspaces.py tldw_Server_API/app/core/Sharing/share_token_service.py tldw_Server_API/app/core/Prototype_Workspaces/access.py tldw_Server_API/app/core/Prototype_Workspaces/preview_broker.py -f json -o /tmp/bandit_prototype_security_review_1977.json`
+  - GREEN: `results: []`.
+
 ## Remaining Risks For Gate 8
 
-- Browser-observed UX evidence still needs to be captured against the local frontend route.
-- Final security review should confirm private-link/session-token flows against the latest merged code.
-- If production deployment requires operator dashboards instead of documented log/status-field workflows, that should be filed as a follow-up rather than folded into this smoke-coverage slice.
+- No production-blocking browser UX or private-link/session-token security issues remain from #1977.
+- Operator dashboards beyond documented log/status-field workflows remain a possible future enhancement, not a Gate 8 blocker.

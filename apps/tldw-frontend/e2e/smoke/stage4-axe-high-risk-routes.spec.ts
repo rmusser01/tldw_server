@@ -140,11 +140,7 @@ async function waitForRouteToSettle(
     } catch {}
   }
 
-  try {
-    await page.waitForLoadState('networkidle', { timeout: 1_500 });
-  } catch {}
-
-  await page.waitForTimeout(250);
+  await waitForVisualSettle(page, LOAD_TIMEOUT);
 }
 
 async function analyzeA11yWithRetry(

@@ -134,6 +134,12 @@ describe("PrototypeWorkspaceSessionView", () => {
         session_token: "session-token-1"
       })
     })
+    expect(usePrototypeWorkspaceStore.getState()).toMatchObject({
+      collaboratorWorkspaceId: "pw_collab",
+      collaboratorSessionId: "pss_collab",
+      collaboratorSessionToken: "session-token-1",
+      collaboratorShareToken: "share-token-1"
+    })
     expect(routerState.navigate).toHaveBeenCalledWith(
       "/prototype-workspaces?workspace=pw_collab",
       { replace: true }
