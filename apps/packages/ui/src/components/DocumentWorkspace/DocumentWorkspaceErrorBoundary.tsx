@@ -1,7 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { Button, Result } from "antd"
 import { AlertTriangle, RefreshCw } from "lucide-react"
+import { EmptyState } from "@/components/ui/feedback/EmptyState"
 
 interface ErrorBoundaryState {
   hasError: boolean
@@ -68,13 +68,16 @@ const ErrorFallback: React.FC<ErrorFallbackProps> = ({ onRetry, error }) => {
 
   return (
     <div className="flex h-full items-center justify-center bg-bg p-8">
-      <Result
-        icon={<AlertTriangle className="mx-auto h-16 w-16 text-warning" />}
+      <EmptyState
+        variant="card"
+        size="lg"
+        icon={AlertTriangle}
+        iconClassName="text-warning"
         title={t(
           "option:documentWorkspace.errorTitle",
           "Something went wrong"
         )}
-        subTitle={
+        description={
           <div className="space-y-2">
             <p className="text-text-secondary">
               {t(
@@ -100,15 +103,11 @@ const ErrorFallback: React.FC<ErrorFallbackProps> = ({ onRetry, error }) => {
             )}
           </div>
         }
-        extra={
-          <Button
-            type="primary"
-            icon={<RefreshCw className="h-4 w-4" />}
-            onClick={onRetry}
-          >
-            {t("common:tryAgain", "Try again")}
-          </Button>
-        }
+        primaryAction={{
+          label: t("common:tryAgain", "Try again"),
+          icon: <RefreshCw className="h-4 w-4" />,
+          onClick: onRetry
+        }}
       />
     </div>
   )
