@@ -51,7 +51,13 @@ PR #1683 opened against dev and issue #1658 body updated with current count 0 an
 
 PR #1683 review fixes: added defensive optional state-label access for the reviewed getDesignSystemState call sites. After rebasing onto current dev, WorkspaceACPHistoryModal uses the shared design-system Alert primitive instead of AntD Alert. Full bun run verify:design-system-state now exits 0.
 
-Closeout 2026-05-23: verified GitHub issue #1658 records current Chat/Playground baseline debt as Total 0, `antd-product-state-import` 0, and `canonical-state-label` 0, refreshed by PR #1683. PR #1683 is merged into `dev` at `e4663b9b6cb06730ef901ccb44fac930ad1a8fec`. Current `apps/packages/ui/scripts/design-system-product-state-baseline.json` has zero rows for the Chat/Playground owned path map (`src/components/Option/Playground`, `src/components/Common/Playground`, `src/components/Sidepanel/Chat`, and `src/routes/sidepanel-chat.tsx`). Follow-up child TASK-45.44.1.1 closed the later unbaselined Playground Ready labels. Current full `bun run verify:design-system-state` was rerun after repairing the local UI dependency symlink and exits 1 on unrelated repo-wide product-state drift outside the Chat/Playground owned paths, so this closeout does not claim the global verifier is currently clean. Bandit skipped for this closeout because only Backlog markdown is changed.
+Closeout 2026-05-23:
+- Verified GitHub issue #1658 records current Chat/Playground baseline debt as Total 0, `antd-product-state-import` 0, and `canonical-state-label` 0, refreshed by PR #1683.
+- PR #1683 is merged into `dev` at `e4663b9b6cb06730ef901ccb44fac930ad1a8fec`.
+- Current `apps/packages/ui/scripts/design-system-product-state-baseline.json` has zero rows for the Chat/Playground owned path map (`src/components/Option/Playground`, `src/components/Common/Playground`, `src/components/Sidepanel/Chat`, and `src/routes/sidepanel-chat.tsx`).
+- Follow-up child TASK-45.44.1.1 closed the later unbaselined Playground Ready labels.
+- Current full `bun run verify:design-system-state` was rerun after repairing the local UI dependency symlink and exits 1 on unrelated repo-wide product-state drift outside the Chat/Playground owned paths; this closeout does not claim global verifier cleanliness.
+- Bandit skipped for this closeout because only Backlog markdown is changed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
