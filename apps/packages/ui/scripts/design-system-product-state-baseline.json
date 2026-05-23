@@ -2629,28 +2629,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx:Alert#antd-alert-writingplaygrounddiagnosticspanel-type-info-l-1cwjvuu",
-    "path": "src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx:Alert#antd-alert-writingplaygrounddiagnosticspanel-type-warnin-12u64sw",
-    "path": "src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx:Alert#antd-alert-writingplaygroundmodalhost-type-error-line-22-175t14c",
     "path": "src/components/Option/WritingPlayground/WritingPlaygroundModalHost.tsx",
     "rule": "antd-product-state-import",

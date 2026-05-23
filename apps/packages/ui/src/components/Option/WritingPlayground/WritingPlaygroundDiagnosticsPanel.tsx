@@ -1,5 +1,6 @@
 import type { FC } from "react"
-import { Alert, Card, Empty, Tag } from "antd"
+import { Card, Empty, Tag } from "antd"
+import { Alert } from "@/components/ui/primitives"
 import { getDesignSystemState } from "@/design-system"
 import { WritingPlaygroundResponseInspectorCard } from "./WritingPlaygroundResponseInspectorCard"
 import { WritingPlaygroundTokenInspectorCard } from "./WritingPlaygroundTokenInspectorCard"
@@ -39,28 +40,28 @@ export const WritingPlaygroundDiagnosticsPanel: FC<
         </Tag>
         {showOffline ? (
           <Alert
-            type="warning"
-            showIcon
+            variant="warning"
             title={t("option:writingPlayground.offlineTitle", "Server required")}
-            description={t(
+          >
+            {t(
               "option:writingPlayground.offlineBody",
               "Connect to your tldw server to load writing sessions and generate."
             )}
-          />
+          </Alert>
         ) : null}
         {showUnsupported ? (
           <Alert
-            type="info"
-            showIcon
+            variant="info"
             title={t(
               "option:writingPlayground.unavailableTitle",
               "Playground unavailable"
             )}
-            description={t(
+          >
+            {t(
               "option:writingPlayground.unavailableBody",
               "This server does not advertise writing playground support yet."
             )}
-          />
+          </Alert>
         ) : null}
         {!showOffline && !showUnsupported ? (
           hasActiveSession ? (
