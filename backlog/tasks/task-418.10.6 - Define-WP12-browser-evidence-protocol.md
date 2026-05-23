@@ -1,7 +1,7 @@
 ---
 id: TASK-418.10.6
 title: Define WP12 browser evidence protocol
-status: In Progress
+status: Done
 labels:
 - wp12
 - webui
