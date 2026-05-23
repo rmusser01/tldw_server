@@ -62,7 +62,7 @@ Migrate the single product-state AntD Alert in `WritingPlaygroundActiveSessionGu
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated the `WritingPlaygroundActiveSessionGuard` settings-load error state to the shared design-system Alert primitive, added focused marker coverage, and removed the retired product-state baseline exception. The slice reduces the product-state baseline to 287 total exceptions and Writing/Review to 17.
+Migrated the `WritingPlaygroundActiveSessionGuard` settings-load error state to the shared design-system Alert primitive, added focused marker coverage, and removed the retired product-state baseline exception. Verification passed for the focused guard test, product-state guard test, `verify:design-system-state`, baseline absence check, and `git diff --check`; the slice reduces the product-state baseline to 287 total exceptions and Writing/Review to 17.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
