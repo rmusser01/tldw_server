@@ -273,6 +273,100 @@ describe("SourceFormModal test-source preflight", () => {
     })
   })
 
+  it("submits cloned draft initial values with create semantics", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    formApi.validateFields.mockResolvedValue({
+      name: "Saved Feed copy",
+      url: "https://copy.example.com/feed.xml",
+      source_type: "site",
+      tags: ["news", "daily"],
+      scrape_item_selector: "css:article",
+      scrape_link_selector: ".//a/@href",
+      scrape_title_selector: "css:h2",
+      scrape_summary_selector: "",
+      scrape_content_selector: "",
+      scrape_date_selector: "",
+      scrape_guid_selector: "css:[data-guid]",
+      scrape_limit: 5,
+      source_top_n: 3,
+      discover_method: "links",
+      skip_article_fetch: true
+    })
+
+    render(
+      <SourceFormModal
+        open
+        mode="create"
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        initialValues={{
+          name: "Saved Feed copy",
+          url: "https://example.com/feed.xml",
+          source_type: "site",
+          tags: ["news", "daily"],
+          settings: {
+            retain_unowned_rule: "preserve",
+            scrape_rules: {
+              item_selector: "css:article",
+              link_xpath: ".//a/@href",
+              guid_xpath: "css:[data-guid]",
+              limit: 5,
+              skip_article_fetch: true
+            },
+            top_n: 3,
+            discover_method: "links"
+          }
+        }}
+        existingTags={[]}
+      />
+    )
+
+    expect(screen.getByRole("heading", { name: "Add Source" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(formApi.setFieldsValue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Saved Feed copy",
+          url: "https://example.com/feed.xml",
+          source_type: "site",
+          tags: ["news", "daily"],
+          scrape_item_selector: "css:article",
+          scrape_link_selector: ".//a/@href",
+          scrape_guid_selector: "css:[data-guid]",
+          scrape_limit: 5,
+          source_top_n: 3,
+          discover_method: "links",
+          skip_article_fetch: true
+        })
+      )
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        name: "Saved Feed copy",
+        url: "https://copy.example.com/feed.xml",
+        source_type: "site",
+        tags: ["news", "daily"],
+        settings: {
+          retain_unowned_rule: "preserve",
+          scrape_rules: {
+            item_selector: "css:article",
+            link_xpath: ".//a/@href",
+            title_selector: "css:h2",
+            guid_xpath: "css:[data-guid]",
+            limit: 5,
+            skip_article_fetch: true
+          },
+          top_n: 3,
+          discover_method: "links"
+        }
+      })
+    })
+  })
+
   it("renders optional source validation diagnostics from preview", async () => {
     formApi.validateFields.mockResolvedValue({
       url: "https://example.com/news",

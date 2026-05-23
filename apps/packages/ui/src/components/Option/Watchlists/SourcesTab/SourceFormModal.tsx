@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next"
 import { Alert } from "@/components/ui/primitives"
 import { testWatchlistSource, testWatchlistSourceDraft } from "@/services/watchlists"
 import type { JobPreviewResult, SourcePreviewDiagnostics } from "@/types/watchlists"
-import type { WatchlistSource, SourceType } from "@/types/watchlists"
+import type { SourceType } from "@/types/watchlists"
 import { buildWatchlistsModalChrome, useWatchlistsViewport } from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import {
@@ -18,6 +18,17 @@ import {
   restoreFocusToElement
 } from "../shared/focus-management"
 
+type SourceFormMode = "create" | "edit"
+
+type SourceFormInitialValues = {
+  id?: number
+  name: string
+  url: string
+  source_type: SourceType
+  tags?: string[]
+  settings?: Record<string, unknown> | null
+}
+
 interface SourceFormModalProps {
   open: boolean
   onClose: () => void
@@ -28,7 +39,8 @@ interface SourceFormModalProps {
     tags: string[]
     settings?: Record<string, unknown> | null
   }) => Promise<void>
-  initialValues?: WatchlistSource
+  initialValues?: SourceFormInitialValues
+  mode?: SourceFormMode
   existingTags: string[]
   forumsEnabled?: boolean
 }
@@ -155,6 +167,7 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
   onClose,
   onSubmit,
   initialValues,
+  mode,
   existingTags,
   forumsEnabled = false
 }) => {
@@ -169,7 +182,8 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
   const wasOpenRef = useRef(false)
   const { isConstrained } = useWatchlistsViewport()
 
-  const isEditing = !!initialValues
+  const formMode = mode ?? (typeof initialValues?.id === "number" ? "edit" : "create")
+  const isEditing = formMode === "edit"
   const testSourceId = typeof initialValues?.id === "number" ? initialValues.id : null
   const modalChrome = buildWatchlistsModalChrome(isConstrained, 500)
   const diagnosticsLines = buildDiagnosticsLines(testResult?.diagnostics, t)
@@ -197,7 +211,7 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
           name: initialValues.name,
           url: initialValues.url,
           source_type: initialValues.source_type,
-          tags: initialValues.tags,
+          tags: initialValues.tags || [],
           ...sourceSettingsToFormValues(initialValues.settings)
         })
       } else {

@@ -47,7 +47,13 @@ import {
   restoreWatchlistSource,
   updateWatchlistSource
 } from "@/services/watchlists"
-import type { SourceSeenStats, WatchlistJob, WatchlistSource, SourceType } from "@/types/watchlists"
+import type {
+  SourceSeenStats,
+  WatchlistJob,
+  WatchlistSource,
+  WatchlistSourceCreate,
+  SourceType
+} from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { SourceFormModal } from "./SourceFormModal"
 import { GroupsTree } from "./GroupsTree"
@@ -181,8 +187,7 @@ export const SourcesTab: React.FC = () => {
   )
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [bulkWorking, setBulkWorking] = useState(false)
-  const cloningSourceIdsRef = useRef<Set<number>>(new Set())
-  const [cloningSourceIds, setCloningSourceIds] = useState<Set<number>>(() => new Set())
+  const [sourceCloneDraft, setSourceCloneDraft] = useState<WatchlistSourceCreate | null>(null)
   const [bulkMoveTargetValue, setBulkMoveTargetValue] = useState<BulkMoveTargetValue>(null)
   const [checkingSourceIds, setCheckingSourceIds] = useState<number[]>([])
   const [importOpen, setImportOpen] = useState(false)
@@ -1112,6 +1117,21 @@ export const SourcesTab: React.FC = () => {
     })
   }, [])
 
+  const handleOpenNewSourceForm = useCallback(() => {
+    setSourceCloneDraft(null)
+    openSourceForm()
+  }, [openSourceForm])
+
+  const handleOpenExistingSourceForm = useCallback((sourceId: number) => {
+    setSourceCloneDraft(null)
+    openSourceForm(sourceId)
+  }, [openSourceForm])
+
+  const handleCloseSourceForm = useCallback(() => {
+    setSourceCloneDraft(null)
+    closeSourceForm()
+  }, [closeSourceForm])
+
   // Handle form submit
   const handleFormSubmit = async (
     values: {
@@ -1130,12 +1150,27 @@ export const SourcesTab: React.FC = () => {
       } else {
         const created = await createWatchlistSource({
           ...values,
-          watchlist_id: selectedWatchlistId ?? undefined
+          ...(sourceCloneDraft
+            ? {
+                active: false,
+                group_ids: sourceCloneDraft.group_ids,
+                watchlist_id: sourceCloneDraft.watchlist_id ?? selectedWatchlistId ?? undefined
+              }
+            : {
+                watchlist_id: selectedWatchlistId ?? undefined
+              })
         })
         addSource(created)
-        message.success(t("watchlists:sources.created", "Source created"))
+        message.success(
+          sourceCloneDraft
+            ? t(
+                "watchlists:sources.cloneSuccess",
+                "Feed cloned as an inactive copy. Review and enable it when ready."
+              )
+            : t("watchlists:sources.created", "Source created")
+        )
       }
-      closeSourceForm()
+      handleCloseSourceForm()
       loadTags() // Refresh tags in case new ones were added
     } catch (err) {
       console.error("Failed to save source:", err)
@@ -1166,54 +1201,17 @@ export const SourcesTab: React.FC = () => {
     }
   }
 
-  const startCloningSource = useCallback((sourceId: number) => {
-    if (cloningSourceIdsRef.current.has(sourceId)) {
-      return false
-    }
-    const next = new Set(cloningSourceIdsRef.current)
-    next.add(sourceId)
-    cloningSourceIdsRef.current = next
-    setCloningSourceIds(next)
-    return true
-  }, [])
-
-  const finishCloningSource = useCallback((sourceId: number) => {
-    if (!cloningSourceIdsRef.current.has(sourceId)) {
-      return
-    }
-    const next = new Set(cloningSourceIdsRef.current)
-    next.delete(sourceId)
-    cloningSourceIdsRef.current = next
-    setCloningSourceIds(next)
-  }, [])
-
-  const handleCloneSource = async (source: WatchlistSource) => {
-    if (!startCloningSource(source.id)) return
-    try {
-      const cloned = await createWatchlistSource(
-        buildClonedWatchlistSourcePayload(source, selectedWatchlistId)
-      )
-      addSource(cloned)
-      message.success(
-        t(
-          "watchlists:sources.cloneSuccess",
-          "Feed cloned as an inactive copy. Review and enable it when ready."
-        )
-      )
-      void loadSources()
-      void loadTags()
-    } catch (err) {
-      console.error("Failed to clone source:", err)
-      message.error(t("watchlists:sources.cloneError", "Failed to clone feed"))
-    } finally {
-      finishCloningSource(source.id)
-    }
+  const handleCloneSource = (source: WatchlistSource) => {
+    setSourceCloneDraft(buildClonedWatchlistSourcePayload(source, selectedWatchlistId))
+    openSourceForm()
   }
 
   // Get source for editing
   const editingSource = sourceFormEditId
     ? sources.find((s) => s.id === sourceFormEditId)
     : undefined
+  const sourceFormInitialValues = editingSource ?? sourceCloneDraft ?? undefined
+  const sourceFormMode = sourceFormEditId ? "edit" : "create"
 
   // Table columns
   const tagsColumn: ColumnsType<WatchlistSource>[number] = {
@@ -1412,7 +1410,7 @@ export const SourcesTab: React.FC = () => {
               size="small"
               aria-label={t("common:edit", "Edit")}
               icon={<Edit2 className="h-4 w-4" />}
-              onClick={() => openSourceForm(record.id)}
+              onClick={() => handleOpenExistingSourceForm(record.id)}
             />
           </Tooltip>
           <Tooltip title={t("watchlists:sources.seenInfo", "Source Health & Dedup Stats")}>
@@ -1430,7 +1428,6 @@ export const SourcesTab: React.FC = () => {
               size="small"
               aria-label={t("watchlists:sources.cloneFeedAria", "Clone {{name}}", { name: record.name })}
               icon={<Copy className="h-4 w-4" />}
-              loading={cloningSourceIds.has(record.id)}
               onClick={() => handleCloneSource(record)}
             />
           </Tooltip>
@@ -1587,7 +1584,6 @@ export const SourcesTab: React.FC = () => {
                   size="small"
                   aria-label={t("watchlists:sources.cloneFeedAria", "Clone {{name}}", { name: source.name })}
                   icon={<Copy className="h-4 w-4" />}
-                  loading={cloningSourceIds.has(source.id)}
                   onClick={() => handleCloneSource(source)}
                 />
                 <Button
@@ -1595,7 +1591,7 @@ export const SourcesTab: React.FC = () => {
                   size="small"
                   aria-label={t("watchlists:sources.editSourceAria", "Edit {{name}}", { name: source.name })}
                   icon={<Edit2 className="h-4 w-4" />}
-                  onClick={() => openSourceForm(source.id)}
+                  onClick={() => handleOpenExistingSourceForm(source.id)}
                 />
                 <Button
                   type="text"
@@ -1705,7 +1701,7 @@ export const SourcesTab: React.FC = () => {
           <Button
             type="primary"
             icon={<Plus className="h-4 w-4" />}
-            onClick={() => openSourceForm()}
+            onClick={handleOpenNewSourceForm}
           >
             {t("watchlists:sources.addSource", "Add Source")}
           </Button>
@@ -1823,7 +1819,7 @@ export const SourcesTab: React.FC = () => {
               <Space>
                 <Button
                   icon={<Plus className="h-4 w-4" />}
-                  onClick={() => openSourceForm()}
+                  onClick={handleOpenNewSourceForm}
                 >
                   {t("watchlists:sources.addSource", "Add Source")}
                 </Button>
@@ -1900,9 +1896,10 @@ export const SourcesTab: React.FC = () => {
 
       <SourceFormModal
         open={sourceFormOpen}
-        onClose={closeSourceForm}
+        onClose={handleCloseSourceForm}
         onSubmit={handleFormSubmit}
-        initialValues={editingSource}
+        initialValues={sourceFormInitialValues}
+        mode={sourceFormMode}
         existingTags={(Array.isArray(tags) ? tags : []).map((t) => t.name)}
         forumsEnabled={Boolean(settings?.forums_enabled)}
       />
