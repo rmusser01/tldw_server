@@ -1,7 +1,7 @@
 ---
 id: TASK-481
 title: Design Watchlists durable audio artifact projection
-status: In Progress
+status: Done
 labels:
 - watchlists
 - design
@@ -22,6 +22,10 @@ Create the design/spec for durable Watchlists audio artifact projections. Workfl
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Durable audio artifact projection spec exists and records Workflows-as-canonical projection requirements.
+- [x] #2 Implementation planning proceeded through `TASK-482`.
+- [x] #3 Implementation proceeded through `TASK-483`.
+- [x] #4 This reconciliation changed task metadata only and did not modify design/spec content.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -34,6 +38,8 @@ Design/spec only. Captures durable Watchlists audio artifact projection with Wor
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Second design review found and addressed four implementation-critical gaps: real Workflows run correlation metadata is not currently persisted despite endpoint tests using metadata_json; retry idempotency must include audio_request_id; proactive projection must poll Workflow run state rather than Scheduler task terminal state and must not use an unensured queue; admin target_user_id download links need target-aware handling. The spec now documents these as required constraints before implementation planning.
+
+Metadata reconciliation note: no design/spec content was changed in this cleanup. The implementation plan and implementation records are complete in `TASK-482` and `TASK-483`, so this stale `In Progress` status is closed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -44,10 +50,10 @@ Created and refined Docs/superpowers/specs/2026-05-22-watchlists-durable-audio-a
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
