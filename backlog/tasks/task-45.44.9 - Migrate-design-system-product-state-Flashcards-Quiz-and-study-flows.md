@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.9
 title: 'Migrate design-system product state: Flashcards, Quiz, and study flows'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-14 03:19'
 labels:
@@ -15,8 +15,15 @@ references:
   - >-
     Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
   - apps/packages/ui/scripts/design-system-product-state-baseline.json
+  - 'https://github.com/rmusser01/tldw_server/pull/2000'
 parent_task_id: TASK-45.44
 priority: medium
+documentation:
+  - >-
+    TASK-45.44.9.7 / PR #2000 migrated FlashcardTemplateValueModal's template-load
+    error Alert to the design-system Alert primitive. Baseline evidence: total product-state
+    exceptions 265 -> 264; Flashcards/Quiz/study-flow exceptions 41 -> 40; FlashcardTemplateValueModal
+    target rows 1 -> 0. Verification recorded in TASK-45.44.9.7.
 ---
 
 ## Description
