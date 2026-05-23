@@ -347,6 +347,9 @@ class SyncRestorePreviewRequest(BaseModel):
 
     dataset_ids: list[str] = Field(default_factory=list)
     domains: list[SyncDomain] = Field(default_factory=list)
+    selected_object_ids: list[str] = Field(default_factory=list)
+    selected_attachment_ids: list[str] = Field(default_factory=list)
+    metadata_only: bool = False
     local_inventory: list[SyncRestorePreviewLocalInventoryItem] = Field(default_factory=list)
     attachment_availability: dict[str, str] = Field(default_factory=dict)
 
@@ -455,6 +458,7 @@ class SyncRestorePreviewResponse(BaseModel):
     restore_status: SyncRestoreCompletenessStatus | None = None
     domain_details: list[SyncRestoreDomainCompleteness] = Field(default_factory=list)
     blob_details: list[SyncRestoreBlobCompleteness] = Field(default_factory=list)
+    metadata_only_allowed: bool = True
 
 
 class SyncBlobUploadCreateRequest(BaseModel):

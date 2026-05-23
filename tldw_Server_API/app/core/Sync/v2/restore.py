@@ -104,14 +104,51 @@ def attachment_available_locally(
 ) -> bool:
     """Return whether the client reports having a blob needed by an attachment ref."""
 
+    status = attachment_restore_status(
+        attachment_availability,
+        attachment_id=attachment_id,
+        payload_hash=payload_hash,
+    )
+    return status in {"available", "present", "stored", "server", "verified", "verified_complete"}
+
+
+def attachment_verified_locally(
+    attachment_availability: Mapping[str, str] | None,
+    *,
+    attachment_id: str,
+    payload_hash: str,
+) -> bool:
+    """Return whether the client reports a locally verified blob checksum."""
+
+    status = attachment_restore_status(
+        attachment_availability,
+        attachment_id=attachment_id,
+        payload_hash=payload_hash,
+    )
+    return status in {"verified", "verified_complete"}
+
+
+def attachment_restore_status(
+    attachment_availability: Mapping[str, str] | None,
+    *,
+    attachment_id: str,
+    payload_hash: str,
+) -> str | None:
+    """Return the normalized client-reported restore status for an attachment blob."""
+
     if not attachment_availability:
-        return False
+        return None
     candidates = (
         attachment_availability.get(attachment_id),
         attachment_availability.get(payload_hash),
         attachment_availability.get(f"{attachment_id}:{payload_hash}"),
     )
-    return any(str(value).strip().lower() in {"available", "present", "stored", "server"} for value in candidates)
+    for value in candidates:
+        if value is not None:
+            normalized = str(value).strip().lower()
+            if normalized:
+                return normalized
+    return None
 
 
 def _string_value(value: object) -> str | None:
@@ -141,6 +178,8 @@ __all__ = [
     "OBJECT_RESTORE_DOMAINS",
     "WHOLE_OBJECT_RESTORE_DOMAINS",
     "attachment_available_locally",
+    "attachment_restore_status",
+    "attachment_verified_locally",
     "build_local_inventory_index",
     "find_local_inventory_item",
     "local_inventory_matches",

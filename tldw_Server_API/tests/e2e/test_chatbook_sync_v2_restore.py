@@ -329,6 +329,14 @@ def test_chatbook_sync_v2_restore_preview_and_pull_roundtrip(
             ],
         },
     )
+    metadata_only_preview = client.post(
+        "/api/v1/sync/restore/preview",
+        json={
+            "dataset_ids": ["dataset-1"],
+            "selected_attachment_ids": ["attachment-1"],
+            "metadata_only": True,
+        },
+    )
     pulled = client.get(
         "/api/v1/sync/pull",
         params=[
@@ -355,6 +363,7 @@ def test_chatbook_sync_v2_restore_preview_and_pull_roundtrip(
     assert duplicate["accepted"][0]["server_cursor"] == pushed["accepted"][0]["server_cursor"]
     assert manifest.status_code == 200
     assert preview.status_code == 200
+    assert metadata_only_preview.status_code == 200
     assert pulled.status_code == 200
 
     manifest_body = manifest.json()
@@ -383,6 +392,9 @@ def test_chatbook_sync_v2_restore_preview_and_pull_roundtrip(
     ]
     assert [item["attachment_id"] for item in preview_body["attachment_refs"]] == ["attachment-1"]
     assert [item["attachment_id"] for item in preview_body["missing_blobs"]] == ["attachment-1"]
+    metadata_only_body = metadata_only_preview.json()
+    assert metadata_only_body["restore_status"] == "metadata_ready"
+    assert metadata_only_body["blob_details"][0]["required_for_restore"] is False
 
     rendered_restore_metadata = f"{manifest_body}\n{preview_body}"
     for private_marker in [PRIVATE_NOTE_BODY, PRIVATE_CHAT_BODY, "wrapped:opaque-dataset-key"]:

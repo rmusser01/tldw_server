@@ -533,6 +533,9 @@ def preview_sync_v2_restore(
             user_id=_sync_user_id(user),
             dataset_ids=request.dataset_ids,
             domains=request.domains,
+            selected_object_ids=request.selected_object_ids,
+            selected_attachment_ids=request.selected_attachment_ids,
+            metadata_only=request.metadata_only,
             local_inventory=[model_dump_compat(item) for item in request.local_inventory],
             attachment_availability=request.attachment_availability,
         )

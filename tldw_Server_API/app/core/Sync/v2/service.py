@@ -58,6 +58,9 @@ from .models import (
     SyncKeyRecord,
     SyncKeyRecordCreate,
     SyncOperation,
+    SyncRestoreBlobCompleteness,
+    SyncRestoreCompletenessStatus,
+    SyncRestoreDomainCompleteness,
 )
 from .profile import SyncProfileStatus, SyncV2ProfileManager
 from .replay import SyncReplayRepairer, SyncReplayRepairResult
@@ -65,6 +68,8 @@ from .restore import (
     OBJECT_RESTORE_DOMAINS,
     WHOLE_OBJECT_RESTORE_DOMAINS,
     attachment_available_locally,
+    attachment_restore_status,
+    attachment_verified_locally,
     build_local_inventory_index,
     find_local_inventory_item,
     local_inventory_matches,
@@ -331,6 +336,10 @@ class SyncRestorePreview:
     warnings: list[SyncRestorePreviewWarning] = field(default_factory=list)
     generated_at: str | None = None
     filters_applied: dict[str, object] = field(default_factory=dict)
+    restore_status: SyncRestoreCompletenessStatus | None = None
+    domain_details: list[SyncRestoreDomainCompleteness] = field(default_factory=list)
+    blob_details: list[SyncRestoreBlobCompleteness] = field(default_factory=list)
+    metadata_only_allowed: bool = True
 
 
 class SyncV2Service:
@@ -765,6 +774,9 @@ class SyncV2Service:
         user_id: str,
         dataset_ids: Sequence[str] | None = None,
         domains: Sequence[SyncDomain] | None = None,
+        selected_object_ids: Sequence[str] | None = None,
+        selected_attachment_ids: Sequence[str] | None = None,
+        metadata_only: bool = False,
         local_inventory: Sequence[Mapping[str, object]] | None = None,
         attachment_availability: Mapping[str, str] | None = None,
     ) -> SyncRestorePreview:
@@ -772,6 +784,8 @@ class SyncV2Service:
 
         allowed_dataset_ids = set(dataset_ids or [])
         selected_domains = set(domains or [])
+        selected_object_id_set = _normalize_selection_set(selected_object_ids)
+        selected_attachment_id_set = _normalize_selection_set(selected_attachment_ids)
         local_index = build_local_inventory_index(local_inventory)
         user_datasets = self.store.list_datasets_for_user(user_id)
         datasets_by_id = {dataset.dataset_id: dataset for dataset in user_datasets}
@@ -789,6 +803,7 @@ class SyncV2Service:
         tombstones: list[SyncRestorePreviewObject] = []
         attachment_refs: list[SyncRestorePreviewAttachmentRef] = []
         missing_blobs: list[SyncRestorePreviewAttachmentRef] = []
+        blob_details: list[SyncRestoreBlobCompleteness] = []
         envelope_ranges: list[SyncRestorePreviewEnvelopeRange] = []
         total_counts: dict[str, int] = {}
         key_status: dict[str, dict[str, bool]] = {}
@@ -856,6 +871,8 @@ class SyncV2Service:
                     continue
                 for envelope in domain_envelopes.get(domain, []):
                     if envelope.apply_status == "conflict":
+                        continue
+                    if selected_object_id_set and envelope.object_id not in selected_object_id_set:
                         continue
                     latest_object_envelopes[(domain, envelope.object_id)] = envelope
             for (domain, object_id), envelope in sorted(
@@ -972,10 +989,58 @@ class SyncV2Service:
                     metadata = extract_attachment_ref_metadata(envelope)
                 except AttachmentRefValidationError:
                     continue
+                if selected_attachment_id_set and (
+                    metadata.attachment_id not in selected_attachment_id_set
+                    and metadata.payload_hash not in selected_attachment_id_set
+                ):
+                    continue
+                if (
+                    not selected_attachment_id_set
+                    and selected_object_id_set
+                    and metadata.parent_object_id not in selected_object_id_set
+                ):
+                    continue
                 ref_key = (metadata.attachment_id, metadata.payload_hash)
                 if ref_key in seen_refs:
                     continue
                 seen_refs.add(ref_key)
+                server_blob = None
+                if self.settings.supports_attachments:
+                    server_blob = self.store.get_blob_object(
+                        dataset.dataset_id,
+                        attachment_id=metadata.attachment_id,
+                        payload_hash=metadata.payload_hash,
+                        owner_user_id=user_id,
+                    )
+                metadata_claims_server_blob = (
+                    not self.settings.supports_attachments
+                    and _attachment_ref_has_server_blob(metadata.availability)
+                )
+                server_availability = "available" if server_blob is not None or metadata_claims_server_blob else "metadata_only"
+                download_status = attachment_restore_status(
+                    attachment_availability,
+                    attachment_id=metadata.attachment_id,
+                    payload_hash=metadata.payload_hash,
+                )
+                verified_locally = attachment_verified_locally(
+                    attachment_availability,
+                    attachment_id=metadata.attachment_id,
+                    payload_hash=metadata.payload_hash,
+                )
+                required_for_restore = not metadata_only
+                blob_details.append(
+                    SyncRestoreBlobCompleteness(
+                        attachment_id=metadata.attachment_id,
+                        payload_hash=metadata.payload_hash,
+                        size_bytes=metadata.size_bytes,
+                        content_type=metadata.content_type,
+                        parent_domain=metadata.parent_domain,
+                        parent_object_id=metadata.parent_object_id,
+                        server_availability=server_availability,
+                        download_status=download_status,
+                        required_for_restore=required_for_restore,
+                    )
+                )
                 summary = SyncRestorePreviewAttachmentRef(
                     dataset_id=dataset.dataset_id,
                     attachment_id=metadata.attachment_id,
@@ -985,13 +1050,11 @@ class SyncV2Service:
                     content_type=metadata.content_type,
                     size_bytes=metadata.size_bytes,
                     payload_hash=metadata.payload_hash,
-                    availability=metadata.availability,
+                    availability=server_availability,
                     server_cursor=envelope.server_cursor or 0,
                 )
                 attachment_refs.append(summary)
-                if not _attachment_ref_has_server_blob(
-                    metadata.availability
-                ) and not attachment_available_locally(
+                if required_for_restore and server_availability != "available" and not attachment_available_locally(
                     attachment_availability,
                     attachment_id=metadata.attachment_id,
                     payload_hash=metadata.payload_hash,
@@ -1007,6 +1070,33 @@ class SyncV2Service:
                             payload_hash=metadata.payload_hash,
                         )
                     )
+                if verified_locally and server_availability != "available":
+                    warnings.append(
+                        SyncRestorePreviewWarning(
+                            code="sync_attachment_blob_verified_without_server_copy",
+                            message=(
+                                "Attachment blob is verified locally but is not available "
+                                "from the Sync v2 server."
+                            ),
+                            dataset_id=dataset.dataset_id,
+                            attachment_id=metadata.attachment_id,
+                            object_id=envelope.object_id,
+                            payload_hash=metadata.payload_hash,
+                        )
+                    )
+
+        domain_details = _build_restore_domain_details(
+            safe_applies=safe_applies,
+            tombstones=tombstones,
+            object_conflicts=object_conflicts,
+            blob_details=blob_details,
+            metadata_only=metadata_only,
+        )
+        restore_status = _restore_status_from_domain_details(
+            domain_details,
+            has_blob_selection=bool(blob_details),
+            metadata_only=metadata_only,
+        )
 
         return SyncRestorePreview(
             datasets=preview_datasets,
@@ -1024,7 +1114,14 @@ class SyncV2Service:
             filters_applied={
                 "dataset_ids": list(dataset_ids or []),
                 "domains": list(domains or []),
+                "selected_object_ids": sorted(selected_object_id_set),
+                "selected_attachment_ids": sorted(selected_attachment_id_set),
+                "metadata_only": metadata_only,
             },
+            restore_status=restore_status,
+            domain_details=domain_details,
+            blob_details=blob_details,
+            metadata_only_allowed=True,
         )
 
     def repair(
@@ -2115,6 +2212,132 @@ def _ciphertext_exceeds_attachment_limit(
 
 def _attachment_ref_has_server_blob(availability: str) -> bool:
     return availability.strip().lower() in ATTACHMENT_REF_SERVER_AVAILABILITY
+
+
+def _normalize_selection_set(values: Sequence[str] | None) -> set[str]:
+    selected: set[str] = set()
+    for value in values or []:
+        text = str(value).strip()
+        if text:
+            selected.add(text)
+    return selected
+
+
+def _build_restore_domain_details(
+    *,
+    safe_applies: Sequence[SyncRestorePreviewObject],
+    tombstones: Sequence[SyncRestorePreviewObject],
+    object_conflicts: Sequence[SyncRestorePreviewObjectConflict],
+    blob_details: Sequence[SyncRestoreBlobCompleteness],
+    metadata_only: bool,
+) -> list[SyncRestoreDomainCompleteness]:
+    counts: dict[SyncDomain, dict[str, int]] = {}
+
+    def domain_counts(domain: SyncDomain) -> dict[str, int]:
+        return counts.setdefault(
+            domain,
+            {
+                "selected_count": 0,
+                "safe_apply_count": 0,
+                "conflict_count": 0,
+                "tombstone_count": 0,
+                "required_blob_count": 0,
+                "available_blob_count": 0,
+                "missing_blob_count": 0,
+                "verified_blob_count": 0,
+            },
+        )
+
+    for item in safe_applies:
+        bucket = domain_counts(item.domain)
+        bucket["selected_count"] += 1
+        bucket["safe_apply_count"] += 1
+    for item in tombstones:
+        bucket = domain_counts(item.domain)
+        bucket["selected_count"] += 1
+        bucket["tombstone_count"] += 1
+    for item in object_conflicts:
+        bucket = domain_counts(item.domain)
+        bucket["selected_count"] += 1
+        bucket["conflict_count"] += 1
+    for item in blob_details:
+        bucket = domain_counts("attachment.ref")
+        bucket["selected_count"] += 1
+        if item.required_for_restore:
+            bucket["required_blob_count"] += 1
+            if item.server_availability == "available":
+                bucket["available_blob_count"] += 1
+            elif item.download_status not in {
+                "available",
+                "present",
+                "stored",
+                "server",
+                "verified",
+                "verified_complete",
+            }:
+                bucket["missing_blob_count"] += 1
+            if item.download_status in {"verified", "verified_complete"}:
+                bucket["verified_blob_count"] += 1
+
+    domain_order = {domain: index for index, domain in enumerate(M1_SYNC_DOMAINS)}
+    details: list[SyncRestoreDomainCompleteness] = []
+    for domain, values in sorted(
+        counts.items(),
+        key=lambda item: domain_order.get(item[0], len(domain_order)),
+    ):
+        details.append(
+            SyncRestoreDomainCompleteness(
+                domain=domain,
+                status=_restore_status_for_counts(values, metadata_only=metadata_only),
+                selected_count=values["selected_count"],
+                safe_apply_count=values["safe_apply_count"],
+                conflict_count=values["conflict_count"],
+                tombstone_count=values["tombstone_count"],
+                required_blob_count=values["required_blob_count"],
+                available_blob_count=values["available_blob_count"],
+                missing_blob_count=values["missing_blob_count"],
+                verified_blob_count=values["verified_blob_count"],
+            )
+        )
+    return details
+
+
+def _restore_status_for_counts(
+    values: Mapping[str, int],
+    *,
+    metadata_only: bool,
+) -> SyncRestoreCompletenessStatus:
+    if values["conflict_count"] > 0:
+        return "blocked_by_conflicts"
+    required_blob_count = values["required_blob_count"]
+    if required_blob_count == 0:
+        if metadata_only and values["selected_count"] > 0:
+            return "metadata_ready"
+        return "content_complete"
+    if values["missing_blob_count"] > 0:
+        return "blob_incomplete"
+    if values["verified_blob_count"] >= required_blob_count:
+        return "verified_complete"
+    return "content_complete"
+
+
+def _restore_status_from_domain_details(
+    domain_details: Sequence[SyncRestoreDomainCompleteness],
+    *,
+    has_blob_selection: bool,
+    metadata_only: bool,
+) -> SyncRestoreCompletenessStatus:
+    if any(item.status == "blocked_by_conflicts" for item in domain_details):
+        return "blocked_by_conflicts"
+    if any(item.status == "blob_incomplete" for item in domain_details):
+        return "blob_incomplete"
+    if metadata_only and has_blob_selection:
+        return "metadata_ready"
+    required_blob_count = sum(item.required_blob_count for item in domain_details)
+    verified_blob_count = sum(item.verified_blob_count for item in domain_details)
+    if required_blob_count > 0 and verified_blob_count >= required_blob_count:
+        return "verified_complete"
+    return "content_complete"
 
 
 def _call_adapter_evaluate(

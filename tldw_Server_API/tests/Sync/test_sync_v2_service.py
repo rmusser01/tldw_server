@@ -2878,6 +2878,149 @@ def test_restore_manifest_is_metadata_only_and_includes_inventory_status(
     assert "wrapped:secret-key" not in repr(manifest)
 
 
+def test_restore_preview_reports_m2_restore_completeness_states(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+    tmp_path: Path,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
+        settings=SyncV2Settings(
+            supports_attachments=True,
+            max_attachment_bytes=64,
+            max_blob_bytes=128,
+            max_chunk_bytes=8,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "chat.conversation", "attachment.ref"],
+    )
+    service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _envelope(client_envelope_id="note-restore"),
+            _envelope(
+                client_envelope_id="conversation-restore",
+                domain="chat.conversation",
+                entity_id="conversation-1",
+                stable_key="chat:conversation-1",
+                payload_hash="sha256:conversation-1",
+            ),
+            _envelope(
+                client_envelope_id="attachment-available-ref",
+                domain="attachment.ref",
+                entity_id="attachment-available",
+                stable_key="attachment:available",
+                payload_hash=_sha256(b"available payload"),
+                payload={
+                    "attachment_id": "attachment-available",
+                    "parent_domain": "notes.note",
+                    "parent_object_id": "note-1",
+                    "content_type": "application/octet-stream",
+                    "size_bytes": len(b"available payload"),
+                    "payload_hash": _sha256(b"available payload"),
+                    "availability": "client_local",
+                },
+            ),
+            _envelope(
+                client_envelope_id="attachment-missing-ref",
+                domain="attachment.ref",
+                entity_id="attachment-missing",
+                stable_key="attachment:missing",
+                payload_hash=_sha256(b"missing payload"),
+                payload={
+                    "attachment_id": "attachment-missing",
+                    "parent_domain": "notes.note",
+                    "parent_object_id": "note-1",
+                    "content_type": "application/octet-stream",
+                    "size_bytes": len(b"missing payload"),
+                    "payload_hash": _sha256(b"missing payload"),
+                    "availability": "client_local",
+                },
+            ),
+        ],
+    )
+    available_payload = b"available payload"
+    service.store_attachment(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domain="notes.note",
+        entity_id="note-1",
+        attachment_id="attachment-available",
+        content_type="application/octet-stream",
+        size_bytes=len(available_payload),
+        payload_ciphertext=available_payload.decode("utf-8"),
+        payload_hash=_sha256(available_payload),
+    )
+
+    blob_incomplete = service.restore_preview(user_id="user-1", dataset_ids=["dataset-1"])
+    content_complete = service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        selected_attachment_ids=["attachment-available"],
+    )
+    verified_complete = service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        selected_attachment_ids=["attachment-available"],
+        attachment_availability={"attachment-available": "verified"},
+    )
+    metadata_ready = service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        selected_attachment_ids=["attachment-missing"],
+        metadata_only=True,
+    )
+    blocked_by_conflicts = service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        selected_object_ids=["conversation-1"],
+        local_inventory=[
+            {
+                "domain": "chat.conversation",
+                "object_id": "conversation-1",
+                "object_revision": 1,
+                "object_hash": "sha256:local-conversation",
+                "deleted": False,
+            }
+        ],
+    )
+
+    assert blob_incomplete.restore_status == "blob_incomplete"
+    assert [blob.attachment_id for blob in blob_incomplete.blob_details] == [
+        "attachment-available",
+        "attachment-missing",
+    ]
+    assert [blob.server_availability for blob in blob_incomplete.blob_details] == [
+        "available",
+        "metadata_only",
+    ]
+    assert content_complete.restore_status == "content_complete"
+    content_attachment_detail = next(
+        item for item in content_complete.domain_details if item.domain == "attachment.ref"
+    )
+    assert content_attachment_detail.status == "content_complete"
+    assert verified_complete.restore_status == "verified_complete"
+    verified_attachment_detail = next(
+        item for item in verified_complete.domain_details if item.domain == "attachment.ref"
+    )
+    assert verified_attachment_detail.verified_blob_count == 1
+    assert metadata_ready.restore_status == "metadata_ready"
+    assert metadata_ready.blob_details[0].required_for_restore is False
+    assert blocked_by_conflicts.restore_status == "blocked_by_conflicts"
+    assert blocked_by_conflicts.object_conflicts[0].domain == "chat.conversation"
+
+
 def test_blob_upload_session_chunk_and_complete_flow_commits_blob(
     sync_store: SyncV2Store,
     registry: SyncAdapterRegistry,
