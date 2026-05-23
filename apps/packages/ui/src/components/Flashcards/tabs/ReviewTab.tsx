@@ -1356,13 +1356,16 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                             ? "warning"
                             : "error"
                         }
+                        className="w-full text-left"
                         title={t("option:flashcards.reviewRetryTitle", {
                           defaultValue: "Review not saved"
                         })}
                         data-testid="flashcards-review-retry-alert"
                       >
                         <div className="space-y-2">
-                          <p className="m-0">{reviewFailure.message}</p>
+                          <Text type="secondary" className="block">
+                            {reviewFailure.message}
+                          </Text>
                           <Space orientation="vertical" size={8}>
                             <Button
                               size="small"
@@ -1541,6 +1544,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                   {showReviewOnboardingGuide ? (
                     <Alert
                       variant="info"
+                      aria-live="off"
                       className="w-full max-w-2xl text-left"
                       data-testid="flashcards-review-onboarding-guide"
                       title={t("option:flashcards.onboardingTitle", {
