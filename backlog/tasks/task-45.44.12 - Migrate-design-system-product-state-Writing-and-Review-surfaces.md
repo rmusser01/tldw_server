@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.12
 title: 'Migrate design-system product state: Writing and Review surfaces'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-14 03:20'
 labels:
@@ -28,9 +28,15 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 The linked GitHub issue owns current count and public status.
-- [ ] #2 Implementation PR tasks are created under this child when the area is too broad for one PR.
+- [x] #2 Implementation PR tasks are created under this child when the area is too broad for one PR.
 - [ ] #3 Backlog notes record PR links and before/after count evidence.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+- Created TASK-45.44.12.2 for the narrow Review slice covering `MediaReviewReadingPane` failed-load Alert migration. Verification on the slice reduced the product-state baseline from 291 to 290 and `Writing and Review surfaces` from 21 to 20.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
