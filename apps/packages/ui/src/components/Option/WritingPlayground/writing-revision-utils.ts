@@ -92,8 +92,12 @@ export const findParagraphRange = (
   cursor: number
 ): { start: number; end: number } => {
   const safeCursor = clampIndex(cursor, text.length)
-  const before = text.lastIndexOf("\n\n", safeCursor - 1)
-  const after = text.indexOf("\n\n", safeCursor)
+  const paragraphCursor = text.startsWith("\n\n", safeCursor)
+    ? clampIndex(safeCursor + 2, text.length)
+    : safeCursor
+  const before =
+    paragraphCursor === 0 ? -1 : text.lastIndexOf("\n\n", paragraphCursor - 1)
+  const after = text.indexOf("\n\n", paragraphCursor)
   return {
     start: before === -1 ? 0 : before + 2,
     end: after === -1 ? text.length : after
@@ -281,6 +285,13 @@ export const planRevisionApply = (
     return {
       type: "conflict",
       reason: "The insertion anchor no longer identifies a unique target."
+    }
+  }
+
+  if (proposal.operation === "insert") {
+    return {
+      type: "conflict",
+      reason: "Insert revisions require a zero-length target."
     }
   }
 
