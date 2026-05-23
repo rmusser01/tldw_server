@@ -49,12 +49,13 @@ Continue TASK-45.44.3 by replacing Watchlists VisualComposerPane AntD Alert prod
 - Removed the three migrated VisualComposerPane Alert exceptions from `apps/packages/ui/scripts/design-system-product-state-baseline.json`.
 - Verification: `bunx vitest run src/components/Option/Watchlists/TemplatesTab/__tests__/VisualComposerPane.section-generation.test.tsx --maxWorkers=1 --no-file-parallelism` -> 1 file, 4 tests passed.
 - Verification: `bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --maxWorkers=1 --no-file-parallelism` -> 1 file, 54 tests passed.
-- Verification: `bun run verify:design-system-state` -> passed with 275 baseline exceptions total and Jobs/Scheduler/Watchlists at 24.
+- Verification: `bun run verify:design-system-state` -> passed with 259 baseline exceptions total and Jobs/Scheduler/Watchlists at 24 after rebasing onto current `origin/dev`.
 - Verification: `node -e "JSON.parse(require('fs').readFileSync('apps/packages/ui/scripts/design-system-product-state-baseline.json','utf8')); console.log('baseline ok')"` -> `baseline ok`.
 - Verification: `git diff --check` -> passed.
 - Bandit: skipped/not applicable; touched code is frontend TS/TSX plus JSON and Backlog task metadata only.
 - PR review follow-up: added a regression assertion for the empty composer Alert `aria-live="off"` opt-out; red run failed with `aria-live="polite"`, then VisualComposerPane passed `aria-live="off"` on the static info Alert and the focused suite passed 4/4.
 - TypeScript: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still exits 2 on existing diagnostics; no diagnostics mention VisualComposerPane, the focused test, the baseline, or TASK-45.44.3.5.
+- Merge conflict follow-up: rebased PR #1975 onto `origin/dev` at 803bbb110 and resolved the baseline conflict by keeping current `dev` entries while removing only the three VisualComposerPane rows; post-rebase baseline parse reported total 259 and targetRows 0.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
