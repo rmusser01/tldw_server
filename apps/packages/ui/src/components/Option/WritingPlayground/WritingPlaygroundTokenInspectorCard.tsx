@@ -70,7 +70,7 @@ export const WritingPlaygroundTokenInspectorCard: FC<TokenInspectorCardProps> = 
       ) : null}
     </div>
     {tokenInspectorUnavailableReason ? (
-      <Alert variant="info" title={tokenInspectorUnavailableReason} />
+<Alert variant="info" className="mb-2" title={tokenInspectorUnavailableReason} />
     ) : null}
     {tokenInspectorError ? (
       <Alert variant="error" title={tokenInspectorError} />
