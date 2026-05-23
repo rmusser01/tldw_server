@@ -88,6 +88,20 @@ describe("writing revision utilities", () => {
     expect(findParagraphRange("\n\nAlpha", 0)).toEqual({ start: 2, end: 7 })
   })
 
+  it("keeps a cursor at paragraph end on the preceding paragraph", () => {
+    expect(findParagraphRange("Alpha\n\nBeta", 5)).toEqual({
+      start: 0,
+      end: 5
+    })
+  })
+
+  it("keeps a cursor inside a paragraph delimiter on the preceding paragraph", () => {
+    expect(findParagraphRange("Alpha\n\nBeta", 6)).toEqual({
+      start: 0,
+      end: 5
+    })
+  })
+
   it("plans a direct replacement when beforeText still matches", () => {
     const proposal = makeReplacementProposal({
       start: 0,
