@@ -91,14 +91,16 @@ export function StatePanel({
         {children}
 
         {hasDiagnostics ? (
-          <dl
-            aria-label="Diagnostics"
-            className="rounded-md border border-border bg-surface2 px-3 py-2"
-          >
-            {diagnostics.map((diagnostic, index) => (
-              <DiagnosticRow key={index} {...diagnostic} />
-            ))}
-          </dl>
+          <details className="rounded-md border border-border bg-surface2 px-3 py-2">
+            <summary className="cursor-pointer text-xs font-semibold text-text-muted">
+              Diagnostics
+            </summary>
+            <dl aria-label="Diagnostics" className="mt-2">
+              {diagnostics.map((diagnostic, index) => (
+                <DiagnosticRow key={index} {...diagnostic} />
+              ))}
+            </dl>
+          </details>
         ) : null}
 
         <ActionGroup primaryAction={primaryAction} secondaryActions={secondaryActions} />

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { ActionGroup, PermissionNotice, RecoveryCallout, SetupRequiredPanel, StatePanel } from "../"
 
@@ -29,6 +29,7 @@ describe("state primitives", () => {
       />
     )
 
+    expect(screen.getByText("Diagnostics").closest("details")).not.toHaveAttribute("open")
     expect(screen.getByLabelText("Diagnostics")).toBeInTheDocument()
     expect(screen.getByText("/api/v1/health")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
@@ -53,8 +54,12 @@ describe("state primitives", () => {
       name: "Sources are unavailable"
     }).closest("div")
     const diagnostics = screen.getByLabelText("Diagnostics")
+    const disclosure = screen.getByText("Diagnostics")
 
     expect(primaryState).not.toHaveTextContent("/api/v1/sources")
+    expect(disclosure.closest("details")).not.toHaveAttribute("open")
+    fireEvent.click(disclosure)
+    expect(disclosure.closest("details")).toHaveAttribute("open")
     expect(diagnostics).toHaveTextContent("/api/v1/sources")
     expect(screen.getByRole("button", { name: "Check server setup" })).toBeInTheDocument()
   })

@@ -1,6 +1,7 @@
 import React from "react"
 import { Skeleton } from "antd"
 import { useTranslation } from "react-i18next"
+import { useNavigate } from "react-router-dom"
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import { PageShell } from "@/components/Common/PageShell"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -9,6 +10,7 @@ import { SkillsManager } from "./Manager"
 
 export const SkillsWorkspace: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
+  const navigate = useNavigate()
   const { capabilities, loading: capsLoading } = useServerCapabilities()
   const hasSkills = capabilities?.hasSkills
 
@@ -36,6 +38,10 @@ export const SkillsWorkspace: React.FC = () => {
               defaultValue:
                 "The connected server does not support the Skills API. Update the server to enable this feature."
             })}
+            primaryActionLabel={t("option:skillsEmpty.checkServerSetup", {
+              defaultValue: "Check server setup"
+            })}
+            onPrimaryAction={() => navigate("/settings/health")}
           />
         </PageShell>
       ) : (

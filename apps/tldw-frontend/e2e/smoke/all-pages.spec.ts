@@ -18,6 +18,7 @@ import {
   seedAuth,
   getCriticalIssues,
   classifySmokeIssues,
+  validateSmokeHardGateAllowlist,
 } from './smoke.setup';
 import { waitForAppShell } from '../utils/helpers';
 import { PAGES, PageEntry, getActivePages, PAGE_COUNT, ACTIVE_PAGE_COUNT } from './page-inventory';
@@ -140,6 +141,14 @@ const TRANSIENT_RUNTIME_OVERLAY_PATTERNS = [
 const keyNavEntries: PageEntry[] = KEY_NAV_TARGETS.map((targetPath) =>
   PAGES.find((entry) => entry.path === targetPath)
 ).filter((entry): entry is PageEntry => Boolean(entry));
+
+function expectSmokeHardGateAllowlistMetadata(): void {
+  const allowlistProblems = validateSmokeHardGateAllowlist();
+  expect(
+    allowlistProblems,
+    `Smoke hard-gate allowlist metadata problems:\n${allowlistProblems.join('\n')}`
+  ).toEqual([]);
+}
 
 /**
  * Format diagnostics for console output
@@ -396,9 +405,15 @@ test.describe('Smoke Tests - All Pages', () => {
 
   // Log test suite info
   test.beforeAll(() => {
+    expectSmokeHardGateAllowlistMetadata();
+
     console.log(
       `\nSmoke test suite: ${ACTIVE_PAGE_COUNT} pages (${PAGE_COUNT - ACTIVE_PAGE_COUNT} skipped)\n`
     );
+  });
+
+  test('hard-gate allowlist entries have current ownership metadata', () => {
+    expectSmokeHardGateAllowlistMetadata();
   });
 
   // Generate a test for each active page

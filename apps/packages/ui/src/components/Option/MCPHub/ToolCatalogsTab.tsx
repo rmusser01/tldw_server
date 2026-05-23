@@ -144,8 +144,19 @@ export const ToolCatalogsTab = ({ onAddServer }: ToolCatalogsTabProps = {}) => {
           type="warning"
           showIcon
           title="Could not load server inventory"
-          description={`${serverInventoryError} Tool Catalog guidance may be incomplete until the server list loads.`}
-        />
+        >
+          <Space orientation="vertical" size={4}>
+            <Typography.Text>
+              Tool Catalog guidance may be incomplete until the server list loads.
+            </Typography.Text>
+            <details>
+              <summary className="cursor-pointer font-medium">Request details</summary>
+              <Typography.Text code className="whitespace-pre-wrap">
+                {serverInventoryError}
+              </Typography.Text>
+            </details>
+          </Space>
+        </Alert>
       ) : null}
 
       {groupedModules.length > 0 ? (

@@ -1,6 +1,7 @@
 import React from "react"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useTranslation } from "react-i18next"
+import { Link } from "react-router-dom"
 import {
   Button,
   Card,
@@ -2960,14 +2961,29 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                       <DesignSystemAlert
                         variant="warning"
                         title={t(
-                          "playground:tts.tldwWarningTitle",
-                          "tldw audio/speech API not detected"
+                          "playground:tts.serverTtsUnavailableTitle",
+                          "Server text-to-speech is not connected"
                         )}
                       >
-                        {t(
-                          "playground:tts.tldwWarningBody",
-                          "Ensure your tldw_server version includes /api/v1/audio/speech and that your extension is connected with a valid API key."
-                        )}
+                        <div className="space-y-3">
+                          <span>
+                            {t(
+                              "playground:tts.serverTtsUnavailableBody",
+                              "Check the server connection and Speech settings before generating server TTS."
+                            )}
+                          </span>
+                          <div>
+                            <Link
+                              to="/settings/speech"
+                              className="inline-flex min-h-8 items-center rounded border border-border px-3 text-xs font-medium text-primary hover:text-primaryStrong"
+                            >
+                              {t(
+                                "playground:tts.openSpeechSettings",
+                                "Open Speech settings"
+                              )}
+                            </Link>
+                          </div>
+                        </div>
                       </DesignSystemAlert>
                     )}
 
