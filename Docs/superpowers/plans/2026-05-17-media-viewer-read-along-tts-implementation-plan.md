@@ -20,6 +20,26 @@
 
 This plan covers one reviewable subsystem: read-along behavior inside the shared `ContentViewer` path. It deliberately excludes backend API work, new TTS providers, persistent server-side audio cache, word-level timing, and a page-level read-aloud player.
 
+## Plan Hardening Review - 2026-05-23
+
+Status: this plan has already been executed. The implementation is recorded in `TASK-417`, and post-PR review fixes are recorded in `TASK-425` for PR #1835. Do not treat the unchecked task-step checkboxes below as current backlog work; they are preserved as the original execution script. The authoritative completion evidence is the completed `TASK-417`/`TASK-425` records plus the final verification checklist in this file.
+
+Current-code ownership check passed:
+
+- `apps/packages/ui/src/components/Media/read-along/` contains the planned segmentation, cache, DOM, selection, session, popover, transport, and focused test modules.
+- `ContentViewer` imports and wires `useContentSelectionActions`, `useMediaReadAlongSession`, `MediaReadAlongPopover`, and `MediaReadAlongTransport`.
+- `useContentViewerModals` exposes explicit `captureAnnotationSelection` while retaining `handleCaptureAnnotationSelection` as a compatibility wrapper.
+- `useTranscriptDisplay` and `ContentViewer` expose `data-read-along-segment-id` / `data-read-along-active` markers for plain and transcript rendering.
+- `tts-provider` exposes `TtsSynthesizeOptions.signal`; `tldw`, OpenAI, and ElevenLabs synthesis paths accept abort signals where their helpers support it, while the browser provider remains a no-cache SpeechSynthesis path.
+- Dexie schema/types include `mediaReadAlongAudioCache` with the media read-along audio cache entry type.
+- Route guards verify WebUI and extension media routes stay on the shared `ViewMediaPage` path and do not duplicate read-along implementation in extension route files.
+
+Risk review passed:
+
+- Annotation selection mediation, full-content versus rendered-window behavior, abort/stale suppression, cache privacy/quota behavior, browser TTS, embedded media pause, markdown/html fallback, route parity, and accessibility all map to focused tests or recorded browser verification.
+- No stale file ownership paths were found in this plan.
+- Future read-along changes should use new focused Backlog tasks rather than re-executing this historical plan.
+
 ## File Structure
 
 Create this directory:
