@@ -41,6 +41,7 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 - Created TASK-45.44.12.5 for the narrow Writing slice covering `WritingPlaygroundActiveSessionGuard` settings-load Alert migration. Verification on the slice reduced the product-state baseline from 288 to 287 and `Writing and Review surfaces` from 18 to 17. PR: https://github.com/rmusser01/tldw_server/pull/1967
 - Created TASK-45.44.12.6 for the narrow Writing slice covering `WritingPlaygroundTokenInspectorCard` unavailable/error Alert migration. Verification on the slice reduced the product-state baseline from 287 to 285 and `Writing and Review surfaces` from 17 to 15. PR: https://github.com/rmusser01/tldw_server/pull/1971
 - Created TASK-45.44.12.7 for the narrow Writing slice covering `WritingPlaygroundDiagnosticsPanel` offline/unsupported Alert migration. Verification on the slice reduced the product-state baseline from 285 to 283 and `Writing and Review surfaces` from 15 to 13. PR: https://github.com/rmusser01/tldw_server/pull/1972
+- Created TASK-45.44.12.8 for the narrow Writing slice covering `ConnectionWebModal` project-required/no-data Empty and loading Spin migration. Verification on the slice reduced the product-state baseline from 283 to 280 and `Writing and Review surfaces` from 13 to 10. PR: https://github.com/rmusser01/tldw_server/pull/1974
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done

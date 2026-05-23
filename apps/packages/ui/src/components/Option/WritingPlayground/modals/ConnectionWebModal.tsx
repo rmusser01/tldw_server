@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Button, Empty, Modal, Spin } from "antd"
+import { Button, Modal } from "antd"
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react"
 import cytoscape, {
   type Core,
@@ -9,6 +9,8 @@ import cytoscape, {
   type StylesheetJson,
 } from "cytoscape"
 import dagre from "cytoscape-dagre"
+import { EmptyState } from "@/components/ui/feedback/EmptyState"
+import { LoadingState } from "@/components/ui/feedback/LoadingState"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
 import {
   listManuscriptCharacters,
@@ -215,13 +217,23 @@ export function ConnectionWebModal({ open, onClose }: ConnectionWebModalProps) {
   return (
     <Modal title="Connection Web" open={open} onCancel={onClose} footer={null} width={900}>
       {!activeProjectId ? (
-        <Empty description="Select a project first" />
+        <EmptyState
+          variant="inline"
+          size="md"
+          title="Select a project first"
+          className="py-10"
+        />
       ) : isLoading ? (
         <div className="h-[520px] flex items-center justify-center">
-          <Spin />
+          <LoadingState mode="spinner" size="md" />
         </div>
       ) : !hasData ? (
-        <Empty description="Add characters or world info to visualize connections" />
+        <EmptyState
+          variant="inline"
+          size="md"
+          title="Add characters or world info to visualize connections"
+          className="py-10"
+        />
       ) : (
         <>
           <div className="flex items-center gap-2 mb-2">
