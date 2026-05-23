@@ -446,7 +446,7 @@
   },
   "commandPalette": {
     "goToChat": "Go to Chat",
-    "goToKnowledge": "Go to Knowledge QA",
+    "goToKnowledge": "Go to Knowledge",
     "goToMedia": "Go to Media",
     "goToNotes": "Go to Notes",
     "goToPrompts": "Go to Prompts",
@@ -612,7 +612,7 @@
     "toggleSidebar": "Toggle sidebar",
     "goToPlayground": "Go to Playground",
     "goToMedia": "Go to Media",
-    "goToKnowledge": "Go to Knowledge QA",
+    "goToKnowledge": "Go to Knowledge",
     "goToNotes": "Go to Notes",
     "goToPrompts": "Go to Prompts",
     "goToFlashcards": "Go to Flashcards",

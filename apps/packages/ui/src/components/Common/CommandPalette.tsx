@@ -195,7 +195,7 @@ export function CommandPalette({
       ...(!isSidepanel ? ([
         {
           id: "nav-knowledge",
-          label: t("common:commandPalette.goToKnowledge", "Go to Knowledge QA"),
+          label: t("common:commandPalette.goToKnowledge", "Go to Knowledge"),
           icon: <CombineIcon className="size-4" />,
           action: () => { navigate("/knowledge"); setOpen(false) },
           targetPath: "/knowledge",
