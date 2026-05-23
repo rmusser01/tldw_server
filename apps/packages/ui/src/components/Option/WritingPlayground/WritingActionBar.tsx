@@ -125,7 +125,9 @@ export function WritingActionBar({
   const sendRequest = (action: WritingRevisionAction, explicitInstruction?: string) => {
     const operation = getOperationForAction(action)
     const requiresConfirmation =
-      target.requiresConfirmation && TEXT_CHANGING_ACTIONS.has(action)
+      target.requiresConfirmation &&
+      operation !== "insert" &&
+      TEXT_CHANGING_ACTIONS.has(action)
 
     if (requiresConfirmation && !confirmed) {
       setConfirmationWarning(true)

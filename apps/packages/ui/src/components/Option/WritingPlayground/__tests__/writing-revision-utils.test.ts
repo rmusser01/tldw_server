@@ -84,6 +84,24 @@ describe("writing revision utilities", () => {
     expect(findParagraphRange(text, 14)).toEqual({ start: 12, end: 33 })
   })
 
+  it("resolves Continue as cursor insertion even when text is selected", () => {
+    const target = resolveRevisionTarget({
+      text: "Alpha beta gamma",
+      action: "continue",
+      operation: "insert",
+      selection: { start: 0, end: 5 },
+      cursor: 5
+    })
+
+    expect(target).toMatchObject({
+      mode: "cursor",
+      start: 5,
+      end: 5,
+      beforeText: "",
+      requiresConfirmation: false
+    })
+  })
+
   it("resolves leading blank paragraphs to the first content paragraph", () => {
     expect(findParagraphRange("\n\nAlpha", 0)).toEqual({ start: 2, end: 7 })
   })

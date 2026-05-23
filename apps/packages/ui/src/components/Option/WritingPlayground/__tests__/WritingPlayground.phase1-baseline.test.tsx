@@ -533,6 +533,42 @@ describe("WritingPlayground phase1 baseline", () => {
     })
   })
 
+  it("continues from the selected text end and applies an insertion", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    mockState.sendResponses.push(structuredReplacement(" continued"))
+    seedWritingSession({ prompt: "Intro sentence. Outro." })
+
+    render(<WritingPlayground />)
+    const editor = getEditor()
+    selectEditorText(editor, "sentence")
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }))
+
+    await waitFor(() => {
+      expect(mockState.sendCalls).toHaveLength(1)
+    })
+    fireEvent.click(screen.getByRole("button", { name: /apply/i }))
+
+    await waitFor(() => {
+      expect(editor.value).toBe("Intro sentence continued. Outro.")
+    })
+  })
+
+  it("does not require broad-target confirmation for Continue", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    mockState.sendResponses.push(structuredReplacement("Opening "))
+    seedWritingSession({
+      prompt: "Long paragraph ".repeat(120)
+    })
+
+    render(<WritingPlayground />)
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }))
+
+    await waitFor(() => {
+      expect(mockState.sendCalls).toHaveLength(1)
+    })
+    expect(latestRevisionPrompt()).toContain("Operation: insert")
+  })
+
   it("refreshes the action-bar target when text is selected after a broad target renders", async () => {
     mockState.storageValues.set("selectedModel", "mock-model")
     mockState.sendResponses.push(structuredReplacement("Specific rewrite."))
@@ -764,7 +800,11 @@ describe("WritingPlayground phase1 baseline", () => {
         frequency_penalty: 0.1,
         seed: 1234,
         stop: ["END"],
-        advanced_extra_body: { safe_key: "kept", api_key: "do-not-leak" },
+        advanced_extra_body: {
+          safe_key: "kept",
+          api_key: "do-not-leak",
+          banned_tokens: ["cliche"]
+        },
         memory_block: {
           enabled: true,
           prefix: "Memory:",
@@ -826,7 +866,11 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(mockState.sendCalls[0]?.options).toMatchObject({
       model: "context-model",
       temperature: 0.42,
-      maxTokens: 333
+      maxTokens: 333,
+      extraBody: {
+        safe_key: "kept",
+        banned_tokens: ["cliche"]
+      }
     })
   })
 

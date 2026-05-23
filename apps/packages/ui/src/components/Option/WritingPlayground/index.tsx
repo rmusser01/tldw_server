@@ -1307,10 +1307,7 @@ export const WritingPlayground = () => {
     })
     const genAdvancedExtraBody =
       supportsAdvancedCompat
-        ? (sanitizeRevisionValue(settings.advanced_extra_body) as Record<
-            string,
-            unknown
-          >)
+        ? settings.advanced_extra_body
         : {}
     return {
       model: selectedModel,
