@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.12.4
 title: Migrate WritingPlaygroundResponseInspectorCard alert to design-system Alert
-status: In Progress
+status: Done
 labels:
 - design-system
 - webui
@@ -13,6 +13,7 @@ references:
 - apps/packages/ui/src/components/Option/WritingPlayground/WritingPlaygroundResponseInspectorCard.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
 - Docs/Design/tldw_web_design_system_contract.md
+- https://github.com/rmusser01/tldw_server/pull/1966
 modified_files:
 - apps/packages/ui/src/components/Option/WritingPlayground/WritingPlaygroundResponseInspectorCard.tsx
 - apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlaygroundResponseInspectorCard.design-system-alert.test.tsx
@@ -56,12 +57,13 @@ Migrate the single product-state AntD Alert in `WritingPlaygroundResponseInspect
   - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still fails on existing repo-wide UI TypeScript debt; no diagnostics mention `WritingPlaygroundResponseInspectorCard` or the new test.
   - `git diff --check` passed.
 - Bandit skipped: touched implementation is TypeScript/React UI code and JSON/test metadata only, with no Python touched.
+- PR: https://github.com/rmusser01/tldw_server/pull/1966
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Migrated the `WritingPlaygroundResponseInspectorCard` response inspector guidance alert to the shared design-system Alert primitive, added focused regression coverage for the design-system marker, and removed the migrated baseline exception. PR: https://github.com/rmusser01/tldw_server/pull/1966
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -70,6 +72,6 @@ Migrate the single product-state AntD Alert in `WritingPlaygroundResponseInspect
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
