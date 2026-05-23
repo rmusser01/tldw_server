@@ -172,6 +172,46 @@ describe("WritingActionBar", () => {
     )
   })
 
+  it("requires fresh confirmation when the broad target changes", () => {
+    const onRequest = vi.fn()
+    const nextDocumentTarget: WritingRevisionTarget = {
+      ...documentTarget,
+      start: 20,
+      end: 1400,
+      beforeText: "Different full document",
+      anchor: {
+        ...documentTarget.anchor,
+        documentFingerprint: "fingerprint-2"
+      }
+    }
+
+    const view = render(
+      <WritingActionBar
+        generationAvailable
+        target={documentTarget}
+        onRequest={onRequest}
+      />
+    )
+
+    fireEvent.click(
+      view.getByLabelText(/confirm whole-document text change/i)
+    )
+    fireEvent.click(view.getByRole("button", { name: /rewrite/i }))
+    expect(onRequest).toHaveBeenCalledTimes(1)
+
+    view.rerender(
+      <WritingActionBar
+        generationAvailable
+        target={nextDocumentTarget}
+        onRequest={onRequest}
+      />
+    )
+
+    fireEvent.click(view.getByRole("button", { name: /rewrite/i }))
+    expect(onRequest).toHaveBeenCalledTimes(1)
+    expect(view.getAllByText(/this will rewrite the full draft/i).length).toBe(2)
+  })
+
   it("exposes a direction/custom instruction input for Tone", () => {
     const onRequest = vi.fn()
 
