@@ -50,6 +50,15 @@ from .models import (
 )
 from .materializers import MaterializationResult, SyncMaterializer
 from .profile import SyncProfileStatus, SyncV2ProfileManager
+from .restore import (
+    OBJECT_RESTORE_DOMAINS,
+    WHOLE_OBJECT_RESTORE_DOMAINS,
+    attachment_available_locally,
+    build_local_inventory_index,
+    find_local_inventory_item,
+    local_inventory_matches,
+    restore_action_for_domain,
+)
 from .security import (
     PrivatePayloadValidationError,
     SyncV2ServerTrustedEncryptionStatus,
@@ -208,6 +217,52 @@ class SyncRestorePreviewDataset:
     approximate_counts: dict[str, int] = field(default_factory=dict)
     byte_estimates: dict[str, int] = field(default_factory=dict)
     latest_cursor: int | None = None
+    latest_cursors: dict[str, int] = field(default_factory=dict)
+    envelope_ranges: list[SyncRestorePreviewEnvelopeRange] = field(default_factory=list)
+    total_count: int = 0
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+    key_recovery_available: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRestorePreviewEnvelopeRange:
+    dataset_id: str
+    domain: SyncDomain
+    from_cursor: int
+    to_cursor: int
+    envelope_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRestorePreviewObject:
+    dataset_id: str
+    domain: SyncDomain
+    object_id: str
+    action: str
+    server_revision: int | None = None
+    server_hash: str | None = None
+    server_cursor: int | None = None
+    local_revision: int | None = None
+    local_hash: str | None = None
+    local_deleted: bool | None = None
+    deleted: bool = False
+    parent_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRestorePreviewObjectConflict:
+    dataset_id: str
+    domain: SyncDomain
+    object_id: str
+    conflict_type: str
+    server_revision: int | None = None
+    server_hash: str | None = None
+    server_cursor: int | None = None
+    server_deleted: bool = False
+    local_revision: int | None = None
+    local_hash: str | None = None
+    local_deleted: bool = False
+    message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,8 +292,15 @@ class SyncRestorePreviewWarning:
 @dataclass(frozen=True, slots=True)
 class SyncRestorePreview:
     datasets: list[SyncRestorePreviewDataset] = field(default_factory=list)
+    safe_applies: list[SyncRestorePreviewObject] = field(default_factory=list)
+    object_conflicts: list[SyncRestorePreviewObjectConflict] = field(default_factory=list)
+    tombstones: list[SyncRestorePreviewObject] = field(default_factory=list)
     attachment_refs: list[SyncRestorePreviewAttachmentRef] = field(default_factory=list)
     missing_blobs: list[SyncRestorePreviewAttachmentRef] = field(default_factory=list)
+    envelope_ranges: list[SyncRestorePreviewEnvelopeRange] = field(default_factory=list)
+    total_counts: dict[str, int] = field(default_factory=dict)
+    encryption: dict[str, object] = field(default_factory=dict)
+    key_status: dict[str, dict[str, bool]] = field(default_factory=dict)
     warnings: list[SyncRestorePreviewWarning] = field(default_factory=list)
     generated_at: str | None = None
     filters_applied: dict[str, object] = field(default_factory=dict)
@@ -658,18 +720,28 @@ class SyncV2Service:
     ) -> SyncRestorePreview:
         """Return metadata needed to preview a restore plan for Sync v2 M1."""
 
-        del local_inventory, attachment_availability
         allowed_dataset_ids = set(dataset_ids or [])
         selected_domains = set(domains or [])
-        datasets = [
-            dataset
-            for dataset in self.store.list_datasets_for_user(user_id)
-            if not allowed_dataset_ids or dataset.dataset_id in allowed_dataset_ids
-        ]
+        local_index = build_local_inventory_index(local_inventory)
+        user_datasets = self.store.list_datasets_for_user(user_id)
+        datasets_by_id = {dataset.dataset_id: dataset for dataset in user_datasets}
+        if allowed_dataset_ids:
+            inaccessible_dataset_ids = sorted(allowed_dataset_ids.difference(datasets_by_id))
+            if inaccessible_dataset_ids:
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            datasets = [datasets_by_id[dataset_id] for dataset_id in dataset_ids or []]
+        else:
+            datasets = user_datasets
 
         preview_datasets: list[SyncRestorePreviewDataset] = []
+        safe_applies: list[SyncRestorePreviewObject] = []
+        object_conflicts: list[SyncRestorePreviewObjectConflict] = []
+        tombstones: list[SyncRestorePreviewObject] = []
         attachment_refs: list[SyncRestorePreviewAttachmentRef] = []
         missing_blobs: list[SyncRestorePreviewAttachmentRef] = []
+        envelope_ranges: list[SyncRestorePreviewEnvelopeRange] = []
+        total_counts: dict[str, int] = {}
+        key_status: dict[str, dict[str, bool]] = {}
         warnings: list[SyncRestorePreviewWarning] = []
 
         for dataset in datasets:
@@ -681,10 +753,38 @@ class SyncV2Service:
                 user_id=user_id,
                 domains=dataset_domains,
             )
-            latest_cursor = self._latest_cursor_for_domains(
-                dataset.dataset_id,
-                dataset_domains,
-            )
+            key_status[dataset.dataset_id] = {
+                "key_recovery_available": stats.key_recovery_available,
+            }
+            for domain, count in stats.approximate_counts.items():
+                total_counts[domain] = total_counts.get(domain, 0) + count
+            domain_envelopes = {
+                domain: self.store.list_envelopes_after(
+                    dataset.dataset_id,
+                    0,
+                    limit=self.settings.restore_manifest_scan_limit,
+                    domains=[domain],
+                    status="accepted",
+                )
+                for domain in dataset_domains
+            }
+            latest_cursors: dict[str, int] = {}
+            dataset_ranges: list[SyncRestorePreviewEnvelopeRange] = []
+            for domain, envelopes in domain_envelopes.items():
+                cursors = [envelope.server_cursor or 0 for envelope in envelopes if envelope.server_cursor]
+                if not cursors:
+                    continue
+                latest_cursors[domain] = max(cursors)
+                dataset_range = SyncRestorePreviewEnvelopeRange(
+                    dataset_id=dataset.dataset_id,
+                    domain=domain,
+                    from_cursor=min(cursors),
+                    to_cursor=max(cursors),
+                    envelope_count=len(cursors),
+                )
+                dataset_ranges.append(dataset_range)
+                envelope_ranges.append(dataset_range)
+            latest_cursor = max(latest_cursors.values(), default=None)
             preview_datasets.append(
                 SyncRestorePreviewDataset(
                     dataset_id=dataset.dataset_id,
@@ -692,31 +792,135 @@ class SyncV2Service:
                     approximate_counts=stats.approximate_counts,
                     byte_estimates=stats.byte_estimates,
                     latest_cursor=latest_cursor,
+                    latest_cursors=latest_cursors,
+                    envelope_ranges=dataset_ranges,
+                    total_count=sum(stats.approximate_counts.values()),
+                    encryption_policy=dataset.encryption_policy,
+                    key_recovery_available=stats.key_recovery_available,
                 )
             )
 
-            if "attachment.ref" not in dataset_domains:
-                continue
-            seen_refs: set[tuple[str, str]] = set()
-            for envelope in self.store.list_envelopes_after(
-                dataset.dataset_id,
-                0,
-                limit=self.settings.restore_manifest_scan_limit,
-                domains=["attachment.ref"],
-                status="accepted",
+            latest_object_envelopes: dict[tuple[SyncDomain, str], SyncEnvelope] = {}
+            for domain in dataset_domains:
+                if domain not in OBJECT_RESTORE_DOMAINS:
+                    continue
+                for envelope in domain_envelopes.get(domain, []):
+                    if envelope.apply_status == "conflict":
+                        continue
+                    latest_object_envelopes[(domain, envelope.object_id)] = envelope
+            for (domain, object_id), envelope in sorted(
+                latest_object_envelopes.items(),
+                key=lambda item: item[1].server_cursor or 0,
             ):
-                if envelope.operation == "tombstone":
+                object_state = self.store.get_object_state(dataset.dataset_id, domain, object_id)
+                server_revision = (
+                    object_state.object_revision
+                    if object_state is not None and object_state.latest_server_cursor == envelope.server_cursor
+                    else envelope.object_revision
+                )
+                if server_revision is None and domain in {"notes.note", "chat.conversation"}:
+                    server_revision = 1
+                server_hash = (
+                    object_state.object_hash
+                    if object_state is not None and object_state.latest_server_cursor == envelope.server_cursor
+                    else envelope.payload_hash
+                )
+                deleted = (
+                    object_state.deleted
+                    if object_state is not None and object_state.latest_server_cursor == envelope.server_cursor
+                    else envelope.operation == "tombstone" or envelope.deleted
+                )
+                local_item = find_local_inventory_item(
+                    local_index,
+                    dataset_id=dataset.dataset_id,
+                    domain=domain,
+                    object_id=object_id,
+                )
+                local_matches = (
+                    local_item is not None
+                    and local_inventory_matches(
+                        local_item,
+                        object_revision=server_revision,
+                        object_hash=server_hash,
+                        deleted=deleted,
+                    )
+                )
+                if deleted:
+                    tombstones.append(
+                        SyncRestorePreviewObject(
+                            dataset_id=dataset.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            action=restore_action_for_domain(
+                                domain,
+                                deleted=True,
+                                local_present=local_item is not None,
+                            ),
+                            server_revision=server_revision,
+                            server_hash=server_hash,
+                            server_cursor=envelope.server_cursor,
+                            local_revision=local_item.object_revision if local_item is not None else None,
+                            local_hash=local_item.object_hash if local_item is not None else None,
+                            local_deleted=local_item.deleted if local_item is not None else None,
+                            deleted=True,
+                            parent_id=envelope.parent_id,
+                        )
+                    )
+                    continue
+                if local_item is None or local_matches:
+                    safe_applies.append(
+                        SyncRestorePreviewObject(
+                            dataset_id=dataset.dataset_id,
+                            domain=domain,
+                            object_id=object_id,
+                            action=restore_action_for_domain(
+                                domain,
+                                deleted=False,
+                                local_present=local_item is not None,
+                            ),
+                            server_revision=server_revision,
+                            server_hash=server_hash,
+                            server_cursor=envelope.server_cursor,
+                            local_revision=local_item.object_revision if local_item is not None else None,
+                            local_hash=local_item.object_hash if local_item is not None else None,
+                            local_deleted=local_item.deleted if local_item is not None else None,
+                            deleted=False,
+                            parent_id=envelope.parent_id,
+                        )
+                    )
+                    continue
+                conflict_type = (
+                    "whole_object_conflict"
+                    if domain in WHOLE_OBJECT_RESTORE_DOMAINS
+                    else "stable_id_conflict"
+                )
+                object_conflicts.append(
+                    SyncRestorePreviewObjectConflict(
+                        dataset_id=dataset.dataset_id,
+                        domain=domain,
+                        object_id=object_id,
+                        conflict_type=conflict_type,
+                        server_revision=server_revision,
+                        server_hash=server_hash,
+                        server_cursor=envelope.server_cursor,
+                        server_deleted=False,
+                        local_revision=local_item.object_revision,
+                        local_hash=local_item.object_hash,
+                        local_deleted=local_item.deleted,
+                        message="Local object differs from the server restore candidate.",
+                    )
+                )
+
+            seen_refs: set[tuple[str, str]] = set()
+            latest_attachment_envelopes: dict[str, SyncEnvelope] = {}
+            for envelope in domain_envelopes.get("attachment.ref", []):
+                latest_attachment_envelopes[envelope.object_id] = envelope
+            for envelope in sorted(latest_attachment_envelopes.values(), key=lambda item: item.server_cursor or 0):
+                if envelope.operation == "tombstone" or envelope.deleted:
                     continue
                 try:
                     metadata = extract_attachment_ref_metadata(envelope)
                 except AttachmentRefValidationError:
-                    continue
-                state = self.store.get_object_state(
-                    dataset.dataset_id,
-                    "attachment.ref",
-                    envelope.object_id,
-                )
-                if state is None or state.deleted:
                     continue
                 ref_key = (metadata.attachment_id, metadata.payload_hash)
                 if ref_key in seen_refs:
@@ -735,7 +939,13 @@ class SyncV2Service:
                     server_cursor=envelope.server_cursor or 0,
                 )
                 attachment_refs.append(summary)
-                if not _attachment_ref_has_server_blob(metadata.availability):
+                if not _attachment_ref_has_server_blob(
+                    metadata.availability
+                ) and not attachment_available_locally(
+                    attachment_availability,
+                    attachment_id=metadata.attachment_id,
+                    payload_hash=metadata.payload_hash,
+                ):
                     missing_blobs.append(summary)
                     warnings.append(
                         SyncRestorePreviewWarning(
@@ -750,8 +960,15 @@ class SyncV2Service:
 
         return SyncRestorePreview(
             datasets=preview_datasets,
+            safe_applies=safe_applies,
+            object_conflicts=object_conflicts,
+            tombstones=tombstones,
             attachment_refs=attachment_refs,
             missing_blobs=missing_blobs,
+            envelope_ranges=envelope_ranges,
+            total_counts=dict(sorted(total_counts.items())),
+            encryption=self.settings.server_trusted_encryption.encryption,
+            key_status=key_status,
             warnings=warnings,
             generated_at=self.clock() or None,
             filters_applied={

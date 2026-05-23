@@ -15,6 +15,7 @@ ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
 ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
 SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
 SyncProfileBootstrapMode = Literal["server_frontend", "offline_sync"]
+SyncRestorePreviewAction = Literal["apply", "append", "delete", "hide", "noop"]
 
 M1_SYNC_DOMAINS: list[SyncDomain] = [
     "notes.note",
@@ -292,13 +293,41 @@ class SyncRestoreManifestResponse(BaseModel):
     filters_applied: dict[str, Any] = Field(default_factory=dict)
 
 
+class SyncRestorePreviewLocalInventoryItem(BaseModel):
+    """Local object fingerprint supplied for restore conflict preview."""
+
+    dataset_id: str | None = None
+    domain: SyncDomain
+    object_id: str = Field(..., min_length=1, validation_alias=AliasChoices("object_id", "entity_id"))
+    object_revision: int | None = Field(None, ge=0, validation_alias=AliasChoices("object_revision", "entity_version"))
+    object_hash: str | None = Field(None, validation_alias=AliasChoices("object_hash", "payload_hash"))
+    deleted: bool = False
+    attachment_availability: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def entity_id(self) -> str:
+        return self.object_id
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
 class SyncRestorePreviewRequest(BaseModel):
     """Client inventory request for a Sync v2 M1 restore preview."""
 
     dataset_ids: list[str] = Field(default_factory=list)
     domains: list[SyncDomain] = Field(default_factory=list)
-    local_inventory: list[dict[str, Any]] = Field(default_factory=list)
+    local_inventory: list[SyncRestorePreviewLocalInventoryItem] = Field(default_factory=list)
     attachment_availability: dict[str, str] = Field(default_factory=dict)
+
+
+class SyncRestorePreviewEnvelopeRange(BaseModel):
+    """Cursor range needed to replay one domain into a restoring client."""
+
+    dataset_id: str
+    domain: SyncDomain
+    from_cursor: int = Field(..., ge=0)
+    to_cursor: int = Field(..., ge=0)
+    envelope_count: int = Field(..., ge=0)
 
 
 class SyncRestorePreviewDataset(BaseModel):
@@ -309,6 +338,45 @@ class SyncRestorePreviewDataset(BaseModel):
     approximate_counts: dict[str, int] = Field(default_factory=dict)
     byte_estimates: dict[str, int] = Field(default_factory=dict)
     latest_cursor: int | None = Field(None, ge=0)
+    latest_cursors: dict[str, int] = Field(default_factory=dict)
+    envelope_ranges: list[SyncRestorePreviewEnvelopeRange] = Field(default_factory=list)
+    total_count: int = Field(0, ge=0)
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+    key_recovery_available: bool = False
+
+
+class SyncRestorePreviewObject(BaseModel):
+    """One safe restore candidate or tombstone action."""
+
+    dataset_id: str
+    domain: SyncDomain
+    object_id: str
+    action: SyncRestorePreviewAction
+    server_revision: int | None = Field(None, ge=0)
+    server_hash: str | None = None
+    server_cursor: int | None = Field(None, ge=0)
+    local_revision: int | None = Field(None, ge=0)
+    local_hash: str | None = None
+    local_deleted: bool | None = None
+    deleted: bool = False
+    parent_id: str | None = None
+
+
+class SyncRestorePreviewObjectConflict(BaseModel):
+    """Whole-object or stable-ID restore conflict surfaced before local apply."""
+
+    dataset_id: str
+    domain: SyncDomain
+    object_id: str
+    conflict_type: str
+    server_revision: int | None = Field(None, ge=0)
+    server_hash: str | None = None
+    server_cursor: int | None = Field(None, ge=0)
+    server_deleted: bool = False
+    local_revision: int | None = Field(None, ge=0)
+    local_hash: str | None = None
+    local_deleted: bool = False
+    message: str | None = None
 
 
 class SyncRestorePreviewAttachmentRef(BaseModel):
@@ -341,8 +409,15 @@ class SyncRestorePreviewResponse(BaseModel):
     """Non-mutating Sync v2 M1 restore preview response."""
 
     datasets: list[SyncRestorePreviewDataset] = Field(default_factory=list)
+    safe_applies: list[SyncRestorePreviewObject] = Field(default_factory=list)
+    object_conflicts: list[SyncRestorePreviewObjectConflict] = Field(default_factory=list)
+    tombstones: list[SyncRestorePreviewObject] = Field(default_factory=list)
     attachment_refs: list[SyncRestorePreviewAttachmentRef] = Field(default_factory=list)
     missing_blobs: list[SyncRestorePreviewAttachmentRef] = Field(default_factory=list)
+    envelope_ranges: list[SyncRestorePreviewEnvelopeRange] = Field(default_factory=list)
+    total_counts: dict[str, int] = Field(default_factory=dict)
+    encryption: dict[str, Any] = Field(default_factory=dict)
+    key_status: dict[str, dict[str, bool]] = Field(default_factory=dict)
     warnings: list[SyncRestorePreviewWarning] = Field(default_factory=list)
     generated_at: str | None = None
     filters_applied: dict[str, Any] = Field(default_factory=dict)

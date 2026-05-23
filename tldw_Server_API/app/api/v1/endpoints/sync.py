@@ -604,7 +604,7 @@ def preview_sync_v2_restore(
             user_id=_sync_user_id(user),
             dataset_ids=request.dataset_ids,
             domains=request.domains,
-            local_inventory=request.local_inventory,
+            local_inventory=[model_dump_compat(item) for item in request.local_inventory],
             attachment_availability=request.attachment_availability,
         )
     except Exception as exc:
