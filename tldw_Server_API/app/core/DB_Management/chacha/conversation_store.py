@@ -411,6 +411,172 @@ class ConversationStore:
             logger.error(f"Database error fetching conversation ID {conversation_id}: {exc}")
             raise
 
+    def upsert_conversation_from_sync(
+        self,
+        *,
+        conversation_id: str,
+        title: str | None,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+        root_id: str | None = None,
+        assistant_kind: str | None = None,
+        assistant_id: str | None = None,
+        character_id: int | str | None = None,
+        persona_memory_mode: str | None = None,
+        state: str | None = None,
+        topic_label: str | None = None,
+        cluster_id: str | None = None,
+        source: str | None = None,
+        external_ref: str | None = None,
+        rating: int | None = None,
+        scope_type: str | None = None,
+        workspace_id: str | None = None,
+    ) -> bool:
+        """Create or update a conversation projection from an accepted Sync v2 envelope."""
+
+        del object_hash
+        normalized_id = str(conversation_id).strip()
+        if not normalized_id:
+            raise InputError("conversation_id cannot be empty.")  # noqa: TRY003
+        if object_revision < 1:
+            raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
+        if rating is not None and not (1 <= rating <= 5):
+            raise InputError(f"Rating must be between 1 and 5. Got: {rating}")  # noqa: TRY003
+
+        assistant_kind, assistant_id, normalized_character_id, persona_memory_mode = (
+            self._normalize_conversation_assistant_identity(
+                character_id=character_id,
+                assistant_kind=assistant_kind,
+                assistant_id=assistant_id,
+                persona_memory_mode=persona_memory_mode,
+            )
+        )
+        normalized_scope_type, normalized_workspace_id = self._normalize_scope(scope_type, workspace_id)
+        normalized_state = self._normalize_sync_conversation_state(state)
+        now = self._db._get_current_utc_timestamp_iso()
+        normalized_title = None if title is None else str(title)
+        normalized_root_id = str(root_id).strip() if root_id else normalized_id
+
+        query = """
+            INSERT INTO conversations (
+                id, root_id, character_id, assistant_kind, assistant_id, persona_memory_mode,
+                title, state, topic_label, cluster_id, source, external_ref, rating,
+                created_at, last_modified, client_id, version, deleted, scope_type, workspace_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                root_id = excluded.root_id,
+                character_id = excluded.character_id,
+                assistant_kind = excluded.assistant_kind,
+                assistant_id = excluded.assistant_id,
+                persona_memory_mode = excluded.persona_memory_mode,
+                title = excluded.title,
+                state = excluded.state,
+                topic_label = excluded.topic_label,
+                cluster_id = excluded.cluster_id,
+                source = excluded.source,
+                external_ref = excluded.external_ref,
+                rating = excluded.rating,
+                last_modified = excluded.last_modified,
+                client_id = excluded.client_id,
+                version = excluded.version,
+                deleted = excluded.deleted,
+                scope_type = excluded.scope_type,
+                workspace_id = excluded.workspace_id
+        """
+        params = (
+            normalized_id,
+            normalized_root_id,
+            normalized_character_id,
+            assistant_kind,
+            assistant_id,
+            persona_memory_mode,
+            normalized_title,
+            normalized_state,
+            self._db._normalize_nullable_text(topic_label),
+            self._db._normalize_nullable_text(cluster_id),
+            self._db._normalize_nullable_text(source),
+            self._db._normalize_nullable_text(external_ref),
+            rating,
+            now,
+            now,
+            sync_client_id,
+            object_revision,
+            False,
+            normalized_scope_type,
+            normalized_workspace_id,
+        )
+        try:
+            with self._db.transaction() as conn:
+                conn.execute(query, params)
+            logger.info("Upserted conversation projection from Sync v2 for ID: {}.", normalized_id)
+            return True
+        except sqlite3.IntegrityError as exc:
+            raise CharactersRAGDBError(
+                f"Database integrity error upserting synced conversation: {exc}"
+            ) from exc  # noqa: TRY003
+        except CharactersRAGDBError:
+            logger.error("Database error upserting synced conversation ID {}.", normalized_id, exc_info=True)
+            raise
+
+    def tombstone_conversation_from_sync(
+        self,
+        *,
+        conversation_id: str,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+    ) -> bool:
+        """Soft-delete a conversation projection from an accepted Sync v2 tombstone."""
+
+        del object_hash
+        normalized_id = str(conversation_id).strip()
+        if not normalized_id:
+            raise InputError("conversation_id cannot be empty.")  # noqa: TRY003
+        if object_revision < 1:
+            raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
+
+        now = self._db._get_current_utc_timestamp_iso()
+        query = """
+            UPDATE conversations
+               SET deleted = ?,
+                   last_modified = ?,
+                   version = ?,
+                   client_id = ?
+             WHERE id = ?
+        """
+        try:
+            with self._db.transaction() as conn:
+                cursor = conn.execute(query, (True, now, object_revision, sync_client_id, normalized_id))
+                if cursor.rowcount == 0:
+                    raise ConflictError(  # noqa: TRY003
+                        "Conversation not found for Sync v2 tombstone.",
+                        entity="conversations",
+                        entity_id=normalized_id,
+                    )
+            logger.info("Soft-deleted conversation projection from Sync v2 for ID: {}.", normalized_id)
+            return True
+        except ConflictError:
+            raise
+        except CharactersRAGDBError:
+            logger.error("Database error tombstoning synced conversation ID {}.", normalized_id, exc_info=True)
+            raise
+
+    def _normalize_sync_conversation_state(self, state: str | None) -> str:
+        """Map portable Sync v2 chat states into the local conversation state enum."""
+
+        if state is None:
+            return self._normalize_conversation_state(None)
+        normalized = str(state).strip().lower()
+        state_aliases = {
+            "active": "in-progress",
+            "open": "in-progress",
+            "archived": "resolved",
+            "closed": "resolved",
+        }
+        return self._normalize_conversation_state(state_aliases.get(normalized, normalized))
+
     def get_conversation_by_source_ref(
         self,
         source: str,

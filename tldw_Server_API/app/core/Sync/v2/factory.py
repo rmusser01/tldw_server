@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
 )
 
 from .adapters import StaticSyncAdapter, SyncAdapterRegistry
-from .materializers import NotesMaterializer
+from .materializers import ChatConversationMaterializer, ChatMessageMaterializer, NotesMaterializer
 from .models import M1_SYNC_DOMAINS
 from .security import server_trusted_encryption_status_from_env
 from .service import SyncV2Service, SyncV2Settings
@@ -46,6 +46,8 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         store=store,
         adapters=default_sync_v2_registry(),
         materializers={
+            "chat.conversation": ChatConversationMaterializer(_chacha_notes_db_for_user(user_id)),
+            "chat.message": ChatMessageMaterializer(_chacha_notes_db_for_user(user_id)),
             "notes.note": NotesMaterializer(_chacha_notes_db_for_user(user_id)),
         },
         settings=SyncV2Settings(

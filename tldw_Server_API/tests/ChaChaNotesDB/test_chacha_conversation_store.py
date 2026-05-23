@@ -23,6 +23,8 @@ _DELEGATED_CONVERSATION_METHODS = {
     "_normalize_scope",
     "_normalize_conversation_assistant_identity",
     "add_conversation",
+    "upsert_conversation_from_sync",
+    "tombstone_conversation_from_sync",
     "get_conversation_by_id",
     "get_conversation_by_source_ref",
     "conversation_title_exists",
@@ -73,6 +75,54 @@ def db(tmp_path):
 def test_conversation_store_owns_delegated_methods_without_monolith_duplicates(db):
     class_method_names = _class_method_names(CharactersRAGDB)
     assert _DELEGATED_CONVERSATION_METHODS.isdisjoint(class_method_names)
+
+
+def test_conversation_store_sync_helpers_upsert_and_tombstone_include_deleted(db):
+    assert db.upsert_conversation_from_sync(
+        conversation_id="sync-conv-1",
+        title="Synced conversation",
+        sync_client_id="sync-device",
+        object_revision=1,
+        object_hash="sha256:conv-v1",
+        assistant_kind="persona",
+        assistant_id="sync-assistant",
+        state="active",
+    )
+
+    created = db.get_conversation_by_id("sync-conv-1")
+    assert created is not None
+    assert created["title"] == "Synced conversation"
+    assert created["version"] == 1
+    assert created["client_id"] == "sync-device"
+
+    assert db.upsert_conversation_from_sync(
+        conversation_id="sync-conv-1",
+        title="Synced conversation revised",
+        sync_client_id="sync-device",
+        object_revision=2,
+        object_hash="sha256:conv-v2",
+        assistant_kind="persona",
+        assistant_id="sync-assistant",
+        state="archived",
+    )
+    updated = db.get_conversation_by_id("sync-conv-1")
+    assert updated is not None
+    assert updated["title"] == "Synced conversation revised"
+    assert updated["state"] == "resolved"
+    assert updated["version"] == 2
+
+    assert db.tombstone_conversation_from_sync(
+        conversation_id="sync-conv-1",
+        sync_client_id="sync-device",
+        object_revision=3,
+        object_hash="sha256:conv-delete",
+    )
+
+    assert db.get_conversation_by_id("sync-conv-1") is None
+    deleted = db.get_conversation_by_id("sync-conv-1", include_deleted=True)
+    assert deleted is not None
+    assert bool(deleted["deleted"]) is True
+    assert deleted["version"] == 3
 
 
 def test_conversation_store_roundtrip_preserves_scope_and_settings(db):
