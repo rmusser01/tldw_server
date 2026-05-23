@@ -274,7 +274,12 @@ describe("ReviewTab create CTA visibility", () => {
       />
     )
 
-    expect(screen.getByTestId("flashcards-review-onboarding-guide")).toBeInTheDocument()
+    const onboardingGuide = screen.getByTestId("flashcards-review-onboarding-guide")
+    expect(onboardingGuide).toHaveAttribute(
+      "data-ds-component",
+      "Alert"
+    )
+    expect(onboardingGuide).toHaveAttribute("aria-live", "off")
     expect(screen.getByTestId("flashcards-review-onboarding-doc-link")).toHaveAttribute(
       "href",
       FLASHCARDS_HELP_LINKS.ratings
@@ -650,6 +655,12 @@ describe("ReviewTab create CTA visibility", () => {
     await waitFor(() => {
       expect(screen.getByTestId("flashcards-review-retry-alert")).toBeInTheDocument()
     })
+    const retryAlert = screen.getByTestId("flashcards-review-retry-alert")
+    expect(retryAlert).toHaveAttribute(
+      "data-ds-component",
+      "Alert"
+    )
+    expect(retryAlert).toHaveClass("w-full", "text-left")
 
     const firstAttempt = mutateAsync.mock.calls[0][0]
     expect(typeof firstAttempt.answerTimeMs).toBe("number")
