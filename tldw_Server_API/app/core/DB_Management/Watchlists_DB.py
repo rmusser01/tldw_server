@@ -118,6 +118,11 @@ _OUTPUT_PRESET_TOP_LEVEL_KEYS = {
     "template_name",
     "delivery_config",
 }
+_OUTPUT_PRESET_NAME_CONSTRAINT_MARKERS = (
+    "ux_output_presets_user_name",
+    "watchlist_output_presets_user_id_lower_idx",
+    "watchlist_output_presets_user_id_name_key",
+)
 _NESTED_REGEX_QUANTIFIER_RE = re.compile(
     r"\((?:[^()\\]|\\.)*(?:\*|\+|\{\d+(?:,\d*)?\})(?:[^()\\]|\\.)*\)\s*(?:\*|\+|\{\d+(?:,\d*)?\})"
 )
@@ -3368,6 +3373,21 @@ class WatchlistsDatabase:
             return
         raise ValueError("output_preset_name_exists")
 
+    @staticmethod
+    def _is_output_preset_name_constraint_error(exc: _DatabaseError) -> bool:
+        message = str(exc).lower()
+        if any(marker in message for marker in _OUTPUT_PRESET_NAME_CONSTRAINT_MARKERS):
+            return True
+        if "duplicate key value" in message and "watchlist_output_presets" in message:
+            return True
+        return "unique constraint failed" in message and "watchlist_output_presets" in message and "name" in message
+
+    @classmethod
+    def _raise_output_preset_constraint_error(cls, exc: _DatabaseError) -> None:
+        if cls._is_output_preset_name_constraint_error(exc):
+            raise ValueError("output_preset_name_exists") from exc
+        raise exc
+
     def create_output_preset(
         self,
         *,
@@ -3386,22 +3406,25 @@ class WatchlistsDatabase:
                 "UPDATE watchlist_output_presets SET is_default = 0, updated_at = ? WHERE user_id = ?",
                 (now, self.user_id),
             )
-        res = self._execute_insert(
-            """
-            INSERT INTO watchlist_output_presets
-                (user_id, name, description, output_prefs_json, is_default, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                self.user_id,
-                clean_name,
-                clean_description,
-                json.dumps(clean_output_prefs, sort_keys=True),
-                1 if is_default else 0,
-                now,
-                now,
-            ),
-        )
+        try:
+            res = self._execute_insert(
+                """
+                INSERT INTO watchlist_output_presets
+                    (user_id, name, description, output_prefs_json, is_default, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self.user_id,
+                    clean_name,
+                    clean_description,
+                    json.dumps(clean_output_prefs, sort_keys=True),
+                    1 if is_default else 0,
+                    now,
+                    now,
+                ),
+            )
+        except _DatabaseError as exc:
+            self._raise_output_preset_constraint_error(exc)
         preset_id = self._extract_lastrowid(res)
         if not preset_id:
             raise RuntimeError("failed_to_create_output_preset")
@@ -3474,14 +3497,17 @@ class WatchlistsDatabase:
         sets.append("updated_at = ?")
         params.append(_utcnow_iso())
         params.extend([int(preset_id), self.user_id])
-        self.backend.execute(
-            f"""
-            UPDATE watchlist_output_presets
-            SET {', '.join(sets)}
-            WHERE id = ? AND user_id = ?
-            """,  # nosec B608
-            tuple(params),
-        )
+        try:
+            self.backend.execute(
+                f"""
+                UPDATE watchlist_output_presets
+                SET {', '.join(sets)}
+                WHERE id = ? AND user_id = ?
+                """,  # nosec B608
+                tuple(params),
+            )
+        except _DatabaseError as exc:
+            self._raise_output_preset_constraint_error(exc)
         return self.get_output_preset(preset_id=int(preset_id))
 
     def delete_output_preset(self, *, preset_id: int) -> bool:

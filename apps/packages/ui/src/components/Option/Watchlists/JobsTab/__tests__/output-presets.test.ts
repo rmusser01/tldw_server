@@ -73,4 +73,20 @@ describe("applyOutputPresetToPrefs", () => {
       raw_advanced: { preserve: true }
     })
   })
+
+  it("deep clones raw advanced values without stringifying non-JSON browser values", () => {
+    const observedAt = new Date("2026-05-23T01:00:00.000Z")
+    const applied = applyOutputPresetToPrefs({
+      baseOutputPrefs: {
+        raw_advanced: { observedAt }
+      },
+      presetOutputPrefs: {
+        generate_audio: false
+      }
+    })
+
+    const rawAdvanced = applied.raw_advanced as { observedAt: Date }
+    expect(rawAdvanced.observedAt).toEqual(observedAt)
+    expect(rawAdvanced.observedAt).not.toBe(observedAt)
+  })
 })

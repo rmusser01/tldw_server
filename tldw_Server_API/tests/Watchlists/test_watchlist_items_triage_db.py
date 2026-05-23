@@ -587,6 +587,34 @@ def test_output_presets_are_user_scoped_and_validated(tmp_path):
     assert db.delete_output_preset(preset_id=int(preset.id)) is False
 
 
+def test_output_preset_unique_constraint_races_map_to_name_exists(tmp_path, monkeypatch):
+    db = _make_db(tmp_path)
+    existing = db.create_output_preset(
+        name="Daily newsletter",
+        description=None,
+        output_prefs={"generate_audio": True},
+    )
+    other = db.create_output_preset(
+        name="Other preset",
+        description=None,
+        output_prefs={"generate_audio": False},
+    )
+    monkeypatch.setattr(db, "_check_output_preset_name_available", lambda **_kwargs: None)
+
+    with pytest.raises(ValueError, match="output_preset_name_exists"):
+        db.create_output_preset(
+            name="daily newsletter",
+            description=None,
+            output_prefs={"generate_audio": False},
+        )
+
+    with pytest.raises(ValueError, match="output_preset_name_exists"):
+        db.update_output_preset(
+            preset_id=int(other.id),
+            fields={"name": str(existing.name).upper()},
+        )
+
+
 def test_output_preset_apply_preserves_unknown_fields(tmp_path):
     db = _make_db(tmp_path)
     preset = db.create_output_preset(

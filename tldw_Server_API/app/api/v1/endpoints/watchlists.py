@@ -1211,10 +1211,19 @@ def _row_to_output_preset(row) -> WatchlistOutputPreset:
     output_prefs: dict[str, Any] = {}
     try:
         parsed = json.loads(row.output_prefs_json or "{}")
-        if isinstance(parsed, dict):
-            output_prefs = parsed
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-        output_prefs = {}
+    except json.JSONDecodeError:
+        logger.opt(exception=True).warning(
+            "Invalid output_prefs_json for watchlist output preset id={}",
+            getattr(row, "id", "unknown"),
+        )
+        raise
+    if not isinstance(parsed, dict):
+        logger.warning(
+            "Invalid non-object output_prefs_json for watchlist output preset id={}",
+            getattr(row, "id", "unknown"),
+        )
+        raise ValueError("output_preset_prefs_invalid")
+    output_prefs = parsed
     return WatchlistOutputPreset(
         id=int(row.id),
         name=row.name,

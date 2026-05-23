@@ -4,7 +4,7 @@ title: Implement Watchlists server-backed output delivery audio presets
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-23 01:18'
+updated_date: '2026-05-23 02:01'
 labels:
   - watchlists
   - frontend
@@ -41,12 +41,14 @@ Implemented per-user Watchlists output preset persistence in Watchlists DB with 
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented per-user Watchlists output preset persistence in Watchlists DB with SQLite/PostgreSQL schema bootstrap, CRUD helpers, default exclusivity, user scoping, and server-side apply semantics. Added /api/v1/watchlists/job-output-presets CRUD/apply routes and schemas. Added shared UI types/services, a frontend merge helper aligned with backend behavior, and JobFormModal controls to load, save, apply, update, and delete presets inside /watchlists while preserving raw advanced output_prefs and leaving scope, filters, source rules, dedupe, and cadence unchanged. Self-review added regression coverage for legacy scalar nested output prefs and a confirmation gate before durable preset deletion.
+
+PR review follow-up: narrowed output preset row projection error handling to log and re-raise corrupt JSON/non-object prefs instead of silently returning an empty object; mapped DB unique-index races for output preset names back to output_preset_name_exists so API routes continue returning 409; changed the frontend preset clone helper to prefer structuredClone with JSON fallback; added regression tests for all three review items. Verification: backend Watchlists DB/API pytest suite passed with 17 tests; frontend preset/service/modal Vitest suite passed with 36 tests; static guard passed with 3 tests; Bandit wrote /tmp/bandit_watchlists_output_presets_review.json with zero findings; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented durable server-backed Watchlists output/delivery/audio presets on codex/watchlists-server-presets. Verification passed: backend Watchlists DB/API pytest suite (15 tests), frontend watchlists preset/service/modal Vitest suite (35 tests), watchlists static guard (3 tests), git diff --check, and Bandit on touched backend files with zero findings in /tmp/bandit_watchlists_output_presets.json.
+Implemented durable server-backed Watchlists output/delivery/audio presets on codex/watchlists-server-presets and addressed PR review follow-ups. Verification passed: backend Watchlists DB/API pytest suite (17 tests), frontend watchlists preset/service/modal Vitest suite (36 tests), watchlists static guard (3 tests), git diff --check, and Bandit on touched backend files with zero findings in /tmp/bandit_watchlists_output_presets_review.json.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

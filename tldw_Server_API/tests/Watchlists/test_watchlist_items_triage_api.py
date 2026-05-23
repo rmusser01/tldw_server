@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from importlib import import_module
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.endpoints.watchlists import _row_to_output_preset
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 
@@ -439,3 +442,18 @@ def test_output_presets_endpoint_crud_and_apply(client_with_user):
     deleted = client.delete(f"/api/v1/watchlists/job-output-presets/{preset['id']}")
     assert deleted.status_code == 204
     assert client.get("/api/v1/watchlists/job-output-presets").json()["items"] == []
+
+
+def test_output_preset_projection_rejects_corrupt_prefs():
+    row = SimpleNamespace(
+        id=1,
+        name="Corrupt preset",
+        description=None,
+        output_prefs_json="{not-json",
+        is_default=0,
+        created_at="2026-05-23T00:00:00Z",
+        updated_at="2026-05-23T00:00:00Z",
+    )
+
+    with pytest.raises(json.JSONDecodeError):
+        _row_to_output_preset(row)

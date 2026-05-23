@@ -20,6 +20,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
 const cloneValue = <T>(value: T): T => {
+  if (value === undefined) return undefined as T
+  if (typeof globalThis.structuredClone === "function") {
+    try {
+      return globalThis.structuredClone(value)
+    } catch {
+      // Fall through to JSON-compatible cloning for values structuredClone cannot copy.
+    }
+  }
   try {
     return JSON.parse(JSON.stringify(value)) as T
   } catch {
