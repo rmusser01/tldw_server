@@ -2684,28 +2684,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundTokenInspectorCard.tsx:Alert#antd-alert-writingplaygroundtokeninspectorcard-type-erro-i8ourj",
-    "path": "src/components/Option/WritingPlayground/WritingPlaygroundTokenInspectorCard.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/WritingPlayground/WritingPlaygroundTokenInspectorCard.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/WritingPlayground/WritingPlaygroundTokenInspectorCard.tsx:Alert#antd-alert-writingplaygroundtokeninspectorcard-type-info-1jtmgd6",
-    "path": "src/components/Option/WritingPlayground/WritingPlaygroundTokenInspectorCard.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/WritingPlayground/WritingPlaygroundTokenInspectorCard.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Quiz/tabs/CreateTab.tsx:Alert#antd-alert-createtab-type-info-line-1003-u954tt",
     "path": "src/components/Quiz/tabs/CreateTab.tsx",
     "rule": "antd-product-state-import",

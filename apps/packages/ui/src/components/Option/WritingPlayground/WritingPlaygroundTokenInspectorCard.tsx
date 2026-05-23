@@ -1,5 +1,6 @@
 import type { FC } from "react"
-import { Alert, Button, Tag } from "antd"
+import { Button, Tag } from "antd"
+import { Alert } from "@/components/ui/primitives"
 import type { TokenInspectorCardProps } from "./WritingPlaygroundDiagnostics.types"
 
 export const WritingPlaygroundTokenInspectorCard: FC<TokenInspectorCardProps> = ({
@@ -69,10 +70,10 @@ export const WritingPlaygroundTokenInspectorCard: FC<TokenInspectorCardProps> = 
       ) : null}
     </div>
     {tokenInspectorUnavailableReason ? (
-      <Alert type="info" showIcon message={tokenInspectorUnavailableReason} />
+      <Alert variant="info" title={tokenInspectorUnavailableReason} />
     ) : null}
     {tokenInspectorError ? (
-      <Alert type="error" showIcon message={tokenInspectorError} />
+      <Alert variant="error" title={tokenInspectorError} />
     ) : null}
     <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
       {hasTokenCountResult && tokenCountValue != null ? (
