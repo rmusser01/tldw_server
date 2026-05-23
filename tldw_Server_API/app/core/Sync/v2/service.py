@@ -17,8 +17,8 @@ from .adapters import (
     AdapterRejected,
     AttachmentRefValidationError,
     SyncAdapterContext,
-    SyncDomainAdapter,
     SyncAdapterRegistry,
+    SyncDomainAdapter,
     extract_attachment_ref_metadata,
 )
 from .errors import (
@@ -26,12 +26,13 @@ from .errors import (
     SyncInvalidDomainError,
     SyncStoreError,
 )
+from .materializers import MaterializationResult, SyncMaterializer
 from .models import (
-    ConflictStatus,
     DEFAULT_M1_ENCRYPTION_POLICY,
-    EncryptionPolicy,
     M1_SYNC_DOMAINS,
     M1_SYNC_OPERATIONS,
+    ConflictStatus,
+    EncryptionPolicy,
     SyncAttachment,
     SyncAttachmentCreate,
     SyncConflict,
@@ -48,9 +49,8 @@ from .models import (
     SyncKeyRecordCreate,
     SyncOperation,
 )
-from .materializers import MaterializationResult, SyncMaterializer
 from .profile import SyncProfileStatus, SyncV2ProfileManager
-from .replay import SyncReplayRepairResult, SyncReplayRepairer
+from .replay import SyncReplayRepairer, SyncReplayRepairResult
 from .restore import (
     OBJECT_RESTORE_DOMAINS,
     WHOLE_OBJECT_RESTORE_DOMAINS,
@@ -84,6 +84,17 @@ class SyncV2Settings:
     max_envelope_payload_bytes: int = 262_144
     max_attachment_bytes: int = 1_048_576
     supports_attachments: bool = False
+    max_blob_bytes: int | None = None
+    max_chunk_bytes: int = 4_194_304
+    max_active_blob_uploads: int = 8
+    user_blob_quota_bytes: int | None = None
+    reserved_blob_bytes: int = 0
+    used_blob_bytes: int = 0
+    blob_storage_backend: str = "local_fs"
+    blob_checksum_algorithm: str = "sha256"
+    supports_resumable_upload: bool = True
+    supports_resumable_download: bool = True
+    supports_chunk_checksums: bool = True
     supported_domains: list[SyncDomain] = field(default_factory=lambda: list(M1_SYNC_DOMAINS))
     operations: dict[SyncDomain, list[SyncOperation]] = field(
         default_factory=lambda: {domain: list(operations) for domain, operations in M1_SYNC_OPERATIONS.items()}
@@ -102,11 +113,12 @@ class SyncV2Capabilities:
     supported_domains: list[SyncDomain]
     operations: dict[SyncDomain, list[SyncOperation]]
     encryption: dict[str, object]
-    blob_transfer: dict[str, bool]
+    blob_transfer: dict[str, object]
     encryption_policies: list[EncryptionPolicy]
     max_batch_size: int
     max_envelope_payload_bytes: int
     max_attachment_bytes: int
+    quota: dict[str, object] = field(default_factory=dict)
     supports_restore_manifest: bool = True
     supports_conflicts: bool = True
     supports_attachments: bool = True
@@ -328,17 +340,38 @@ class SyncV2Service:
         self.settings = settings or SyncV2Settings()
 
     def capabilities(self) -> SyncV2Capabilities:
+        blob_transfer: dict[str, object] = {"supported": False}
+        quota: dict[str, object] = {}
+        if self.settings.supports_attachments:
+            max_blob_bytes = self.settings.max_blob_bytes or self.settings.max_attachment_bytes
+            blob_transfer = {
+                "supported": True,
+                "resumable_upload": self.settings.supports_resumable_upload,
+                "resumable_download": self.settings.supports_resumable_download,
+                "chunk_checksums": self.settings.supports_chunk_checksums,
+                "full_checksum": self.settings.blob_checksum_algorithm,
+                "storage_backend": self.settings.blob_storage_backend,
+            }
+            quota = {
+                "max_blob_bytes": max_blob_bytes,
+                "max_chunk_bytes": self.settings.max_chunk_bytes,
+                "max_active_uploads": self.settings.max_active_blob_uploads,
+                "user_blob_quota_bytes": self.settings.user_blob_quota_bytes,
+                "reserved_blob_bytes": self.settings.reserved_blob_bytes,
+                "used_blob_bytes": self.settings.used_blob_bytes,
+            }
         return SyncV2Capabilities(
             protocol_version=self.settings.protocol_version,
             min_supported_protocol_version=self.settings.min_supported_protocol_version,
             supported_domains=list(self.settings.supported_domains),
             operations={domain: list(operations) for domain, operations in self.settings.operations.items()},
             encryption=self.settings.server_trusted_encryption.encryption,
-            blob_transfer={"supported": False},
+            blob_transfer=blob_transfer,
             encryption_policies=list(self.settings.encryption_policies),
             max_batch_size=self.settings.max_batch_size,
             max_envelope_payload_bytes=self.settings.max_envelope_payload_bytes,
             max_attachment_bytes=self.settings.max_attachment_bytes,
+            quota=quota,
             supports_attachments=self.settings.supports_attachments,
             server_time=self.clock() or None,
             warnings=self.settings.server_trusted_encryption.warnings,
@@ -392,7 +425,7 @@ class SyncV2Service:
         )
         return SyncDatasetEnrollment(
             dataset=dataset,
-            cursors={domain: "0" for domain in dataset.domains},
+            cursors=dict.fromkeys(dataset.domains, "0"),
             key_setup_required=False,
         )
 
@@ -1416,7 +1449,7 @@ class SyncV2Service:
             return MaterializationResult(status="skipped")
         try:
             return materializer.apply(envelope, store=self.store)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - materializer failures are captured as replayable sync state.
             error_code = "sync_projection_failed"
             error_message = _safe_projection_error_message(exc)
             if envelope.server_cursor is not None:

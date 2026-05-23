@@ -5,13 +5,35 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-
 SyncDomain = Literal["notes.note", "chat.conversation", "chat.message", "attachment.ref"]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
 EncryptionPolicy = Literal["server_trusted_v1"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
 SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
+SyncBlobAvailabilityStatus = Literal[
+    "metadata_only",
+    "uploading",
+    "available",
+    "verify_failed",
+    "quarantined",
+    "deleted",
+]
+SyncBlobUploadStatus = Literal[
+    "created",
+    "uploading",
+    "complete",
+    "cancelled",
+    "expired",
+    "verify_failed",
+]
+SyncRestoreCompletenessStatus = Literal[
+    "metadata_ready",
+    "blocked_by_conflicts",
+    "blob_incomplete",
+    "content_complete",
+    "verified_complete",
+]
 
 M1_SYNC_DOMAINS: list[SyncDomain] = [
     "notes.note",
@@ -413,6 +435,67 @@ class SyncAttachment:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncBlobUploadSession:
+    """Core metadata for a resumable Sync v2 M2 blob upload session."""
+
+    upload_id: str
+    dataset_id: str
+    attachment_id: str
+    status: SyncBlobUploadStatus
+    chunk_size: int
+    chunk_count: int
+    size_bytes: int
+    payload_hash: str
+    uploaded_chunks: list[int] = field(default_factory=list)
+    missing_chunks: list[int] = field(default_factory=list)
+    quota: dict[str, Any] = field(default_factory=dict)
+    expires_at: str | None = None
+    blob_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBlobDownloadChunk:
+    """Core chunk entry used by a resumable Sync v2 M2 blob download manifest."""
+
+    chunk_index: int
+    offset_bytes: int
+    size_bytes: int
+    chunk_hash: str
+    download_url: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRestoreDomainCompleteness:
+    """Per-domain restore completeness counters for Sync v2 M2."""
+
+    domain: SyncDomain
+    status: SyncRestoreCompletenessStatus
+    selected_count: int = 0
+    safe_apply_count: int = 0
+    conflict_count: int = 0
+    tombstone_count: int = 0
+    required_blob_count: int = 0
+    available_blob_count: int = 0
+    missing_blob_count: int = 0
+    verified_blob_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRestoreBlobCompleteness:
+    """Per-blob restore completeness detail for Sync v2 M2."""
+
+    attachment_id: str
+    payload_hash: str
+    size_bytes: int
+    content_type: str
+    parent_domain: SyncDomain
+    parent_object_id: str
+    server_availability: SyncBlobAvailabilityStatus
+    download_status: str | None = None
+    required_for_restore: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class SyncRestoreManifestStats:
     """Database-side aggregate statistics for one restore-manifest dataset."""
 
@@ -435,6 +518,10 @@ __all__ = [
     "SyncApplyStatus",
     "SyncAttachment",
     "SyncAttachmentCreate",
+    "SyncBlobAvailabilityStatus",
+    "SyncBlobDownloadChunk",
+    "SyncBlobUploadSession",
+    "SyncBlobUploadStatus",
     "SyncConflict",
     "SyncConflictCreate",
     "SyncDataset",
@@ -449,5 +536,8 @@ __all__ = [
     "SyncKeyRecordCreate",
     "SyncObjectState",
     "SyncOperation",
+    "SyncRestoreBlobCompleteness",
+    "SyncRestoreCompletenessStatus",
+    "SyncRestoreDomainCompleteness",
     "SyncRestoreManifestStats",
 ]

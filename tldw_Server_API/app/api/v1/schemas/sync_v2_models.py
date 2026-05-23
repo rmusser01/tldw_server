@@ -15,6 +15,29 @@ ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
 SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
 SyncProfileBootstrapMode = Literal["server_frontend", "offline_sync"]
 SyncRestorePreviewAction = Literal["apply", "append", "delete", "hide", "noop"]
+SyncBlobAvailabilityStatus = Literal[
+    "metadata_only",
+    "uploading",
+    "available",
+    "verify_failed",
+    "quarantined",
+    "deleted",
+]
+SyncBlobUploadStatus = Literal[
+    "created",
+    "uploading",
+    "complete",
+    "cancelled",
+    "expired",
+    "verify_failed",
+]
+SyncRestoreCompletenessStatus = Literal[
+    "metadata_ready",
+    "blocked_by_conflicts",
+    "blob_incomplete",
+    "content_complete",
+    "verified_complete",
+]
 
 M1_SYNC_DOMAINS: list[SyncDomain] = [
     "notes.note",
@@ -59,6 +82,13 @@ def _default_blob_transfer() -> dict[str, bool]:
     return {"supported": False}
 
 
+def _validate_sha256_hash(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text.startswith("sha256:") or text == "sha256:":
+        raise ValueError("hash values must use sha256:<digest>")
+    return text
+
+
 def _normalize_object_map(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
@@ -97,7 +127,8 @@ class SyncCapabilitiesResponse(BaseModel):
         default_factory=lambda: {domain: list(operations) for domain, operations in M1_SYNC_OPERATIONS.items()}
     )
     encryption: dict[str, Any] = Field(default_factory=_default_encryption)
-    blob_transfer: dict[str, bool] = Field(default_factory=_default_blob_transfer)
+    blob_transfer: dict[str, Any] = Field(default_factory=_default_blob_transfer)
+    quota: dict[str, Any] = Field(default_factory=dict)
     max_batch_size: int = Field(100, ge=1)
     max_envelope_payload_bytes: int = Field(262_144, ge=1)
     max_attachment_bytes: int = Field(1_048_576, ge=1)
@@ -421,6 +452,177 @@ class SyncRestorePreviewResponse(BaseModel):
     warnings: list[SyncRestorePreviewWarning] = Field(default_factory=list)
     generated_at: str | None = None
     filters_applied: dict[str, Any] = Field(default_factory=dict)
+    restore_status: SyncRestoreCompletenessStatus | None = None
+    domain_details: list[SyncRestoreDomainCompleteness] = Field(default_factory=list)
+    blob_details: list[SyncRestoreBlobCompleteness] = Field(default_factory=list)
+
+
+class SyncBlobUploadCreateRequest(BaseModel):
+    """Request to create or resume a Sync v2 M2 blob upload session."""
+
+    dataset_id: str = Field(..., min_length=1)
+    device_id: str | None = None
+    domain: SyncDomain
+    object_id: str = Field(..., min_length=1, validation_alias=AliasChoices("object_id", "entity_id"))
+    attachment_id: str = Field(..., min_length=1)
+    content_type: str = Field(..., min_length=1)
+    size_bytes: int = Field(..., ge=1)
+    payload_hash: str
+    chunk_size: int = Field(..., ge=1)
+    chunk_count: int = Field(..., ge=1)
+    idempotency_key: str | None = None
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("payload_hash")
+    @classmethod
+    def _validate_payload_hash(cls, value: Any) -> str:
+        return _validate_sha256_hash(value)
+
+    @model_validator(mode="after")
+    def _validate_chunk_shape(self) -> SyncBlobUploadCreateRequest:
+        if self.chunk_size * self.chunk_count < self.size_bytes:
+            raise ValueError("chunk_count and chunk_size must cover size_bytes")
+        return self
+
+    @property
+    def entity_id(self) -> str:
+        return self.object_id
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class SyncBlobUploadSessionResponse(BaseModel):
+    """Current state for a resumable Sync v2 M2 blob upload session."""
+
+    upload_id: str
+    dataset_id: str
+    attachment_id: str
+    status: SyncBlobUploadStatus
+    chunk_size: int = Field(..., ge=1)
+    chunk_count: int = Field(..., ge=1)
+    uploaded_chunks: list[int] = Field(default_factory=list)
+    missing_chunks: list[int] = Field(default_factory=list)
+    expires_at: str | None = None
+    blob_id: str | None = None
+    quota: dict[str, Any] = Field(default_factory=dict)
+
+
+class SyncBlobChunkUploadResponse(BaseModel):
+    """Result after accepting one Sync v2 M2 blob chunk."""
+
+    upload_id: str
+    chunk_index: int = Field(..., ge=0)
+    accepted: bool = True
+    size_bytes: int = Field(..., ge=0)
+    chunk_hash: str
+    missing_chunks: list[int] = Field(default_factory=list)
+
+    @field_validator("chunk_hash")
+    @classmethod
+    def _validate_chunk_hash(cls, value: Any) -> str:
+        return _validate_sha256_hash(value)
+
+
+class SyncBlobUploadCompleteResponse(BaseModel):
+    """Result after verifying and committing a Sync v2 M2 blob upload."""
+
+    upload_id: str
+    dataset_id: str
+    attachment_id: str
+    blob_id: str
+    status: SyncBlobAvailabilityStatus
+    stored: bool
+    deduplicated: bool = False
+    size_bytes: int = Field(..., ge=0)
+    payload_hash: str
+    download_url: str | None = None
+    quota: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("payload_hash")
+    @classmethod
+    def _validate_payload_hash(cls, value: Any) -> str:
+        return _validate_sha256_hash(value)
+
+
+class SyncBlobDownloadChunk(BaseModel):
+    """One downloadable chunk entry in a Sync v2 M2 blob manifest."""
+
+    chunk_index: int = Field(..., ge=0)
+    offset_bytes: int = Field(..., ge=0)
+    size_bytes: int = Field(..., ge=0)
+    chunk_hash: str
+    download_url: str | None = None
+
+    @field_validator("chunk_hash")
+    @classmethod
+    def _validate_chunk_hash(cls, value: Any) -> str:
+        return _validate_sha256_hash(value)
+
+
+class SyncBlobDownloadManifestResponse(BaseModel):
+    """Manifest for resumable Sync v2 M2 blob download."""
+
+    dataset_id: str
+    attachment_id: str
+    blob_id: str | None = None
+    availability: SyncBlobAvailabilityStatus
+    content_type: str
+    size_bytes: int = Field(..., ge=0)
+    payload_hash: str
+    chunks: list[SyncBlobDownloadChunk] = Field(default_factory=list)
+    expires_at: str | None = None
+
+    @field_validator("payload_hash")
+    @classmethod
+    def _validate_payload_hash(cls, value: Any) -> str:
+        return _validate_sha256_hash(value)
+
+
+class SyncRestoreDomainCompleteness(BaseModel):
+    """Per-domain restore completeness counters for Sync v2 M2."""
+
+    domain: SyncDomain
+    status: SyncRestoreCompletenessStatus
+    selected_count: int = Field(0, ge=0)
+    safe_apply_count: int = Field(0, ge=0)
+    conflict_count: int = Field(0, ge=0)
+    tombstone_count: int = Field(0, ge=0)
+    required_blob_count: int = Field(0, ge=0)
+    available_blob_count: int = Field(0, ge=0)
+    missing_blob_count: int = Field(0, ge=0)
+    verified_blob_count: int = Field(0, ge=0)
+    warnings: list[SyncRestorePreviewWarning] = Field(default_factory=list)
+
+
+class SyncRestoreBlobCompleteness(BaseModel):
+    """Per-blob restore completeness detail for Sync v2 M2."""
+
+    attachment_id: str
+    payload_hash: str
+    size_bytes: int = Field(..., ge=0)
+    content_type: str
+    parent_domain: SyncDomain
+    parent_object_id: str
+    server_availability: SyncBlobAvailabilityStatus
+    download_status: str | None = None
+    required_for_restore: bool = True
+    warnings: list[SyncRestorePreviewWarning] = Field(default_factory=list)
+
+    @field_validator("payload_hash")
+    @classmethod
+    def _validate_payload_hash(cls, value: Any) -> str:
+        return _validate_sha256_hash(value)
+
+
+class SyncRestoreCompletenessResponse(BaseModel):
+    """Profile-level restore completeness summary for Sync v2 M2."""
+
+    restore_status: SyncRestoreCompletenessStatus
+    domain_details: list[SyncRestoreDomainCompleteness] = Field(default_factory=list)
+    blob_details: list[SyncRestoreBlobCompleteness] = Field(default_factory=list)
+    metadata_only_allowed: bool = True
+    generated_at: str | None = None
 
 
 class SyncV2Envelope(BaseModel):
@@ -869,6 +1071,14 @@ __all__ = [
     "SYNC_V2_MAX_PUSH_ENVELOPES",
     "SyncAttachmentUploadRequest",
     "SyncAttachmentUploadResponse",
+    "SyncBlobAvailabilityStatus",
+    "SyncBlobChunkUploadResponse",
+    "SyncBlobDownloadChunk",
+    "SyncBlobDownloadManifestResponse",
+    "SyncBlobUploadCompleteResponse",
+    "SyncBlobUploadCreateRequest",
+    "SyncBlobUploadSessionResponse",
+    "SyncBlobUploadStatus",
     "SyncCapabilitiesResponse",
     "SyncConflictRecord",
     "SyncConflictResolution",
@@ -911,5 +1121,9 @@ __all__ = [
     "SyncRestorePreviewRequest",
     "SyncRestorePreviewResponse",
     "SyncRestorePreviewWarning",
+    "SyncRestoreBlobCompleteness",
+    "SyncRestoreCompletenessResponse",
+    "SyncRestoreCompletenessStatus",
+    "SyncRestoreDomainCompleteness",
     "SyncV2Envelope",
 ]

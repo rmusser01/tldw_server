@@ -6,15 +6,20 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SYNC_V2_MAX_PUSH_ENVELOPES,
     SyncAttachmentUploadRequest,
     SyncAttachmentUploadResponse,
+    SyncBlobChunkUploadResponse,
+    SyncBlobDownloadManifestResponse,
+    SyncBlobUploadCompleteResponse,
+    SyncBlobUploadCreateRequest,
+    SyncBlobUploadSessionResponse,
     SyncCapabilitiesResponse,
     SyncConflictResolveRequest,
     SyncDatasetEnrollRequest,
     SyncPushRequest,
     SyncPushResponse,
+    SyncRestoreCompletenessResponse,
     SyncV2Envelope,
 )
 from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelope as CoreSyncEnvelope
-
 
 M1_DOMAINS = ["notes.note", "chat.conversation", "chat.message", "attachment.ref"]
 
@@ -517,3 +522,162 @@ def test_attachment_upload_request_response_models():
     assert request.object_id == "attachment-1"
     assert request.size_bytes == response.size_bytes
     assert response.stored is True
+
+
+def test_m2_blob_protocol_models_validate_session_manifest_and_restore_completeness():
+    payload_hash = "sha256:" + "a" * 64
+    chunk_hash = "sha256:" + "b" * 64
+
+    create_request = SyncBlobUploadCreateRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "domain": "attachment.ref",
+            "object_id": "attachment-1",
+            "attachment_id": "attachment-1",
+            "content_type": "application/octet-stream",
+            "size_bytes": 4096,
+            "payload_hash": payload_hash,
+            "chunk_size": 1024,
+            "chunk_count": 4,
+            "idempotency_key": "upload-once",
+        }
+    )
+    session_response = SyncBlobUploadSessionResponse.model_validate(
+        {
+            "upload_id": "upload-1",
+            "dataset_id": "dataset-1",
+            "attachment_id": "attachment-1",
+            "status": "uploading",
+            "chunk_size": 1024,
+            "chunk_count": 4,
+            "uploaded_chunks": [0, 1],
+            "missing_chunks": [2, 3],
+            "quota": {"reserved_blob_bytes": 4096},
+        }
+    )
+    chunk_response = SyncBlobChunkUploadResponse.model_validate(
+        {
+            "upload_id": "upload-1",
+            "chunk_index": 2,
+            "accepted": True,
+            "size_bytes": 1024,
+            "chunk_hash": chunk_hash,
+            "missing_chunks": [3],
+        }
+    )
+    complete_response = SyncBlobUploadCompleteResponse.model_validate(
+        {
+            "upload_id": "upload-1",
+            "dataset_id": "dataset-1",
+            "attachment_id": "attachment-1",
+            "blob_id": "blob-1",
+            "status": "available",
+            "stored": True,
+            "deduplicated": False,
+            "size_bytes": 4096,
+            "payload_hash": payload_hash,
+        }
+    )
+    manifest_response = SyncBlobDownloadManifestResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "attachment_id": "attachment-1",
+            "blob_id": "blob-1",
+            "availability": "available",
+            "content_type": "application/octet-stream",
+            "size_bytes": 4096,
+            "payload_hash": payload_hash,
+            "chunks": [
+                {
+                    "chunk_index": 0,
+                    "offset_bytes": 0,
+                    "size_bytes": 1024,
+                    "chunk_hash": chunk_hash,
+                    "download_url": "/api/v1/sync/attachments/attachment-1/chunks/0",
+                }
+            ],
+        }
+    )
+    completeness = SyncRestoreCompletenessResponse.model_validate(
+        {
+            "restore_status": "content_complete",
+            "domain_details": [
+                {
+                    "domain": "attachment.ref",
+                    "status": "content_complete",
+                    "selected_count": 1,
+                    "required_blob_count": 1,
+                    "available_blob_count": 1,
+                    "missing_blob_count": 0,
+                    "verified_blob_count": 0,
+                }
+            ],
+            "blob_details": [
+                {
+                    "attachment_id": "attachment-1",
+                    "payload_hash": payload_hash,
+                    "size_bytes": 4096,
+                    "content_type": "application/octet-stream",
+                    "parent_domain": "notes.note",
+                    "parent_object_id": "note-1",
+                    "server_availability": "available",
+                    "required_for_restore": True,
+                }
+            ],
+        }
+    )
+
+    assert create_request.encryption_policy == "server_trusted_v1"
+    assert create_request.entity_id == "attachment-1"
+    assert session_response.missing_chunks == [2, 3]
+    assert chunk_response.chunk_index == 2
+    assert complete_response.status == "available"
+    assert manifest_response.chunks[0].chunk_hash == chunk_hash
+    assert completeness.restore_status == "content_complete"
+
+
+def test_m2_blob_upload_rejects_non_sha256_hashes():
+    with pytest.raises(ValidationError):
+        SyncBlobUploadCreateRequest.model_validate(
+            {
+                "dataset_id": "dataset-1",
+                "domain": "attachment.ref",
+                "object_id": "attachment-1",
+                "attachment_id": "attachment-1",
+                "content_type": "application/octet-stream",
+                "size_bytes": 4096,
+                "payload_hash": "md5:not-accepted",
+                "chunk_size": 1024,
+                "chunk_count": 4,
+            }
+        )
+
+
+def test_capabilities_accept_m2_blob_transfer_and_quota_details():
+    capabilities = SyncCapabilitiesResponse.model_validate(
+        {
+            "protocol_version": "sync-v2-m2",
+            "min_supported_protocol_version": "sync-v2-m1",
+            "supports_attachments": True,
+            "blob_transfer": {
+                "supported": True,
+                "resumable_upload": True,
+                "resumable_download": True,
+                "chunk_checksums": True,
+                "full_checksum": "sha256",
+                "storage_backend": "local_fs",
+            },
+            "quota": {
+                "max_blob_bytes": 104857600,
+                "max_chunk_bytes": 4194304,
+                "max_active_uploads": 8,
+                "user_blob_quota_bytes": 10737418240,
+            },
+        }
+    )
+
+    assert capabilities.protocol_version == "sync-v2-m2"
+    assert capabilities.blob_transfer["supported"] is True
+    assert capabilities.blob_transfer["full_checksum"] == "sha256"
+    assert capabilities.quota["max_chunk_bytes"] == 4194304

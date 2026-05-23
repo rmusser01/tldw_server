@@ -7,14 +7,14 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
-from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.adapters import (
     AdapterAccepted,
     AdapterConflict,
     AdapterRejected,
-    SyncAdapterRegistry,
     StaticSyncAdapter,
+    SyncAdapterRegistry,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncConflictCreate,
@@ -218,6 +218,50 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
     assert capabilities.max_attachment_bytes == 4096
     assert capabilities.encryption_policies == ["server_trusted_v1"]
     assert capabilities.supports_attachments is False
+
+
+def test_capabilities_can_advertise_m2_resumable_blob_transfer(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(
+            protocol_version="sync-v2-m2",
+            min_supported_protocol_version="sync-v2-m1",
+            supports_attachments=True,
+            max_attachment_bytes=8192,
+            max_blob_bytes=16384,
+            max_chunk_bytes=1024,
+            max_active_blob_uploads=3,
+            user_blob_quota_bytes=65536,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+
+    capabilities = service.capabilities()
+
+    assert capabilities.protocol_version == "sync-v2-m2"
+    assert capabilities.min_supported_protocol_version == "sync-v2-m1"
+    assert capabilities.supports_attachments is True
+    assert capabilities.blob_transfer == {
+        "supported": True,
+        "resumable_upload": True,
+        "resumable_download": True,
+        "chunk_checksums": True,
+        "full_checksum": "sha256",
+        "storage_backend": "local_fs",
+    }
+    assert capabilities.quota == {
+        "max_blob_bytes": 16384,
+        "max_chunk_bytes": 1024,
+        "max_active_uploads": 3,
+        "user_blob_quota_bytes": 65536,
+        "reserved_blob_bytes": 0,
+        "used_blob_bytes": 0,
+    }
 
 
 def test_device_registration_creates_and_refreshes_same_device(sync_service: SyncV2Service):
