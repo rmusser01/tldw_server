@@ -148,6 +148,32 @@ Review evidence:
 
 Bandit:
 - Workers reported touched-scope Bandit produced no findings but parse errors because files are TypeScript; final Bandit decision will be recorded at final verification.
+
+Task 6 completed.
+
+Files touched:
+- apps/packages/ui/src/components/Option/WritingPlayground/WritingActionBar.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/WritingRevisionDiff.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/WritingRevisionQueue.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingActionBar.test.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingRevisionQueue.test.tsx
+
+Commits:
+- 97c6561a feat: add writing revision queue UI
+- 93bb0f6a fix: add icons to writing revision actions
+- c9af6d91 fix: reset writing revision confirmation on target change
+
+TDD evidence:
+- Initial red: focused Vitest failed because WritingActionBar and WritingRevisionQueue did not exist.
+- Follow-up reds/review regressions: spec review found label-only action buttons; code quality review found broad-target confirmation survived target changes.
+- Final green: bunx vitest run apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingActionBar.test.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingRevisionQueue.test.tsx passed with 2 test files / 11 tests.
+
+Review evidence:
+- Spec compliance review initially found missing icon+label buttons. Fixed in 93bb0f6a; re-review approved.
+- Code quality review found stale confirmation state when target changes. Fixed in c9af6d91; re-review approved with no Critical or Important issues.
+
+Bandit:
+- Touched files are TypeScript/TSX frontend code; final Bandit decision will be recorded at final verification.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
