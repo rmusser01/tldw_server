@@ -31,6 +31,8 @@ export type RouteAvailability =
   | "extension_options"
   | "extension_sidepanel"
 
+export type HostedOptionVisibility = "visible"
+
 export type RouteMetadata = {
   path: string
   canonicalPath: string
@@ -43,6 +45,7 @@ export type RouteMetadata = {
   redirectsTo?: string
   smoke: "include" | "exclude" | "manual"
   commandPalette: "show" | "hide" | "alias_only"
+  hostedOptionVisibility?: HostedOptionVisibility
   nav: "primary" | "secondary" | "hidden"
   requiresAuth?: boolean
   requiresBackend?: boolean
@@ -69,6 +72,7 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
     availability: [...webAndExtensionOptions, "extension_sidepanel"],
     smoke: "include",
     commandPalette: "show",
+    hostedOptionVisibility: "visible",
     nav: "primary",
     requiresBackend: true,
     rationale: "Default entry route for self-hosted WebUI and extension shells."
@@ -195,6 +199,7 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
     availability: [...webAndExtensionOptions, "extension_sidepanel"],
     smoke: "include",
     commandPalette: "show",
+    hostedOptionVisibility: "visible",
     nav: "primary",
     requiresBackend: true,
     rationale: "Primary assistant conversation route across WebUI and extension sidepanel."
@@ -297,6 +302,7 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
     availability: webAndExtensionOptions,
     smoke: "include",
     commandPalette: "show",
+    hostedOptionVisibility: "visible",
     nav: "secondary",
     requiresBackend: true,
     rationale: "Workspace-style chat is available for users who need denser working context."
@@ -310,6 +316,7 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
     availability: webAndExtensionOptions,
     smoke: "include",
     commandPalette: "show",
+    hostedOptionVisibility: "visible",
     nav: "primary",
     requiresBackend: true,
     rationale: "Primary knowledge and RAG route for self-hosted users."
@@ -439,6 +446,7 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
     availability: webAndExtensionOptions,
     smoke: "include",
     commandPalette: "show",
+    hostedOptionVisibility: "visible",
     nav: "primary",
     requiresBackend: true,
     rationale: "Primary route for ingested media review and management."
@@ -505,6 +513,7 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
     availability: webAndExtensionOptions,
     smoke: "include",
     commandPalette: "show",
+    hostedOptionVisibility: "visible",
     nav: "secondary",
     requiresBackend: true,
     rationale: "Collection organization is a common media-library workflow."
@@ -782,6 +791,7 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
     availability: webAndExtensionOptions,
     smoke: "include",
     commandPalette: "show",
+    hostedOptionVisibility: "visible",
     nav: "secondary",
     requiresBackend: true,
     rationale: "STT remains a direct task route inside the broader speech workflow."
@@ -795,6 +805,7 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
     availability: webAndExtensionOptions,
     smoke: "include",
     commandPalette: "show",
+    hostedOptionVisibility: "visible",
     nav: "secondary",
     requiresBackend: true,
     rationale: "TTS remains a direct task route inside the broader speech workflow."
@@ -1035,6 +1046,7 @@ const registryRoute = ({
   redirectsTo,
   smoke = "include",
   commandPalette = "show",
+  hostedOptionVisibility,
   nav = "secondary",
   requiresAuth,
   requiresBackend,
@@ -1053,6 +1065,7 @@ const registryRoute = ({
   redirectsTo,
   smoke,
   commandPalette,
+  hostedOptionVisibility,
   nav,
   requiresAuth,
   requiresBackend,
@@ -1690,6 +1703,7 @@ const ROUTE_REGISTRY_METADATA: RouteMetadata[] = [
     group: "workspace",
     surface: "advanced_self_hosted",
     availability: webAndExtensionOptions,
+    hostedOptionVisibility: "visible",
     requiresBackend: true,
     rationale: "Research Studio is the canonical route for workspace playground behavior in the shared router."
   }),

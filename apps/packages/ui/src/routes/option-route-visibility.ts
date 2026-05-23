@@ -1,16 +1,10 @@
-import { CHAT_WORKSPACE_PATH, RESEARCH_STUDIO_PATH } from "./route-paths"
+import { normalizeRoutePath, ROUTE_METADATA } from "./route-metadata"
 
-export const HOSTED_VISIBLE_OPTION_PATHS = new Set([
-  "/",
-  "/chat",
-  CHAT_WORKSPACE_PATH,
-  "/media",
-  "/knowledge",
-  "/collections",
-  RESEARCH_STUDIO_PATH,
-  "/stt",
-  "/tts"
-])
+export const HOSTED_VISIBLE_OPTION_PATHS = new Set(
+  ROUTE_METADATA.filter(
+    (metadata) => metadata.hostedOptionVisibility === "visible"
+  ).map((metadata) => normalizeRoutePath(metadata.path))
+)
 
 export const isHostedVisibleOptionPath = (path: string) =>
-  HOSTED_VISIBLE_OPTION_PATHS.has(path)
+  HOSTED_VISIBLE_OPTION_PATHS.has(normalizeRoutePath(path))

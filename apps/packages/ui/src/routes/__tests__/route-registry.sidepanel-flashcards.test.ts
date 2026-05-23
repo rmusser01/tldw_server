@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import { getRouteMetadata } from "../route-metadata"
 import { STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS } from "../study-safety-specialized-route-jobs"
 
 const registryPathCandidates = [
@@ -34,6 +35,9 @@ describe("sidepanel flashcards route registration", () => {
   it("registers a /flashcards route in the sidepanel registry", () => {
     expect(registrySource).toMatch(/path:\s*"\/flashcards"/)
     expect(registrySource).toContain("SidepanelFlashcards")
+    expect(getRouteMetadata("/flashcards")?.availability).toContain(
+      "extension_sidepanel"
+    )
   })
 
   it("keeps flashcards as the only Task 11B sidepanel route", () => {
