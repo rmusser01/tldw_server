@@ -446,6 +446,7 @@ class SyncBlobUploadSession:
     chunk_count: int
     size_bytes: int
     payload_hash: str
+    content_type: str
     uploaded_chunks: list[int] = field(default_factory=list)
     missing_chunks: list[int] = field(default_factory=list)
     quota: dict[str, Any] = field(default_factory=dict)
@@ -551,6 +552,7 @@ class SyncBlobQuotaUsage:
     dataset_id: str | None = None
     reserved_blob_bytes: int = 0
     used_blob_bytes: int = 0
+    active_upload_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)

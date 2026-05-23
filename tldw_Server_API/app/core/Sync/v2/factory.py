@@ -8,13 +8,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.DB_Management.Sync_DB import SYNC_DB_FILENAME, SyncDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     _resolve_user_id_for_storage,
 )
+from tldw_Server_API.app.core.DB_Management.Sync_DB import SYNC_DB_FILENAME, SyncDatabase
 
 from .adapters import AttachmentRefAdapter, StaticSyncAdapter, SyncAdapterRegistry
+from .blob_store import LocalSyncBlobStore
 from .materializers import (
     AttachmentRefMaterializer,
     ChatConversationMaterializer,
@@ -60,6 +61,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
             "chat.message": ChatMessageMaterializer(_chacha_notes_db_for_user(user_id)),
             "notes.note": NotesMaterializer(_chacha_notes_db_for_user(user_id)),
         },
+        blob_store=_sync_v2_blob_store_for_user(user_id),
         settings=SyncV2Settings(
             server_trusted_encryption=server_trusted_encryption_status_from_env(),
         ),
@@ -94,6 +96,13 @@ def _chacha_notes_db_for_user(user_id: str) -> CharactersRAGDB:
     db_path = DatabasePaths.get_chacha_db_path(user_id)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return CharactersRAGDB(db_path=str(db_path), client_id=str(user_id))
+
+
+@lru_cache(maxsize=256)
+def _sync_v2_blob_store_for_user(user_id: str) -> LocalSyncBlobStore:
+    base_dir = DatabasePaths.resolve_user_db_base_dir()
+    safe_user_id = _resolve_user_id_for_storage(user_id)
+    return LocalSyncBlobStore(base_dir / safe_user_id / "sync_blobs")
 
 
 def _default_sync_v2_path_for_user(user_id: str) -> Path:

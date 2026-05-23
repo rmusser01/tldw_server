@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -7,14 +8,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
-from tldw_Server_API.app.core.Sync.v2.models import SyncDeviceUpsert
-from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, SyncObjectState
+from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, SyncDeviceUpsert, SyncObjectState
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -24,6 +24,10 @@ from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
 def _clock() -> str:
     return "2026-05-23T18:12:00+00:00"
+
+
+def _sha256(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def _test_user() -> User:
@@ -83,14 +87,26 @@ class _EndpointOutcomeMaterializer:
         return MaterializationResult(status="applied")
 
 
-def _build_service(tmp_path: Path, *, encryption=None, materializers=None) -> SyncV2Service:
+def _build_service(
+    tmp_path: Path,
+    *,
+    encryption=None,
+    materializers=None,
+    supports_attachments: bool = False,
+) -> SyncV2Service:
     return SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_v2_endpoints.db")),
         adapters=_registry(),
         materializers=materializers,
         clock=_clock,
         id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs") if supports_attachments else None,
         settings=SyncV2Settings(
+            supports_attachments=supports_attachments,
+            max_attachment_bytes=64,
+            max_blob_bytes=128,
+            max_chunk_bytes=8,
+            user_blob_quota_bytes=256,
             server_trusted_encryption=encryption or _ready_encryption(),
             restore_manifest_scan_limit=100,
         ),
@@ -556,3 +572,156 @@ def test_legacy_send_and_get_routes_return_replaced_gone(
     assert invalid_get.status_code == 410
     assert invalid_get.json()["detail"]["error_code"] == "sync_legacy_endpoint_replaced"
     assert invalid_get.json()["detail"]["replacement"] == "/api/v1/sync/pull"
+
+
+def test_resumable_blob_upload_endpoints_accept_raw_chunks_and_complete(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    client = _client_for_service(service)
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    payload = b"hello world"
+
+    create_response = client.post(
+        "/api/v1/sync/blob-uploads",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "domain": "notes.note",
+            "object_id": "note-1",
+            "attachment_id": "attachment-1",
+            "content_type": "application/octet-stream",
+            "size_bytes": len(payload),
+            "payload_hash": _sha256(payload),
+            "chunk_size": 6,
+            "chunk_count": 2,
+            "idempotency_key": "upload-key-1",
+        },
+    )
+    assert create_response.status_code == 200
+    upload_id = create_response.json()["upload_id"]
+
+    first_response = client.put(
+        f"/api/v1/sync/blob-uploads/{upload_id}/chunks/0",
+        params={
+            "dataset_id": "dataset-1",
+            "offset_bytes": 0,
+            "chunk_hash": _sha256(payload[:6]),
+        },
+        content=payload[:6],
+        headers={"content-type": "application/octet-stream"},
+    )
+    second_response = client.put(
+        f"/api/v1/sync/blob-uploads/{upload_id}/chunks/1",
+        params={
+            "dataset_id": "dataset-1",
+            "offset_bytes": 6,
+            "chunk_hash": _sha256(payload[6:]),
+        },
+        content=payload[6:],
+        headers={"content-type": "application/octet-stream"},
+    )
+    complete_response = client.post(
+        f"/api/v1/sync/blob-uploads/{upload_id}/complete",
+        params={"dataset_id": "dataset-1"},
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.json()["missing_chunks"] == [1]
+    assert second_response.status_code == 200
+    assert second_response.json()["missing_chunks"] == []
+    assert complete_response.status_code == 200
+    body = complete_response.json()
+    assert body["attachment_id"] == "attachment-1"
+    assert body["status"] == "available"
+    assert body["stored"] is True
+    assert body["payload_hash"] == _sha256(payload)
+    assert body["quota"]["used_blob_bytes"] == len(payload)
+
+
+def test_blob_upload_endpoint_maps_validation_errors_to_safe_statuses(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    client = _client_for_service(service)
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+
+    bad_hash_response = client.put(
+        "/api/v1/sync/blob-uploads/upload-missing/chunks/0",
+        params={
+            "dataset_id": "dataset-1",
+            "offset_bytes": 0,
+            "chunk_hash": "sha256:" + "0" * 64,
+        },
+        content=b"bad",
+        headers={"content-type": "application/octet-stream"},
+    )
+    quota_response = client.post(
+        "/api/v1/sync/blob-uploads",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "domain": "notes.note",
+            "object_id": "note-1",
+            "attachment_id": "attachment-1",
+            "content_type": "application/octet-stream",
+            "size_bytes": 512,
+            "payload_hash": _sha256(b"x" * 512),
+            "chunk_size": 8,
+            "chunk_count": 64,
+        },
+    )
+
+    assert bad_hash_response.status_code == 404
+    assert bad_hash_response.json()["detail"]["error_code"] == "sync_resource_not_found"
+    assert quota_response.status_code == 413
+    assert quota_response.json()["detail"]["error_code"] == "sync_attachment_too_large"
+
+
+def test_small_attachment_endpoint_uses_blob_commit_path(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    client = _client_for_service(service)
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    payload = b"small encrypted payload"
+
+    response = client.post(
+        "/api/v1/sync/attachments",
+        json={
+            "dataset_id": "dataset-1",
+            "domain": "notes.note",
+            "object_id": "note-1",
+            "attachment_id": "attachment-small",
+            "content_type": "application/octet-stream",
+            "size_bytes": len(payload),
+            "payload_ciphertext": payload.decode("utf-8"),
+            "payload_hash": _sha256(payload),
+        },
+    )
+    quota = service.store.summarize_blob_quota("user-1", dataset_id="dataset-1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["attachment_id"] == "attachment-small"
+    assert body["stored"] is True
+    assert body["payload_hash"] == _sha256(payload)
+    assert quota.used_blob_bytes == len(payload)

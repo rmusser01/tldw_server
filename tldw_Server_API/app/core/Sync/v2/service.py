@@ -21,6 +21,7 @@ from .adapters import (
     SyncDomainAdapter,
     extract_attachment_ref_metadata,
 )
+from .blob_store import LocalSyncBlobStore, SyncBlobStoreError
 from .errors import (
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
@@ -35,6 +36,12 @@ from .models import (
     EncryptionPolicy,
     SyncAttachment,
     SyncAttachmentCreate,
+    SyncBlobChunk,
+    SyncBlobChunkCreate,
+    SyncBlobObject,
+    SyncBlobObjectCreate,
+    SyncBlobUploadSession,
+    SyncBlobUploadSessionCreate,
     SyncConflict,
     SyncConflictCreate,
     SyncDataset,
@@ -330,6 +337,7 @@ class SyncV2Service:
         materializers: Mapping[SyncDomain, SyncMaterializer] | None = None,
         clock: Callable[[], str] | None = None,
         id_factory: Callable[[str], str] | None = None,
+        blob_store: LocalSyncBlobStore | None = None,
         settings: SyncV2Settings | None = None,
     ) -> None:
         self.store = store
@@ -337,6 +345,7 @@ class SyncV2Service:
         self.materializers = dict(materializers or {})
         self.clock = clock or (lambda: datetime.now(timezone.utc).isoformat())
         self.id_factory = id_factory or (lambda prefix: f"{prefix}-{uuid4().hex}")
+        self.blob_store = blob_store
         self.settings = settings or SyncV2Settings()
 
     def capabilities(self) -> SyncV2Capabilities:
@@ -1065,29 +1074,59 @@ class SyncV2Service:
         size_bytes: int,
         payload_ciphertext: str,
         payload_hash: str,
-        encryption_policy: EncryptionPolicy = "client_private_v1",
+        encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY,
         metadata: dict[str, object] | None = None,
     ) -> SyncAttachment:
         """Persist a small encrypted attachment payload for later restore."""
 
-        if not self.settings.supports_attachments:
-            raise SyncStoreError(
-                "sync_blob_transfer_not_supported: Sync v2 M1 does not support " "binary blob transfer"
+        blob_store = self._require_blob_transfer()
+        if encryption_policy != DEFAULT_M1_ENCRYPTION_POLICY:
+            raise SyncStoreError("Sync attachment persistence requires server_trusted_v1 encryption")
+        payload = payload_ciphertext.encode("utf-8")
+        if (
+            size_bytes > self.settings.max_attachment_bytes
+            or _ciphertext_exceeds_attachment_limit(
+                payload_ciphertext,
+                self.settings.max_attachment_bytes,
             )
-        if encryption_policy != "client_private_v1":
-            raise SyncStoreError("Sync attachment persistence requires client_private_v1 encryption")
-        if size_bytes > self.settings.max_attachment_bytes or _ciphertext_exceeds_attachment_limit(
-            payload_ciphertext,
-            self.settings.max_attachment_bytes,
+            or len(payload) != size_bytes
         ):
             raise SyncStoreError("Sync attachment payload exceeds the server size limit")
         if not payload_ciphertext:
             raise SyncStoreError("Sync attachment payload_ciphertext is required")
-        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        if dataset is None:
-            raise SyncStoreError("Sync dataset was not found or is not accessible")
-        if domain not in dataset.domains:
-            raise SyncInvalidDomainError(f"Sync domain is not enrolled for this dataset: {domain}")
+        self._validate_sha256_hash(payload_hash, field_name="payload_hash")
+        self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id, domain=domain)
+        blob_id = self.id_factory("blob")
+        upload_id = self.id_factory("blob-upload")
+        storage_key = self._write_single_chunk_blob(
+            blob_store=blob_store,
+            upload_id=upload_id,
+            payload=payload,
+            payload_hash=payload_hash,
+        )
+        blob = self.store.complete_blob_upload(
+            SyncBlobObjectCreate(
+                blob_id=blob_id,
+                dataset_id=dataset_id,
+                owner_user_id=user_id,
+                attachment_id=attachment_id,
+                payload_hash=payload_hash,
+                content_type=content_type,
+                size_bytes=size_bytes,
+                storage_backend=self.settings.blob_storage_backend,
+                storage_key=storage_key,
+                encryption_policy=encryption_policy,
+                metadata=dict(metadata or {}),
+            )
+        )
+        attachment_metadata = dict(metadata or {})
+        attachment_metadata.update(
+            {
+                "blob_id": blob.blob_id,
+                "storage_backend": blob.storage_backend,
+                "storage_key": blob.storage_key,
+            }
+        )
         return self.store.store_attachment(
             SyncAttachmentCreate(
                 attachment_id=attachment_id,
@@ -1099,9 +1138,180 @@ class SyncV2Service:
                 payload_ciphertext=payload_ciphertext,
                 payload_hash=payload_hash,
                 encryption_policy=encryption_policy,
+                metadata=attachment_metadata,
+            )
+        )
+
+    def create_blob_upload_session(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str | None,
+        domain: SyncDomain,
+        entity_id: str,
+        attachment_id: str,
+        content_type: str,
+        size_bytes: int,
+        payload_hash: str,
+        chunk_size: int,
+        chunk_count: int,
+        idempotency_key: str | None = None,
+        encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY,
+        metadata: dict[str, object] | None = None,
+    ) -> SyncBlobUploadSession:
+        """Create or resume a quota-checked M2 blob upload session."""
+
+        self._require_blob_transfer()
+        if encryption_policy != DEFAULT_M1_ENCRYPTION_POLICY:
+            raise SyncStoreError("Sync blob upload requires server_trusted_v1 encryption")
+        self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id, domain=domain)
+        self._validate_blob_limits(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            size_bytes=size_bytes,
+            chunk_size=chunk_size,
+            chunk_count=chunk_count,
+        )
+        self._validate_sha256_hash(payload_hash, field_name="payload_hash")
+        return self.store.create_blob_upload_session(
+            SyncBlobUploadSessionCreate(
+                upload_id=self.id_factory("blob-upload"),
+                dataset_id=dataset_id,
+                owner_user_id=user_id,
+                device_id=device_id,
+                attachment_id=attachment_id,
+                domain=domain,
+                object_id=entity_id,
+                content_type=content_type,
+                size_bytes=size_bytes,
+                payload_hash=payload_hash,
+                chunk_size=chunk_size,
+                chunk_count=chunk_count,
+                reserved_quota_bytes=size_bytes,
+                idempotency_key=idempotency_key,
                 metadata=dict(metadata or {}),
             )
         )
+
+    def get_blob_upload_session(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        upload_id: str,
+    ) -> SyncBlobUploadSession:
+        """Return an upload session after checking dataset ownership."""
+
+        self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id)
+        session = self.store.get_blob_upload_session(upload_id, dataset_id=dataset_id)
+        if session is None:
+            raise SyncStoreError(f"Sync blob upload session not found: {upload_id}")
+        return session
+
+    def upload_blob_chunk(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        upload_id: str,
+        chunk_index: int,
+        offset_bytes: int,
+        chunk_payload: bytes,
+        chunk_hash: str,
+    ) -> SyncBlobChunk:
+        """Verify, store, and record one resumable upload chunk."""
+
+        blob_store = self._require_blob_transfer()
+        session = self.get_blob_upload_session(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+        )
+        self._validate_sha256_hash(chunk_hash, field_name="chunk_hash")
+        if len(chunk_payload) > self.settings.max_chunk_bytes:
+            raise SyncStoreError("Sync blob chunk exceeds the server size limit")
+        if offset_bytes < 0:
+            raise SyncStoreError("Sync blob chunk offset is invalid")
+        expected_size = min(session.chunk_size, max(session.size_bytes - offset_bytes, 0))
+        if len(chunk_payload) != expected_size:
+            raise SyncStoreError("Sync blob chunk size does not match the upload session")
+        try:
+            storage_key = blob_store.write_upload_chunk(
+                upload_id=upload_id,
+                chunk_index=chunk_index,
+                payload=chunk_payload,
+                expected_hash=chunk_hash,
+            )
+        except SyncBlobStoreError as exc:
+            raise SyncStoreError(str(exc)) from exc
+        return self.store.record_blob_chunk(
+            SyncBlobChunkCreate(
+                upload_id=upload_id,
+                dataset_id=dataset_id,
+                chunk_index=chunk_index,
+                offset_bytes=offset_bytes,
+                size_bytes=len(chunk_payload),
+                chunk_hash=chunk_hash,
+                storage_key=storage_key,
+            )
+        )
+
+    def complete_blob_upload(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        upload_id: str,
+    ) -> SyncBlobObject:
+        """Verify all chunks and mark a blob object available."""
+
+        blob_store = self._require_blob_transfer()
+        session = self.get_blob_upload_session(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+        )
+        if session.missing_chunks:
+            raise SyncStoreError("Sync blob upload session is missing chunks")
+        try:
+            storage_key = blob_store.commit_upload(
+                upload_id=upload_id,
+                payload_hash=session.payload_hash,
+                chunk_indexes=list(range(session.chunk_count)),
+            )
+        except SyncBlobStoreError as exc:
+            raise SyncStoreError(str(exc)) from exc
+        return self.store.complete_blob_upload(
+            SyncBlobObjectCreate(
+                blob_id=self.id_factory("blob"),
+                dataset_id=dataset_id,
+                owner_user_id=user_id,
+                attachment_id=session.attachment_id,
+                payload_hash=session.payload_hash,
+                content_type=session.content_type,
+                size_bytes=session.size_bytes,
+                storage_backend=self.settings.blob_storage_backend,
+                storage_key=storage_key,
+                encryption_policy=DEFAULT_M1_ENCRYPTION_POLICY,
+                metadata={},
+            )
+        )
+
+    def cancel_blob_upload(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        upload_id: str,
+    ) -> SyncBlobUploadSession:
+        """Cancel an upload session and remove staged chunks."""
+
+        blob_store = self._require_blob_transfer()
+        self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id)
+        session = self.store.cancel_blob_upload_session(upload_id, dataset_id=dataset_id)
+        blob_store.discard_upload(upload_id)
+        return session
 
     def list_conflicts(
         self,
@@ -1657,6 +1867,85 @@ class SyncV2Service:
             key_recovery_available=stats.key_recovery_available,
             metadata=metadata,
         )
+
+    def _require_blob_transfer(self) -> LocalSyncBlobStore:
+        if not self.settings.supports_attachments or self.blob_store is None:
+            raise SyncStoreError(
+                "sync_blob_transfer_not_supported: Sync v2 M1 does not support binary blob transfer"
+            )
+        return self.blob_store
+
+    def _require_blob_dataset(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        domain: SyncDomain | None = None,
+    ) -> SyncDataset:
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        if domain is not None and domain not in dataset.domains:
+            raise SyncInvalidDomainError(f"Sync domain is not enrolled for this dataset: {domain}")
+        return dataset
+
+    def _validate_blob_limits(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        size_bytes: int,
+        chunk_size: int,
+        chunk_count: int,
+    ) -> None:
+        max_blob_bytes = self.settings.max_blob_bytes or self.settings.max_attachment_bytes
+        if size_bytes <= 0 or size_bytes > max_blob_bytes:
+            raise SyncStoreError("Sync attachment payload exceeds the server size limit")
+        if chunk_size <= 0 or chunk_size > self.settings.max_chunk_bytes:
+            raise SyncStoreError("Sync blob chunk exceeds the server size limit")
+        if chunk_count <= 0 or chunk_size * chunk_count < size_bytes:
+            raise SyncStoreError("Sync blob chunk shape is invalid")
+        quota = self.store.summarize_blob_quota(user_id, dataset_id=dataset_id)
+        if (
+            self.settings.user_blob_quota_bytes is not None
+            and quota.used_blob_bytes + quota.reserved_blob_bytes + size_bytes
+            > self.settings.user_blob_quota_bytes
+        ):
+            raise SyncStoreError("Sync blob quota exceeded")
+        if quota.active_upload_count >= self.settings.max_active_blob_uploads:
+            raise SyncStoreError("Sync blob active upload limit exceeded")
+
+    def _validate_sha256_hash(self, value: str, *, field_name: str) -> None:
+        prefix = "sha256:"
+        if not value.startswith(prefix) or len(value) != len(prefix) + 64:
+            raise SyncStoreError(f"Sync blob {field_name} must be sha256:<64 hex chars>")
+        try:
+            bytes.fromhex(value[len(prefix) :])
+        except ValueError as exc:
+            raise SyncStoreError(f"Sync blob {field_name} digest must be hex") from exc
+
+    def _write_single_chunk_blob(
+        self,
+        *,
+        blob_store: LocalSyncBlobStore,
+        upload_id: str,
+        payload: bytes,
+        payload_hash: str,
+    ) -> str:
+        try:
+            blob_store.write_upload_chunk(
+                upload_id=upload_id,
+                chunk_index=0,
+                payload=payload,
+                expected_hash=payload_hash,
+            )
+            return blob_store.commit_upload(
+                upload_id=upload_id,
+                payload_hash=payload_hash,
+                chunk_indexes=[0],
+            )
+        except SyncBlobStoreError as exc:
+            raise SyncStoreError(str(exc)) from exc
 
     def _latest_cursor_for_domains(
         self,

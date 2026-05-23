@@ -28,6 +28,10 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     ConflictStatus,
     SyncAttachmentUploadRequest,
     SyncAttachmentUploadResponse,
+    SyncBlobChunkUploadResponse,
+    SyncBlobUploadCompleteResponse,
+    SyncBlobUploadCreateRequest,
+    SyncBlobUploadSessionResponse,
     SyncCapabilitiesResponse,
     SyncConflictRecord,
     SyncConflictResolveRejectedItem,
@@ -169,11 +173,21 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                     "message": "Sync attachment exceeds the server size limit.",
                 },
             )
+        if "quota" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "error_code": "sync_blob_quota_exceeded",
+                    "message": "Sync blob quota would be exceeded.",
+                },
+            )
         if (
             "invalid sync cursor" in lowered
             or "page_size" in lowered
             or "resolution envelope" in lowered
             or "payload exceeds" in lowered
+            or "chunk" in lowered
+            or "hash" in lowered
             or "bootstrap mode" in lowered
             or "requested unsupported domains" in lowered
             or "client_family" in lowered
@@ -266,6 +280,10 @@ def _api_profile_from_core(profile: Any) -> SyncProfileResponse:
 
 def _api_bootstrap_profile_from_core(profile: Any) -> SyncProfileBootstrapResponse:
     return SyncProfileBootstrapResponse(**asdict(profile))
+
+
+def _api_blob_session_from_core(session: Any) -> SyncBlobUploadSessionResponse:
+    return SyncBlobUploadSessionResponse(**asdict(session))
 
 
 def _api_empty_profile(user_id: str, device_id: str | None) -> SyncProfileResponse:
@@ -761,6 +779,189 @@ def list_sync_v2_key_recovery_bundles(
         dataset_id=dataset_id,
         key_records=[_api_key_record_export(record) for record in records],
     )
+
+
+@router.post(
+    "/blob-uploads",
+    response_model=SyncBlobUploadSessionResponse,
+    summary="Create or resume a Sync v2 M2 blob upload session",
+)
+def create_sync_v2_blob_upload(
+    request: SyncBlobUploadCreateRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        session = service.create_blob_upload_session(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            domain=request.domain,
+            entity_id=request.entity_id,
+            attachment_id=request.attachment_id,
+            content_type=request.content_type,
+            size_bytes=request.size_bytes,
+            payload_hash=request.payload_hash,
+            chunk_size=request.chunk_size,
+            chunk_count=request.chunk_count,
+            idempotency_key=request.idempotency_key,
+            encryption_policy=request.encryption_policy,
+            metadata=request.metadata,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            domain=request.domain,
+            attachment_id=request.attachment_id,
+        ) from exc
+    return _api_blob_session_from_core(session)
+
+
+@router.get(
+    "/blob-uploads/{upload_id}",
+    response_model=SyncBlobUploadSessionResponse,
+    summary="Return Sync v2 M2 blob upload session status",
+)
+def get_sync_v2_blob_upload(
+    upload_id: str,
+    dataset_id: str = Query(...),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        session = service.get_blob_upload_session(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+        ) from exc
+    return _api_blob_session_from_core(session)
+
+
+@router.put(
+    "/blob-uploads/{upload_id}/chunks/{chunk_index}",
+    response_model=SyncBlobChunkUploadResponse,
+    summary="Upload one raw Sync v2 M2 blob chunk",
+)
+async def upload_sync_v2_blob_chunk(
+    raw_request: Request,
+    upload_id: str,
+    chunk_index: int,
+    dataset_id: str = Query(...),
+    offset_bytes: int = Query(..., ge=0),
+    chunk_hash: str = Query(...),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    payload = await raw_request.body()
+    try:
+        chunk = await asyncio.to_thread(
+            service.upload_blob_chunk,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+            chunk_index=chunk_index,
+            offset_bytes=offset_bytes,
+            chunk_payload=payload,
+            chunk_hash=chunk_hash,
+        )
+        session = await asyncio.to_thread(
+            service.get_blob_upload_session,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+            chunk_index=chunk_index,
+        ) from exc
+    return SyncBlobChunkUploadResponse(
+        upload_id=chunk.upload_id,
+        chunk_index=chunk.chunk_index,
+        accepted=True,
+        size_bytes=chunk.size_bytes,
+        chunk_hash=chunk.chunk_hash,
+        missing_chunks=session.missing_chunks,
+    )
+
+
+@router.post(
+    "/blob-uploads/{upload_id}/complete",
+    response_model=SyncBlobUploadCompleteResponse,
+    summary="Complete and verify a Sync v2 M2 blob upload",
+)
+def complete_sync_v2_blob_upload(
+    upload_id: str,
+    dataset_id: str = Query(...),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    user_id = _sync_user_id(user)
+    try:
+        blob = service.complete_blob_upload(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+        )
+        quota = service.store.summarize_blob_quota(user_id, dataset_id=dataset_id)
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=user_id,
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+        ) from exc
+    return SyncBlobUploadCompleteResponse(
+        upload_id=upload_id,
+        dataset_id=blob.dataset_id,
+        attachment_id=blob.attachment_id,
+        blob_id=blob.blob_id,
+        status=blob.status,
+        stored=blob.status == "available",
+        size_bytes=blob.size_bytes,
+        payload_hash=blob.payload_hash,
+        download_url=f"/api/v1/sync/attachments/{blob.attachment_id}?dataset_id={blob.dataset_id}",
+        quota=asdict(quota),
+    )
+
+
+@router.delete(
+    "/blob-uploads/{upload_id}",
+    response_model=SyncBlobUploadSessionResponse,
+    summary="Cancel a Sync v2 M2 blob upload session",
+)
+def cancel_sync_v2_blob_upload(
+    upload_id: str,
+    dataset_id: str = Query(...),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        session = service.cancel_blob_upload(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+        ) from exc
+    return _api_blob_session_from_core(session)
 
 
 @router.post(

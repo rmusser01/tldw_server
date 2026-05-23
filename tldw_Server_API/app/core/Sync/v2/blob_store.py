@@ -84,6 +84,15 @@ class LocalSyncBlobStore:
 
         return self.resolve_storage_key(storage_key).read_bytes()
 
+    def discard_upload(self, upload_id: str) -> None:
+        """Remove staged chunks for an upload if present."""
+
+        upload_segment = _safe_segment(upload_id, field_name="upload_id")
+        shutil.rmtree(
+            self.resolve_storage_key(f"_uploads/{upload_segment}"),
+            ignore_errors=True,
+        )
+
     def resolve_storage_key(self, storage_key: str) -> Path:
         """Return a contained filesystem path for a relative storage key."""
 

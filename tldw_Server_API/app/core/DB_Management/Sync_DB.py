@@ -861,6 +861,7 @@ def _blob_upload_session_from_row(
         chunk_count=chunk_count,
         size_bytes=int(row["size_bytes"]),
         payload_hash=row["payload_hash"],
+        content_type=row["content_type"],
         uploaded_chunks=uploaded,
         missing_chunks=missing,
         quota={"reserved_blob_bytes": int(row["reserved_quota_bytes"])},
@@ -2953,7 +2954,8 @@ class SyncDatabase:
             reserved_row = _first(
                 self.execute(
                     """
-                    SELECT COALESCE(SUM(reserved_quota_bytes), 0) AS bytes
+                    SELECT COALESCE(SUM(reserved_quota_bytes), 0) AS bytes,
+                           COUNT(*) AS active_upload_count
                       FROM sync_blob_upload_sessions
                      WHERE owner_user_id = ?
                        AND status IN ('created', 'uploading')
@@ -2976,7 +2978,8 @@ class SyncDatabase:
             reserved_row = _first(
                 self.execute(
                     """
-                    SELECT COALESCE(SUM(reserved_quota_bytes), 0) AS bytes
+                    SELECT COALESCE(SUM(reserved_quota_bytes), 0) AS bytes,
+                           COUNT(*) AS active_upload_count
                       FROM sync_blob_upload_sessions
                      WHERE owner_user_id = ?
                        AND dataset_id = ?
@@ -3002,6 +3005,7 @@ class SyncDatabase:
             dataset_id=dataset_id,
             reserved_blob_bytes=int(reserved_row["bytes"] if reserved_row else 0),
             used_blob_bytes=int(used_row["bytes"] if used_row else 0),
+            active_upload_count=int(reserved_row["active_upload_count"] if reserved_row else 0),
         )
 
     def _require_blob_upload_session(

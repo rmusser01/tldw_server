@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import cast
 
@@ -14,6 +15,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     StaticSyncAdapter,
     SyncAdapterRegistry,
 )
+from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
@@ -33,6 +35,10 @@ from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
 def _clock() -> str:
     return "2026-05-10T12:00:00+00:00"
+
+
+def _sha256(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def _ready_encryption():
@@ -2870,6 +2876,212 @@ def test_restore_manifest_is_metadata_only_and_includes_inventory_status(
     assert manifest.datasets[0].key_recovery_available is True
     assert "ciphertext:known-private-note" not in repr(manifest)
     assert "wrapped:secret-key" not in repr(manifest)
+
+
+def test_blob_upload_session_chunk_and_complete_flow_commits_blob(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+    tmp_path: Path,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
+        settings=SyncV2Settings(
+            supports_attachments=True,
+            max_blob_bytes=64,
+            max_chunk_bytes=8,
+            user_blob_quota_bytes=128,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    payload = b"hello world"
+
+    session = service.create_blob_upload_session(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        domain="notes.note",
+        entity_id="note-1",
+        attachment_id="attachment-1",
+        content_type="application/octet-stream",
+        size_bytes=len(payload),
+        payload_hash=_sha256(payload),
+        chunk_size=6,
+        chunk_count=2,
+        idempotency_key="upload-key-1",
+    )
+    duplicate = service.create_blob_upload_session(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        domain="notes.note",
+        entity_id="note-1",
+        attachment_id="attachment-1",
+        content_type="application/octet-stream",
+        size_bytes=len(payload),
+        payload_hash=_sha256(payload),
+        chunk_size=6,
+        chunk_count=2,
+        idempotency_key="upload-key-1",
+    )
+    first_chunk = service.upload_blob_chunk(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        upload_id=session.upload_id,
+        chunk_index=0,
+        offset_bytes=0,
+        chunk_payload=payload[:6],
+        chunk_hash=_sha256(payload[:6]),
+    )
+    second_chunk = service.upload_blob_chunk(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        upload_id=session.upload_id,
+        chunk_index=1,
+        offset_bytes=6,
+        chunk_payload=payload[6:],
+        chunk_hash=_sha256(payload[6:]),
+    )
+    blob = service.complete_blob_upload(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        upload_id=session.upload_id,
+    )
+    quota = sync_store.summarize_blob_quota("user-1", dataset_id="dataset-1")
+
+    assert duplicate.upload_id == session.upload_id
+    assert first_chunk.chunk_index == 0
+    assert second_chunk.chunk_index == 1
+    assert blob.attachment_id == "attachment-1"
+    assert blob.status == "available"
+    assert service.blob_store is not None
+    assert service.blob_store.read_blob(blob.storage_key) == payload
+    assert quota.reserved_blob_bytes == 0
+    assert quota.used_blob_bytes == len(payload)
+    assert quota.active_upload_count == 0
+
+
+def test_blob_upload_rejects_bad_hash_domain_and_quota(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+    tmp_path: Path,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
+        settings=SyncV2Settings(
+            supports_attachments=True,
+            max_blob_bytes=32,
+            max_chunk_bytes=8,
+            user_blob_quota_bytes=8,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+
+    with pytest.raises(SyncStoreError, match="quota"):
+        service.create_blob_upload_session(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="notes.note",
+            entity_id="note-1",
+            attachment_id="attachment-1",
+            content_type="application/octet-stream",
+            size_bytes=9,
+            payload_hash=_sha256(b"123456789"),
+            chunk_size=8,
+            chunk_count=2,
+        )
+
+    with pytest.raises(SyncStoreError, match="not enrolled"):
+        service.create_blob_upload_session(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="chat.conversation",
+            entity_id="chat-1",
+            attachment_id="attachment-2",
+            content_type="application/octet-stream",
+            size_bytes=4,
+            payload_hash=_sha256(b"data"),
+            chunk_size=4,
+            chunk_count=1,
+        )
+
+    session = service.create_blob_upload_session(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        domain="notes.note",
+        entity_id="note-1",
+        attachment_id="attachment-3",
+        content_type="application/octet-stream",
+        size_bytes=4,
+        payload_hash=_sha256(b"data"),
+        chunk_size=4,
+        chunk_count=1,
+    )
+    with pytest.raises(SyncStoreError, match="hash"):
+        service.upload_blob_chunk(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            upload_id=session.upload_id,
+            chunk_index=0,
+            offset_bytes=0,
+            chunk_payload=b"data",
+            chunk_hash="sha256:" + "0" * 64,
+        )
+
+
+def test_store_attachment_uses_blob_upload_commit_path_for_small_blobs(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+    tmp_path: Path,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
+        settings=SyncV2Settings(
+            supports_attachments=True,
+            max_attachment_bytes=64,
+            max_blob_bytes=64,
+            max_chunk_bytes=64,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    payload = b"small encrypted payload"
+
+    attachment = service.store_attachment(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domain="notes.note",
+        entity_id="note-1",
+        attachment_id="attachment-small",
+        content_type="application/octet-stream",
+        size_bytes=len(payload),
+        payload_ciphertext=payload.decode("utf-8"),
+        payload_hash=_sha256(payload),
+    )
+    quota = sync_store.summarize_blob_quota("user-1", dataset_id="dataset-1")
+
+    assert attachment.stored is True
+    assert attachment.metadata["blob_id"] == "blob-generated"
+    assert quota.used_blob_bytes == len(payload)
 
 
 def test_store_attachment_rejects_blob_transfer_in_m1(
