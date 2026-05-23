@@ -126,6 +126,28 @@ Review evidence:
 
 Bandit:
 - Workers reported touched-scope Bandit produced no findings but parse errors because files are TypeScript; final Bandit decision will be recorded at final verification.
+
+Task 5 completed.
+
+Files touched:
+- apps/packages/ui/src/components/Option/WritingPlayground/hooks/useWritingRevisions.ts
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/useWritingRevisions.test.tsx
+
+Commits:
+- 2b977be87 feat: manage writing revision queue state
+- 40e17037 fix: guard stale writing revision regeneration
+
+TDD evidence:
+- Initial red: focused Vitest failed because hooks/useWritingRevisions.ts did not exist.
+- Follow-up reds: stale regeneration appended after active session switch, and regeneration appended after source proposal was rejected while async replacement was pending.
+- Final green: bunx vitest run apps/packages/ui/src/components/Option/WritingPlayground/__tests__/useWritingRevisions.test.tsx passed with 1 test file / 10 tests.
+
+Review evidence:
+- Spec compliance review approved the initial Task 5 hook implementation.
+- Code quality review found async regeneration could append/persist stale replacements after session/source changes. Fixed in 40e17037. Re-review approved with no Critical or Important issues.
+
+Bandit:
+- Workers reported touched-scope Bandit produced no findings but parse errors because files are TypeScript; final Bandit decision will be recorded at final verification.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
