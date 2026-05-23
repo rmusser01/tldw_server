@@ -1,17 +1,20 @@
 ---
 id: TASK-463
 title: Design Research Workspace hard replacement roadmap
-status: In Progress
+status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-05-23 19:10'
 labels:
-- design
-- webui
-- research-workspace
-- workspace
-priority: High
+  - design
+  - webui
+  - research-workspace
+  - workspace
+dependencies: []
 documentation:
-- Docs/superpowers/specs/2026-05-23-research-workspace-hard-replacement-roadmap-design.md
-modified_files:
-- Docs/superpowers/specs/2026-05-23-research-workspace-hard-replacement-roadmap-design.md
+  - >-
+    Docs/superpowers/specs/2026-05-23-research-workspace-hard-replacement-roadmap-design.md
+priority: high
 ---
 
 ## Description
@@ -22,6 +25,7 @@ Create umbrella design spec for replacing Workspace Playground with server-backe
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Reviewer-approved design spec captures the hard /research-workspace replacement roadmap and user-requested review clarifications.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -32,9 +36,15 @@ Design/spec phase only. Umbrella roadmap created for hard replacing Workspace Pl
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec review loop completed. First review found three planning blockers: Phase A capability fields too open, migration legacy storage inventory unresolved, and access enforcement too broad. Spec was patched to add the Phase A minimum capability contract, legacy store inventory/schema-mapping gate, and action-specific enforcement. Second review approved. Advisory clarifications applied for unknown capability states, UI-only legacy key classification, and tombstone/local UI preference scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+User-review follow-up completed. Added clarifications for phased implementation planning boundaries, capability mapping, fail-closed unknown governance state, all-payload-class migration deletion eligibility, chunk/object integrity validation, auditable user-acknowledged discard, concrete workspace picker contract, and local-only metrics/export semantics. Re-ran spec-document-reviewer loop; final result: Approved.
+
+Verification recorded: git diff --check passed for the spec and Backlog task; final spec-document-reviewer result was Approved. Bandit and code tests are not applicable because this patch changes documentation/task records only.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
@@ -44,10 +54,10 @@ Created reviewer-approved umbrella design spec for replacing Workspace Playgroun
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
