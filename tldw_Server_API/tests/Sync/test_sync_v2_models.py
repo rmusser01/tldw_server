@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.endpoints.sync import _core_envelope_from_api
+from tldw_Server_API.app.api.v1.schemas import sync_v2_models as api_sync_models
 from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SYNC_V2_MAX_PUSH_ENVELOPES,
     SyncAttachmentUploadRequest,
@@ -25,6 +26,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncRestoreCompletenessResponse,
     SyncV2Envelope,
 )
+from tldw_Server_API.app.core.Sync.v2 import models as core_sync_models
 from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelope as CoreSyncEnvelope
 
 M1_DOMAINS = ["notes.note", "chat.conversation", "chat.message", "attachment.ref"]
@@ -32,6 +34,15 @@ WORKSPACE_DOMAINS = ["workspaces.workspace", "workspaces.source_ref"]
 SOURCE_CACHE_DOMAINS = ["source_cache.entry"]
 MEDIA_DOMAINS = ["media.item", "media.keyword", "media.keyword_link"]
 SUPPORTED_DOMAINS = M1_DOMAINS + WORKSPACE_DOMAINS + SOURCE_CACHE_DOMAINS + MEDIA_DOMAINS
+
+
+def _encryption_policy_model_classes():
+    assert hasattr(api_sync_models, "SyncEncryptionPolicyMetadata")
+    assert hasattr(core_sync_models, "SyncEncryptionPolicyMetadata")
+    return (
+        api_sync_models.SyncEncryptionPolicyMetadata,
+        core_sync_models.SyncEncryptionPolicyMetadata,
+    )
 
 
 def _m1_envelope_payload(**overrides):
@@ -99,6 +110,117 @@ def test_dataset_enroll_request_defaults_to_m1_personal_server_trusted_dataset()
     assert request.scope_type == "personal"
     assert request.domains == M1_DOMAINS
     assert request.encryption_policy == "server_trusted_v1"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "policy": "server_trusted_v1",
+            "key_epoch": 1,
+            "attestation": {
+                "scope": "user_database_directory",
+                "covers": ["Sync_v2.db", "ChaChaNotes.db"],
+                "configured": True,
+            },
+        },
+        {
+            "policy": "passphrase_wrapped_v1",
+            "key_epoch": 2,
+            "kdf_metadata": {
+                "algorithm": "argon2id",
+                "params_hash": "sha256:kdf-params",
+            },
+            "recovery_key_record_id": "key-passphrase-1",
+        },
+        {
+            "policy": "device_wrapped_v1",
+            "key_epoch": 3,
+            "device_key_record_ids": ["key-device-1"],
+        },
+        {
+            "policy": "client_private_v1",
+            "key_epoch": 4,
+            "server_materialization": "metadata_only",
+        },
+    ],
+)
+def test_encryption_policy_metadata_accepts_m3_policy_modes(payload):
+    api_policy_cls, core_policy_cls = _encryption_policy_model_classes()
+
+    api_policy = api_policy_cls.model_validate(payload)
+    core_policy = core_policy_cls(**payload)
+
+    assert api_policy.policy == payload["policy"]
+    assert core_policy.policy == payload["policy"]
+    assert api_policy.key_epoch == payload["key_epoch"]
+    assert core_policy.key_epoch == payload["key_epoch"]
+    assert "wrapped_key_blob" not in api_policy.model_dump()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "policy": "server_trusted_v1",
+            "attestation": {"configured": False},
+        },
+        {
+            "policy": "passphrase_wrapped_v1",
+            "kdf_metadata": {"algorithm": "argon2id"},
+            "recovery_key_record_id": "key-passphrase-1",
+        },
+        {
+            "policy": "passphrase_wrapped_v1",
+            "kdf_metadata": {
+                "algorithm": "argon2id",
+                "params_hash": "sha256:kdf-params",
+            },
+        },
+        {
+            "policy": "device_wrapped_v1",
+            "device_key_record_ids": [],
+        },
+        {
+            "policy": "client_private_v1",
+            "server_materialization": "allowed",
+        },
+        {
+            "policy": "client_private_v1",
+            "key_epoch": 0,
+            "server_materialization": "metadata_only",
+        },
+    ],
+)
+def test_encryption_policy_metadata_rejects_incomplete_or_unsafe_modes(payload):
+    api_policy_cls, core_policy_cls = _encryption_policy_model_classes()
+
+    with pytest.raises(ValidationError):
+        api_policy_cls.model_validate(payload)
+    with pytest.raises(ValueError):
+        core_policy_cls(**payload)
+
+
+def test_encryption_policy_metadata_rejects_secret_key_material_fields():
+    api_policy_cls, core_policy_cls = _encryption_policy_model_classes()
+    payload = {
+        "policy": "passphrase_wrapped_v1",
+        "key_epoch": 1,
+        "kdf_metadata": {
+            "algorithm": "argon2id",
+            "params_hash": "sha256:kdf-params",
+        },
+        "recovery_key_record_id": "key-passphrase-1",
+        "wrapped_key_blob": "wrapped:secret-key-material",
+    }
+
+    with pytest.raises(ValidationError) as api_error:
+        api_policy_cls.model_validate(payload)
+    with pytest.raises(TypeError) as core_error:
+        core_policy_cls(**payload)
+
+    assert "wrapped:secret-key-material" not in str(api_error.value)
+    assert "wrapped:secret-key-material" not in str(core_error.value)
 
 
 def test_dataset_enroll_request_accepts_explicit_workspace_metadata_domains():

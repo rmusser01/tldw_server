@@ -212,9 +212,9 @@
 
 **Tests:** Model/store/service/endpoint tests for policy validation, rotation preview/commit, revoked key rejection, safe redaction, and server-front-end limitations.
 
-**Status:** Not Started
+**Status:** In Progress
 
-- [ ] **Step 1: Write failing policy model tests**
+- [x] **Step 1: Write failing policy model tests**
 
   Cover `server_trusted_v1`, `passphrase_wrapped_v1`, `device_wrapped_v1`, and
   `client_private_v1` validation.

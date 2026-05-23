@@ -20,7 +20,12 @@ SyncDomain = Literal[
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
-EncryptionPolicy = Literal["server_trusted_v1"]
+EncryptionPolicy = Literal[
+    "server_trusted_v1",
+    "passphrase_wrapped_v1",
+    "device_wrapped_v1",
+    "client_private_v1",
+]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
 ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
 SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
@@ -100,6 +105,17 @@ SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **MEDIA_SYNC_OPERATIONS,
 }
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
+SYNC_V2_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
+    "server_trusted_v1",
+    "passphrase_wrapped_v1",
+    "device_wrapped_v1",
+    "client_private_v1",
+]
+STRICT_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
+    "passphrase_wrapped_v1",
+    "device_wrapped_v1",
+    "client_private_v1",
+]
 SYNC_V2_MAX_PUSH_ENVELOPES = 100
 
 _WHOLE_OBJECT_DOMAINS = {"notes.note", "chat.conversation"}
@@ -143,6 +159,82 @@ def _normalize_object_map(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     raise ValueError("value must be an object")
+
+
+def _validate_policy_hash(value: Any, *, field_name: str) -> str:
+    text = str(value or "").strip()
+    if not text.startswith("sha256:") or text == "sha256:":
+        raise ValueError(f"{field_name} must use sha256:<digest>")
+    return text
+
+
+class SyncEncryptionPolicyMetadata(BaseModel):
+    """Public, non-secret metadata for a Sync v2 dataset encryption policy."""
+
+    policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+    key_epoch: int = Field(1, ge=1)
+    attestation: dict[str, Any] = Field(default_factory=dict)
+    kdf_metadata: dict[str, Any] = Field(default_factory=dict)
+    recovery_key_record_id: str | None = None
+    device_key_record_ids: list[str] = Field(default_factory=list)
+    server_materialization: str | None = None
+
+    @field_validator("attestation", "kdf_metadata", mode="before")
+    @classmethod
+    def _default_metadata_maps(cls, value: Any) -> dict[str, Any]:
+        return _normalize_object_map(value)
+
+    @field_validator("device_key_record_ids", mode="before")
+    @classmethod
+    def _default_device_key_records(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        return value
+
+    @field_validator("device_key_record_ids", mode="after")
+    @classmethod
+    def _normalize_device_key_records(cls, value: list[str]) -> list[str]:
+        return [record_id.strip() for record_id in value if record_id.strip()]
+
+    @model_validator(mode="after")
+    def _validate_policy_metadata(self) -> SyncEncryptionPolicyMetadata:
+        if self.policy == "server_trusted_v1":
+            _validate_server_trusted_policy_metadata(self.attestation)
+        elif self.policy == "passphrase_wrapped_v1":
+            _validate_passphrase_wrapped_policy_metadata(
+                kdf_metadata=self.kdf_metadata,
+                recovery_key_record_id=self.recovery_key_record_id,
+            )
+        elif self.policy == "device_wrapped_v1":
+            if not self.device_key_record_ids:
+                raise ValueError("device_wrapped_v1 requires at least one device key record")
+        elif self.policy == "client_private_v1" and self.server_materialization != "metadata_only":
+            raise ValueError("client_private_v1 requires metadata_only server materialization")
+        return self
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+
+def _validate_server_trusted_policy_metadata(attestation: dict[str, Any]) -> None:
+    if attestation.get("configured") is not True:
+        raise ValueError("server_trusted_v1 requires configured attestation metadata")
+    if not str(attestation.get("scope") or "").strip():
+        raise ValueError("server_trusted_v1 requires attestation scope metadata")
+    covers = attestation.get("covers")
+    if not isinstance(covers, list) or not any(str(item).strip() for item in covers):
+        raise ValueError("server_trusted_v1 requires covered storage metadata")
+
+
+def _validate_passphrase_wrapped_policy_metadata(
+    *,
+    kdf_metadata: dict[str, Any],
+    recovery_key_record_id: str | None,
+) -> None:
+    if not str(kdf_metadata.get("algorithm") or "").strip():
+        raise ValueError("passphrase_wrapped_v1 requires KDF algorithm metadata")
+    _validate_policy_hash(kdf_metadata.get("params_hash"), field_name="params_hash")
+    if not str(recovery_key_record_id or "").strip():
+        raise ValueError("passphrase_wrapped_v1 requires a recovery key record reference")
 
 
 def _with_transition_aliases(data: Any) -> Any:
@@ -1338,8 +1430,10 @@ __all__ = [
     "M1_SYNC_OPERATIONS",
     "MEDIA_SYNC_DOMAINS",
     "MEDIA_SYNC_OPERATIONS",
+    "STRICT_ENCRYPTION_POLICIES",
     "SOURCE_CACHE_SYNC_DOMAINS",
     "SOURCE_CACHE_SYNC_OPERATIONS",
+    "SYNC_V2_ENCRYPTION_POLICIES",
     "SYNC_V2_SUPPORTED_DOMAINS",
     "SYNC_V2_SUPPORTED_OPERATIONS",
     "SYNC_V2_MAX_PUSH_ENVELOPES",
@@ -1365,6 +1459,7 @@ __all__ = [
     "SyncDeviceRegisterRequest",
     "SyncDeviceRegisterResponse",
     "SyncDomain",
+    "SyncEncryptionPolicyMetadata",
     "SyncKeyRecoveryBundleListResponse",
     "SyncKeyRecoveryBundleRequest",
     "SyncKeyRecoveryBundleRecord",
