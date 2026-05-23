@@ -34,6 +34,7 @@ import {
   mergePendingPayloadIntoSession,
   normalizeStringArrayValue,
   SAVE_DEBOUNCE_MS,
+  shouldClearPendingSessionSave,
   type PendingSave,
   type SessionUsageMap,
   type WritingSessionPayload,
@@ -746,8 +747,13 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         selectedThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
       } else {
         scheduleSave(activeSessionDetail.id, nextPayload)
@@ -795,8 +801,13 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         selectedThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }
@@ -845,8 +856,13 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         selectedThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }
@@ -887,8 +903,13 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         nextThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }
@@ -929,8 +950,13 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         selectedThemeName,
         nextChatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }

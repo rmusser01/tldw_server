@@ -1203,6 +1203,18 @@ export const mergePendingPayloadIntoSession = (
     options
   )
 
+export const shouldClearPendingSessionSave = (
+  savedPayload: Record<string, unknown> | null | undefined,
+  pendingPayload: Record<string, unknown> | null | undefined,
+  hasCurrentFieldChanges: boolean
+): boolean => {
+  if (hasCurrentFieldChanges) return false
+  if (!isRecord(pendingPayload)) return true
+  return getRevisionPayloadSignature(savedPayload) === getRevisionPayloadSignature(
+    pendingPayload
+  )
+}
+
 export const areSettingsEqual = (
   left: WritingSessionSettings,
   right: WritingSessionSettings
