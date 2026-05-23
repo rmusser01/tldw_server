@@ -17,6 +17,8 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-05-23-chatbook-sync-v2-roadmap-prd-design.md
 - Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md
+- Docs/Design/Sync_V2_M1_Implementation_Decisions.md
+- Docs/API/Sync_V2_M1.md
 - backlog/tasks/task-490 - Plan-Sync-v2-completion-roadmap-for-Chatbook-clients.md
 - backlog/tasks/task-490.1 - Sync-v2-M1-Lock-implementation-decisions-and-API-docs.md
 - backlog/tasks/task-490.2 - Sync-v2-M1-Align-envelope-models-and-storage.md
@@ -90,6 +92,14 @@ Verification before first commit:
 - `git diff --check` passed.
 - Placeholder/stale contradiction scan over the spec passed with no matches.
 - Bandit not run because this change is documentation/Backlog only and touches no production code.
+
+M1 Task 1 completion:
+
+- Locked the implementation decisions in `Docs/Design/Sync_V2_M1_Implementation_Decisions.md`.
+- Locked the M1 API contract in `Docs/API/Sync_V2_M1.md`.
+- `git diff --check` passed for the docs task.
+- `rg -n "T[B]D|T[O]DO|FIX[M]E|client_private_v1.*M1|workspaces|source_cache|media" Docs/Design/Sync_V2_M1_Implementation_Decisions.md Docs/API/Sync_V2_M1.md` returned no matches; exit 1 is expected for no `rg` matches.
+- Bandit not run because Task 1 touched documentation/Backlog records only and no production code.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

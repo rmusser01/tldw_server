@@ -278,10 +278,9 @@ envelopes or resolution records rather than mutating historical envelopes.
 
 Supported M1 actions:
 
-- keep local
-- use server
-- duplicate/rename where the domain supports it
-- skip
+- `overwrite`
+- `duplicate_rename`
+- `skip`
 
 ## Envelope Contract
 

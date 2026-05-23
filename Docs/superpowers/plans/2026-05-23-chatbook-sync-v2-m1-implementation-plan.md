@@ -633,8 +633,8 @@ Assert:
 - accepted push response includes server cursor and object revision
 - projection failures return explicit apply errors without losing accepted envelopes
 - pull returns accepted envelopes in deterministic cursor order with domain filters, pagination, `has_more`, next cursor, echo suppression by default, and opt-in same-device echoes for repair/debug
-- conflicts use M1 actions: `keep_local`, `use_server`, `duplicate_rename`, `skip`
-- conflict resolution persists a durable resolution record and, for `use_server` or `duplicate_rename`, creates a resolution envelope or accepted duplicate envelope instead of mutating historical envelopes
+- conflicts use M1 actions: `overwrite`, `duplicate_rename`, `skip`
+- conflict resolution persists a durable resolution record and, for `overwrite` or `duplicate_rename`, creates a resolution envelope or accepted duplicate envelope instead of mutating historical envelopes
 - cross-user access is blocked for datasets, pulls, pushes, conflicts, conflict resolution, and envelope ranges
 - legacy `/send` and `/get` are removed or return a clear gone/replaced response
 - attachment/blob upload endpoint returns `sync_blob_transfer_not_supported` in M1
@@ -655,8 +655,7 @@ If the same DB transaction cannot cover both Sync DB and ChaChaNotes DB, accepte
 
 Implement M1 actions:
 
-- `keep_local`: record the user decision and leave the server projection unchanged; optionally mark the client conflict as resolved for that device/profile.
-- `use_server`: record the decision and return the server object/envelope range the client should apply locally.
+- `overwrite`: record the user decision and overwrite the conflicting local object with the selected server object, or accept a supplied resolution envelope for the same object where the domain supports it.
 - `duplicate_rename`: create a new accepted envelope/object with a distinct object id or title/name suffix where the domain supports it.
 - `skip`: dismiss the conflict without applying either side.
 
