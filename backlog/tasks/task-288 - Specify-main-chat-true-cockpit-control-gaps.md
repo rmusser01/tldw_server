@@ -18,10 +18,9 @@ references:
   - 'https://github.com/rmusser01/tldw_server/pull/1582'
 documentation:
   - Docs/superpowers/specs/2026-05-12-main-chat-cockpit-controls-gap-design.md
-  - >-
-    Docs/superpowers/specs/2026-05-13-main-chat-cockpit-rail-completion-design.md
-  - >-
-    Docs/superpowers/specs/2026-05-16-main-chat-cockpit-merge-certification.md
+  - Docs/superpowers/specs/2026-05-13-main-chat-cockpit-rail-completion-design.md
+  - Docs/superpowers/specs/2026-05-15-main-chat-cockpit-maturity-roadmap-design.md
+  - Docs/superpowers/specs/2026-05-16-main-chat-cockpit-merge-certification.md
 priority: high
 ---
 
