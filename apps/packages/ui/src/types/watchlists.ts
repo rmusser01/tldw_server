@@ -239,7 +239,7 @@ export interface WatchlistOutputPreset {
 }
 
 export interface WatchlistOutputPresetApplyRequest {
-  base_output_prefs?: JobOutputPrefs | null
+  base_output_prefs?: JobOutputPrefs
 }
 
 export interface WatchlistOutputPresetApplyResponse {

@@ -861,7 +861,7 @@ class WatchlistOutputPresetsList(BaseModel):
 
 
 class WatchlistOutputPresetApplyRequest(BaseModel):
-    base_output_prefs: dict[str, Any] | None = Field(default_factory=dict)
+    base_output_prefs: dict[str, Any] = Field(default_factory=dict)
 
 
 class WatchlistOutputPresetApplyResponse(BaseModel):

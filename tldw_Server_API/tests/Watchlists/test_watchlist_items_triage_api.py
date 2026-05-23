@@ -444,6 +444,26 @@ def test_output_presets_endpoint_crud_and_apply(client_with_user):
     assert client.get("/api/v1/watchlists/job-output-presets").json()["items"] == []
 
 
+def test_output_preset_apply_rejects_null_base_output_prefs(client_with_user):
+    client = client_with_user
+
+    created = client.post(
+        "/api/v1/watchlists/job-output-presets",
+        json={
+            "name": "Null apply guard",
+            "output_prefs": {"generate_audio": True},
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    response = client.post(
+        f"/api/v1/watchlists/job-output-presets/{created.json()['id']}/apply",
+        json={"base_output_prefs": None},
+    )
+
+    assert response.status_code == 422
+
+
 def test_output_preset_projection_rejects_corrupt_prefs():
     row = SimpleNamespace(
         id=1,
