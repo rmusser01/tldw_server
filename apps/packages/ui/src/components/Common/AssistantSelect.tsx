@@ -136,7 +136,7 @@ export const AssistantSelect: React.FC<Props> = ({
   })
   const [open, setOpen] = React.useState(false)
   const [searchText, setSearchText] = React.useState("")
-  const [selectionMode, setSelectionMode] = React.useState<"tracked" | "overlay">(
+  const selectionModeIntentRef = React.useRef<"tracked" | "overlay">(
     selectionModePreference
   )
   const [activeTab, setActiveTab] = React.useState<"character" | "persona">(
@@ -196,6 +196,10 @@ export const AssistantSelect: React.FC<Props> = ({
   }, [selectedAssistant?.kind])
 
   React.useEffect(() => {
+    selectionModeIntentRef.current = selectionModePreference
+  }, [selectionModePreference])
+
+  React.useEffect(() => {
     if (typeof window === "undefined") return
 
     const handleOpen = (event: Event) => {
@@ -209,9 +213,8 @@ export const AssistantSelect: React.FC<Props> = ({
         detail.returnFocusSelector.trim().length > 0
           ? detail.returnFocusSelector.trim()
           : null
-      setSelectionMode(
+      selectionModeIntentRef.current =
         detail?.applyAs === "overlay" ? "overlay" : selectionModePreference
-      )
       setSearchText("")
       setOpen(true)
     }
@@ -438,31 +441,31 @@ export const AssistantSelect: React.FC<Props> = ({
 
   const handleSelect = React.useCallback(
     async (entry: AssistantSelection) => {
-      const activeSelectionMode = selectionMode
+      const nextMode = selectionModeIntentRef.current
       const isTrackedMode =
         effectiveAssistantState.mode === "tracked_character" ||
         effectiveAssistantState.mode === "tracked_persona"
-      if (activeSelectionMode === "overlay" && isTrackedMode) {
+      if (nextMode === "overlay" && isTrackedMode) {
         setOpen(false)
         setSearchText("")
-        setSelectionMode(selectionModePreference)
+        selectionModeIntentRef.current = selectionModePreference
         restoreReturnFocus()
         return
       }
 
       setOpen(false)
       setSearchText("")
-      setSelectionMode(selectionModePreference)
+      selectionModeIntentRef.current = selectionModePreference
       restoreReturnFocus()
       const nextEntry: AssistantSelection = {
         ...entry,
         metadata: {
           ...(entry.metadata ?? {}),
-          selectionMode: activeSelectionMode
+          selectionMode: nextMode
         }
       }
       await setSelectedAssistant(nextEntry)
-      if (activeSelectionMode === "overlay") {
+      if (nextMode === "overlay") {
         let overlaySnapshot = buildAssistantOverlaySnapshotFromSelection(nextEntry)
         try {
           overlaySnapshot = await resolveAssistantOverlaySnapshot(nextEntry)
@@ -488,7 +491,6 @@ export const AssistantSelect: React.FC<Props> = ({
     [
       effectiveAssistantState.mode,
       restoreReturnFocus,
-      selectionMode,
       selectionModePreference,
       setSelectedAssistant,
       updateSettings
@@ -498,11 +500,11 @@ export const AssistantSelect: React.FC<Props> = ({
   const handleOpenChange = React.useCallback((nextOpen: boolean) => {
     setOpen(nextOpen)
     if (nextOpen) {
-      setSelectionMode(selectionModePreference)
+      selectionModeIntentRef.current = selectionModePreference
     }
     if (!nextOpen) {
       setSearchText("")
-      setSelectionMode(selectionModePreference)
+      selectionModeIntentRef.current = selectionModePreference
       restoreReturnFocus()
     }
   }, [restoreReturnFocus, selectionModePreference])
@@ -510,6 +512,7 @@ export const AssistantSelect: React.FC<Props> = ({
   const openActorSettings = React.useCallback(() => {
     setOpen(false)
     setSearchText("")
+    selectionModeIntentRef.current = selectionModePreference
     restoreReturnFocus()
     try {
       if (typeof window !== "undefined") {
@@ -518,7 +521,7 @@ export const AssistantSelect: React.FC<Props> = ({
     } catch {
       // no-op
     }
-  }, [restoreReturnFocus])
+  }, [restoreReturnFocus, selectionModePreference])
 
   const buttonLabel =
     labelOverride ||

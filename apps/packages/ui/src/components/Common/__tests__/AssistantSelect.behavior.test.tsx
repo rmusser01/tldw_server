@@ -146,14 +146,24 @@ const renderAssistantSelect = (
     }
   })
 
-  render(
+  const renderTree = (
+    nextProps: React.ComponentProps<typeof AssistantSelect> = props
+  ) => (
     <QueryClientProvider client={queryClient}>
       <button id="assistant-rail-trigger" type="button">
         Runtime rail trigger
       </button>
-      <AssistantSelect variant="dropdown" {...props} />
+      <AssistantSelect variant="dropdown" {...nextProps} />
     </QueryClientProvider>
   )
+
+  const result = render(renderTree())
+  return {
+    ...result,
+    rerenderAssistantSelect: (
+      nextProps: React.ComponentProps<typeof AssistantSelect>
+    ) => result.rerender(renderTree(nextProps))
+  }
 }
 
 describe("AssistantSelect behavior", () => {
@@ -712,6 +722,42 @@ describe("AssistantSelect behavior", () => {
         })
       )
     })
+  })
+
+  it("uses the latest prop-driven selection mode when choosing after rerender", async () => {
+    const user = userEvent.setup()
+    const { rerenderAssistantSelect } = renderAssistantSelect({
+      selectionModePreference: "overlay",
+      labelOverride: "Apply assistant"
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Apply assistant" })
+    )
+    expect(await screen.findByRole("button", { name: "Alpha" })).toBeInTheDocument()
+
+    rerenderAssistantSelect({
+      selectionModePreference: "tracked",
+      labelOverride: "Apply assistant"
+    })
+    await user.click(await screen.findByRole("tab", { name: "Personas" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Guide Persona" })
+    )
+
+    await waitFor(() => {
+      expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "persona",
+          id: "persona-1",
+          name: "Guide Persona",
+          metadata: expect.objectContaining({
+            selectionMode: "tracked"
+          })
+        })
+      )
+    })
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
   })
 
   it("uses the prop-driven overlay selection path and custom label without requiring an open event", async () => {
