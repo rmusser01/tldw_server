@@ -1,7 +1,7 @@
 # Research Workspace Hard Replacement Roadmap Design
 
 Date: 2026-05-23
-Status: Draft for review
+Status: Reviewer-approved; user-requested clarifications applied
 Backlog: TASK-463
 
 ## Summary
@@ -28,6 +28,12 @@ The roadmap order is:
 2. Phase D: trust and transparency.
 3. Phase B: experienced power-user workflow.
 4. Phase C: browser extension capture loop.
+
+This is an umbrella design, not a single implementation batch. Implementation
+planning should produce separate phase plans, and Phase A should be split into
+reviewable work packages for route replacement, server-backed workspace
+creation/loading, legacy migration, source ingestion/status, first-run UX, and
+workspace capability projection.
 
 ## Context And Verified Current State
 
@@ -322,6 +328,20 @@ disabled by deployment configuration, or has not yet reported a status after a
 bounded refresh attempt. It must not be used as the default value for an
 unimplemented capability provider.
 
+Unknown security or governance state must fail closed for actions that depend
+on that state. If MCP, ACP, sandbox, sharing, path-scope, or access policy is
+`unknown`, affected actions such as tool execution, agent start, sandboxed
+execution, governed source mutation, sharing changes, or restricted grounded
+chat must be blocked or marked `needs_approval` with a reason code until the
+authoritative policy is resolved. Actions that do not depend on the unknown
+provider may remain available.
+
+Implementation planning must inventory the existing sharing, MCP Hub, ACP,
+sandbox, provider, and workspace services before finalizing this endpoint. The
+plan should map every Phase A capability field to an existing authoritative
+source or a specific new projection responsibility, including exactly when
+`unknown` may be emitted and how refresh/retry is bounded.
+
 Phase D expands the same contract with drill-down data: detailed policy reasons,
 tool lists, workspace sets, path scopes, active ACP sessions, approval history,
 sandbox sessions, migration receipt details, and provider/model diagnostics.
@@ -440,6 +460,14 @@ The migration endpoint must be idempotent. It accepts:
 - idempotency key;
 - manifest hash.
 
+The manifest must declare object counts, byte sizes, and hashes for every
+payload-bearing object or chunk that can affect deletion eligibility. Chunk
+upload and finalize must validate ordering, completeness, duplicate/retry
+behavior, byte sizes, and hash matches. Finalize must reject any migration with
+missing, mismatched, unexpected, or unverified declared payloads. Read-back
+verification must compare persisted server state against the manifest and
+receipt before `client_delete_eligible` can be emitted.
+
 Migration states:
 
 - `received`
@@ -480,6 +508,21 @@ The receipt and recovery manifest should include:
 - deletion eligibility;
 - deletion acknowledgement timestamp when received;
 - bounded diagnostic payload metadata when safe and useful.
+
+Deletion eligibility must be computed across every migrated object class, not
+only source media. The receipt needs explicit per-object-class outcomes for
+sources, folders, tags, notes, chats, artifacts, large artifact payloads,
+outputs, metadata, IndexedDB records, and UI-only legacy records. A class is
+eligible for client deletion only when every content item is persisted,
+migrated losslessly to a supported fallback representation, preserved in a
+recovery artifact/export, or explicitly acknowledged by the user for discard at
+the per-object or per-class level. Unsupported or non-migratable content blocks
+local deletion by default. Non-content/UI-only records may be retained, renamed,
+or deleted only according to the legacy store inventory mapping.
+
+Any user-acknowledged discard must be auditable in the migration receipt,
+including object or class identity, acknowledgement timestamp, and acknowledging
+user id.
 
 After local content deletion, the client should keep only a non-content
 tombstone:
@@ -696,11 +739,14 @@ GET  /api/v1/workspaces/migrations/{migration_id}
 POST /api/v1/workspaces/migrations/{migration_id}/client-delete-ack
 ```
 
-`GET /api/v1/workspaces` should satisfy the Phase A recent/selectable workspace
-picker contract unless implementation planning finds an existing pagination or
-sorting constraint that requires a dedicated endpoint. The required picker data
-is workspace id, name, last updated or last accessed timestamp, private/shared/
-cloned state, and enough access metadata to disable invalid destinations.
+Phase A must define a concrete recent/selectable workspace picker contract for
+the WebUI and browser extension. `GET /api/v1/workspaces` should satisfy that
+contract unless implementation planning finds an existing pagination or sorting
+constraint that requires a dedicated endpoint. The required picker data is
+workspace id, name, workspace kind, last updated or last accessed timestamp,
+current/recent marker where available, private/shared/cloned state, source
+count, effective access level, and allowed capture/add-source actions with
+reason codes for disabled destinations.
 
 Sharing remains under `/api/v1/sharing`.
 
@@ -780,7 +826,7 @@ navigation, tutorials, or current documentation.
 
 ## Product Metrics
 
-Recommended product and quality metrics:
+Recommended local product and quality metrics:
 
 - time to first queryable source;
 - source ingestion success rate;
@@ -795,6 +841,14 @@ Recommended product and quality metrics:
 - average time from capture to queryable source;
 - frequency of blocked actions by access/governance reason.
 
+These metrics must preserve the project's local-first and self-hosted privacy
+posture. They are local-only by default and should be stored/viewed locally for
+product-health, diagnostic, and admin purposes. Any export must be explicit
+opt-in configuration, disabled by default, documented, revocable, and
+content-free by default. Exported metrics must exclude source, chat, note,
+artifact, and migrated payload content unless the user separately and
+explicitly configures content-bearing export.
+
 ## Rollout Plan
 
 This is a hard replacement, but implementation should still be staged
@@ -808,6 +862,12 @@ internally:
 5. Add workspace capability projection and trust panel.
 6. Expand power-user source management and evidence workflows.
 7. Connect browser extension capture into canonical workspace identity.
+
+Implementation planning should not collapse these into one large pull request.
+At minimum, create separate implementation plans or Backlog child tasks for
+Phase A hard route replacement, migration safety, source status/jobs,
+first-run/source-add UX, capability projection, Phase D trust surfaces, Phase B
+power-user workflows, and Phase C browser-extension capture.
 
 ## Open Questions For Implementation Planning
 
@@ -833,5 +893,14 @@ internally:
 - The design includes Jobs-backed ingestion/indexing status.
 - The design includes a workspace capability projection.
 - The design defines the Phase A minimum capability contract.
+- The design requires an implementation mapping gate for capability fields.
+- The design requires unknown security/governance state to fail closed for
+  dependent actions.
+- The design requires all-payload-class migration outcomes before local
+  deletion eligibility.
+- The design requires chunk/object integrity validation before migration
+  finalization and local deletion eligibility.
+- The design defines a concrete recent/selectable workspace picker contract.
+- The design keeps product metrics local by default unless explicitly exported.
 - The design defines the legacy store inventory and schema-mapping gate.
 - The design includes testing, route inventory, and product metric gates.
