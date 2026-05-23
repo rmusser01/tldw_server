@@ -411,8 +411,12 @@ const isWritingRevisionTarget = (
   isOneOf(value.mode, WRITING_REVISION_TARGET_MODES) &&
   typeof value.start === "number" &&
   Number.isFinite(value.start) &&
+  Number.isInteger(value.start) &&
+  value.start >= 0 &&
   typeof value.end === "number" &&
   Number.isFinite(value.end) &&
+  Number.isInteger(value.end) &&
+  value.end >= value.start &&
   typeof value.beforeText === "string" &&
   isWritingRevisionAnchor(value.anchor) &&
   typeof value.label === "string" &&
@@ -1198,22 +1202,6 @@ export const mergePendingPayloadIntoSession = (
     chatMode,
     options
   )
-
-export const shouldClearPendingSessionSave = (
-  savedPayload: Record<string, unknown> | null | undefined,
-  pendingPayload: Record<string, unknown> | null | undefined,
-  hasCurrentFieldChanges: boolean
-): boolean => {
-  if (hasCurrentFieldChanges) return false
-  if (!isRecord(pendingPayload)) return true
-  return (
-    getRevisionPayloadSignature(savedPayload) === getRevisionPayloadSignature(
-      pendingPayload
-    ) &&
-    getRevisionPresetIdFromPayload(savedPayload) ===
-      getRevisionPresetIdFromPayload(pendingPayload)
-  )
-}
 
 export const areSettingsEqual = (
   left: WritingSessionSettings,
