@@ -50,6 +50,7 @@ from .models import (
 )
 from .materializers import MaterializationResult, SyncMaterializer
 from .profile import SyncProfileStatus, SyncV2ProfileManager
+from .replay import SyncReplayRepairResult, SyncReplayRepairer
 from .restore import (
     OBJECT_RESTORE_DOMAINS,
     WHOLE_OBJECT_RESTORE_DOMAINS,
@@ -975,6 +976,48 @@ class SyncV2Service:
                 "dataset_ids": list(dataset_ids or []),
                 "domains": list(domains or []),
             },
+        )
+
+    def repair(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        domains: Sequence[SyncDomain] | None = None,
+        since_cursor: int = 0,
+        failed_only: bool = False,
+        limit: int | None = None,
+    ) -> SyncReplayRepairResult:
+        """Replay accepted envelopes to repair server-side materialized projections."""
+
+        if since_cursor < 0:
+            raise SyncStoreError("Invalid sync cursor: repair since_cursor must be non-negative")
+        if limit is not None and limit < 1:
+            raise SyncStoreError("Sync repair limit must be greater than zero")
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        selected_domains = self._selected_domains(dataset, domains)
+
+        def _repair_materialize(envelope: SyncEnvelope) -> MaterializationResult:
+            materialization = self._materialize_envelope(envelope)
+            if materialization.status == "conflict":
+                snapshot = self._envelope_snapshot(envelope)
+                self._store_materialization_conflict(dataset, snapshot, materialization)
+            return materialization
+
+        return SyncReplayRepairer(
+            store=self.store,
+            materializers=self.materializers,
+            materialize=_repair_materialize,
+            snapshot=self._envelope_snapshot,
+            scan_limit=self.settings.restore_manifest_scan_limit,
+        ).run(
+            dataset_id=dataset.dataset_id,
+            domains=selected_domains,
+            since_cursor=since_cursor,
+            failed_only=failed_only,
+            limit=limit,
         )
 
     def store_attachment(

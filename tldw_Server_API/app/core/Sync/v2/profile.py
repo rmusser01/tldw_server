@@ -63,6 +63,7 @@ class SyncProfileDomainStatus:
     unresolved_conflicts: int = 0
     last_apply_status: str | None = None
     last_apply_result: dict[str, Any] = field(default_factory=dict)
+    repair_status: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,6 +321,7 @@ class SyncV2ProfileManager:
             unresolved_conflicts=unresolved_conflicts,
             last_apply_status=last.apply_status if last is not None else None,
             last_apply_result=last_apply_result,
+            repair_status=_repair_status(envelopes, failed_apply_count),
         )
 
     def _all_domain_envelopes(
@@ -403,6 +405,26 @@ def _last_apply_result(envelope: SyncEnvelope | None) -> dict[str, Any]:
         result["error_message"] = envelope.apply_error_message
     if envelope.applied_at is not None:
         result["applied_at"] = envelope.applied_at
+    return result
+
+
+def _repair_status(
+    envelopes: Sequence[SyncEnvelope],
+    failed_apply_count: int,
+) -> dict[str, Any]:
+    failed_envelopes = [envelope for envelope in envelopes if envelope.apply_status == "failed"]
+    last_failed = _last_envelope(failed_envelopes)
+    result: dict[str, Any] = {
+        "status": "repair_needed" if failed_apply_count else "healthy",
+        "failed_apply_count": failed_apply_count,
+    }
+    if last_failed is not None:
+        result["last_failed_cursor"] = last_failed.server_cursor
+        result["last_failed_client_envelope_id"] = last_failed.client_envelope_id
+        if last_failed.apply_error_code is not None:
+            result["last_error_code"] = last_failed.apply_error_code
+        if last_failed.apply_error_message is not None:
+            result["last_error_message"] = last_failed.apply_error_message
     return result
 
 

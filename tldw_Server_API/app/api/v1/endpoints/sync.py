@@ -60,6 +60,8 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncPushRejectedEnvelope,
     SyncPushRequest,
     SyncPushResponse,
+    SyncRepairRequest,
+    SyncRepairResponse,
     SyncRestoreManifestResponse,
     SyncRestorePreviewRequest,
     SyncRestorePreviewResponse,
@@ -615,6 +617,35 @@ def preview_sync_v2_restore(
             domains=request.domains,
         ) from exc
     return SyncRestorePreviewResponse(**asdict(preview))
+
+
+@router.post(
+    "/repair",
+    response_model=SyncRepairResponse,
+    summary="Replay accepted Sync v2 envelopes into server projections",
+)
+def repair_sync_v2_projections(
+    request: SyncRepairRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        result = service.repair(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            domains=request.domains,
+            since_cursor=request.since_cursor,
+            failed_only=request.failed_only,
+            limit=request.limit,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            domains=request.domains,
+        ) from exc
+    return SyncRepairResponse(**asdict(result))
 
 
 @router.post(

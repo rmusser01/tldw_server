@@ -6,7 +6,6 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 SyncDomain = Literal["notes.note", "chat.conversation", "chat.message", "attachment.ref"]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -219,6 +218,7 @@ class SyncProfileDomainStatusResponse(BaseModel):
     unresolved_conflicts: int = Field(0, ge=0)
     last_apply_status: str | None = None
     last_apply_result: dict[str, Any] = Field(default_factory=dict)
+    repair_status: dict[str, Any] = Field(default_factory=dict)
 
 
 class SyncProfileResponse(BaseModel):
@@ -477,7 +477,7 @@ class SyncV2Envelope(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_m1_contract(self) -> "SyncV2Envelope":
+    def _validate_m1_contract(self) -> SyncV2Envelope:
         allowed_operations = M1_SYNC_OPERATIONS[self.domain]
         if self.operation not in allowed_operations:
             raise ValueError(f"{self.operation} is not supported for {self.domain}")
@@ -636,6 +636,58 @@ class SyncPullResponse(BaseModel):
     has_more: bool = False
 
 
+class SyncRepairRequest(BaseModel):
+    """Request to replay accepted envelopes into server-side projections."""
+
+    dataset_id: str = Field(..., min_length=1)
+    domains: list[SyncDomain] = Field(default_factory=list)
+    since_cursor: int = Field(0, ge=0)
+    failed_only: bool = False
+    limit: int | None = Field(None, ge=1)
+
+
+class SyncRepairEnvelopeError(BaseModel):
+    """One failed envelope from a replay/repair operation."""
+
+    server_cursor: int | None = Field(None, ge=0)
+    client_envelope_id: str
+    domain: SyncDomain
+    object_id: str
+    error_code: str | None = None
+    message: str | None = None
+
+
+class SyncRepairDomainResult(BaseModel):
+    """Per-domain replay/repair counters."""
+
+    domain: SyncDomain
+    scanned_count: int = Field(0, ge=0)
+    attempted_count: int = Field(0, ge=0)
+    applied_count: int = Field(0, ge=0)
+    failed_count: int = Field(0, ge=0)
+    conflict_count: int = Field(0, ge=0)
+    skipped_count: int = Field(0, ge=0)
+    last_cursor: int = Field(0, ge=0)
+    errors: list[SyncRepairEnvelopeError] = Field(default_factory=list)
+
+
+class SyncRepairResponse(BaseModel):
+    """Replay/repair result for a dataset projection repair run."""
+
+    dataset_id: str
+    domains: list[SyncDomain] = Field(default_factory=list)
+    from_cursor: int = Field(0, ge=0)
+    to_cursor: int = Field(0, ge=0)
+    scanned_count: int = Field(0, ge=0)
+    attempted_count: int = Field(0, ge=0)
+    applied_count: int = Field(0, ge=0)
+    failed_count: int = Field(0, ge=0)
+    conflict_count: int = Field(0, ge=0)
+    skipped_count: int = Field(0, ge=0)
+    domain_results: list[SyncRepairDomainResult] = Field(default_factory=list)
+    repair_status: dict[str, Any] = Field(default_factory=dict)
+
+
 class SyncAttachmentUploadRequest(BaseModel):
     """Request metadata for uploading a future encrypted sync attachment."""
 
@@ -710,7 +762,7 @@ class SyncConflictResolution(BaseModel):
     resolution_envelope: SyncV2Envelope | None = None
 
     @model_validator(mode="after")
-    def _validate_resolution_envelope(self) -> "SyncConflictResolution":
+    def _validate_resolution_envelope(self) -> SyncConflictResolution:
         if self.action == "duplicate_rename" and self.resolution_envelope is None:
             raise ValueError("duplicate_rename requires a resolution_envelope")
         if self.action == "skip" and self.resolution_envelope is not None:
@@ -847,6 +899,10 @@ __all__ = [
     "SyncPushRejectedEnvelope",
     "SyncPushRequest",
     "SyncPushResponse",
+    "SyncRepairDomainResult",
+    "SyncRepairEnvelopeError",
+    "SyncRepairRequest",
+    "SyncRepairResponse",
     "SyncRestoreManifestDevice",
     "SyncRestoreManifestDataset",
     "SyncRestoreManifestResponse",
