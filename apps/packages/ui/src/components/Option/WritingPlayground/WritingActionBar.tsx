@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Alert, Button, Checkbox, Input, Segmented, Space, Tag, Typography } from "antd"
+import {
+  Button,
+  Checkbox,
+  Input,
+  Segmented,
+  Space,
+  Tag,
+  Typography,
+  type InputRef
+} from "antd"
+import type { TextAreaRef } from "antd/es/input/TextArea"
 import {
   ArrowRight,
   FileText,
@@ -9,6 +19,7 @@ import {
   RefreshCw,
   SlidersHorizontal
 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { WRITING_REVISION_PRESETS, getWritingRevisionPreset } from "./writing-revision-presets"
 import type {
   WritingRevisionAction,
@@ -16,6 +27,8 @@ import type {
   WritingRevisionPresetId,
   WritingRevisionTarget
 } from "./writing-revision-types"
+import { READY_STATE_LABEL } from "@/design-system"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 
 const { Text } = Typography
 
@@ -95,6 +108,7 @@ export function WritingActionBar({
   onPresetChange,
   onRequest
 }: WritingActionBarProps) {
+  const { t } = useTranslation(["option"])
   const [internalPresetId, setInternalPresetId] =
     useState<WritingRevisionPresetId>("polish_prose")
   const [activeInputAction, setActiveInputAction] =
@@ -103,10 +117,8 @@ export function WritingActionBar({
   const [toneDirection, setToneDirection] = useState("")
   const [confirmed, setConfirmed] = useState(false)
   const [confirmationWarning, setConfirmationWarning] = useState(false)
-  const customInputRef = useRef<{
-    resizableTextArea?: { textArea?: HTMLTextAreaElement | null }
-  } | null>(null)
-  const toneInputRef = useRef<{ input?: HTMLInputElement | null } | null>(null)
+  const customInputRef = useRef<TextAreaRef | null>(null)
+  const toneInputRef = useRef<InputRef | null>(null)
 
   const activePresetId = selectedPresetId ?? internalPresetId
   const selectedPreset = useMemo(
@@ -121,6 +133,14 @@ export function WritingActionBar({
   }, [targetIdentity])
 
   const disabled = !generationAvailable || isGenerating
+  const generationUnavailableLabel = t(
+    "option:writingPlayground.generationUnavailableShort",
+    "Generation unavailable"
+  )
+  const broadTargetConfirmationLabel = t(
+    "option:writingPlayground.revisionConfirmBroadTarget",
+    "Confirm before applying a broad text-changing request."
+  )
 
   const sendRequest = (action: WritingRevisionAction, explicitInstruction?: string) => {
     const operation = getOperationForAction(action)
@@ -174,7 +194,7 @@ export function WritingActionBar({
     >
       <div className="flex flex-wrap items-center gap-2">
         <Tag color={generationAvailable ? "green" : "default"}>
-          {generationAvailable ? "Ready" : "Generation unavailable"}
+          {generationAvailable ? READY_STATE_LABEL : generationUnavailableLabel}
         </Tag>
         <Text type="secondary" className="text-xs">
           Target:
@@ -211,19 +231,15 @@ export function WritingActionBar({
             Confirm whole-document text change
           </Checkbox>
           <Text type="secondary" className="text-xs">
-            {target.confirmationReason ??
-              "Confirm before sending a broad text-changing request."}
+            {target.confirmationReason ?? broadTargetConfirmationLabel}
           </Text>
         </div>
       ) : null}
 
       {confirmationWarning ? (
-        <Alert
-          type="warning"
-          title={
-            target.confirmationReason ??
-            "Confirm before sending a broad text-changing request."
-          }
+        <DesignSystemAlert
+          variant="warning"
+          title={target.confirmationReason ?? broadTargetConfirmationLabel}
         />
       ) : null}
 

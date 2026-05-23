@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 type QueryResult = {
@@ -244,6 +244,60 @@ const seedActiveSession = () => {
   })
 }
 
+const seedActiveSessionDetail = (
+  payloadOverrides: Record<string, unknown> = {},
+) => {
+  seedActiveSession()
+  setQueryResult(["writing-session", "session-auto"], {
+    data: {
+      id: "session-auto",
+      name: "Auto Session",
+      payload: {
+        prompt: "Seed prompt",
+        settings: {},
+        template_name: null,
+        theme_name: null,
+        chat_mode: false,
+        ...payloadOverrides,
+      },
+      schema_version: 1,
+      version_parent_id: null,
+      created_at: "2026-03-16T12:00:00Z",
+      last_modified: "2026-03-16T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 1,
+    },
+  })
+}
+
+const seedRequestedCapabilities = (
+  requestedOverrides: Record<string, unknown>,
+) => {
+  mockState.storageValues.set("selectedModel", "mock-model")
+  setQueryResult(["writing-capabilities", "requested", "mock-model", ""], {
+    data: {
+      ...DEFAULT_WRITING_CAPABILITIES,
+      requested: {
+        ...DEFAULT_WRITING_CAPABILITIES.requested,
+        ...requestedOverrides,
+        features: {
+          ...DEFAULT_WRITING_CAPABILITIES.requested.features,
+          ...((requestedOverrides.features as Record<string, unknown> | undefined) ?? {}),
+        },
+        extra_body_compat: {
+          ...DEFAULT_WRITING_CAPABILITIES.requested.extra_body_compat,
+          ...((requestedOverrides.extra_body_compat as Record<string, unknown> | undefined) ?? {}),
+        },
+      },
+    },
+  })
+}
+
+const openSettingsPanel = () => {
+  fireEvent.click(screen.getByLabelText("Toggle settings"))
+}
+
 describe("WritingPlayground shell product-state alerts", () => {
   beforeEach(() => {
     mockState.storageValues.clear()
@@ -310,5 +364,61 @@ describe("WritingPlayground shell product-state alerts", () => {
 
     const editorError = screen.getByText("Unable to load this session.")
     expect(editorError.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+  })
+
+  it("renders the logprobs unavailable advanced-settings state through the design-system Alert", () => {
+    seedActiveSessionDetail()
+    seedRequestedCapabilities({
+      features: { logprobs: false },
+    })
+
+    render(<WritingPlayground />)
+    openSettingsPanel()
+
+    const logprobsAlert = screen.getByText(
+      "Logprobs are not advertised for this provider/model.",
+    )
+    expect(logprobsAlert.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+  })
+
+  it("renders the unsupported advanced sampler state through the design-system Alert", () => {
+    seedActiveSessionDetail()
+    seedRequestedCapabilities({
+      extra_body_compat: {
+        supported: false,
+        known_params: ["logit_bias"],
+        effective_reason: "Advanced sampler controls are disabled for this runtime.",
+      },
+    })
+
+    render(<WritingPlayground />)
+    openSettingsPanel()
+
+    const unsupportedAlert = screen.getByText(
+      "Advanced sampler controls are disabled for this runtime.",
+    )
+    expect(
+      unsupportedAlert.closest('[data-ds-component="Alert"]'),
+    ).toBeInTheDocument()
+  })
+
+  it("renders the logit-bias validation error through the design-system Alert", () => {
+    seedActiveSessionDetail()
+    seedRequestedCapabilities({
+      extra_body_compat: {
+        supported: true,
+        known_params: ["logit_bias"],
+      },
+    })
+
+    render(<WritingPlayground />)
+    openSettingsPanel()
+    fireEvent.click(screen.getByText("Advanced sampler controls (extra_body)"))
+    fireEvent.change(screen.getByPlaceholderText('{"50256": -100, "198": -1.5}'), {
+      target: { value: "{" },
+    })
+
+    const logitBiasAlert = screen.getByText(/Invalid JSON:/)
+    expect(logitBiasAlert.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
   })
 })
