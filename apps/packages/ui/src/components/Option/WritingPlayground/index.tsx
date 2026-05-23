@@ -117,7 +117,6 @@ import {
 } from "./writing-revision-prompt-utils"
 import {
   confirmRevisionTarget,
-  countWords,
   resolveRevisionTarget
 } from "./writing-revision-utils"
 import type {
@@ -282,8 +281,6 @@ export const WritingPlayground = () => {
     React.useState<WritingRevisionPresetId>(
       WRITING_REVISION_PRESETS[0]?.id ?? "polish_prose"
     )
-  const [revisionSelection, setRevisionSelection] =
-    React.useState<WritingEditorSelection | null>(null)
 
   // --- Refs (local only) ---
   const generationServiceRef = React.useRef(new TldwChatService())
@@ -453,6 +450,15 @@ export const WritingPlayground = () => {
   React.useEffect(() => {
     setRevisionSelection(null)
   }, [activeSessionDetail?.id, editorMode])
+
+  React.useEffect(() => {
+    const persistedPresetId = getRevisionPresetIdFromPayload(
+      activeSessionDetail?.payload
+    )
+    setSelectedRevisionPresetId(
+      persistedPresetId ?? WRITING_REVISION_PRESETS[0]?.id ?? "polish_prose"
+    )
+  }, [activeSessionDetail?.id, activeSessionDetail?.payload])
 
   // =====================================================================
   // Hook 2: Template Library
@@ -1308,7 +1314,10 @@ export const WritingPlayground = () => {
     })
     const genAdvancedExtraBody =
       supportsAdvancedCompat
-        ? settings.advanced_extra_body
+        ? (sanitizeRevisionValue(settings.advanced_extra_body) as Record<
+            string,
+            unknown
+          >)
         : {}
     return {
       model: selectedModel,
@@ -1414,7 +1423,7 @@ export const WritingPlayground = () => {
 
   const resolveFreshRevisionTarget = React.useCallback(
     (request: WritingActionBarRequest): WritingRevisionTarget | null => {
-      const adapterSelection = refreshRevisionSelection()
+      const adapterSelection = getCurrentEditorAdapter()?.getSelection()
       const freshTarget = resolveRevisionTarget({
         text: editorText,
         action: request.action,
@@ -1445,17 +1454,17 @@ export const WritingPlayground = () => {
       )
       return null
     },
-    [editorText, refreshRevisionSelection, t]
+    [editorText, getCurrentEditorAdapter, t]
   )
 
   const handleRevisionRequest = React.useCallback(
     async (request: WritingActionBarRequest) => {
-      if (isGenerating || isRevisionGenerating) return
+      if (isGenerating) return
       const target = resolveFreshRevisionTarget(request)
       if (!target) return
 
       persistRevisionPreset(request.presetId)
-      setIsRevisionGenerating(true)
+      setIsGenerating(true)
       try {
         const proposal = await createRevisionProposal({
           action: request.action,
@@ -1477,13 +1486,12 @@ export const WritingPlayground = () => {
           t("option:writingPlayground.generateError", "Generation failed: {{detail}}", { detail })
         )
       } finally {
-        setIsRevisionGenerating(false)
+        setIsGenerating(false)
       }
     },
     [
       createRevisionProposal,
       isGenerating,
-      isRevisionGenerating,
       persistRevisionPreset,
       resolveFreshRevisionTarget,
       revisionState,
@@ -1493,8 +1501,8 @@ export const WritingPlayground = () => {
 
   const handleRegenerateRevision = React.useCallback(
     async (proposal: WritingRevisionProposal) => {
-      if (isGenerating || isRevisionGenerating) return
-      setIsRevisionGenerating(true)
+      if (isGenerating) return
+      setIsGenerating(true)
       try {
         await revisionState.regenerateRevision(proposal.id, async (source) => {
           const preset =
@@ -1531,13 +1539,12 @@ export const WritingPlayground = () => {
           t("option:writingPlayground.generateError", "Generation failed: {{detail}}", { detail })
         )
       } finally {
-        setIsRevisionGenerating(false)
+        setIsGenerating(false)
       }
     },
     [
       createRevisionProposal,
       isGenerating,
-      isRevisionGenerating,
       revisionState,
       selectedRevisionPresetId,
       t
@@ -1550,28 +1557,10 @@ export const WritingPlayground = () => {
         text: editorText,
         action: "rewrite",
         operation: "replace",
-        selection: revisionSelection,
-        cursor: revisionSelection?.end ?? 0
+        selection: getCurrentEditorAdapter()?.getSelection(),
+        cursor: getCurrentEditorAdapter()?.getSelection()?.end ?? editorText.length
       }),
-    [editorText, revisionSelection]
-  )
-  const writingWordCount = React.useMemo(
-    () => countWords(editorText),
-    [editorText]
-  )
-  const selectedWordCount = React.useMemo(() => {
-    if (!revisionSelection || revisionSelection.start === revisionSelection.end) {
-      return 0
-    }
-    return countWords(
-      editorText.slice(revisionSelection.start, revisionSelection.end)
-    )
-  }, [editorText, revisionSelection])
-  const pendingRevisionCount = React.useMemo(
-    () =>
-      revisionState.revisions.filter((proposal) => proposal.status === "pending")
-        .length,
-    [revisionState.revisions]
+    [editorText, getCurrentEditorAdapter]
   )
 
   const handleCopyRevision = React.useCallback(
@@ -2829,11 +2818,9 @@ export const WritingPlayground = () => {
                       <Button size="small" icon={searchOpen ? <X className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />} onClick={() => setSearchOpen((open) => !open)} title={searchOpen ? t("option:writingPlayground.searchClose", "Close search") : t("option:writingPlayground.searchToggle", "Find")} />
                     </div>
                     <WritingActionBar
-                      generationAvailable={canGenerate && !isRevisionGenerating}
+                      generationAvailable={canGenerate}
                       target={displayedRevisionTarget}
-                      selectedPresetId={selectedRevisionPresetId}
-                      isGenerating={isRevisionGenerating}
-                      onPresetChange={persistRevisionPreset}
+                      isGenerating={isGenerating}
                       onRequest={(request) => {
                         void handleRevisionRequest(request)
                       }}
