@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SYNC_DB_FILENAME, SyncDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
@@ -14,6 +15,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
 )
 
 from .adapters import StaticSyncAdapter, SyncAdapterRegistry
+from .materializers import NotesMaterializer
 from .models import M1_SYNC_DOMAINS
 from .security import server_trusted_encryption_status_from_env
 from .service import SyncV2Service, SyncV2Settings
@@ -43,6 +45,9 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
     return SyncV2Service(
         store=store,
         adapters=default_sync_v2_registry(),
+        materializers={
+            "notes.note": NotesMaterializer(_chacha_notes_db_for_user(user_id)),
+        },
         settings=SyncV2Settings(
             server_trusted_encryption=server_trusted_encryption_status_from_env(),
         ),
@@ -70,6 +75,13 @@ def _sync_v2_store_for_user(
 ) -> SyncV2Store:
     del database_url, sqlite_path
     return SyncV2Store(SyncDatabase(user_id=user_id))
+
+
+@lru_cache(maxsize=256)
+def _chacha_notes_db_for_user(user_id: str) -> CharactersRAGDB:
+    db_path = DatabasePaths.get_chacha_db_path(user_id)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return CharactersRAGDB(db_path=str(db_path), client_id=str(user_id))
 
 
 def _default_sync_v2_path_for_user(user_id: str) -> Path:

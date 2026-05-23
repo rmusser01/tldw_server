@@ -24395,6 +24395,8 @@ for _note_store_method in (
     "get_keywords_for_note",
     "get_keywords_for_notes",
     "get_note_counts_for_keywords",
+    "upsert_note_from_sync",
+    "tombstone_note_from_sync",
 ):
     setattr(
         CharactersRAGDB,

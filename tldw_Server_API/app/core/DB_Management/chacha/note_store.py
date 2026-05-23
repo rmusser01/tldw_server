@@ -101,6 +101,147 @@ class NoteStore:
             logger.error(f"Database error adding note '{title.strip()}': {e}")
             raise
 
+    def upsert_note_from_sync(
+        self,
+        *,
+        note_id: str,
+        title: str,
+        content: str,
+        conversation_id: str | None,
+        message_id: str | None,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> bool:
+        """Create or update a note projection from an accepted Sync v2 envelope."""
+
+        del object_hash
+        normalized_note_id = str(note_id).strip()
+        normalized_title = title.strip() if isinstance(title, str) else ""
+        if not normalized_note_id:
+            raise InputError("note_id cannot be empty.")  # noqa: TRY003
+        if not normalized_title:
+            raise InputError("Note title cannot be empty.")  # noqa: TRY003
+        if content is None:
+            raise InputError("Note content cannot be None.")  # noqa: TRY003
+        if object_revision < 1:
+            raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
+
+        now = self._db._get_current_utc_timestamp_iso()
+        normalized_conversation_id = self._db._normalize_nullable_text(conversation_id)
+        normalized_message_id = self._db._normalize_nullable_text(message_id)
+        query = """
+            INSERT INTO notes (
+                id, title, content, last_modified, client_id, version, deleted,
+                created_at, conversation_id, message_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                content = excluded.content,
+                last_modified = excluded.last_modified,
+                client_id = excluded.client_id,
+                version = excluded.version,
+                deleted = excluded.deleted,
+                conversation_id = excluded.conversation_id,
+                message_id = excluded.message_id
+        """
+        params = (
+            normalized_note_id,
+            normalized_title,
+            content,
+            now,
+            sync_client_id,
+            object_revision,
+            self._deleted_value(False),
+            now,
+            normalized_conversation_id,
+            normalized_message_id,
+        )
+
+        try:
+            def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
+                transaction_conn.execute(query, params)
+                logger.info("Upserted note projection from Sync v2 for ID: {}.", normalized_note_id)
+                return True
+
+            if conn is None:
+                with self._db.transaction() as transaction_conn:
+                    return _execute(transaction_conn)
+            return _execute(conn)
+        except sqlite3.IntegrityError as e:
+            msg = str(e).lower()
+            if "foreign key constraint failed" in msg:
+                raise ConflictError("Conversation or message not found.", entity="notes", entity_id=normalized_note_id) from e  # noqa: TRY003
+            raise CharactersRAGDBError(f"Database integrity error upserting synced note: {e}") from e  # noqa: TRY003
+        except BackendDatabaseError as e:
+            msg = str(e).lower()
+            if "foreign key" in msg:
+                raise ConflictError("Conversation or message not found.", entity="notes", entity_id=normalized_note_id) from e  # noqa: TRY003
+            raise CharactersRAGDBError(f"Backend error upserting synced note: {e}") from e  # noqa: TRY003
+        except CharactersRAGDBError:
+            logger.error("Database error upserting synced note ID {}.", normalized_note_id, exc_info=True)
+            raise
+
+    def tombstone_note_from_sync(
+        self,
+        *,
+        note_id: str,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> bool:
+        """Soft-delete a note projection from an accepted Sync v2 tombstone."""
+
+        del object_hash
+        normalized_note_id = str(note_id).strip()
+        if not normalized_note_id:
+            raise InputError("note_id cannot be empty.")  # noqa: TRY003
+        if object_revision < 1:
+            raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
+
+        now = self._db._get_current_utc_timestamp_iso()
+        query = """
+            UPDATE notes
+               SET deleted = ?,
+                   last_modified = ?,
+                   version = ?,
+                   client_id = ?
+             WHERE id = ?
+        """
+        params = (
+            self._deleted_value(True),
+            now,
+            object_revision,
+            sync_client_id,
+            normalized_note_id,
+        )
+
+        try:
+            def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
+                cursor = transaction_conn.execute(query, params)
+                if cursor.rowcount == 0:
+                    raise ConflictError(  # noqa: TRY003
+                        "Note not found for Sync v2 tombstone.",
+                        entity="notes",
+                        entity_id=normalized_note_id,
+                    )
+                self._db._invalidate_note_clipper_sidecars(normalized_note_id, conn=transaction_conn, deleted=True)
+                logger.info("Soft-deleted note projection from Sync v2 for ID: {}.", normalized_note_id)
+                return True
+
+            if conn is None:
+                with self._db.transaction() as transaction_conn:
+                    return _execute(transaction_conn)
+            return _execute(conn)
+        except ConflictError:
+            raise
+        except CharactersRAGDBError:
+            logger.error("Database error tombstoning synced note ID {}.", normalized_note_id, exc_info=True)
+            raise
+
     # ------------------------------------------------------------------
     # Note retrieval
     # ------------------------------------------------------------------

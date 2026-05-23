@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -45,6 +45,7 @@ from .models import (
     SyncKeyRecordCreate,
     SyncOperation,
 )
+from .materializers import MaterializationResult, SyncMaterializer
 from .profile import SyncProfileStatus, SyncV2ProfileManager
 from .security import (
     PrivatePayloadValidationError,
@@ -202,12 +203,14 @@ class SyncV2Service:
         *,
         store: SyncV2Store,
         adapters: SyncAdapterRegistry,
+        materializers: Mapping[SyncDomain, SyncMaterializer] | None = None,
         clock: Callable[[], str] | None = None,
         id_factory: Callable[[str], str] | None = None,
         settings: SyncV2Settings | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
+        self.materializers = dict(materializers or {})
         self.clock = clock or (lambda: datetime.now(timezone.utc).isoformat())
         self.id_factory = id_factory or (lambda prefix: f"{prefix}-{uuid4().hex}")
         self.settings = settings or SyncV2Settings()
@@ -484,6 +487,17 @@ class SyncV2Service:
                     )
                 )
                 continue
+            if inserted.apply_status != "applied":
+                materialization = self._materialize_envelope(inserted)
+                if materialization.status == "conflict":
+                    conflicts.append(
+                        self._store_materialization_conflict(
+                            dataset,
+                            inserted,
+                            materialization,
+                        )
+                    )
+                    continue
             accepted.append(
                 SyncPushAccepted(
                     client_envelope_id=inserted.client_envelope_id,
@@ -539,12 +553,15 @@ class SyncV2Service:
         )
 
         page = visible[:page_limit]
-        has_more = len(visible) > page_limit
-        next_sequence = (
-            page[-1].server_sequence
-            if page
-            else max((envelope.server_sequence for envelope in raw_envelopes), default=since_sequence)
-        )
+        has_visible_lookahead = len(visible) > page_limit
+        has_more = has_visible_lookahead or len(raw_envelopes) > page_limit
+        if has_visible_lookahead and page:
+            next_sequence = page[-1].server_sequence
+        else:
+            next_sequence = max(
+                (envelope.server_sequence for envelope in raw_envelopes),
+                default=since_sequence,
+            )
         if cursor is None and raw_envelopes:
             self._update_cursors(dataset_id, device_id, selected_domains, next_sequence)
         return SyncPullResult(
@@ -900,6 +917,53 @@ class SyncV2Service:
             message=outcome.message,
         )
 
+    def _materialize_envelope(self, envelope: SyncEnvelope) -> MaterializationResult:
+        materializer = self.materializers.get(envelope.domain)
+        if materializer is None:
+            return MaterializationResult(status="skipped")
+        return materializer.apply(envelope, store=self.store)
+
+    def _store_materialization_conflict(
+        self,
+        dataset: SyncDataset,
+        envelope: SyncEnvelope,
+        result: MaterializationResult,
+    ) -> SyncPushConflict:
+        existing = self.store.get_unresolved_conflict_for_envelope(
+            dataset.dataset_id,
+            local_envelope_id=envelope.client_envelope_id,
+            server_sequence=envelope.server_sequence,
+        )
+        if existing is not None:
+            return SyncPushConflict(
+                conflict_id=existing.conflict_id,
+                client_envelope_id=envelope.client_envelope_id,
+                domain=existing.domain,
+                entity_id=existing.entity_id,
+                server_sequence=existing.server_sequence,
+                message=result.message,
+            )
+        conflict = self.store.insert_conflict(
+            SyncConflictCreate(
+                conflict_id=self.id_factory("conflict"),
+                dataset_id=dataset.dataset_id,
+                domain=envelope.domain,
+                entity_id=envelope.entity_id,
+                conflict_type=result.conflict_type or "materialization_conflict",
+                local_envelope_id=envelope.client_envelope_id,
+                server_sequence=envelope.server_sequence,
+                metadata=dict(result.metadata),
+            )
+        )
+        return SyncPushConflict(
+            conflict_id=conflict.conflict_id,
+            client_envelope_id=envelope.client_envelope_id,
+            domain=envelope.domain,
+            entity_id=envelope.entity_id,
+            server_sequence=envelope.server_sequence,
+            message=result.message,
+        )
+
     def _resolve_cursor(
         self,
         dataset_id: str,
@@ -971,7 +1035,7 @@ class SyncV2Service:
         page_limit: int,
         include_own_changes: bool,
     ) -> tuple[list[SyncEnvelope], list[SyncEnvelope]]:
-        visible = self.store.list_envelopes_after(
+        raw = self.store.list_envelopes_after(
             dataset_id,
             since_sequence,
             limit=page_limit + 1,
@@ -979,7 +1043,8 @@ class SyncV2Service:
             status="accepted",
             exclude_device_id=None if include_own_changes else device_id,
         )
-        return visible, visible
+        visible = [envelope for envelope in raw if envelope.apply_status != "conflict"]
+        return raw, visible
 
     def _manifest_dataset(
         self,
