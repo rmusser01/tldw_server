@@ -32,7 +32,9 @@ from .materializers import MaterializationResult, SyncMaterializer
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
-    M1_SYNC_OPERATIONS,
+    SYNC_V2_SUPPORTED_DOMAINS,
+    SYNC_V2_SUPPORTED_OPERATIONS,
+    WORKSPACE_SYNC_DOMAINS,
     ConflictStatus,
     EncryptionPolicy,
     SyncAttachment,
@@ -145,9 +147,9 @@ class SyncV2Settings:
     supports_resumable_upload: bool = True
     supports_resumable_download: bool = True
     supports_chunk_checksums: bool = True
-    supported_domains: list[SyncDomain] = field(default_factory=lambda: list(M1_SYNC_DOMAINS))
+    supported_domains: list[SyncDomain] = field(default_factory=lambda: list(SYNC_V2_SUPPORTED_DOMAINS))
     operations: dict[SyncDomain, list[SyncOperation]] = field(
-        default_factory=lambda: {domain: list(operations) for domain, operations in M1_SYNC_OPERATIONS.items()}
+        default_factory=lambda: {domain: list(operations) for domain, operations in SYNC_V2_SUPPORTED_OPERATIONS.items()}
     )
     encryption_policies: list[EncryptionPolicy] = field(default_factory=lambda: [DEFAULT_M1_ENCRYPTION_POLICY])
     server_trusted_encryption: SyncV2ServerTrustedEncryptionStatus = field(
@@ -174,6 +176,9 @@ class SyncV2Capabilities:
     supports_attachments: bool = True
     server_time: str | None = None
     warnings: list[dict[str, str]] = field(default_factory=list)
+
+
+WorkspaceAccessChecker = Callable[[str, str, str], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -400,6 +405,7 @@ class SyncV2Service:
         id_factory: Callable[[str], str] | None = None,
         blob_store: LocalSyncBlobStore | None = None,
         settings: SyncV2Settings | None = None,
+        workspace_access_checker: WorkspaceAccessChecker | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -408,6 +414,7 @@ class SyncV2Service:
         self.id_factory = id_factory or (lambda prefix: f"{prefix}-{uuid4().hex}")
         self.blob_store = blob_store
         self.settings = settings or SyncV2Settings()
+        self.workspace_access_checker = workspace_access_checker
 
     def capabilities(self) -> SyncV2Capabilities:
         blob_transfer: dict[str, object] = {"supported": False}
@@ -532,6 +539,7 @@ class SyncV2Service:
     ) -> SyncDeviceAuthorization:
         """Create a pending device authorization request."""
 
+        self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         return self.store.create_device_authorization(
             SyncDeviceAuthorizationCreate(
                 authorization_id=self.id_factory("device-authorization"),
@@ -554,6 +562,7 @@ class SyncV2Service:
     ) -> SyncDeviceAuthorization:
         """Approve a pending device authorization and activate the device."""
 
+        self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         if approving_device_id is not None:
             self._require_registered_device(user_id, approving_device_id)
         return self.store.approve_device_authorization(
@@ -633,9 +642,7 @@ class SyncV2Service:
         """Record a device's durable application/verification acknowledgments."""
 
         self._require_registered_device(user_id, device_id)
-        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        if dataset is None:
-            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         for acknowledgment in domain_acks:
             if acknowledgment.dataset_id != dataset_id or acknowledgment.device_id != device_id:
                 raise SyncStoreError("Sync acknowledgment device or dataset does not match request")
@@ -656,9 +663,7 @@ class SyncV2Service:
         """Return stored or default background sync policy for a dataset/device."""
 
         self._require_registered_device(user_id, device_id)
-        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        if dataset is None:
-            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         stored = self.store.get_background_policy(dataset_id, device_id)
         if stored is not None:
             return stored
@@ -744,8 +749,7 @@ class SyncV2Service:
         """Acquire or refresh a short-lived advisory background sync lease."""
 
         self._require_registered_device(user_id, device_id)
-        if self.store.get_dataset(dataset_id, owner_user_id=user_id) is None:
-            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         return self.store.acquire_background_lease(
             SyncBackgroundLeaseCreate(
                 dataset_id=dataset_id,
@@ -766,9 +770,7 @@ class SyncV2Service:
         """Return profile-level and per-domain background sync status."""
 
         self._require_registered_device(user_id, device_id)
-        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        if dataset is None:
-            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         policy = self.get_background_policy(
             user_id=user_id,
             dataset_id=dataset_id,
@@ -833,7 +835,11 @@ class SyncV2Service:
         metadata: dict[str, object] | None = None,
     ) -> SyncDatasetEnrollment:
         self._require_server_trusted_encryption_ready()
-        enrolled_domains = list(domains or self.settings.supported_domains)
+        if scope_type == "workspace":
+            self._require_workspace_sync_access(user_id=user_id, workspace_id=workspace_id)
+            enrolled_domains = list(domains or WORKSPACE_SYNC_DOMAINS)
+        else:
+            enrolled_domains = list(domains or M1_SYNC_DOMAINS)
         dataset = self.store.enroll_dataset(
             SyncDatasetCreate(
                 dataset_id=dataset_id or self.id_factory("dataset"),
@@ -912,8 +918,9 @@ class SyncV2Service:
         envelopes: Sequence[SyncEnvelopeCreate],
     ) -> SyncPushResult:
         self._require_registered_device(user_id, device_id)
-        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        if dataset is None:
+        try:
+            dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        except SyncStoreError:
             return SyncPushResult(
                 dataset_id=dataset_id,
                 rejected=[
@@ -1090,9 +1097,7 @@ class SyncV2Service:
         self._require_registered_device(user_id, device_id)
         if page_size is not None and page_size < 1:
             raise SyncStoreError("Sync pull page_size must be greater than zero")
-        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        if dataset is None:
-            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
 
         selected_domains = self._selected_domains(dataset, domains)
         since_sequence = self._resolve_cursor(dataset_id, device_id, cursor, selected_domains)
@@ -1136,13 +1141,8 @@ class SyncV2Service:
     ) -> SyncRestoreManifest:
         if device_id is not None:
             self._require_registered_device(user_id, device_id)
-        allowed_dataset_ids = set(dataset_ids or [])
         selected_domains = set(domains or [])
-        datasets = [
-            dataset
-            for dataset in self.store.list_datasets_for_user(user_id)
-            if not allowed_dataset_ids or dataset.dataset_id in allowed_dataset_ids
-        ]
+        datasets = self._accessible_datasets(user_id=user_id, dataset_ids=dataset_ids)
         devices = [
             SyncRestoreManifestDevice(
                 device_id=device.device_id,
@@ -1185,20 +1185,11 @@ class SyncV2Service:
 
         if device_id is not None:
             self._require_registered_device(user_id, device_id)
-        allowed_dataset_ids = set(dataset_ids or [])
         selected_domains = set(domains or [])
         selected_object_id_set = _normalize_selection_set(selected_object_ids)
         selected_attachment_id_set = _normalize_selection_set(selected_attachment_ids)
         local_index = build_local_inventory_index(local_inventory)
-        user_datasets = self.store.list_datasets_for_user(user_id)
-        datasets_by_id = {dataset.dataset_id: dataset for dataset in user_datasets}
-        if allowed_dataset_ids:
-            inaccessible_dataset_ids = sorted(allowed_dataset_ids.difference(datasets_by_id))
-            if inaccessible_dataset_ids:
-                raise SyncStoreError("Sync dataset was not found or is not accessible")
-            datasets = [datasets_by_id[dataset_id] for dataset_id in dataset_ids or []]
-        else:
-            datasets = user_datasets
+        datasets = self._accessible_datasets(user_id=user_id, dataset_ids=dataset_ids)
 
         preview_datasets: list[SyncRestorePreviewDataset] = []
         safe_applies: list[SyncRestorePreviewObject] = []
@@ -1557,9 +1548,7 @@ class SyncV2Service:
             raise SyncStoreError("Sync repair limit must be greater than zero")
         if device_id is not None:
             self._require_registered_device(user_id, device_id)
-        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        if dataset is None:
-            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         selected_domains = self._selected_domains(dataset, domains)
 
         def _repair_materialize(envelope: SyncEnvelope) -> MaterializationResult:
@@ -1926,9 +1915,7 @@ class SyncV2Service:
         dataset_id: str,
         status: ConflictStatus | None = None,
     ) -> list[SyncConflict]:
-        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        if dataset is None:
-            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         return self.store.list_conflicts(dataset_id, status=status)
 
     def resolve_conflict(
@@ -1948,9 +1935,10 @@ class SyncV2Service:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
         if dataset_id is not None and conflict.dataset_id != dataset_id:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
-        dataset = self.store.get_dataset(conflict.dataset_id, owner_user_id=user_id)
-        if dataset is None:
-            raise SyncStoreError("Sync conflict was not found or is not accessible")
+        try:
+            dataset = self._require_dataset_access(user_id=user_id, dataset_id=conflict.dataset_id)
+        except SyncStoreError as exc:
+            raise SyncStoreError("Sync conflict was not found or is not accessible") from exc
         if action not in {"overwrite", "duplicate_rename", "skip"}:
             raise SyncStoreError(f"Sync conflict resolution action is not supported: {action}")
         if conflict.status != "unresolved":
@@ -2121,9 +2109,7 @@ class SyncV2Service:
         recovery_hint: str | None = None,
         rotation_of_key_record_id: str | None = None,
     ) -> SyncKeyRecord:
-        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        if dataset is None:
-            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         if device_id is not None:
             self._require_registered_device(user_id, device_id)
         self._validate_key_recovery_bundle(
@@ -2156,9 +2142,7 @@ class SyncV2Service:
         device_id: str | None = None,
         key_purpose: str | None = "dataset_recovery",
     ) -> list[SyncKeyRecord]:
-        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        if dataset is None:
-            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         return [
             record
             for record in self.store.list_key_records(
@@ -2254,6 +2238,62 @@ class SyncV2Service:
         ):
             return device
         raise SyncStoreError("Sync device was not found or is not accessible")
+
+    def _require_dataset_access(self, *, user_id: str, dataset_id: str) -> SyncDataset:
+        dataset = self.store.get_dataset(dataset_id)
+        if dataset is None or dataset.archived_at is not None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        if dataset.scope_type == "personal":
+            if dataset.owner_user_id != user_id:
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            return dataset
+        if dataset.scope_type == "workspace":
+            self._require_workspace_sync_access(
+                user_id=user_id,
+                workspace_id=dataset.workspace_id,
+            )
+            return dataset
+        raise SyncStoreError("Sync dataset was not found or is not accessible")
+
+    def _accessible_datasets(
+        self,
+        *,
+        user_id: str,
+        dataset_ids: Sequence[str] | None = None,
+    ) -> list[SyncDataset]:
+        if dataset_ids:
+            return [
+                self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+                for dataset_id in dataset_ids
+            ]
+        datasets: list[SyncDataset] = []
+        for dataset in self.store.list_datasets_for_user(user_id):
+            try:
+                self._require_dataset_access(
+                    user_id=user_id,
+                    dataset_id=dataset.dataset_id,
+                )
+            except SyncStoreError:
+                continue
+            datasets.append(dataset)
+        return datasets
+
+    def _require_workspace_sync_access(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str | None,
+    ) -> None:
+        if not workspace_id or not workspace_id.strip():
+            raise SyncStoreError("Sync workspace was not found or is not accessible")
+        if self.workspace_access_checker is None:
+            raise SyncStoreError("Sync workspace was not found or is not accessible")
+        try:
+            granted = bool(self.workspace_access_checker(user_id, workspace_id, "sync"))
+        except Exception as exc:
+            raise SyncStoreError("Sync workspace was not found or is not accessible") from exc
+        if not granted:
+            raise SyncStoreError("Sync workspace was not found or is not accessible")
 
     def _default_background_policy(
         self,
@@ -2622,9 +2662,7 @@ class SyncV2Service:
         dataset_id: str,
         domain: SyncDomain | None = None,
     ) -> SyncDataset:
-        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
-        if dataset is None:
-            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         if domain is not None and domain not in dataset.domains:
             raise SyncInvalidDomainError(f"Sync domain is not enrolled for this dataset: {domain}")
         return dataset

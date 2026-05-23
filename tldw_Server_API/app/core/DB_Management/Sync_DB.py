@@ -21,7 +21,8 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
 from tldw_Server_API.app.core.Sync.v2.models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
-    M1_SYNC_OPERATIONS,
+    SYNC_V2_SUPPORTED_OPERATIONS,
+    WORKSPACE_SYNC_DOMAINS,
     ConflictStatus,
     SyncApplyStatus,
     SyncAttachment,
@@ -1671,11 +1672,20 @@ class SyncDatabase:
         connection: Any,
     ) -> dict[str, Any]:
         dataset_row = self._require_dataset(dataset_id, connection=connection)
-        row = self._get_device_row(
-            str(dataset_row["owner_user_id"]),
-            device_id,
-            connection=connection,
-        )
+        if str(dataset_row["scope_type"]) == "workspace":
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_devices WHERE device_id = ?",
+                    (device_id,),
+                    connection=connection,
+                )
+            )
+        else:
+            row = self._get_device_row(
+                str(dataset_row["owner_user_id"]),
+                device_id,
+                connection=connection,
+            )
         if row is None:
             raise SyncStoreError(
                 f"Sync device is not registered for dataset {dataset_id}: {device_id}"
@@ -1687,17 +1697,27 @@ class SyncDatabase:
             raise SyncStoreError(
                 f"Sync v2 M1 datasets require {DEFAULT_M1_ENCRYPTION_POLICY}"
             )
-        invalid_domains = sorted(set(dataset.domains).difference(M1_SYNC_DOMAINS))
+        if dataset.scope_type == "personal":
+            if dataset.workspace_id is not None:
+                raise SyncStoreError("Personal sync datasets must not include workspace_id")
+            allowed_domains = set(M1_SYNC_DOMAINS)
+        elif dataset.scope_type == "workspace":
+            if not dataset.workspace_id or not dataset.workspace_id.strip():
+                raise SyncStoreError("Workspace sync datasets require workspace_id")
+            allowed_domains = set(WORKSPACE_SYNC_DOMAINS)
+        else:
+            raise SyncStoreError(f"Unsupported sync dataset scope: {dataset.scope_type}")
+        invalid_domains = sorted(set(dataset.domains).difference(allowed_domains))
         if invalid_domains:
             raise SyncInvalidDomainError(
-                "Sync v2 M1 dataset contains unsupported domains: "
+                f"Sync v2 dataset scope {dataset.scope_type} contains unsupported domains: "
                 + ", ".join(invalid_domains)
             )
 
     def _validate_envelope_contract(self, envelope: SyncEnvelopeCreate) -> None:
-        if envelope.domain not in M1_SYNC_OPERATIONS:
+        if envelope.domain not in SYNC_V2_SUPPORTED_OPERATIONS:
             raise SyncInvalidDomainError(f"Sync v2 M1 domain is not supported: {envelope.domain}")
-        if envelope.operation not in M1_SYNC_OPERATIONS[envelope.domain]:
+        if envelope.operation not in SYNC_V2_SUPPORTED_OPERATIONS[envelope.domain]:
             raise SyncStoreError(
                 f"Sync v2 M1 operation {envelope.operation} is not supported for {envelope.domain}"
             )
@@ -2003,7 +2023,10 @@ class SyncDatabase:
                 authorization.dataset_id,
                 connection=conn,
             )
-            if str(dataset_row["owner_user_id"]) != str(authorization.user_id):
+            if (
+                str(dataset_row["scope_type"]) != "workspace"
+                and str(dataset_row["owner_user_id"]) != str(authorization.user_id)
+            ):
                 raise SyncDatasetNotFoundError(
                     f"Sync dataset not found: {authorization.dataset_id}"
                 )
@@ -3763,7 +3786,10 @@ class SyncDatabase:
                 session.domain,
                 connection=conn,
             )
-            if str(dataset_row["owner_user_id"]) != str(session.owner_user_id):
+            if (
+                str(dataset_row["scope_type"]) != "workspace"
+                and str(dataset_row["owner_user_id"]) != str(session.owner_user_id)
+            ):
                 raise SyncDatasetNotFoundError(
                     f"Sync dataset not found: {session.dataset_id}"
                 )
@@ -3973,7 +3999,10 @@ class SyncDatabase:
         now = utcnow_iso()
         with self.backend.transaction() as conn:
             dataset_row = self._require_dataset(blob.dataset_id, connection=conn)
-            if str(dataset_row["owner_user_id"]) != str(blob.owner_user_id):
+            if (
+                str(dataset_row["scope_type"]) != "workspace"
+                and str(dataset_row["owner_user_id"]) != str(blob.owner_user_id)
+            ):
                 raise SyncDatasetNotFoundError(f"Sync dataset not found: {blob.dataset_id}")
             session = self._find_active_blob_session_for_blob(blob, connection=conn)
             if session is not None:

@@ -72,6 +72,44 @@ def registry() -> SyncAdapterRegistry:
     return registry
 
 
+WORKSPACE_DOMAINS = [
+    cast(SyncDomain, "workspaces.workspace"),
+    cast(SyncDomain, "workspaces.source_ref"),
+]
+
+
+def _workspace_registry() -> SyncAdapterRegistry:
+    registry = SyncAdapterRegistry()
+    for domain in WORKSPACE_DOMAINS:
+        registry.register(StaticSyncAdapter(domain=domain, supported_adapter_versions={1}))
+    return registry
+
+
+def _workspace_service(
+    sync_store: SyncV2Store,
+    allowed_workspace_permissions: set[tuple[str, str, str]],
+    *,
+    blob_store: LocalSyncBlobStore | None = None,
+) -> SyncV2Service:
+    def can_sync_workspace(user_id: str, workspace_id: str, permission: str) -> bool:
+        return (user_id, workspace_id, permission) in allowed_workspace_permissions
+
+    return SyncV2Service(
+        store=sync_store,
+        adapters=_workspace_registry(),
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=blob_store,
+        workspace_access_checker=can_sync_workspace,
+        settings=SyncV2Settings(
+            supports_attachments=blob_store is not None,
+            max_blob_bytes=4096,
+            max_chunk_bytes=1024,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+
+
 @pytest.fixture()
 def sync_service(sync_store: SyncV2Store, registry: SyncAdapterRegistry) -> SyncV2Service:
     service = SyncV2Service(
@@ -125,6 +163,26 @@ def _m1_note_envelope(**overrides) -> SyncEnvelopeCreate:
         "schema_version": 1,
         "payload": {"title": "Research note"},
         "payload_hash": "sha256:note-1",
+        "created_at_client": "2026-05-10T00:00:00+00:00",
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+        "adapter_version": 1,
+    }
+    payload.update(overrides)
+    return SyncEnvelopeCreate(**payload)
+
+
+def _workspace_envelope(**overrides) -> SyncEnvelopeCreate:
+    payload = {
+        "dataset_id": "workspace-dataset",
+        "client_envelope_id": "workspace-env-1",
+        "domain": "workspaces.workspace",
+        "operation": "upsert",
+        "object_id": "workspace-1",
+        "device_id": "device-1",
+        "client_sequence": 1,
+        "schema_version": 1,
+        "payload": {"name": "Shared research"},
+        "payload_hash": "sha256:workspace-1",
         "created_at_client": "2026-05-10T00:00:00+00:00",
         "encryption_metadata": {"policy": "server_trusted_v1"},
         "adapter_version": 1,
@@ -220,6 +278,8 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
         "chat.conversation",
         "chat.message",
         "attachment.ref",
+        "workspaces.workspace",
+        "workspaces.source_ref",
     ]
     assert capabilities.max_batch_size == 10
     assert capabilities.max_envelope_payload_bytes == 1024
@@ -626,6 +686,239 @@ def test_adapter_registry_accepts_known_domains_and_rejects_unknown_domains(
         registry.register(
             StaticSyncAdapter(domain=cast(SyncDomain, "bogus"), supported_adapter_versions={1})
         )
+
+
+def test_adapter_registry_accepts_workspace_metadata_domains():
+    registry = _workspace_registry()
+
+    assert registry.get(cast(SyncDomain, "workspaces.workspace")).domain == "workspaces.workspace"
+    assert registry.get(cast(SyncDomain, "workspaces.source_ref")).domain == "workspaces.source_ref"
+
+
+def test_workspace_dataset_enrollment_requires_workspace_sync_permission(
+    sync_store: SyncV2Store,
+):
+    no_checker_service = SyncV2Service(
+        store=sync_store,
+        adapters=_workspace_registry(),
+        clock=_clock,
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    with pytest.raises(SyncStoreError, match="workspace.*not found or is not accessible"):
+        no_checker_service.enroll_dataset(
+            user_id="user-1",
+            dataset_id="workspace-dataset-no-checker",
+            scope_type="workspace",
+            workspace_id="workspace-1",
+            domains=WORKSPACE_DOMAINS,
+        )
+
+    allowed = {("user-1", "workspace-1", "sync")}
+    service = _workspace_service(sync_store, allowed)
+    enrollment = service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="workspace-dataset",
+        scope_type="workspace",
+        workspace_id="workspace-1",
+        domains=WORKSPACE_DOMAINS,
+    )
+
+    assert enrollment.dataset.scope_type == "workspace"
+    assert enrollment.dataset.workspace_id == "workspace-1"
+    assert enrollment.dataset.domains == WORKSPACE_DOMAINS
+
+    with pytest.raises(SyncStoreError, match="workspace.*not found or is not accessible"):
+        service.enroll_dataset(
+            user_id="user-2",
+            dataset_id="workspace-dataset-denied",
+            scope_type="workspace",
+            workspace_id="workspace-1",
+            domains=WORKSPACE_DOMAINS,
+        )
+
+
+def test_workspace_dataset_member_access_is_not_tied_to_dataset_owner(
+    sync_store: SyncV2Store,
+):
+    allowed = {
+        ("user-1", "workspace-1", "sync"),
+        ("user-2", "workspace-1", "sync"),
+    }
+    service = _workspace_service(sync_store, allowed)
+    _register_devices(service, "user-1", "owner-device")
+    _register_devices(service, "user-2", "member-device")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="workspace-dataset",
+        scope_type="workspace",
+        workspace_id="workspace-1",
+        domains=WORKSPACE_DOMAINS,
+    )
+
+    policy = service.update_background_policy(
+        user_id="user-2",
+        dataset_id="workspace-dataset",
+        device_id="member-device",
+        enabled=False,
+        pending_local_changes=True,
+    )
+    push_result = service.push(
+        user_id="user-2",
+        dataset_id="workspace-dataset",
+        device_id="member-device",
+        envelopes=[
+            _workspace_envelope(
+                device_id="member-device",
+                client_envelope_id="workspace-member-env",
+            )
+        ],
+    )
+
+    assert policy.enabled is False
+    assert policy.pending_local_changes is True
+    assert push_result.rejected == []
+    assert push_result.accepted[0].client_envelope_id == "workspace-member-env"
+
+
+def test_workspace_dataset_access_is_rechecked_for_dataset_scoped_operations(
+    sync_store: SyncV2Store,
+    tmp_path: Path,
+):
+    allowed = {("user-1", "workspace-1", "sync")}
+    service = _workspace_service(
+        sync_store,
+        allowed,
+        blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="workspace-dataset",
+        scope_type="workspace",
+        workspace_id="workspace-1",
+        domains=WORKSPACE_DOMAINS,
+    )
+    authorization = service.create_device_authorization(
+        user_id="user-1",
+        dataset_id="workspace-dataset",
+        device_id="device-1",
+        authorization_method="existing_device",
+    )
+    conflict = sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="workspace-conflict-1",
+            dataset_id="workspace-dataset",
+            domain=cast(SyncDomain, "workspaces.workspace"),
+            object_id="workspace-1",
+            conflict_type="rename_conflict",
+            metadata={"reason": "workspace renamed on two devices"},
+        )
+    )
+
+    allowed.clear()
+
+    push_result = service.push(
+        user_id="user-1",
+        dataset_id="workspace-dataset",
+        device_id="device-1",
+        envelopes=[_workspace_envelope()],
+    )
+    assert push_result.accepted == []
+    assert push_result.rejected[0].error_code == "dataset_not_found_or_forbidden"
+
+    denied_calls = [
+        lambda: service.acknowledge_device_state(
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+            device_id="device-1",
+        ),
+        lambda: service.get_background_policy(
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+            device_id="device-1",
+        ),
+        lambda: service.acquire_background_lease(
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+            device_id="device-1",
+        ),
+        lambda: service.background_status(
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+            device_id="device-1",
+        ),
+        lambda: service.create_device_authorization(
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+            device_id="device-1",
+            authorization_method="existing_device",
+        ),
+        lambda: service.approve_device_authorization(
+            authorization.authorization_id,
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+            approving_device_id="device-1",
+        ),
+        lambda: service.pull(
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+            device_id="device-1",
+        ),
+        lambda: service.restore_manifest(
+            user_id="user-1",
+            device_id="device-1",
+            dataset_ids=["workspace-dataset"],
+        ),
+        lambda: service.restore_preview(
+            user_id="user-1",
+            device_id="device-1",
+            dataset_ids=["workspace-dataset"],
+        ),
+        lambda: service.repair(
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+            device_id="device-1",
+        ),
+        lambda: service.list_conflicts(
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+        ),
+        lambda: service.resolve_conflict(
+            user_id="user-1",
+            conflict_id=conflict.conflict_id,
+            dataset_id="workspace-dataset",
+            action="skip",
+            resolved_by_device_id="device-1",
+        ),
+        lambda: service.store_key_recovery_bundle(
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+            device_id="device-1",
+            key_purpose="dataset_recovery",
+            wrapped_key_blob="wrapped:opaque",
+            kdf_metadata={"algorithm": "argon2id"},
+        ),
+        lambda: service.list_key_recovery_bundles(
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+        ),
+        lambda: service.create_blob_upload_session(
+            user_id="user-1",
+            dataset_id="workspace-dataset",
+            device_id="device-1",
+            domain=cast(SyncDomain, "workspaces.source_ref"),
+            entity_id="source-ref-1",
+            attachment_id="attachment-1",
+            content_type="application/octet-stream",
+            size_bytes=16,
+            payload_hash=_sha256(b"0123456789abcdef"),
+            chunk_size=16,
+            chunk_count=1,
+        ),
+    ]
+    for call in denied_calls:
+        with pytest.raises(SyncStoreError, match="not found or is not accessible"):
+            call()
 
 
 def test_push_supports_legacy_adapter_without_context_keyword(sync_store: SyncV2Store):

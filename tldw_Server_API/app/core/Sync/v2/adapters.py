@@ -6,7 +6,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol, cast
 
-from .models import M1_SYNC_DOMAINS, SyncDataset, SyncDomain, SyncEnvelope, SyncEnvelopeCreate
+from .models import (
+    M1_SYNC_DOMAINS,
+    SYNC_V2_SUPPORTED_DOMAINS,
+    SyncDataset,
+    SyncDomain,
+    SyncEnvelope,
+    SyncEnvelopeCreate,
+)
 
 ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS: frozenset[str] = frozenset(
     {
@@ -26,10 +33,7 @@ ATTACHMENT_REF_SERVER_AVAILABILITY: frozenset[str] = frozenset({"server", "serve
 
 KNOWN_SYNC_DOMAINS: frozenset[str] = frozenset(
     {
-        "notes.note",
-        "chat.conversation",
-        "chat.message",
-        "attachment.ref",
+        *SYNC_V2_SUPPORTED_DOMAINS,
         "notes",
         "chat",
         "workspaces",

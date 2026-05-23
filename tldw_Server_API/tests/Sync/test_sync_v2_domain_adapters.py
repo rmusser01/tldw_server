@@ -15,15 +15,16 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     SyncAdapterContext,
     SyncAdapterRegistry,
 )
-from tldw_Server_API.app.core.Sync.v2.domain_adapters.chat import ChatDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters._lineage import incoming_references_head
-from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaCompatibilityAdapter
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.chat import ChatDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.source_cache import SourceCacheAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.workspaces import WorkspacesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
+    SYNC_V2_SUPPORTED_DOMAINS,
+    WORKSPACE_SYNC_DOMAINS,
     SyncDataset,
     SyncEnvelope,
     SyncEnvelopeCreate,
@@ -634,10 +635,10 @@ def test_workspaces_adapter_accepts_source_ref_membership_by_source_id():
     prior = _stored(
         _envelope(
             client_envelope_id="workspace-source-a",
-            domain="workspaces",
+            domain="workspaces.source_ref",
             entity_id="workspace-1:source-1",
             stable_key="workspace_source:workspace-1:source-1",
-            operation="link",
+            operation="upsert",
             routing_metadata={"entity_kind": "workspace_source_ref", "workspace_id": "workspace-1"},
             payload_clear={
                 "entity_kind": "workspace_source_ref",
@@ -649,10 +650,10 @@ def test_workspaces_adapter_accepts_source_ref_membership_by_source_id():
     )
     incoming = _envelope(
         client_envelope_id="workspace-source-b",
-        domain="workspaces",
+        domain="workspaces.source_ref",
         entity_id="workspace-1:source-2",
         stable_key="workspace_source:workspace-1:source-2",
-        operation="link",
+        operation="upsert",
         routing_metadata={"entity_kind": "workspace_source_ref", "workspace_id": "workspace-1"},
         payload_clear={
             "entity_kind": "workspace_source_ref",
@@ -662,7 +663,7 @@ def test_workspaces_adapter_accepts_source_ref_membership_by_source_id():
         payload_hash="sha256:source-2",
     )
 
-    outcome = WorkspacesDomainAdapter().evaluate_envelope(
+    outcome = WorkspacesDomainAdapter(domain="workspaces.source_ref").evaluate_envelope(
         incoming,
         dataset=_dataset(),
         context=_context(prior),
@@ -862,14 +863,16 @@ def test_service_persists_domain_adapter_conflicts(tmp_path: Path):
     assert conflicts[0].local_envelope_id == "message-b"
 
 
-def test_default_sync_v2_registry_advertises_only_m1_domains():
+def test_default_sync_v2_registry_advertises_personal_and_workspace_metadata_domains():
     registry = sync_endpoint._default_sync_v2_registry()
 
-    assert registry.supported_domains == sorted(M1_SYNC_DOMAINS)
+    assert registry.supported_domains == sorted(SYNC_V2_SUPPORTED_DOMAINS)
     for domain in M1_SYNC_DOMAINS:
         if domain == "attachment.ref":
             assert isinstance(registry.get(domain), AttachmentRefAdapter)
         else:
             assert isinstance(registry.get(domain), StaticSyncAdapter)
+    for domain in WORKSPACE_SYNC_DOMAINS:
+        assert isinstance(registry.get(domain), WorkspacesDomainAdapter)
     with pytest.raises(KeyError):
         registry.get("media")

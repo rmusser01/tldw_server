@@ -16,13 +16,14 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SYNC_DB_FILENAME, Syn
 
 from .adapters import AttachmentRefAdapter, StaticSyncAdapter, SyncAdapterRegistry
 from .blob_store import LocalSyncBlobStore
+from .domain_adapters.workspaces import WorkspacesDomainAdapter
 from .materializers import (
     AttachmentRefMaterializer,
     ChatConversationMaterializer,
     ChatMessageMaterializer,
     NotesMaterializer,
 )
-from .models import M1_SYNC_DOMAINS
+from .models import M1_SYNC_DOMAINS, WORKSPACE_SYNC_DOMAINS
 from .security import server_trusted_encryption_status_from_env
 from .service import SyncV2Service, SyncV2Settings
 from .store import SyncV2Store
@@ -41,6 +42,7 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
             )
             for domain in M1_SYNC_DOMAINS
         ]
+        + [WorkspacesDomainAdapter(domain=domain) for domain in WORKSPACE_SYNC_DOMAINS]
     )
 
 
@@ -65,6 +67,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         settings=SyncV2Settings(
             server_trusted_encryption=server_trusted_encryption_status_from_env(),
         ),
+        workspace_access_checker=_workspace_access_checker,
     )
 
 
@@ -103,6 +106,12 @@ def _sync_v2_blob_store_for_user(user_id: str) -> LocalSyncBlobStore:
     base_dir = DatabasePaths.resolve_user_db_base_dir()
     safe_user_id = _resolve_user_id_for_storage(user_id)
     return LocalSyncBlobStore(base_dir / safe_user_id / "sync_blobs")
+
+
+def _workspace_access_checker(user_id: str, workspace_id: str, permission: str) -> bool:
+    if permission != "sync":
+        return False
+    return _chacha_notes_db_for_user(user_id).get_workspace(workspace_id) is not None
 
 
 def _default_sync_v2_path_for_user(user_id: str) -> Path:

@@ -6,7 +6,14 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SyncDomain = Literal["notes.note", "chat.conversation", "chat.message", "attachment.ref"]
+SyncDomain = Literal[
+    "notes.note",
+    "chat.conversation",
+    "chat.message",
+    "attachment.ref",
+    "workspaces.workspace",
+    "workspaces.source_ref",
+]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
 EncryptionPolicy = Literal["server_trusted_v1"]
@@ -53,6 +60,19 @@ M1_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "chat.conversation": ["upsert", "tombstone"],
     "chat.message": ["append", "tombstone"],
     "attachment.ref": ["upsert", "tombstone"],
+}
+WORKSPACE_SYNC_DOMAINS: list[SyncDomain] = [
+    "workspaces.workspace",
+    "workspaces.source_ref",
+]
+WORKSPACE_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    "workspaces.workspace": ["upsert", "tombstone"],
+    "workspaces.source_ref": ["upsert", "tombstone"],
+}
+SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = list(M1_SYNC_DOMAINS) + list(WORKSPACE_SYNC_DOMAINS)
+SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    **M1_SYNC_OPERATIONS,
+    **WORKSPACE_SYNC_OPERATIONS,
 }
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_MAX_PUSH_ENVELOPES = 100
@@ -123,11 +143,11 @@ class SyncCapabilitiesResponse(BaseModel):
     protocol_version: str = "sync-v2-m1"
     min_supported_protocol_version: str = "sync-v2-m1"
     domains: list[SyncDomain] = Field(
-        default_factory=lambda: list(M1_SYNC_DOMAINS),
+        default_factory=lambda: list(SYNC_V2_SUPPORTED_DOMAINS),
         validation_alias=AliasChoices("domains", "supported_domains"),
     )
     operations: dict[SyncDomain, list[SyncOperation]] = Field(
-        default_factory=lambda: {domain: list(operations) for domain, operations in M1_SYNC_OPERATIONS.items()}
+        default_factory=lambda: {domain: list(operations) for domain, operations in SYNC_V2_SUPPORTED_OPERATIONS.items()}
     )
     encryption: dict[str, Any] = Field(default_factory=_default_encryption)
     blob_transfer: dict[str, Any] = Field(default_factory=_default_blob_transfer)
@@ -153,10 +173,10 @@ class SyncCapabilitiesResponse(BaseModel):
     @classmethod
     def _default_m1_domains(cls, value: Any) -> list[SyncDomain]:
         if value in (None, []):
-            return list(M1_SYNC_DOMAINS)
-        if isinstance(value, list) and all(domain in M1_SYNC_DOMAINS for domain in value):
+            return list(SYNC_V2_SUPPORTED_DOMAINS)
+        if isinstance(value, list) and all(domain in SYNC_V2_SUPPORTED_DOMAINS for domain in value):
             return value
-        return list(M1_SYNC_DOMAINS)
+        return list(SYNC_V2_SUPPORTED_DOMAINS)
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -1291,6 +1311,8 @@ __all__ = [
     "EncryptionPolicy",
     "M1_SYNC_DOMAINS",
     "M1_SYNC_OPERATIONS",
+    "SYNC_V2_SUPPORTED_DOMAINS",
+    "SYNC_V2_SUPPORTED_OPERATIONS",
     "SYNC_V2_MAX_PUSH_ENVELOPES",
     "SyncAttachmentUploadRequest",
     "SyncAttachmentUploadResponse",
@@ -1349,4 +1371,6 @@ __all__ = [
     "SyncRestoreCompletenessStatus",
     "SyncRestoreDomainCompleteness",
     "SyncV2Envelope",
+    "WORKSPACE_SYNC_DOMAINS",
+    "WORKSPACE_SYNC_OPERATIONS",
 ]

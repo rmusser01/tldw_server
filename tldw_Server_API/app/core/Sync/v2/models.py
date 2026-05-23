@@ -5,7 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-SyncDomain = Literal["notes.note", "chat.conversation", "chat.message", "attachment.ref"]
+SyncDomain = Literal[
+    "notes.note",
+    "chat.conversation",
+    "chat.message",
+    "attachment.ref",
+    "workspaces.workspace",
+    "workspaces.source_ref",
+]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
 EncryptionPolicy = Literal["server_trusted_v1"]
@@ -49,6 +56,19 @@ M1_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "chat.conversation": ["upsert", "tombstone"],
     "chat.message": ["append", "tombstone"],
     "attachment.ref": ["upsert", "tombstone"],
+}
+WORKSPACE_SYNC_DOMAINS: list[SyncDomain] = [
+    "workspaces.workspace",
+    "workspaces.source_ref",
+]
+WORKSPACE_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    "workspaces.workspace": ["upsert", "tombstone"],
+    "workspaces.source_ref": ["upsert", "tombstone"],
+}
+SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = list(M1_SYNC_DOMAINS) + list(WORKSPACE_SYNC_DOMAINS)
+SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    **M1_SYNC_OPERATIONS,
+    **WORKSPACE_SYNC_OPERATIONS,
 }
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 
@@ -806,6 +826,8 @@ __all__ = [
     "EncryptionPolicy",
     "M1_SYNC_DOMAINS",
     "M1_SYNC_OPERATIONS",
+    "SYNC_V2_SUPPORTED_DOMAINS",
+    "SYNC_V2_SUPPORTED_OPERATIONS",
     "SyncApplyStatus",
     "SyncAttachment",
     "SyncAttachmentCreate",
@@ -844,4 +866,6 @@ __all__ = [
     "SyncRestoreCompletenessStatus",
     "SyncRestoreDomainCompleteness",
     "SyncRestoreManifestStats",
+    "WORKSPACE_SYNC_DOMAINS",
+    "WORKSPACE_SYNC_OPERATIONS",
 ]

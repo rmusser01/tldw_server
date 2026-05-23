@@ -793,6 +793,47 @@ def test_dataset_enrollment_rejects_non_m1_domain_and_encryption_policy(
         )
 
 
+def test_dataset_enrollment_supports_workspace_metadata_domains(sync_store: SyncV2Store):
+    dataset = sync_store.enroll_dataset(
+        _dataset(
+            dataset_id="workspace-dataset",
+            scope_type="workspace",
+            workspace_id="workspace-1",
+            domains=["workspaces.workspace", "workspaces.source_ref"],
+            metadata={"label": "Shared research workspace"},
+        )
+    )
+
+    assert dataset.dataset_id == "workspace-dataset"
+    assert dataset.scope_type == "workspace"
+    assert dataset.workspace_id == "workspace-1"
+    assert dataset.domains == ["workspaces.workspace", "workspaces.source_ref"]
+    assert dataset.metadata == {"label": "Shared research workspace"}
+
+
+def test_dataset_enrollment_rejects_scope_domain_mismatches(sync_store: SyncV2Store):
+    with pytest.raises(SyncInvalidDomainError):
+        sync_store.enroll_dataset(_dataset(domains=["workspaces.workspace"]))
+
+    with pytest.raises(SyncInvalidDomainError):
+        sync_store.enroll_dataset(
+            _dataset(
+                scope_type="workspace",
+                workspace_id="workspace-1",
+                domains=["notes.note"],
+            )
+        )
+
+    with pytest.raises(SyncStoreError):
+        sync_store.enroll_dataset(
+            _dataset(
+                scope_type="workspace",
+                workspace_id=None,
+                domains=["workspaces.workspace"],
+            )
+        )
+
+
 def test_get_dataset_can_be_scoped_by_owner(sync_store: SyncV2Store):
     dataset = sync_store.enroll_dataset(_dataset())
 

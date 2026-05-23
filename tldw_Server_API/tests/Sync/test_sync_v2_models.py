@@ -28,6 +28,8 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
 from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelope as CoreSyncEnvelope
 
 M1_DOMAINS = ["notes.note", "chat.conversation", "chat.message", "attachment.ref"]
+WORKSPACE_DOMAINS = ["workspaces.workspace", "workspaces.source_ref"]
+SUPPORTED_DOMAINS = M1_DOMAINS + WORKSPACE_DOMAINS
 
 
 def _m1_envelope_payload(**overrides):
@@ -58,16 +60,18 @@ def _m1_envelope_payload(**overrides):
     return payload
 
 
-def test_capabilities_advertise_only_m1_domains_and_server_trusted_encryption():
+def test_capabilities_advertise_personal_and_workspace_domains_with_server_trusted_encryption():
     capabilities = SyncCapabilitiesResponse()
 
     assert capabilities.protocol_version == "sync-v2-m1"
-    assert capabilities.domains == M1_DOMAINS
+    assert capabilities.domains == SUPPORTED_DOMAINS
     assert capabilities.operations == {
         "notes.note": ["upsert", "tombstone"],
         "chat.conversation": ["upsert", "tombstone"],
         "chat.message": ["append", "tombstone"],
         "attachment.ref": ["upsert", "tombstone"],
+        "workspaces.workspace": ["upsert", "tombstone"],
+        "workspaces.source_ref": ["upsert", "tombstone"],
     }
     assert capabilities.encryption["policy"] == "server_trusted_v1"
     assert capabilities.encryption["ready"] is True
@@ -75,12 +79,12 @@ def test_capabilities_advertise_only_m1_domains_and_server_trusted_encryption():
     assert "client_private_v1" not in capabilities.model_dump_json()
 
 
-def test_capabilities_normalize_legacy_supported_domains_to_m1_defaults():
+def test_capabilities_normalize_legacy_supported_domains_to_supported_defaults():
     capabilities = SyncCapabilitiesResponse.model_validate(
         {"supported_domains": ["notes", "chat", "source_cache", "media"]}
     )
 
-    assert capabilities.domains == M1_DOMAINS
+    assert capabilities.domains == SUPPORTED_DOMAINS
 
 
 def test_dataset_enroll_request_defaults_to_m1_personal_server_trusted_dataset():
@@ -89,6 +93,20 @@ def test_dataset_enroll_request_defaults_to_m1_personal_server_trusted_dataset()
     assert request.scope_type == "personal"
     assert request.domains == M1_DOMAINS
     assert request.encryption_policy == "server_trusted_v1"
+
+
+def test_dataset_enroll_request_accepts_explicit_workspace_metadata_domains():
+    request = SyncDatasetEnrollRequest.model_validate(
+        {
+            "scope_type": "workspace",
+            "workspace_id": "workspace-1",
+            "domains": WORKSPACE_DOMAINS,
+        }
+    )
+
+    assert request.scope_type == "workspace"
+    assert request.workspace_id == "workspace-1"
+    assert request.domains == WORKSPACE_DOMAINS
 
 
 def test_background_policy_lease_and_status_models_validate_m3_shapes():

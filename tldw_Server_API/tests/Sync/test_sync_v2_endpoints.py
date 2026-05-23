@@ -15,7 +15,12 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
-from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, SyncDeviceUpsert, SyncObjectState
+from tldw_Server_API.app.core.Sync.v2.models import (
+    M1_SYNC_DOMAINS,
+    SYNC_V2_SUPPORTED_DOMAINS,
+    SyncDeviceUpsert,
+    SyncObjectState,
+)
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -134,7 +139,7 @@ def client(sync_service: SyncV2Service) -> TestClient:
     return _client_for_service(sync_service)
 
 
-def test_capabilities_endpoint_reports_m1_domains_and_encryption_posture(
+def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
     client: TestClient,
 ) -> None:
     response = client.get("/api/v1/sync/capabilities")
@@ -143,7 +148,7 @@ def test_capabilities_endpoint_reports_m1_domains_and_encryption_posture(
     body = response.json()
     assert body["protocol_version"] == "sync-v2-m1"
     assert body["min_supported_protocol_version"] == "sync-v2-m1"
-    assert body["domains"] == list(M1_SYNC_DOMAINS)
+    assert body["domains"] == list(SYNC_V2_SUPPORTED_DOMAINS)
     assert body["encryption"]["policy"] == "server_trusted_v1"
     assert body["encryption"]["ready"] is True
     assert body["encryption"]["attestation"]["mode"] == "managed_storage"
@@ -601,7 +606,7 @@ def test_lower_level_register_and_enroll_routes_remain_available_for_internal_ca
 
     assert registered.status_code == 200
     assert registered.json()["device_id"] == "device-1"
-    assert registered.json()["server_capabilities"]["domains"] == list(M1_SYNC_DOMAINS)
+    assert registered.json()["server_capabilities"]["domains"] == list(SYNC_V2_SUPPORTED_DOMAINS)
     assert enrolled.status_code == 200
     assert enrolled.json()["dataset_id"] == "dataset-1"
     assert enrolled.json()["encryption_policy"] == "server_trusted_v1"
