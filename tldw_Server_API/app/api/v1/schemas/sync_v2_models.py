@@ -26,6 +26,8 @@ EncryptionPolicy = Literal[
     "device_wrapped_v1",
     "client_private_v1",
 ]
+SyncKeyWrappedFor = Literal["server", "passphrase", "device", "recovery"]
+SyncKeyRewrapStatus = Literal["not_required", "pending", "complete", "failed", "blocked"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
 ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
 SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
@@ -1396,6 +1398,12 @@ class SyncKeyRecoveryBundleRequest(BaseModel):
     kdf_metadata: dict[str, Any] = Field(default_factory=dict)
     recovery_hint: str | None = None
     rotation_of_key_record_id: str | None = None
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+    key_epoch: int = Field(1, ge=1)
+    active_from_server_sequence: int | None = Field(None, ge=0)
+    superseded_at: str | None = None
+    wrapped_for: SyncKeyWrappedFor = "recovery"
+    rewrap_status: SyncKeyRewrapStatus = "not_required"
 
 
 class SyncKeyRecoveryBundleRecord(BaseModel):
@@ -1411,6 +1419,12 @@ class SyncKeyRecoveryBundleRecord(BaseModel):
     rotation_of_key_record_id: str | None = None
     created_at: str | None = None
     revoked_at: str | None = None
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+    key_epoch: int = Field(1, ge=1)
+    active_from_server_sequence: int | None = Field(None, ge=0)
+    superseded_at: str | None = None
+    wrapped_for: SyncKeyWrappedFor = "recovery"
+    rewrap_status: SyncKeyRewrapStatus = "not_required"
 
 
 class SyncKeyRecoveryBundleListResponse(BaseModel):
@@ -1460,9 +1474,11 @@ __all__ = [
     "SyncDeviceRegisterResponse",
     "SyncDomain",
     "SyncEncryptionPolicyMetadata",
+    "SyncKeyRewrapStatus",
     "SyncKeyRecoveryBundleListResponse",
     "SyncKeyRecoveryBundleRequest",
     "SyncKeyRecoveryBundleRecord",
+    "SyncKeyWrappedFor",
     "SyncOperation",
     "SyncApplyStatus",
     "SyncProfileBootstrapMode",

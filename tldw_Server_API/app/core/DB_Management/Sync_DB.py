@@ -320,6 +320,12 @@ CREATE TABLE IF NOT EXISTS sync_key_records (
     kdf_metadata_json TEXT NOT NULL DEFAULT '{}',
     recovery_hint TEXT,
     rotation_of_key_record_id TEXT,
+    encryption_policy TEXT NOT NULL DEFAULT 'server_trusted_v1',
+    key_epoch INTEGER NOT NULL DEFAULT 1,
+    active_from_server_sequence INTEGER,
+    superseded_at TEXT,
+    wrapped_for TEXT NOT NULL DEFAULT 'recovery',
+    rewrap_status TEXT NOT NULL DEFAULT 'not_required',
     created_at TEXT NOT NULL,
     revoked_at TEXT
 );
@@ -327,6 +333,10 @@ CREATE INDEX IF NOT EXISTS idx_sync_key_records_dataset
     ON sync_key_records(dataset_id, key_purpose, created_at);
 CREATE INDEX IF NOT EXISTS idx_sync_key_records_device
     ON sync_key_records(dataset_id, device_id);
+CREATE INDEX IF NOT EXISTS idx_sync_key_records_epoch
+    ON sync_key_records(dataset_id, encryption_policy, key_epoch);
+CREATE INDEX IF NOT EXISTS idx_sync_key_records_rewrap
+    ON sync_key_records(dataset_id, rewrap_status);
 
 CREATE TABLE IF NOT EXISTS sync_attachments (
     attachment_id TEXT NOT NULL,
@@ -654,6 +664,12 @@ CREATE TABLE IF NOT EXISTS sync_key_records (
     kdf_metadata_json TEXT NOT NULL DEFAULT '{}',
     recovery_hint TEXT,
     rotation_of_key_record_id TEXT,
+    encryption_policy TEXT NOT NULL DEFAULT 'server_trusted_v1',
+    key_epoch INTEGER NOT NULL DEFAULT 1,
+    active_from_server_sequence INTEGER,
+    superseded_at TIMESTAMPTZ,
+    wrapped_for TEXT NOT NULL DEFAULT 'recovery',
+    rewrap_status TEXT NOT NULL DEFAULT 'not_required',
     created_at TIMESTAMPTZ NOT NULL,
     revoked_at TIMESTAMPTZ
 );
@@ -661,6 +677,10 @@ CREATE INDEX IF NOT EXISTS idx_sync_key_records_dataset
     ON sync_key_records(dataset_id, key_purpose, created_at);
 CREATE INDEX IF NOT EXISTS idx_sync_key_records_device
     ON sync_key_records(dataset_id, device_id);
+CREATE INDEX IF NOT EXISTS idx_sync_key_records_epoch
+    ON sync_key_records(dataset_id, encryption_policy, key_epoch);
+CREATE INDEX IF NOT EXISTS idx_sync_key_records_rewrap
+    ON sync_key_records(dataset_id, rewrap_status);
 
 CREATE TABLE IF NOT EXISTS sync_attachments (
     attachment_id TEXT NOT NULL,
@@ -798,6 +818,12 @@ def _timestamp_to_string(value: Any) -> str | None:
     if isinstance(value, datetime):
         return value.isoformat()
     return str(value)
+
+
+def _optional_int_from_storage(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
 
 
 def _parse_iso_datetime(value: str) -> datetime:
@@ -1093,6 +1119,14 @@ def _key_record_from_row(row: dict[str, Any]) -> SyncKeyRecord:
         rotation_of_key_record_id=row.get("rotation_of_key_record_id"),
         created_at=row["created_at"],
         revoked_at=row.get("revoked_at"),
+        encryption_policy=row.get("encryption_policy") or DEFAULT_M1_ENCRYPTION_POLICY,
+        key_epoch=int(row.get("key_epoch") or 1),
+        active_from_server_sequence=_optional_int_from_storage(
+            row.get("active_from_server_sequence")
+        ),
+        superseded_at=_timestamp_to_string(row.get("superseded_at")),
+        wrapped_for=row.get("wrapped_for") or "recovery",
+        rewrap_status=row.get("rewrap_status") or "not_required",
     )
 
 
@@ -1334,6 +1368,12 @@ def _key_record_fingerprint_from_create(record: SyncKeyRecordCreate) -> dict[str
         "recovery_hint": record.recovery_hint,
         "rotation_of_key_record_id": record.rotation_of_key_record_id,
         "revoked_at": record.revoked_at,
+        "encryption_policy": record.encryption_policy,
+        "key_epoch": record.key_epoch,
+        "active_from_server_sequence": record.active_from_server_sequence,
+        "superseded_at": record.superseded_at,
+        "wrapped_for": record.wrapped_for,
+        "rewrap_status": record.rewrap_status,
     }
 
 
@@ -1349,6 +1389,14 @@ def _key_record_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "recovery_hint": row.get("recovery_hint"),
         "rotation_of_key_record_id": row.get("rotation_of_key_record_id"),
         "revoked_at": row.get("revoked_at"),
+        "encryption_policy": row.get("encryption_policy") or DEFAULT_M1_ENCRYPTION_POLICY,
+        "key_epoch": int(row.get("key_epoch") or 1),
+        "active_from_server_sequence": _optional_int_from_storage(
+            row.get("active_from_server_sequence")
+        ),
+        "superseded_at": _timestamp_to_string(row.get("superseded_at")),
+        "wrapped_for": row.get("wrapped_for") or "recovery",
+        "rewrap_status": row.get("rewrap_status") or "not_required",
     }
 
 
@@ -1576,6 +1624,9 @@ class SyncDatabase:
         with self.backend.transaction() as conn:
             if self.backend.table_exists("sync_envelopes", connection=conn):
                 self._ensure_envelope_m1_columns(connection=conn)
+            if self.backend.table_exists("sync_key_records", connection=conn):
+                self._ensure_key_record_user_id_column(connection=conn)
+                self._ensure_key_record_rotation_columns(connection=conn)
             self.backend.create_tables(schema, connection=conn)
             self._ensure_device_lifecycle_columns(connection=conn)
             self._ensure_device_lifecycle_tables(connection=conn)
@@ -1584,6 +1635,7 @@ class SyncDatabase:
             self._ensure_sync_object_state_table(connection=conn)
             self._ensure_envelope_m1_indexes(connection=conn)
             self._ensure_key_record_user_id_column(connection=conn)
+            self._ensure_key_record_rotation_columns(connection=conn)
             self._ensure_key_record_user_id_index(connection=conn)
 
     def execute(
@@ -3653,9 +3705,11 @@ class SyncDatabase:
                 INSERT INTO sync_key_records (
                     key_record_id, dataset_id, user_id, device_id, key_purpose,
                     wrapped_key_blob, kdf_metadata_json, recovery_hint,
-                    rotation_of_key_record_id, created_at, revoked_at
+                    rotation_of_key_record_id, encryption_policy, key_epoch,
+                    active_from_server_sequence, superseded_at, wrapped_for,
+                    rewrap_status, created_at, revoked_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (key_record_id) DO NOTHING
                 """,
                 (
@@ -3668,6 +3722,12 @@ class SyncDatabase:
                     encode_json(record.kdf_metadata, default={}),
                     record.recovery_hint,
                     record.rotation_of_key_record_id,
+                    record.encryption_policy,
+                    record.key_epoch,
+                    record.active_from_server_sequence,
+                    record.superseded_at,
+                    record.wrapped_for,
+                    record.rewrap_status,
                     now,
                     record.revoked_at,
                 ),
@@ -4808,6 +4868,57 @@ class SyncDatabase:
             """
             CREATE INDEX IF NOT EXISTS idx_sync_key_records_user
                 ON sync_key_records(user_id, dataset_id)
+            """,
+            connection=connection,
+        )
+
+    def _ensure_key_record_rotation_columns(self, *, connection: Any) -> None:
+        columns = {
+            column.get("name")
+            for column in self.backend.get_table_info("sync_key_records", connection=connection)
+            if isinstance(column, dict)
+        }
+        superseded_type = (
+            "TIMESTAMPTZ"
+            if self.backend_type == BackendType.POSTGRESQL
+            else "TEXT"
+        )
+        column_specs = [
+            (
+                "encryption_policy",
+                "TEXT NOT NULL DEFAULT 'server_trusted_v1'",
+            ),
+            ("key_epoch", "INTEGER NOT NULL DEFAULT 1"),
+            ("active_from_server_sequence", "INTEGER"),
+            ("superseded_at", superseded_type),
+            ("wrapped_for", "TEXT NOT NULL DEFAULT 'recovery'"),
+            ("rewrap_status", "TEXT NOT NULL DEFAULT 'not_required'"),
+        ]
+        for column_name, column_type in column_specs:
+            if column_name in columns:
+                continue
+            if self.backend_type == BackendType.POSTGRESQL:
+                self.execute(
+                    f"ALTER TABLE sync_key_records ADD COLUMN IF NOT EXISTS {column_name} {column_type}",
+                    connection=connection,
+                )
+            else:
+                self.execute(
+                    f"ALTER TABLE sync_key_records ADD COLUMN {column_name} {column_type}",
+                    connection=connection,
+                )
+
+        self.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_key_records_epoch
+                ON sync_key_records(dataset_id, encryption_policy, key_epoch)
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_key_records_rewrap
+                ON sync_key_records(dataset_id, rewrap_status)
             """,
             connection=connection,
         )

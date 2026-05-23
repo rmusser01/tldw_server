@@ -69,6 +69,8 @@ from .models import (
     SyncEnvelopeCreate,
     SyncKeyRecord,
     SyncKeyRecordCreate,
+    SyncKeyRewrapStatus,
+    SyncKeyWrappedFor,
     SyncOperation,
     SyncRestoreBlobCompleteness,
     SyncRestoreCompletenessStatus,
@@ -2108,6 +2110,12 @@ class SyncV2Service:
         kdf_metadata: dict[str, object] | None = None,
         recovery_hint: str | None = None,
         rotation_of_key_record_id: str | None = None,
+        encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY,
+        key_epoch: int = 1,
+        active_from_server_sequence: int | None = None,
+        superseded_at: str | None = None,
+        wrapped_for: SyncKeyWrappedFor = "recovery",
+        rewrap_status: SyncKeyRewrapStatus = "not_required",
     ) -> SyncKeyRecord:
         dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
         if device_id is not None:
@@ -2131,6 +2139,12 @@ class SyncV2Service:
                 kdf_metadata=dict(kdf_metadata or {}),
                 recovery_hint=recovery_hint,
                 rotation_of_key_record_id=rotation_of_key_record_id,
+                encryption_policy=encryption_policy,
+                key_epoch=key_epoch,
+                active_from_server_sequence=active_from_server_sequence,
+                superseded_at=superseded_at,
+                wrapped_for=wrapped_for,
+                rewrap_status=rewrap_status,
             )
         )
 

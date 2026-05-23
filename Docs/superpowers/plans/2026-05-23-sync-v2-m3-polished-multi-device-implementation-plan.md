@@ -219,7 +219,7 @@
   Cover `server_trusted_v1`, `passphrase_wrapped_v1`, `device_wrapped_v1`, and
   `client_private_v1` validation.
 
-- [ ] **Step 2: Implement key epoch storage**
+- [x] **Step 2: Implement key epoch storage**
 
   Extend key record metadata and add rotation state.
 

@@ -1462,6 +1462,115 @@ def test_key_records_store_wrapped_blobs_without_plaintext_keys(sync_store: Sync
         sync_store.list_key_records("dataset-1", user_id="")
 
 
+def test_key_records_store_epoch_and_rotation_state_metadata(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset())
+
+    stored = sync_store.store_key_record(
+        _key_record(
+            encryption_policy="passphrase_wrapped_v1",
+            key_epoch=2,
+            active_from_server_sequence=7,
+            superseded_at="2026-05-10T12:30:00+00:00",
+            wrapped_for="passphrase",
+            rewrap_status="complete",
+        )
+    )
+    duplicate = sync_store.store_key_record(
+        _key_record(
+            encryption_policy="passphrase_wrapped_v1",
+            key_epoch=2,
+            active_from_server_sequence=7,
+            superseded_at="2026-05-10T12:30:00+00:00",
+            wrapped_for="passphrase",
+            rewrap_status="complete",
+        )
+    )
+    records = sync_store.list_key_records("dataset-1", user_id="user-1")
+
+    assert duplicate == stored
+    assert records == [stored]
+    assert stored.encryption_policy == "passphrase_wrapped_v1"
+    assert stored.key_epoch == 2
+    assert stored.active_from_server_sequence == 7
+    assert stored.superseded_at == "2026-05-10T12:30:00+00:00"
+    assert stored.wrapped_for == "passphrase"
+    assert stored.rewrap_status == "complete"
+
+    with pytest.raises(SyncIdempotencyConflictError):
+        sync_store.store_key_record(_key_record(key_epoch=3))
+
+    with pytest.raises(SyncIdempotencyConflictError):
+        sync_store.store_key_record(_key_record(rewrap_status="pending"))
+
+
+def test_existing_key_record_rows_receive_safe_epoch_defaults(tmp_path: Path):
+    db_path = tmp_path / "sync_v2_legacy_key_records.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE sync_key_records (
+                key_record_id TEXT PRIMARY KEY,
+                dataset_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                device_id TEXT,
+                key_purpose TEXT NOT NULL,
+                wrapped_key_blob TEXT NOT NULL,
+                kdf_metadata_json TEXT NOT NULL DEFAULT '{}',
+                recovery_hint TEXT,
+                rotation_of_key_record_id TEXT,
+                created_at TEXT NOT NULL,
+                revoked_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO sync_key_records (
+                key_record_id, dataset_id, user_id, device_id, key_purpose,
+                wrapped_key_blob, kdf_metadata_json, recovery_hint,
+                rotation_of_key_record_id, created_at, revoked_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-key-1",
+                "dataset-1",
+                "user-1",
+                "device-1",
+                "dataset_recovery",
+                "wrapped:legacy",
+                '{"algorithm": "scrypt", "salt": "legacy-salt"}',
+                "legacy recovery",
+                None,
+                "2026-05-10T12:00:00+00:00",
+                None,
+            ),
+        )
+
+    store = SyncV2Store(SyncDatabase(sqlite_path=db_path))
+    store.enroll_dataset(_dataset())
+
+    columns = {column["name"] for column in store.db.backend.get_table_info("sync_key_records")}
+    records = store.list_key_records("dataset-1", user_id="user-1")
+
+    assert {
+        "encryption_policy",
+        "key_epoch",
+        "active_from_server_sequence",
+        "superseded_at",
+        "wrapped_for",
+        "rewrap_status",
+    }.issubset(columns)
+    assert len(records) == 1
+    assert records[0].key_record_id == "legacy-key-1"
+    assert records[0].encryption_policy == "server_trusted_v1"
+    assert records[0].key_epoch == 1
+    assert records[0].active_from_server_sequence is None
+    assert records[0].superseded_at is None
+    assert records[0].wrapped_for == "recovery"
+    assert records[0].rewrap_status == "not_required"
+
+
 def test_key_records_are_scoped_by_user(sync_store: SyncV2Store):
     sync_store.enroll_dataset(_dataset())
 

@@ -25,6 +25,8 @@ EncryptionPolicy = Literal[
     "device_wrapped_v1",
     "client_private_v1",
 ]
+SyncKeyWrappedFor = Literal["server", "passphrase", "device", "recovery"]
+SyncKeyRewrapStatus = Literal["not_required", "pending", "complete", "failed", "blocked"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
 SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
 SyncBlobAvailabilityStatus = Literal[
@@ -111,6 +113,19 @@ STRICT_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "passphrase_wrapped_v1",
     "device_wrapped_v1",
     "client_private_v1",
+]
+SYNC_KEY_WRAPPED_FOR_VALUES: list[SyncKeyWrappedFor] = [
+    "server",
+    "passphrase",
+    "device",
+    "recovery",
+]
+SYNC_KEY_REWRAP_STATUSES: list[SyncKeyRewrapStatus] = [
+    "not_required",
+    "pending",
+    "complete",
+    "failed",
+    "blocked",
 ]
 
 
@@ -692,6 +707,21 @@ class SyncKeyRecordCreate:
     recovery_hint: str | None = None
     rotation_of_key_record_id: str | None = None
     revoked_at: str | None = None
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+    key_epoch: int = 1
+    active_from_server_sequence: int | None = None
+    superseded_at: str | None = None
+    wrapped_for: SyncKeyWrappedFor = "recovery"
+    rewrap_status: SyncKeyRewrapStatus = "not_required"
+
+    def __post_init__(self) -> None:
+        _validate_key_record_rotation_metadata(
+            encryption_policy=self.encryption_policy,
+            key_epoch=self.key_epoch,
+            active_from_server_sequence=self.active_from_server_sequence,
+            wrapped_for=self.wrapped_for,
+            rewrap_status=self.rewrap_status,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -709,6 +739,47 @@ class SyncKeyRecord:
     rotation_of_key_record_id: str | None
     created_at: str
     revoked_at: str | None = None
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+    key_epoch: int = 1
+    active_from_server_sequence: int | None = None
+    superseded_at: str | None = None
+    wrapped_for: SyncKeyWrappedFor = "recovery"
+    rewrap_status: SyncKeyRewrapStatus = "not_required"
+
+    def __post_init__(self) -> None:
+        _validate_key_record_rotation_metadata(
+            encryption_policy=self.encryption_policy,
+            key_epoch=self.key_epoch,
+            active_from_server_sequence=self.active_from_server_sequence,
+            wrapped_for=self.wrapped_for,
+            rewrap_status=self.rewrap_status,
+        )
+
+
+def _validate_key_record_rotation_metadata(
+    *,
+    encryption_policy: EncryptionPolicy,
+    key_epoch: int,
+    active_from_server_sequence: int | None,
+    wrapped_for: SyncKeyWrappedFor,
+    rewrap_status: SyncKeyRewrapStatus,
+) -> None:
+    if encryption_policy not in SYNC_V2_ENCRYPTION_POLICIES:
+        raise ValueError(f"unsupported Sync v2 encryption policy: {encryption_policy}")
+    if isinstance(key_epoch, bool) or key_epoch < 1:
+        raise ValueError("Sync key record key_epoch must be greater than or equal to 1")
+    if (
+        active_from_server_sequence is not None
+        and (
+            isinstance(active_from_server_sequence, bool)
+            or active_from_server_sequence < 0
+        )
+    ):
+        raise ValueError("Sync key record active_from_server_sequence must be non-negative")
+    if wrapped_for not in SYNC_KEY_WRAPPED_FOR_VALUES:
+        raise ValueError(f"unsupported Sync key wrapped_for value: {wrapped_for}")
+    if rewrap_status not in SYNC_KEY_REWRAP_STATUSES:
+        raise ValueError(f"unsupported Sync key rewrap_status value: {rewrap_status}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -961,6 +1032,8 @@ __all__ = [
     "STRICT_ENCRYPTION_POLICIES",
     "SOURCE_CACHE_SYNC_DOMAINS",
     "SOURCE_CACHE_SYNC_OPERATIONS",
+    "SYNC_KEY_REWRAP_STATUSES",
+    "SYNC_KEY_WRAPPED_FOR_VALUES",
     "SYNC_V2_ENCRYPTION_POLICIES",
     "SYNC_V2_SUPPORTED_DOMAINS",
     "SYNC_V2_SUPPORTED_OPERATIONS",
@@ -995,8 +1068,10 @@ __all__ = [
     "SyncEnvelope",
     "SyncEnvelopeCreate",
     "SyncEncryptionPolicyMetadata",
+    "SyncKeyRewrapStatus",
     "SyncKeyRecord",
     "SyncKeyRecordCreate",
+    "SyncKeyWrappedFor",
     "SyncObjectState",
     "SyncOperation",
     "SyncRestoreBlobCompleteness",

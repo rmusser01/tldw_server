@@ -21,6 +21,8 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncCapabilitiesResponse,
     SyncConflictResolveRequest,
     SyncDatasetEnrollRequest,
+    SyncKeyRecoveryBundleRecord,
+    SyncKeyRecoveryBundleRequest,
     SyncPushRequest,
     SyncPushResponse,
     SyncRestoreCompletenessResponse,
@@ -221,6 +223,69 @@ def test_encryption_policy_metadata_rejects_secret_key_material_fields():
 
     assert "wrapped:secret-key-material" not in str(api_error.value)
     assert "wrapped:secret-key-material" not in str(core_error.value)
+
+
+def test_key_recovery_bundle_models_include_epoch_rotation_metadata():
+    request = SyncKeyRecoveryBundleRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "wrapped_key_blob": "wrapped:opaque",
+            "kdf_metadata": {"algorithm": "scrypt", "salt": "opaque-salt"},
+            "encryption_policy": "passphrase_wrapped_v1",
+            "key_epoch": 4,
+            "active_from_server_sequence": 17,
+            "superseded_at": "2026-05-10T12:30:00+00:00",
+            "wrapped_for": "passphrase",
+            "rewrap_status": "pending",
+        }
+    )
+    record = SyncKeyRecoveryBundleRecord.model_validate(
+        {
+            "key_record_id": "key-1",
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "key_purpose": "dataset_recovery",
+            "wrapped_key_blob": "wrapped:opaque",
+            "encryption_policy": "device_wrapped_v1",
+            "key_epoch": 2,
+            "active_from_server_sequence": 19,
+            "wrapped_for": "device",
+            "rewrap_status": "complete",
+        }
+    )
+
+    assert request.encryption_policy == "passphrase_wrapped_v1"
+    assert request.key_epoch == 4
+    assert request.active_from_server_sequence == 17
+    assert request.superseded_at == "2026-05-10T12:30:00+00:00"
+    assert request.wrapped_for == "passphrase"
+    assert request.rewrap_status == "pending"
+    assert record.encryption_policy == "device_wrapped_v1"
+    assert record.key_epoch == 2
+    assert record.active_from_server_sequence == 19
+    assert record.wrapped_for == "device"
+    assert record.rewrap_status == "complete"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"key_epoch": 0},
+        {"active_from_server_sequence": -1},
+        {"wrapped_for": "plaintext"},
+        {"rewrap_status": "leaked"},
+        {"encryption_policy": "legacy"},
+    ],
+)
+def test_key_recovery_bundle_models_reject_invalid_epoch_rotation_metadata(payload):
+    request_payload = {
+        "dataset_id": "dataset-1",
+        "wrapped_key_blob": "wrapped:opaque",
+    }
+    request_payload.update(payload)
+
+    with pytest.raises(ValidationError):
+        SyncKeyRecoveryBundleRequest.model_validate(request_payload)
 
 
 def test_dataset_enroll_request_accepts_explicit_workspace_metadata_domains():

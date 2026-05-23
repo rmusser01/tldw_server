@@ -370,6 +370,12 @@ def _api_key_record_metadata(record: Any) -> dict[str, Any]:
         "key_purpose": record.key_purpose,
         "recovery_hint": record.recovery_hint,
         "rotation_of_key_record_id": record.rotation_of_key_record_id,
+        "encryption_policy": record.encryption_policy,
+        "key_epoch": record.key_epoch,
+        "active_from_server_sequence": record.active_from_server_sequence,
+        "superseded_at": record.superseded_at,
+        "wrapped_for": record.wrapped_for,
+        "rewrap_status": record.rewrap_status,
         "created_at": record.created_at,
     }
 
@@ -386,6 +392,12 @@ def _api_key_record_export(record: Any) -> SyncKeyRecoveryBundleRecord:
         rotation_of_key_record_id=record.rotation_of_key_record_id,
         created_at=record.created_at,
         revoked_at=record.revoked_at,
+        encryption_policy=record.encryption_policy,
+        key_epoch=record.key_epoch,
+        active_from_server_sequence=record.active_from_server_sequence,
+        superseded_at=record.superseded_at,
+        wrapped_for=record.wrapped_for,
+        rewrap_status=record.rewrap_status,
     )
 
 
@@ -1530,6 +1542,12 @@ def store_sync_v2_key_recovery_bundle(
             kdf_metadata=request.kdf_metadata,
             recovery_hint=request.recovery_hint,
             rotation_of_key_record_id=request.rotation_of_key_record_id,
+            encryption_policy=request.encryption_policy,
+            key_epoch=request.key_epoch,
+            active_from_server_sequence=request.active_from_server_sequence,
+            superseded_at=request.superseded_at,
+            wrapped_for=request.wrapped_for,
+            rewrap_status=request.rewrap_status,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(

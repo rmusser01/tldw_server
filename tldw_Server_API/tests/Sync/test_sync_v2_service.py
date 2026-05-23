@@ -3182,6 +3182,42 @@ def test_list_key_recovery_bundles_returns_filtered_opaque_material(
     assert "opaque-salt" not in str(manifest)
 
 
+def test_store_key_recovery_bundle_persists_epoch_rotation_metadata(
+    sync_service: SyncV2Service,
+):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+
+    stored = sync_service.store_key_recovery_bundle(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        key_purpose="dataset_recovery",
+        wrapped_key_blob="wrapped:passphrase-key",
+        kdf_metadata={"algorithm": "scrypt", "salt": "opaque-salt"},
+        recovery_hint="vault passphrase",
+        encryption_policy="passphrase_wrapped_v1",
+        key_epoch=3,
+        active_from_server_sequence=12,
+        wrapped_for="passphrase",
+        rewrap_status="pending",
+    )
+    records = sync_service.list_key_recovery_bundles(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        key_purpose="dataset_recovery",
+    )
+
+    assert records == [stored]
+    assert stored.encryption_policy == "passphrase_wrapped_v1"
+    assert stored.key_epoch == 3
+    assert stored.active_from_server_sequence == 12
+    assert stored.superseded_at is None
+    assert stored.wrapped_for == "passphrase"
+    assert stored.rewrap_status == "pending"
+    assert stored.wrapped_key_blob == "wrapped:passphrase-key"
+
+
 def test_store_key_recovery_bundle_validates_purpose_wrapping_metadata_and_rotation(
     sync_service: SyncV2Service,
     sync_store: SyncV2Store,
