@@ -41,6 +41,10 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
     getRevisionsFromPayload(activeSessionPayload)
   )
   const revisionsRef = useRef(revisions)
+  const activeSessionIdRef = useRef(activeSessionId)
+  const revisionListVersionRef = useRef(0)
+
+  activeSessionIdRef.current = activeSessionId
 
   useEffect(() => {
     revisionsRef.current = revisions
@@ -48,6 +52,7 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
 
   useEffect(() => {
     const nextRevisions = getRevisionsFromPayload(activeSessionPayload)
+    revisionListVersionRef.current += 1
     revisionsRef.current = nextRevisions
     setRevisions(nextRevisions)
   }, [activeSessionId, activeSessionPayload])
@@ -68,6 +73,7 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
       ) => WritingRevisionProposal[]
     ) => {
       const nextRevisions = updater(revisionsRef.current)
+      revisionListVersionRef.current += 1
       revisionsRef.current = nextRevisions
       setRevisions(nextRevisions)
       persistRevisions(nextRevisions)
@@ -154,7 +160,23 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
       )
       if (!source) return
 
+      const regenerationSessionId = activeSessionIdRef.current
+      const regenerationVersion = revisionListVersionRef.current
       const replacement = await createReplacement(source)
+      if (activeSessionIdRef.current !== regenerationSessionId) return
+
+      const currentSource = revisionsRef.current.find(
+        (proposal) => proposal.id === source.id
+      )
+      if (
+        revisionListVersionRef.current !== regenerationVersion ||
+        currentSource !== source ||
+        currentSource.sessionId !== regenerationSessionId ||
+        currentSource.status !== "pending"
+      ) {
+        return
+      }
+
       updateRevisions((current) => [
         ...current.map((proposal) =>
           proposal.id === source.id
