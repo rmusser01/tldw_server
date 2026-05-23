@@ -455,11 +455,11 @@ git commit -m "feat(sync): harden sync v2 key recovery readiness"
 
 Before opening the M2 implementation PR:
 
-- [ ] Run targeted Sync v2 tests listed above.
-- [ ] Run the e2e restore test.
-- [ ] Run Bandit on touched production paths.
-- [ ] Run `git diff --check`.
-- [ ] Update `TASK-490.12` and all child Backlog tasks with modified files,
+- [x] Run targeted Sync v2 tests listed above.
+- [x] Run the e2e restore test.
+- [x] Run Bandit on touched production paths.
+- [x] Run `git diff --check`.
+- [x] Update `TASK-490.12` and all child Backlog tasks with modified files,
   verification output, known skips, and final summary.
 - [ ] Ensure the PR includes a human-written Change summary explaining what
   changed and why these implementation choices were made.

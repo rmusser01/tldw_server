@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
 from tldw_Server_API.app.core.Sync.v2.materializers import (
     AttachmentRefMaterializer,
@@ -32,6 +34,10 @@ PRIVATE_CHAT_BODY = "Never expose this chat body in restore metadata"
 
 def _clock() -> str:
     return "2026-05-10T12:00:00+00:00"
+
+
+def _sha256(payload: bytes) -> str:
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def _test_user() -> User:
@@ -84,6 +90,44 @@ def harness(tmp_path: Path) -> SyncE2EHarness:
             max_batch_size=20,
             max_pull_page_size=20,
             restore_manifest_scan_limit=100,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    return SyncE2EHarness(
+        client=_sync_client(service, _test_user()),
+        service=service,
+        chacha_db=chacha_db,
+    )
+
+
+@pytest.fixture()
+def m2_harness(tmp_path: Path) -> SyncE2EHarness:
+    default_sync_v2_registry.cache_clear()
+    chacha_db = CharactersRAGDB(
+        db_path=str(tmp_path / "ChaChaNotes.db"),
+        client_id="server-user-1",
+    )
+    service = SyncV2Service(
+        store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_restore_m2_e2e.db")),
+        adapters=default_sync_v2_registry(),
+        materializers={
+            "attachment.ref": AttachmentRefMaterializer(),
+            "chat.conversation": ChatConversationMaterializer(chacha_db),
+            "chat.message": ChatMessageMaterializer(chacha_db),
+            "notes.note": NotesMaterializer(chacha_db),
+        },
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
+        settings=SyncV2Settings(
+            max_batch_size=20,
+            max_pull_page_size=20,
+            restore_manifest_scan_limit=100,
+            supports_attachments=True,
+            max_attachment_bytes=4096,
+            max_blob_bytes=4096,
+            max_chunk_bytes=1024,
+            user_blob_quota_bytes=8192,
             server_trusted_encryption=_ready_encryption(),
         ),
     )
@@ -407,6 +451,132 @@ def test_chatbook_sync_v2_restore_preview_and_pull_roundtrip(
         "env-message-1",
         "env-attachment-ref-1",
     ]
+
+
+def test_chatbook_sync_v2_m2_uploaded_blob_restore_completeness_roundtrip(
+    m2_harness: SyncE2EHarness,
+) -> None:
+    client = m2_harness.client
+    payload = b"uploaded attachment payload"
+    payload_hash = _sha256(payload)
+    attachment_ref = _attachment_ref_envelope(
+        payload={
+            "attachment_id": "attachment-1",
+            "parent_domain": "notes.note",
+            "parent_object_id": "note-1",
+            "content_type": "application/octet-stream",
+            "size_bytes": len(payload),
+            "payload_hash": payload_hash,
+            "availability": "client_local",
+        },
+        payload_hash=payload_hash,
+        payload_size_bytes=len(payload),
+    )
+
+    _register_device(client, "device-a", "Laptop A")
+    _register_device(client, "device-b", "Laptop B")
+    _enroll_dataset(client)
+    recovery = client.post(
+        "/api/v1/sync/keys/recovery-bundle",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-a",
+            "key_purpose": "dataset_recovery",
+            "wrapped_key_blob": "wrapped:opaque-dataset-key",
+            "kdf_metadata": {"algorithm": "scrypt", "salt": "opaque-salt"},
+        },
+    )
+    pushed = _push(client, [_note_envelope(), attachment_ref])
+    blob_incomplete = client.post(
+        "/api/v1/sync/restore/preview",
+        json={"dataset_ids": ["dataset-1"], "selected_attachment_ids": ["attachment-1"]},
+    )
+
+    create_upload = client.post(
+        "/api/v1/sync/blob-uploads",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-a",
+            "domain": "notes.note",
+            "object_id": "note-1",
+            "attachment_id": "attachment-1",
+            "content_type": "application/octet-stream",
+            "size_bytes": len(payload),
+            "payload_hash": payload_hash,
+            "chunk_size": len(payload),
+            "chunk_count": 1,
+            "idempotency_key": "upload-attachment-1",
+        },
+    )
+    upload_id = create_upload.json()["upload_id"]
+    chunk = client.put(
+        f"/api/v1/sync/blob-uploads/{upload_id}/chunks/0",
+        params={
+            "dataset_id": "dataset-1",
+            "offset_bytes": 0,
+            "chunk_hash": payload_hash,
+        },
+        content=payload,
+        headers={"content-type": "application/octet-stream"},
+    )
+    complete = client.post(
+        f"/api/v1/sync/blob-uploads/{upload_id}/complete",
+        params={"dataset_id": "dataset-1"},
+    )
+    content_complete = client.post(
+        "/api/v1/sync/restore/preview",
+        json={"dataset_ids": ["dataset-1"], "selected_attachment_ids": ["attachment-1"]},
+    )
+    verified_complete = client.post(
+        "/api/v1/sync/restore/preview",
+        json={
+            "dataset_ids": ["dataset-1"],
+            "selected_attachment_ids": ["attachment-1"],
+            "attachment_availability": {"attachment-1": "verified"},
+        },
+    )
+    download_manifest = client.get(
+        "/api/v1/sync/attachments/attachment-1/manifest",
+        params={"dataset_id": "dataset-1"},
+    )
+    downloaded = client.get(
+        "/api/v1/sync/attachments/attachment-1",
+        params={"dataset_id": "dataset-1"},
+    )
+
+    assert recovery.status_code == 200
+    assert pushed["rejected"] == []
+    assert pushed["conflicts"] == []
+    assert blob_incomplete.status_code == 200
+    blob_incomplete_body = blob_incomplete.json()
+    assert blob_incomplete_body["restore_status"] == "blob_incomplete"
+    assert blob_incomplete_body["blob_details"][0]["server_availability"] == "metadata_only"
+    assert [item["attachment_id"] for item in blob_incomplete_body["missing_blobs"]] == [
+        "attachment-1"
+    ]
+
+    assert create_upload.status_code == 200
+    assert chunk.status_code == 200
+    assert complete.status_code == 200
+    assert complete.json()["status"] == "available"
+    assert complete.json()["payload_hash"] == payload_hash
+
+    assert content_complete.status_code == 200
+    content_complete_body = content_complete.json()
+    assert content_complete_body["restore_status"] == "content_complete"
+    assert content_complete_body["blob_details"][0]["server_availability"] == "available"
+    assert content_complete_body["domain_details"][0]["domain"] == "notes.note"
+    assert any(
+        detail["domain"] == "attachment.ref" and detail["status"] == "content_complete"
+        for detail in content_complete_body["domain_details"]
+    )
+
+    assert verified_complete.status_code == 200
+    assert verified_complete.json()["restore_status"] == "verified_complete"
+    assert download_manifest.status_code == 200
+    assert download_manifest.json()["payload_hash"] == payload_hash
+    assert downloaded.status_code == 200
+    assert downloaded.content == payload
 
 
 def test_chatbook_sync_v2_two_device_pagination_echo_and_cross_user_isolation(

@@ -1,23 +1,28 @@
 ---
 id: TASK-490.12
 title: 'Sync v2 M2: Restore completeness and blobs'
-status: In Progress
+status: Done
 assignee:
 - '@Codex'
+created_date: ''
+updated_date: 2026-05-23 18:40
 labels:
 - sync
 - sync-v2
 - m2
 - roadmap
 - attachments
-priority: medium
-parent_task_id: TASK-490
+dependencies: []
 documentation:
 - Docs/superpowers/specs/2026-05-23-chatbook-sync-v2-roadmap-prd-design.md
 - Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md
 - Docs/Design/Sync_V2_M2_Restore_Completeness_and_Blobs.md
 - Docs/superpowers/plans/2026-05-23-sync-v2-m2-restore-completeness-blobs-implementation-plan.md
+- Docs/API/Sync_V2_M2.md
+parent_task_id: TASK-490
+priority: medium
 modified_files:
+- Docs/API/Sync_V2_M2.md
 - Docs/Design/Sync_V2_M2_Restore_Completeness_and_Blobs.md
 - Docs/superpowers/plans/2026-05-23-sync-v2-m2-restore-completeness-blobs-implementation-plan.md
 - backlog/tasks/task-490.12 - Sync-v2-M2-Restore-completeness-and-blobs.md
@@ -28,6 +33,7 @@ modified_files:
 - backlog/tasks/task-490.12.5 - Sync-v2-M2-Restore-completeness-and-selective-restore-status.md
 - backlog/tasks/task-490.12.6 - Sync-v2-M2-Key-recovery-hardening.md
 - backlog/tasks/task-490.12.7 - Sync-v2-M2-E2E-docs-and-final-verification.md
+- tldw_Server_API/tests/e2e/test_chatbook_sync_v2_restore.py
 ---
 
 ## Description
@@ -45,26 +51,18 @@ Roadmap epic for Milestone 2 after M1 lands: attachment/blob transfer, restore c
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-- Added `Docs/Design/Sync_V2_M2_Restore_Completeness_and_Blobs.md` to lock M2 design decisions after M1 stabilized.
-- Added `Docs/superpowers/plans/2026-05-23-sync-v2-m2-restore-completeness-blobs-implementation-plan.md` with five implementation stages and test-first steps.
-- Created child tasks:
-  - `TASK-490.12.1` protocol models and capabilities.
-  - `TASK-490.12.2` blob storage ledger and local blob store.
-  - `TASK-490.12.3` resumable upload API.
-  - `TASK-490.12.4` download manifests and chunk serving.
-  - `TASK-490.12.5` restore completeness and selective restore status.
-  - `TASK-490.12.6` key recovery hardening.
-  - `TASK-490.12.7` E2E docs and final verification.
-- Parent task remains `In Progress` as the M2 tracking epic while implementation children are open.
-- Verification: `git diff --check` passed; `rg` verified the design, plan, and parent task contain the M2 server-trusted/resumable restore decisions and child task references; Backlog MCP lists all seven child tasks under `TASK-490.12`.
-- Bandit: skipped for this planning pass because only Markdown/Backlog files were changed.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:BEGIN -->
+- Added Docs/Design/Sync_V2_M2_Restore_Completeness_and_Blobs.md to lock M2 design decisions after M1 stabilized.
+- Added Docs/superpowers/plans/2026-05-23-sync-v2-m2-restore-completeness-blobs-implementation-plan.md with staged test-first implementation tasks.
+- Completed child tasks TASK-490.12.1 through TASK-490.12.7 covering protocol models/capabilities, blob ledger/storage, resumable upload, download manifests, restore completeness, key recovery hardening, API docs, and final e2e verification.
+- Added Docs/API/Sync_V2_M2.md and final e2e coverage for uploaded blob restore completeness.
+- Final verification for the M2 track passed: Sync suite 313 passed, restore e2e 5 passed, Ruff passed, Bandit reported 0 findings at /tmp/bandit_sync_v2_m2_final.json, and git diff --check passed.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-M2 planning is refined and split into implementation child tasks. The M2 design locks personal attachment.ref blob transfer, resumable upload/download, quota and checksum policy, server-derived blob availability, profile-level restore completeness, selective restore controls, and server-unlocked key recovery hardening. Implementation is tracked by TASK-490.12.1 through TASK-490.12.7.
+Sync v2 M2 restore completeness and blob support is implemented and verified. The track now covers M2 protocol/capability models, blob storage ledger and local blob store, resumable upload API, download manifests and byte serving, restore completeness/selective restore status, key recovery hardening, API documentation, and uploaded-blob restore e2e coverage. Final verification passed with the Sync suite at 313 passed/6 warnings, restore e2e at 5 passed, Ruff clean for touched e2e code, Bandit 0 findings at /tmp/bandit_sync_v2_m2_final.json, and git diff --check clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
