@@ -3563,11 +3563,17 @@
   "writingPlayground_generateUnavailable": {
     "message": "Chat completions unavailable."
   },
+  "writingPlayground_generationUnavailableShort": {
+    "message": "Generation unavailable"
+  },
   "writingPlayground_modelMissing": {
     "message": "Select a model in Settings to generate."
   },
   "writingPlayground_generationInProgress": {
     "message": "Stop generation before switching sessions."
+  },
+  "writingPlayground_revisionConfirmBroadTarget": {
+    "message": "Confirm before applying a broad text-changing request."
   },
   "writingPlayground_generateShortcutTooltip": {
     "message": "Ctrl/Cmd+Enter to generate"
