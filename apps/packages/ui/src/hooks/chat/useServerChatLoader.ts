@@ -557,7 +557,7 @@ export const useServerChatLoader = ({
   t,
   scope
 }: UseServerChatLoaderOptions) => {
-  const [, setSelectedAssistant] = useSelectedAssistant(null)
+  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const {
     messages,
     streaming,
@@ -784,7 +784,8 @@ export const useServerChatLoader = ({
               try {
                 syncedSettings = await syncChatSettingsForServerChat({
                   historyId: null,
-                  serverChatId
+                  serverChatId,
+                  allowScratchFallback: false
                 })
               } catch {
                 syncedSettings = null
@@ -863,6 +864,23 @@ export const useServerChatLoader = ({
               }
               if (!canCommitCurrentLoad()) {
                 return null
+              }
+              const fallbackState = resolveEffectiveAssistantState({
+                tracked: {
+                  assistantKind,
+                  assistantId,
+                  characterId
+                },
+                draftSelection: selectedAssistant
+              })
+              const selection =
+                effectiveAssistantStateToSelection(fallbackState)
+              if (selection) {
+                await setSelectedAssistant(selection)
+                return {
+                  assistantName: selection.name,
+                  assistantAvatarUrl: selection.avatar_url ?? null
+                }
               }
               await setSelectedAssistant(null)
               return null
@@ -978,7 +996,8 @@ export const useServerChatLoader = ({
                 try {
                   await syncChatSettingsForServerChat({
                     historyId: localHistoryId,
-                    serverChatId
+                    serverChatId,
+                    allowScratchFallback: false
                   })
                 } catch {
                   // Best-effort settings sync.
@@ -1112,6 +1131,7 @@ export const useServerChatLoader = ({
     setServerChatTitle,
     setServerChatTopic,
     setServerChatVersion,
+    selectedAssistant,
     scope,
     t,
     temporaryChat

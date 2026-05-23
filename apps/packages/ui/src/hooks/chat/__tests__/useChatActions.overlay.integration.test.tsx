@@ -5,11 +5,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
 
-const { createChatMock, normalChatModeMock, streamCharacterChatCompletionMock } =
+const {
+  createChatMock,
+  normalChatModeMock,
+  streamCharacterChatCompletionMock,
+  syncChatSettingsForServerChatMock
+} =
   vi.hoisted(() => ({
     createChatMock: vi.fn(),
     normalChatModeMock: vi.fn(),
-    streamCharacterChatCompletionMock: vi.fn()
+    streamCharacterChatCompletionMock: vi.fn(),
+    syncChatSettingsForServerChatMock: vi.fn(async () => null)
   }))
 
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
@@ -113,6 +119,10 @@ vi.mock("@/store/option", () => ({
 
 vi.mock("@/services/tldw/server-capabilities", () => ({
   getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))
+}))
+
+vi.mock("@/services/chat-settings", () => ({
+  syncChatSettingsForServerChat: syncChatSettingsForServerChatMock
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -263,5 +273,39 @@ describe("useChatActions overlay integration", () => {
         overlaySystemPrompt: "Overlay guide prompt"
       })
     )
+  })
+
+  it("reconciles scratch overlay settings only when a send links a new server conversation", async () => {
+    const options = createHookOptions()
+    normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const params = args[6] as {
+        saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>
+      }
+      await params.saveMessageOnSuccess({
+        historyId: null,
+        isRegenerate: false,
+        selectedModel: "deepseek-chat",
+        message: "Overlay hello",
+        image: "",
+        fullText: "Overlay reply",
+        source: [],
+        conversationId: "server-chat-42"
+      })
+    })
+
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Overlay hello",
+        image: ""
+      })
+    })
+
+    expect(syncChatSettingsForServerChatMock).toHaveBeenCalledWith({
+      historyId: "history-overlay",
+      serverChatId: "server-chat-42",
+      allowScratchFallback: true
+    })
   })
 })

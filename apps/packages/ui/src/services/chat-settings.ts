@@ -639,8 +639,9 @@ export const saveChatSettingsForChat = async (params: {
 export const syncChatSettingsForServerChat = async (params: {
   historyId: string | null
   serverChatId: string | null
+  allowScratchFallback?: boolean
 }): Promise<ChatSettingsRecord | null> => {
-  const { historyId, serverChatId } = params
+  const { historyId, serverChatId, allowScratchFallback = false } = params
   if (!serverChatId) return null
 
   const serverKey = resolveChatSettingsKey({ historyId: null, serverChatId })
@@ -650,9 +651,10 @@ export const syncChatSettingsForServerChat = async (params: {
   const localForServer = await getChatSettingsForKey(serverKey)
   const localFromHistory = historyId ? await getChatSettingsForKey(localKey) : null
   const localFromScratch =
-    !localForServer && !localFromHistory
+    allowScratchFallback && !localForServer && !localFromHistory
       ? await getChatSettingsForKey(scratchKey)
       : null
+  const usedScratchFallback = Boolean(localFromScratch)
   const localSettings = localForServer || localFromHistory || localFromScratch
 
   await tldwClient.initialize().catch(() => null)
@@ -673,6 +675,9 @@ export const syncChatSettingsForServerChat = async (params: {
       const res = await tldwClient.updateChatSettings(serverChatId, localSettings)
       const synced = coerceSettings(res.settings) || localSettings
       await saveChatSettingsForKey(serverKey, synced)
+      if (usedScratchFallback) {
+        await storage.remove(getChatSettingsStorageKey(scratchKey))
+      }
       return synced
     } catch (error) {
       console.warn("Failed to push local chat settings", error)
@@ -705,6 +710,9 @@ export const syncChatSettingsForServerChat = async (params: {
   }
 
   await saveChatSettingsForKey(serverKey, merged)
+  if (usedScratchFallback) {
+    await storage.remove(getChatSettingsStorageKey(scratchKey))
+  }
   return merged
 }
 

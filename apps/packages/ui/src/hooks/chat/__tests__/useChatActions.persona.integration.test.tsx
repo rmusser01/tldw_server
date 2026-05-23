@@ -8,11 +8,23 @@ import { useChatActions } from "../useChatActions"
 const {
   createChatMock,
   normalChatModeMock,
-  streamCharacterChatCompletionMock
+  streamCharacterChatCompletionMock,
+  baseSaveMessageOnSuccessMock,
+  syncChatSettingsForServerChatMock,
+  getConfigMock,
+  savePlaygroundSessionMock,
+  buildChatSurfaceScopeKeyFromConfigMock
 } = vi.hoisted(() => ({
   createChatMock: vi.fn(),
   normalChatModeMock: vi.fn(),
-  streamCharacterChatCompletionMock: vi.fn()
+  streamCharacterChatCompletionMock: vi.fn(),
+  baseSaveMessageOnSuccessMock: vi.fn(
+    async (_payload?: unknown): Promise<string | null> => "history-persona"
+  ),
+  syncChatSettingsForServerChatMock: vi.fn(async () => null),
+  getConfigMock: vi.fn(),
+  savePlaygroundSessionMock: vi.fn(),
+  buildChatSurfaceScopeKeyFromConfigMock: vi.fn()
 }))
 
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
@@ -37,11 +49,7 @@ vi.mock("@/hooks/chat-modes/documentChatMode", () => ({
 
 vi.mock("@/hooks/utils/messageHelpers", () => ({
   validateBeforeSubmit: vi.fn(() => true),
-  createSaveMessageOnSuccess: vi.fn(
-    () =>
-      async (_payload?: unknown): Promise<string | null> =>
-        "history-persona"
-  ),
+  createSaveMessageOnSuccess: vi.fn(() => baseSaveMessageOnSuccessMock),
   createSaveMessageOnError: vi.fn(
     () =>
       async (_payload?: unknown): Promise<string | null> =>
@@ -118,11 +126,28 @@ vi.mock("@/services/tldw/server-capabilities", () => ({
   getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))
 }))
 
+vi.mock("@/services/chat-settings", () => ({
+  syncChatSettingsForServerChat: syncChatSettingsForServerChatMock
+}))
+
+vi.mock("@/services/chat-surface-scope", () => ({
+  buildChatSurfaceScopeKeyFromConfig: buildChatSurfaceScopeKeyFromConfigMock
+}))
+
+vi.mock("@/store/playground-session", () => ({
+  usePlaygroundSessionStore: {
+    getState: () => ({
+      saveSession: savePlaygroundSessionMock
+    })
+  }
+}))
+
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     createChat: createChatMock,
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
-    initialize: vi.fn(async () => null)
+    initialize: vi.fn(async () => null),
+    getConfig: getConfigMock
   }
 }))
 
@@ -224,6 +249,16 @@ const createHookOptions = () => ({
 describe("useChatActions persona integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    baseSaveMessageOnSuccessMock.mockImplementation(
+      async (_payload?: unknown): Promise<string | null> => "history-persona"
+    )
+    syncChatSettingsForServerChatMock.mockResolvedValue(null)
+    getConfigMock.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-key"
+    })
+    buildChatSurfaceScopeKeyFromConfigMock.mockReturnValue("scope:chat")
     createChatMock.mockResolvedValue({
       id: "persona-chat-1",
       title: "Persona chat",
@@ -262,7 +297,36 @@ describe("useChatActions persona integration", () => {
     expect(options.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(
       "read_only"
     )
+    expect(
+      options.setServerChatId.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      options.setServerChatAssistantKind.mock.invocationCallOrder.at(-1) ?? 0
+    )
     expect(options.setServerChatMetaLoaded).toHaveBeenCalledWith(true)
+    expect(savePlaygroundSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        historyId: "history-persona",
+        serverChatId: "persona-chat-1",
+        trackedAssistantKind: "persona",
+        trackedAssistantId: "garden-helper",
+        trackedCharacterId: null,
+        trackedAssistantDisplayName: "Garden Helper",
+        trackedAssistantAvatarUrl: null,
+        serverChatPersonaMemoryMode: "read_only",
+        scopeKey: "scope:chat",
+        trackedAssistantSelection: expect.objectContaining({
+          kind: "persona",
+          id: "garden-helper",
+          name: "Garden Helper",
+          metadata: expect.objectContaining({
+            selectionMode: "tracked"
+          })
+        })
+      })
+    )
+    expect(
+      savePlaygroundSessionMock.mock.invocationCallOrder[0]
+    ).toBeLessThan(normalChatModeMock.mock.invocationCallOrder[0])
     expect(normalChatModeMock).toHaveBeenCalledWith(
       "Hello persona",
       "",
@@ -393,5 +457,51 @@ describe("useChatActions persona integration", () => {
         serverChatId: "persona-chat-existing"
       })
     )
+  })
+
+  it("preserves tracked persona server linkage when local history is assigned", async () => {
+    const setHistoryId = vi.fn()
+    const options = {
+      ...createHookOptions(),
+      historyId: null,
+      setHistoryId,
+      serverChatId: null
+    }
+    baseSaveMessageOnSuccessMock.mockImplementationOnce(
+      async (payload?: { setHistoryId?: (id: string) => void }) => {
+        payload?.setHistoryId?.("history-persona")
+        return "history-persona"
+      }
+    )
+    normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const params = args[6] as {
+        saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>
+      }
+      await params.saveMessageOnSuccess({
+        historyId: null,
+        isRegenerate: false,
+        selectedModel: "deepseek-chat",
+        message: "Hello persona",
+        image: "",
+        fullText: "Persona reply",
+        source: [],
+        assistantMessageId: "assistant-persona-1",
+        reasoning_time_taken: 0,
+        conversationId: "persona-chat-1"
+      })
+    })
+
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Hello persona",
+        image: ""
+      })
+    })
+
+    expect(setHistoryId).toHaveBeenCalledWith("history-persona", {
+      preserveServerChatId: true
+    })
   })
 })

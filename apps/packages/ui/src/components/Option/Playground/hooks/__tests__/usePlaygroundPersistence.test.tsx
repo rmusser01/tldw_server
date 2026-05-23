@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   createCharacter: vi.fn(),
   createChat: vi.fn(),
   addChatMessage: vi.fn(),
+  getConfig: vi.fn(),
+  savePlaygroundSession: vi.fn(),
+  buildChatSurfaceScopeKeyFromConfig: vi.fn(),
   usePersistenceMode: vi.fn()
 }))
 
@@ -30,7 +33,20 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     listCharacters: mocks.listCharacters,
     createCharacter: mocks.createCharacter,
     createChat: mocks.createChat,
-    addChatMessage: mocks.addChatMessage
+    addChatMessage: mocks.addChatMessage,
+    getConfig: mocks.getConfig
+  }
+}))
+
+vi.mock("@/services/chat-surface-scope", () => ({
+  buildChatSurfaceScopeKeyFromConfig: mocks.buildChatSurfaceScopeKeyFromConfig
+}))
+
+vi.mock("@/store/playground-session", () => ({
+  usePlaygroundSessionStore: {
+    getState: () => ({
+      saveSession: mocks.savePlaygroundSession
+    })
   }
 }))
 
@@ -46,11 +62,16 @@ const buildDeps = (overrides: Record<string, unknown> = {}) => ({
   setTemporaryChat: vi.fn(),
   serverChatId: null,
   setServerChatId: vi.fn(),
+  historyId: null,
   serverChatState: null,
   setServerChatState: vi.fn(),
   serverChatSource: null,
   setServerChatSource: vi.fn(),
   setServerChatVersion: vi.fn(),
+  setServerChatCharacterId: vi.fn(),
+  setServerChatAssistantKind: vi.fn(),
+  setServerChatAssistantId: vi.fn(),
+  setServerChatPersonaMemoryMode: vi.fn(),
   history: [{ role: "user", content: "Hello" }],
   clearChat: vi.fn(),
   selectedCharacter: null,
@@ -78,6 +99,9 @@ describe("usePlaygroundPersistence", () => {
     mocks.createCharacter.mockReset()
     mocks.createChat.mockReset()
     mocks.addChatMessage.mockReset()
+    mocks.getConfig.mockReset()
+    mocks.savePlaygroundSession.mockReset()
+    mocks.buildChatSurfaceScopeKeyFromConfig.mockReset()
     mocks.usePersistenceMode.mockReset()
 
     mocks.initialize.mockResolvedValue(undefined)
@@ -86,11 +110,74 @@ describe("usePlaygroundPersistence", () => {
     mocks.createCharacter.mockRejectedValue(new Error("create failed"))
     mocks.createChat.mockResolvedValue({ id: "chat-1" })
     mocks.addChatMessage.mockResolvedValue(undefined)
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-key"
+    })
+    mocks.buildChatSurfaceScopeKeyFromConfig.mockReturnValue("scope:chat")
     mocks.usePersistenceMode.mockReturnValue({
       persistenceTooltip: "save to server",
       focusConnectionCard: vi.fn(),
       getPersistenceModeLabel: vi.fn(() => "Saved to server")
     })
+  })
+
+  it("immediately persists tracked character identity when greeting auto-creates a server chat", async () => {
+    renderHook(
+      (deps: ReturnType<typeof buildDeps>) => usePlaygroundPersistence(deps),
+      {
+        initialProps: buildDeps({
+          history: [
+            {
+              role: "assistant",
+              content: "Ready for overlay continuity proof."
+            }
+          ],
+          selectedCharacter: {
+            id: "tracked-character",
+            name: "Tracked Character",
+            avatar_url: "https://example.test/avatar.png",
+            greeting: "Ready for overlay continuity proof.",
+            system_prompt: "Stay in character."
+          },
+          selectedAssistantMode: "tracked"
+        })
+      }
+    )
+
+    await waitFor(() => {
+      expect(mocks.savePlaygroundSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serverChatId: "chat-1",
+          trackedAssistantKind: "character",
+          trackedAssistantId: "tracked-character",
+          trackedCharacterId: "tracked-character",
+          trackedAssistantDisplayName: "Tracked Character",
+          trackedAssistantAvatarUrl: "https://example.test/avatar.png",
+          serverChatPersonaMemoryMode: null,
+          scopeKey: "scope:chat"
+        })
+      )
+    })
+
+    expect(mocks.savePlaygroundSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trackedAssistantSelection: expect.objectContaining({
+          kind: "character",
+          id: "tracked-character",
+          name: "Tracked Character",
+          greeting: "Ready for overlay continuity proof.",
+          system_prompt: "Stay in character.",
+          metadata: expect.objectContaining({
+            selectionMode: "tracked"
+          })
+        })
+      })
+    )
+    expect(
+      mocks.savePlaygroundSession.mock.invocationCallOrder[0]
+    ).toBeLessThan(mocks.addChatMessage.mock.invocationCallOrder[0])
   })
 
   it("shows the server character error notification only once across rerenders for the same pending chat", async () => {

@@ -84,6 +84,9 @@ import {
 import type { ChatScope } from "@/types/chat-scope"
 import { getServerCapabilities } from "@/services/tldw/server-capabilities"
 import { generateTitle } from "@/services/title"
+import { syncChatSettingsForServerChat } from "@/services/chat-settings"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { trackCompareMetric } from "@/utils/compare-metrics"
 import { MAX_COMPARE_MODELS } from "@/hooks/chat/compare-constants"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
@@ -162,6 +165,52 @@ type ChatModeOverrides = {
 const loadActorSettings = () => import("@/services/actor-settings")
 const STREAMING_UPDATE_INTERVAL_MS = 80
 const toChatSubmitResult = normalizeChatSubmitResult
+
+const persistTrackedPersonaPlaygroundSession = async ({
+  chatId,
+  historyId,
+  assistant,
+  personaMemoryMode
+}: {
+  chatId: string
+  historyId: string | null
+  assistant: AssistantSelection & { kind: "persona" }
+  personaMemoryMode: "read_only" | "read_write"
+}) => {
+  const assistantId = String(assistant.id)
+  const trackedAssistantSelection = {
+    ...assistant,
+    id: assistantId,
+    metadata: {
+      ...(assistant.metadata ?? {}),
+      selectionMode: "tracked" as const
+    }
+  }
+
+  try {
+    const config = await tldwClient.getConfig().catch(() => null)
+    const scopeKey = buildChatSurfaceScopeKeyFromConfig(config)
+    usePlaygroundSessionStore.getState().saveSession({
+      historyId,
+      serverChatId: chatId,
+      trackedAssistantSelection,
+      trackedAssistantKind: "persona",
+      trackedAssistantId: assistantId,
+      trackedCharacterId: null,
+      trackedAssistantDisplayName:
+        typeof assistant.name === "string" ? assistant.name : null,
+      trackedAssistantAvatarUrl:
+        typeof assistant.avatar_url === "string" ? assistant.avatar_url : null,
+      serverChatPersonaMemoryMode: personaMemoryMode,
+      scopeKey
+    })
+  } catch (error) {
+    console.warn(
+      "[useChatActions] Failed to persist tracked persona session",
+      error
+    )
+  }
+}
 
 type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
   setHistoryId?: SaveMessageData["setHistoryId"]
@@ -715,13 +764,24 @@ export const useChatActions = ({
   const saveMessageOnSuccess = async (
     payload?: SaveMessagePayload
   ): Promise<string | null> => {
+    const payloadConversationId =
+      typeof payload?.conversationId === "string"
+        ? payload.conversationId
+        : payload?.conversationId != null
+          ? String(payload.conversationId)
+          : null
     const payloadWithHistory = payload
       ? {
           ...payload,
           setHistoryId:
             payload.setHistoryId ??
             ((id: string) => {
-              setHistoryId(id)
+              setHistoryId(
+                id,
+                payloadConversationId || serverChatId
+                  ? { preserveServerChatId: true }
+                  : undefined
+              )
             })
         }
       : undefined
@@ -736,12 +796,17 @@ export const useChatActions = ({
     }
 
     let skipServerWrite = false
-    const payloadConversationId =
-      typeof payload?.conversationId === "string"
-        ? payload.conversationId
-        : payload?.conversationId != null
-          ? String(payload.conversationId)
-          : null
+    if (historyKey && payloadConversationId && !serverChatId) {
+      try {
+        await syncChatSettingsForServerChat({
+          historyId: historyKey,
+          serverChatId: payloadConversationId,
+          allowScratchFallback: true
+        })
+      } catch {
+        // Best-effort scratch-to-server settings reconciliation.
+      }
+    }
     const resolvedServerConversationId =
       payloadConversationId ??
       (serverChatId != null ? String(serverChatId) : null)
@@ -1380,6 +1445,9 @@ export const useChatActions = ({
       if (shouldResetServerChat) {
         setServerChatId(null)
         setServerChatCharacterId(null)
+        setServerChatAssistantKind(null)
+        setServerChatAssistantId(null)
+        setServerChatPersonaMemoryMode(null)
         setServerChatMetaLoaded(false)
         setServerChatTitle(null)
         setServerChatState("in-progress")
@@ -1444,10 +1512,19 @@ export const useChatActions = ({
           created && typeof created === "object"
             ? created.character_id ?? activeCharacter?.id ?? null
             : activeCharacter?.id ?? null
+        const normalizedCharacterAssistantId =
+          createdCharacterId != null ? String(createdCharacterId) : activeCharacterId
         setServerChatTitle(createdTitle)
         setServerChatCharacterId(createdCharacterId)
+        setServerChatAssistantKind("character")
+        setServerChatAssistantId(normalizedCharacterAssistantId)
+        setServerChatPersonaMemoryMode(null)
         setServerChatMetaLoaded(true)
         invalidateServerChatHistory()
+      } else {
+        setServerChatAssistantKind("character")
+        setServerChatAssistantId(activeCharacterId)
+        setServerChatPersonaMemoryMode(null)
       }
       activeChatId = chatId
 
@@ -2567,6 +2644,12 @@ export const useChatActions = ({
             const personaServerChat = await ensurePersonaServerChatWithState({
               assistant: trackedPersonaAssistantForSend,
               serverChatIdOverride
+            })
+            await persistTrackedPersonaPlaygroundSession({
+              chatId: personaServerChat.chatId,
+              historyId: personaServerChat.historyId,
+              assistant: trackedPersonaAssistantForSend,
+              personaMemoryMode: personaServerChat.personaMemoryMode
             })
             const assistantIdentity = {
               name: trackedPersonaAssistantForSend.name,

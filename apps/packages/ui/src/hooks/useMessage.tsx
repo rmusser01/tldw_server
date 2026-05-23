@@ -98,6 +98,7 @@ import { useChatLoopState } from "@/services/chat-loop/hooks";
 import { subscribeChatLoopEvents } from "@/services/chat-loop/bridge";
 import { extractChatLoopEvent } from "@/services/chat-loop/stream";
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing";
+import { syncChatSettingsForServerChat } from "@/services/chat-settings";
 
 const extractToolCalls = (generationInfo: unknown): ToolCall[] | undefined => {
   if (!generationInfo || typeof generationInfo !== "object") return undefined;
@@ -449,6 +450,15 @@ export const useMessage = () => {
         setServerChatId(conversationId);
         setServerChatMetaLoaded(false);
         invalidateServerChatHistory();
+        if (!serverChatId) {
+          void syncChatSettingsForServerChat({
+            historyId,
+            serverChatId: conversationId,
+            allowScratchFallback: true,
+          }).catch(() => {
+            // Best-effort scratch-to-server settings reconciliation.
+          });
+        }
       },
     }
   );

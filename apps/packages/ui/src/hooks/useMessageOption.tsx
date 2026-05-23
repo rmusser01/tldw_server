@@ -39,13 +39,6 @@ import type { ChatScope } from "@/types/chat-scope";
 export const useMessageOption = (
   opts: { forceCompareEnabled?: boolean; scope?: ChatScope } = {},
 ) => {
-  const logE2EDebug = React.useCallback(
-    (
-      _key: "syncSystem" | "syncQuick" | "storeSystem" | "storeQuick",
-      _payload: Record<string, unknown>,
-    ) => {},
-    [],
-  );
   // Controllers come from Context (for aborting streaming requests)
   const { controller: abortController, setController: setAbortController } =
     usePageAssist();
@@ -299,7 +292,6 @@ export const useMessageOption = (
     setSelectedSystemPrompt,
     selectedQuickPrompt,
     setSelectedQuickPrompt,
-    logE2EDebug,
   });
 
   useRagSettings({

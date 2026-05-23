@@ -267,6 +267,8 @@ describe("useChatActions character integration", () => {
       }),
       expect.any(Object)
     )
+    expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("character")
+    expect(options.setServerChatAssistantId).toHaveBeenCalledWith("char-tracked")
     expect(normalChatModeMock).not.toHaveBeenCalled()
     expect(options.setServerChatId).not.toHaveBeenCalledWith(null)
   })

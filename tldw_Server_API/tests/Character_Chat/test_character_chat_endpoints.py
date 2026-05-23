@@ -252,10 +252,7 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             r = await client.delete(f"/api/v1/characters/world-books/{wb_id}", headers=headers)
             assert r.status_code == 200
     finally:
-        try:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-        except Exception:
-            _ = None
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 @pytest.mark.asyncio

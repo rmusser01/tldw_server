@@ -438,10 +438,11 @@ export const AssistantSelect: React.FC<Props> = ({
 
   const handleSelect = React.useCallback(
     async (entry: AssistantSelection) => {
+      const activeSelectionMode = selectionMode
       const isTrackedMode =
         effectiveAssistantState.mode === "tracked_character" ||
         effectiveAssistantState.mode === "tracked_persona"
-      if (selectionMode === "overlay" && isTrackedMode) {
+      if (activeSelectionMode === "overlay" && isTrackedMode) {
         setOpen(false)
         setSearchText("")
         setSelectionMode(selectionModePreference)
@@ -457,11 +458,11 @@ export const AssistantSelect: React.FC<Props> = ({
         ...entry,
         metadata: {
           ...(entry.metadata ?? {}),
-          selectionMode
+          selectionMode: activeSelectionMode
         }
       }
       await setSelectedAssistant(nextEntry)
-      if (selectionMode === "overlay") {
+      if (activeSelectionMode === "overlay") {
         let overlaySnapshot = buildAssistantOverlaySnapshotFromSelection(nextEntry)
         try {
           overlaySnapshot = await resolveAssistantOverlaySnapshot(nextEntry)

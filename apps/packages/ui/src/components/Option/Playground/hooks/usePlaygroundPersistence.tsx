@@ -1,9 +1,14 @@
 import React from "react"
 import { Button, Modal } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { usePersistenceMode } from "@/hooks/playground"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import type { Character } from "@/types/character"
-import type { AssistantSelectionMode } from "@/types/assistant-selection"
+import {
+  characterToAssistantSelection,
+  type AssistantSelectionMode
+} from "@/types/assistant-selection"
 import {
   WEBUI_CHARACTER_CHAT_SOURCE,
   WEBUI_CHAT_SOURCE,
@@ -21,11 +26,18 @@ export interface UsePlaygroundPersistenceDeps {
   setTemporaryChat: (value: boolean) => void
   serverChatId: string | null
   setServerChatId: (id: string) => void
+  historyId: string | null
   serverChatState: string | null
   setServerChatState: (state: string) => void
   serverChatSource: string | null
   setServerChatSource: (source: string | null) => void
   setServerChatVersion: (version: number | null) => void
+  setServerChatCharacterId: (id: string | number | null) => void
+  setServerChatAssistantKind: (kind: "character" | "persona" | null) => void
+  setServerChatAssistantId: (id: string | number | null) => void
+  setServerChatPersonaMemoryMode: (
+    mode: "read_only" | "read_write" | null
+  ) => void
   history: Array<{ role: string; content?: string; image?: string }>
   clearChat: () => void
   selectedCharacter: Character | null
@@ -44,6 +56,51 @@ export interface UsePlaygroundPersistenceDeps {
   t: (key: string, defaultValueOrOptions?: any, options?: any) => string
 }
 
+const persistTrackedCharacterPlaygroundSession = async ({
+  chatId,
+  historyId,
+  character
+}: {
+  chatId: string
+  historyId: string | null
+  character: Character
+}) => {
+  const selection = characterToAssistantSelection(
+    character as Character & Record<string, unknown>
+  )
+  if (!selection) return
+
+  const trackedSelection = {
+    ...selection,
+    metadata: {
+      ...(selection.metadata ?? {}),
+      selectionMode: "tracked" as const
+    }
+  }
+
+  try {
+    const config = await tldwClient.getConfig().catch(() => null)
+    const scopeKey = buildChatSurfaceScopeKeyFromConfig(config)
+    usePlaygroundSessionStore.getState().saveSession({
+      historyId,
+      serverChatId: chatId,
+      trackedAssistantSelection: trackedSelection,
+      trackedAssistantKind: "character",
+      trackedAssistantId: trackedSelection.id,
+      trackedCharacterId: trackedSelection.id,
+      trackedAssistantDisplayName: trackedSelection.name ?? null,
+      trackedAssistantAvatarUrl: trackedSelection.avatar_url ?? null,
+      serverChatPersonaMemoryMode: null,
+      scopeKey
+    })
+  } catch (error) {
+    console.warn(
+      "[usePlaygroundPersistence] Failed to persist tracked character session",
+      error
+    )
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -56,11 +113,16 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     setTemporaryChat,
     serverChatId,
     setServerChatId,
+    historyId,
     serverChatState,
     setServerChatState,
     serverChatSource,
     setServerChatSource,
     setServerChatVersion,
+    setServerChatCharacterId,
+    setServerChatAssistantKind,
+    setServerChatAssistantId,
+    setServerChatPersonaMemoryMode,
     history,
     clearChat,
     selectedCharacter,
@@ -238,13 +300,17 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         assistantOverlayActiveRef.current ||
         selectedAssistantModeRef.current === "overlay"
       const shouldPersistTrackedCharacter = !isOverlaySelection
+      const trackedCharacterSnapshot =
+        shouldPersistTrackedCharacter && selectedCharacterRef.current?.id != null
+          ? selectedCharacterRef.current
+          : null
       let characterId: string | number | null = shouldPersistTrackedCharacter
-        ? ((selectedCharacterRef.current as any)?.id ?? null)
+        ? ((trackedCharacterSnapshot as any)?.id ?? null)
         : null
       const selectedCharacterName =
         shouldPersistTrackedCharacter &&
-        typeof selectedCharacterRef.current?.name === "string"
-          ? selectedCharacterRef.current.name.trim()
+        typeof trackedCharacterSnapshot?.name === "string"
+          ? trackedCharacterSnapshot.name.trim()
           : ""
       const explicitSource =
         serverChatSourceRef.current &&
@@ -388,6 +454,17 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         (created as any)?.source ?? serverChatSourceRef.current ?? null
       )
       setServerChatVersion((created as any)?.version ?? null)
+      if (isCharacterPersistence && trackedCharacterSnapshot) {
+        setServerChatCharacterId(characterId)
+        setServerChatAssistantKind("character")
+        setServerChatAssistantId(characterId)
+        setServerChatPersonaMemoryMode(null)
+        await persistTrackedCharacterPlaygroundSession({
+          chatId: cid,
+          historyId,
+          character: trackedCharacterSnapshot
+        })
+      }
       invalidateServerChatHistory()
 
       for (const msg of snapshot) {
@@ -441,12 +518,17 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     temporaryChat,
     serverChatId,
     setServerChatId,
+    historyId,
     navigate,
     setServerPersistenceHintSeen,
     t,
     setServerChatState,
     setServerChatSource,
-    setServerChatVersion
+    setServerChatVersion,
+    setServerChatCharacterId,
+    setServerChatAssistantKind,
+    setServerChatAssistantId,
+    setServerChatPersonaMemoryMode
   ])
 
   // Auto-save to server
