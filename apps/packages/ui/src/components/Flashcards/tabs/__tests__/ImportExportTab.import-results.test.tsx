@@ -815,6 +815,10 @@ describe("ImportExportTab import result details", () => {
         "42 cards from Biology"
       )
     })
+    expect(screen.getByTestId("flashcards-export-preview")).toHaveAttribute(
+      "data-ds-component",
+      "Alert"
+    )
     const exportPreviewQuery = useQueryMock.mock.calls
       .map(([options]) => options as any)
       .findLast((options) => options.queryKey?.[0] === "flashcards:export-preview-count")
