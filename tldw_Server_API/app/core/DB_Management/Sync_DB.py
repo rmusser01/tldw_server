@@ -60,6 +60,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncEnvelopeCreate,
     SyncKeyRecord,
     SyncKeyRecordCreate,
+    SyncKeyRotationEnvelopeRange,
     SyncObjectState,
     SyncRestoreManifestStats,
 )
@@ -3775,6 +3776,167 @@ class SyncDatabase:
         sql += " ORDER BY created_at ASC, key_record_id ASC"
         result = self.execute(sql, tuple(params))
         return [_key_record_from_row(row) for row in result.rows]
+
+    def get_dataset_envelope_range(self, dataset_id: str) -> SyncKeyRotationEnvelopeRange:
+        with self.backend.transaction() as conn:
+            self._require_dataset(dataset_id, connection=conn)
+            row = _first(
+                self.execute(
+                    """
+                    SELECT MIN(server_sequence) AS from_server_sequence,
+                           MAX(server_sequence) AS through_server_sequence,
+                           COUNT(*) AS envelope_count
+                      FROM sync_envelopes
+                     WHERE dataset_id = ?
+                       AND status = 'accepted'
+                    """,
+                    (dataset_id,),
+                    connection=conn,
+                )
+            ) or {}
+        return SyncKeyRotationEnvelopeRange(
+            from_server_sequence=_optional_int_from_storage(
+                row.get("from_server_sequence")
+            ),
+            through_server_sequence=_optional_int_from_storage(
+                row.get("through_server_sequence")
+            ),
+            envelope_count=int(row.get("envelope_count") or 0),
+        )
+
+    def commit_key_rotation(
+        self,
+        record: SyncKeyRecordCreate,
+        *,
+        source_key_record_ids: Sequence[str],
+        superseded_at: str,
+    ) -> tuple[SyncKeyRecord, list[SyncKeyRecord]]:
+        source_ids = list(dict.fromkeys(str(item).strip() for item in source_key_record_ids))
+        source_ids = [item for item in source_ids if item]
+        if not source_ids:
+            raise SyncStoreError("Sync key rotation is invalid")
+
+        source_id_set = set(source_ids)
+        with self.backend.transaction() as conn:
+            self._require_dataset(record.dataset_id, connection=conn)
+            source_rows = [
+                row
+                for row in self.execute(
+                    """
+                SELECT * FROM sync_key_records
+                 WHERE dataset_id = ?
+                   AND user_id = ?
+                   AND key_purpose = ?
+                """,
+                    (
+                        record.dataset_id,
+                        record.user_id,
+                        record.key_purpose,
+                    ),
+                    connection=conn,
+                ).rows
+                if row["key_record_id"] in source_id_set
+            ]
+            if len(source_rows) != len(source_ids):
+                raise SyncStoreError("Sync key rotation is invalid")
+
+            existing = _first(
+                self.execute(
+                    "SELECT * FROM sync_key_records WHERE key_record_id = ?",
+                    (record.key_record_id,),
+                    connection=conn,
+                )
+            )
+            if existing is not None:
+                if (
+                    _key_record_fingerprint_from_row(existing)
+                    != _key_record_fingerprint_from_create(record)
+                ):
+                    raise SyncIdempotencyConflictError(
+                        "Sync key rotation ID was reused with different key material"
+                    )
+            else:
+                if any(
+                    row.get("revoked_at") is not None
+                    or row.get("superseded_at") is not None
+                    for row in source_rows
+                ):
+                    raise SyncStoreError("Sync key rotation is invalid")
+                self.execute(
+                    """
+                    INSERT INTO sync_key_records (
+                        key_record_id, dataset_id, user_id, device_id, key_purpose,
+                        wrapped_key_blob, kdf_metadata_json, recovery_hint,
+                        rotation_of_key_record_id, encryption_policy, key_epoch,
+                        active_from_server_sequence, superseded_at, wrapped_for,
+                        rewrap_status, created_at, revoked_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record.key_record_id,
+                        record.dataset_id,
+                        record.user_id,
+                        record.device_id,
+                        record.key_purpose,
+                        record.wrapped_key_blob,
+                        encode_json(record.kdf_metadata, default={}),
+                        record.recovery_hint,
+                        record.rotation_of_key_record_id,
+                        record.encryption_policy,
+                        record.key_epoch,
+                        record.active_from_server_sequence,
+                        record.superseded_at,
+                        record.wrapped_for,
+                        record.rewrap_status,
+                        utcnow_iso(),
+                        record.revoked_at,
+                    ),
+                    connection=conn,
+                )
+                for source_id in source_ids:
+                    self.execute(
+                        """
+                    UPDATE sync_key_records
+                       SET superseded_at = ?
+                     WHERE dataset_id = ?
+                       AND user_id = ?
+                       AND key_record_id = ?
+                    """,
+                        (superseded_at, record.dataset_id, record.user_id, source_id),
+                        connection=conn,
+                    )
+                existing = _first(
+                    self.execute(
+                        "SELECT * FROM sync_key_records WHERE key_record_id = ?",
+                        (record.key_record_id,),
+                        connection=conn,
+                    )
+                )
+                source_rows = [
+                    row
+                    for row in self.execute(
+                        """
+                    SELECT * FROM sync_key_records
+                     WHERE dataset_id = ?
+                       AND user_id = ?
+                       AND key_purpose = ?
+                    """,
+                        (
+                            record.dataset_id,
+                            record.user_id,
+                            record.key_purpose,
+                        ),
+                        connection=conn,
+                    ).rows
+                    if row["key_record_id"] in source_id_set
+                ]
+
+        source_row_by_id = {row["key_record_id"]: row for row in source_rows}
+        return (
+            _key_record_from_row(existing),
+            [_key_record_from_row(source_row_by_id[source_id]) for source_id in source_ids],
+        )
 
     def store_attachment(self, attachment: SyncAttachmentCreate) -> SyncAttachment:
         """Store or idempotently deduplicate an encrypted Sync v2 attachment."""

@@ -288,6 +288,95 @@ def test_key_recovery_bundle_models_reject_invalid_epoch_rotation_metadata(paylo
         SyncKeyRecoveryBundleRequest.model_validate(request_payload)
 
 
+def test_key_rotation_models_validate_redacted_preview_and_commit_shapes():
+    assert hasattr(api_sync_models, "SyncKeyRotationPreviewRequest")
+    assert hasattr(api_sync_models, "SyncKeyRotationCommitRequest")
+    assert hasattr(api_sync_models, "SyncKeyRotationResponse")
+
+    preview_request = api_sync_models.SyncKeyRotationPreviewRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "target_encryption_policy": "passphrase_wrapped_v1",
+            "source_key_record_ids": ["key-1"],
+        }
+    )
+    commit_request = api_sync_models.SyncKeyRotationCommitRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "rotation_id": "rotation-1",
+            "target_encryption_policy": "passphrase_wrapped_v1",
+            "wrapped_key_blob": "wrapped:super-secret-key-material",
+            "kdf_metadata": {"algorithm": "scrypt", "salt": "secret-salt"},
+            "source_key_record_ids": ["key-1"],
+            "wrapped_for": "passphrase",
+        }
+    )
+    response = api_sync_models.SyncKeyRotationResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "target_encryption_policy": "passphrase_wrapped_v1",
+            "next_key_epoch": 2,
+            "active_from_server_sequence": 8,
+            "can_commit": True,
+            "committed": False,
+            "affected_key_records": [
+                {
+                    "key_record_id": "key-1",
+                    "key_epoch": 1,
+                    "encryption_policy": "server_trusted_v1",
+                    "wrapped_for": "recovery",
+                    "rewrap_status": "not_required",
+                }
+            ],
+            "new_key_record": {
+                "key_record_id": "key-rotation-1",
+                "key_epoch": 2,
+                "encryption_policy": "passphrase_wrapped_v1",
+                "wrapped_for": "passphrase",
+                "rewrap_status": "complete",
+            },
+            "retained_envelope_range": {
+                "from_server_sequence": 1,
+                "through_server_sequence": 7,
+            },
+        }
+    )
+
+    assert preview_request.source_key_record_ids == ["key-1"]
+    assert commit_request.rotation_id == "rotation-1"
+    assert commit_request.rewrap_status == "complete"
+    assert response.next_key_epoch == 2
+    assert response.affected_key_records[0].key_record_id == "key-1"
+    assert "wrapped_key_blob" not in response.model_dump_json()
+    assert "kdf_metadata" not in response.model_dump_json()
+    assert "super-secret-key-material" not in response.model_dump_json()
+    assert "secret-salt" not in response.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"rotation_id": ""},
+        {"target_encryption_policy": "legacy"},
+        {"key_epoch": 0},
+        {"wrapped_for": "plaintext"},
+        {"rewrap_status": "leaked"},
+    ],
+)
+def test_key_rotation_commit_request_rejects_invalid_metadata(payload):
+    assert hasattr(api_sync_models, "SyncKeyRotationCommitRequest")
+    request_payload = {
+        "dataset_id": "dataset-1",
+        "rotation_id": "rotation-1",
+        "wrapped_key_blob": "wrapped:opaque",
+        "kdf_metadata": {"algorithm": "scrypt", "salt": "opaque-salt"},
+    }
+    request_payload.update(payload)
+
+    with pytest.raises(ValidationError):
+        api_sync_models.SyncKeyRotationCommitRequest.model_validate(request_payload)
+
+
 def test_dataset_enroll_request_accepts_explicit_workspace_metadata_domains():
     request = SyncDatasetEnrollRequest.model_validate(
         {

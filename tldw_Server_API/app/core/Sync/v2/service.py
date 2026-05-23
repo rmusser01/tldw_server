@@ -32,6 +32,7 @@ from .materializers import MaterializationResult, SyncMaterializer
 from .models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
+    SYNC_V2_ENCRYPTION_POLICIES,
     SYNC_V2_SUPPORTED_DOMAINS,
     SYNC_V2_SUPPORTED_OPERATIONS,
     WORKSPACE_SYNC_DOMAINS,
@@ -70,6 +71,8 @@ from .models import (
     SyncKeyRecord,
     SyncKeyRecordCreate,
     SyncKeyRewrapStatus,
+    SyncKeyRotationKeyRecord,
+    SyncKeyRotationResult,
     SyncKeyWrappedFor,
     SyncOperation,
     SyncRestoreBlobCompleteness,
@@ -2168,6 +2171,168 @@ class SyncV2Service:
             if record.revoked_at is None
         ]
 
+    def preview_key_rotation(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        target_encryption_policy: EncryptionPolicy,
+        source_key_record_ids: Sequence[str] | None = None,
+    ) -> SyncKeyRotationResult:
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        if target_encryption_policy not in SYNC_V2_ENCRYPTION_POLICIES:
+            self._raise_invalid_key_rotation()
+
+        all_records = self.store.list_key_records(
+            dataset.dataset_id,
+            user_id=user_id,
+            key_purpose=SYNC_DATASET_RECOVERY_KEY_PURPOSE,
+        )
+        active_records = [
+            record
+            for record in all_records
+            if record.revoked_at is None and record.superseded_at is None
+        ]
+        selected_records, blockers = self._select_key_rotation_sources(
+            active_records=active_records,
+            all_records=all_records,
+            source_key_record_ids=source_key_record_ids,
+        )
+        if not selected_records:
+            blockers.append("sync_key_rotation_no_active_source_keys")
+
+        highest_epoch = max((record.key_epoch for record in all_records), default=0)
+        retained_range = self.store.get_dataset_envelope_range(dataset.dataset_id)
+        active_from = (retained_range.through_server_sequence or 0) + 1
+        summaries = [self._key_rotation_record_summary(record) for record in selected_records]
+        return SyncKeyRotationResult(
+            dataset_id=dataset.dataset_id,
+            target_encryption_policy=target_encryption_policy,
+            next_key_epoch=max(highest_epoch + 1, 1),
+            active_from_server_sequence=active_from,
+            can_commit=not blockers,
+            committed=False,
+            retained_envelope_range=retained_range,
+            affected_key_records=summaries,
+            blockers=list(dict.fromkeys(blockers)),
+            device_ids=sorted(
+                {
+                    record.device_id
+                    for record in selected_records
+                    if record.device_id is not None
+                }
+            ),
+            recovery_target_count=len(selected_records),
+        )
+
+    def commit_key_rotation(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        rotation_id: str,
+        target_encryption_policy: EncryptionPolicy,
+        wrapped_key_blob: str,
+        kdf_metadata: Mapping[str, object] | None = None,
+        source_key_record_ids: Sequence[str] | None = None,
+        wrapped_for: SyncKeyWrappedFor = "recovery",
+        rewrap_status: SyncKeyRewrapStatus = "complete",
+        recovery_hint: str | None = None,
+    ) -> SyncKeyRotationResult:
+        clean_rotation_id = str(rotation_id or "").strip()
+        if not clean_rotation_id:
+            self._raise_invalid_key_rotation()
+
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        self._validate_key_recovery_bundle(
+            user_id=user_id,
+            dataset_id=dataset.dataset_id,
+            key_purpose=SYNC_DATASET_RECOVERY_KEY_PURPOSE,
+            wrapped_key_blob=wrapped_key_blob,
+            kdf_metadata=kdf_metadata,
+            rotation_of_key_record_id=None,
+        )
+        new_key_record_id = f"key-{clean_rotation_id}"
+        existing_records = self.store.list_key_records(
+            dataset.dataset_id,
+            user_id=user_id,
+            key_purpose=SYNC_DATASET_RECOVERY_KEY_PURPOSE,
+        )
+        existing_new_record = next(
+            (
+                record
+                for record in existing_records
+                if record.key_record_id == new_key_record_id
+            ),
+            None,
+        )
+        retained_range = self.store.get_dataset_envelope_range(dataset.dataset_id)
+        if existing_new_record is not None:
+            self._validate_existing_key_rotation_record(
+                existing_new_record,
+                target_encryption_policy=target_encryption_policy,
+                wrapped_key_blob=wrapped_key_blob,
+                kdf_metadata=kdf_metadata,
+                wrapped_for=wrapped_for,
+                rewrap_status=rewrap_status,
+            )
+            source_records = self._existing_key_rotation_sources(
+                existing_records=existing_records,
+                existing_new_record=existing_new_record,
+                source_key_record_ids=source_key_record_ids,
+            )
+            return self._key_rotation_result_from_records(
+                dataset_id=dataset.dataset_id,
+                target_encryption_policy=target_encryption_policy,
+                next_key_epoch=existing_new_record.key_epoch,
+                active_from_server_sequence=existing_new_record.active_from_server_sequence or 1,
+                retained_range=retained_range,
+                source_records=source_records,
+                new_record=existing_new_record,
+                rotation_id=clean_rotation_id,
+                committed=True,
+            )
+
+        preview = self.preview_key_rotation(
+            user_id=user_id,
+            dataset_id=dataset.dataset_id,
+            target_encryption_policy=target_encryption_policy,
+            source_key_record_ids=source_key_record_ids,
+        )
+        if not preview.can_commit:
+            self._raise_invalid_key_rotation()
+        source_ids = [record.key_record_id for record in preview.affected_key_records]
+        new_record, superseded_records = self.store.commit_key_rotation(
+            SyncKeyRecordCreate(
+                key_record_id=new_key_record_id,
+                dataset_id=dataset.dataset_id,
+                user_id=user_id,
+                key_purpose=SYNC_DATASET_RECOVERY_KEY_PURPOSE,
+                wrapped_key_blob=wrapped_key_blob,
+                kdf_metadata=dict(kdf_metadata or {}),
+                recovery_hint=recovery_hint,
+                rotation_of_key_record_id=source_ids[0] if source_ids else None,
+                encryption_policy=target_encryption_policy,
+                key_epoch=preview.next_key_epoch,
+                active_from_server_sequence=preview.active_from_server_sequence,
+                wrapped_for=wrapped_for,
+                rewrap_status=rewrap_status,
+            ),
+            source_key_record_ids=source_ids,
+            superseded_at=self.clock(),
+        )
+        return self._key_rotation_result_from_records(
+            dataset_id=dataset.dataset_id,
+            target_encryption_policy=target_encryption_policy,
+            next_key_epoch=new_record.key_epoch,
+            active_from_server_sequence=new_record.active_from_server_sequence or 1,
+            retained_range=retained_range,
+            source_records=superseded_records,
+            new_record=new_record,
+            rotation_id=clean_rotation_id,
+            committed=True,
+        )
+
     def _validate_key_recovery_bundle(
         self,
         *,
@@ -2212,6 +2377,135 @@ class SyncV2Service:
     @staticmethod
     def _raise_invalid_key_recovery_bundle() -> None:
         raise SyncStoreError("Sync key recovery bundle is invalid")
+
+    @staticmethod
+    def _raise_invalid_key_rotation() -> None:
+        raise SyncStoreError("Sync key rotation is invalid")
+
+    @staticmethod
+    def _key_rotation_record_summary(record: SyncKeyRecord) -> SyncKeyRotationKeyRecord:
+        return SyncKeyRotationKeyRecord(
+            key_record_id=record.key_record_id,
+            key_epoch=record.key_epoch,
+            encryption_policy=record.encryption_policy,
+            wrapped_for=record.wrapped_for,
+            rewrap_status=record.rewrap_status,
+            device_id=record.device_id,
+            key_purpose=record.key_purpose,
+            active_from_server_sequence=record.active_from_server_sequence,
+            superseded_at=record.superseded_at,
+            revoked_at=record.revoked_at,
+            rotation_of_key_record_id=record.rotation_of_key_record_id,
+        )
+
+    def _select_key_rotation_sources(
+        self,
+        *,
+        active_records: Sequence[SyncKeyRecord],
+        all_records: Sequence[SyncKeyRecord],
+        source_key_record_ids: Sequence[str] | None,
+    ) -> tuple[list[SyncKeyRecord], list[str]]:
+        requested_ids = [
+            str(record_id).strip()
+            for record_id in source_key_record_ids or []
+            if str(record_id).strip()
+        ]
+        requested_ids = list(dict.fromkeys(requested_ids))
+        if not requested_ids:
+            return list(active_records), []
+
+        active_by_id = {record.key_record_id: record for record in active_records}
+        all_by_id = {record.key_record_id: record for record in all_records}
+        selected: list[SyncKeyRecord] = []
+        blockers: list[str] = []
+        for record_id in requested_ids:
+            active_record = active_by_id.get(record_id)
+            if active_record is not None:
+                selected.append(active_record)
+                continue
+            if record_id in all_by_id:
+                blockers.append("sync_key_rotation_source_inactive")
+            else:
+                blockers.append("sync_key_rotation_source_missing")
+        return selected, blockers
+
+    def _existing_key_rotation_sources(
+        self,
+        *,
+        existing_records: Sequence[SyncKeyRecord],
+        existing_new_record: SyncKeyRecord,
+        source_key_record_ids: Sequence[str] | None,
+    ) -> list[SyncKeyRecord]:
+        requested_ids = [
+            str(record_id).strip()
+            for record_id in source_key_record_ids or []
+            if str(record_id).strip()
+        ]
+        if not requested_ids and existing_new_record.rotation_of_key_record_id:
+            requested_ids = [existing_new_record.rotation_of_key_record_id]
+        record_by_id = {record.key_record_id: record for record in existing_records}
+        return [
+            record_by_id[record_id]
+            for record_id in dict.fromkeys(requested_ids)
+            if record_id in record_by_id
+        ]
+
+    @staticmethod
+    def _validate_existing_key_rotation_record(
+        record: SyncKeyRecord,
+        *,
+        target_encryption_policy: EncryptionPolicy,
+        wrapped_key_blob: str,
+        kdf_metadata: Mapping[str, object] | None,
+        wrapped_for: SyncKeyWrappedFor,
+        rewrap_status: SyncKeyRewrapStatus,
+    ) -> None:
+        if (
+            record.encryption_policy != target_encryption_policy
+            or record.wrapped_key_blob != wrapped_key_blob
+            or record.kdf_metadata != dict(kdf_metadata or {})
+            or record.wrapped_for != wrapped_for
+            or record.rewrap_status != rewrap_status
+        ):
+            raise SyncIdempotencyConflictError(
+                "Sync key rotation ID was reused with different key material"
+            )
+
+    def _key_rotation_result_from_records(
+        self,
+        *,
+        dataset_id: str,
+        target_encryption_policy: EncryptionPolicy,
+        next_key_epoch: int,
+        active_from_server_sequence: int,
+        retained_range,
+        source_records: Sequence[SyncKeyRecord],
+        new_record: SyncKeyRecord,
+        rotation_id: str,
+        committed: bool,
+    ) -> SyncKeyRotationResult:
+        affected = [self._key_rotation_record_summary(record) for record in source_records]
+        return SyncKeyRotationResult(
+            dataset_id=dataset_id,
+            target_encryption_policy=target_encryption_policy,
+            next_key_epoch=next_key_epoch,
+            active_from_server_sequence=active_from_server_sequence,
+            can_commit=True,
+            committed=committed,
+            retained_envelope_range=retained_range,
+            affected_key_records=affected,
+            blockers=[],
+            device_ids=sorted(
+                {
+                    record.device_id
+                    for record in source_records
+                    if record.device_id is not None
+                }
+            ),
+            recovery_target_count=len(source_records),
+            rotation_id=rotation_id,
+            new_key_record=self._key_rotation_record_summary(new_record),
+        )
 
     def _evaluate_envelope(
         self,

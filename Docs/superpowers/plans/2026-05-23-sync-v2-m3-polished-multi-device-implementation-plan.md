@@ -223,7 +223,7 @@
 
   Extend key record metadata and add rotation state.
 
-- [ ] **Step 3: Add rotation preview and commit APIs**
+- [x] **Step 3: Add rotation preview and commit APIs**
 
   Implement idempotent rotation flows with safe error mapping and redaction.
 

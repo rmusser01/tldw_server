@@ -1427,6 +1427,82 @@ class SyncKeyRecoveryBundleRecord(BaseModel):
     rewrap_status: SyncKeyRewrapStatus = "not_required"
 
 
+class SyncKeyRotationPreviewRequest(BaseModel):
+    """Request a redacted key rotation preview without mutating key state."""
+
+    dataset_id: str
+    target_encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+    source_key_record_ids: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("source_key_record_ids", mode="after")
+    @classmethod
+    def _normalize_source_key_record_ids(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(str(record_id).strip() for record_id in value if str(record_id).strip()))
+
+
+class SyncKeyRotationCommitRequest(SyncKeyRotationPreviewRequest):
+    """Commit a new key epoch with client-supplied wrapped key material."""
+
+    rotation_id: str
+    wrapped_key_blob: str
+    kdf_metadata: dict[str, Any] = Field(default_factory=dict)
+    recovery_hint: str | None = None
+    wrapped_for: SyncKeyWrappedFor = "recovery"
+    rewrap_status: SyncKeyRewrapStatus = "complete"
+
+    @field_validator("rotation_id")
+    @classmethod
+    def _rotation_id_required(cls, value: str) -> str:
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            raise ValueError("rotation_id is required")
+        return cleaned
+
+
+class SyncKeyRotationKeyRecord(BaseModel):
+    """Redacted key-record metadata returned by key rotation flows."""
+
+    key_record_id: str
+    key_epoch: int = Field(..., ge=1)
+    encryption_policy: EncryptionPolicy
+    wrapped_for: SyncKeyWrappedFor
+    rewrap_status: SyncKeyRewrapStatus
+    device_id: str | None = None
+    key_purpose: str = "dataset_recovery"
+    active_from_server_sequence: int | None = Field(None, ge=0)
+    superseded_at: str | None = None
+    revoked_at: str | None = None
+    rotation_of_key_record_id: str | None = None
+
+
+class SyncKeyRotationEnvelopeRange(BaseModel):
+    """Accepted envelope range retained under old key material."""
+
+    from_server_sequence: int | None = Field(None, ge=1)
+    through_server_sequence: int | None = Field(None, ge=0)
+    envelope_count: int = Field(0, ge=0)
+
+
+class SyncKeyRotationResponse(BaseModel):
+    """Redacted key rotation preview or commit response."""
+
+    dataset_id: str
+    target_encryption_policy: EncryptionPolicy
+    next_key_epoch: int = Field(..., ge=1)
+    active_from_server_sequence: int = Field(..., ge=1)
+    can_commit: bool
+    committed: bool = False
+    retained_envelope_range: SyncKeyRotationEnvelopeRange
+    affected_key_records: list[SyncKeyRotationKeyRecord] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    device_ids: list[str] = Field(default_factory=list)
+    recovery_target_count: int = Field(0, ge=0)
+    rotation_id: str | None = None
+    new_key_record: SyncKeyRotationKeyRecord | None = None
+
+
 class SyncKeyRecoveryBundleListResponse(BaseModel):
     """Recovery bundle records available for a dataset."""
 
@@ -1478,6 +1554,11 @@ __all__ = [
     "SyncKeyRecoveryBundleListResponse",
     "SyncKeyRecoveryBundleRequest",
     "SyncKeyRecoveryBundleRecord",
+    "SyncKeyRotationCommitRequest",
+    "SyncKeyRotationEnvelopeRange",
+    "SyncKeyRotationKeyRecord",
+    "SyncKeyRotationPreviewRequest",
+    "SyncKeyRotationResponse",
     "SyncKeyWrappedFor",
     "SyncOperation",
     "SyncApplyStatus",

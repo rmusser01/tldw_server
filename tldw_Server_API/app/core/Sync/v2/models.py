@@ -783,6 +783,51 @@ def _validate_key_record_rotation_metadata(
 
 
 @dataclass(frozen=True, slots=True)
+class SyncKeyRotationKeyRecord:
+    """Redacted key-record metadata returned by key rotation flows."""
+
+    key_record_id: str
+    key_epoch: int
+    encryption_policy: EncryptionPolicy
+    wrapped_for: SyncKeyWrappedFor
+    rewrap_status: SyncKeyRewrapStatus
+    device_id: str | None = None
+    key_purpose: str = "dataset_recovery"
+    active_from_server_sequence: int | None = None
+    superseded_at: str | None = None
+    revoked_at: str | None = None
+    rotation_of_key_record_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncKeyRotationEnvelopeRange:
+    """Accepted envelope range retained under old key material."""
+
+    from_server_sequence: int | None = None
+    through_server_sequence: int | None = None
+    envelope_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SyncKeyRotationResult:
+    """Redacted key rotation preview or commit result."""
+
+    dataset_id: str
+    target_encryption_policy: EncryptionPolicy
+    next_key_epoch: int
+    active_from_server_sequence: int
+    can_commit: bool
+    committed: bool
+    retained_envelope_range: SyncKeyRotationEnvelopeRange
+    affected_key_records: list[SyncKeyRotationKeyRecord] = field(default_factory=list)
+    blockers: list[str] = field(default_factory=list)
+    device_ids: list[str] = field(default_factory=list)
+    recovery_target_count: int = 0
+    rotation_id: str | None = None
+    new_key_record: SyncKeyRotationKeyRecord | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SyncAttachmentCreate:
     """Attachment payload accepted by the Sync v2 store."""
 
@@ -1071,6 +1116,9 @@ __all__ = [
     "SyncKeyRewrapStatus",
     "SyncKeyRecord",
     "SyncKeyRecordCreate",
+    "SyncKeyRotationEnvelopeRange",
+    "SyncKeyRotationKeyRecord",
+    "SyncKeyRotationResult",
     "SyncKeyWrappedFor",
     "SyncObjectState",
     "SyncOperation",

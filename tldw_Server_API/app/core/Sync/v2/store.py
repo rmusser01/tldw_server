@@ -42,6 +42,7 @@ from .models import (
     SyncEnvelopeCreate,
     SyncKeyRecord,
     SyncKeyRecordCreate,
+    SyncKeyRotationEnvelopeRange,
     SyncObjectState,
     SyncRestoreManifestStats,
 )
@@ -383,6 +384,22 @@ class SyncV2Store:
             user_id=user_id,
             device_id=device_id,
             key_purpose=key_purpose,
+        )
+
+    def get_dataset_envelope_range(self, dataset_id: str) -> SyncKeyRotationEnvelopeRange:
+        return self.db.get_dataset_envelope_range(dataset_id)
+
+    def commit_key_rotation(
+        self,
+        record: SyncKeyRecordCreate,
+        *,
+        source_key_record_ids: Sequence[str],
+        superseded_at: str,
+    ) -> tuple[SyncKeyRecord, list[SyncKeyRecord]]:
+        return self.db.commit_key_rotation(
+            record,
+            source_key_record_ids=source_key_record_ids,
+            superseded_at=superseded_at,
         )
 
     def store_attachment(self, attachment: SyncAttachmentCreate) -> SyncAttachment:

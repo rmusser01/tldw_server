@@ -3288,6 +3288,175 @@ def test_store_key_recovery_bundle_validates_purpose_wrapping_metadata_and_rotat
     assert rotated.rotation_of_key_record_id == original.key_record_id
 
 
+def test_key_rotation_preview_reports_redacted_next_epoch_and_retained_range(
+    sync_service: SyncV2Service,
+):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Tablet",
+        client_type="chatbook",
+        device_id="device-3",
+    )
+    recovery_key = sync_service.store_key_recovery_bundle(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        key_purpose="dataset_recovery",
+        wrapped_key_blob="wrapped:current-secret",
+        kdf_metadata={"algorithm": "scrypt", "salt": "secret-salt"},
+        recovery_hint="laptop",
+    )
+    sync_service.push(
+        user_id="user-1",
+        device_id="device-1",
+        dataset_id="dataset-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-1",
+                object_id="note-1",
+                client_sequence=1,
+                payload_hash="sha256:note-1",
+            ),
+            _m1_note_envelope(
+                client_envelope_id="env-2",
+                object_id="note-2",
+                client_sequence=2,
+                payload_hash="sha256:note-2",
+            ),
+        ],
+    )
+
+    preview = sync_service.preview_key_rotation(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        target_encryption_policy="passphrase_wrapped_v1",
+        source_key_record_ids=[recovery_key.key_record_id],
+    )
+
+    assert preview.dataset_id == "dataset-1"
+    assert preview.target_encryption_policy == "passphrase_wrapped_v1"
+    assert preview.next_key_epoch == 2
+    assert preview.active_from_server_sequence == 3
+    assert preview.can_commit is True
+    assert preview.committed is False
+    assert preview.retained_envelope_range.from_server_sequence == 1
+    assert preview.retained_envelope_range.through_server_sequence == 2
+    assert [record.key_record_id for record in preview.affected_key_records] == [
+        recovery_key.key_record_id
+    ]
+    assert preview.device_ids == ["device-1"]
+    assert preview.recovery_target_count == 1
+    assert preview.blockers == []
+    assert "wrapped:current-secret" not in str(preview)
+    assert "secret-salt" not in str(preview)
+
+
+def test_key_rotation_commit_is_idempotent_and_supersedes_source_records(
+    sync_service: SyncV2Service,
+):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    recovery_key = sync_service.store_key_recovery_bundle(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        key_purpose="dataset_recovery",
+        wrapped_key_blob="wrapped:current-secret",
+        kdf_metadata={"algorithm": "scrypt", "salt": "secret-salt"},
+        recovery_hint="laptop",
+    )
+    sync_service.push(
+        user_id="user-1",
+        device_id="device-1",
+        dataset_id="dataset-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-1",
+                object_id="note-1",
+                client_sequence=1,
+                payload_hash="sha256:note-1",
+            )
+        ],
+    )
+
+    committed = sync_service.commit_key_rotation(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        rotation_id="rotation-1",
+        target_encryption_policy="passphrase_wrapped_v1",
+        wrapped_key_blob="wrapped:new-secret",
+        kdf_metadata={"algorithm": "scrypt", "salt": "new-secret-salt"},
+        source_key_record_ids=[recovery_key.key_record_id],
+        wrapped_for="passphrase",
+    )
+    repeated = sync_service.commit_key_rotation(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        rotation_id="rotation-1",
+        target_encryption_policy="passphrase_wrapped_v1",
+        wrapped_key_blob="wrapped:new-secret",
+        kdf_metadata={"algorithm": "scrypt", "salt": "new-secret-salt"},
+        source_key_record_ids=[recovery_key.key_record_id],
+        wrapped_for="passphrase",
+    )
+    records = sync_service.list_key_recovery_bundles(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        key_purpose="dataset_recovery",
+    )
+    by_id = {record.key_record_id: record for record in records}
+
+    assert committed == repeated
+    assert committed.committed is True
+    assert committed.next_key_epoch == 2
+    assert committed.active_from_server_sequence == 2
+    assert committed.new_key_record is not None
+    assert committed.new_key_record.key_epoch == 2
+    assert committed.new_key_record.rotation_of_key_record_id == recovery_key.key_record_id
+    assert committed.new_key_record.wrapped_for == "passphrase"
+    assert committed.new_key_record.rewrap_status == "complete"
+    assert committed.affected_key_records[0].superseded_at == _clock()
+    assert by_id[recovery_key.key_record_id].superseded_at == _clock()
+    assert by_id[committed.new_key_record.key_record_id].wrapped_key_blob == "wrapped:new-secret"
+    assert "wrapped:new-secret" not in str(committed)
+    assert "new-secret-salt" not in str(committed)
+
+
+def test_key_rotation_commit_rejects_revoked_or_missing_source_without_secret_leak(
+    sync_service: SyncV2Service,
+    sync_store: SyncV2Store,
+):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    sync_store.store_key_record(
+        SyncKeyRecordCreate(
+            key_record_id="key-revoked",
+            dataset_id="dataset-1",
+            user_id="user-1",
+            device_id="device-1",
+            key_purpose="dataset_recovery",
+            wrapped_key_blob="wrapped:revoked-secret",
+            kdf_metadata={"algorithm": "scrypt", "salt": "revoked-salt"},
+            revoked_at="2026-05-10T12:30:00+00:00",
+        )
+    )
+
+    for source_key_record_ids in (["missing-key"], ["key-revoked"]):
+        with pytest.raises(SyncStoreError, match="Sync key rotation is invalid") as exc_info:
+            sync_service.commit_key_rotation(
+                user_id="user-1",
+                dataset_id="dataset-1",
+                rotation_id="rotation-invalid",
+                target_encryption_policy="passphrase_wrapped_v1",
+                wrapped_key_blob="wrapped:new-secret",
+                kdf_metadata={"algorithm": "scrypt", "salt": "new-secret-salt"},
+                source_key_record_ids=source_key_record_ids,
+                wrapped_for="passphrase",
+            )
+
+        assert "wrapped:new-secret" not in str(exc_info.value)
+        assert "new-secret-salt" not in str(exc_info.value)
+
+
 def test_restore_preview_warns_when_selected_dataset_lacks_active_key_recovery(
     sync_service: SyncV2Service,
     sync_store: SyncV2Store,

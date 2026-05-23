@@ -61,6 +61,9 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncKeyRecoveryBundleListResponse,
     SyncKeyRecoveryBundleRecord,
     SyncKeyRecoveryBundleRequest,
+    SyncKeyRotationCommitRequest,
+    SyncKeyRotationPreviewRequest,
+    SyncKeyRotationResponse,
     SyncProfileBootstrapRequest,
     SyncProfileBootstrapResponse,
     SyncProfileResponse,
@@ -212,6 +215,7 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
             or "client_family" in lowered
             or "client_profile_id" in lowered
             or "key recovery bundle" in lowered
+            or "key rotation" in lowered
             or "wrapping metadata" in lowered
             or "key purpose" in lowered
         ):
@@ -1201,6 +1205,67 @@ def list_sync_v2_key_recovery_bundles(
         dataset_id=dataset_id,
         key_records=[_api_key_record_export(record) for record in records],
     )
+
+
+@router.post(
+    "/key-rotation/preview",
+    response_model=SyncKeyRotationResponse,
+    summary="Preview a Sync v2 key rotation",
+)
+def preview_sync_v2_key_rotation(
+    request: SyncKeyRotationPreviewRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        result = service.preview_key_rotation(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            target_encryption_policy=request.target_encryption_policy,
+            source_key_record_ids=request.source_key_record_ids,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            target_encryption_policy=request.target_encryption_policy,
+        ) from exc
+    return SyncKeyRotationResponse.model_validate(asdict(result))
+
+
+@router.post(
+    "/key-rotation/commit",
+    response_model=SyncKeyRotationResponse,
+    summary="Commit a Sync v2 key rotation",
+)
+def commit_sync_v2_key_rotation(
+    request: SyncKeyRotationCommitRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        result = service.commit_key_rotation(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            rotation_id=request.rotation_id,
+            target_encryption_policy=request.target_encryption_policy,
+            wrapped_key_blob=request.wrapped_key_blob,
+            kdf_metadata=request.kdf_metadata,
+            source_key_record_ids=request.source_key_record_ids,
+            wrapped_for=request.wrapped_for,
+            rewrap_status=request.rewrap_status,
+            recovery_hint=request.recovery_hint,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            rotation_id=request.rotation_id,
+            target_encryption_policy=request.target_encryption_policy,
+        ) from exc
+    return SyncKeyRotationResponse.model_validate(asdict(result))
 
 
 @router.post(

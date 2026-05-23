@@ -655,6 +655,107 @@ def test_key_recovery_bundle_validation_error_does_not_expose_wrapped_material(
     assert "secret-salt" not in rendered_logs
 
 
+def test_key_rotation_preview_and_commit_endpoints_are_redacted(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+    )
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    recovery_key = sync_service.store_key_recovery_bundle(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        key_purpose="dataset_recovery",
+        wrapped_key_blob="wrapped:current-secret",
+        kdf_metadata={"algorithm": "scrypt", "salt": "current-secret-salt"},
+    )
+    secret = "wrapped:new-secret-key-material"
+    salt = "new-secret-salt"
+
+    preview = client.post(
+        "/api/v1/sync/key-rotation/preview",
+        json={
+            "dataset_id": "dataset-1",
+            "target_encryption_policy": "passphrase_wrapped_v1",
+            "source_key_record_ids": [recovery_key.key_record_id],
+        },
+    )
+    commit = client.post(
+        "/api/v1/sync/key-rotation/commit",
+        json={
+            "dataset_id": "dataset-1",
+            "rotation_id": "rotation-1",
+            "target_encryption_policy": "passphrase_wrapped_v1",
+            "wrapped_key_blob": secret,
+            "kdf_metadata": {"algorithm": "scrypt", "salt": salt},
+            "source_key_record_ids": [recovery_key.key_record_id],
+            "wrapped_for": "passphrase",
+        },
+    )
+
+    assert preview.status_code == 200
+    assert preview.json()["can_commit"] is True
+    assert preview.json()["next_key_epoch"] == 2
+    assert preview.json()["affected_key_records"][0]["key_record_id"] == recovery_key.key_record_id
+    assert commit.status_code == 200
+    assert commit.json()["committed"] is True
+    assert commit.json()["new_key_record"]["key_epoch"] == 2
+    assert commit.json()["affected_key_records"][0]["superseded_at"] == _clock()
+    assert secret not in preview.text
+    assert salt not in preview.text
+    assert secret not in commit.text
+    assert salt not in commit.text
+
+
+def test_key_rotation_commit_endpoint_validation_error_is_redacted(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+    )
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    secret = "wrapped:new-secret-key-material"
+    salt = "new-secret-salt"
+    log_messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: log_messages.append(str(message)),
+        format="{message} {extra}",
+        level="WARNING",
+    )
+    try:
+        response = client.post(
+            "/api/v1/sync/key-rotation/commit",
+            json={
+                "dataset_id": "dataset-1",
+                "rotation_id": "rotation-1",
+                "target_encryption_policy": "passphrase_wrapped_v1",
+                "wrapped_key_blob": secret,
+                "kdf_metadata": {"algorithm": "scrypt", "salt": salt},
+                "source_key_record_ids": ["missing-key"],
+                "wrapped_for": "passphrase",
+            },
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error_code"] == "sync_validation_failed"
+    assert secret not in response.text
+    assert salt not in response.text
+    rendered_logs = "\n".join(log_messages)
+    assert secret not in rendered_logs
+    assert salt not in rendered_logs
+
+
 def test_datasets_enroll_endpoint_fails_closed_when_encryption_is_not_ready(
     tmp_path: Path,
 ) -> None:
