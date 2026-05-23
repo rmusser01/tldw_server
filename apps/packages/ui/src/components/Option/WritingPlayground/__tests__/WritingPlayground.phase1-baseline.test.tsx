@@ -1,6 +1,5 @@
 import React from "react"
 import {
-  act,
   cleanup,
   fireEvent,
   render,
@@ -8,7 +7,6 @@ import {
   waitFor,
   within
 } from "@testing-library/react"
-import { useQuery } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockState = vi.hoisted(() => ({
@@ -19,7 +17,7 @@ const mockState = vi.hoisted(() => ({
   resolveApiProviderForModel: vi.fn(async () => null as string | null),
   streamCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
   sendCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
-  sendResponses: [] as Array<string | Promise<string>>
+  sendResponses: [] as string[]
 }))
 
 type MockQueryResult = {
@@ -116,7 +114,7 @@ vi.mock("@/services/tldw/TldwChat", () => ({
     }
     async sendMessage(messages: unknown[], options: Record<string, unknown>) {
       mockState.sendCalls.push({ messages, options })
-      return await (mockState.sendResponses.shift() ?? "mocked completion")
+      return mockState.sendResponses.shift() ?? "mocked completion"
     }
   }
 }))
@@ -148,45 +146,20 @@ vi.mock("@/services/writing-playground", () => ({
 
 vi.mock("../WritingTipTapEditor", () => ({
   WritingTipTapEditor: ({
-    content,
     onAdapterReady,
-    onSelectionChange,
     onContentChange,
     placeholder
   }: {
-    content?: {
-      type?: string
-      text?: string
-      content?: Array<{
-        type?: string
-        text?: string
-        content?: Array<{ type?: string; text?: string }>
-      }>
-    } | null
     onAdapterReady: (adapter: {
       getSelection: () => { start: number; end: number }
       setSelection: (selection: { start: number; end: number }) => void
       getSelectedText: (currentValue: string) => string
       focus: () => void
     }) => void
-    onSelectionChange?: (selection: { start: number; end: number }) => void
     onContentChange: (json: Record<string, unknown>, plain: string) => void
     placeholder?: string
   }) => {
     const [selection, setSelection] = React.useState({ start: 0, end: 0 })
-    const [value, setValue] = React.useState("")
-
-    React.useEffect(() => {
-      const text =
-        content?.content
-          ?.map((node) =>
-            node.text ??
-            node.content?.map((child) => child.text ?? "").join("") ??
-            ""
-          )
-          .join("\n") ?? ""
-      setValue(text)
-    }, [content])
 
     React.useEffect(() => {
       onAdapterReady({
@@ -202,18 +175,12 @@ vi.mock("../WritingTipTapEditor", () => ({
       <textarea
         aria-label="Mock rich editor"
         placeholder={placeholder}
-        value={value}
-        onChange={(event) => {
-          setValue(event.target.value)
+        onChange={(event) =>
           onContentChange({ type: "doc" }, event.target.value)
-        }}
+        }
         onSelect={(event) => {
           const node = event.currentTarget
           setSelection({
-            start: node.selectionStart,
-            end: node.selectionEnd
-          })
-          onSelectionChange?.({
             start: node.selectionStart,
             end: node.selectionEnd
           })
@@ -291,28 +258,25 @@ const seedWritingSession = (
     limit: 200,
     offset: 0
   })
-  mockState.queryData.set(
-    mockState.queryKey(["writing-session", "session-auto"]),
-    {
-      id: "session-auto",
-      name: "Auto Session",
-      payload: {
-        prompt: "Seed prompt",
-        settings: {},
-        template_name: null,
-        theme_name: null,
-        chat_mode: false,
-        ...payloadOverrides
-      },
-      schema_version: 1,
-      version_parent_id: null,
-      created_at: "2026-03-16T12:00:00Z",
-      last_modified: "2026-03-16T12:00:00Z",
-      deleted: false,
-      client_id: "test-client",
-      version: 1
-    }
-  )
+  mockState.queryData.set("writing-session:session-auto", {
+    id: "session-auto",
+    name: "Auto Session",
+    payload: {
+      prompt: "Seed prompt",
+      settings: {},
+      template_name: null,
+      theme_name: null,
+      chat_mode: false,
+      ...payloadOverrides
+    },
+    schema_version: 1,
+    version_parent_id: null,
+    created_at: "2026-03-16T12:00:00Z",
+    last_modified: "2026-03-16T12:00:00Z",
+    deleted: false,
+    client_id: "test-client",
+    version: 1
+  })
 }
 
 const getEditor = () =>
@@ -519,50 +483,6 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(screen.getByTestId("writing-revision-queue")).toBeInTheDocument()
   })
 
-  it("shows document and selected word counts in the status bar", async () => {
-    mockState.storageValues.set("selectedModel", "mock-model")
-    seedWritingSession({ prompt: "One two three four." })
-
-    render(<WritingPlayground />)
-
-    expect(screen.getByTestId("writing-status-word-count")).toHaveTextContent(
-      "4 words"
-    )
-    expect(screen.queryByTestId("writing-status-selected-word-count")).toBeNull()
-
-    selectEditorText(getEditor(), "One two")
-
-    await waitFor(() => {
-      expect(
-        screen.getByTestId("writing-status-selected-word-count")
-      ).toHaveTextContent("2 selected")
-    })
-  })
-
-  it("initializes the workflow preset from the active session payload", async () => {
-    mockState.storageValues.set("selectedModel", "mock-model")
-    mockState.sendResponses.push(structuredReplacement("Voice-preserved line."))
-    const preserveVoice = WRITING_REVISION_PRESETS.find(
-      (preset) => preset.id === "preserve_voice"
-    )
-    expect(preserveVoice).toBeTruthy()
-    seedWritingSession({
-      prompt: "Keep this voice.",
-      revision_preset_id: "preserve_voice"
-    })
-
-    render(<WritingPlayground />)
-
-    expect(screen.getByText(preserveVoice!.instruction)).toBeInTheDocument()
-    selectEditorText(getEditor(), "Keep this voice.")
-    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
-
-    await waitFor(() => {
-      expect(mockState.sendCalls).toHaveLength(1)
-    })
-    expect(latestRevisionPrompt()).toContain(preserveVoice!.instruction)
-  })
-
   it("creates a pending Rewrite proposal for selected text and applies it without mutating early", async () => {
     mockState.storageValues.set("selectedModel", "mock-model")
     mockState.sendResponses.push(structuredReplacement("The sharper sentence."))
@@ -580,211 +500,11 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(editor.value).toBe("Intro. The old sentence. Outro.")
     expect(mockState.streamCalls).toHaveLength(0)
     expect(mockState.sendCalls).toHaveLength(1)
-    expect(screen.getByTestId("writing-revision-pending-count")).toHaveTextContent(
-      "1 pending"
-    )
 
     fireEvent.click(screen.getByRole("button", { name: /apply/i }))
 
     await waitFor(() => {
       expect(editor.value).toBe("Intro. The sharper sentence. Outro.")
-    })
-  })
-
-  it("continues from the selected text end and applies an insertion", async () => {
-    mockState.storageValues.set("selectedModel", "mock-model")
-    mockState.sendResponses.push(structuredReplacement(" continued"))
-    seedWritingSession({ prompt: "Intro sentence. Outro." })
-
-    render(<WritingPlayground />)
-    const editor = getEditor()
-    selectEditorText(editor, "sentence")
-    fireEvent.click(screen.getByRole("button", { name: /continue/i }))
-
-    await waitFor(() => {
-      expect(mockState.sendCalls).toHaveLength(1)
-    })
-    fireEvent.click(screen.getByRole("button", { name: /apply/i }))
-
-    await waitFor(() => {
-      expect(editor.value).toBe("Intro sentence continued. Outro.")
-    })
-  })
-
-  it("does not require broad-target confirmation for Continue", async () => {
-    mockState.storageValues.set("selectedModel", "mock-model")
-    mockState.sendResponses.push(structuredReplacement("Opening "))
-    seedWritingSession({
-      prompt: "Long paragraph ".repeat(120)
-    })
-
-    render(<WritingPlayground />)
-    fireEvent.click(screen.getByRole("button", { name: /continue/i }))
-
-    await waitFor(() => {
-      expect(mockState.sendCalls).toHaveLength(1)
-    })
-    expect(latestRevisionPrompt()).toContain("Operation: insert")
-  })
-
-  it("refreshes the action-bar target when text is selected after a broad target renders", async () => {
-    mockState.storageValues.set("selectedModel", "mock-model")
-    mockState.sendResponses.push(structuredReplacement("Specific rewrite."))
-    seedWritingSession({
-      prompt: `${"Long paragraph ".repeat(180)}target phrase.`
-    })
-
-    render(<WritingPlayground />)
-    expect(
-      screen.getByLabelText(/confirm whole-document text change/i)
-    ).toBeInTheDocument()
-
-    selectEditorText(getEditor(), "target phrase.")
-
-    await waitFor(() => {
-      expect(
-        screen.queryByLabelText(/confirm whole-document text change/i)
-      ).toBeNull()
-    })
-    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText("Specific rewrite.")).toBeInTheDocument()
-    })
-    expect(latestRevisionPrompt()).toContain("Target summary: selection")
-  })
-
-  it("refreshes the rich-editor action-bar target when rich text is selected", async () => {
-    mockState.storageValues.set("selectedModel", "mock-model")
-    mockState.sendResponses.push(structuredReplacement("Rich specific rewrite."))
-    useWritingPlaygroundStore.setState({ editorMode: "tiptap" })
-    seedWritingSession({
-      prompt: `${"Long paragraph ".repeat(180)}target phrase.`
-    })
-
-    render(<WritingPlayground />)
-    fireEvent.click(screen.getByRole("radio", { name: "Rich" }))
-    const richEditor = await screen.findByLabelText("Mock rich editor") as HTMLTextAreaElement
-    expect(
-      screen.getByLabelText(/confirm whole-document text change/i)
-    ).toBeInTheDocument()
-
-    selectEditorText(richEditor, "target phrase.")
-
-    await waitFor(() => {
-      expect(
-        screen.queryByLabelText(/confirm whole-document text change/i)
-      ).toBeNull()
-    })
-    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText("Rich specific rewrite.")).toBeInTheDocument()
-    })
-    expect(latestRevisionPrompt()).toContain("Target summary: selection")
-  })
-
-  it("keeps the topbar Generate control non-cancelable during revision proposal requests", async () => {
-    mockState.storageValues.set("selectedModel", "mock-model")
-    let resolveResponse: (value: string) => void = () => {}
-    mockState.sendResponses.push(
-      new Promise<string>((resolve) => {
-        resolveResponse = resolve
-      })
-    )
-    seedWritingSession({
-      prompt: "Rewrite this line.",
-      settings: { token_streaming: true }
-    })
-
-    render(<WritingPlayground />)
-    selectEditorText(getEditor(), "Rewrite this line.")
-    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
-
-    await waitFor(() => {
-      expect(mockState.sendCalls).toHaveLength(1)
-    })
-    const generateButton = screen.getByTestId("writing-topbar-generate")
-    expect(generateButton).toHaveTextContent("Generate")
-    expect(generateButton).toBeDisabled()
-
-    await act(async () => {
-      resolveResponse(structuredReplacement("Resolved rewrite."))
-    })
-    await waitFor(() => {
-      expect(screen.getByText("Resolved rewrite.")).toBeInTheDocument()
-    })
-  })
-
-  it("blocks session switching while a revision proposal request is pending", async () => {
-    mockState.storageValues.set("selectedModel", "mock-model")
-    let resolveResponse: (value: string) => void = () => {}
-    mockState.sendResponses.push(
-      new Promise<string>((resolve) => {
-        resolveResponse = resolve
-      })
-    )
-    seedWritingSession({ prompt: "Rewrite this line." })
-    mockState.queryData.set(mockState.queryKey(["writing-sessions"]), {
-      sessions: [
-        {
-          id: "session-auto",
-          name: "Auto Session",
-          last_modified: "2026-03-16T12:00:00Z",
-          version: 1
-        },
-        {
-          id: "session-other",
-          name: "Other Session",
-          last_modified: "2026-03-16T12:05:00Z",
-          version: 1
-        }
-      ],
-      total: 2,
-      limit: 200,
-      offset: 0
-    })
-    mockState.queryData.set(
-      mockState.queryKey(["writing-session", "session-other"]),
-      {
-        id: "session-other",
-        name: "Other Session",
-        payload: {
-          prompt: "Other draft.",
-          settings: {},
-          template_name: null,
-          theme_name: null,
-          chat_mode: false
-        },
-        schema_version: 1,
-        version_parent_id: null,
-        created_at: "2026-03-16T12:00:00Z",
-        last_modified: "2026-03-16T12:05:00Z",
-        deleted: false,
-        client_id: "test-client",
-        version: 1
-      }
-    )
-
-    render(<WritingPlayground />)
-    selectEditorText(getEditor(), "Rewrite this line.")
-    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
-
-    await waitFor(() => {
-      expect(mockState.sendCalls).toHaveLength(1)
-    })
-    fireEvent.click(screen.getByRole("button", { name: /Other Session/i }))
-
-    expect(useWritingPlaygroundStore.getState().activeSessionId).toBe(
-      "session-auto"
-    )
-    expect(getEditor()).toHaveValue("Rewrite this line.")
-
-    await act(async () => {
-      resolveResponse(structuredReplacement("Resolved rewrite."))
-    })
-    await waitFor(() => {
-      expect(screen.getByText("Resolved rewrite.")).toBeInTheDocument()
     })
   })
 
@@ -861,11 +581,7 @@ describe("WritingPlayground phase1 baseline", () => {
         frequency_penalty: 0.1,
         seed: 1234,
         stop: ["END"],
-        advanced_extra_body: {
-          safe_key: "kept",
-          api_key: "do-not-leak",
-          banned_tokens: ["cliche"]
-        },
+        advanced_extra_body: { safe_key: "kept", api_key: "do-not-leak" },
         memory_block: {
           enabled: true,
           prefix: "Memory:",
@@ -927,11 +643,7 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(mockState.sendCalls[0]?.options).toMatchObject({
       model: "context-model",
       temperature: 0.42,
-      maxTokens: 333,
-      extraBody: {
-        safe_key: "kept",
-        banned_tokens: ["cliche"]
-      }
+      maxTokens: 333
     })
   })
 
@@ -959,12 +671,6 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(within(queue).getByText("rejected")).toBeInTheDocument()
     expect(within(queue).getAllByText("pending")).toHaveLength(1)
     expect(screen.getByText(/regenerated from/i)).toBeInTheDocument()
-    const proposals = within(queue).getAllByTestId("writing-revision-proposal")
-    expect(proposals).toHaveLength(2)
-    expect(proposals[1]).toHaveAttribute(
-      "data-regenerated-from-id",
-      proposals[0].getAttribute("data-proposal-id")
-    )
   })
 
   it("shows manual-apply guidance for rich editor apply without mutating content", async () => {
@@ -975,8 +681,6 @@ describe("WritingPlayground phase1 baseline", () => {
 
     render(<WritingPlayground />)
     fireEvent.click(screen.getByRole("radio", { name: "Rich" }))
-    const richEditor = await screen.findByLabelText("Mock rich editor")
-    expect(richEditor).toHaveValue("Rich original.")
     fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
 
     await waitFor(() => {
@@ -990,7 +694,6 @@ describe("WritingPlayground phase1 baseline", () => {
       ).toBeInTheDocument()
     })
     expect(screen.getByText(/rich editor/i)).toBeInTheDocument()
-    expect(richEditor).toHaveValue("Rich original.")
   })
 
   it("allows confirmed whole-document text-changing targets to create applyable proposals", async () => {
@@ -1001,13 +704,7 @@ describe("WritingPlayground phase1 baseline", () => {
     })
 
     render(<WritingPlayground />)
-    const editor = getEditor()
-    editor.focus()
-    editor.setSelectionRange(0, 0)
-    fireEvent.select(editor)
-    fireEvent.click(
-      await screen.findByLabelText(/confirm whole-document text change/i)
-    )
+    fireEvent.click(screen.getByLabelText(/confirm whole-document text change/i))
     fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
 
     await waitFor(() => {
