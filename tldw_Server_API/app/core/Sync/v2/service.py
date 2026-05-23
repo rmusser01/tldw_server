@@ -10,13 +10,16 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from .adapters import (
+    ATTACHMENT_REF_SERVER_AVAILABILITY,
     AdapterAccepted,
     AdapterConflict,
     AdapterDeferred,
     AdapterRejected,
+    AttachmentRefValidationError,
     SyncAdapterContext,
     SyncDomainAdapter,
     SyncAdapterRegistry,
+    extract_attachment_ref_metadata,
 )
 from .errors import (
     SyncIdempotencyConflictError,
@@ -69,14 +72,9 @@ class SyncV2Settings:
     supports_attachments: bool = False
     supported_domains: list[SyncDomain] = field(default_factory=lambda: list(M1_SYNC_DOMAINS))
     operations: dict[SyncDomain, list[SyncOperation]] = field(
-        default_factory=lambda: {
-            domain: list(operations)
-            for domain, operations in M1_SYNC_OPERATIONS.items()
-        }
+        default_factory=lambda: {domain: list(operations) for domain, operations in M1_SYNC_OPERATIONS.items()}
     )
-    encryption_policies: list[EncryptionPolicy] = field(
-        default_factory=lambda: [DEFAULT_M1_ENCRYPTION_POLICY]
-    )
+    encryption_policies: list[EncryptionPolicy] = field(default_factory=lambda: [DEFAULT_M1_ENCRYPTION_POLICY])
     server_trusted_encryption: SyncV2ServerTrustedEncryptionStatus = field(
         default_factory=server_trusted_encryption_status_from_env
     )
@@ -195,6 +193,49 @@ class SyncRestoreManifest:
     filters_applied: dict[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class SyncRestorePreviewDataset:
+    dataset_id: str
+    domains: list[SyncDomain]
+    approximate_counts: dict[str, int] = field(default_factory=dict)
+    byte_estimates: dict[str, int] = field(default_factory=dict)
+    latest_cursor: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRestorePreviewAttachmentRef:
+    dataset_id: str
+    attachment_id: str
+    object_id: str
+    parent_domain: SyncDomain
+    parent_object_id: str
+    content_type: str
+    size_bytes: int
+    payload_hash: str
+    availability: str
+    server_cursor: int
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRestorePreviewWarning:
+    code: str
+    message: str
+    dataset_id: str | None = None
+    attachment_id: str | None = None
+    object_id: str | None = None
+    payload_hash: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRestorePreview:
+    datasets: list[SyncRestorePreviewDataset] = field(default_factory=list)
+    attachment_refs: list[SyncRestorePreviewAttachmentRef] = field(default_factory=list)
+    missing_blobs: list[SyncRestorePreviewAttachmentRef] = field(default_factory=list)
+    warnings: list[SyncRestorePreviewWarning] = field(default_factory=list)
+    generated_at: str | None = None
+    filters_applied: dict[str, object] = field(default_factory=dict)
+
+
 class SyncV2Service:
     """Core Sync v2 service with injected persistence and adapter dependencies."""
 
@@ -220,10 +261,7 @@ class SyncV2Service:
             protocol_version=self.settings.protocol_version,
             min_supported_protocol_version=self.settings.min_supported_protocol_version,
             supported_domains=list(self.settings.supported_domains),
-            operations={
-                domain: list(operations)
-                for domain, operations in self.settings.operations.items()
-            },
+            operations={domain: list(operations) for domain, operations in self.settings.operations.items()},
             encryption=self.settings.server_trusted_encryption.encryption,
             blob_transfer={"supported": False},
             encryption_policies=list(self.settings.encryption_policies),
@@ -508,11 +546,7 @@ class SyncV2Service:
             )
 
         sequences = [item.server_sequence for item in accepted]
-        sequences.extend(
-            item.server_sequence
-            for item in conflicts
-            if item.server_sequence is not None
-        )
+        sequences.extend(item.server_sequence for item in conflicts if item.server_sequence is not None)
         next_sequence = max(sequences, default=None)
         return SyncPushResult(
             dataset_id=dataset_id,
@@ -599,12 +633,124 @@ class SyncV2Service:
         ]
 
         manifest_datasets = [
-            self._manifest_dataset(dataset, user_id=user_id, domains=selected_domains)
-            for dataset in datasets
+            self._manifest_dataset(dataset, user_id=user_id, domains=selected_domains) for dataset in datasets
         ]
         return SyncRestoreManifest(
             datasets=manifest_datasets,
             devices=devices,
+            generated_at=self.clock() or None,
+            filters_applied={
+                "dataset_ids": list(dataset_ids or []),
+                "domains": list(domains or []),
+            },
+        )
+
+    def restore_preview(
+        self,
+        *,
+        user_id: str,
+        dataset_ids: Sequence[str] | None = None,
+        domains: Sequence[SyncDomain] | None = None,
+        local_inventory: Sequence[Mapping[str, object]] | None = None,
+        attachment_availability: Mapping[str, str] | None = None,
+    ) -> SyncRestorePreview:
+        """Return metadata needed to preview a restore plan for Sync v2 M1."""
+
+        del local_inventory, attachment_availability
+        allowed_dataset_ids = set(dataset_ids or [])
+        selected_domains = set(domains or [])
+        datasets = [
+            dataset
+            for dataset in self.store.list_datasets_for_user(user_id)
+            if not allowed_dataset_ids or dataset.dataset_id in allowed_dataset_ids
+        ]
+
+        preview_datasets: list[SyncRestorePreviewDataset] = []
+        attachment_refs: list[SyncRestorePreviewAttachmentRef] = []
+        missing_blobs: list[SyncRestorePreviewAttachmentRef] = []
+        warnings: list[SyncRestorePreviewWarning] = []
+
+        for dataset in datasets:
+            dataset_domains = [
+                domain for domain in dataset.domains if not selected_domains or domain in selected_domains
+            ]
+            stats = self.store.summarize_restore_manifest_dataset(
+                dataset.dataset_id,
+                user_id=user_id,
+                domains=dataset_domains,
+            )
+            latest_cursor = self._latest_cursor_for_domains(
+                dataset.dataset_id,
+                dataset_domains,
+            )
+            preview_datasets.append(
+                SyncRestorePreviewDataset(
+                    dataset_id=dataset.dataset_id,
+                    domains=dataset_domains,
+                    approximate_counts=stats.approximate_counts,
+                    byte_estimates=stats.byte_estimates,
+                    latest_cursor=latest_cursor,
+                )
+            )
+
+            if "attachment.ref" not in dataset_domains:
+                continue
+            seen_refs: set[tuple[str, str]] = set()
+            for envelope in self.store.list_envelopes_after(
+                dataset.dataset_id,
+                0,
+                limit=self.settings.restore_manifest_scan_limit,
+                domains=["attachment.ref"],
+                status="accepted",
+            ):
+                if envelope.operation == "tombstone":
+                    continue
+                try:
+                    metadata = extract_attachment_ref_metadata(envelope)
+                except AttachmentRefValidationError:
+                    continue
+                state = self.store.get_object_state(
+                    dataset.dataset_id,
+                    "attachment.ref",
+                    envelope.object_id,
+                )
+                if state is None or state.deleted:
+                    continue
+                ref_key = (metadata.attachment_id, metadata.payload_hash)
+                if ref_key in seen_refs:
+                    continue
+                seen_refs.add(ref_key)
+                summary = SyncRestorePreviewAttachmentRef(
+                    dataset_id=dataset.dataset_id,
+                    attachment_id=metadata.attachment_id,
+                    object_id=envelope.object_id,
+                    parent_domain=metadata.parent_domain,
+                    parent_object_id=metadata.parent_object_id,
+                    content_type=metadata.content_type,
+                    size_bytes=metadata.size_bytes,
+                    payload_hash=metadata.payload_hash,
+                    availability=metadata.availability,
+                    server_cursor=envelope.server_cursor or 0,
+                )
+                attachment_refs.append(summary)
+                if not _attachment_ref_has_server_blob(metadata.availability):
+                    missing_blobs.append(summary)
+                    warnings.append(
+                        SyncRestorePreviewWarning(
+                            code="sync_attachment_blob_missing",
+                            message=("Attachment blob is not available from the Sync v2 " "M1 server."),
+                            dataset_id=dataset.dataset_id,
+                            attachment_id=metadata.attachment_id,
+                            object_id=envelope.object_id,
+                            payload_hash=metadata.payload_hash,
+                        )
+                    )
+
+        return SyncRestorePreview(
+            datasets=preview_datasets,
+            attachment_refs=attachment_refs,
+            missing_blobs=missing_blobs,
+            warnings=warnings,
             generated_at=self.clock() or None,
             filters_applied={
                 "dataset_ids": list(dataset_ids or []),
@@ -630,17 +776,14 @@ class SyncV2Service:
         """Persist a small encrypted attachment payload for later restore."""
 
         if not self.settings.supports_attachments:
-            raise SyncStoreError("Sync v2 attachment persistence is not enabled")
-        if encryption_policy != "client_private_v1":
             raise SyncStoreError(
-                "Sync attachment persistence requires client_private_v1 encryption"
+                "sync_blob_transfer_not_supported: Sync v2 M1 does not support " "binary blob transfer"
             )
-        if (
-            size_bytes > self.settings.max_attachment_bytes
-            or _ciphertext_exceeds_attachment_limit(
-                payload_ciphertext,
-                self.settings.max_attachment_bytes,
-            )
+        if encryption_policy != "client_private_v1":
+            raise SyncStoreError("Sync attachment persistence requires client_private_v1 encryption")
+        if size_bytes > self.settings.max_attachment_bytes or _ciphertext_exceeds_attachment_limit(
+            payload_ciphertext,
+            self.settings.max_attachment_bytes,
         ):
             raise SyncStoreError("Sync attachment payload exceeds the server size limit")
         if not payload_ciphertext:
@@ -649,9 +792,7 @@ class SyncV2Service:
         if dataset is None:
             raise SyncStoreError("Sync dataset was not found or is not accessible")
         if domain not in dataset.domains:
-            raise SyncInvalidDomainError(
-                f"Sync domain is not enrolled for this dataset: {domain}"
-            )
+            raise SyncInvalidDomainError(f"Sync domain is not enrolled for this dataset: {domain}")
         return self.store.store_attachment(
             SyncAttachmentCreate(
                 attachment_id=attachment_id,
@@ -710,40 +851,26 @@ class SyncV2Service:
             resolution_device_id = resolved_by_device_id or resolution_envelope.device_id
             self._require_registered_device(user_id, resolution_device_id or "")
             if resolution_envelope.dataset_id != dataset.dataset_id:
-                raise SyncStoreError(
-                    "Sync resolution envelope dataset_id must match the conflict dataset"
-                )
+                raise SyncStoreError("Sync resolution envelope dataset_id must match the conflict dataset")
             if resolution_envelope.domain != conflict.domain:
-                raise SyncStoreError(
-                    "Sync resolution envelope must target the conflict domain"
-                )
+                raise SyncStoreError("Sync resolution envelope must target the conflict domain")
             if action == "duplicate_rename":
                 if resolution_envelope.entity_id == conflict.entity_id:
-                    raise SyncStoreError(
-                        "Sync duplicate_rename resolution envelope must use a distinct object_id"
-                    )
+                    raise SyncStoreError("Sync duplicate_rename resolution envelope must use a distinct object_id")
             elif resolution_envelope.entity_id != conflict.entity_id:
-                raise SyncStoreError(
-                    "Sync resolution envelope must target the conflict entity"
-                )
+                raise SyncStoreError("Sync resolution envelope must target the conflict entity")
             if (
                 resolved_by_device_id is not None
                 and resolution_envelope.device_id is not None
                 and resolution_envelope.device_id != resolved_by_device_id
             ):
-                raise SyncStoreError(
-                    "Sync resolution envelope device_id must match resolved_by_device_id"
-                )
+                raise SyncStoreError("Sync resolution envelope device_id must match resolved_by_device_id")
             if self._payload_exceeds_size_limit(resolution_envelope):
-                raise SyncStoreError(
-                    "Sync resolution envelope payload exceeds the server size limit"
-                )
+                raise SyncStoreError("Sync resolution envelope payload exceeds the server size limit")
             try:
                 outcome = self._evaluate_envelope(dataset, resolution_envelope)
             except PrivatePayloadValidationError as exc:
-                raise SyncStoreError(
-                    "Sync resolution envelope private payload validation failed"
-                ) from exc
+                raise SyncStoreError("Sync resolution envelope private payload validation failed") from exc
             if not isinstance(outcome, AdapterAccepted):
                 raise SyncStoreError("Sync resolution envelope was not accepted")
             inserted = self.store.insert_envelope(
@@ -1062,9 +1189,7 @@ class SyncV2Service:
         last_updated_at = stats.last_updated_at or dataset.updated_at
         if last_updated_at < dataset.updated_at:
             last_updated_at = dataset.updated_at
-        metadata: dict[str, object] = (
-            {} if dataset.encryption_policy == "client_private_v1" else dict(dataset.metadata)
-        )
+        metadata: dict[str, object] = {} if dataset.encryption_policy == "client_private_v1" else dict(dataset.metadata)
         return SyncRestoreManifestDataset(
             dataset_id=dataset.dataset_id,
             scope_type=dataset.scope_type,
@@ -1081,13 +1206,24 @@ class SyncV2Service:
             metadata=metadata,
         )
 
+    def _latest_cursor_for_domains(
+        self,
+        dataset_id: str,
+        domains: Sequence[SyncDomain],
+    ) -> int | None:
+        if not domains:
+            return None
+        envelopes = self.store.list_envelopes_after(
+            dataset_id,
+            0,
+            limit=self.settings.restore_manifest_scan_limit,
+            domains=domains,
+        )
+        return max((envelope.server_cursor or 0 for envelope in envelopes), default=None)
+
 
 def _compact_json_size(value: object) -> int:
-    return len(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
-            "utf-8"
-        )
-    )
+    return len(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
 
 
 def _ciphertext_exceeds_attachment_limit(
@@ -1097,6 +1233,10 @@ def _ciphertext_exceeds_attachment_limit(
     """Return whether persisted ciphertext text exceeds the attachment cap."""
 
     return len(payload_ciphertext.encode("utf-8")) > max_attachment_bytes
+
+
+def _attachment_ref_has_server_blob(availability: str) -> bool:
+    return availability.strip().lower() in ATTACHMENT_REF_SERVER_AVAILABILITY
 
 
 def _call_adapter_evaluate(
@@ -1116,10 +1256,7 @@ def _evaluate_accepts_context(evaluate: Callable[..., object]) -> bool:
     parameters = inspect.signature(evaluate).parameters.values()
     return any(
         parameter.kind == inspect.Parameter.VAR_KEYWORD
-        or (
-            parameter.name == "context"
-            and parameter.kind != inspect.Parameter.POSITIONAL_ONLY
-        )
+        or (parameter.name == "context" and parameter.kind != inspect.Parameter.POSITIONAL_ONLY)
         for parameter in parameters
     )
 
@@ -1135,6 +1272,10 @@ __all__ = [
     "SyncRestoreManifest",
     "SyncRestoreManifestDataset",
     "SyncRestoreManifestDevice",
+    "SyncRestorePreview",
+    "SyncRestorePreviewAttachmentRef",
+    "SyncRestorePreviewDataset",
+    "SyncRestorePreviewWarning",
     "SyncV2Capabilities",
     "SyncV2Service",
     "SyncV2Settings",

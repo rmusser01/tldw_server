@@ -76,15 +76,9 @@ def _with_transition_aliases(data: Any) -> Any:
         normalized["server_cursor"] = normalized["server_sequence"]
     if normalized.get("payload") is None and normalized.get("payload_clear") is not None:
         normalized["payload"] = normalized["payload_clear"]
-    if (
-        normalized.get("created_at_client") is None
-        and normalized.get("client_timestamp") is not None
-    ):
+    if normalized.get("created_at_client") is None and normalized.get("client_timestamp") is not None:
         normalized["created_at_client"] = normalized["client_timestamp"]
-    if (
-        normalized.get("received_at_server") is None
-        and normalized.get("server_timestamp") is not None
-    ):
+    if normalized.get("received_at_server") is None and normalized.get("server_timestamp") is not None:
         normalized["received_at_server"] = normalized["server_timestamp"]
     return normalized
 
@@ -297,6 +291,62 @@ class SyncRestoreManifestResponse(BaseModel):
     filters_applied: dict[str, Any] = Field(default_factory=dict)
 
 
+class SyncRestorePreviewRequest(BaseModel):
+    """Client inventory request for a Sync v2 M1 restore preview."""
+
+    dataset_ids: list[str] = Field(default_factory=list)
+    domains: list[SyncDomain] = Field(default_factory=list)
+    local_inventory: list[dict[str, Any]] = Field(default_factory=list)
+    attachment_availability: dict[str, str] = Field(default_factory=dict)
+
+
+class SyncRestorePreviewDataset(BaseModel):
+    """Dataset-level restore preview summary."""
+
+    dataset_id: str
+    domains: list[SyncDomain] = Field(default_factory=list)
+    approximate_counts: dict[str, int] = Field(default_factory=dict)
+    byte_estimates: dict[str, int] = Field(default_factory=dict)
+    latest_cursor: int | None = Field(None, ge=0)
+
+
+class SyncRestorePreviewAttachmentRef(BaseModel):
+    """Attachment metadata surfaced in a restore preview."""
+
+    dataset_id: str
+    attachment_id: str
+    object_id: str
+    parent_domain: SyncDomain
+    parent_object_id: str
+    content_type: str
+    size_bytes: int = Field(..., ge=0)
+    payload_hash: str
+    availability: str
+    server_cursor: int = Field(..., ge=0)
+
+
+class SyncRestorePreviewWarning(BaseModel):
+    """Restore preview warning with stable client-actionable code."""
+
+    code: str
+    message: str
+    dataset_id: str | None = None
+    attachment_id: str | None = None
+    object_id: str | None = None
+    payload_hash: str | None = None
+
+
+class SyncRestorePreviewResponse(BaseModel):
+    """Non-mutating Sync v2 M1 restore preview response."""
+
+    datasets: list[SyncRestorePreviewDataset] = Field(default_factory=list)
+    attachment_refs: list[SyncRestorePreviewAttachmentRef] = Field(default_factory=list)
+    missing_blobs: list[SyncRestorePreviewAttachmentRef] = Field(default_factory=list)
+    warnings: list[SyncRestorePreviewWarning] = Field(default_factory=list)
+    generated_at: str | None = None
+    filters_applied: dict[str, Any] = Field(default_factory=dict)
+
+
 class SyncV2Envelope(BaseModel):
     """Protocol unit exchanged by Sync v2 clients and the server."""
 
@@ -321,9 +371,7 @@ class SyncV2Envelope(BaseModel):
     created_at_client: str | None = None
     received_at_server: str | None = None
     deleted: bool = False
-    encryption_metadata: dict[str, Any] = Field(
-        default_factory=lambda: {"policy": DEFAULT_M1_ENCRYPTION_POLICY}
-    )
+    encryption_metadata: dict[str, Any] = Field(default_factory=lambda: {"policy": DEFAULT_M1_ENCRYPTION_POLICY})
     payload_size_bytes: int | None = Field(None, ge=0)
     payload_ciphertext: str | None = None
     dependencies: list[dict[str, Any]] = Field(default_factory=list)
@@ -382,8 +430,7 @@ class SyncV2Envelope(BaseModel):
                 raise ValueError(f"{self.domain} update envelopes require base metadata")
 
         if self.domain == "chat.message" and (
-            self.operation == "append"
-            and (not self.object_id.strip() or not self.payload_hash.strip())
+            self.operation == "append" and (not self.object_id.strip() or not self.payload_hash.strip())
         ):
             raise ValueError("chat.message append envelopes require object_id and payload_hash")
 
@@ -391,9 +438,11 @@ class SyncV2Envelope(BaseModel):
             missing = _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS.difference(self.payload)
             if missing:
                 raise ValueError(
-                    "attachment.ref envelopes require payload metadata fields: "
-                    + ", ".join(sorted(missing))
+                    "attachment.ref envelopes require payload metadata fields: " + ", ".join(sorted(missing))
                 )
+            attachment_id = self.payload.get("attachment_id")
+            if isinstance(attachment_id, str) and self.object_id != attachment_id.strip():
+                raise ValueError("attachment.ref object_id must match payload attachment_id")
         return self
 
     @property
@@ -435,9 +484,7 @@ class SyncPushRequest(BaseModel):
     def _validate_envelope_dataset_ids(self) -> "SyncPushRequest":
         for envelope in self.envelopes:
             if envelope.dataset_id != self.dataset_id:
-                raise ValueError(
-                    "envelope dataset_id must match SyncPushRequest.dataset_id"
-                )
+                raise ValueError("envelope dataset_id must match SyncPushRequest.dataset_id")
         return self
 
 
@@ -726,5 +773,10 @@ __all__ = [
     "SyncRestoreManifestDevice",
     "SyncRestoreManifestDataset",
     "SyncRestoreManifestResponse",
+    "SyncRestorePreviewAttachmentRef",
+    "SyncRestorePreviewDataset",
+    "SyncRestorePreviewRequest",
+    "SyncRestorePreviewResponse",
+    "SyncRestorePreviewWarning",
     "SyncV2Envelope",
 ]

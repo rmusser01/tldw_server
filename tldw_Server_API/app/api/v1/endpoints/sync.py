@@ -61,6 +61,8 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncPushRequest,
     SyncPushResponse,
     SyncRestoreManifestResponse,
+    SyncRestorePreviewRequest,
+    SyncRestorePreviewResponse,
     SyncV2Envelope,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
@@ -231,6 +233,14 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        if "sync_blob_transfer_not_supported" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail={
+                    "error_code": "sync_blob_transfer_not_supported",
+                    "message": "Sync v2 M1 does not support binary blob transfer.",
+                },
+            )
         if "sync_encryption_attestation_required" in lowered:
             return HTTPException(
                 status_code=status.HTTP_412_PRECONDITION_FAILED,
@@ -580,6 +590,34 @@ def get_sync_v2_restore_manifest(
 
 
 @router.post(
+    "/restore/preview",
+    response_model=SyncRestorePreviewResponse,
+    summary="Preview a Sync v2 M1 restore plan",
+)
+def preview_sync_v2_restore(
+    request: SyncRestorePreviewRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        preview = service.restore_preview(
+            user_id=_sync_user_id(user),
+            dataset_ids=request.dataset_ids,
+            domains=request.domains,
+            local_inventory=request.local_inventory,
+            attachment_availability=request.attachment_availability,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_ids=request.dataset_ids,
+            domains=request.domains,
+        ) from exc
+    return SyncRestorePreviewResponse(**asdict(preview))
+
+
+@router.post(
     "/push",
     response_model=SyncPushResponse,
     summary="Push Sync v2 envelopes",
@@ -800,6 +838,14 @@ async def upload_sync_v2_attachment(
 ):
     """Validate and persist a small encrypted Sync v2 attachment upload."""
 
+    if not service.settings.supports_attachments:
+        raise _safe_sync_v2_http_error(
+            SyncStoreError(
+                "sync_blob_transfer_not_supported: Sync v2 M1 does not support binary blob transfer"
+            ),
+            user_id=_sync_user_id(user),
+        )
+
     try:
         request = SyncAttachmentUploadRequest.model_validate(await raw_request.json())
     except (json.JSONDecodeError, ValidationError) as exc:
@@ -842,6 +888,25 @@ async def upload_sync_v2_attachment(
         stored=attachment.stored,
         size_bytes=attachment.size_bytes,
         payload_hash=attachment.payload_hash,
+    )
+
+
+@router.get(
+    "/attachments/{attachment_id}",
+    summary="Download a Sync v2 attachment blob",
+)
+def download_sync_v2_attachment(
+    attachment_id: str,
+    dataset_id: str = Query(...),
+    user: User = Depends(get_request_user),
+):
+    del user, dataset_id, attachment_id
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "error_code": "sync_blob_transfer_not_supported",
+            "message": "Sync v2 M1 does not support binary blob transfer.",
+        },
     )
 
 

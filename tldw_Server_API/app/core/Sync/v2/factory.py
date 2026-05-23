@@ -14,8 +14,13 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     _resolve_user_id_for_storage,
 )
 
-from .adapters import StaticSyncAdapter, SyncAdapterRegistry
-from .materializers import ChatConversationMaterializer, ChatMessageMaterializer, NotesMaterializer
+from .adapters import AttachmentRefAdapter, StaticSyncAdapter, SyncAdapterRegistry
+from .materializers import (
+    AttachmentRefMaterializer,
+    ChatConversationMaterializer,
+    ChatMessageMaterializer,
+    NotesMaterializer,
+)
 from .models import M1_SYNC_DOMAINS
 from .security import server_trusted_encryption_status_from_env
 from .service import SyncV2Service, SyncV2Settings
@@ -28,7 +33,11 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
 
     return SyncAdapterRegistry(
         [
-            StaticSyncAdapter(domain=domain, supported_adapter_versions={1})
+            (
+                AttachmentRefAdapter()
+                if domain == "attachment.ref"
+                else StaticSyncAdapter(domain=domain, supported_adapter_versions={1})
+            )
             for domain in M1_SYNC_DOMAINS
         ]
     )
@@ -46,6 +55,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
         store=store,
         adapters=default_sync_v2_registry(),
         materializers={
+            "attachment.ref": AttachmentRefMaterializer(),
             "chat.conversation": ChatConversationMaterializer(_chacha_notes_db_for_user(user_id)),
             "chat.message": ChatMessageMaterializer(_chacha_notes_db_for_user(user_id)),
             "notes.note": NotesMaterializer(_chacha_notes_db_for_user(user_id)),

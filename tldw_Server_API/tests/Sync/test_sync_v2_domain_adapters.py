@@ -9,6 +9,8 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import (
     AdapterAccepted,
     AdapterConflict,
+    AdapterRejected,
+    AttachmentRefAdapter,
     StaticSyncAdapter,
     SyncAdapterContext,
     SyncAdapterRegistry,
@@ -19,6 +21,7 @@ from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaCompatib
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.source_cache import SourceCacheAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.workspaces import WorkspacesDomainAdapter
+from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     SyncDataset,
@@ -63,6 +66,34 @@ def _envelope(**overrides) -> SyncEnvelopeCreate:
         "payload_ciphertext": "ciphertext:opaque",
         "payload_clear": {"entity_kind": "note", "status": "active"},
         "payload_hash": "sha256:note-1",
+        "payload_size_bytes": 128,
+    }
+    payload.update(overrides)
+    return SyncEnvelopeCreate(**payload)
+
+
+def _attachment_ref_envelope(**overrides) -> SyncEnvelopeCreate:
+    payload = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "env-attachment-1",
+        "domain": "attachment.ref",
+        "entity_id": "att-1",
+        "operation": "upsert",
+        "adapter_version": 1,
+        "device_id": "device-1",
+        "stable_key": "attachment:att-1",
+        "client_timestamp": "2026-05-10T00:00:00+00:00",
+        "routing_metadata": {"entity_kind": "attachment_ref"},
+        "payload_clear": {
+            "attachment_id": "att-1",
+            "parent_domain": "notes.note",
+            "parent_object_id": "note-1",
+            "content_type": "image/png",
+            "size_bytes": 512,
+            "payload_hash": "sha256:blob-v1",
+            "availability": "client_local",
+        },
+        "payload_hash": "sha256:blob-v1",
         "payload_size_bytes": 128,
     }
     payload.update(overrides)
@@ -125,6 +156,58 @@ def _ready_sync_settings() -> SyncV2Settings:
             auth_mode="multi_user",
         )
     )
+
+
+def test_default_attachment_ref_adapter_rejects_invalid_parent_domain():
+    default_sync_v2_registry.cache_clear()
+    adapter = default_sync_v2_registry().get("attachment.ref")
+
+    outcome = adapter.evaluate_envelope(
+        _attachment_ref_envelope(
+            payload_clear={
+                "attachment_id": "att-1",
+                "parent_domain": "media",
+                "parent_object_id": "media-1",
+                "content_type": "image/png",
+                "size_bytes": 512,
+                "payload_hash": "sha256:blob-v1",
+                "availability": "client_local",
+            },
+        ),
+        dataset=_dataset(domains=list(M1_SYNC_DOMAINS)),
+        context=_context(),
+    )
+
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "attachment_ref_parent_domain_invalid"
+
+
+def test_default_attachment_ref_adapter_conflicts_divergent_stable_payload_hash():
+    default_sync_v2_registry.cache_clear()
+    adapter = default_sync_v2_registry().get("attachment.ref")
+    prior = _stored(_attachment_ref_envelope())
+
+    outcome = adapter.evaluate_envelope(
+        _attachment_ref_envelope(
+            client_envelope_id="env-attachment-divergent",
+            payload_clear={
+                "attachment_id": "att-1",
+                "parent_domain": "notes.note",
+                "parent_object_id": "note-1",
+                "content_type": "image/jpeg",
+                "size_bytes": 512,
+                "payload_hash": "sha256:blob-v2",
+                "availability": "client_local",
+            },
+            payload_hash="sha256:blob-v2",
+        ),
+        dataset=_dataset(domains=list(M1_SYNC_DOMAINS)),
+        context=_context(prior),
+    )
+
+    assert isinstance(outcome, AdapterConflict)
+    assert outcome.domain == "attachment.ref"
+    assert outcome.conflict_type == "attachment_ref_hash_mismatch"
 
 
 def test_notes_adapter_accepts_metadata_only_tag_status_merge():
@@ -784,6 +867,9 @@ def test_default_sync_v2_registry_advertises_only_m1_domains():
 
     assert registry.supported_domains == sorted(M1_SYNC_DOMAINS)
     for domain in M1_SYNC_DOMAINS:
-        assert isinstance(registry.get(domain), StaticSyncAdapter)
+        if domain == "attachment.ref":
+            assert isinstance(registry.get(domain), AttachmentRefAdapter)
+        else:
+            assert isinstance(registry.get(domain), StaticSyncAdapter)
     with pytest.raises(KeyError):
         registry.get("media")
