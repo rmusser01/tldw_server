@@ -38,6 +38,7 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 - Created TASK-45.44.12.2 for the narrow Review slice covering `MediaReviewReadingPane` failed-load Alert migration. Verification on the slice reduced the product-state baseline from 291 to 290 and `Writing and Review surfaces` from 21 to 20. PR: https://github.com/rmusser01/tldw_server/pull/1964
 - Created TASK-45.44.12.3 for the narrow Writing slice covering `WritingPlaygroundWordcloudCard` wordcloud error Alert migration. Verification on the slice reduced the product-state baseline from 290 to 289 and `Writing and Review surfaces` from 20 to 19. PR: https://github.com/rmusser01/tldw_server/pull/1965
 - Created TASK-45.44.12.4 for the narrow Writing slice covering `WritingPlaygroundResponseInspectorCard` response inspector guidance Alert migration. Verification on the slice reduced the product-state baseline from 289 to 288 and `Writing and Review surfaces` from 19 to 18. PR: https://github.com/rmusser01/tldw_server/pull/1966
+- Created TASK-45.44.12.5 for the narrow Writing slice covering `WritingPlaygroundActiveSessionGuard` settings-load Alert migration. Verification on the slice reduced the product-state baseline from 288 to 287 and `Writing and Review surfaces` from 18 to 17. PR: https://github.com/rmusser01/tldw_server/pull/1967
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
