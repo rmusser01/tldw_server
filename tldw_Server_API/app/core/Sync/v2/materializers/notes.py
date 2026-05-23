@@ -91,15 +91,16 @@ class NotesMaterializer:
                     content=payload["content"],
                     conversation_id=payload.get("conversation_id"),
                     message_id=payload.get("message_id"),
-                    sync_client_id=envelope.device_id or "sync-v2",
+                    sync_client_id=_projection_client_id(envelope, payload),
                     object_revision=object_revision,
                     object_hash=object_hash,
                 )
                 deleted = False
             elif envelope.operation == "tombstone":
+                payload = _note_payload_for_owner(envelope.payload)
                 self.note_db.tombstone_note_from_sync(
                     note_id=envelope.object_id,
-                    sync_client_id=envelope.device_id or "sync-v2",
+                    sync_client_id=_projection_client_id(envelope, payload),
                     object_revision=object_revision,
                     object_hash=object_hash,
                 )
@@ -231,7 +232,31 @@ def _note_payload(payload: dict[str, Any]) -> dict[str, str | None]:
         "content": content,
         "conversation_id": str(conversation_id) if conversation_id is not None else None,
         "message_id": str(message_id) if message_id is not None else None,
+        "client_id": _optional_text(payload.get("client_id")),
+        "owner_user_id": _optional_text(payload.get("owner_user_id")),
     }
+
+
+def _note_payload_for_owner(payload: dict[str, Any]) -> dict[str, str | None]:
+    return {
+        "client_id": _optional_text(payload.get("client_id")),
+        "owner_user_id": _optional_text(payload.get("owner_user_id")),
+    }
+
+
+def _projection_client_id(envelope: SyncEnvelope, payload: dict[str, Any]) -> str:
+    if envelope.routing_metadata.get("origin") == "server":
+        client_id = payload.get("client_id") or payload.get("owner_user_id")
+        if isinstance(client_id, str) and client_id.strip():
+            return client_id.strip()
+    return envelope.device_id or "sync-v2"
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _conflict_result(

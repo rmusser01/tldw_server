@@ -25,6 +25,7 @@ from fastapi import (
     BackgroundTasks,
     Body,
     Depends,
+    Header,
     HTTPException,
     Path,
     Query,
@@ -156,6 +157,15 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     ConflictError,
     InputError,
+)
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.server_origin import (
+    SyncServerOriginIdempotencyConflictError,
+    SyncServerOriginMaterializationError,
+    capture_server_origin_mutation,
+    get_active_server_origin_sync_service_for_user,
+    server_origin_object_id,
+    server_origin_stable_key,
 )
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -293,6 +303,104 @@ def _safe_replace_placeholders(value: Any, char_name: str, user_name: str) -> st
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Placeholder replacement failed: {}", exc)
         return text
+
+
+def _chat_sync_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, SyncServerOriginIdempotencyConflictError):
+        envelope = exc.envelope
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": "sync_server_origin_idempotency_conflict",
+                "message": "The idempotency key was already used for a different chat change.",
+                "server_cursor": envelope.server_cursor,
+                "apply_status": envelope.apply_status,
+            },
+        )
+    if isinstance(exc, SyncServerOriginMaterializationError):
+        envelope = exc.envelope
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "sync_server_origin_materialization_failed",
+                "message": "Sync accepted the server-origin chat change but projection apply failed.",
+                "server_cursor": envelope.server_cursor,
+                "apply_status": envelope.apply_status,
+                "apply_error_code": envelope.apply_error_code,
+                "apply_error_message": envelope.apply_error_message,
+            },
+        )
+    if isinstance(exc, SyncStoreError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "sync_server_origin_append_failed",
+                "message": "Sync could not record the server-origin chat change.",
+            },
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={
+            "error_code": "sync_server_origin_failed",
+            "message": "Sync failed while recording the server-origin chat change.",
+        },
+    )
+
+
+def _active_chat_sync_service(current_user: User, scope: ConversationScopeParams):
+    if scope.scope_type == "workspace":
+        return None
+    return get_active_server_origin_sync_service_for_user(str(current_user.id))
+
+
+def _chat_completion_persist_sync_unsupported_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error_code": "sync_v2_chat_completion_persist_not_supported",
+            "message": "Sync v2 M1 does not support persisting chat completion flows through this endpoint.",
+        },
+    )
+
+
+def _chat_restore_sync_unsupported_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error_code": "sync_v2_chat_restore_not_supported",
+            "message": "Sync v2 M1 does not support restoring chat conversations through this endpoint.",
+        },
+    )
+
+
+def _chat_hard_delete_sync_unsupported_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error_code": "sync_v2_chat_hard_delete_not_supported",
+            "message": "Sync v2 M1 does not support permanently deleting chat conversations through this endpoint.",
+        },
+    )
+
+
+def _conversation_sync_payload(row: Mapping[str, Any]) -> dict[str, object]:
+    return {
+        "title": row.get("title"),
+        "root_id": row.get("root_id") or row.get("id"),
+        "assistant_kind": row.get("assistant_kind"),
+        "assistant_id": row.get("assistant_id"),
+        "character_id": row.get("character_id"),
+        "persona_memory_mode": row.get("persona_memory_mode"),
+        "state": row.get("state"),
+        "topic_label": row.get("topic_label"),
+        "cluster_id": row.get("cluster_id"),
+        "source": row.get("source"),
+        "external_ref": row.get("external_ref"),
+        "rating": row.get("rating"),
+        "client_id": row.get("client_id"),
+        "scope_type": row.get("scope_type") or "global",
+        "workspace_id": row.get("workspace_id"),
+    }
 
 
 def _extract_character_latest_user_turn_text(
@@ -3564,6 +3672,7 @@ async def create_chat_session(
     response: Response,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     seed_first_message: bool = Query(False, description="If true, seed the chat with an initial assistant greeting"),
     greeting_strategy: Literal["default", "alternate_random", "alternate_index"] = Query("default", description="How to choose the initial assistant greeting when seeding"),
     alternate_index: Optional[int] = Query(None, ge=0, description="Index for alternate greeting when greeting_strategy=alternate_index"),
@@ -3669,14 +3778,29 @@ async def create_chat_session(
                 source_message.get("id") or session_data.forked_from_message_id
             )
 
-        # Generate chat ID and title
-        chat_id = str(uuid.uuid4())
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        title = session_data.title or (
-            f"{assistant_display_name} Chat ({timestamp})"
-            if session_data.assistant_kind in {"character", "persona"}
-            else f"Chat ({timestamp})"
+        sync_service = _active_chat_sync_service(current_user, scope)
+        stable_key = server_origin_stable_key(
+            source="server_api",
+            domain="chat.conversation",
+            operation="upsert",
+            idempotency_key=idempotency_key,
         )
+
+        # Generate chat ID and title
+        chat_id = (
+            server_origin_object_id("chat.conversation", idempotency_key)
+            if sync_service is not None
+            else None
+        ) or str(uuid.uuid4())
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        if session_data.title:
+            title = session_data.title
+        elif sync_service is not None and idempotency_key:
+            title = f"{assistant_display_name} Chat ({chat_id[-12:]})"
+        elif session_data.assistant_kind in {"character", "persona"}:
+            title = f"{assistant_display_name} Chat ({timestamp})"
+        else:
+            title = f"Chat ({timestamp})"
 
         # Create conversation data
         conv_data = {
@@ -3700,13 +3824,29 @@ async def create_chat_session(
             'workspace_id': session_data.workspace_id,
         }
 
-        # Add to database
-        created_id = db.add_conversation(conv_data)
-        if not created_id:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create chat session"
-            )
+        if sync_service is not None:
+            try:
+                capture_server_origin_mutation(
+                    sync_service,
+                    user_id=str(current_user.id),
+                    domain="chat.conversation",
+                    operation="upsert",
+                    object_id=chat_id,
+                    payload=_conversation_sync_payload(conv_data),
+                    source="server_api",
+                    stable_key=stable_key,
+                )
+            except Exception as sync_exc:
+                raise _chat_sync_http_error(sync_exc) from sync_exc
+            created_id = chat_id
+        else:
+            # Add to database
+            created_id = db.add_conversation(conv_data)
+            if not created_id:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to create chat session"
+                )
 
         # Retrieve created conversation
         created_conv = db.get_conversation_by_id(created_id)
@@ -3718,7 +3858,7 @@ async def create_chat_session(
 
         # Optionally seed the chat with a greeting (first_message or alternate)
         seed_status: Optional[str] = None
-        if seed_first_message and character is not None:
+        if seed_first_message and character is not None and sync_service is None:
             try:
                 raw_name = character.get('name') or 'Assistant'
                 choice_text: Optional[str] = None
@@ -3755,7 +3895,7 @@ async def create_chat_session(
             seed_status = "no_greeting"
 
         # Persist a greetings checksum so staleness can be detected later.
-        if character is not None:
+        if character is not None and sync_service is None:
             try:
                 checksum = _compute_greetings_checksum(character)
                 updated_settings = db.upsert_conversation_settings(
@@ -5089,6 +5229,13 @@ async def character_chat_completion(
             except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
                 save_to_db = False
         will_persist = bool(save_to_db) and not stream_requested
+        if will_persist:
+            conversation_scope = _resolve_chat_scope(
+                conversation.get("scope_type"),
+                conversation.get("workspace_id"),
+            )
+            if _active_chat_sync_service(current_user, conversation_scope) is not None:
+                raise _chat_completion_persist_sync_unsupported_error()
 
         messages = db.get_messages_for_conversation(chat_id, limit=limit, offset=offset) or []
         messages = [m for m in messages if not m.get('deleted')]
@@ -6147,8 +6294,25 @@ async def update_chat_session(
             for k, v in update_fields.items()
             if k in {"title", "rating", "state", "topic_label", "cluster_id", "source", "external_ref"}
         }
-        # db.update_conversation updates metadata and bumps version even if payload is empty
-        db.update_conversation(chat_id, allowed_update, expected_version)
+        sync_service = _active_chat_sync_service(current_user, scope)
+        if sync_service is not None:
+            projected = dict(conversation)
+            projected.update(allowed_update)
+            try:
+                capture_server_origin_mutation(
+                    sync_service,
+                    user_id=str(current_user.id),
+                    domain="chat.conversation",
+                    operation="upsert",
+                    object_id=chat_id,
+                    payload=_conversation_sync_payload(projected),
+                    source="server_api",
+                )
+            except Exception as sync_exc:
+                raise _chat_sync_http_error(sync_exc) from sync_exc
+        else:
+            # db.update_conversation updates metadata and bumps version even if payload is empty
+            db.update_conversation(chat_id, allowed_update, expected_version)
 
         # Retrieve updated conversation
         updated_conv = db.get_conversation_by_id(chat_id)
@@ -6356,6 +6520,9 @@ async def delete_chat_session(
                     detail=f"Version mismatch. Expected {expected_version}, found {conversation.get('version', 1)}"
                 )
 
+            if _active_chat_sync_service(current_user, scope) is not None:
+                raise _chat_hard_delete_sync_unsupported_error()
+
             deleted_ok = db.hard_delete_conversation(chat_id)
             if not deleted_ok:
                 raise HTTPException(
@@ -6371,6 +6538,64 @@ async def delete_chat_session(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Version mismatch. Expected {expected_version}, found {conversation.get('version', 1)}"
             )
+
+        sync_service = _active_chat_sync_service(current_user, scope)
+        if sync_service is not None:
+            try:
+                child_messages: list[dict[str, Any]] = []
+                fetch_offset = 0
+                fetch_limit = 100
+                while True:
+                    batch = db.get_messages_for_conversation(
+                        chat_id,
+                        limit=fetch_limit,
+                        offset=fetch_offset,
+                    )
+                    if not batch:
+                        break
+                    child_messages.extend(batch)
+                    if len(batch) < fetch_limit:
+                        break
+                    fetch_offset += fetch_limit
+
+                for message in child_messages:
+                    message_id = str(message.get("id") or "")
+                    if not message_id:
+                        continue
+                    capture_server_origin_mutation(
+                        sync_service,
+                        user_id=str(current_user.id),
+                        domain="chat.message",
+                        operation="tombstone",
+                        object_id=message_id,
+                        parent_id=chat_id,
+                        payload={
+                            "id": message_id,
+                            "deleted": True,
+                            "conversation_id": chat_id,
+                            "client_id": str(current_user.id),
+                            "owner_user_id": str(current_user.id),
+                        },
+                        source="server_api",
+                    )
+                capture_server_origin_mutation(
+                    sync_service,
+                    user_id=str(current_user.id),
+                    domain="chat.conversation",
+                    operation="tombstone",
+                    object_id=chat_id,
+                    payload={
+                        "id": chat_id,
+                        "deleted": True,
+                        "client_id": str(current_user.id),
+                        "owner_user_id": str(current_user.id),
+                    },
+                    source="server_api",
+                )
+            except Exception as sync_exc:
+                raise _chat_sync_http_error(sync_exc) from sync_exc
+            logger.info(f"Soft deleted chat session {chat_id} by user {current_user.id}")
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
 
         # Delete messages in batches using offset-based pagination to avoid unbounded memory
         # Track failed message IDs to prevent infinite loops when deletions fail
@@ -6479,6 +6704,9 @@ async def restore_chat_session(
                     str(current_user.id),
                 )
             )
+
+        if _active_chat_sync_service(current_user, scope) is not None:
+            raise _chat_restore_sync_unsupported_error()
 
         exp_ver = expected_version if expected_version is not None else conversation.get("version", 1)
         db.restore_conversation(chat_id, exp_ver)
@@ -6763,6 +6991,12 @@ async def persist_streamed_assistant_message(
     try:
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id)
+        conversation_scope = _resolve_chat_scope(
+            conversation.get("scope_type"),
+            conversation.get("workspace_id"),
+        )
+        if _active_chat_sync_service(current_user, conversation_scope) is not None:
+            raise _chat_completion_persist_sync_unsupported_error()
 
         settings_row = db.get_conversation_settings(chat_id)
         history_messages = db.get_messages_for_conversation(chat_id, limit=1000, offset=0) or []

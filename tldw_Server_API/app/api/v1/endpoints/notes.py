@@ -10,6 +10,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any, Callable, Optional, TypeVar
 from urllib.parse import quote
+from uuid import uuid4
 
 #
 # 3rd-party Libraries
@@ -113,6 +114,15 @@ from tldw_Server_API.app.core.Personalization import (
     record_note_restored,
     record_note_updated,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.server_origin import (
+    SyncServerOriginIdempotencyConflictError,
+    SyncServerOriginMaterializationError,
+    capture_server_origin_mutation,
+    get_active_server_origin_sync_service_for_user,
+    server_origin_object_id,
+    server_origin_stable_key,
+)
 from tldw_Server_API.app.core.Writing.note_title import TitleGenOptions, generate_note_title
 
 #
@@ -203,6 +213,83 @@ def _ensure_note_exists_or_404(db: CharactersRAGDB, note_id: str) -> None:
     note_data = db.get_note_by_id(note_id=note_id)
     if not note_data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+
+
+def _note_sync_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, SyncServerOriginIdempotencyConflictError):
+        envelope = exc.envelope
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": "sync_server_origin_idempotency_conflict",
+                "message": "The idempotency key was already used for a different note change.",
+                "server_cursor": envelope.server_cursor,
+                "apply_status": envelope.apply_status,
+            },
+        )
+    if isinstance(exc, SyncServerOriginMaterializationError):
+        envelope = exc.envelope
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "sync_server_origin_materialization_failed",
+                "message": "Sync accepted the server-origin note change but projection apply failed.",
+                "server_cursor": envelope.server_cursor,
+                "apply_status": envelope.apply_status,
+                "apply_error_code": envelope.apply_error_code,
+                "apply_error_message": envelope.apply_error_message,
+            },
+        )
+    if isinstance(exc, SyncStoreError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "sync_server_origin_append_failed",
+                "message": "Sync could not record the server-origin note change.",
+            },
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={
+            "error_code": "sync_server_origin_failed",
+            "message": "Sync failed while recording the server-origin note change.",
+        },
+    )
+
+
+def _note_keywords_sync_unsupported_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error_code": "sync_v2_keywords_not_supported",
+            "message": "Sync v2 M1 does not support note keyword mutations.",
+        },
+    )
+
+
+def _note_restore_sync_unsupported_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error_code": "sync_v2_note_restore_not_supported",
+            "message": "Sync v2 M1 does not support restoring notes through this endpoint.",
+        },
+    )
+
+
+def _note_payload_from_row(note: dict[str, Any]) -> dict[str, object]:
+    return {
+        "title": str(note.get("title") or ""),
+        "content": str(note.get("content") or ""),
+        "conversation_id": note.get("conversation_id"),
+        "message_id": note.get("message_id"),
+        "client_id": note.get("client_id"),
+        "owner_user_id": note.get("owner_user_id") or note.get("client_id"),
+    }
+
+
+def _active_notes_sync_service(current_user: User):
+    return get_active_server_origin_sync_service_for_user(str(current_user.id))
 
 
 def _safe_note_attachment_dirname(note_id: str) -> str:
@@ -1186,15 +1273,52 @@ async def create_note(
             note_in.message_id,
         )
 
-        note_id = db.add_note(
-            title=effective_title,
-            content=note_in.content,
-            note_id=note_in.id,  # Pass optional client-provided ID
-            conversation_id=conversation_id,
-            message_id=message_id,
+        sync_service = _active_notes_sync_service(current_user)
+        if sync_service is not None and _field_supplied(note_in, "keywords"):
+            raise _note_keywords_sync_unsupported_error()
+        idempotency_key = request.headers.get("Idempotency-Key")
+        stable_key = server_origin_stable_key(
+            source="server_api",
+            domain="notes.note",
+            operation="upsert",
+            idempotency_key=idempotency_key,
         )
-        if note_id is None:  # Should be caught by exceptions
-            raise CharactersRAGDBError("Note creation failed to return an ID.")
+        note_id = (
+            note_in.id
+            or (server_origin_object_id("notes.note", idempotency_key) if sync_service is not None else None)
+            or str(uuid4())
+        )
+        if sync_service is not None:
+            try:
+                capture_server_origin_mutation(
+                    sync_service,
+                    user_id=str(current_user.id),
+                    domain="notes.note",
+                    operation="upsert",
+                    object_id=note_id,
+                    payload={
+                        "title": effective_title,
+                        "content": note_in.content,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "client_id": str(current_user.id),
+                        "owner_user_id": str(current_user.id),
+                    },
+                    source="server_api",
+                    stable_key=stable_key,
+                )
+            except Exception as sync_exc:
+                raise _note_sync_http_error(sync_exc) from sync_exc
+        else:
+            note_id = db.add_note(
+                title=effective_title,
+                content=note_in.content,
+                note_id=note_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+            )
+            if note_id is None:  # Should be caught by exceptions
+                raise CharactersRAGDBError("Note creation failed to return an ID.")
 
         # Topic monitoring (non-blocking) for title and content
         try:
@@ -1702,6 +1826,7 @@ async def import_notes(
             "failed_count": 0,
         }
         companion_events: list[dict[str, Any]] = []
+        sync_service = _active_notes_sync_service(current_user)
 
         for item in payload.items:
             file_result = NotesImportFileResult(
@@ -1732,6 +1857,12 @@ async def import_notes(
                 file_result.failed_count += 1
                 file_result.errors.append(f"Could not parse import content: {parse_err}")
 
+            if sync_service is not None and any(
+                parsed_note.get("keywords_provided") or parsed_note.get("keywords")
+                for parsed_note in parsed_notes
+            ):
+                raise _note_keywords_sync_unsupported_error()
+
             for note_index, parsed_note in enumerate(parsed_notes, start=1):
                 try:
                     imported_id = parsed_note.get("id")
@@ -1746,18 +1877,34 @@ async def import_notes(
                             "title": parsed_note["title"],
                             "content": parsed_note["content"],
                         }
-                        expected_version = int(existing_note.get("version", 1))
-                        db.update_note(
-                            note_id=str(imported_id),
-                            update_data=update_patch,
-                            expected_version=expected_version,
-                        )
-                        if parsed_note.get("keywords_provided"):
-                            _sync_note_keywords(
-                                db,
+                        if sync_service is not None:
+                            projected_note = dict(existing_note)
+                            projected_note.update(update_patch)
+                            try:
+                                capture_server_origin_mutation(
+                                    sync_service,
+                                    user_id=str(current_user.id),
+                                    domain="notes.note",
+                                    operation="upsert",
+                                    object_id=str(imported_id),
+                                    payload=_note_payload_from_row(projected_note),
+                                    source="server_api",
+                                )
+                            except Exception as sync_exc:
+                                raise _note_sync_http_error(sync_exc) from sync_exc
+                        else:
+                            expected_version = int(existing_note.get("version", 1))
+                            db.update_note(
                                 note_id=str(imported_id),
-                                keywords=parsed_note.get("keywords", []),
+                                update_data=update_patch,
+                                expected_version=expected_version,
                             )
+                            if parsed_note.get("keywords_provided"):
+                                _sync_note_keywords(
+                                    db,
+                                    note_id=str(imported_id),
+                                    keywords=parsed_note.get("keywords", []),
+                                )
                         companion_events.append(
                             _build_import_note_companion_event(
                                 db=db,
@@ -1770,19 +1917,41 @@ async def import_notes(
                         continue
 
                     create_with_id = None if payload.duplicate_strategy == "create_copy" else imported_id
-                    created_note_id = db.add_note(
-                        title=parsed_note["title"],
-                        content=parsed_note["content"],
-                        note_id=create_with_id,
-                    )
-                    if not created_note_id:
-                        raise CharactersRAGDBError("Import create returned no note ID.")  # noqa: TRY003
-                    if parsed_note.get("keywords"):
-                        _sync_note_keywords(
-                            db,
-                            note_id=str(created_note_id),
-                            keywords=parsed_note.get("keywords", []),
+                    if sync_service is not None:
+                        created_note_id = str(create_with_id or uuid4())
+                        try:
+                            capture_server_origin_mutation(
+                                sync_service,
+                                user_id=str(current_user.id),
+                                domain="notes.note",
+                                operation="upsert",
+                                object_id=created_note_id,
+                                payload={
+                                    "title": parsed_note["title"],
+                                    "content": parsed_note["content"],
+                                    "conversation_id": None,
+                                    "message_id": None,
+                                    "client_id": str(current_user.id),
+                                    "owner_user_id": str(current_user.id),
+                                },
+                                source="server_api",
+                            )
+                        except Exception as sync_exc:
+                            raise _note_sync_http_error(sync_exc) from sync_exc
+                    else:
+                        created_note_id = db.add_note(
+                            title=parsed_note["title"],
+                            content=parsed_note["content"],
+                            note_id=create_with_id,
                         )
+                        if not created_note_id:
+                            raise CharactersRAGDBError("Import create returned no note ID.")  # noqa: TRY003
+                        if parsed_note.get("keywords"):
+                            _sync_note_keywords(
+                                db,
+                                note_id=str(created_note_id),
+                                keywords=parsed_note.get("keywords", []),
+                            )
                     companion_events.append(
                         _build_import_note_companion_event(
                             db=db,
@@ -1824,6 +1993,8 @@ async def import_notes(
                             continue
                     file_result.failed_count += 1
                     file_result.errors.append(f"Note {note_index}: {conflict_err}")
+                except HTTPException:
+                    raise
                 except _NOTES_NONCRITICAL_EXCEPTIONS as note_err:
                     file_result.failed_count += 1
                     file_result.errors.append(f"Note {note_index}: {note_err}")
@@ -3446,14 +3617,41 @@ async def update_note(
                 )
         except _NOTES_NONCRITICAL_EXCEPTIONS:
             pass
+        sync_service = _active_notes_sync_service(current_user)
+        if sync_service is not None and keywords_supplied:
+            raise _note_keywords_sync_unsupported_error()
         if update_data:
-            success = db.update_note(
-                note_id=note_id,
-                update_data=update_data,
-                expected_version=expected_version
-            )
-            if not success:
-                raise CharactersRAGDBError("Note update reported non-success without specific exception.")
+            if sync_service is not None:
+                current_note = _get_current_note()
+                current_version = current_note.get("version")
+                if current_version is not None and int(current_version) != int(expected_version):
+                    raise ConflictError(
+                        f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
+                        entity="notes",
+                        entity_id=note_id,
+                    )
+                projected_note = dict(current_note)
+                projected_note.update(update_data)
+                try:
+                    capture_server_origin_mutation(
+                        sync_service,
+                        user_id=str(current_user.id),
+                        domain="notes.note",
+                        operation="upsert",
+                        object_id=note_id,
+                        payload=_note_payload_from_row(projected_note),
+                        source="server_api",
+                    )
+                except Exception as sync_exc:
+                    raise _note_sync_http_error(sync_exc) from sync_exc
+            else:
+                success = db.update_note(
+                    note_id=note_id,
+                    update_data=update_data,
+                    expected_version=expected_version
+                )
+                if not success:
+                    raise CharactersRAGDBError("Note update reported non-success without specific exception.")
 
         keyword_sync_summary: dict[str, Any] | None = None
         if keywords_supplied:
@@ -3585,14 +3783,41 @@ async def patch_note(
             data_keys.append("keywords")
         logger.info(
             f"User (DB client_id: {db.client_id}) partially updating note: ID='{note_id}', Version={expected_version}, DataKeys={data_keys}")
+        sync_service = _active_notes_sync_service(current_user)
+        if sync_service is not None and keywords_supplied:
+            raise _note_keywords_sync_unsupported_error()
         if update_data:
-            success = db.update_note(
-                note_id=note_id,
-                update_data=update_data,
-                expected_version=expected_version
-            )
-            if not success:
-                raise CharactersRAGDBError("Note update reported non-success without specific exception.")
+            if sync_service is not None:
+                current = _get_current_note()
+                current_version = current.get("version")
+                if current_version is not None and int(current_version) != int(expected_version):
+                    raise ConflictError(
+                        f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
+                        entity="notes",
+                        entity_id=note_id,
+                    )
+                payload = _note_payload_from_row(current)
+                payload.update(update_data)
+                try:
+                    capture_server_origin_mutation(
+                        sync_service,
+                        user_id=str(current_user.id),
+                        domain="notes.note",
+                        operation="upsert",
+                        object_id=note_id,
+                        payload=payload,
+                        source="server_api",
+                    )
+                except Exception as sync_exc:
+                    raise _note_sync_http_error(sync_exc) from sync_exc
+            else:
+                success = db.update_note(
+                    note_id=note_id,
+                    update_data=update_data,
+                    expected_version=expected_version
+                )
+                if not success:
+                    raise CharactersRAGDBError("Note update reported non-success without specific exception.")
 
         keyword_sync_summary: dict[str, Any] | None = None
         if keywords_supplied:
@@ -3658,12 +3883,41 @@ async def delete_note(
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
         logger.info(
             f"User (DB client_id: {db.client_id}) soft-deleting note: ID='{note_id}', Version={expected_version}")
-        success = db.soft_delete_note(
-            note_id=note_id,
-            expected_version=expected_version
-        )
-        if not success:
-            raise CharactersRAGDBError("Note soft delete reported non-success without specific exception.")
+        sync_service = _active_notes_sync_service(current_user)
+        if sync_service is not None:
+            if not existing_note:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+            current_version = existing_note.get("version")
+            if current_version is not None and int(current_version) != int(expected_version):
+                raise ConflictError(
+                    f"Note ID {note_id} delete failed: version mismatch (db has {current_version}, client expected {expected_version}).",
+                    entity="notes",
+                    entity_id=note_id,
+                )
+            try:
+                capture_server_origin_mutation(
+                    sync_service,
+                    user_id=str(current_user.id),
+                    domain="notes.note",
+                    operation="tombstone",
+                    object_id=note_id,
+                    payload={
+                        "id": note_id,
+                        "deleted": True,
+                        "client_id": str(current_user.id),
+                        "owner_user_id": str(current_user.id),
+                    },
+                    source="server_api",
+                )
+            except Exception as sync_exc:
+                raise _note_sync_http_error(sync_exc) from sync_exc
+        else:
+            success = db.soft_delete_note(
+                note_id=note_id,
+                expected_version=expected_version
+            )
+            if not success:
+                raise CharactersRAGDBError("Note soft delete reported non-success without specific exception.")
         if note_for_activity is not None:
             record_note_deleted(
                 user_id=current_user.id,
@@ -3717,6 +3971,9 @@ async def restore_note(
         logger.info(
             f"User (DB client_id: {db.client_id}) restoring note: ID='{note_id}', Version={expected_version}")
 
+        if _active_notes_sync_service(current_user) is not None:
+            raise _note_restore_sync_unsupported_error()
+
         success = db.restore_note(
             note_id=note_id,
             expected_version=expected_version
@@ -3765,6 +4022,8 @@ async def restore_note(
             keywords=keyword_responses,
             folders=list(folders or []),
         )
+    except HTTPException:
+        raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "note")
 
@@ -3828,6 +4087,10 @@ async def bulk_create_notes(
                             detail="Rate limit exceeded for notes.bulk_create",
                             headers={"Retry-After": str(meta.get("retry_after", 60))})
 
+    sync_service = _active_notes_sync_service(current_user)
+    if sync_service is not None and any(_field_supplied(item, "keywords") for item in request.notes):
+        raise _note_keywords_sync_unsupported_error()
+
     for item in request.notes:
         try:
             # Compute title per item
@@ -3853,15 +4116,37 @@ async def bulk_create_notes(
                 item.message_id,
             )
 
-            note_id = db.add_note(
-                title=effective_title,
-                content=item.content,
-                note_id=item.id,
-                conversation_id=conversation_id,
-                message_id=message_id,
-            )
-            if not note_id:
-                raise CharactersRAGDBError("Failed to create note (no ID returned)")
+            note_id = item.id or str(uuid4())
+            if sync_service is not None:
+                try:
+                    capture_server_origin_mutation(
+                        sync_service,
+                        user_id=str(current_user.id),
+                        domain="notes.note",
+                        operation="upsert",
+                        object_id=note_id,
+                        payload={
+                            "title": effective_title,
+                            "content": item.content,
+                            "conversation_id": conversation_id,
+                            "message_id": message_id,
+                            "client_id": str(current_user.id),
+                            "owner_user_id": str(current_user.id),
+                        },
+                        source="server_api",
+                    )
+                except Exception as sync_exc:
+                    raise _note_sync_http_error(sync_exc) from sync_exc
+            else:
+                note_id = db.add_note(
+                    title=effective_title,
+                    content=item.content,
+                    note_id=note_id,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                )
+                if not note_id:
+                    raise CharactersRAGDBError("Failed to create note (no ID returned)")
 
             # Topic monitoring (non-blocking) per item
             try:
@@ -3890,18 +4175,19 @@ async def bulk_create_notes(
                 pass
 
             # Attach keywords if provided
-            try:
-                kw_list = item.normalized_keywords if hasattr(item, 'normalized_keywords') else None
-                if kw_list:
-                    for kw in kw_list:
-                        try:
-                            kw_row = _get_or_create_keyword_row(db, kw)
-                            if kw_row and kw_row.get('id') is not None:
-                                db.link_note_to_keyword(note_id=note_id, keyword_id=int(kw_row['id']))
-                        except _NOTES_NONCRITICAL_EXCEPTIONS as kw_err:
-                            logger.warning(f"[Bulk] Keyword attach failed for '{kw}' on note {note_id}: {kw_err}")
-            except _NOTES_NONCRITICAL_EXCEPTIONS as kw_outer_err:
-                logger.warning(f"[Bulk] Keyword processing issue for note {note_id}: {kw_outer_err}")
+            if sync_service is None:
+                try:
+                    kw_list = item.normalized_keywords if hasattr(item, 'normalized_keywords') else None
+                    if kw_list:
+                        for kw in kw_list:
+                            try:
+                                kw_row = _get_or_create_keyword_row(db, kw)
+                                if kw_row and kw_row.get('id') is not None:
+                                    db.link_note_to_keyword(note_id=note_id, keyword_id=int(kw_row['id']))
+                            except _NOTES_NONCRITICAL_EXCEPTIONS as kw_err:
+                                logger.warning(f"[Bulk] Keyword attach failed for '{kw}' on note {note_id}: {kw_err}")
+                except _NOTES_NONCRITICAL_EXCEPTIONS as kw_outer_err:
+                    logger.warning(f"[Bulk] Keyword processing issue for note {note_id}: {kw_outer_err}")
 
             nd = db.get_note_by_id(note_id=note_id)
             if not nd:
@@ -4257,6 +4543,8 @@ async def link_note_to_keyword_endpoint(
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                                 detail="Rate limit exceeded for notes.link_keyword",
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
+        if _active_notes_sync_service(current_user) is not None:
+            raise _note_keywords_sync_unsupported_error()
         logger.info(f"User (DB client_id: {db.client_id}) linking note '{note_id}' to keyword '{keyword_id}'")
         # Check if note and keyword exist in the user's DB
         note_data = db.get_note_by_id(note_id)
@@ -4299,10 +4587,14 @@ async def unlink_note_from_keyword_endpoint(
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                                 detail="Rate limit exceeded for notes.unlink_keyword",
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
+        if _active_notes_sync_service(current_user) is not None:
+            raise _note_keywords_sync_unsupported_error()
         logger.info(f"User (DB client_id: {db.client_id}) unlinking note '{note_id}' from keyword '{keyword_id}'")
         success = db.unlink_note_from_keyword(note_id=note_id, keyword_id=keyword_id)
         msg = "Note unlinked from keyword successfully." if success else "Link not found or no action taken."
         return NoteKeywordLinkResponse(success=success, message=msg)
+    except HTTPException:
+        raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "note-keyword unlink")
 

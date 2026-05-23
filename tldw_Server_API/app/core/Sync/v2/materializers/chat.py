@@ -68,7 +68,7 @@ class ChatConversationMaterializer:
                 self.note_db.upsert_conversation_from_sync(
                     conversation_id=envelope.object_id,
                     title=payload.get("title"),
-                    sync_client_id=envelope.device_id or "sync-v2",
+                    sync_client_id=_projection_client_id(envelope, payload),
                     object_revision=object_revision,
                     object_hash=object_hash,
                     root_id=payload.get("root_id"),
@@ -89,7 +89,7 @@ class ChatConversationMaterializer:
             elif envelope.operation == "tombstone":
                 self.note_db.tombstone_conversation_from_sync(
                     conversation_id=envelope.object_id,
-                    sync_client_id=envelope.device_id or "sync-v2",
+                    sync_client_id=_projection_client_id(envelope, envelope.payload),
                     object_revision=object_revision,
                     object_hash=object_hash,
                 )
@@ -186,7 +186,7 @@ class ChatMessageMaterializer:
                     sender=payload["sender"],
                     content=payload.get("content"),
                     timestamp=payload.get("timestamp"),
-                    sync_client_id=envelope.device_id or "sync-v2",
+                    sync_client_id=_projection_client_id(envelope, payload),
                     object_revision=object_revision,
                     payload_hash=object_hash,
                     parent_message_id=payload.get("parent_message_id"),
@@ -219,7 +219,7 @@ class ChatMessageMaterializer:
                     return conflict
                 self.note_db.tombstone_message_from_sync(
                     stable_message_id=envelope.object_id,
-                    sync_client_id=envelope.device_id or "sync-v2",
+                    sync_client_id=_projection_client_id(envelope, envelope.payload),
                     object_revision=object_revision,
                     object_hash=current_state.object_hash if current_state is not None else object_hash,
                 )
@@ -489,6 +489,14 @@ def _message_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "sender": sender,
         "content": content,
     }
+
+
+def _projection_client_id(envelope: SyncEnvelope, payload: dict[str, Any]) -> str:
+    if envelope.routing_metadata.get("origin") == "server":
+        client_id = payload.get("client_id") or payload.get("owner_user_id")
+        if isinstance(client_id, str) and client_id.strip():
+            return client_id.strip()
+    return envelope.device_id or "sync-v2"
 
 
 def _next_object_revision(envelope: SyncEnvelope, current_state: SyncObjectState | None) -> int:
