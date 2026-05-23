@@ -33,17 +33,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/DocumentWorkspace/DocumentWorkspaceErrorBoundary.tsx:Result",
-    "path": "src/components/DocumentWorkspace/DocumentWorkspaceErrorBoundary.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Result",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Result product-state UI in src/components/DocumentWorkspace/DocumentWorkspaceErrorBoundary.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Flashcards/components/FlashcardDocumentRow.tsx:Alert#antd-alert-flashcarddocumentrow-type-error-line-414-o4coyq",
     "path": "src/components/Flashcards/components/FlashcardDocumentRow.tsx",
     "rule": "antd-product-state-import",
