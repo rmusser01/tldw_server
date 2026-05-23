@@ -92,15 +92,8 @@ export const findParagraphRange = (
   cursor: number
 ): { start: number; end: number } => {
   const safeCursor = clampIndex(cursor, text.length)
-  const paragraphCursor =
-    safeCursor === 0 && text.startsWith("\n\n")
-      ? clampIndex(safeCursor + 2, text.length)
-      : safeCursor > 0 && text.slice(safeCursor - 1, safeCursor + 1) === "\n\n"
-        ? safeCursor - 1
-      : safeCursor
-  const before =
-    paragraphCursor === 0 ? -1 : text.lastIndexOf("\n\n", paragraphCursor - 1)
-  const after = text.indexOf("\n\n", paragraphCursor)
+  const before = text.lastIndexOf("\n\n", safeCursor - 1)
+  const after = text.indexOf("\n\n", safeCursor)
   return {
     start: before === -1 ? 0 : before + 2,
     end: after === -1 ? text.length : after
@@ -153,21 +146,6 @@ export const resolveRevisionTarget = (input: {
   const { text, action, operation, selection } = input
   const maxAutomaticTargetCharacters =
     input.maxAutomaticTargetCharacters ?? DEFAULT_LARGE_TARGET_CHARS
-  const cursor = clampIndex(
-    input.cursor ?? selection?.end ?? text.length,
-    text.length
-  )
-  if (action === "continue") {
-    return makeRevisionTarget({
-      text,
-      mode: "cursor",
-      start: cursor,
-      end: cursor,
-      operation: "insert",
-      label: cursor === text.length ? "document end" : "cursor"
-    })
-  }
-
   if (selection && selection.start !== selection.end) {
     return makeRevisionTarget({
       text,
@@ -176,6 +154,18 @@ export const resolveRevisionTarget = (input: {
       end: selection.end,
       operation,
       label: "selection"
+    })
+  }
+
+  const cursor = clampIndex(input.cursor ?? text.length, text.length)
+  if (action === "continue") {
+    return makeRevisionTarget({
+      text,
+      mode: "cursor",
+      start: cursor,
+      end: cursor,
+      operation: "insert",
+      label: cursor === text.length ? "document end" : "cursor"
     })
   }
 
@@ -245,7 +235,7 @@ export const planRevisionApply = (
   const replacementText = proposal.replacementText
   if (typeof replacementText !== "string") {
     return {
-      type: "noop",
+      type: "conflict",
       reason: "Text-changing revisions require replacement text."
     }
   }
@@ -291,13 +281,6 @@ export const planRevisionApply = (
     return {
       type: "conflict",
       reason: "The insertion anchor no longer identifies a unique target."
-    }
-  }
-
-  if (proposal.operation === "insert") {
-    return {
-      type: "conflict",
-      reason: "Insert revisions require a zero-length target."
     }
   }
 
