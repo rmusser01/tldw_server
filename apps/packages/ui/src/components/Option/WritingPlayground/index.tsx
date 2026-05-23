@@ -117,6 +117,7 @@ import {
 } from "./writing-revision-prompt-utils"
 import {
   confirmRevisionTarget,
+  countWords,
   resolveRevisionTarget
 } from "./writing-revision-utils"
 import type {
@@ -1556,6 +1557,24 @@ export const WritingPlayground = () => {
         cursor: revisionSelection?.end ?? 0
       }),
     [editorText, revisionSelection]
+  )
+  const writingWordCount = React.useMemo(
+    () => countWords(editorText),
+    [editorText]
+  )
+  const selectedWordCount = React.useMemo(() => {
+    if (!revisionSelection || revisionSelection.start === revisionSelection.end) {
+      return 0
+    }
+    return countWords(
+      editorText.slice(revisionSelection.start, revisionSelection.end)
+    )
+  }, [editorText, revisionSelection])
+  const pendingRevisionCount = React.useMemo(
+    () =>
+      revisionState.revisions.filter((proposal) => proposal.status === "pending")
+        .length,
+    [revisionState.revisions]
   )
 
   const handleCopyRevision = React.useCallback(
