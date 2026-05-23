@@ -419,9 +419,10 @@ git commit -m "test: govern headings and command targets"
 Implementation outcome:
 - Added metadata-backed command labels and h1 policy helpers in route metadata.
 - Added command palette route-target governance and frontend-owned route heading governance tests.
-- Browser QA initially found `/media` and `/notes` heading failures; `/media` needed route test mocks, and `/notes` now exposes its existing title as the page `h1`.
+- Browser QA initially found `/media` and `/notes` heading failures; `/media` needed route test mocks, and `/notes` is now a metadata-backed h1-policy exception because user-authored note content can contain document h1s.
 - Kept CommandPaletteHost and shortcut behavior unchanged because the new target contract passed without host changes.
 - Follow-up review moved the metadata-only heading governance test out of `@tldw/ui` so the package no longer imports frontend smoke inventory.
+- Follow-up review also added a non-empty browser route guard and made explicit `requiresH1: false` opt-outs require `h1ExceptionReason` directly.
 
 ### Task 3: Govern Sidepanel And Hosted Visibility
 

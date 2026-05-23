@@ -533,6 +533,9 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
     commandPalette: "show",
     nav: "primary",
     requiresBackend: true,
+    requiresH1: false,
+    h1ExceptionReason:
+      "Notes can render user-authored document headings, including h1, inside the editor and preview surface.",
     rationale: "Notes are a primary knowledge capture surface."
   },
   {
@@ -1788,7 +1791,7 @@ export const getRouteHeadingPolicy = (
   if (metadata.requiresH1 === false) {
     return {
       requiresH1: false,
-      exceptionReason: metadata.h1ExceptionReason ?? metadata.rationale
+      exceptionReason: metadata.h1ExceptionReason
     }
   }
 

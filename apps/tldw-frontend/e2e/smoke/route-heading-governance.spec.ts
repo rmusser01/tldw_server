@@ -63,6 +63,10 @@ async function installRouteHeadingMocks(page: Page): Promise<void> {
 }
 
 test.describe('route heading governance', () => {
+  test('has at least one primary route requiring h1 governance', () => {
+    expect(PRIMARY_HEADING_ROUTES.length).toBeGreaterThan(0);
+  });
+
   for (const entry of PRIMARY_HEADING_ROUTES) {
     test(`${entry.path} exposes one semantic h1`, async ({ page }) => {
       await installRouteHeadingMocks(page);

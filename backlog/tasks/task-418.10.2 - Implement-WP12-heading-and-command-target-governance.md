@@ -34,10 +34,11 @@ Execute WP12 Task 2 from the WebUI route governance QA plan: add metadata-backed
 - Implemented route metadata helpers for command palette labels and h1 policy.
 - Added command target governance Vitest coverage for labels, targets, duplicate labels, and command-palette visibility.
 - Added frontend-owned route heading governance Vitest coverage and browser coverage for primary self-hosted smoke routes.
-- Changed the existing Notes sidebar title element to the page h1 without visual redesign.
+- Kept Notes out of strict one-h1 enforcement with a metadata-backed exception because user-authored note content can contain document h1s.
 - Aligned Knowledge command copy and English locale strings with route metadata.
-- Browser QA initially found `/media` and `/notes` heading failures. `/media` was a test harness issue resolved with the same media API mocks used by existing smoke coverage; `/notes` required the semantic h1 fix.
+- Browser QA initially found `/media` and `/notes` heading failures. `/media` was a test harness issue resolved with the same media API mocks used by existing smoke coverage; `/notes` is now excluded from strict one-h1 browser enforcement through a documented metadata exception.
 - Addressed PR review by moving the metadata-only heading test out of `@tldw/ui`, replacing the command label CSS selector with metadata-backed label lookup, and adding direct coverage for the `/settings/health` command-label override.
+- Addressed follow-up review by adding a non-empty browser route guard and enforcing dedicated `h1ExceptionReason` values for explicit h1 opt-outs.
 - Bandit is not applicable to this frontend-only TypeScript/markdown slice.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 

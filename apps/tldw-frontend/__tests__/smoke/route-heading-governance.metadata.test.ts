@@ -32,8 +32,8 @@ describe("route heading governance metadata", () => {
 
   it("requires explicit h1 opt-outs to carry a recovery-friendly reason", () => {
     const routesWithoutExceptionReasons = ROUTE_METADATA
-      .filter((metadata) => getRouteHeadingPolicy(metadata).requiresH1 === false)
-      .filter((metadata) => !getRouteHeadingPolicy(metadata).exceptionReason?.trim())
+      .filter((metadata) => metadata.requiresH1 === false)
+      .filter((metadata) => !metadata.h1ExceptionReason?.trim())
       .map((metadata) => metadata.path)
 
     expect(sorted(routesWithoutExceptionReasons)).toEqual([])
