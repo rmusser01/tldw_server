@@ -2,13 +2,20 @@
  * Common test helpers for E2E tests
  */
 import { expect, type Locator, type Page, type Route } from '@playwright/test';
+import { resolveE2eApiKey } from './e2e-auth';
+
+const E2E_SERVER_URL =
+  process.env.TLDW_SERVER_URL ||
+  process.env.TLDW_E2E_SERVER_URL ||
+  process.env.E2E_TEST_BASE_URL ||
+  'http://127.0.0.1:8000';
 
 /**
  * Environment configuration for tests
  */
 export const TEST_CONFIG = {
-  serverUrl: process.env.TLDW_SERVER_URL || 'http://127.0.0.1:8000',
-  apiKey: process.env.TLDW_API_KEY || 'THIS-IS-A-SECURE-KEY-123-FAKE-KEY',
+  serverUrl: E2E_SERVER_URL,
+  apiKey: resolveE2eApiKey({ serverUrl: E2E_SERVER_URL }),
   webUrl: process.env.TLDW_WEB_URL || 'http://localhost:8080',
   allowOffline: process.env.TLDW_E2E_ALLOW_OFFLINE !== '0',
 };
