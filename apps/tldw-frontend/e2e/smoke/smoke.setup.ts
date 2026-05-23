@@ -1,4 +1,5 @@
 import { test as base, expect, Page } from "@playwright/test"
+import { resolveE2eApiKey } from "../utils/e2e-auth"
 
 /**
  * Diagnostics data collected during page visits
@@ -80,7 +81,7 @@ export { expect }
 
 const DEFAULT_SMOKE_LOAD_TIMEOUT_MS = 30_000
 const MIN_SMOKE_LOAD_TIMEOUT_MS = 5_000
-const DEFAULT_SMOKE_API_KEY = "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
+const DEFAULT_SMOKE_SERVER_URL = "http://127.0.0.1:8000"
 
 const resolveSmokeLoadTimeoutMs = (): number => {
   const raw = process.env.TLDW_SMOKE_LOAD_TIMEOUT_MS
@@ -94,29 +95,20 @@ const resolveSmokeLoadTimeoutMs = (): number => {
 
 export const SMOKE_LOAD_TIMEOUT = resolveSmokeLoadTimeoutMs()
 
+const resolveSmokeServerUrl = (): string =>
+  process.env.TLDW_SERVER_URL ||
+  process.env.TLDW_E2E_SERVER_URL ||
+  process.env.E2E_TEST_BASE_URL ||
+  DEFAULT_SMOKE_SERVER_URL
+
+const SMOKE_SERVER_URL = resolveSmokeServerUrl()
+
 /**
  * Auth configuration for smoke tests
  */
-const resolveSmokeApiKey = (): string => {
-  const configured =
-    process.env.TLDW_API_KEY ||
-    process.env.TLDW_E2E_API_KEY ||
-    process.env.SINGLE_USER_API_KEY
-
-  if (configured?.trim()) {
-    return configured.trim()
-  }
-
-  return DEFAULT_SMOKE_API_KEY
-}
-
 export const AUTH_CONFIG = {
-  serverUrl:
-    process.env.TLDW_SERVER_URL ||
-    process.env.TLDW_E2E_SERVER_URL ||
-    process.env.E2E_TEST_BASE_URL ||
-    "http://127.0.0.1:8000",
-  apiKey: resolveSmokeApiKey(),
+  serverUrl: SMOKE_SERVER_URL,
+  apiKey: resolveE2eApiKey({ serverUrl: SMOKE_SERVER_URL }),
   allowOffline: process.env.TLDW_E2E_ALLOW_OFFLINE !== "0"
 }
 
