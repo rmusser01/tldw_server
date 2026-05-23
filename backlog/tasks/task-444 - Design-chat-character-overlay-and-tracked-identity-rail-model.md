@@ -1,7 +1,7 @@
 ---
 id: TASK-444
 title: Design /chat character overlay and tracked identity rail model
-status: In Progress
+status: Done
 labels:
 - design
 - chat
@@ -37,15 +37,15 @@ Write a design spec for /chat that preserves tracked character/persona chats whi
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Completed the /chat character overlay and tracked identity design slice. The approved spec and implementation plan define tracked character/persona chat as durable identity state, normal-chat overlays as non-destructive snapshot state, and the side-rail/sidepanel control model used by the merged implementation PR #1956. Bandit was not applicable to the design slice because it only produced Markdown planning artifacts.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
