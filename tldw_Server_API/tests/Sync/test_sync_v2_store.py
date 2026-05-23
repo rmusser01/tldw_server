@@ -18,14 +18,16 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
-    SyncConflictCreate,
     SyncAttachmentCreate,
+    SyncBlobChunkCreate,
+    SyncBlobObjectCreate,
+    SyncBlobUploadSessionCreate,
+    SyncConflictCreate,
     SyncDatasetCreate,
     SyncDeviceCursor,
     SyncDeviceUpsert,
     SyncEnvelopeCreate,
     SyncKeyRecordCreate,
-    SyncObjectState,
 )
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
@@ -168,10 +170,195 @@ def test_sync_database_bootstrap_creates_required_tables(sync_store: SyncV2Store
         "sync_conflicts",
         "sync_key_records",
         "sync_attachments",
+        "sync_blob_objects",
+        "sync_blob_upload_sessions",
+        "sync_blob_chunks",
     }
 
     for table_name in required_tables:
         assert sync_store.db.backend.table_exists(table_name)
+
+
+def test_blob_upload_sessions_are_idempotent_and_release_reserved_quota(
+    sync_store: SyncV2Store,
+):
+    sync_store.upsert_device(_device())
+    sync_store.enroll_dataset(_dataset())
+
+    session = sync_store.create_blob_upload_session(
+        SyncBlobUploadSessionCreate(
+            upload_id="upload-1",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            device_id="device-1",
+            attachment_id="attachment-1",
+            domain="attachment.ref",
+            object_id="attachment-1",
+            content_type="application/octet-stream",
+            size_bytes=2048,
+            payload_hash="sha256:" + "a" * 64,
+            chunk_size=1024,
+            chunk_count=2,
+            reserved_quota_bytes=2048,
+            idempotency_key="same-upload",
+        )
+    )
+    retry = sync_store.create_blob_upload_session(
+        SyncBlobUploadSessionCreate(
+            upload_id="upload-retry",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            device_id="device-1",
+            attachment_id="attachment-1",
+            domain="attachment.ref",
+            object_id="attachment-1",
+            content_type="application/octet-stream",
+            size_bytes=2048,
+            payload_hash="sha256:" + "a" * 64,
+            chunk_size=1024,
+            chunk_count=2,
+            reserved_quota_bytes=2048,
+            idempotency_key="same-upload",
+        )
+    )
+
+    assert retry.upload_id == session.upload_id
+    assert retry.missing_chunks == [0, 1]
+    assert sync_store.summarize_blob_quota("user-1").reserved_blob_bytes == 2048
+
+    with pytest.raises(SyncIdempotencyConflictError):
+        sync_store.create_blob_upload_session(
+            SyncBlobUploadSessionCreate(
+                upload_id="upload-drift",
+                dataset_id="dataset-1",
+                owner_user_id="user-1",
+                device_id="device-1",
+                attachment_id="attachment-1",
+                domain="attachment.ref",
+                object_id="attachment-1",
+                content_type="application/octet-stream",
+                size_bytes=2048,
+                payload_hash="sha256:" + "b" * 64,
+                chunk_size=1024,
+                chunk_count=2,
+                reserved_quota_bytes=2048,
+                idempotency_key="same-upload",
+            )
+        )
+
+    cancelled = sync_store.cancel_blob_upload_session("upload-1", dataset_id="dataset-1")
+
+    assert cancelled.status == "cancelled"
+    assert sync_store.summarize_blob_quota("user-1").reserved_blob_bytes == 0
+
+
+def test_blob_chunks_and_completion_validate_idempotency_and_dedupe(
+    sync_store: SyncV2Store,
+):
+    sync_store.upsert_device(_device())
+    sync_store.enroll_dataset(_dataset())
+    payload_hash = "sha256:" + "a" * 64
+
+    sync_store.create_blob_upload_session(
+        SyncBlobUploadSessionCreate(
+            upload_id="upload-1",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            device_id="device-1",
+            attachment_id="attachment-1",
+            domain="attachment.ref",
+            object_id="attachment-1",
+            content_type="application/octet-stream",
+            size_bytes=2048,
+            payload_hash=payload_hash,
+            chunk_size=1024,
+            chunk_count=2,
+            reserved_quota_bytes=2048,
+        )
+    )
+    first_chunk = sync_store.record_blob_chunk(
+        SyncBlobChunkCreate(
+            upload_id="upload-1",
+            dataset_id="dataset-1",
+            chunk_index=0,
+            offset_bytes=0,
+            size_bytes=1024,
+            chunk_hash="sha256:" + "1" * 64,
+            storage_key="uploads/upload-1/0.part",
+        )
+    )
+    retry_chunk = sync_store.record_blob_chunk(
+        SyncBlobChunkCreate(
+            upload_id="upload-1",
+            dataset_id="dataset-1",
+            chunk_index=0,
+            offset_bytes=0,
+            size_bytes=1024,
+            chunk_hash="sha256:" + "1" * 64,
+            storage_key="uploads/upload-1/0.part",
+        )
+    )
+
+    assert first_chunk.chunk_hash == retry_chunk.chunk_hash
+    assert sync_store.get_blob_upload_session("upload-1").missing_chunks == [1]
+
+    with pytest.raises(SyncIdempotencyConflictError):
+        sync_store.record_blob_chunk(
+            SyncBlobChunkCreate(
+                upload_id="upload-1",
+                dataset_id="dataset-1",
+                chunk_index=0,
+                offset_bytes=0,
+                size_bytes=1024,
+                chunk_hash="sha256:" + "2" * 64,
+                storage_key="uploads/upload-1/0.part",
+            )
+        )
+
+    sync_store.record_blob_chunk(
+        SyncBlobChunkCreate(
+            upload_id="upload-1",
+            dataset_id="dataset-1",
+            chunk_index=1,
+            offset_bytes=1024,
+            size_bytes=1024,
+            chunk_hash="sha256:" + "3" * 64,
+            storage_key="uploads/upload-1/1.part",
+        )
+    )
+    blob = sync_store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="blob-1",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            attachment_id="attachment-1",
+            payload_hash=payload_hash,
+            content_type="application/octet-stream",
+            size_bytes=2048,
+            storage_backend="local_fs",
+            storage_key="blobs/sha256/aa/blob.bin",
+        )
+    )
+    duplicate = sync_store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="blob-duplicate",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            attachment_id="attachment-2",
+            payload_hash=payload_hash,
+            content_type="application/octet-stream",
+            size_bytes=2048,
+            storage_backend="local_fs",
+            storage_key="blobs/sha256/aa/blob.bin",
+        )
+    )
+
+    quota = sync_store.summarize_blob_quota("user-1")
+
+    assert blob.status == "available"
+    assert duplicate.blob_id == blob.blob_id
+    assert quota.used_blob_bytes == 2048
+    assert quota.reserved_blob_bytes == 0
 
 
 def test_sync_envelope_schema_contains_m1_columns_and_indexes(sync_store: SyncV2Store):
@@ -709,6 +896,7 @@ def test_list_envelopes_after_filters_status_and_excluded_device_in_sql(
     )
 
     assert own not in visible
+    assert remote in visible
     assert [envelope.client_envelope_id for envelope in visible] == ["remote-accepted"]
 
 

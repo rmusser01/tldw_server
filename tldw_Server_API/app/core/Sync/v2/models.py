@@ -454,6 +454,106 @@ class SyncBlobUploadSession:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncBlobUploadSessionCreate:
+    """Upload-session metadata accepted by the Sync v2 M2 store."""
+
+    upload_id: str
+    dataset_id: str
+    owner_user_id: str
+    device_id: str | None
+    attachment_id: str
+    domain: SyncDomain
+    object_id: str
+    content_type: str
+    size_bytes: int
+    payload_hash: str
+    chunk_size: int
+    chunk_count: int
+    reserved_quota_bytes: int
+    status: SyncBlobUploadStatus = "created"
+    idempotency_key: str | None = None
+    expires_at: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBlobChunkCreate:
+    """Chunk metadata accepted by the Sync v2 M2 store."""
+
+    upload_id: str
+    dataset_id: str
+    chunk_index: int
+    offset_bytes: int
+    size_bytes: int
+    chunk_hash: str
+    storage_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBlobChunk:
+    """Stored chunk metadata for one upload session."""
+
+    upload_id: str
+    dataset_id: str
+    chunk_index: int
+    offset_bytes: int
+    size_bytes: int
+    chunk_hash: str
+    storage_key: str
+    received_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBlobObjectCreate:
+    """Committed blob metadata accepted by the Sync v2 M2 store."""
+
+    blob_id: str
+    dataset_id: str
+    owner_user_id: str
+    attachment_id: str
+    payload_hash: str
+    content_type: str
+    size_bytes: int
+    storage_backend: str
+    storage_key: str
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+    status: SyncBlobAvailabilityStatus = "available"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBlobObject:
+    """Committed blob metadata stored by Sync v2 M2."""
+
+    blob_id: str
+    dataset_id: str
+    owner_user_id: str
+    attachment_id: str
+    payload_hash: str
+    content_type: str
+    size_bytes: int
+    encryption_policy: EncryptionPolicy
+    storage_backend: str
+    storage_key: str
+    status: SyncBlobAvailabilityStatus
+    ref_count: int
+    metadata: dict[str, Any]
+    created_at: str
+    updated_at: str
+    deleted_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBlobQuotaUsage:
+    """Quota counters for committed and pending Sync v2 M2 blobs."""
+
+    owner_user_id: str
+    dataset_id: str | None = None
+    reserved_blob_bytes: int = 0
+    used_blob_bytes: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class SyncBlobDownloadChunk:
     """Core chunk entry used by a resumable Sync v2 M2 blob download manifest."""
 
@@ -519,8 +619,14 @@ __all__ = [
     "SyncAttachment",
     "SyncAttachmentCreate",
     "SyncBlobAvailabilityStatus",
+    "SyncBlobChunk",
+    "SyncBlobChunkCreate",
     "SyncBlobDownloadChunk",
+    "SyncBlobObject",
+    "SyncBlobObjectCreate",
+    "SyncBlobQuotaUsage",
     "SyncBlobUploadSession",
+    "SyncBlobUploadSessionCreate",
     "SyncBlobUploadStatus",
     "SyncConflict",
     "SyncConflictCreate",

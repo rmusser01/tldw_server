@@ -11,6 +11,13 @@ from .models import (
     SyncApplyStatus,
     SyncAttachment,
     SyncAttachmentCreate,
+    SyncBlobChunk,
+    SyncBlobChunkCreate,
+    SyncBlobObject,
+    SyncBlobObjectCreate,
+    SyncBlobQuotaUsage,
+    SyncBlobUploadSession,
+    SyncBlobUploadSessionCreate,
     SyncConflict,
     SyncConflictCreate,
     SyncDataset,
@@ -266,6 +273,42 @@ class SyncV2Store:
         """Store or deduplicate an encrypted attachment through the DB layer."""
 
         return self.db.store_attachment(attachment)
+
+    def create_blob_upload_session(
+        self,
+        session: SyncBlobUploadSessionCreate,
+    ) -> SyncBlobUploadSession:
+        return self.db.create_blob_upload_session(session)
+
+    def get_blob_upload_session(
+        self,
+        upload_id: str,
+        *,
+        dataset_id: str | None = None,
+    ) -> SyncBlobUploadSession | None:
+        return self.db.get_blob_upload_session(upload_id, dataset_id=dataset_id)
+
+    def cancel_blob_upload_session(
+        self,
+        upload_id: str,
+        *,
+        dataset_id: str | None = None,
+    ) -> SyncBlobUploadSession:
+        return self.db.cancel_blob_upload_session(upload_id, dataset_id=dataset_id)
+
+    def record_blob_chunk(self, chunk: SyncBlobChunkCreate) -> SyncBlobChunk:
+        return self.db.record_blob_chunk(chunk)
+
+    def complete_blob_upload(self, blob: SyncBlobObjectCreate) -> SyncBlobObject:
+        return self.db.complete_blob_upload(blob)
+
+    def summarize_blob_quota(
+        self,
+        owner_user_id: str,
+        *,
+        dataset_id: str | None = None,
+    ) -> SyncBlobQuotaUsage:
+        return self.db.summarize_blob_quota(owner_user_id, dataset_id=dataset_id)
 
     def summarize_restore_manifest_dataset(
         self,

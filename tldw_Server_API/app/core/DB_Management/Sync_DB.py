@@ -19,13 +19,20 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
-    ConflictStatus,
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     M1_SYNC_OPERATIONS,
+    ConflictStatus,
     SyncApplyStatus,
     SyncAttachment,
     SyncAttachmentCreate,
+    SyncBlobChunk,
+    SyncBlobChunkCreate,
+    SyncBlobObject,
+    SyncBlobObjectCreate,
+    SyncBlobQuotaUsage,
+    SyncBlobUploadSession,
+    SyncBlobUploadSessionCreate,
     SyncConflict,
     SyncConflictCreate,
     SyncDataset,
@@ -244,6 +251,72 @@ CREATE INDEX IF NOT EXISTS idx_sync_attachments_dataset_domain
     ON sync_attachments(dataset_id, domain, created_at);
 CREATE INDEX IF NOT EXISTS idx_sync_attachments_dataset_hash
     ON sync_attachments(dataset_id, payload_hash);
+
+CREATE TABLE IF NOT EXISTS sync_blob_objects (
+    blob_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    encryption_policy TEXT NOT NULL,
+    storage_backend TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    status TEXT NOT NULL,
+    ref_count INTEGER NOT NULL DEFAULT 1,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    UNIQUE(dataset_id, payload_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_owner
+    ON sync_blob_objects(owner_user_id, dataset_id, status);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_attachment
+    ON sync_blob_objects(dataset_id, attachment_id);
+
+CREATE TABLE IF NOT EXISTS sync_blob_upload_sessions (
+    upload_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    device_id TEXT,
+    attachment_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    payload_hash TEXT NOT NULL,
+    chunk_size INTEGER NOT NULL,
+    chunk_count INTEGER NOT NULL,
+    reserved_quota_bytes INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    idempotency_key TEXT,
+    expires_at TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    blob_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(dataset_id, device_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_owner
+    ON sync_blob_upload_sessions(owner_user_id, dataset_id, status);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_hash
+    ON sync_blob_upload_sessions(dataset_id, payload_hash);
+
+CREATE TABLE IF NOT EXISTS sync_blob_chunks (
+    upload_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    offset_bytes INTEGER NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    chunk_hash TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY(upload_id, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_chunks_dataset
+    ON sync_blob_chunks(dataset_id, upload_id);
 """
 
 SYNC_POSTGRES_SCHEMA = """
@@ -432,6 +505,72 @@ CREATE INDEX IF NOT EXISTS idx_sync_attachments_dataset_domain
     ON sync_attachments(dataset_id, domain, created_at);
 CREATE INDEX IF NOT EXISTS idx_sync_attachments_dataset_hash
     ON sync_attachments(dataset_id, payload_hash);
+
+CREATE TABLE IF NOT EXISTS sync_blob_objects (
+    blob_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    encryption_policy TEXT NOT NULL,
+    storage_backend TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    status TEXT NOT NULL,
+    ref_count INTEGER NOT NULL DEFAULT 1,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    deleted_at TIMESTAMPTZ,
+    UNIQUE(dataset_id, payload_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_owner
+    ON sync_blob_objects(owner_user_id, dataset_id, status);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_objects_attachment
+    ON sync_blob_objects(dataset_id, attachment_id);
+
+CREATE TABLE IF NOT EXISTS sync_blob_upload_sessions (
+    upload_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    device_id TEXT,
+    attachment_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    payload_hash TEXT NOT NULL,
+    chunk_size INTEGER NOT NULL,
+    chunk_count INTEGER NOT NULL,
+    reserved_quota_bytes INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    idempotency_key TEXT,
+    expires_at TIMESTAMPTZ,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    blob_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    UNIQUE(dataset_id, device_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_owner
+    ON sync_blob_upload_sessions(owner_user_id, dataset_id, status);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_upload_sessions_hash
+    ON sync_blob_upload_sessions(dataset_id, payload_hash);
+
+CREATE TABLE IF NOT EXISTS sync_blob_chunks (
+    upload_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    offset_bytes INTEGER NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    chunk_hash TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY(upload_id, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_blob_chunks_dataset
+    ON sync_blob_chunks(dataset_id, upload_id);
 """
 
 
@@ -705,6 +844,65 @@ def _attachment_from_row(row: dict[str, Any], *, stored: bool = True) -> SyncAtt
     )
 
 
+def _blob_upload_session_from_row(
+    row: dict[str, Any],
+    *,
+    uploaded_chunks: Sequence[int] | None = None,
+) -> SyncBlobUploadSession:
+    uploaded = sorted(int(index) for index in uploaded_chunks or [])
+    chunk_count = int(row["chunk_count"])
+    missing = [index for index in range(chunk_count) if index not in set(uploaded)]
+    return SyncBlobUploadSession(
+        upload_id=row["upload_id"],
+        dataset_id=row["dataset_id"],
+        attachment_id=row["attachment_id"],
+        status=row["status"],
+        chunk_size=int(row["chunk_size"]),
+        chunk_count=chunk_count,
+        size_bytes=int(row["size_bytes"]),
+        payload_hash=row["payload_hash"],
+        uploaded_chunks=uploaded,
+        missing_chunks=missing,
+        quota={"reserved_blob_bytes": int(row["reserved_quota_bytes"])},
+        expires_at=_timestamp_to_string(row.get("expires_at")),
+        blob_id=row.get("blob_id"),
+    )
+
+
+def _blob_chunk_from_row(row: dict[str, Any]) -> SyncBlobChunk:
+    return SyncBlobChunk(
+        upload_id=row["upload_id"],
+        dataset_id=row["dataset_id"],
+        chunk_index=int(row["chunk_index"]),
+        offset_bytes=int(row["offset_bytes"]),
+        size_bytes=int(row["size_bytes"]),
+        chunk_hash=row["chunk_hash"],
+        storage_key=row["storage_key"],
+        received_at=_timestamp_to_string(row.get("received_at")) or "",
+    )
+
+
+def _blob_object_from_row(row: dict[str, Any]) -> SyncBlobObject:
+    return SyncBlobObject(
+        blob_id=row["blob_id"],
+        dataset_id=row["dataset_id"],
+        owner_user_id=row["owner_user_id"],
+        attachment_id=row["attachment_id"],
+        payload_hash=row["payload_hash"],
+        content_type=row["content_type"],
+        size_bytes=int(row["size_bytes"]),
+        encryption_policy=row["encryption_policy"],
+        storage_backend=row["storage_backend"],
+        storage_key=row["storage_key"],
+        status=row["status"],
+        ref_count=int(row["ref_count"]),
+        metadata=decode_json(row.get("metadata_json"), default={}),
+        created_at=_timestamp_to_string(row.get("created_at")) or "",
+        updated_at=_timestamp_to_string(row.get("updated_at")) or "",
+        deleted_at=_timestamp_to_string(row.get("deleted_at")),
+    )
+
+
 def _object_state_from_row(row: dict[str, Any]) -> SyncObjectState:
     return SyncObjectState(
         dataset_id=row["dataset_id"],
@@ -911,6 +1109,98 @@ def _attachment_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "payload_ciphertext": row["payload_ciphertext"],
         "payload_hash": row["payload_hash"],
         "encryption_policy": row["encryption_policy"],
+        "metadata": decode_json(row.get("metadata_json"), default={}),
+    }
+
+
+def _blob_session_fingerprint_from_create(
+    session: SyncBlobUploadSessionCreate,
+) -> dict[str, Any]:
+    return {
+        "dataset_id": session.dataset_id,
+        "owner_user_id": session.owner_user_id,
+        "device_id": session.device_id,
+        "attachment_id": session.attachment_id,
+        "domain": session.domain,
+        "object_id": session.object_id,
+        "content_type": session.content_type,
+        "size_bytes": session.size_bytes,
+        "payload_hash": session.payload_hash,
+        "chunk_size": session.chunk_size,
+        "chunk_count": session.chunk_count,
+        "reserved_quota_bytes": session.reserved_quota_bytes,
+        "metadata": session.metadata,
+    }
+
+
+def _blob_session_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "dataset_id": row["dataset_id"],
+        "owner_user_id": row["owner_user_id"],
+        "device_id": row.get("device_id"),
+        "attachment_id": row["attachment_id"],
+        "domain": row["domain"],
+        "object_id": row["entity_id"],
+        "content_type": row["content_type"],
+        "size_bytes": int(row["size_bytes"]),
+        "payload_hash": row["payload_hash"],
+        "chunk_size": int(row["chunk_size"]),
+        "chunk_count": int(row["chunk_count"]),
+        "reserved_quota_bytes": int(row["reserved_quota_bytes"]),
+        "metadata": decode_json(row.get("metadata_json"), default={}),
+    }
+
+
+def _blob_chunk_fingerprint_from_create(chunk: SyncBlobChunkCreate) -> dict[str, Any]:
+    return {
+        "upload_id": chunk.upload_id,
+        "dataset_id": chunk.dataset_id,
+        "chunk_index": chunk.chunk_index,
+        "offset_bytes": chunk.offset_bytes,
+        "size_bytes": chunk.size_bytes,
+        "chunk_hash": chunk.chunk_hash,
+        "storage_key": chunk.storage_key,
+    }
+
+
+def _blob_chunk_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "upload_id": row["upload_id"],
+        "dataset_id": row["dataset_id"],
+        "chunk_index": int(row["chunk_index"]),
+        "offset_bytes": int(row["offset_bytes"]),
+        "size_bytes": int(row["size_bytes"]),
+        "chunk_hash": row["chunk_hash"],
+        "storage_key": row["storage_key"],
+    }
+
+
+def _blob_object_fingerprint_from_create(blob: SyncBlobObjectCreate) -> dict[str, Any]:
+    return {
+        "dataset_id": blob.dataset_id,
+        "owner_user_id": blob.owner_user_id,
+        "payload_hash": blob.payload_hash,
+        "content_type": blob.content_type,
+        "size_bytes": blob.size_bytes,
+        "encryption_policy": blob.encryption_policy,
+        "storage_backend": blob.storage_backend,
+        "storage_key": blob.storage_key,
+        "status": blob.status,
+        "metadata": blob.metadata,
+    }
+
+
+def _blob_object_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "dataset_id": row["dataset_id"],
+        "owner_user_id": row["owner_user_id"],
+        "payload_hash": row["payload_hash"],
+        "content_type": row["content_type"],
+        "size_bytes": int(row["size_bytes"]),
+        "encryption_policy": row["encryption_policy"],
+        "storage_backend": row["storage_backend"],
+        "storage_key": row["storage_key"],
+        "status": row["status"],
         "metadata": decode_json(row.get("metadata_json"), default={}),
     }
 
@@ -2359,6 +2649,450 @@ class SyncDatabase:
                     "Sync attachment ID was reused with different content"
                 )
         return _attachment_from_row(row, stored=inserted)
+
+    def create_blob_upload_session(
+        self,
+        session: SyncBlobUploadSessionCreate,
+    ) -> SyncBlobUploadSession:
+        """Create or idempotently return a resumable blob upload session."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            dataset_row = self._require_dataset_domain(
+                session.dataset_id,
+                session.domain,
+                connection=conn,
+            )
+            if str(dataset_row["owner_user_id"]) != str(session.owner_user_id):
+                raise SyncDatasetNotFoundError(
+                    f"Sync dataset not found: {session.dataset_id}"
+                )
+            if session.idempotency_key:
+                existing = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_blob_upload_sessions
+                         WHERE dataset_id = ? AND device_id = ? AND idempotency_key = ?
+                        """,
+                        (
+                            session.dataset_id,
+                            session.device_id,
+                            session.idempotency_key,
+                        ),
+                        connection=conn,
+                    )
+                )
+                if existing is not None:
+                    if _blob_session_fingerprint_from_row(
+                        existing
+                    ) != _blob_session_fingerprint_from_create(session):
+                        raise SyncIdempotencyConflictError(
+                            "Sync blob upload idempotency key was reused with different content"
+                        )
+                    return self._blob_upload_session_with_chunks(
+                        existing["upload_id"],
+                        connection=conn,
+                    )
+            self.execute(
+                """
+                INSERT INTO sync_blob_upload_sessions (
+                    upload_id, dataset_id, owner_user_id, device_id, attachment_id,
+                    domain, entity_id, content_type, size_bytes, payload_hash,
+                    chunk_size, chunk_count, reserved_quota_bytes, status,
+                    idempotency_key, expires_at, metadata_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session.upload_id,
+                    session.dataset_id,
+                    session.owner_user_id,
+                    session.device_id,
+                    session.attachment_id,
+                    session.domain,
+                    session.object_id,
+                    session.content_type,
+                    session.size_bytes,
+                    session.payload_hash,
+                    session.chunk_size,
+                    session.chunk_count,
+                    session.reserved_quota_bytes,
+                    session.status,
+                    session.idempotency_key,
+                    session.expires_at,
+                    encode_json(session.metadata, default={}),
+                    now,
+                    now,
+                ),
+                connection=conn,
+            )
+            return self._blob_upload_session_with_chunks(
+                session.upload_id,
+                connection=conn,
+            )
+
+    def get_blob_upload_session(
+        self,
+        upload_id: str,
+        *,
+        dataset_id: str | None = None,
+    ) -> SyncBlobUploadSession | None:
+        """Return one blob upload session with uploaded/missing chunk detail."""
+
+        if dataset_id is None:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_blob_upload_sessions WHERE upload_id = ?",
+                    (upload_id,),
+                )
+            )
+        else:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_blob_upload_sessions
+                     WHERE upload_id = ? AND dataset_id = ?
+                    """,
+                    (upload_id, dataset_id),
+                )
+            )
+        if row is None:
+            return None
+        return self._blob_upload_session_with_chunks(row["upload_id"])
+
+    def cancel_blob_upload_session(
+        self,
+        upload_id: str,
+        *,
+        dataset_id: str | None = None,
+    ) -> SyncBlobUploadSession:
+        """Cancel an incomplete blob upload session and release reserved quota."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            row = self._require_blob_upload_session(
+                upload_id,
+                dataset_id=dataset_id,
+                connection=conn,
+            )
+            if row["status"] not in {"complete", "cancelled", "expired"}:
+                self.execute(
+                    """
+                    UPDATE sync_blob_upload_sessions
+                       SET status = ?, updated_at = ?
+                     WHERE upload_id = ?
+                    """,
+                    ("cancelled", now, upload_id),
+                    connection=conn,
+                )
+            return self._blob_upload_session_with_chunks(
+                upload_id,
+                connection=conn,
+            )
+
+    def record_blob_chunk(self, chunk: SyncBlobChunkCreate) -> SyncBlobChunk:
+        """Record one uploaded blob chunk idempotently."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            session = self._require_blob_upload_session(
+                chunk.upload_id,
+                dataset_id=chunk.dataset_id,
+                connection=conn,
+            )
+            if session["status"] not in {"created", "uploading"}:
+                raise SyncStoreError("Sync blob upload session is not accepting chunks")
+            if chunk.chunk_index < 0 or chunk.chunk_index >= int(session["chunk_count"]):
+                raise SyncStoreError("Sync blob chunk index is outside the upload session")
+            expected_offset = int(session["chunk_size"]) * chunk.chunk_index
+            if chunk.offset_bytes != expected_offset:
+                raise SyncStoreError("Sync blob chunk offset does not match the upload session")
+            existing = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_blob_chunks
+                     WHERE upload_id = ? AND chunk_index = ?
+                    """,
+                    (chunk.upload_id, chunk.chunk_index),
+                    connection=conn,
+                )
+            )
+            if existing is not None:
+                if _blob_chunk_fingerprint_from_row(existing) != _blob_chunk_fingerprint_from_create(chunk):
+                    raise SyncIdempotencyConflictError(
+                        "Sync blob chunk was reused with different content"
+                    )
+                return _blob_chunk_from_row(existing)
+            self.execute(
+                """
+                INSERT INTO sync_blob_chunks (
+                    upload_id, dataset_id, chunk_index, offset_bytes, size_bytes,
+                    chunk_hash, storage_key, received_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    chunk.upload_id,
+                    chunk.dataset_id,
+                    chunk.chunk_index,
+                    chunk.offset_bytes,
+                    chunk.size_bytes,
+                    chunk.chunk_hash,
+                    chunk.storage_key,
+                    now,
+                ),
+                connection=conn,
+            )
+            self.execute(
+                """
+                UPDATE sync_blob_upload_sessions
+                   SET status = CASE WHEN status = 'created' THEN 'uploading' ELSE status END,
+                       updated_at = ?
+                 WHERE upload_id = ?
+                """,
+                (now, chunk.upload_id),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_blob_chunks
+                     WHERE upload_id = ? AND chunk_index = ?
+                    """,
+                    (chunk.upload_id, chunk.chunk_index),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError("Sync blob chunk insert did not produce a retrievable record")
+            return _blob_chunk_from_row(row)
+
+    def complete_blob_upload(self, blob: SyncBlobObjectCreate) -> SyncBlobObject:
+        """Commit a verified blob and deduplicate by dataset plus payload hash."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            dataset_row = self._require_dataset(blob.dataset_id, connection=conn)
+            if str(dataset_row["owner_user_id"]) != str(blob.owner_user_id):
+                raise SyncDatasetNotFoundError(f"Sync dataset not found: {blob.dataset_id}")
+            session = self._find_active_blob_session_for_blob(blob, connection=conn)
+            if session is not None:
+                uploaded_chunks = self._blob_chunk_indexes(
+                    session["upload_id"],
+                    connection=conn,
+                )
+                expected = list(range(int(session["chunk_count"])))
+                if uploaded_chunks != expected:
+                    raise SyncStoreError("Sync blob upload session is missing chunks")
+            self.execute(
+                """
+                INSERT INTO sync_blob_objects (
+                    blob_id, dataset_id, owner_user_id, attachment_id, payload_hash,
+                    content_type, size_bytes, encryption_policy, storage_backend,
+                    storage_key, status, ref_count, metadata_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, payload_hash) DO NOTHING
+                """,
+                (
+                    blob.blob_id,
+                    blob.dataset_id,
+                    blob.owner_user_id,
+                    blob.attachment_id,
+                    blob.payload_hash,
+                    blob.content_type,
+                    blob.size_bytes,
+                    blob.encryption_policy,
+                    blob.storage_backend,
+                    blob.storage_key,
+                    blob.status,
+                    1,
+                    encode_json(blob.metadata, default={}),
+                    now,
+                    now,
+                ),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_blob_objects
+                     WHERE dataset_id = ? AND payload_hash = ?
+                    """,
+                    (blob.dataset_id, blob.payload_hash),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError("Sync blob object insert did not produce a retrievable record")
+            if _blob_object_fingerprint_from_row(row) != _blob_object_fingerprint_from_create(blob):
+                raise SyncIdempotencyConflictError(
+                    "Sync blob payload hash was reused with different metadata"
+                )
+            if session is not None:
+                self.execute(
+                    """
+                    UPDATE sync_blob_upload_sessions
+                       SET status = ?, blob_id = ?, updated_at = ?
+                     WHERE upload_id = ?
+                    """,
+                    ("complete", row["blob_id"], now, session["upload_id"]),
+                    connection=conn,
+                )
+            return _blob_object_from_row(row)
+
+    def summarize_blob_quota(
+        self,
+        owner_user_id: str,
+        *,
+        dataset_id: str | None = None,
+    ) -> SyncBlobQuotaUsage:
+        """Return committed and pending blob quota usage for one user."""
+
+        if dataset_id is None:
+            reserved_row = _first(
+                self.execute(
+                    """
+                    SELECT COALESCE(SUM(reserved_quota_bytes), 0) AS bytes
+                      FROM sync_blob_upload_sessions
+                     WHERE owner_user_id = ?
+                       AND status IN ('created', 'uploading')
+                    """,
+                    (owner_user_id,),
+                )
+            )
+            used_row = _first(
+                self.execute(
+                    """
+                    SELECT COALESCE(SUM(size_bytes), 0) AS bytes
+                      FROM sync_blob_objects
+                     WHERE owner_user_id = ?
+                       AND status = 'available'
+                    """,
+                    (owner_user_id,),
+                )
+            )
+        else:
+            reserved_row = _first(
+                self.execute(
+                    """
+                    SELECT COALESCE(SUM(reserved_quota_bytes), 0) AS bytes
+                      FROM sync_blob_upload_sessions
+                     WHERE owner_user_id = ?
+                       AND dataset_id = ?
+                       AND status IN ('created', 'uploading')
+                    """,
+                    (owner_user_id, dataset_id),
+                )
+            )
+            used_row = _first(
+                self.execute(
+                    """
+                    SELECT COALESCE(SUM(size_bytes), 0) AS bytes
+                      FROM sync_blob_objects
+                     WHERE owner_user_id = ?
+                       AND dataset_id = ?
+                       AND status = 'available'
+                    """,
+                    (owner_user_id, dataset_id),
+                )
+            )
+        return SyncBlobQuotaUsage(
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
+            reserved_blob_bytes=int(reserved_row["bytes"] if reserved_row else 0),
+            used_blob_bytes=int(used_row["bytes"] if used_row else 0),
+        )
+
+    def _require_blob_upload_session(
+        self,
+        upload_id: str,
+        *,
+        dataset_id: str | None = None,
+        connection: Any,
+    ) -> dict[str, Any]:
+        if dataset_id is None:
+            row = _first(
+                self.execute(
+                    "SELECT * FROM sync_blob_upload_sessions WHERE upload_id = ?",
+                    (upload_id,),
+                    connection=connection,
+                )
+            )
+        else:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_blob_upload_sessions
+                     WHERE upload_id = ? AND dataset_id = ?
+                    """,
+                    (upload_id, dataset_id),
+                    connection=connection,
+                )
+            )
+        if row is None:
+            raise SyncStoreError(f"Sync blob upload session not found: {upload_id}")
+        return row
+
+    def _blob_chunk_indexes(
+        self,
+        upload_id: str,
+        *,
+        connection: Any,
+    ) -> list[int]:
+        result = self.execute(
+            """
+            SELECT chunk_index
+              FROM sync_blob_chunks
+             WHERE upload_id = ?
+             ORDER BY chunk_index ASC
+            """,
+            (upload_id,),
+            connection=connection,
+        )
+        return [int(row["chunk_index"]) for row in result.rows]
+
+    def _blob_upload_session_with_chunks(
+        self,
+        upload_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> SyncBlobUploadSession:
+        row = _first(
+            self.execute(
+                "SELECT * FROM sync_blob_upload_sessions WHERE upload_id = ?",
+                (upload_id,),
+                connection=connection,
+            )
+        )
+        if row is None:
+            raise SyncStoreError(f"Sync blob upload session not found: {upload_id}")
+        return _blob_upload_session_from_row(
+            row,
+            uploaded_chunks=self._blob_chunk_indexes(upload_id, connection=connection),
+        )
+
+    def _find_active_blob_session_for_blob(
+        self,
+        blob: SyncBlobObjectCreate,
+        *,
+        connection: Any,
+    ) -> dict[str, Any] | None:
+        return _first(
+            self.execute(
+                """
+                SELECT * FROM sync_blob_upload_sessions
+                 WHERE dataset_id = ?
+                   AND attachment_id = ?
+                   AND payload_hash = ?
+                   AND status IN ('created', 'uploading')
+                 ORDER BY created_at ASC
+                 LIMIT 1
+                """,
+                (blob.dataset_id, blob.attachment_id, blob.payload_hash),
+                connection=connection,
+            )
+        )
 
     def summarize_restore_manifest_dataset(
         self,

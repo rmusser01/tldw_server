@@ -1,0 +1,124 @@
+"""Local filesystem blob storage for Sync v2 M2."""
+
+from __future__ import annotations
+
+import hashlib
+import shutil
+from pathlib import Path
+
+
+class SyncBlobStoreError(ValueError):
+    """Raised when blob storage input or integrity checks fail."""
+
+
+class LocalSyncBlobStore:
+    """Path-contained local blob store rooted under a user's sync blob directory."""
+
+    def __init__(self, root: str | Path) -> None:
+        self.root = Path(root).expanduser().resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def write_upload_chunk(
+        self,
+        *,
+        upload_id: str,
+        chunk_index: int,
+        payload: bytes,
+        expected_hash: str,
+    ) -> str:
+        """Write one verified upload chunk and return its relative storage key."""
+
+        actual_hash = _sha256(payload)
+        if actual_hash != expected_hash:
+            raise SyncBlobStoreError("Sync blob chunk hash does not match payload")
+        upload_segment = _safe_segment(upload_id, field_name="upload_id")
+        if chunk_index < 0:
+            raise SyncBlobStoreError("chunk_index must be non-negative")
+        storage_key = f"_uploads/{upload_segment}/{chunk_index}.part"
+        target = self.resolve_storage_key(storage_key)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = target.with_suffix(target.suffix + ".tmp")
+        temp_path.write_bytes(payload)
+        temp_path.replace(target)
+        return storage_key
+
+    def commit_upload(
+        self,
+        *,
+        upload_id: str,
+        payload_hash: str,
+        chunk_indexes: list[int],
+    ) -> str:
+        """Assemble verified chunks into a committed blob path atomically."""
+
+        digest = _hash_digest(payload_hash)
+        upload_segment = _safe_segment(upload_id, field_name="upload_id")
+        final_key = f"blobs/sha256/{digest[:2]}/{digest}.blob"
+        final_path = self.resolve_storage_key(final_key)
+        final_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = final_path.with_suffix(final_path.suffix + ".tmp")
+        hasher = hashlib.sha256()
+        try:
+            with temp_path.open("wb") as output:
+                for chunk_index in chunk_indexes:
+                    chunk_path = self.resolve_storage_key(
+                        f"_uploads/{upload_segment}/{chunk_index}.part"
+                    )
+                    if not chunk_path.exists():
+                        raise SyncBlobStoreError(f"Missing upload chunk: {chunk_index}")
+                    payload = chunk_path.read_bytes()
+                    hasher.update(payload)
+                    output.write(payload)
+            actual_hash = "sha256:" + hasher.hexdigest()
+            if actual_hash != payload_hash:
+                raise SyncBlobStoreError("Sync blob payload hash does not match chunks")
+        except (OSError, SyncBlobStoreError):
+            temp_path.unlink(missing_ok=True)
+            raise
+        temp_path.replace(final_path)
+        shutil.rmtree(self.resolve_storage_key(f"_uploads/{upload_segment}"))
+        return final_key
+
+    def read_blob(self, storage_key: str) -> bytes:
+        """Read a committed blob by storage key after path-containment checks."""
+
+        return self.resolve_storage_key(storage_key).read_bytes()
+
+    def resolve_storage_key(self, storage_key: str) -> Path:
+        """Return a contained filesystem path for a relative storage key."""
+
+        if not storage_key or Path(storage_key).is_absolute():
+            raise SyncBlobStoreError("storage_key must be relative")
+        target = (self.root / storage_key).resolve()
+        try:
+            target.relative_to(self.root)
+        except ValueError as exc:
+            raise SyncBlobStoreError("storage_key escapes blob store root") from exc
+        return target
+
+
+def _sha256(payload: bytes) -> str:
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _hash_digest(value: str) -> str:
+    prefix = "sha256:"
+    if not value.startswith(prefix) or len(value) != len(prefix) + 64:
+        raise SyncBlobStoreError("payload_hash must be sha256:<64 hex chars>")
+    digest = value[len(prefix) :]
+    try:
+        bytes.fromhex(digest)
+    except ValueError as exc:
+        raise SyncBlobStoreError("payload_hash digest must be hex") from exc
+    return digest
+
+
+def _safe_segment(value: str, *, field_name: str) -> str:
+    if not value or any(char in value for char in {"/", "\\", "\x00"}):
+        raise SyncBlobStoreError(f"{field_name} contains unsafe path characters")
+    if value in {".", ".."}:
+        raise SyncBlobStoreError(f"{field_name} contains unsafe path characters")
+    return value
+
+
+__all__ = ["LocalSyncBlobStore", "SyncBlobStoreError"]
