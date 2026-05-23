@@ -150,6 +150,28 @@ describe("PrototypeWorkspacePage", () => {
     ).toHaveTextContent("Workspace:none Session:none Share:share-token-1")
   })
 
+  it("keeps the collaborator session view after token-bearing routes are cleaned up", () => {
+    usePrototypeWorkspaceStore.getState().setCollaboratorEntry({
+      collaboratorSessionId: "pss_collab",
+      collaboratorSessionToken: "session-token-1",
+      collaboratorShareToken: "share-token-1",
+      sharedActorId: "psa_collab"
+    })
+    searchParamsState.value = new URLSearchParams({
+      workspace: "pw_collab"
+    })
+
+    render(<PrototypeWorkspacePage />)
+
+    expect(hookState.usePrototypeWorkspace).toHaveBeenCalledWith(null)
+    expect(
+      screen.getByTestId("prototype-workspace-session-view")
+    ).toHaveTextContent("Workspace:pw_collab Session:none Share:none")
+    expect(
+      screen.queryByTestId("prototype-workspace-owner-view")
+    ).not.toBeInTheDocument()
+  })
+
   it("passes prototype share passwords from navigation state into collaborator entry", () => {
     searchParamsState.value = new URLSearchParams({
       share_token: "share-token-1"
