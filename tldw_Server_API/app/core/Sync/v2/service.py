@@ -37,6 +37,11 @@ from .models import (
     EncryptionPolicy,
     SyncAttachment,
     SyncAttachmentCreate,
+    SyncBackgroundDomainStatus,
+    SyncBackgroundLease,
+    SyncBackgroundLeaseCreate,
+    SyncBackgroundPolicy,
+    SyncBackgroundPolicyUpsert,
     SyncBlobChunk,
     SyncBlobChunkCreate,
     SyncBlobDownloadChunk,
@@ -183,6 +188,20 @@ class SyncDatasetEnrollment:
     dataset: SyncDataset
     cursors: dict[str, str] = field(default_factory=dict)
     key_setup_required: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBackgroundStatus:
+    dataset_id: str
+    device_id: str
+    policy: SyncBackgroundPolicy
+    lease: SyncBackgroundLease | None = None
+    domains: list[SyncBackgroundDomainStatus] = field(default_factory=list)
+    conflict_count: int = 0
+    replayable_failure_count: int = 0
+    quota_pressure: dict[str, object] = field(default_factory=dict)
+    restore_completeness: SyncRestoreCompletenessStatus = "metadata_ready"
+    server_time: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -626,6 +645,181 @@ class SyncV2Service:
                 raise SyncStoreError("Sync acknowledgment device or dataset does not match request")
             self.store.upsert_device_blob_ack(acknowledgment)
         return self.store.list_device_acknowledgments(dataset_id, device_id)
+
+    def get_background_policy(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+    ) -> SyncBackgroundPolicy:
+        """Return stored or default background sync policy for a dataset/device."""
+
+        self._require_registered_device(user_id, device_id)
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        stored = self.store.get_background_policy(dataset_id, device_id)
+        if stored is not None:
+            return stored
+        return self._default_background_policy(dataset_id, device_id)
+
+    def update_background_policy(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        enabled: bool | None = None,
+        minimum_interval_seconds: int | None = None,
+        backoff_floor_seconds: int | None = None,
+        max_batch_size: int | None = None,
+        max_blob_bytes_per_run: int | None = None,
+        respect_metered_networks: bool | None = None,
+        maintenance_window: dict[str, object] | None = None,
+        paused_reason: str | None = None,
+        pending_local_changes: bool | None = None,
+    ) -> SyncBackgroundPolicy:
+        """Persist background sync policy hints and user pause/resume intent."""
+
+        current = self.get_background_policy(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            device_id=device_id,
+        )
+        resolved_enabled = current.enabled if enabled is None else enabled
+        return self.store.upsert_background_policy(
+            SyncBackgroundPolicyUpsert(
+                dataset_id=dataset_id,
+                device_id=device_id,
+                enabled=resolved_enabled,
+                minimum_interval_seconds=(
+                    current.minimum_interval_seconds
+                    if minimum_interval_seconds is None
+                    else minimum_interval_seconds
+                ),
+                backoff_floor_seconds=(
+                    current.backoff_floor_seconds
+                    if backoff_floor_seconds is None
+                    else backoff_floor_seconds
+                ),
+                max_batch_size=current.max_batch_size if max_batch_size is None else max_batch_size,
+                max_blob_bytes_per_run=(
+                    current.max_blob_bytes_per_run
+                    if max_blob_bytes_per_run is None
+                    else max_blob_bytes_per_run
+                ),
+                respect_metered_networks=(
+                    current.respect_metered_networks
+                    if respect_metered_networks is None
+                    else respect_metered_networks
+                ),
+                maintenance_window=(
+                    current.maintenance_window
+                    if maintenance_window is None
+                    else dict(maintenance_window)
+                ),
+                paused_reason=(
+                    paused_reason
+                    if paused_reason is not None
+                    else (None if resolved_enabled else current.paused_reason)
+                ),
+                pending_local_changes=(
+                    current.pending_local_changes
+                    if pending_local_changes is None
+                    else pending_local_changes
+                ),
+            )
+        )
+
+    def acquire_background_lease(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        lease_id: str | None = None,
+        ttl_seconds: int = 120,
+    ) -> SyncBackgroundLease:
+        """Acquire or refresh a short-lived advisory background sync lease."""
+
+        self._require_registered_device(user_id, device_id)
+        if self.store.get_dataset(dataset_id, owner_user_id=user_id) is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        return self.store.acquire_background_lease(
+            SyncBackgroundLeaseCreate(
+                dataset_id=dataset_id,
+                device_id=device_id,
+                lease_id=lease_id or self.id_factory("background-lease"),
+                ttl_seconds=ttl_seconds,
+                requested_at=self.clock(),
+            )
+        )
+
+    def background_status(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+    ) -> SyncBackgroundStatus:
+        """Return profile-level and per-domain background sync status."""
+
+        self._require_registered_device(user_id, device_id)
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        policy = self.get_background_policy(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            device_id=device_id,
+        )
+        domains = self.store.summarize_background_domains(
+            dataset_id,
+            device_id,
+            domains=dataset.domains,
+        )
+        lease = self.store.get_background_lease(dataset_id, device_id)
+        quota = self.store.summarize_blob_quota(user_id, dataset_id=dataset_id)
+        quota_limit = self.settings.user_blob_quota_bytes
+        quota_used = quota.used_blob_bytes + quota.reserved_blob_bytes
+        quota_pressure = {
+            "reserved_blob_bytes": quota.reserved_blob_bytes,
+            "used_blob_bytes": quota.used_blob_bytes,
+            "active_upload_count": quota.active_upload_count,
+            "limit_bytes": quota_limit,
+            "pressure_ratio": (
+                round(quota_used / quota_limit, 4)
+                if quota_limit and quota_limit > 0
+                else 0.0
+            ),
+        }
+        conflict_count = sum(domain.unresolved_conflicts for domain in domains)
+        replayable_failure_count = sum(domain.replayable_failures for domain in domains)
+        missing_blob_count = sum(
+            domain.blob_completeness.get("missing_blob_count", 0)
+            for domain in domains
+        )
+        if conflict_count:
+            restore_completeness: SyncRestoreCompletenessStatus = "blocked_by_conflicts"
+        elif missing_blob_count:
+            restore_completeness = "blob_incomplete"
+        elif any(domain.last_server_sequence for domain in domains):
+            restore_completeness = "content_complete"
+        else:
+            restore_completeness = "metadata_ready"
+        return SyncBackgroundStatus(
+            dataset_id=dataset_id,
+            device_id=device_id,
+            policy=policy,
+            lease=lease,
+            domains=domains,
+            conflict_count=conflict_count,
+            replayable_failure_count=replayable_failure_count,
+            quota_pressure=quota_pressure,
+            restore_completeness=restore_completeness,
+            server_time=self.clock(),
+        )
 
     def enroll_dataset(
         self,
@@ -2060,6 +2254,30 @@ class SyncV2Service:
         ):
             return device
         raise SyncStoreError("Sync device was not found or is not accessible")
+
+    def _default_background_policy(
+        self,
+        dataset_id: str,
+        device_id: str,
+    ) -> SyncBackgroundPolicy:
+        return SyncBackgroundPolicy(
+            dataset_id=dataset_id,
+            device_id=device_id,
+            enabled=True,
+            minimum_interval_seconds=300,
+            backoff_floor_seconds=60,
+            max_batch_size=self.settings.max_batch_size,
+            max_blob_bytes_per_run=(
+                self.settings.max_blob_bytes
+                if self.settings.max_blob_bytes is not None
+                else self.settings.max_attachment_bytes
+            ),
+            respect_metered_networks=True,
+            maintenance_window=None,
+            paused_reason=None,
+            pending_local_changes=False,
+            updated_at=self.clock(),
+        )
 
     def _require_server_trusted_encryption_ready(self) -> None:
         if not self.settings.server_trusted_encryption.encryption.get("ready", False):

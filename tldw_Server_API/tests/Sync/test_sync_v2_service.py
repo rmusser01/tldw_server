@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncConflictCreate,
     SyncDataset,
+    SyncDeviceCursor,
     SyncDeviceUpsert,
     SyncDomain,
     SyncEnvelopeCreate,
@@ -439,6 +440,154 @@ def test_revoked_device_cannot_sync_or_start_device_scoped_blob_upload(
             payload_hash=_sha256(b"blob"),
             chunk_size=1024,
             chunk_count=1,
+        )
+
+
+def test_background_policy_lease_and_status_aggregation(
+    sync_service: SyncV2Service,
+    sync_store: SyncV2Store,
+) -> None:
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "attachment.ref"],
+    )
+    sync_store.insert_envelope(
+        _m1_note_envelope(
+            client_envelope_id="env-device-1",
+            object_id="note-1",
+            device_id="device-1",
+            client_sequence=1,
+            payload_hash="sha256:note-1",
+            apply_status="applied",
+        )
+    )
+    failed = sync_store.insert_envelope(
+        _m1_note_envelope(
+            client_envelope_id="env-device-2",
+            object_id="note-2",
+            device_id="device-2",
+            client_sequence=1,
+            payload_hash="sha256:note-2",
+            apply_status="failed",
+        )
+    )
+    sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-1",
+            dataset_id="dataset-1",
+            domain="notes.note",
+            object_id="note-2",
+            conflict_type="version_divergence",
+            local_envelope_id="env-device-2",
+            server_cursor=failed.server_sequence,
+        )
+    )
+    sync_store.update_device_cursor(
+        SyncDeviceCursor(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="notes.note",
+            last_pulled_sequence=1,
+        )
+    )
+
+    default_policy = sync_service.get_background_policy(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+    )
+    paused_policy = sync_service.update_background_policy(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        enabled=False,
+        paused_reason="user_paused",
+        pending_local_changes=True,
+    )
+    resumed_policy = sync_service.update_background_policy(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        enabled=True,
+    )
+    paused_policy = sync_service.update_background_policy(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        enabled=False,
+        paused_reason="user_paused",
+        pending_local_changes=True,
+    )
+    lease = sync_service.acquire_background_lease(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        lease_id="lease-1",
+        ttl_seconds=120,
+    )
+    held = sync_service.acquire_background_lease(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        lease_id="lease-2",
+        ttl_seconds=120,
+    )
+    status = sync_service.background_status(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+    )
+
+    assert default_policy.enabled is True
+    assert default_policy.max_batch_size == 10
+    assert paused_policy.enabled is False
+    assert paused_policy.paused_reason == "user_paused"
+    assert paused_policy.pending_local_changes is True
+    assert resumed_policy.enabled is True
+    assert resumed_policy.paused_reason is None
+    assert lease.acquired is True
+    assert lease.status == "acquired"
+    assert held.acquired is False
+    assert held.status == "held_by_other"
+    assert status.policy.enabled is False
+    assert status.lease is not None
+    assert status.lease.lease_id == "lease-1"
+    assert status.conflict_count == 1
+    assert status.replayable_failure_count == 1
+    assert status.restore_completeness == "blocked_by_conflicts"
+    notes_status = {item.domain: item for item in status.domains}["notes.note"]
+    assert notes_status.last_server_sequence == failed.server_sequence
+    assert notes_status.last_pulled_sequence == 1
+    assert notes_status.cursor_lag_count == 1
+    assert notes_status.unresolved_conflicts == 1
+    assert notes_status.replayable_failures == 1
+    assert notes_status.last_successful_push_at is not None
+    assert notes_status.last_successful_pull_at is not None
+
+
+def test_background_sync_rejects_revoked_devices(sync_service: SyncV2Service) -> None:
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1")
+    sync_service.revoke_device(user_id="user-1", device_id="device-1", reason="lost")
+
+    with pytest.raises(SyncStoreError, match="not found or is not accessible"):
+        sync_service.get_background_policy(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+        )
+    with pytest.raises(SyncStoreError, match="not found or is not accessible"):
+        sync_service.acquire_background_lease(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            ttl_seconds=120,
+        )
+    with pytest.raises(SyncStoreError, match="not found or is not accessible"):
+        sync_service.background_status(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
         )
 
 

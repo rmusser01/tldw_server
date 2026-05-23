@@ -316,6 +316,82 @@ def test_device_lifecycle_endpoints_authorize_acknowledge_and_revoke(
     } == {"device-1": "active", "device-2": "revoked"}
 
 
+def test_background_sync_policy_lease_and_status_endpoints(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.store.upsert_device(
+        SyncDeviceUpsert(
+            device_id="device-1",
+            user_id="user-1",
+            display_name="Trusted laptop",
+            client_type="chatbook",
+        )
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "attachment.ref"],
+    )
+
+    default_policy = client.get(
+        "/api/v1/sync/background-policy",
+        params={"dataset_id": "dataset-1", "device_id": "device-1"},
+    )
+    patched_policy = client.patch(
+        "/api/v1/sync/background-policy",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "enabled": False,
+            "paused_reason": "user_paused",
+            "pending_local_changes": True,
+        },
+    )
+    lease = client.post(
+        "/api/v1/sync/background-leases",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "lease_id": "lease-1",
+            "ttl_seconds": 120,
+        },
+    )
+    held = client.post(
+        "/api/v1/sync/background-leases",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "lease_id": "lease-2",
+            "ttl_seconds": 120,
+        },
+    )
+    status = client.get(
+        "/api/v1/sync/background-status",
+        params={"dataset_id": "dataset-1", "device_id": "device-1"},
+    )
+
+    assert default_policy.status_code == 200
+    assert default_policy.json()["enabled"] is True
+    assert patched_policy.status_code == 200
+    assert patched_policy.json()["enabled"] is False
+    assert patched_policy.json()["paused_reason"] == "user_paused"
+    assert patched_policy.json()["pending_local_changes"] is True
+    assert lease.status_code == 200
+    assert lease.json()["status"] == "acquired"
+    assert lease.json()["acquired"] is True
+    assert held.status_code == 200
+    assert held.json()["status"] == "held_by_other"
+    assert held.json()["lease_id"] == "lease-1"
+    assert status.status_code == 200
+    assert status.json()["policy"]["enabled"] is False
+    assert status.json()["lease"]["lease_id"] == "lease-1"
+    assert {item["domain"] for item in status.json()["domains"]} == {
+        "notes.note",
+        "attachment.ref",
+    }
+
+
 def test_profile_endpoint_for_fresh_user_does_not_create_sync_db(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

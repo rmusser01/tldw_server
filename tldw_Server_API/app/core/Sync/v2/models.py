@@ -29,6 +29,7 @@ SyncBlobUploadStatus = Literal[
 ]
 SyncDeviceStatus = Literal["pending_authorization", "active", "paused", "revoked"]
 SyncDeviceAuthorizationStatus = Literal["pending", "approved", "rejected"]
+SyncBackgroundLeaseStatus = Literal["acquired", "refreshed", "held_by_other"]
 SyncRestoreCompletenessStatus = Literal[
     "metadata_ready",
     "blocked_by_conflicts",
@@ -192,6 +193,80 @@ class SyncDeviceAcknowledgmentSummary:
     device_id: str
     domain_acks: dict[SyncDomain, SyncDeviceDomainAck] = field(default_factory=dict)
     blob_acks: list[SyncDeviceBlobAck] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBackgroundPolicyUpsert:
+    """Background sync policy and user intent accepted by the Sync v2 store."""
+
+    dataset_id: str
+    device_id: str
+    enabled: bool = True
+    minimum_interval_seconds: int = 300
+    backoff_floor_seconds: int = 60
+    max_batch_size: int = 100
+    max_blob_bytes_per_run: int | None = None
+    respect_metered_networks: bool = True
+    maintenance_window: dict[str, Any] | None = None
+    paused_reason: str | None = None
+    pending_local_changes: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBackgroundPolicy:
+    """Stored background sync policy and user intent for one dataset/device."""
+
+    dataset_id: str
+    device_id: str
+    enabled: bool
+    minimum_interval_seconds: int
+    backoff_floor_seconds: int
+    max_batch_size: int
+    max_blob_bytes_per_run: int | None
+    respect_metered_networks: bool
+    maintenance_window: dict[str, Any] | None
+    paused_reason: str | None
+    pending_local_changes: bool
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBackgroundLeaseCreate:
+    """Advisory background sync lease request accepted by the Sync v2 store."""
+
+    dataset_id: str
+    device_id: str
+    lease_id: str
+    ttl_seconds: int
+    requested_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBackgroundLease:
+    """Stored advisory background sync lease."""
+
+    dataset_id: str
+    device_id: str
+    lease_id: str
+    status: SyncBackgroundLeaseStatus
+    acquired: bool
+    expires_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBackgroundDomainStatus:
+    """Aggregated background sync status for one domain."""
+
+    domain: SyncDomain
+    last_server_sequence: int = 0
+    last_pulled_sequence: int = 0
+    cursor_lag_count: int = 0
+    unresolved_conflicts: int = 0
+    replayable_failures: int = 0
+    last_successful_push_at: str | None = None
+    last_successful_pull_at: str | None = None
+    blob_completeness: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -734,6 +809,12 @@ __all__ = [
     "SyncApplyStatus",
     "SyncAttachment",
     "SyncAttachmentCreate",
+    "SyncBackgroundDomainStatus",
+    "SyncBackgroundLease",
+    "SyncBackgroundLeaseCreate",
+    "SyncBackgroundLeaseStatus",
+    "SyncBackgroundPolicy",
+    "SyncBackgroundPolicyUpsert",
     "SyncBlobAvailabilityStatus",
     "SyncBlobChunk",
     "SyncBlobChunkCreate",

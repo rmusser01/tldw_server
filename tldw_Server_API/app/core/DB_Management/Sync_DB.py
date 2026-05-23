@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -26,6 +26,11 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncApplyStatus,
     SyncAttachment,
     SyncAttachmentCreate,
+    SyncBackgroundDomainStatus,
+    SyncBackgroundLease,
+    SyncBackgroundLeaseCreate,
+    SyncBackgroundPolicy,
+    SyncBackgroundPolicyUpsert,
     SyncBlobChunk,
     SyncBlobChunkCreate,
     SyncBlobObject,
@@ -136,6 +141,35 @@ CREATE TABLE IF NOT EXISTS sync_device_blob_acks (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_device_blob_acks_device
     ON sync_device_blob_acks(device_id, dataset_id);
+
+CREATE TABLE IF NOT EXISTS sync_background_policies (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    minimum_interval_seconds INTEGER NOT NULL DEFAULT 300,
+    backoff_floor_seconds INTEGER NOT NULL DEFAULT 60,
+    max_batch_size INTEGER NOT NULL DEFAULT 100,
+    max_blob_bytes_per_run INTEGER,
+    respect_metered_networks INTEGER NOT NULL DEFAULT 1,
+    maintenance_window_json TEXT,
+    paused_reason TEXT,
+    pending_local_changes INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(dataset_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_background_policies_device
+    ON sync_background_policies(device_id, dataset_id);
+
+CREATE TABLE IF NOT EXISTS sync_background_leases (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    lease_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(dataset_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_background_leases_expiry
+    ON sync_background_leases(expires_at);
 
 CREATE TABLE IF NOT EXISTS sync_datasets (
     dataset_id TEXT PRIMARY KEY,
@@ -442,6 +476,35 @@ CREATE TABLE IF NOT EXISTS sync_device_blob_acks (
 CREATE INDEX IF NOT EXISTS idx_sync_device_blob_acks_device
     ON sync_device_blob_acks(device_id, dataset_id);
 
+CREATE TABLE IF NOT EXISTS sync_background_policies (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    minimum_interval_seconds INTEGER NOT NULL DEFAULT 300,
+    backoff_floor_seconds INTEGER NOT NULL DEFAULT 60,
+    max_batch_size INTEGER NOT NULL DEFAULT 100,
+    max_blob_bytes_per_run BIGINT,
+    respect_metered_networks BOOLEAN NOT NULL DEFAULT TRUE,
+    maintenance_window_json TEXT,
+    paused_reason TEXT,
+    pending_local_changes BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY(dataset_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_background_policies_device
+    ON sync_background_policies(device_id, dataset_id);
+
+CREATE TABLE IF NOT EXISTS sync_background_leases (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    lease_id TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY(dataset_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_background_leases_expiry
+    ON sync_background_leases(expires_at);
+
 CREATE TABLE IF NOT EXISTS sync_datasets (
     dataset_id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL,
@@ -734,6 +797,17 @@ def _timestamp_to_string(value: Any) -> str | None:
     return str(value)
 
 
+def _parse_iso_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _add_seconds_iso(value: str, seconds: int) -> str:
+    return (_parse_iso_datetime(value) + timedelta(seconds=seconds)).isoformat()
+
+
 def _bool_from_storage(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -839,6 +913,47 @@ def _device_blob_ack_from_row(row: dict[str, Any]) -> SyncDeviceBlobAck:
         verified_at=_timestamp_to_string(row.get("verified_at")) or "",
         updated_at=_timestamp_to_string(row.get("updated_at")) or "",
         idempotency_key=row.get("idempotency_key"),
+    )
+
+
+def _background_policy_from_row(row: dict[str, Any]) -> SyncBackgroundPolicy:
+    maintenance_window = decode_json(row.get("maintenance_window_json"), default=None)
+    if maintenance_window is not None and not isinstance(maintenance_window, dict):
+        maintenance_window = None
+    return SyncBackgroundPolicy(
+        dataset_id=row["dataset_id"],
+        device_id=row["device_id"],
+        enabled=_bool_from_storage(row.get("enabled")),
+        minimum_interval_seconds=int(row["minimum_interval_seconds"]),
+        backoff_floor_seconds=int(row["backoff_floor_seconds"]),
+        max_batch_size=int(row["max_batch_size"]),
+        max_blob_bytes_per_run=(
+            int(row["max_blob_bytes_per_run"])
+            if row.get("max_blob_bytes_per_run") is not None
+            else None
+        ),
+        respect_metered_networks=_bool_from_storage(row.get("respect_metered_networks")),
+        maintenance_window=maintenance_window,
+        paused_reason=row.get("paused_reason"),
+        pending_local_changes=_bool_from_storage(row.get("pending_local_changes")),
+        updated_at=_timestamp_to_string(row.get("updated_at")) or "",
+    )
+
+
+def _background_lease_from_row(
+    row: dict[str, Any],
+    *,
+    status: str,
+    acquired: bool,
+) -> SyncBackgroundLease:
+    return SyncBackgroundLease(
+        dataset_id=row["dataset_id"],
+        device_id=row["device_id"],
+        lease_id=row["lease_id"],
+        status=status,
+        acquired=acquired,
+        expires_at=_timestamp_to_string(row.get("expires_at")) or "",
+        updated_at=_timestamp_to_string(row.get("updated_at")) or "",
     )
 
 
@@ -1461,6 +1576,7 @@ class SyncDatabase:
             self.backend.create_tables(schema, connection=conn)
             self._ensure_device_lifecycle_columns(connection=conn)
             self._ensure_device_lifecycle_tables(connection=conn)
+            self._ensure_background_sync_tables(connection=conn)
             self._ensure_envelope_m1_columns(connection=conn)
             self._ensure_sync_object_state_table(connection=conn)
             self._ensure_envelope_m1_indexes(connection=conn)
@@ -2264,6 +2380,335 @@ class SyncDatabase:
             domain_acks=domain_acks,
             blob_acks=[_device_blob_ack_from_row(row) for row in blob_rows],
         )
+
+    def get_background_policy(
+        self,
+        dataset_id: str,
+        device_id: str,
+    ) -> SyncBackgroundPolicy | None:
+        """Return stored background sync policy for one dataset/device."""
+
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_background_policies
+                 WHERE dataset_id = ? AND device_id = ?
+                """,
+                (dataset_id, device_id),
+            )
+        )
+        if row is None:
+            return None
+        return _background_policy_from_row(row)
+
+    def upsert_background_policy(
+        self,
+        policy: SyncBackgroundPolicyUpsert,
+    ) -> SyncBackgroundPolicy:
+        """Store background sync policy hints and user intent."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            self._require_device_for_dataset(
+                policy.dataset_id,
+                policy.device_id,
+                connection=conn,
+            )
+            self.execute(
+                """
+                INSERT INTO sync_background_policies (
+                    dataset_id, device_id, enabled, minimum_interval_seconds,
+                    backoff_floor_seconds, max_batch_size, max_blob_bytes_per_run,
+                    respect_metered_networks, maintenance_window_json, paused_reason,
+                    pending_local_changes, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, device_id)
+                DO UPDATE SET
+                    enabled = excluded.enabled,
+                    minimum_interval_seconds = excluded.minimum_interval_seconds,
+                    backoff_floor_seconds = excluded.backoff_floor_seconds,
+                    max_batch_size = excluded.max_batch_size,
+                    max_blob_bytes_per_run = excluded.max_blob_bytes_per_run,
+                    respect_metered_networks = excluded.respect_metered_networks,
+                    maintenance_window_json = excluded.maintenance_window_json,
+                    paused_reason = excluded.paused_reason,
+                    pending_local_changes = excluded.pending_local_changes,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    policy.dataset_id,
+                    policy.device_id,
+                    1 if policy.enabled else 0,
+                    policy.minimum_interval_seconds,
+                    policy.backoff_floor_seconds,
+                    policy.max_batch_size,
+                    policy.max_blob_bytes_per_run,
+                    1 if policy.respect_metered_networks else 0,
+                    encode_json(policy.maintenance_window, default=None),
+                    policy.paused_reason,
+                    1 if policy.pending_local_changes else 0,
+                    now,
+                ),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_background_policies
+                     WHERE dataset_id = ? AND device_id = ?
+                    """,
+                    (policy.dataset_id, policy.device_id),
+                    connection=conn,
+                )
+            )
+        return _background_policy_from_row(row)
+
+    def get_background_lease(
+        self,
+        dataset_id: str,
+        device_id: str,
+    ) -> SyncBackgroundLease | None:
+        """Return the current advisory background lease for one dataset/device."""
+
+        row = _first(
+            self.execute(
+                """
+                SELECT * FROM sync_background_leases
+                 WHERE dataset_id = ? AND device_id = ?
+                """,
+                (dataset_id, device_id),
+            )
+        )
+        if row is None:
+            return None
+        return _background_lease_from_row(row, status="acquired", acquired=True)
+
+    def acquire_background_lease(
+        self,
+        lease: SyncBackgroundLeaseCreate,
+    ) -> SyncBackgroundLease:
+        """Create or refresh a short-lived advisory background sync lease."""
+
+        if lease.ttl_seconds < 1:
+            raise SyncStoreError("Sync background lease ttl_seconds must be greater than zero")
+        now = lease.requested_at or utcnow_iso()
+        expires_at = _add_seconds_iso(now, lease.ttl_seconds)
+        with self.backend.transaction() as conn:
+            self._require_device_for_dataset(
+                lease.dataset_id,
+                lease.device_id,
+                connection=conn,
+            )
+            existing = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_background_leases
+                     WHERE dataset_id = ? AND device_id = ?
+                    """,
+                    (lease.dataset_id, lease.device_id),
+                    connection=conn,
+                )
+            )
+            if existing is not None:
+                existing_expires_at = _timestamp_to_string(existing.get("expires_at")) or ""
+                active = _parse_iso_datetime(existing_expires_at) > _parse_iso_datetime(now)
+                if active and existing["lease_id"] != lease.lease_id:
+                    return _background_lease_from_row(
+                        existing,
+                        status="held_by_other",
+                        acquired=False,
+                    )
+                status = "refreshed" if active else "acquired"
+                self.execute(
+                    """
+                    UPDATE sync_background_leases
+                       SET lease_id = ?, expires_at = ?, updated_at = ?
+                     WHERE dataset_id = ? AND device_id = ?
+                    """,
+                    (
+                        lease.lease_id,
+                        expires_at,
+                        now,
+                        lease.dataset_id,
+                        lease.device_id,
+                    ),
+                    connection=conn,
+                )
+            else:
+                status = "acquired"
+                self.execute(
+                    """
+                    INSERT INTO sync_background_leases (
+                        dataset_id, device_id, lease_id, expires_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        lease.dataset_id,
+                        lease.device_id,
+                        lease.lease_id,
+                        expires_at,
+                        now,
+                    ),
+                    connection=conn,
+                )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_background_leases
+                     WHERE dataset_id = ? AND device_id = ?
+                    """,
+                    (lease.dataset_id, lease.device_id),
+                    connection=conn,
+                )
+            )
+        return _background_lease_from_row(row, status=status, acquired=True)
+
+    def summarize_background_domains(
+        self,
+        dataset_id: str,
+        device_id: str,
+        *,
+        domains: Sequence[SyncDomain] | None = None,
+    ) -> list[SyncBackgroundDomainStatus]:
+        """Return per-domain background sync status counters."""
+
+        with self.backend.transaction() as conn:
+            dataset_row = self._require_dataset(dataset_id, connection=conn)
+            self._require_device_for_dataset(
+                dataset_id,
+                device_id,
+                connection=conn,
+            )
+            selected_domains = [
+                domain
+                for domain in _dataset_domains_from_row(dataset_row)
+                if domains is None or domain in domains
+            ]
+            statuses: list[SyncBackgroundDomainStatus] = []
+            for domain in selected_domains:
+                cursor_row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_cursors
+                         WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                        """,
+                        (dataset_id, device_id, domain),
+                        connection=conn,
+                    )
+                )
+                last_pulled = int(cursor_row["last_pulled_sequence"]) if cursor_row else 0
+                last_pull_at = (
+                    _timestamp_to_string(cursor_row.get("updated_at"))
+                    if cursor_row
+                    else None
+                )
+                envelope_row = _first(
+                    self.execute(
+                        """
+                        SELECT MAX(server_sequence) AS last_server_sequence,
+                               MAX(CASE WHEN device_id = ? THEN server_timestamp END)
+                                   AS last_successful_push_at
+                          FROM sync_envelopes
+                         WHERE dataset_id = ?
+                           AND domain = ?
+                           AND status = 'accepted'
+                        """,
+                        (device_id, dataset_id, domain),
+                        connection=conn,
+                    )
+                ) or {}
+                lag_row = _first(
+                    self.execute(
+                        """
+                        SELECT COUNT(*) AS lag_count
+                          FROM sync_envelopes
+                         WHERE dataset_id = ?
+                           AND domain = ?
+                           AND status = 'accepted'
+                           AND server_sequence > ?
+                        """,
+                        (dataset_id, domain, last_pulled),
+                        connection=conn,
+                    )
+                ) or {}
+                conflict_row = _first(
+                    self.execute(
+                        """
+                        SELECT COUNT(*) AS conflict_count
+                          FROM sync_conflicts
+                         WHERE dataset_id = ?
+                           AND domain = ?
+                           AND status = 'unresolved'
+                        """,
+                        (dataset_id, domain),
+                        connection=conn,
+                    )
+                ) or {}
+                failure_row = _first(
+                    self.execute(
+                        """
+                        SELECT COUNT(*) AS failure_count
+                          FROM sync_envelopes
+                         WHERE dataset_id = ?
+                           AND domain = ?
+                           AND apply_status = 'failed'
+                        """,
+                        (dataset_id, domain),
+                        connection=conn,
+                    )
+                ) or {}
+                blob_completeness: dict[str, int] = {}
+                if domain == "attachment.ref":
+                    attachment_row = _first(
+                        self.execute(
+                            """
+                            SELECT COUNT(*) AS required_blob_count
+                              FROM sync_attachments
+                             WHERE dataset_id = ?
+                            """,
+                            (dataset_id,),
+                            connection=conn,
+                        )
+                    ) or {}
+                    available_row = _first(
+                        self.execute(
+                            """
+                            SELECT COUNT(*) AS available_blob_count
+                              FROM sync_blob_objects
+                             WHERE dataset_id = ?
+                               AND status = 'available'
+                               AND deleted_at IS NULL
+                            """,
+                            (dataset_id,),
+                            connection=conn,
+                        )
+                    ) or {}
+                    required = int(attachment_row.get("required_blob_count") or 0)
+                    available = int(available_row.get("available_blob_count") or 0)
+                    if required or available:
+                        blob_completeness = {
+                            "required_blob_count": required,
+                            "available_blob_count": available,
+                            "missing_blob_count": max(required - available, 0),
+                        }
+                statuses.append(
+                    SyncBackgroundDomainStatus(
+                        domain=domain,
+                        last_server_sequence=int(envelope_row.get("last_server_sequence") or 0),
+                        last_pulled_sequence=last_pulled,
+                        cursor_lag_count=int(lag_row.get("lag_count") or 0),
+                        unresolved_conflicts=int(conflict_row.get("conflict_count") or 0),
+                        replayable_failures=int(failure_row.get("failure_count") or 0),
+                        last_successful_push_at=_timestamp_to_string(
+                            envelope_row.get("last_successful_push_at")
+                        ),
+                        last_successful_pull_at=last_pull_at,
+                        blob_completeness=blob_completeness,
+                    )
+                )
+        return statuses
 
     def get_or_create_default_personal_dataset(self, user_id: str) -> SyncDataset:
         """Return the user's default Chatbook personal dataset, creating it if needed."""
@@ -4059,6 +4504,72 @@ class SyncDatabase:
             """,
         ]
         for statement in statements:
+            self.execute(statement, connection=connection)
+
+    def _ensure_background_sync_tables(self, *, connection: Any) -> None:
+        if self.backend_type == BackendType.POSTGRESQL:
+            schema = """
+            CREATE TABLE IF NOT EXISTS sync_background_policies (
+                dataset_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                minimum_interval_seconds INTEGER NOT NULL DEFAULT 300,
+                backoff_floor_seconds INTEGER NOT NULL DEFAULT 60,
+                max_batch_size INTEGER NOT NULL DEFAULT 100,
+                max_blob_bytes_per_run BIGINT,
+                respect_metered_networks BOOLEAN NOT NULL DEFAULT TRUE,
+                maintenance_window_json TEXT,
+                paused_reason TEXT,
+                pending_local_changes BOOLEAN NOT NULL DEFAULT FALSE,
+                updated_at TIMESTAMPTZ NOT NULL,
+                PRIMARY KEY(dataset_id, device_id)
+            );
+            CREATE TABLE IF NOT EXISTS sync_background_leases (
+                dataset_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                lease_id TEXT NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                PRIMARY KEY(dataset_id, device_id)
+            );
+            """
+        else:
+            schema = """
+            CREATE TABLE IF NOT EXISTS sync_background_policies (
+                dataset_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                minimum_interval_seconds INTEGER NOT NULL DEFAULT 300,
+                backoff_floor_seconds INTEGER NOT NULL DEFAULT 60,
+                max_batch_size INTEGER NOT NULL DEFAULT 100,
+                max_blob_bytes_per_run INTEGER,
+                respect_metered_networks INTEGER NOT NULL DEFAULT 1,
+                maintenance_window_json TEXT,
+                paused_reason TEXT,
+                pending_local_changes INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(dataset_id, device_id)
+            );
+            CREATE TABLE IF NOT EXISTS sync_background_leases (
+                dataset_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                lease_id TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(dataset_id, device_id)
+            );
+            """
+        self.backend.create_tables(schema, connection=connection)
+        for statement in (
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_background_policies_device
+                ON sync_background_policies(device_id, dataset_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_background_leases_expiry
+                ON sync_background_leases(expires_at)
+            """,
+        ):
             self.execute(statement, connection=connection)
 
     def _ensure_domain_state(

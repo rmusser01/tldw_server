@@ -11,6 +11,11 @@ from .models import (
     SyncApplyStatus,
     SyncAttachment,
     SyncAttachmentCreate,
+    SyncBackgroundDomainStatus,
+    SyncBackgroundLease,
+    SyncBackgroundLeaseCreate,
+    SyncBackgroundPolicy,
+    SyncBackgroundPolicyUpsert,
     SyncBlobChunk,
     SyncBlobChunkCreate,
     SyncBlobObject,
@@ -132,6 +137,45 @@ class SyncV2Store:
         device_id: str,
     ) -> SyncDeviceAcknowledgmentSummary:
         return self.db.list_device_acknowledgments(dataset_id, device_id)
+
+    def get_background_policy(
+        self,
+        dataset_id: str,
+        device_id: str,
+    ) -> SyncBackgroundPolicy | None:
+        return self.db.get_background_policy(dataset_id, device_id)
+
+    def upsert_background_policy(
+        self,
+        policy: SyncBackgroundPolicyUpsert,
+    ) -> SyncBackgroundPolicy:
+        return self.db.upsert_background_policy(policy)
+
+    def get_background_lease(
+        self,
+        dataset_id: str,
+        device_id: str,
+    ) -> SyncBackgroundLease | None:
+        return self.db.get_background_lease(dataset_id, device_id)
+
+    def acquire_background_lease(
+        self,
+        lease: SyncBackgroundLeaseCreate,
+    ) -> SyncBackgroundLease:
+        return self.db.acquire_background_lease(lease)
+
+    def summarize_background_domains(
+        self,
+        dataset_id: str,
+        device_id: str,
+        *,
+        domains: Sequence[SyncDomain] | None = None,
+    ) -> list[SyncBackgroundDomainStatus]:
+        return self.db.summarize_background_domains(
+            dataset_id,
+            device_id,
+            domains=domains,
+        )
 
     def get_or_create_default_personal_dataset(self, user_id: str) -> SyncDataset:
         return self.db.get_or_create_default_personal_dataset(user_id)

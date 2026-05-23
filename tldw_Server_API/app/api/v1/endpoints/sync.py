@@ -29,6 +29,11 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     ConflictStatus,
     SyncAttachmentUploadRequest,
     SyncAttachmentUploadResponse,
+    SyncBackgroundLeaseRequest,
+    SyncBackgroundLeaseResponse,
+    SyncBackgroundPolicyPatchRequest,
+    SyncBackgroundPolicyResponse,
+    SyncBackgroundStatusResponse,
     SyncBlobChunkUploadResponse,
     SyncBlobDownloadManifestResponse,
     SyncBlobUploadCompleteResponse,
@@ -317,6 +322,18 @@ def _api_device_acknowledgments_from_core(
     acknowledgments: Any,
 ) -> SyncDeviceAcknowledgmentsResponse:
     return SyncDeviceAcknowledgmentsResponse(**asdict(acknowledgments))
+
+
+def _api_background_policy_from_core(policy: Any) -> SyncBackgroundPolicyResponse:
+    return SyncBackgroundPolicyResponse(**asdict(policy))
+
+
+def _api_background_lease_from_core(lease: Any) -> SyncBackgroundLeaseResponse:
+    return SyncBackgroundLeaseResponse(**asdict(lease))
+
+
+def _api_background_status_from_core(status: Any) -> SyncBackgroundStatusResponse:
+    return SyncBackgroundStatusResponse(**asdict(status))
 
 
 def _api_empty_profile(user_id: str, device_id: str | None) -> SyncProfileResponse:
@@ -706,6 +723,123 @@ def acknowledge_sync_v2_device_state(
             device_id=request.device_id,
         ) from exc
     return _api_device_acknowledgments_from_core(acknowledgments)
+
+
+@router.get(
+    "/background-policy",
+    response_model=SyncBackgroundPolicyResponse,
+    summary="Return Sync v2 background sync policy for a dataset/device",
+)
+def get_sync_v2_background_policy(
+    dataset_id: str = Query(...),
+    device_id: str = Query(...),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        policy = service.get_background_policy(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+        ) from exc
+    return _api_background_policy_from_core(policy)
+
+
+@router.patch(
+    "/background-policy",
+    response_model=SyncBackgroundPolicyResponse,
+    summary="Update Sync v2 background sync policy for a dataset/device",
+)
+def update_sync_v2_background_policy(
+    request: SyncBackgroundPolicyPatchRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        policy = service.update_background_policy(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            enabled=request.enabled,
+            minimum_interval_seconds=request.minimum_interval_seconds,
+            backoff_floor_seconds=request.backoff_floor_seconds,
+            max_batch_size=request.max_batch_size,
+            max_blob_bytes_per_run=request.max_blob_bytes_per_run,
+            respect_metered_networks=request.respect_metered_networks,
+            maintenance_window=request.maintenance_window,
+            paused_reason=request.paused_reason,
+            pending_local_changes=request.pending_local_changes,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+        ) from exc
+    return _api_background_policy_from_core(policy)
+
+
+@router.post(
+    "/background-leases",
+    response_model=SyncBackgroundLeaseResponse,
+    summary="Acquire or refresh a Sync v2 background sync lease",
+)
+def acquire_sync_v2_background_lease(
+    request: SyncBackgroundLeaseRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        lease = service.acquire_background_lease(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            lease_id=request.lease_id,
+            ttl_seconds=request.ttl_seconds,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+        ) from exc
+    return _api_background_lease_from_core(lease)
+
+
+@router.get(
+    "/background-status",
+    response_model=SyncBackgroundStatusResponse,
+    summary="Return Sync v2 background sync status for a dataset/device",
+)
+def get_sync_v2_background_status(
+    dataset_id: str = Query(...),
+    device_id: str = Query(...),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        background_status = service.background_status(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+        ) from exc
+    return _api_background_status_from_core(background_status)
 
 
 @router.post(

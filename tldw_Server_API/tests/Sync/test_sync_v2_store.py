@@ -19,6 +19,8 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncAttachmentCreate,
+    SyncBackgroundLeaseCreate,
+    SyncBackgroundPolicyUpsert,
     SyncBlobChunkCreate,
     SyncBlobObjectCreate,
     SyncBlobUploadSessionCreate,
@@ -169,6 +171,8 @@ def test_sync_database_bootstrap_creates_required_tables(sync_store: SyncV2Store
         "sync_device_authorizations",
         "sync_device_domain_acks",
         "sync_device_blob_acks",
+        "sync_background_policies",
+        "sync_background_leases",
         "sync_domain_state",
         "sync_envelopes",
         "sync_object_state",
@@ -183,6 +187,103 @@ def test_sync_database_bootstrap_creates_required_tables(sync_store: SyncV2Store
 
     for table_name in required_tables:
         assert sync_store.db.backend.table_exists(table_name)
+
+
+def test_background_policy_and_lease_lifecycle(sync_store: SyncV2Store):
+    sync_store.upsert_device(_device())
+    sync_store.enroll_dataset(_dataset())
+
+    assert sync_store.get_background_policy("dataset-1", "device-1") is None
+
+    policy = sync_store.upsert_background_policy(
+        SyncBackgroundPolicyUpsert(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            enabled=False,
+            minimum_interval_seconds=900,
+            backoff_floor_seconds=120,
+            max_batch_size=25,
+            max_blob_bytes_per_run=4096,
+            respect_metered_networks=False,
+            maintenance_window={"start": "01:00", "end": "03:00"},
+            paused_reason="user_paused",
+            pending_local_changes=True,
+        )
+    )
+    retry = sync_store.upsert_background_policy(
+        SyncBackgroundPolicyUpsert(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            enabled=False,
+            minimum_interval_seconds=900,
+            backoff_floor_seconds=120,
+            max_batch_size=25,
+            max_blob_bytes_per_run=4096,
+            respect_metered_networks=False,
+            maintenance_window={"start": "01:00", "end": "03:00"},
+            paused_reason="user_paused",
+            pending_local_changes=True,
+        )
+    )
+
+    first_lease = sync_store.acquire_background_lease(
+        SyncBackgroundLeaseCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            lease_id="lease-1",
+            ttl_seconds=120,
+            requested_at="2026-05-23T18:00:00+00:00",
+        )
+    )
+    refreshed = sync_store.acquire_background_lease(
+        SyncBackgroundLeaseCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            lease_id="lease-1",
+            ttl_seconds=180,
+            requested_at="2026-05-23T18:01:00+00:00",
+        )
+    )
+    held = sync_store.acquire_background_lease(
+        SyncBackgroundLeaseCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            lease_id="lease-2",
+            ttl_seconds=120,
+            requested_at="2026-05-23T18:02:00+00:00",
+        )
+    )
+    after_expiry = sync_store.acquire_background_lease(
+        SyncBackgroundLeaseCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            lease_id="lease-2",
+            ttl_seconds=120,
+            requested_at="2026-05-23T18:10:00+00:00",
+        )
+    )
+
+    assert policy.enabled is False
+    assert policy.pending_local_changes is True
+    assert retry.updated_at >= policy.updated_at
+    assert first_lease.status == "acquired"
+    assert first_lease.acquired is True
+    assert refreshed.status == "refreshed"
+    assert refreshed.lease_id == "lease-1"
+    assert held.status == "held_by_other"
+    assert held.acquired is False
+    assert held.lease_id == "lease-1"
+    assert after_expiry.status == "acquired"
+    assert after_expiry.lease_id == "lease-2"
+
+    with pytest.raises(SyncStoreError, match="not registered"):
+        sync_store.upsert_background_policy(
+            SyncBackgroundPolicyUpsert(
+                dataset_id="dataset-1",
+                device_id="missing-device",
+                enabled=True,
+            )
+        )
 
 
 def test_blob_upload_sessions_are_idempotent_and_release_reserved_quota(

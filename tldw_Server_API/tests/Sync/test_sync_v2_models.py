@@ -6,6 +6,12 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SYNC_V2_MAX_PUSH_ENVELOPES,
     SyncAttachmentUploadRequest,
     SyncAttachmentUploadResponse,
+    SyncBackgroundDomainStatusResponse,
+    SyncBackgroundLeaseRequest,
+    SyncBackgroundLeaseResponse,
+    SyncBackgroundPolicyPatchRequest,
+    SyncBackgroundPolicyResponse,
+    SyncBackgroundStatusResponse,
     SyncBlobChunkUploadResponse,
     SyncBlobDownloadManifestResponse,
     SyncBlobUploadCompleteResponse,
@@ -83,6 +89,77 @@ def test_dataset_enroll_request_defaults_to_m1_personal_server_trusted_dataset()
     assert request.scope_type == "personal"
     assert request.domains == M1_DOMAINS
     assert request.encryption_policy == "server_trusted_v1"
+
+
+def test_background_policy_lease_and_status_models_validate_m3_shapes():
+    policy = SyncBackgroundPolicyResponse.model_validate(
+        {"dataset_id": "dataset-1", "device_id": "device-1"}
+    )
+    patch = SyncBackgroundPolicyPatchRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "enabled": False,
+            "paused_reason": "user_paused",
+            "pending_local_changes": True,
+        }
+    )
+    lease_request = SyncBackgroundLeaseRequest.model_validate(
+        {"dataset_id": "dataset-1", "device_id": "device-1", "ttl_seconds": 120}
+    )
+    lease = SyncBackgroundLeaseResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "lease_id": "lease-1",
+            "status": "acquired",
+            "acquired": True,
+            "expires_at": "2026-05-23T18:02:00+00:00",
+            "updated_at": "2026-05-23T18:00:00+00:00",
+        }
+    )
+    status = SyncBackgroundStatusResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "policy": policy.model_dump(),
+            "lease": lease.model_dump(),
+            "quota_pressure": {
+                "reserved_blob_bytes": 8,
+                "used_blob_bytes": 16,
+                "limit_bytes": 100,
+                "pressure_ratio": 0.24,
+            },
+            "restore_completeness": "content_complete",
+            "domains": [
+                SyncBackgroundDomainStatusResponse(
+                    domain="notes.note",
+                    last_server_sequence=3,
+                    last_pulled_sequence=1,
+                    cursor_lag_count=2,
+                    unresolved_conflicts=1,
+                    replayable_failures=1,
+                    last_successful_push_at="2026-05-23T18:01:00+00:00",
+                    last_successful_pull_at="2026-05-23T18:02:00+00:00",
+                ).model_dump()
+            ],
+        }
+    )
+
+    assert policy.enabled is True
+    assert policy.minimum_interval_seconds == 300
+    assert policy.backoff_floor_seconds == 60
+    assert policy.respect_metered_networks is True
+    assert patch.enabled is False
+    assert patch.pending_local_changes is True
+    assert lease_request.lease_id is None
+    assert lease.acquired is True
+    assert status.domains[0].cursor_lag_count == 2
+
+    with pytest.raises(ValidationError):
+        SyncBackgroundLeaseRequest.model_validate(
+            {"dataset_id": "dataset-1", "device_id": "device-1", "ttl_seconds": 0}
+        )
 
 
 def test_sync_envelope_accepts_m1_fields_and_legacy_transition_aliases():

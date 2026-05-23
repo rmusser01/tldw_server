@@ -17,6 +17,7 @@ SyncProfileBootstrapMode = Literal["server_frontend", "offline_sync"]
 SyncRestorePreviewAction = Literal["apply", "append", "delete", "hide", "noop"]
 SyncDeviceStatus = Literal["pending_authorization", "active", "paused", "revoked"]
 SyncDeviceAuthorizationStatus = Literal["pending", "approved", "rejected"]
+SyncBackgroundLeaseStatus = Literal["acquired", "refreshed", "held_by_other"]
 SyncBlobAvailabilityStatus = Literal[
     "metadata_only",
     "uploading",
@@ -316,6 +317,89 @@ class SyncDeviceAcknowledgmentsResponse(BaseModel):
     device_id: str
     domain_acks: dict[SyncDomain, SyncDeviceDomainAckResponse] = Field(default_factory=dict)
     blob_acks: list[SyncDeviceBlobAckResponse] = Field(default_factory=list)
+
+
+class SyncBackgroundPolicyPatchRequest(BaseModel):
+    """Background sync policy/user-intent update for one dataset/device."""
+
+    dataset_id: str = Field(..., min_length=1)
+    device_id: str = Field(..., min_length=1)
+    enabled: bool | None = None
+    minimum_interval_seconds: int | None = Field(None, ge=1)
+    backoff_floor_seconds: int | None = Field(None, ge=1)
+    max_batch_size: int | None = Field(None, ge=1)
+    max_blob_bytes_per_run: int | None = Field(None, ge=0)
+    respect_metered_networks: bool | None = None
+    maintenance_window: dict[str, Any] | None = None
+    paused_reason: str | None = None
+    pending_local_changes: bool | None = None
+
+
+class SyncBackgroundPolicyResponse(BaseModel):
+    """Background sync policy hints and stored user intent."""
+
+    dataset_id: str
+    device_id: str
+    enabled: bool = True
+    minimum_interval_seconds: int = Field(300, ge=1)
+    backoff_floor_seconds: int = Field(60, ge=1)
+    max_batch_size: int = Field(100, ge=1)
+    max_blob_bytes_per_run: int | None = Field(None, ge=0)
+    respect_metered_networks: bool = True
+    maintenance_window: dict[str, Any] | None = None
+    paused_reason: str | None = None
+    pending_local_changes: bool = False
+    updated_at: str | None = None
+
+
+class SyncBackgroundLeaseRequest(BaseModel):
+    """Request to acquire or refresh an advisory background sync lease."""
+
+    dataset_id: str = Field(..., min_length=1)
+    device_id: str = Field(..., min_length=1)
+    lease_id: str | None = None
+    ttl_seconds: int = Field(120, ge=1, le=3600)
+
+
+class SyncBackgroundLeaseResponse(BaseModel):
+    """Current advisory background sync lease state."""
+
+    dataset_id: str
+    device_id: str
+    lease_id: str
+    status: SyncBackgroundLeaseStatus
+    acquired: bool
+    expires_at: str
+    updated_at: str
+
+
+class SyncBackgroundDomainStatusResponse(BaseModel):
+    """Per-domain background sync status counters."""
+
+    domain: SyncDomain
+    last_server_sequence: int = Field(0, ge=0)
+    last_pulled_sequence: int = Field(0, ge=0)
+    cursor_lag_count: int = Field(0, ge=0)
+    unresolved_conflicts: int = Field(0, ge=0)
+    replayable_failures: int = Field(0, ge=0)
+    last_successful_push_at: str | None = None
+    last_successful_pull_at: str | None = None
+    blob_completeness: dict[str, int] = Field(default_factory=dict)
+
+
+class SyncBackgroundStatusResponse(BaseModel):
+    """Profile-level and per-domain background sync status."""
+
+    dataset_id: str
+    device_id: str
+    policy: SyncBackgroundPolicyResponse
+    lease: SyncBackgroundLeaseResponse | None = None
+    domains: list[SyncBackgroundDomainStatusResponse] = Field(default_factory=list)
+    conflict_count: int = Field(0, ge=0)
+    replayable_failure_count: int = Field(0, ge=0)
+    quota_pressure: dict[str, Any] = Field(default_factory=dict)
+    restore_completeness: SyncRestoreCompletenessStatus = "metadata_ready"
+    server_time: str | None = None
 
 
 class SyncDatasetEnrollRequest(BaseModel):

@@ -176,7 +176,10 @@ Returns server policy hints for a device/dataset:
   "max_batch_size": 500,
   "max_blob_bytes_per_run": 104857600,
   "respect_metered_networks": true,
-  "maintenance_window": null
+  "maintenance_window": null,
+  "paused_reason": null,
+  "pending_local_changes": false,
+  "updated_at": "2026-05-23T18:00:00Z"
 }
 ```
 
@@ -189,7 +192,8 @@ Stores user/device intent:
   "dataset_id": "ds_personal_user_1",
   "device_id": "dev_phone",
   "enabled": false,
-  "paused_reason": "user_paused"
+  "paused_reason": "user_paused",
+  "pending_local_changes": true
 }
 ```
 
@@ -207,6 +211,11 @@ does not run overlapping sync workers:
 }
 ```
 
+The response includes `status` (`acquired`, `refreshed`, or `held_by_other`),
+`acquired`, `lease_id`, `expires_at`, and `updated_at`. If another unexpired
+lease already exists for the same dataset/device, the endpoint returns the
+active lease with `acquired: false` rather than replacing it.
+
 The lease is advisory and does not replace idempotency guarantees on push,
 pull, or blob endpoints.
 
@@ -220,7 +229,8 @@ Returns profile-level and per-domain status for background sync:
 - server-side conflict count;
 - replayable failure count;
 - quota pressure;
-- selected restore completeness.
+- selected restore completeness;
+- attachment blob completeness counters for `attachment.ref`.
 
 ## Device Acknowledgments
 

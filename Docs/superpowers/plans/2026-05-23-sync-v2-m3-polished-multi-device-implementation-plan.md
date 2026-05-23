@@ -117,27 +117,27 @@
 
 **Tests:** Store/service/endpoint tests for policy, leases, status aggregation, lease expiry, idempotency, and cross-user isolation.
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write failing model and schema tests**
+- [x] **Step 1: Write failing model and schema tests**
 
   Validate background policy, lease, and status request/response shapes.
 
-- [ ] **Step 2: Implement storage**
+- [x] **Step 2: Implement storage**
 
   Add policy and lease persistence keyed by dataset/device.
 
-- [ ] **Step 3: Implement service aggregation**
+- [x] **Step 3: Implement service aggregation**
 
   Combine cursor lag, last push/pull, conflict count, replayable failures,
   quota pressure, and blob completeness.
 
-- [ ] **Step 4: Wire endpoints**
+- [x] **Step 4: Wire endpoints**
 
   Add `GET/PATCH /sync/background-policy`,
   `POST /sync/background-leases`, and `GET /sync/background-status`.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
   Run targeted tests, relevant Sync suite, Ruff, Bandit, and `git diff --check`.
 
