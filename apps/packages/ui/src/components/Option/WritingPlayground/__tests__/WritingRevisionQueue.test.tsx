@@ -88,6 +88,12 @@ describe("WritingRevisionQueue", () => {
     expect(
       within(queue).getByRole("button", { name: /regenerate/i })
     ).toBeTruthy()
+    expect(
+      within(queue).getByRole("button", { name: /apply/i }).querySelector("svg")
+    ).toBeTruthy()
+    expect(
+      within(queue).getByRole("button", { name: /copy/i }).querySelector("svg")
+    ).toBeTruthy()
   })
 
   it("hides Apply for advisory proposals", () => {
