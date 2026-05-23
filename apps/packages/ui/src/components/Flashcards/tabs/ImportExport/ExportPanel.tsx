@@ -1,8 +1,9 @@
 import React from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Alert, Button, Form, Input, Select, Switch, Typography } from "antd"
+import { Button, Form, Input, Select, Switch, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 
+import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { exportFlashcards, exportFlashcardsFile, listFlashcards } from "@/services/flashcards"
 
@@ -290,13 +291,13 @@ export const ExportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
         </>
       )}
       <Alert
-        type="info"
-        showIcon
+        variant="info"
         data-testid="flashcards-export-preview"
         title={t("option:flashcards.exportPreviewTitle", {
           defaultValue: "Export preview"
         })}
-        description={t("option:flashcards.exportPreviewDescription", {
+      >
+        {t("option:flashcards.exportPreviewDescription", {
           defaultValue:
             "{{count}} cards from {{deck}}. Tag filter: {{tag}}. Query filter: {{query}}.",
           count: exportPreviewCountQuery.data ?? 0,
@@ -308,7 +309,7 @@ export const ExportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
             normalizedExportQuery ||
             t("option:flashcards.noneLabel", { defaultValue: "none" })
         })}
-      />
+      </Alert>
       <Button
         type="primary"
         onClick={handleExport}
