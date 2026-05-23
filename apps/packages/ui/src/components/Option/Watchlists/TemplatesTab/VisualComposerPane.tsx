@@ -203,6 +203,7 @@ export const VisualComposerPane: React.FC<VisualComposerPaneProps> = ({
       {nodes.length === 0 ? (
         <Alert
           variant="info"
+          aria-live="off"
           title="No visual blocks yet"
         >
           Add blocks above to start building this template.

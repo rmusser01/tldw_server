@@ -12,6 +12,7 @@ priority: medium
 parent_task_id: TASK-45.44.3
 references:
 - https://github.com/rmusser01/tldw_server/issues/1660
+- https://github.com/rmusser01/tldw_server/pull/1975
 - apps/packages/ui/src/components/Option/Watchlists/TemplatesTab/VisualComposerPane.tsx
 - apps/packages/ui/src/components/Option/Watchlists/TemplatesTab/__tests__/VisualComposerPane.section-generation.test.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
@@ -52,12 +53,14 @@ Continue TASK-45.44.3 by replacing Watchlists VisualComposerPane AntD Alert prod
 - Verification: `node -e "JSON.parse(require('fs').readFileSync('apps/packages/ui/scripts/design-system-product-state-baseline.json','utf8')); console.log('baseline ok')"` -> `baseline ok`.
 - Verification: `git diff --check` -> passed.
 - Bandit: skipped/not applicable; touched code is frontend TS/TSX plus JSON and Backlog task metadata only.
+- PR review follow-up: added a regression assertion for the empty composer Alert `aria-live="off"` opt-out; red run failed with `aria-live="polite"`, then VisualComposerPane passed `aria-live="off"` on the static info Alert and the focused suite passed 4/4.
+- TypeScript: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still exits 2 on existing diagnostics; no diagnostics mention VisualComposerPane, the focused test, the baseline, or TASK-45.44.3.5.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-VisualComposerPane now uses the shared design-system Alert primitive for its empty composer state and manual section-generation error/warning states. Focused tests cover the migrated callouts, the product-state baseline dropped the three VisualComposerPane Alert exceptions, and verification passed for the focused Watchlists test, product-state guard, design-system verifier, JSON parse, and diff hygiene.
+VisualComposerPane now uses the shared design-system Alert primitive for its empty composer state and manual section-generation error/warning states. The empty composer Alert opts out of live-region announcements with `aria-live="off"` because it is static help text. Focused tests cover the migrated callouts, the product-state baseline dropped the three VisualComposerPane Alert exceptions, and verification passed for the focused Watchlists test, product-state guard, design-system verifier, JSON parse, and diff hygiene.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -140,10 +140,10 @@ describe("VisualComposerPane section generation", () => {
     )
 
     const emptyTitle = screen.getByText(/No visual blocks yet/)
+    const emptyAlert = emptyTitle.closest('[data-ds-component="Alert"]')
     expect(emptyTitle).toBeInTheDocument()
-    expect(
-      emptyTitle.closest('[data-ds-component="Alert"]')
-    ).not.toBeNull()
+    expect(emptyAlert).not.toBeNull()
+    expect(emptyAlert).toHaveAttribute("aria-live", "off")
     expect(
       screen.getByText("Add blocks above to start building this template.")
     ).toBeInTheDocument()
