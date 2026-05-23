@@ -1,15 +1,15 @@
 ---
 id: TASK-460
 title: Implement document-first Writing Playground revision workflow
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-23 02:47'
+updated_date: 2026-05-23 02:47
 labels:
-  - implementation
-  - webui
-  - extension
-  - writing-playground
+- implementation
+- webui
+- extension
+- writing-playground
 dependencies: []
 ---
 
@@ -21,11 +21,11 @@ Implement the approved document-first Writing Playground revision workflow from 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Task 1-9 from the implementation plan are completed using test-first execution.
-- [ ] #2 Writing Playground proposed-edit workflow supports reviewable proposals, safe apply/reject/copy/regenerate states, workflow presets, and status counts.
-- [ ] #3 Revision state is schema-versioned in existing session payload persistence without overwriting pending prompt/settings changes.
-- [ ] #4 WebUI and extension route parity are preserved through shared UI implementation and focused tests.
-- [ ] #5 Verification results, Bandit skip/results, and known blockers are recorded before final handoff.
+- [x] #1 Task 1-9 from the implementation plan are completed using test-first execution.
+- [x] #2 Writing Playground proposed-edit workflow supports reviewable proposals, safe apply/reject/copy/regenerate states, workflow presets, and status counts.
+- [x] #3 Revision state is schema-versioned in existing session payload persistence without overwriting pending prompt/settings changes.
+- [x] #4 WebUI and extension route parity are preserved through shared UI implementation and focused tests.
+- [x] #5 Verification results, Bandit skip/results, and known blockers are recorded before final handoff.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -233,14 +233,56 @@ Review evidence:
 
 Bandit:
 - Touched files are TypeScript/TSX frontend code; final Bandit decision will be recorded at final verification.
+
+Task 9 final verification and review completed.
+
+Commit:
+- 6fe6e83f0 fix: harden writing revision final review issues
+
+Files touched:
+- apps/packages/ui/src/components/Option/WritingPlayground/WritingActionBar.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/WritingTipTapEditor.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/hooks/useWritingRevisions.ts
+- apps/packages/ui/src/components/Option/WritingPlayground/index.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/writing-editor-adapter.ts
+- apps/packages/ui/src/components/Option/WritingPlayground/writing-revision-utils.ts
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingTipTapEditor.external-sync.test.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/useWritingRevisions.test.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/writing-editor-adapter.test.ts
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/writing-revision-utils.test.ts
+
+Final review fixes:
+- Continue now resolves to a cursor insert before selection targeting, so selected text does not create a non-zero insert target.
+- Continue no longer uses broad replace-target confirmation for insert operations.
+- Revision payload refreshes compare revision signatures, so same-payload autosave echoes do not discard in-flight regenerated proposals.
+- Revision proposed-edit requests preserve actual advanced extra_body generation controls while prompt/debug summaries remain sanitized.
+- TipTap selection mapping now uses the same plain-text serialization as rich editor persistence, including paragraph boundaries and sceneBreak serialization.
+
+TDD/regression evidence:
+- Added red regressions for Continue-with-selection, Continue broad confirmation, same-payload regeneration echo, TipTap paragraph-boundary selection, TipTap sceneBreak selection, and advanced extra_body parity.
+- Final green: cd apps/packages/ui && bunx vitest run src/components/Option/WritingPlayground/__tests__/writing-revision-utils.test.ts src/components/Option/WritingPlayground/__tests__/writing-revision-presets.test.ts src/components/Option/WritingPlayground/__tests__/writing-revision-prompt-utils.test.ts src/components/Option/WritingPlayground/__tests__/writing-session-payload-utils.test.ts src/components/Option/WritingPlayground/__tests__/useWritingRevisions.test.tsx src/components/Option/WritingPlayground/__tests__/writing-editor-adapter.test.ts src/components/Option/WritingPlayground/__tests__/WritingTipTapEditor.external-sync.test.tsx src/components/Option/WritingPlayground/__tests__/WritingActionBar.test.tsx src/components/Option/WritingPlayground/__tests__/WritingRevisionQueue.test.tsx src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx --maxWorkers=1 --no-file-parallelism passed with 10 files / 92 tests.
+- Final green: cd apps/tldw-frontend/extension && bunx vitest run __tests__/writing-playground-route-parity.guard.test.ts --maxWorkers=1 --no-file-parallelism passed with 1 file / 1 test.
+- Mechanical checks: git diff --check over touched paths passed; ASCII scan over touched paths had no matches.
+
+Review evidence:
+- Final targeted review initially found four Important issues: Continue selected-text targeting/confirmation, regeneration dropped on same-payload save echo, TipTap plain-text offset mismatch after rich paragraph boundaries, and advanced extra_body token-key sanitization dropping valid controls.
+- Fix re-review found one remaining Important sceneBreak/custom atom mapping gap.
+- Final re-review found no Critical or Important findings for the remaining TipTap mapping issue.
+
+Bandit:
+- Touched code for the final fixes is TypeScript/TSX frontend code; Bandit is a Python analyzer and is not applicable to these paths. Earlier TypeScript touched-scope Bandit attempts produced no findings but parse errors, so final security validation for this slice is recorded as not applicable.
+
+Known blocker:
+- Extension Playwright smoke remains blocked by the existing WXT production build stall documented during Task 8. Focused shared UI coverage and route parity guard are the verified extension evidence for this task.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
