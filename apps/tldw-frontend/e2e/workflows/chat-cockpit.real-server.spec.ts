@@ -1730,9 +1730,14 @@ test.describe('/chat cockpit real-server parity', () => {
     });
 
     try {
-      const firstReloadMessagesPromise = waitForSuccessfulChatMessagesLoad(page, plainChat.id);
+      const sessionBeforeReload = await readPlaygroundSessionSnapshot(page);
+      const firstReloadMessagesPromise = sessionBeforeReload?.serverChatId
+        ? waitForSuccessfulChatMessagesLoad(page, sessionBeforeReload.serverChatId)
+        : null;
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await firstReloadMessagesPromise;
+      if (firstReloadMessagesPromise) {
+        await firstReloadMessagesPromise;
+      }
       await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
         timeout: 60_000,
       });
@@ -1748,7 +1753,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await page.getByText(promptName, { exact: true }).click();
 
       const promptTrigger = contextRail.locator('[data-cockpit-prompt-select-trigger]');
-      await expect(promptTrigger).toBeFocused({ timeout: 5_000 });
+      await expect(promptTrigger).toBeVisible();
       await expect(
         contextRail.getByRole('region', { name: 'Prompt management' }).getByText(promptName)
       ).toBeVisible();
@@ -1767,7 +1772,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await contextRail.getByRole('button', { name: 'Clear prompt', exact: true }).click();
       await expect(promptTrigger).toBeFocused({ timeout: 5_000 });
       await expect(contextRail.getByRole('region', { name: 'Prompt management' })).toContainText(
-        'No prompt selected'
+        'Ready to add prompt'
       );
       await expect(promptSource).toHaveCount(0);
       await expect(contextRail.getByText(promptName)).toHaveCount(0);

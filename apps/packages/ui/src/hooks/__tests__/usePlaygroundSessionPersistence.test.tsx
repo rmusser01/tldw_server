@@ -318,4 +318,54 @@ describe("usePlaygroundSessionPersistence", () => {
       { timeout: 250 }
     )
   })
+
+  it("clears stale tracked state when restoring a plain server-backed session", async () => {
+    useStoreMessageOption.setState({
+      serverChatAssistantKind: "character",
+      serverChatAssistantId: "stale-character",
+      serverChatCharacterId: "stale-character",
+      serverChatPersonaMemoryMode: "read_only",
+      serverChatMetaLoaded: true
+    })
+    usePlaygroundSessionStore.getState().saveSession({
+      historyId: null,
+      serverChatId: "plain-chat-11",
+      trackedAssistantSelection: null,
+      trackedAssistantKind: null,
+      trackedAssistantId: null,
+      trackedCharacterId: null,
+      trackedAssistantDisplayName: null,
+      trackedAssistantAvatarUrl: null,
+      serverChatPersonaMemoryMode: null,
+      scopeKey: "global",
+      chatMode: "normal",
+      webSearch: false,
+      compareMode: false,
+      compareSelectedModels: [],
+      ragMediaIds: null,
+      ragSearchMode: "hybrid",
+      ragTopK: null,
+      ragEnableGeneration: true,
+      ragEnableCitations: true,
+      queuedMessages: []
+    })
+
+    const { result } = renderHook(() => usePlaygroundSessionPersistence())
+
+    await waitFor(() => {
+      expect(result.current.sessionScopeReady).toBe(true)
+    })
+
+    await expect(result.current.restoreSession()).resolves.toBe(true)
+
+    await waitFor(() => {
+      const optionState = useStoreMessageOption.getState()
+      expect(optionState.serverChatId).toBe("plain-chat-11")
+      expect(optionState.serverChatAssistantKind).toBeNull()
+      expect(optionState.serverChatAssistantId).toBeNull()
+      expect(optionState.serverChatCharacterId).toBeNull()
+      expect(optionState.serverChatPersonaMemoryMode).toBeNull()
+      expect(optionState.serverChatMetaLoaded).toBe(false)
+    })
+  })
 })

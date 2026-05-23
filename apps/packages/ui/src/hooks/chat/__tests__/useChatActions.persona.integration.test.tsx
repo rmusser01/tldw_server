@@ -249,9 +249,6 @@ const createHookOptions = () => ({
 describe("useChatActions persona integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    baseSaveMessageOnSuccessMock.mockImplementation(
-      async (_payload?: unknown): Promise<string | null> => "history-persona"
-    )
     syncChatSettingsForServerChatMock.mockResolvedValue(null)
     getConfigMock.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",

@@ -561,4 +561,54 @@ describe("useSelectedAssistant", () => {
       })
     })
   })
+
+  it("does not override an explicit selection mode when useSelectedCharacter updates the active character", async () => {
+    const { result } = renderHook(() => {
+      const assistantState = useSelectedAssistant()
+      const characterState = useSelectedCharacter<Character | null>(null)
+      return { assistantState, characterState }
+    })
+
+    await act(async () => {
+      await result.current.assistantState[1]({
+        kind: "character",
+        id: "char-explicit",
+        name: "Overlay Guide",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.assistantState[0]).toMatchObject({
+        kind: "character",
+        id: "char-explicit",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await act(async () => {
+      await result.current.characterState[1]({
+        id: "char-explicit",
+        name: "Tracked Guide",
+        metadata: {
+          selectionMode: "tracked"
+        }
+      } as Character & { metadata: { selectionMode: "tracked" } })
+    })
+
+    await waitFor(() => {
+      expect(result.current.assistantState[0]).toMatchObject({
+        kind: "character",
+        id: "char-explicit",
+        name: "Tracked Guide",
+        metadata: {
+          selectionMode: "tracked"
+        }
+      })
+    })
+  })
 })

@@ -4487,7 +4487,7 @@ async def execute_streaming_call(
                     metadata_payload["tldw_system_message_id"] = system_message_id
                 if normalized_continuation_metadata:
                     metadata_payload["tldw_continuation"] = normalized_continuation_metadata
-                yield f"data: {json.dumps(metadata_payload)}\n\n"
+                yield f"data: {_json.dumps(metadata_payload)}\n\n"
             try:
                 stream_buffer_limit = int(os.getenv("MODERATION_STREAM_BUFFER_CHARS", "1024"))
             except _CHAT_NONCRITICAL_EXCEPTIONS:

@@ -569,6 +569,7 @@ export const useServerChatLoader = ({
   const messagesRef = React.useRef(messages)
   const streamingRef = React.useRef(streaming)
   const processingRef = React.useRef(isProcessing)
+  const selectedAssistantRef = React.useRef(selectedAssistant)
   const {
     serverChatId,
     serverChatTitle,
@@ -636,6 +637,7 @@ export const useServerChatLoader = ({
   messagesRef.current = messages
   streamingRef.current = streaming
   processingRef.current = isProcessing
+  selectedAssistantRef.current = selectedAssistant
 
   React.useEffect(() => {
     return () => {
@@ -871,7 +873,7 @@ export const useServerChatLoader = ({
                   assistantId,
                   characterId
                 },
-                draftSelection: selectedAssistant
+                draftSelection: selectedAssistantRef.current
               })
               const selection =
                 effectiveAssistantStateToSelection(fallbackState)
@@ -1131,7 +1133,6 @@ export const useServerChatLoader = ({
     setServerChatTitle,
     setServerChatTopic,
     setServerChatVersion,
-    selectedAssistant,
     scope,
     t,
     temporaryChat

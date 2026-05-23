@@ -180,7 +180,7 @@ describe("usePlaygroundPersistence", () => {
     ).toBeLessThan(mocks.addChatMessage.mock.invocationCallOrder[0])
   })
 
-  it("shows the server character error notification only once across rerenders for the same pending chat", async () => {
+  it("saves plain chats without requiring a default character", async () => {
     const firstHistory = [{ role: "user", content: "Hello" }]
     const notificationApi = {
       error: vi.fn(),
@@ -201,8 +201,19 @@ describe("usePlaygroundPersistence", () => {
     )
 
     await waitFor(() => {
-      expect(notificationApi.error).toHaveBeenCalledTimes(1)
+      expect(mocks.createChat).toHaveBeenCalledTimes(1)
+      expect(mocks.createChat).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "webui-chat"
+        })
+      )
+      expect(mocks.createChat).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          character_id: expect.anything()
+        })
+      )
     })
+    expect(notificationApi.error).not.toHaveBeenCalled()
 
     rerender(
       {
@@ -213,7 +224,8 @@ describe("usePlaygroundPersistence", () => {
 
     await waitFor(() => {
       expect(mocks.initialize).toHaveBeenCalledTimes(1)
-      expect(notificationApi.error).toHaveBeenCalledTimes(1)
+      expect(mocks.createChat).toHaveBeenCalledTimes(1)
+      expect(notificationApi.error).not.toHaveBeenCalled()
     })
   })
 
@@ -246,11 +258,17 @@ describe("usePlaygroundPersistence", () => {
 
     await waitFor(() => {
       expect(mocks.initialize).toHaveBeenCalledTimes(1)
-      expect(notificationApi.error).toHaveBeenCalledTimes(1)
+      expect(mocks.createChat).toHaveBeenCalledTimes(1)
+      expect(mocks.createChat).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "webui-chat"
+        })
+      )
     })
+    expect(notificationApi.error).not.toHaveBeenCalled()
   })
 
-  it("uses a WebUI character-aware fallback title for server persistence", async () => {
+  it("uses a WebUI character-aware fallback title for tracked character persistence", async () => {
     const notificationApi = {
       error: vi.fn(),
       warning: vi.fn(),
@@ -267,7 +285,8 @@ describe("usePlaygroundPersistence", () => {
           selectedCharacter: {
             id: "mira",
             name: "Mira"
-          }
+          },
+          selectedAssistantMode: "tracked"
         })
       }
     )
@@ -281,6 +300,36 @@ describe("usePlaygroundPersistence", () => {
         })
       )
     })
+  })
+
+  it("does not persist a stale selected character as tracked for a plain chat", async () => {
+    renderHook(
+      (deps: ReturnType<typeof buildDeps>) => usePlaygroundPersistence(deps),
+      {
+        initialProps: buildDeps({
+          history: [{ role: "user", content: "Plain conversation" }],
+          selectedCharacter: {
+            id: "stale-character",
+            name: "Stale Character"
+          },
+          selectedAssistantMode: null
+        })
+      }
+    )
+
+    await waitFor(() => {
+      expect(mocks.createChat).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "webui-chat"
+        })
+      )
+      expect(mocks.createChat).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          character_id: "stale-character"
+        })
+      )
+    })
+    expect(mocks.savePlaygroundSession).not.toHaveBeenCalled()
   })
 
   it("does not persist overlay character selections as tracked server chats", async () => {

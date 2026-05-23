@@ -499,7 +499,9 @@ export const Playground = () => {
   const hasTrackedCharacterSelection =
     selectedAssistant?.kind === "character"
       ? selectedAssistantMode !== "overlay"
-      : Boolean(selectedCharacter?.id) && selectedAssistantMode !== "overlay";
+      : selectedAssistant
+        ? false
+        : Boolean(selectedCharacter?.id) && selectedAssistantMode !== "overlay";
   const characterWorkflowActive =
     routeRequestsCharacterMode ||
     characterModeIntentActive ||

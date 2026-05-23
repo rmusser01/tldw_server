@@ -36,7 +36,8 @@ export const useSelectedCharacter = <T = StoredCharacter>(
       const nextSelection = characterToAssistantSelection(
         next as (StoredCharacter & Record<string, unknown>) | null
       )
-      if (nextSelection && selectedCharacterMode) {
+      const nextSelectionMode = getAssistantSelectionMode(nextSelection)
+      if (nextSelection && selectedCharacterMode && !nextSelectionMode) {
         nextSelection.metadata = {
           ...(nextSelection.metadata ?? {}),
           selectionMode: selectedCharacterMode

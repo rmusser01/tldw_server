@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Modal } from "antd"
+import { Modal } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { usePersistenceMode } from "@/hooks/playground"
@@ -131,7 +131,6 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     serverPersistenceHintSeen,
     setServerPersistenceHintSeen,
     invalidateServerChatHistory,
-    navigate,
     notificationApi,
     t
   } = deps
@@ -299,7 +298,9 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       const isOverlaySelection =
         assistantOverlayActiveRef.current ||
         selectedAssistantModeRef.current === "overlay"
-      const shouldPersistTrackedCharacter = !isOverlaySelection
+      const selectedAssistantMode = selectedAssistantModeRef.current
+      const shouldPersistTrackedCharacter =
+        !isOverlaySelection && selectedAssistantMode === "tracked"
       const trackedCharacterSnapshot =
         shouldPersistTrackedCharacter && selectedCharacterRef.current?.id != null
           ? selectedCharacterRef.current
@@ -352,75 +353,13 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
                 : titleSource
             })()
 
-      if (!characterId && !isOverlaySelection) {
-        const DEFAULT_NAME = "Helpful AI Assistant"
-        const normalizeName = (value: unknown) =>
-          String(value || "").trim().toLowerCase()
-        const findByName = (list: any[]) =>
-          (list || []).find(
-            (c: any) => normalizeName(c?.name) === normalizeName(DEFAULT_NAME)
-          )
-        const findDefaultCharacter = async () => {
-          try {
-            const results = await tldwClient.searchCharacters(DEFAULT_NAME, {
-              limit: 50
-            })
-            const match = findByName(results)
-            if (match) return match
-          } catch {}
-          try {
-            const results = await tldwClient.listCharacters({ limit: 200 })
-            const match = findByName(results)
-            if (match) return match
-          } catch {}
-          return null
-        }
-        try {
-          let target = await findDefaultCharacter()
-          if (!target) {
-            try {
-              target = await tldwClient.createCharacter({
-                name: DEFAULT_NAME
-              })
-            } catch (error: any) {
-              if (error?.status === 409) {
-                target = await findDefaultCharacter()
-              } else {
-                throw error
-              }
-            }
-          }
-          characterId =
-            target && typeof target.id !== "undefined" ? target.id : null
-        } catch {
-          characterId = null
-        }
-      }
-
-      if (characterId == null && !isOverlaySelection) {
+      if (selectedAssistantMode === "tracked" && characterId == null) {
         notificationApi.error({
           key: "playground-server-character-required",
           message: t("error"),
           description: t(
             "playground:composer.persistence.serverCharacterRequired",
-            "Unable to find or create a default assistant character on the server. Try again from the Characters page."
-          ),
-          btn: (
-            <Button
-              type="primary"
-              size="small"
-              title={t(
-                "playground:composer.persistence.serverCharacterCta",
-                "Open Characters workspace"
-              ) as string}
-              onClick={() => {
-                navigate("/characters?from=server-chat-persistence-error")
-              }}>
-              {t(
-                "playground:composer.persistence.serverCharacterCta",
-                "Open Characters workspace"
-              )}
-            </Button>
+            "Unable to save this tracked character chat because the selected character is missing. Re-select the character and try again."
           ),
           duration: 6
         })
@@ -519,7 +458,6 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     serverChatId,
     setServerChatId,
     historyId,
-    navigate,
     setServerPersistenceHintSeen,
     t,
     setServerChatState,

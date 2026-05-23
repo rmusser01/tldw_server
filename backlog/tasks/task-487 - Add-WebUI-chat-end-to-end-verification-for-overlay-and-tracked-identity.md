@@ -16,6 +16,11 @@ Add real WebUI `/chat` end-to-end coverage for the merged tracked-vs-overlay ass
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] Add real-server `/chat` E2E coverage for applying, changing, and clearing assistant overlay identity without changing the active conversation.
+- [x] Add real-server `/chat` E2E coverage proving tracked character chats remain linked to their character identity.
+- [x] Add real-server `/chat` E2E coverage proving tracked persona chats remain linked to their persona identity.
+- [x] Record focused unit/integration verification for overlay, tracked identity, greeting, persistence, and chat-settings behavior.
+- [x] Record Bandit verification for touched backend and E2E Python-adjacent scope.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -32,10 +37,10 @@ Verification recorded for the focused `/chat` hardening slice: `bunx vitest run 
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
