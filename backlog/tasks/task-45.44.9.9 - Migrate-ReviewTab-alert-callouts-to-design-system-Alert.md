@@ -15,6 +15,7 @@ references:
 - apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx
 - apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/pull/2004
 modified_files:
 - apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx
 - apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx

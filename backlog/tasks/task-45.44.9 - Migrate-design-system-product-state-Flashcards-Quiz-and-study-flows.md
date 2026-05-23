@@ -17,6 +17,7 @@ references:
   - apps/packages/ui/scripts/design-system-product-state-baseline.json
   - 'https://github.com/rmusser01/tldw_server/pull/2000'
   - 'https://github.com/rmusser01/tldw_server/pull/2002'
+  - 'https://github.com/rmusser01/tldw_server/pull/2004'
 parent_task_id: TASK-45.44
 priority: medium
 documentation:
@@ -30,6 +31,11 @@ documentation:
     to the design-system Alert primitive. Baseline evidence: total product-state exceptions
     264 -> 263; Flashcards/Quiz/study-flow exceptions 40 -> 39; ExportPanel target rows
     1 -> 0. Verification recorded in TASK-45.44.9.8.
+  - >-
+    TASK-45.44.9.9 / PR #2004 migrated ReviewTab onboarding and review-retry Alerts
+    to the design-system Alert primitive. Baseline evidence: total product-state exceptions
+    263 -> 262; Flashcards/Quiz/study-flow exceptions 39 -> 38; ReviewTab target rows
+    1 -> 0. Verification recorded in TASK-45.44.9.9.
 ---
 
 ## Description
