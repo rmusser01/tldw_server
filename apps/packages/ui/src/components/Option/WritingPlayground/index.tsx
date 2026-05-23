@@ -48,6 +48,7 @@ import { useServerOnline } from "@/hooks/useServerOnline"
 import { READY_STATE_LABEL } from "@/design-system"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { TldwChatService } from "@/services/tldw/TldwChat"
 import {
   getWritingCapabilities,
@@ -2104,7 +2105,10 @@ export const WritingPlayground = () => {
           <ManuscriptTreePanel isOnline={isOnline} />
         ) : (
         sessionsLoading ? (<Skeleton active />) : sessionsError ? (
-          <Alert type="error" showIcon title={t("option:writingPlayground.sessionsError", "Unable to load sessions.")} />
+          <DesignSystemAlert
+            variant="error"
+            title={t("option:writingPlayground.sessionsError", "Unable to load sessions.")}
+          />
         ) : sortedSessions.length === 0 ? (
           <Empty description={t("option:writingPlayground.sessionsEmpty", "Create your first session to start writing.")} />
         ) : (
@@ -2220,12 +2224,22 @@ export const WritingPlayground = () => {
       {activeThemeCss ? <style>{activeThemeCss}</style> : null}
       {showOffline && (
         <div className="p-4">
-          <Alert type="warning" showIcon title={t("option:writingPlayground.offlineTitle", "Server required")} description={t("option:writingPlayground.offlineBody", "Connect to your tldw server to load writing sessions and generate.")} />
+          <DesignSystemAlert
+            variant="warning"
+            title={t("option:writingPlayground.offlineTitle", "Server required")}
+          >
+            {t("option:writingPlayground.offlineBody", "Connect to your tldw server to load writing sessions and generate.")}
+          </DesignSystemAlert>
         </div>
       )}
       {showUnsupported && (
         <div className="p-4">
-          <Alert type="info" showIcon title={t("option:writingPlayground.unavailableTitle", "Playground unavailable")} description={t("option:writingPlayground.unavailableBody", "This server does not advertise writing playground support yet.")} />
+          <DesignSystemAlert
+            variant="info"
+            title={t("option:writingPlayground.unavailableTitle", "Playground unavailable")}
+          >
+            {t("option:writingPlayground.unavailableBody", "This server does not advertise writing playground support yet.")}
+          </DesignSystemAlert>
         </div>
       )}
       {!showOffline && !showUnsupported && (
@@ -2266,7 +2280,10 @@ export const WritingPlayground = () => {
               <WritingPlaygroundEditorPanel>
               {activeSession ? (
                 activeSessionLoading ? (<Skeleton active />) : activeSessionError ? (
-                  <Alert type="error" showIcon title={t("option:writingPlayground.editorError", "Unable to load this session.")} />
+                  <DesignSystemAlert
+                    variant="error"
+                    title={t("option:writingPlayground.editorError", "Unable to load this session.")}
+                  />
                 ) : (
                   <div className="flex flex-col gap-3">
                     <div className="flex flex-wrap items-center gap-2">
