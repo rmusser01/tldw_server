@@ -6,7 +6,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { TemplatePreviewPane } from "../TemplatePreviewPane"
 
 const serviceMocks = vi.hoisted(() => ({
-  previewWatchlistTemplate: vi.fn()
+  previewWatchlistTemplate: vi.fn(),
+  flowCheckWatchlistTemplateSections: vi.fn()
 }))
 
 const telemetryMock = vi.hoisted(() => ({
@@ -98,7 +99,7 @@ vi.mock("antd", async () => {
   )
 
   const Spin = () => <div data-testid="template-preview-loading">Loading</div>
-  const Button = ({ children, onClick, ...rest }: any) => (
+  const Button = ({ children, onClick, loading: _loading, ...rest }: any) => (
     <button type="button" onClick={() => onClick?.()} {...rest}>
       {children}
     </button>
@@ -117,7 +118,9 @@ vi.mock("antd", async () => {
 })
 
 vi.mock("@/services/watchlists", () => ({
-  previewWatchlistTemplate: (...args: unknown[]) => serviceMocks.previewWatchlistTemplate(...args)
+  previewWatchlistTemplate: (...args: unknown[]) => serviceMocks.previewWatchlistTemplate(...args),
+  flowCheckWatchlistTemplateSections: (...args: unknown[]) =>
+    serviceMocks.flowCheckWatchlistTemplateSections(...args)
 }))
 
 vi.mock("@/utils/watchlists-prevention-telemetry", () => ({
@@ -132,6 +135,12 @@ describe("TemplatePreviewPane preview clarity", () => {
       rendered: "# Preview",
       context_keys: ["items"],
       warnings: []
+    })
+    serviceMocks.flowCheckWatchlistTemplateSections.mockResolvedValue({
+      issues: [],
+      diff: "",
+      sections: [],
+      mode: "suggest_only"
     })
   })
 
@@ -165,6 +174,11 @@ describe("TemplatePreviewPane preview clarity", () => {
       "Live preview renders with data from a completed run to validate loops, variables, and conditionals."
     )
     expect(screen.getByText("Select a run to preview the template with real data.")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Select a run to preview the template with real data.")
+        .closest('[data-ds-component="Alert"]')
+    ).not.toBeNull()
   })
 
   it("renders live preview warnings when server render returns warning metadata", async () => {
@@ -197,6 +211,7 @@ describe("TemplatePreviewPane preview clarity", () => {
     }, { timeout: 2000 })
 
     expect(screen.getByText("Render warnings")).toBeInTheDocument()
+    expect(screen.getByText("Render warnings").closest('[data-ds-component="Alert"]')).not.toBeNull()
     expect(screen.getByText("Missing item.summary")).toBeInTheDocument()
     expect(screen.getByText("Unknown group key")).toBeInTheDocument()
     expect(screen.getByText("Live output")).toBeInTheDocument()
@@ -218,6 +233,11 @@ describe("TemplatePreviewPane preview clarity", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Live (render with run data)" }))
 
     expect(screen.getByText("No completed runs available for live preview.")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("No completed runs available for live preview.")
+        .closest('[data-ds-component="Alert"]')
+    ).not.toBeNull()
     expect(
       screen.getByText(
         "Run a monitor once from Activity, then return here to preview templates with real data."
@@ -251,6 +271,7 @@ describe("TemplatePreviewPane preview clarity", () => {
     }, { timeout: 2000 })
 
     expect(screen.getByText("Live preview failed")).toBeInTheDocument()
+    expect(screen.getByText("Live preview failed").closest('[data-ds-component="Alert"]')).not.toBeNull()
     expect(
       screen.getByText("Check template syntax or choose another run, then try live preview again.")
     ).toBeInTheDocument()
@@ -268,5 +289,35 @@ describe("TemplatePreviewPane preview clarity", () => {
         run_id: 33
       })
     )
+  })
+
+  it("renders flow-check failures through the design-system Alert primitive", async () => {
+    serviceMocks.flowCheckWatchlistTemplateSections.mockRejectedValueOnce(
+      new Error("Flow-check service unavailable")
+    )
+
+    render(
+      <TemplatePreviewPane
+        content="# Heading"
+        format="md"
+        runs={[{ id: 44, label: "Run #44" }]}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("radio", { name: "Live (render with run data)" }))
+    fireEvent.change(screen.getByTestId("template-preview-run-select"), {
+      target: { value: "44" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Run flow-check" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Flow-check service unavailable")).toBeInTheDocument()
+    })
+
+    expect(
+      screen
+        .getByText("Flow-check service unavailable")
+        .closest('[data-ds-component="Alert"]')
+    ).not.toBeNull()
   })
 })
