@@ -155,3 +155,25 @@ bootstrap dataset domain list.
 - Accepted Notes and Chat envelopes must be materialized through
   DB_Management-owned projection APIs.
 - Projection state can be rebuilt from accepted envelopes.
+
+## Verification And Repair Invariants
+
+M1 includes an explicit projection repair path. `POST /api/v1/sync/repair`
+replays accepted, non-conflict envelopes from `Sync_v2.db` into the user's
+`ChaChaNotes.db` projection. Repair is scoped to the authenticated user's
+dataset, preserves tombstones, and reports per-domain counters plus an aggregate
+`repair_status`. Profile domain status also exposes apply counters and
+`repair_status` so a client can detect when server-side projections need
+operator-initiated repair.
+
+The final M1 verification matrix must keep coverage for:
+
+- two-device pull pagination and same-device echo suppression
+- server-front-end Notes writes represented as server-origin Sync v2 envelopes
+- clean restore previews with attachment reference missing-blob warnings
+- restore previews into non-empty profiles with whole-object Note and
+  conversation conflicts
+- stable chat message ID duplicate dedupe and divergent payload conflicts
+- tombstone envelopes that prevent deleted Notes and messages from reappearing
+- cross-user isolation for datasets, pulls, restore previews, conflicts,
+  conflict resolution, and unsupported attachment blob endpoints

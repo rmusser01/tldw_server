@@ -155,8 +155,10 @@ Returns the current Sync v2 profile without creating durable sync state.
 ```json
 {
   "protocol_version": "sync-v2-m1",
+  "min_supported_protocol_version": "sync-v2-m1",
   "profile_bootstrapped": true,
   "user_id": "user_123",
+  "active_dataset_id": "ds_personal_01HZZ0",
   "device": {
     "device_id": "dev_chatbook_laptop",
     "registered": true,
@@ -208,30 +210,65 @@ Returns the current Sync v2 profile without creating durable sync state.
     {
       "domain": "notes.note",
       "last_server_cursor": 101,
+      "envelope_count": 12,
+      "pending_apply_count": 0,
       "pending_apply": 0,
+      "failed_apply_count": 0,
       "unresolved_conflicts": 0,
-      "last_apply_status": "applied"
+      "last_apply_status": "applied",
+      "last_apply_result": {
+        "envelope_id": "srv_env_000000000101",
+        "applied_at": "2026-05-23T18:12:46Z"
+      },
+      "repair_status": {
+        "status": "healthy",
+        "failed_apply_count": 0
+      }
     },
     {
       "domain": "chat.conversation",
       "last_server_cursor": 110,
+      "envelope_count": 4,
+      "pending_apply_count": 0,
       "pending_apply": 0,
+      "failed_apply_count": 0,
       "unresolved_conflicts": 0,
-      "last_apply_status": "applied"
+      "last_apply_status": "applied",
+      "last_apply_result": {},
+      "repair_status": {
+        "status": "healthy",
+        "failed_apply_count": 0
+      }
     },
     {
       "domain": "chat.message",
       "last_server_cursor": 128,
+      "envelope_count": 22,
+      "pending_apply_count": 0,
       "pending_apply": 0,
+      "failed_apply_count": 0,
       "unresolved_conflicts": 0,
-      "last_apply_status": "applied"
+      "last_apply_status": "applied",
+      "last_apply_result": {},
+      "repair_status": {
+        "status": "healthy",
+        "failed_apply_count": 0
+      }
     },
     {
       "domain": "attachment.ref",
       "last_server_cursor": 126,
+      "envelope_count": 3,
+      "pending_apply_count": 0,
       "pending_apply": 0,
+      "failed_apply_count": 0,
       "unresolved_conflicts": 0,
-      "last_apply_status": "applied"
+      "last_apply_status": "applied",
+      "last_apply_result": {},
+      "repair_status": {
+        "status": "healthy",
+        "failed_apply_count": 0
+      }
     }
   ],
   "warnings": []
@@ -445,6 +482,7 @@ Returns accepted envelopes after a cursor in deterministic server-cursor order.
       "payload": {
         "conversation_id": "conv_research",
         "role": "user",
+        "sender": "user",
         "content": "Summarize the saved notes.",
         "created_at": "2026-05-23T18:14:00Z"
       },
@@ -804,6 +842,83 @@ M1 actions are:
   title/name suffix when the domain supports it.
 - `skip`: dismiss the conflict without applying either side.
 
+## `POST /api/v1/sync/repair`
+
+Replays accepted envelopes from `Sync_v2.db` into the user's materialized
+`ChaChaNotes.db` projection. Repair is intended for failed apply recovery,
+projection rebuilds, and administrative verification. It never rewrites
+historical envelopes and does not replay unresolved conflict envelopes as
+accepted changes.
+
+The endpoint is scoped to the authenticated user's datasets. A user cannot run
+repair against another user's dataset.
+
+### Request
+
+```json
+{
+  "dataset_id": "ds_personal_01HZZ0",
+  "domains": [
+    "notes.note",
+    "chat.conversation",
+    "chat.message"
+  ],
+  "since_cursor": 0,
+  "failed_only": false,
+  "limit": 500
+}
+```
+
+If `domains` is empty, the server selects all M1 domains that have registered
+materializers. `failed_only=true` limits repair to envelopes whose last
+projection apply status was failed. `since_cursor` is inclusive of work after
+that cursor and must be non-negative.
+
+### Response
+
+```json
+{
+  "dataset_id": "ds_personal_01HZZ0",
+  "domains": [
+    "notes.note",
+    "chat.conversation",
+    "chat.message"
+  ],
+  "from_cursor": 0,
+  "to_cursor": 131,
+  "scanned_count": 38,
+  "attempted_count": 38,
+  "applied_count": 38,
+  "failed_count": 0,
+  "conflict_count": 0,
+  "skipped_count": 0,
+  "domain_results": [
+    {
+      "domain": "notes.note",
+      "scanned_count": 12,
+      "attempted_count": 12,
+      "applied_count": 12,
+      "failed_count": 0,
+      "conflict_count": 0,
+      "skipped_count": 0,
+      "last_cursor": 129,
+      "errors": []
+    }
+  ],
+  "repair_status": {
+    "status": "healthy",
+    "failed_count": 0,
+    "conflict_count": 0,
+    "skipped_count": 0
+  }
+}
+```
+
+Envelope-level repair errors include `server_cursor`, `client_envelope_id`,
+`domain`, `object_id`, `error_code`, and a safe `message`. A response status of
+`repair_needed` means at least one envelope failed replay or replay produced a
+conflict that requires explicit review.
+
 ## Envelope Examples
 
 ### `notes.note` Upsert
@@ -881,6 +996,7 @@ M1 actions are:
   "payload": {
     "conversation_id": "conv_research",
     "role": "assistant",
+    "sender": "assistant",
     "content": "Here is a concise summary.",
     "created_at": "2026-05-23T18:33:00Z"
   },

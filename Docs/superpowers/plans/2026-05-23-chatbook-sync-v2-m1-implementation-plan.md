@@ -922,11 +922,12 @@ git commit -m "feat: add sync v2 replay repair"
 
 **Files:**
 - Modify: `tldw_Server_API/tests/e2e/test_chatbook_sync_v2_restore.py`
+- Modify: `tldw_Server_API/app/api/v1/endpoints/sync.py`
 - Modify: `Docs/API/Sync_V2_M1.md`
 - Modify: `Docs/Design/Sync_V2_M1_Implementation_Decisions.md`
 - Modify: `backlog/tasks/...` child implementation tasks
 
-- [ ] **Step 1: Add final E2E scenario matrix**
+- [x] **Step 1: Add final E2E scenario matrix**
 
 Update `test_chatbook_sync_v2_restore.py` or split it into focused tests that cover:
 
@@ -940,7 +941,7 @@ Update `test_chatbook_sync_v2_restore.py` or split it into focused tests that co
 - tombstones prevent deleted notes/messages from reappearing
 - user B cannot access user A datasets, pulls, envelope ranges, conflicts, conflict resolutions, restore previews, or attachment refs
 
-- [ ] **Step 2: Run targeted Sync and ChaChaNotes tests**
+- [x] **Step 2: Run targeted Sync and ChaChaNotes tests**
 
 Run:
 
@@ -956,7 +957,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 3: Run broader relevant API tests**
+- [x] **Step 3: Run broader relevant API tests**
 
 Run:
 
@@ -970,7 +971,11 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: pass or document unrelated pre-existing failures.
 
-- [ ] **Step 4: Run Bandit on touched production scope**
+Result: broader suite surfaced unrelated pre-existing failures in
+`test_chacha_persona_state_store.py` and `test_flashcard_templates_db.py`; see
+TASK-490.11 verification notes.
+
+- [x] **Step 4: Run Bandit on touched production scope**
 
 Run:
 
@@ -991,7 +996,9 @@ source .venv/bin/activate && python -m bandit -r \
 
 Expected: no new findings in touched code.
 
-- [ ] **Step 5: Run final diff checks**
+Result: passed with zero findings in `/tmp/bandit_sync_v2_m1.json`.
+
+- [x] **Step 5: Run final diff checks**
 
 Run:
 
@@ -1010,7 +1017,11 @@ rg -n "T[O]DO|FIX[M]E|client_private_v1.*default|source_cache|workspaces|media" 
 
 Expected: no unresolved M1 contradictions.
 
-- [ ] **Step 6: Update Backlog tasks**
+Result: whitespace check passed. Contradiction scan hits were reviewed: remaining
+matches are response `media_type` false positives, redaction-key names, and
+dormant future/compat adapters that are not in the M1 registry/capabilities.
+
+- [x] **Step 6: Update Backlog tasks**
 
 For each child implementation task:
 
@@ -1019,12 +1030,14 @@ For each child implementation task:
 - record Bandit result or skip rationale
 - mark complete only after tests pass
 
-- [ ] **Step 7: Final commit**
+- [x] **Step 7: Final commit**
 
 ```bash
 git add tldw_Server_API/tests/e2e/test_chatbook_sync_v2_restore.py \
+  tldw_Server_API/app/api/v1/endpoints/sync.py \
   Docs/API/Sync_V2_M1.md \
   Docs/Design/Sync_V2_M1_Implementation_Decisions.md \
+  Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md \
   backlog/tasks
 git commit -m "test: verify sync v2 m1 end to end"
 ```
