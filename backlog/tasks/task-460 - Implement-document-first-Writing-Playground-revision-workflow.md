@@ -4,7 +4,7 @@ title: Implement document-first Writing Playground revision workflow
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-23 01:36'
+updated_date: '2026-05-23 01:59'
 labels:
   - implementation
   - webui
@@ -58,6 +58,26 @@ TDD evidence:
 Review evidence:
 - Spec compliance review initially found missing replacement should return noop; fixed in 9c5ac7b2b. Re-review approved.
 - Code quality review found insert fallthrough and paragraph edge cases; fixed in df40a2ac2 and 3d7a691c7. Re-review approved with no Critical or Important issues.
+
+Bandit:
+- Worker reported touched-scope Bandit produced no findings but parse errors because files are TypeScript; final Bandit decision will be recorded at final verification.
+
+Task 2 completed.
+
+Files touched:
+- apps/packages/ui/src/components/Option/WritingPlayground/writing-revision-presets.ts
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/writing-revision-presets.test.ts
+
+Commit:
+- 75f475ed7 feat: add writing revision presets
+
+TDD evidence:
+- Initial red: focused Vitest failed because ../writing-revision-presets did not exist.
+- Final green: bunx vitest run apps/packages/ui/src/components/Option/WritingPlayground/__tests__/writing-revision-presets.test.ts passed with 4 tests.
+
+Review evidence:
+- Spec compliance review approved with no issues.
+- Code quality review approved with no Critical or Important issues. Minor readonly-array hardening was noted as non-blocking.
 
 Bandit:
 - Worker reported touched-scope Bandit produced no findings but parse errors because files are TypeScript; final Bandit decision will be recorded at final verification.
