@@ -4,7 +4,7 @@ title: Migrate WatchlistsPage admin guard alerts to design-system Alert
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-24 01:05'
+updated_date: '2026-05-24 01:37'
 labels:
   - design-system
   - webui
@@ -52,6 +52,17 @@ Verification:
 - `git diff --check` passed.
 - TypeScript: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still exits 2 on 347 existing diagnostics; no diagnostics mention WatchlistsPage, WatchlistsPage.admin-guard, the baseline, or TASK-45.44.3.9.
 - Bandit skipped: UI-only TypeScript/test/baseline task; no Python touched.
+
+PR review follow-up:
+- Gemini requested wrapping the forbidden/not-found guard alerts in the same padded max-width container used by the normal admin page render. Verified current code returns bare Alert elements, so the layout feedback applies.
+
+PR review follow-up verification:
+- RED: `bunx vitest run src/components/Option/Admin/__tests__/WatchlistsPage.admin-guard.test.tsx --reporter=dot` failed after adding page-container assertions because guard alerts lacked the shared padded/max-width wrapper.
+- GREEN: `bunx vitest run src/components/Option/Admin/__tests__/WatchlistsPage.admin-guard.test.tsx --reporter=dot` passed, 2 tests.
+- Product-state guard: `bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot` passed, 54 tests.
+- Verifier: `bun run verify:design-system-state` passed with total baseline exceptions still 254.
+- `git diff --check` passed.
+- TypeScript: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still exits 2 on 347 existing diagnostics; no diagnostics mention WatchlistsPage, WatchlistsPage.admin-guard, the baseline, or TASK-45.44.3.9.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -60,6 +71,8 @@ Verification:
 Migrated the Admin WatchlistsPage forbidden and not-found guard callouts from AntD Alert to the shared design-system Alert primitive, added focused guard-state coverage for both paths, and removed the two WatchlistsPage Alert entries from the product-state baseline. The full design-system verifier passes with total baseline exceptions reduced to 254.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2019
+
+PR review follow-up: wrapped both guard alerts in the same padded/max-width page container used by the normal WatchlistsPage render, and added focused assertions for that layout contract.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

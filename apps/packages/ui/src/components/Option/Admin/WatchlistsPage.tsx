@@ -17,6 +17,11 @@ import {
 import { Alert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
+const pageContainerStyle: React.CSSProperties = {
+  padding: "24px",
+  maxWidth: 1200
+}
+
 const WatchlistsPage: React.FC = () => {
   // Admin guard state
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
@@ -240,21 +245,25 @@ const WatchlistsPage: React.FC = () => {
 
   if (adminGuard === "forbidden") {
     return (
-      <Alert variant="error" title="Access Denied">
-        You don't have permission to access watchlists administration.
-      </Alert>
+      <div style={pageContainerStyle}>
+        <Alert variant="error" title="Access Denied">
+          You don't have permission to access watchlists administration.
+        </Alert>
+      </div>
     )
   }
   if (adminGuard === "notFound") {
     return (
-      <Alert variant="warning" title="Not Available">
-        Watchlists administration is not available on this server.
-      </Alert>
+      <div style={pageContainerStyle}>
+        <Alert variant="warning" title="Not Available">
+          Watchlists administration is not available on this server.
+        </Alert>
+      </div>
     )
   }
 
   return (
-    <div style={{ padding: "24px", maxWidth: 1200 }}>
+    <div style={pageContainerStyle}>
       <h2 style={{ marginBottom: 16 }}>Watchlists &amp; Alerts</h2>
 
       {/* Watchlists Card */}
