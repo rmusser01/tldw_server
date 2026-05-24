@@ -91,6 +91,103 @@ class WorkspaceSourceReorderRequest(BaseModel):
     ordered_ids: list[str]
 
 
+WorkspaceSourceLifecycleState = Literal[
+    "queued",
+    "ingesting",
+    "extracting",
+    "chunking",
+    "indexing",
+    "queryable",
+    "partially_queryable",
+    "failed",
+    "retrying",
+    "missing_media",
+    "blocked_by_permissions",
+]
+
+WorkspaceCapabilityServiceState = Literal[
+    "available",
+    "private",
+    "not_configured",
+    "unknown",
+    "blocked",
+    "degraded",
+]
+
+
+class WorkspaceSourceReadiness(BaseModel):
+    metadata_ready: bool = False
+    text_extracted: bool = False
+    fts_ready: bool = False
+    vector_ready: bool = False
+    citation_ready: bool = False
+    summary_ready: bool = False
+    tool_accessible: bool = False
+
+
+class WorkspaceSourceJobStatus(BaseModel):
+    id: int | None = None
+    uuid: str | None = None
+    status: str | None = None
+    job_type: str | None = None
+    progress_percent: float | None = None
+    progress_message: str | None = None
+    error_message: str | None = None
+
+
+class WorkspaceSourceStatusResponse(BaseModel):
+    id: str
+    workspace_id: str
+    media_id: int | None = None
+    title: str
+    source_type: str
+    url: str | None = None
+    selected: bool = True
+    state: WorkspaceSourceLifecycleState
+    status_reason: str
+    readiness: WorkspaceSourceReadiness
+    progress_percent: float | None = None
+    progress_message: str | None = None
+    job: WorkspaceSourceJobStatus | None = None
+    updated_at: str = ""
+
+
+class WorkspaceSourceStatusSummary(BaseModel):
+    total: int = 0
+    selected: int = 0
+    queryable: int = 0
+    partially_queryable: int = 0
+    processing: int = 0
+    failed: int = 0
+    missing: int = 0
+
+
+class WorkspaceSourceStatusListResponse(BaseModel):
+    workspace_id: str
+    sources: list[WorkspaceSourceStatusResponse]
+    summary: WorkspaceSourceStatusSummary
+
+
+class WorkspaceCapabilityService(BaseModel):
+    state: WorkspaceCapabilityServiceState
+    reason_code: str | None = None
+    management_surface: str | None = None
+
+
+class WorkspaceAllowedAction(BaseModel):
+    allowed: bool
+    reason_code: str | None = None
+
+
+class WorkspaceCapabilitiesResponse(BaseModel):
+    workspace_id: str
+    workspace_kind: Literal["research_workspace"]
+    access_level: Literal["owner", "editor", "viewer"] = "owner"
+    source_summary: WorkspaceSourceStatusSummary
+    workspace_services: dict[str, WorkspaceCapabilityService]
+    allowed_actions: dict[str, WorkspaceAllowedAction]
+
+
 class StatusResponse(BaseModel):
     ok: bool = True
 
