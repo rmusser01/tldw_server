@@ -7558,6 +7558,84 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V46->V47: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V47 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _sqlite_linear_migration_steps(self) -> Mapping[int, Callable[[sqlite3.Connection], None]]:
+        """Return SQLite migration handlers keyed by their source schema version."""
+        return {
+            4: self._migrate_from_v4_to_v5,
+            5: self._migrate_from_v5_to_v6,
+            6: self._migrate_from_v6_to_v7,
+            7: self._migrate_from_v7_to_v8,
+            8: self._migrate_from_v8_to_v9,
+            9: self._migrate_from_v9_to_v10,
+            10: self._migrate_from_v10_to_v11,
+            11: self._migrate_from_v11_to_v12,
+            12: self._migrate_from_v12_to_v13,
+            13: self._migrate_from_v13_to_v14,
+            14: self._migrate_from_v14_to_v15,
+            15: self._migrate_from_v15_to_v16,
+            16: self._migrate_from_v16_to_v17,
+            17: self._migrate_from_v17_to_v18,
+            18: self._migrate_from_v18_to_v19,
+            19: self._migrate_from_v19_to_v20,
+            20: self._migrate_from_v20_to_v21,
+            21: self._migrate_from_v21_to_v22,
+            22: self._migrate_from_v22_to_v23,
+            23: self._migrate_from_v23_to_v24,
+            24: self._migrate_from_v24_to_v25,
+            25: self._migrate_from_v25_to_v26,
+            26: self._migrate_from_v26_to_v27,
+            27: self._migrate_from_v27_to_v28,
+            28: self._migrate_from_v28_to_v29,
+            29: self._migrate_from_v29_to_v30,
+            30: self._migrate_from_v30_to_v31,
+            31: self._migrate_from_v31_to_v32,
+            32: self._migrate_from_v32_to_v33,
+            33: self._migrate_from_v33_to_v34,
+            34: self._migrate_from_v34_to_v35,
+            35: self._migrate_from_v35_to_v36,
+            36: self._migrate_from_v36_to_v37,
+            37: self._migrate_from_v37_to_v38,
+            38: self._migrate_from_v38_to_v39,
+            39: self._migrate_from_v39_to_v40,
+            40: self._migrate_from_v40_to_v41,
+            41: self._migrate_from_v41_to_v42,
+            42: self._migrate_from_v42_to_v43,
+            43: self._migrate_from_v43_to_v44,
+            44: self._migrate_from_v44_to_v45,
+            45: self._migrate_from_v45_to_v46,
+            46: self._migrate_from_v46_to_v47,
+        }
+
+    def _migrate_sqlite_linearly_to_target(
+        self,
+        conn: sqlite3.Connection,
+        current_db_version: int,
+        target_version: int,
+        current_initial_version: int,
+    ) -> int:
+        """Run registered SQLite migrations until `target_version` is reached."""
+        migration_steps = self._sqlite_linear_migration_steps()
+        while current_db_version < target_version:
+            migration_step = migration_steps.get(current_db_version)
+            if migration_step is None:
+                missing_target_version = current_db_version + 1
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"Migration path undefined for '{self._SCHEMA_NAME}' from version "
+                    f"{current_db_version} to {missing_target_version} while migrating "
+                    f"from {current_initial_version} to {target_version}. "
+                    f"Manual migration or a new database may be required."
+                )
+            migration_step(conn)
+            next_version = self._get_db_version(conn)
+            expected_next_version = current_db_version + 1
+            if next_version != expected_next_version:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"Migration for '{self._SCHEMA_NAME}' advanced from version "
+                    f"{current_db_version} to {next_version}; expected {expected_next_version}."
+                )
+            current_db_version = next_version
+        return current_db_version
+
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Repair persona persistence tables for databases with collided schema versions."""
         required_tables = {
@@ -8961,135 +9039,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     # New DB: apply V4 base then migrate to current target (>= V5)
                     self._apply_schema_v4(conn)
                     current_db_version = self._get_db_version(conn)
-                    if target_version >= 5 and current_db_version == 4:
-                        self._migrate_from_v4_to_v5(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 6 and current_db_version == 5:
-                        self._migrate_from_v5_to_v6(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 7 and current_db_version == 6:
-                        self._migrate_from_v6_to_v7(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 8 and current_db_version == 7:
-                        self._migrate_from_v7_to_v8(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 9 and current_db_version == 8:
-                        self._migrate_from_v8_to_v9(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 10 and current_db_version == 9:
-                        self._migrate_from_v9_to_v10(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 11 and current_db_version == 10:
-                        self._migrate_from_v10_to_v11(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 12 and current_db_version == 11:
-                        self._migrate_from_v11_to_v12(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 13 and current_db_version == 12:
-                        self._migrate_from_v12_to_v13(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 14 and current_db_version == 13:
-                        self._migrate_from_v13_to_v14(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 15 and current_db_version == 14:
-                        self._migrate_from_v14_to_v15(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 16 and current_db_version == 15:
-                        self._migrate_from_v15_to_v16(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 17 and current_db_version == 16:
-                        self._migrate_from_v16_to_v17(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 18 and current_db_version == 17:
-                        self._migrate_from_v17_to_v18(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 19 and current_db_version == 18:
-                        self._migrate_from_v18_to_v19(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 20 and current_db_version == 19:
-                        self._migrate_from_v19_to_v20(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 21 and current_db_version == 20:
-                        self._migrate_from_v20_to_v21(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 22 and current_db_version == 21:
-                        self._migrate_from_v21_to_v22(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 23 and current_db_version == 22:
-                        self._migrate_from_v22_to_v23(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 24 and current_db_version == 23:
-                        self._migrate_from_v23_to_v24(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 25 and current_db_version == 24:
-                        self._migrate_from_v24_to_v25(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 26 and current_db_version == 25:
-                        self._migrate_from_v25_to_v26(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 27 and current_db_version == 26:
-                        self._migrate_from_v26_to_v27(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 28 and current_db_version == 27:
-                        self._migrate_from_v27_to_v28(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 29 and current_db_version == 28:
-                        self._migrate_from_v28_to_v29(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 30 and current_db_version == 29:
-                        self._migrate_from_v29_to_v30(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 31 and current_db_version == 30:
-                        self._migrate_from_v30_to_v31(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 32 and current_db_version == 31:
-                        self._migrate_from_v31_to_v32(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 33 and current_db_version == 32:
-                        self._migrate_from_v32_to_v33(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 34 and current_db_version == 33:
-                        self._migrate_from_v33_to_v34(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 35 and current_db_version == 34:
-                        self._migrate_from_v34_to_v35(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 36 and current_db_version == 35:
-                        self._migrate_from_v35_to_v36(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 37 and current_db_version == 36:
-                        self._migrate_from_v36_to_v37(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 38 and current_db_version == 37:
-                        self._migrate_from_v37_to_v38(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 39 and current_db_version == 38:
-                        self._migrate_from_v38_to_v39(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 40 and current_db_version == 39:
-                        self._migrate_from_v39_to_v40(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 41 and current_db_version == 40:
-                        self._migrate_from_v40_to_v41(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 42 and current_db_version == 41:
-                        self._migrate_from_v41_to_v42(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 43 and current_db_version == 42:
-                        self._migrate_from_v42_to_v43(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 44 and current_db_version == 43:
-                        self._migrate_from_v43_to_v44(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 45 and current_db_version == 44:
-                        self._migrate_from_v44_to_v45(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 46 and current_db_version == 45:
-                        self._migrate_from_v45_to_v46(conn)
-                        current_db_version = self._get_db_version(conn)
-                    if target_version >= 47 and current_db_version == 46:
-                        self._migrate_from_v46_to_v47(conn)
-                        current_db_version = self._get_db_version(conn)
+                    current_db_version = self._migrate_sqlite_linearly_to_target(
+                        conn,
+                        current_db_version,
+                        target_version,
+                        current_initial_version,
+                    )
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -9131,431 +9086,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._ensure_workspace_study_material_schema_sqlite(conn)
                 except sqlite3.Error:
                     pass
-                # Example for future migrations:
-                # elif current_db_version == 1:
-                #     self._migrate_from_v1_to_v2(conn)
-                #     current_db_version = self._get_db_version(conn) # Refresh version
-                #     if current_db_version == 2 and target_version > 2: # Continue if more migrations needed
-                #         self._migrate_from_v2_to_v3(conn)
-                #         # ...and so on
-                if current_initial_version < target_version:
-                    # If this was a brand new database (version 0), we have already
-                    # applied the base schema and stepped migrations above. Skip
-                    # the secondary migration-path dispatcher.
-                    if current_initial_version == 0:
-                        pass
-                    # Handle known migration paths for pre-existing databases
-                    elif current_initial_version == 4 and target_version >= 5:
-                        self._migrate_from_v4_to_v5(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 6 and current_db_version == 5:
-                            self._migrate_from_v5_to_v6(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 7 and current_db_version == 6:
-                            self._migrate_from_v6_to_v7(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 8 and current_db_version == 7:
-                            self._migrate_from_v7_to_v8(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 9 and current_db_version == 8:
-                            self._migrate_from_v8_to_v9(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 10 and current_db_version == 9:
-                            self._migrate_from_v9_to_v10(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 5 and target_version >= 6:
-                        self._migrate_from_v5_to_v6(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 7 and current_db_version == 6:
-                            self._migrate_from_v6_to_v7(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 8 and current_db_version == 7:
-                            self._migrate_from_v7_to_v8(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 9 and current_db_version == 8:
-                            self._migrate_from_v8_to_v9(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 10 and current_db_version == 9:
-                            self._migrate_from_v9_to_v10(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 6 and target_version >= 7:
-                        self._migrate_from_v6_to_v7(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 8 and current_db_version == 7:
-                            self._migrate_from_v7_to_v8(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 9 and current_db_version == 8:
-                            self._migrate_from_v8_to_v9(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 10 and current_db_version == 9:
-                            self._migrate_from_v9_to_v10(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 7 and target_version >= 8:
-                        self._migrate_from_v7_to_v8(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 9 and current_db_version == 8:
-                            self._migrate_from_v8_to_v9(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 10 and current_db_version == 9:
-                            self._migrate_from_v9_to_v10(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 8 and target_version >= 9:
-                        self._migrate_from_v8_to_v9(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 10 and current_db_version == 9:
-                            self._migrate_from_v9_to_v10(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 9 and target_version >= 10:
-                        self._migrate_from_v9_to_v10(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 10 and target_version >= 11:
-                        self._migrate_from_v10_to_v11(conn)
-                        current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 11 and target_version >= 12:
-                        self._migrate_from_v11_to_v12(conn)
-                        current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 12 and target_version >= 13:
-                        self._migrate_from_v12_to_v13(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 14 and current_db_version == 13:
-                            self._migrate_from_v13_to_v14(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 15 and current_db_version == 14:
-                            self._migrate_from_v14_to_v15(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 16 and current_db_version == 15:
-                            self._migrate_from_v15_to_v16(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 13 and target_version >= 14:
-                        self._migrate_from_v13_to_v14(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 15 and current_db_version == 14:
-                            self._migrate_from_v14_to_v15(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 16 and current_db_version == 15:
-                            self._migrate_from_v15_to_v16(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 14 and target_version >= 15:
-                        self._migrate_from_v14_to_v15(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 16 and current_db_version == 15:
-                            self._migrate_from_v15_to_v16(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 15 and target_version >= 16:
-                        self._migrate_from_v15_to_v16(conn)
-                        current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 16 and target_version >= 17:
-                        self._migrate_from_v16_to_v17(conn)
-                        current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 17 and target_version >= 18:
-                        self._migrate_from_v17_to_v18(conn)
-                        current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 18 and target_version >= 19:
-                        self._migrate_from_v18_to_v19(conn)
-                        current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 19 and target_version >= 20:
-                        self._migrate_from_v19_to_v20(conn)
-                        current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 20 and target_version >= 21:
-                        self._migrate_from_v20_to_v21(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 22 and current_db_version == 21:
-                            self._migrate_from_v21_to_v22(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 23 and current_db_version == 22:
-                            self._migrate_from_v22_to_v23(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 24 and current_db_version == 23:
-                            self._migrate_from_v23_to_v24(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 25 and current_db_version == 24:
-                            self._migrate_from_v24_to_v25(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 21 and target_version >= 22:
-                        self._migrate_from_v21_to_v22(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 23 and current_db_version == 22:
-                            self._migrate_from_v22_to_v23(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 24 and current_db_version == 23:
-                            self._migrate_from_v23_to_v24(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 25 and current_db_version == 24:
-                            self._migrate_from_v24_to_v25(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 22 and target_version >= 23:
-                        self._migrate_from_v22_to_v23(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 24 and current_db_version == 23:
-                            self._migrate_from_v23_to_v24(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 25 and current_db_version == 24:
-                            self._migrate_from_v24_to_v25(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 23 and target_version >= 24:
-                        self._migrate_from_v23_to_v24(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 25 and current_db_version == 24:
-                            self._migrate_from_v24_to_v25(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 24 and target_version >= 25:
-                        self._migrate_from_v24_to_v25(conn)
-                        current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 25 and target_version >= 26:
-                        self._migrate_from_v25_to_v26(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 27 and current_db_version == 26:
-                            self._migrate_from_v26_to_v27(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 28 and current_db_version == 27:
-                            self._migrate_from_v27_to_v28(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 29 and current_db_version == 28:
-                            self._migrate_from_v28_to_v29(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 26 and target_version >= 27:
-                        self._migrate_from_v26_to_v27(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 28 and current_db_version == 27:
-                            self._migrate_from_v27_to_v28(conn)
-                            current_db_version = self._get_db_version(conn)
-                        if target_version >= 29 and current_db_version == 28:
-                            self._migrate_from_v28_to_v29(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 27 and target_version >= 28:
-                        self._migrate_from_v27_to_v28(conn)
-                        current_db_version = self._get_db_version(conn)
-                        if target_version >= 29 and current_db_version == 28:
-                            self._migrate_from_v28_to_v29(conn)
-                            current_db_version = self._get_db_version(conn)
-                    elif current_initial_version == 28 and target_version >= 29:
-                        self._migrate_from_v28_to_v29(conn)
-                        current_db_version = self._get_db_version(conn)
-                    else:
-                        # Fallback: attempt linear migrations for known versions.
-                        fallback_version = current_initial_version
-                        while fallback_version < target_version:
-                            if fallback_version == 4:
-                                self._migrate_from_v4_to_v5(conn)
-                            elif fallback_version == 5:
-                                self._migrate_from_v5_to_v6(conn)
-                            elif fallback_version == 6:
-                                self._migrate_from_v6_to_v7(conn)
-                            elif fallback_version == 7:
-                                self._migrate_from_v7_to_v8(conn)
-                            elif fallback_version == 8:
-                                self._migrate_from_v8_to_v9(conn)
-                            elif fallback_version == 9:
-                                self._migrate_from_v9_to_v10(conn)
-                            elif fallback_version == 10:
-                                self._migrate_from_v10_to_v11(conn)
-                            elif fallback_version == 11:
-                                self._migrate_from_v11_to_v12(conn)
-                            elif fallback_version == 12:
-                                self._migrate_from_v12_to_v13(conn)
-                            elif fallback_version == 13:
-                                self._migrate_from_v13_to_v14(conn)
-                            elif fallback_version == 14:
-                                self._migrate_from_v14_to_v15(conn)
-                            elif fallback_version == 15:
-                                self._migrate_from_v15_to_v16(conn)
-                            elif fallback_version == 16:
-                                self._migrate_from_v16_to_v17(conn)
-                            elif fallback_version == 17:
-                                self._migrate_from_v17_to_v18(conn)
-                            elif fallback_version == 18:
-                                self._migrate_from_v18_to_v19(conn)
-                            elif fallback_version == 19:
-                                self._migrate_from_v19_to_v20(conn)
-                            elif fallback_version == 20:
-                                self._migrate_from_v20_to_v21(conn)
-                            elif fallback_version == 21:
-                                self._migrate_from_v21_to_v22(conn)
-                            elif fallback_version == 22:
-                                self._migrate_from_v22_to_v23(conn)
-                            elif fallback_version == 23:
-                                self._migrate_from_v23_to_v24(conn)
-                            elif fallback_version == 24:
-                                self._migrate_from_v24_to_v25(conn)
-                            elif fallback_version == 25:
-                                self._migrate_from_v25_to_v26(conn)
-                            elif fallback_version == 26:
-                                self._migrate_from_v26_to_v27(conn)
-                            elif fallback_version == 27:
-                                self._migrate_from_v27_to_v28(conn)
-                            elif fallback_version == 28:
-                                self._migrate_from_v28_to_v29(conn)
-                            elif fallback_version == 29:
-                                self._migrate_from_v29_to_v30(conn)
-                            elif fallback_version == 30:
-                                self._migrate_from_v30_to_v31(conn)
-                            elif fallback_version == 31:
-                                self._migrate_from_v31_to_v32(conn)
-                            elif fallback_version == 32:
-                                self._migrate_from_v32_to_v33(conn)
-                            elif fallback_version == 33:
-                                self._migrate_from_v33_to_v34(conn)
-                            elif fallback_version == 34:
-                                self._migrate_from_v34_to_v35(conn)
-                            elif fallback_version == 35:
-                                self._migrate_from_v35_to_v36(conn)
-                            elif fallback_version == 36:
-                                self._migrate_from_v36_to_v37(conn)
-                            elif fallback_version == 37:
-                                self._migrate_from_v37_to_v38(conn)
-                            elif fallback_version == 38:
-                                self._migrate_from_v38_to_v39(conn)
-                            elif fallback_version == 39:
-                                self._migrate_from_v39_to_v40(conn)
-                            elif fallback_version == 40:
-                                self._migrate_from_v40_to_v41(conn)
-                            elif fallback_version == 41:
-                                self._migrate_from_v41_to_v42(conn)
-                            elif fallback_version == 42:
-                                self._migrate_from_v42_to_v43(conn)
-                            elif fallback_version == 43:
-                                self._migrate_from_v43_to_v44(conn)
-                            elif fallback_version == 44:
-                                self._migrate_from_v44_to_v45(conn)
-                            elif fallback_version == 45:
-                                self._migrate_from_v45_to_v46(conn)
-                            elif fallback_version == 46:
-                                self._migrate_from_v46_to_v47(conn)
-                            else:
-                                raise SchemaError(  # noqa: TRY003, TRY301
-                                    f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
-                                    f"Manual migration or a new database may be required.")
-                            fallback_version = self._get_db_version(conn)
-                        current_db_version = fallback_version
-                else: # Should not be reached due to prior checks
-                    raise SchemaError(f"Unexpected schema state: current {current_initial_version}, target {target_version}")  # noqa: TRY003, TRY301
-
-                if target_version >= 12 and current_db_version == 11:
-                    self._migrate_from_v11_to_v12(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 13 and current_db_version == 12:
-                    self._migrate_from_v12_to_v13(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 14 and current_db_version == 13:
-                    self._migrate_from_v13_to_v14(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 15 and current_db_version == 14:
-                    self._migrate_from_v14_to_v15(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 16 and current_db_version == 15:
-                    self._migrate_from_v15_to_v16(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 17 and current_db_version == 16:
-                    self._migrate_from_v16_to_v17(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 18 and current_db_version == 17:
-                    self._migrate_from_v17_to_v18(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 19 and current_db_version == 18:
-                    self._migrate_from_v18_to_v19(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 20 and current_db_version == 19:
-                    self._migrate_from_v19_to_v20(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 21 and current_db_version == 20:
-                    self._migrate_from_v20_to_v21(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 22 and current_db_version == 21:
-                    self._migrate_from_v21_to_v22(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 23 and current_db_version == 22:
-                    self._migrate_from_v22_to_v23(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 24 and current_db_version == 23:
-                    self._migrate_from_v23_to_v24(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 25 and current_db_version == 24:
-                    self._migrate_from_v24_to_v25(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 26 and current_db_version == 25:
-                    self._migrate_from_v25_to_v26(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 27 and current_db_version == 26:
-                    self._migrate_from_v26_to_v27(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 28 and current_db_version == 27:
-                    self._migrate_from_v27_to_v28(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 29 and current_db_version == 28:
-                    self._migrate_from_v28_to_v29(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 30 and current_db_version == 29:
-                    self._migrate_from_v29_to_v30(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 31 and current_db_version == 30:
-                    self._migrate_from_v30_to_v31(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 32 and current_db_version == 31:
-                    self._migrate_from_v31_to_v32(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 33 and current_db_version == 32:
-                    self._migrate_from_v32_to_v33(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 34 and current_db_version == 33:
-                    self._migrate_from_v33_to_v34(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 35 and current_db_version == 34:
-                    self._migrate_from_v34_to_v35(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 36 and current_db_version == 35:
-                    self._migrate_from_v35_to_v36(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 37 and current_db_version == 36:
-                    self._migrate_from_v36_to_v37(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 38 and current_db_version == 37:
-                    self._migrate_from_v37_to_v38(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 39 and current_db_version == 38:
-                    self._migrate_from_v38_to_v39(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 40 and current_db_version == 39:
-                    self._migrate_from_v39_to_v40(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 41 and current_db_version == 40:
-                    self._migrate_from_v40_to_v41(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 42 and current_db_version == 41:
-                    self._migrate_from_v41_to_v42(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 43 and current_db_version == 42:
-                    self._migrate_from_v42_to_v43(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 44 and current_db_version == 43:
-                    self._migrate_from_v43_to_v44(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 45 and current_db_version == 44:
-                    self._migrate_from_v44_to_v45(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 46 and current_db_version == 45:
-                    self._migrate_from_v45_to_v46(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 47 and current_db_version == 46:
-                    self._migrate_from_v46_to_v47(conn)
-                    current_db_version = self._get_db_version(conn)
+                if current_initial_version < target_version and current_initial_version != 0:
+                    current_db_version = self._migrate_sqlite_linearly_to_target(
+                        conn,
+                        current_initial_version,
+                        target_version,
+                        current_initial_version,
+                    )
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
