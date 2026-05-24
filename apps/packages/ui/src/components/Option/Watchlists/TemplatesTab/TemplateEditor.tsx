@@ -1,6 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
-  Alert,
   Button,
   Checkbox,
   Divider,
@@ -14,6 +13,7 @@ import {
   message
 } from "antd"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   composeWatchlistTemplateSection,
@@ -866,8 +866,7 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
               {hasVersionDrift && (
                 <Alert
                   className="mt-3"
-                  type="warning"
-                  showIcon
+                  variant="warning"
                   title={t("watchlists:templates.unsavedDrift", "Current editor content differs from the loaded version.")}
                 />
               )}
@@ -887,26 +886,21 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
         {activeTab === "visual" && composerNeedsRepair && (
           <Alert
             className="mb-4"
-            type="warning"
-            showIcon
+            variant="warning"
             title={t(
               "watchlists:templates.visualOutOfSyncTitle",
               "Visual layout may be out of sync"
             )}
-            description={t(
+            action={{
+              label: t("watchlists:templates.repairVisualLayout", "Repair layout"),
+              onClick: handleRepairVisualLayout
+            }}
+          >
+            {t(
               "watchlists:templates.visualOutOfSyncDescription",
               "The template was edited in code mode and the visual block layout may need repair."
             )}
-            action={(
-              <Button
-                size="small"
-                onClick={handleRepairVisualLayout}
-                data-testid="template-editor-repair-visual-layout"
-              >
-                {t("watchlists:templates.repairVisualLayout", "Repair layout")}
-              </Button>
-            )}
-          />
+          </Alert>
         )}
 
         <Tabs

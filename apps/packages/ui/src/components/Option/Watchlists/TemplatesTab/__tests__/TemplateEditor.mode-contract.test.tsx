@@ -337,6 +337,11 @@ describe("TemplateEditor authoring mode contract", () => {
         screen.getByText("Current editor content differs from the loaded version.")
       ).toBeInTheDocument()
     })
+    expect(
+      screen
+        .getByText("Current editor content differs from the loaded version.")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("template-editor-mode-basic"))
     fireEvent.click(screen.getByTestId("template-editor-mode-advanced"))
@@ -351,6 +356,40 @@ describe("TemplateEditor authoring mode contract", () => {
     expect(
       screen.getByText("Current editor content differs from the loaded version.")
     ).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Current editor content differs from the loaded version.")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+  })
+
+  it("renders visual repair warnings through the design-system Alert primitive", async () => {
+    render(<TemplateEditor open template={null} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(serviceMocks.fetchWatchlistRuns).toHaveBeenCalled()
+    })
+
+    openEditorTab()
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        "Start with plain text or Markdown. Advanced users can add Jinja2 tags later."
+      ),
+      {
+        target: { value: "{% macro card(x) %}{{ x }}{% endmacro %}\n{{ card(title) }}" }
+      }
+    )
+    fireEvent.click(screen.getByRole("tab", { name: "Visual" }))
+
+    const repairTitle = await screen.findByText("Visual layout may be out of sync")
+
+    expect(repairTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "The template was edited in code mode and the visual block layout may need repair."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Repair layout" })).toBeInTheDocument()
   })
 
   it("applies recipe defaults and autofills name/description in basic create mode", async () => {
