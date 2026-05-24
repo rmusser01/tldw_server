@@ -18,7 +18,7 @@ import {
   assertNoCriticalErrors
 } from "../utils/fixtures"
 import { KnowledgeQAPage } from "../utils/page-objects/KnowledgeQAPage"
-import { WorkspacePlaygroundPage } from "../utils/page-objects/WorkspacePlaygroundPage"
+import { ResearchWorkspacePage } from "../utils/page-objects/ResearchWorkspacePage"
 import {
   seedAuth,
   generateTestId,
@@ -1769,7 +1769,7 @@ test.describe("KnowledgeQA Workflow", () => {
       diagnostics
     }) => {
       qaPage = new KnowledgeQAPage(authedPage)
-      const workspacePage = new WorkspacePlaygroundPage(authedPage)
+      const workspacePage = new ResearchWorkspacePage(authedPage)
       const query = `knowledge workspace handoff ${generateTestId("handoff")}`
       const answer = "Workspace-ready synthesis [1]"
       const sourceTitle = "Workspace Handoff Source"
@@ -1841,7 +1841,7 @@ test.describe("KnowledgeQA Workflow", () => {
         .getByRole("button", { name: /^Open in Workspace$/i })
         .evaluate((button: HTMLButtonElement) => button.click())
 
-      await authedPage.waitForURL(/\/research-studio(?:\?|$)/, {
+      await authedPage.waitForURL(/\/research-workspace(?:\?|$)/, {
         timeout: 10_000
       })
       await workspacePage.waitForReady()
@@ -1885,7 +1885,7 @@ test.describe("KnowledgeQA Workflow", () => {
                 noteContent: state?.currentNote?.content || "",
                 prefillPending:
                   window.localStorage.getItem(
-                    "__tldw_workspace_playground_prefill"
+                    "__tldw_research_workspace_prefill"
                   ) !== null
               }
             }),

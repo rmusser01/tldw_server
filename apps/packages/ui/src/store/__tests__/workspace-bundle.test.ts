@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import JSZip from "jszip"
 import {
+  LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT,
   WORKSPACE_EXPORT_BUNDLE_FORMAT,
   WORKSPACE_EXPORT_BUNDLE_MANIFEST_FILE,
   WORKSPACE_EXPORT_BUNDLE_PAYLOAD_FILE,
@@ -176,6 +177,7 @@ describe("workspace bundle zip compatibility", () => {
 
   it("imports legacy JSON workspace bundles", async () => {
     const bundle = createBundleFixture()
+    bundle.format = LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT
     const file = new File([JSON.stringify(bundle)], "alpha.workspace.json", {
       type: "application/json"
     })

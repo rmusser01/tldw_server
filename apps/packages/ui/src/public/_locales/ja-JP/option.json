@@ -2612,8 +2612,8 @@
   "moderationPlayground_subtitle": {
     "message": "家族向け安全設定とサーバーのガードレールを一箇所に。"
   },
-  "header_workspacePlayground": {
-    "message": "Model Playground"
+  "header_researchWorkspace": {
+    "message": "Research Workspace"
   },
   "omniSearch_searchError": {
     "message": "検索に失敗しました。もう一度お試しください。"
@@ -2667,7 +2667,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Workspace Playground"
+    "message": "Model Playground"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"

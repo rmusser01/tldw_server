@@ -77,7 +77,7 @@ export const SharedWithMe: React.FC = () => {
                   type="link"
                   size="small"
                   icon={<ExternalLink className="h-3.5 w-3.5" />}
-                  onClick={() => navigate(`/research-studio?shared=${item.share_id}`)}
+                  href={`/research-workspace?shared=${item.share_id}`}
                 >
                   Open
                 </Button>,

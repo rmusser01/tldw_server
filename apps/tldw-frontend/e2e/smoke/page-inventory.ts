@@ -289,7 +289,7 @@ const EXTRA_PAGES: PageEntry[] = [
   { path: "/presentation-studio/new", name: "New Presentation", category: "workspace" },
   { path: "/repo2txt", name: "Repo2Txt", category: "workspace" },
   { path: "/workflow-editor", name: "Workflow Editor", category: "workspace" },
-  { path: "/research-studio", name: "Research Studio", category: "workspace" },
+  { path: "/research-workspace", name: "Research Workspace", category: "workspace" },
   {
     path: "/writing-playground",
     name: "Writing Playground",

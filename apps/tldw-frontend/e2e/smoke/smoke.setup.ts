@@ -482,7 +482,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
       "/moderation",
       "/moderation/rules",
       "/chunking-playground",
-      "/research-studio",
+      "/research-workspace",
       "/stt",
       "/speech",
       "/tts",
@@ -637,8 +637,8 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Dense smoke sweeps can rate-limit model metadata probes; treated as environment noise for these routes.",
     owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/content-review", "/claims-review", "/research-studio"]
+    expiresOn: "2026-03-31",
+    routes: ["/content-review", "/claims-review", "/research-workspace"]
   },
   {
     id: "m5-model-metadata-abort-noise",
@@ -646,10 +646,10 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern:
       /Failed to fetch models from tldw:\s+AbortError:\s+signal is aborted without reason/i,
     rationale:
-      "Research Studio can abort in-flight model metadata fetches during route hydration without user-impacting breakage.",
+      "Research Workspace can abort in-flight model metadata fetches during route hydration without user-impacting breakage.",
     owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/research-studio"]
+    expiresOn: "2026-03-31",
+    routes: ["/research-workspace"]
   },
   {
     id: "m5-chatbooks-evaluations-cors-noise",

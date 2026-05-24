@@ -61,10 +61,10 @@ vi.mock("@/routes/route-registry", () => {
       },
       {
         kind: "options",
-        path: "/workspace-playground",
+        path: "/research-workspace",
         nav: {
           group: "workspace",
-          labelToken: "settings:researchStudioNav",
+          labelToken: "settings:researchWorkspaceNav",
           icon: MockIcon,
           beta: true,
           order: 0
@@ -186,7 +186,7 @@ describe("settings nav guardian gating", () => {
   it("keeps only settings-prefixed routes in settings navigation", () => {
     const paths = flattenPaths(undefined)
     expect(paths).toContain("/settings/chat")
-    expect(paths).not.toContain("/workspace-playground")
+    expect(paths).not.toContain("/research-workspace")
   })
 
   it("includes guardian route by default when capabilities are not resolved", () => {
