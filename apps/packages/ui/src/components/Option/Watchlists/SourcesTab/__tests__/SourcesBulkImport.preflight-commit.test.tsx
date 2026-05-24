@@ -240,7 +240,9 @@ describe("SourcesBulkImport preflight and commit", () => {
     fireEvent.change(uploadInput, { target: { files: [file] } })
 
     await waitFor(() => {
-      expect(screen.getByText("Preflight Summary")).toBeInTheDocument()
+      const preflightTitle = screen.getByText("Preflight Summary")
+      expect(preflightTitle).toBeInTheDocument()
+      expect(preflightTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
       expect(screen.getByText(/1 ready, 1 existing duplicates/i)).toBeInTheDocument()
       expect(screen.getByTestId("preflight-table-rows")).toHaveTextContent("2")
     })
@@ -260,6 +262,7 @@ describe("SourcesBulkImport preflight and commit", () => {
       )
       expect(onImported).toHaveBeenCalledTimes(1)
       expect(mocks.messageSuccessMock).toHaveBeenCalledWith("OPML imported")
+      expect(screen.getByText("Import Summary").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
     })
   })
 
