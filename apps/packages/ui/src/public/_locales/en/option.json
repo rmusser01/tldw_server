@@ -3959,8 +3959,8 @@
   "header_modelPlayground": {
     "message": "Model Playground"
   },
-  "header_workspacePlayground": {
-    "message": "Research Studio"
+  "header_researchWorkspace": {
+    "message": "Research Workspace"
   },
   "omniSearch_searchError": {
     "message": "Search failed. Please try again."

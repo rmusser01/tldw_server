@@ -2,20 +2,20 @@
 
 ## Decision
 
-`WorkspacePlayground` is the canonical shell for the roadmap first slice.
+`ResearchWorkspace` is the canonical shell for the roadmap first slice.
 `ChatWorkspace` and `DocumentWorkspace` remain separate routes during this slice
 and are treated as specialized entry points/modes, not deleted or fully merged.
 
 ## Current Entry Points
 
-- `/workspace-playground`: broad research workspace and best candidate for the
+- `/research-workspace`: broad research workspace and best candidate for the
   canonical shell.
 - `/chat-workspace`: chat-first and staged-context workspace.
 - `/document-workspace`: document-focused reading and annotation workspace.
 
 ## Reasons
 
-- WorkspacePlayground already contains sources, selected sources, chat, quick notes,
+- ResearchWorkspace already contains sources, selected sources, chat, quick notes,
   generated artifacts, saved workspaces, source transfer, local persistence, and
   artifact payload offload.
 - ChatWorkspace validates a chat-first route but should not own a separate product model.
@@ -25,7 +25,7 @@ and are treated as specialized entry points/modes, not deleted or fully merged.
 ## First-Slice Boundary
 
 This slice does not consolidate routes. It defines the shared model and implements
-one golden path inside WorkspacePlayground.
+one golden path inside ResearchWorkspace.
 
 ## Server/Local Boundary
 
@@ -36,7 +36,7 @@ artifact status semantics, and persistence behavior between the two.
 
 ## Follow-Up Decisions
 
-- Whether ChatWorkspace becomes a mode inside WorkspacePlayground.
+- Whether ChatWorkspace becomes a mode inside ResearchWorkspace.
 - Whether DocumentWorkspace writes selected documents into workspace sources by default.
 - Which collaboration semantics are required before enterprise pilots.
 - How ACP execution workspaces attach to the canonical workspace without

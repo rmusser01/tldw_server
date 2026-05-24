@@ -74,7 +74,7 @@ export const EXTENSION_ROUTES: ExtensionRouteEntry[] = [
   { kind: "options", path: "/audiobook-studio", name: "Audiobook Studio" },
   { kind: "options", path: "/presentation-studio/start", name: "Presentation Studio Quick Start" },
   { kind: "options", path: "/workflow-editor", name: "Workflow Editor" },
-  { kind: "options", path: "/research-studio", name: "Research Studio" },
+  { kind: "options", path: "/research-workspace", name: "Research Workspace" },
   { kind: "options", path: "/moderation-playground", name: "Moderation Playground" },
   { kind: "options", path: "/admin/server", name: "Admin Server" },
   { kind: "options", path: "/admin/llamacpp", name: "Admin LlamaCpp" },

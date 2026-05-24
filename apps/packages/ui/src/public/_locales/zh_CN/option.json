@@ -2579,8 +2579,8 @@
   "moderationPlayground_subtitle": {
     "message": "家庭安全控制与服务器防护栏集中于一处。"
   },
-  "header_workspacePlayground": {
-    "message": "Model Playground"
+  "header_researchWorkspace": {
+    "message": "Research Workspace"
   },
   "omniSearch_searchError": {
     "message": "搜索失败。请重试。"
@@ -2634,7 +2634,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Workspace Playground"
+    "message": "Model Playground"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"

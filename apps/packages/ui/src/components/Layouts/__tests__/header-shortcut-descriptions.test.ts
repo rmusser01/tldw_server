@@ -16,7 +16,7 @@ describe("header shortcut descriptions", () => {
     "chatbooks-playground",
     "world-books",
     "deep-research",
-    "workspace-playground",
+    "research-workspace",
     "prompt-studio",
     "model-playground",
     "mcp-hub",

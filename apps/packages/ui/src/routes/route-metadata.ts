@@ -105,7 +105,7 @@ export const AUDITED_ROOT_ROUTE_PATHS = [
   "/knowledge",
   "/search",
   "/research",
-  "/workspace-playground",
+  "/research-workspace",
   "/document-workspace",
   "/repo2txt",
   "/model-playground",
@@ -372,8 +372,8 @@ export const ROUTE_METADATA = [
     rationale: "Research run route discovered outside the original smoke inventory."
   }),
   defineRoute({
-    path: "/workspace-playground",
-    label: "Workspace Playground",
+    path: "/research-workspace",
+    label: "Research Workspace",
     group: "workspace",
     surface: "labs_beta",
     availability: webAndExtension,

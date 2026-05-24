@@ -42,9 +42,9 @@ export const FEATURE_FLAGS = {
   /** Use generated fallback as default in media navigation */
   MEDIA_NAVIGATION_GENERATED_FALLBACK_DEFAULT:
     "ff_mediaNavigationGeneratedFallbackDefault",
-  /** Provenance tracking in Research Studio */
+  /** Provenance tracking in Research Workspace */
   RESEARCH_STUDIO_PROVENANCE_V1: "research_studio_provenance_v1",
-  /** Status guardrails in Research Studio */
+  /** Status guardrails in Research Workspace */
   RESEARCH_STUDIO_STATUS_GUARDRAILS_V1:
     "research_studio_status_guardrails_v1"
 } as const

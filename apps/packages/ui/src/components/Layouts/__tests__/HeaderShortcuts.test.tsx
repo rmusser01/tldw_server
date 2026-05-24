@@ -18,7 +18,7 @@ const mockT = vi.hoisted(() => (key: string, fallback?: string) => fallback ?? k
 
 const ALL_SHORTCUT_IDS = [
   "chat", "chat-workspace", "prompts", "prompt-studio", "characters",
-  "chat-dictionaries", "world-books", "deep-research", "workspace-playground",
+  "chat-dictionaries", "world-books", "deep-research", "research-workspace",
   "knowledge-qa", "media", "document-workspace",
   "repo2txt",
   "multi-item-review", "collections",
