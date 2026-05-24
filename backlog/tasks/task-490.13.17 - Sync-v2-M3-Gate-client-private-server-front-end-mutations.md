@@ -4,7 +4,7 @@ title: 'Sync v2 M3: Gate client-private server-front-end mutations'
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-05-24 00:10
+updated_date: 2026-05-24 00:26
 labels: []
 dependencies: []
 documentation:
@@ -47,13 +47,13 @@ Implement Stage 6 Step 4 from the Sync v2 M3 plan: prevent server-origin/server-
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented Stage 6 Step 4 for client-private server-front-end limitations. Added a shared blocker code/message, profile dataset/domain mutation flags, capabilities warning/compatibility flag, and a server-origin fail-closed exception that fires before envelope append or materialization. Notes and Chat endpoint error mappers now return 409 with the stable blocker code. Updated M3 API/design docs and roadmap status.
+Implemented Stage 6 Step 4 for client-private server-front-end limitations. Added a shared blocker code/message, profile dataset/domain mutation flags, capabilities warning/compatibility flag, and a server-origin fail-closed exception that fires before envelope append or materialization. Notes and Chat endpoint error mappers now return 409 with the stable blocker code. Updated M3 API/design docs and roadmap status. Code-review follow-up: added Chat conversation and message endpoint regressions for client_private_v1 409 behavior, including no materialization and no envelope append assertions.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Closed the client-private server-front-end mutation gate for Sync v2 M3. Server-origin writes now refuse client_private_v1 datasets before appending clear server-trusted envelopes; profile/domain status and capabilities advertise the limitation; tests cover direct capture, normal Notes API mapping, profile status, and capabilities warnings. Verification: new red tests failed first for missing symbols, then passed; affected Sync service/profile/server-origin tests passed with 124 passed; full Sync suite passed with 397 passed and 6 warnings; Ruff passed for Sync core/test files and E9/F821 endpoint checks; Bandit report /tmp/bandit_sync_v2_m3_server_frontend_gate.json has 0 results; git diff --check passed.
+Closed the client-private server-front-end mutation gate for Sync v2 M3. Server-origin writes now refuse client_private_v1 datasets before appending clear server-trusted envelopes; profile/domain status and capabilities advertise the limitation; tests cover direct capture, normal Notes API mapping, profile status, capabilities warnings, and Chat conversation/message HTTP 409 behavior. Verification: new red tests failed first for missing symbols, then passed; affected Sync service/profile/server-origin tests passed with 124 passed; full Sync suite passed with 399 passed and 6 warnings after review follow-up; Ruff passed for Sync core/test files and E9/F821 endpoint checks; Bandit report /tmp/bandit_sync_v2_m3_server_frontend_gate.json has 0 results; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

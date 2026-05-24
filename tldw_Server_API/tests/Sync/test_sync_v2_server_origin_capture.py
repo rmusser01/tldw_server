@@ -665,6 +665,87 @@ def test_normal_notes_create_api_reports_client_private_server_frontend_limitati
     ) == []
 
 
+def test_normal_chat_create_api_reports_client_private_server_frontend_limitation(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    character_id = chacha_db.add_character_card({"name": "Assistant"})
+    assert character_id is not None
+    dataset = sync_service.store.list_datasets_for_user("user-1")[0]
+    private_dataset = replace(dataset, encryption_policy="client_private_v1")
+    monkeypatch.setattr(
+        sync_service.store,
+        "list_datasets_for_user",
+        lambda user_id: [private_dataset] if user_id == "user-1" else [],
+    )
+    client = _chat_messages_app(monkeypatch, chacha_db=chacha_db, sync_service=sync_service)
+    idempotency_key = "client-private-chat-create"
+    expected_chat_id = server_origin_object_id("chat.conversation", idempotency_key)
+    assert expected_chat_id is not None
+
+    response = client.post(
+        "/api/v1/chats/",
+        headers={"Idempotency-Key": idempotency_key},
+        json={"character_id": character_id, "title": "API private chat"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error_code"] == CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE
+    assert chacha_db.get_conversation_by_id(expected_chat_id) is None
+    assert sync_service.store.list_envelopes_after(
+        dataset.dataset_id,
+        0,
+        domains=["chat.conversation"],
+        limit=10,
+    ) == []
+
+
+def test_normal_chat_message_api_reports_client_private_server_frontend_limitation(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    character_id = chacha_db.add_character_card({"name": "Assistant"})
+    assert character_id is not None
+    conversation_id = chacha_db.add_conversation(
+        {
+            "id": "chat-existing-private",
+            "character_id": character_id,
+            "title": "Existing direct chat",
+            "client_id": "user-1",
+        }
+    )
+    dataset = sync_service.store.list_datasets_for_user("user-1")[0]
+    private_dataset = replace(dataset, encryption_policy="client_private_v1")
+    monkeypatch.setattr(
+        sync_service.store,
+        "list_datasets_for_user",
+        lambda user_id: [private_dataset] if user_id == "user-1" else [],
+    )
+    client = _chat_messages_app(monkeypatch, chacha_db=chacha_db, sync_service=sync_service)
+    idempotency_key = "client-private-message-create"
+    expected_message_id = server_origin_object_id("chat.message", idempotency_key)
+    assert expected_message_id is not None
+
+    response = client.post(
+        f"/api/v1/chats/{conversation_id}/messages",
+        headers={"Idempotency-Key": idempotency_key},
+        json={"role": "user", "content": "This message cannot be server-origin captured."},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error_code"] == CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE
+    assert chacha_db.get_message_by_id(expected_message_id) is None
+    assert chacha_db.get_messages_for_conversation(conversation_id) == []
+    assert sync_service.store.list_envelopes_after(
+        dataset.dataset_id,
+        0,
+        domains=["chat.message"],
+        limit=10,
+    ) == []
+
+
 def test_active_sync_note_keywords_are_rejected_without_direct_mutation(
     monkeypatch: pytest.MonkeyPatch,
     sync_service: SyncV2Service,
