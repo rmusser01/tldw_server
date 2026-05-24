@@ -1009,7 +1009,7 @@ def test_workspace_source_endpoints_happy_path(workspace_fastapi_app, db):
 
 
 @pytest.mark.integration
-def test_add_workspace_source_enqueues_idempotent_ingest_job(workspace_fastapi_app, db):
+def test_add_workspace_source_does_not_enqueue_unsupported_ingest_job(workspace_fastapi_app, db):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -1050,27 +1050,11 @@ def test_add_workspace_source_enqueues_idempotent_ingest_job(workspace_fastapi_a
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
 
     assert response.status_code == 201, response.text
-    assert len(job_manager.created_jobs) == 1
-    job = job_manager.created_jobs[0]
-    assert job["domain"] == "media_ingest"
-    assert job["queue"] == "default"
-    assert job["job_type"] == "workspace_source_ingest"
-    assert job["owner_user_id"] == "7"
-    assert job["idempotency_key"] == "workspace-source:ws-job-api:src-job-1:55"
-    assert job["payload"] == {
-        "workspace_id": "ws-job-api",
-        "workspace_source_id": "src-job-1",
-        "source_id": "src-job-1",
-        "media_id": 55,
-        "source_type": "pdf",
-        "title": "NotebookLM Migration PDF",
-        "url": "file:///imports/notebooklm.pdf",
-        "requested_stages": ["ingestion", "extraction", "chunking", "indexing"],
-    }
+    assert job_manager.created_jobs == []
 
 
 @pytest.mark.integration
-def test_add_workspace_source_preserves_row_when_job_enqueue_fails(workspace_fastapi_app, db):
+def test_add_workspace_source_ignores_unused_job_manager_override(workspace_fastapi_app, db):
     async def _allow_rate_limit() -> None:
         return None
 
@@ -1105,7 +1089,7 @@ def test_add_workspace_source_preserves_row_when_job_enqueue_fails(workspace_fas
 
 
 @pytest.mark.integration
-def test_add_workspace_source_preserves_row_when_job_manager_dependency_fails(workspace_fastapi_app, db):
+def test_add_workspace_source_does_not_construct_job_manager(workspace_fastapi_app, db):
     async def _allow_rate_limit() -> None:
         return None
 

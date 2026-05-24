@@ -8,7 +8,6 @@ import {
   Button,
   Alert,
   Spin,
-  List,
   Checkbox,
   Empty,
   message,
@@ -1137,59 +1136,69 @@ const SearchTab: React.FC<{
 
       {results.length > 0 && (
         <>
-          <div className="max-h-64 overflow-y-auto rounded border border-border">
-            <List
-              size="small"
-              dataSource={results}
-              renderItem={(item, idx) => (
-                (() => {
-                  const record = item as Record<string, unknown>
-                  const resultUrl = getResultUrl(record)
-                  const resultSnippet = getResultSnippet(record)
-                  const faviconUrl = getFaviconUrl(resultUrl)
-                  return (
-                    <List.Item
-                      className={`cursor-pointer transition hover:bg-surface2 ${
-                        selectedResults.has(idx) ? "bg-primary/10" : ""
-                      }`}
-                      onClick={() => toggleResult(idx)}
-                    >
+          <div
+            className="max-h-64 overflow-y-auto rounded border border-border"
+            role="list"
+          >
+            {results.map((item, idx) => {
+              const record = item as Record<string, unknown>
+              const resultUrl = getResultUrl(record)
+              const resultSnippet = getResultSnippet(record)
+              const faviconUrl = getFaviconUrl(resultUrl)
+              const resultTitle = item.title || resultUrl || `Result ${idx + 1}`
+
+              return (
+                <div
+                  key={`${resultUrl || resultTitle}-${idx}`}
+                  role="listitem"
+                  className={`cursor-pointer p-3 transition hover:bg-surface2 ${
+                    selectedResults.has(idx) ? "bg-primary/10" : ""
+                  }`}
+                  tabIndex={0}
+                  aria-selected={selectedResults.has(idx)}
+                  onClick={() => toggleResult(idx)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleResult(idx)
+                    }
+                  }}
+                >
+                  <div className="flex items-start gap-2">
+                    <Checkbox
+                      checked={selectedResults.has(idx)}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={() => toggleResult(idx)}
+                    />
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-start gap-2">
-                        <Checkbox
-                          checked={selectedResults.has(idx)}
-                          onChange={() => toggleResult(idx)}
-                        />
+                        {faviconUrl ? (
+                          <img
+                            src={faviconUrl}
+                            alt=""
+                            data-testid={`search-result-favicon-${idx}`}
+                            className="mt-0.5 h-4 w-4 shrink-0 rounded"
+                          />
+                        ) : null}
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-start gap-2">
-                            {faviconUrl ? (
-                              <img
-                                src={faviconUrl}
-                                alt=""
-                                data-testid={`search-result-favicon-${idx}`}
-                                className="mt-0.5 h-4 w-4 shrink-0 rounded"
-                              />
-                            ) : null}
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium text-text">
-                                {item.title}
-                              </p>
-                              <p className="truncate text-xs text-text-muted">
-                                {resultUrl}
-                              </p>
-                              {resultSnippet ? (
-                                <p className="mt-0.5 line-clamp-2 text-xs text-text-subtle">
-                                  {resultSnippet}
-                                </p>
-                              ) : null}
-                            </div>
-                          </div>
+                          <p className="truncate text-sm font-medium text-text">
+                            {resultTitle}
+                          </p>
+                          <p className="truncate text-xs text-text-muted">
+                            {resultUrl}
+                          </p>
+                          {resultSnippet ? (
+                            <p className="mt-0.5 line-clamp-2 text-xs text-text-subtle">
+                              {resultSnippet}
+                            </p>
+                          ) : null}
                         </div>
                       </div>
-                    </List.Item>
-                  )
-                })()
-              )}
-            />
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
           </div>
           <Button
             type="primary"
@@ -1467,20 +1476,30 @@ const ExistingTab: React.FC<{
               }
             )}
           </p>
-          <div className="max-h-64 overflow-y-auto rounded border border-border">
-            <List
-              size="small"
-              dataSource={availableMedia}
-              renderItem={(item) => {
+          <div
+            className="max-h-64 overflow-y-auto rounded border border-border"
+            role="list"
+          >
+            {availableMedia.map((item) => {
                 const key = getMediaLibraryItemKey(item)
                 if (key == null) return null
                 const title = item.title || item.name || "Untitled"
                 return (
-                  <List.Item
-                    className={`cursor-pointer transition hover:bg-surface2 ${
+                  <div
+                    key={key}
+                    role="listitem"
+                    className={`cursor-pointer p-3 transition hover:bg-surface2 ${
                       selectedMediaKeys.has(key) ? "bg-primary/10" : ""
                     }`}
+                    tabIndex={0}
+                    aria-selected={selectedMediaKeys.has(key)}
                     onClick={() => toggleMedia(key)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        toggleMedia(key)
+                      }
+                    }}
                   >
                     <div className="flex items-start gap-2">
                       <Checkbox
@@ -1502,10 +1521,9 @@ const ExistingTab: React.FC<{
                         </p>
                       </div>
                     </div>
-                  </List.Item>
+                  </div>
                 )
-              }}
-            />
+              })}
           </div>
           <Button
             type="primary"

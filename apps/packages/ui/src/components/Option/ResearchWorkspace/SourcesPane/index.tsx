@@ -1629,15 +1629,24 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
         footer={null}
         width={680}
       >
-        {previewSource && (
+        {previewSource &&
+          (() => {
+            const previewStatus = statusGuardrailsEnabled
+              ? previewSource.status || "ready"
+              : "ready"
+            const previewStatusLabel =
+              previewStatus === "processing"
+                ? t("playground:sources.statusProcessing", "Processing")
+                : previewStatus === "error"
+                  ? t("playground:sources.statusErrorShort", "Error")
+                  : t("playground:sources.statusReady", "Ready")
+
+            return (
           <div className="space-y-4">
             <div className="rounded border border-border bg-surface2/40 p-3">
               <p className="text-sm font-semibold text-text">{previewSource.title}</p>
               <p className="text-xs capitalize text-text-muted">
-                {previewSource.type} •{" "}
-                {statusGuardrailsEnabled
-                  ? previewSource.status || "ready"
-                  : "ready"}
+                {previewSource.type} • {previewStatusLabel}
               </p>
               {previewSource.url && (
                 <a
@@ -1738,7 +1747,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               )}
             </div>
           </div>
-        )}
+            )
+          })()}
       </Modal>
 
       <AddSourceModal />
