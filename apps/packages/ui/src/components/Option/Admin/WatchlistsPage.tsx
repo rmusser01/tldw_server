@@ -7,7 +7,6 @@ import {
   Form,
   Tag,
   Space,
-  Alert,
   Popconfirm,
   message
 } from "antd"
@@ -15,6 +14,7 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { Alert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 const WatchlistsPage: React.FC = () => {
@@ -239,10 +239,18 @@ const WatchlistsPage: React.FC = () => {
   // ── Render ──
 
   if (adminGuard === "forbidden") {
-    return <Alert type="error" message="Access Denied" description="You don't have permission to access watchlists administration." showIcon />
+    return (
+      <Alert variant="error" title="Access Denied">
+        You don't have permission to access watchlists administration.
+      </Alert>
+    )
   }
   if (adminGuard === "notFound") {
-    return <Alert type="warning" message="Not Available" description="Watchlists administration is not available on this server." showIcon />
+    return (
+      <Alert variant="warning" title="Not Available">
+        Watchlists administration is not available on this server.
+      </Alert>
+    )
   }
 
   return (

@@ -616,28 +616,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/WatchlistsPage.tsx:Alert#antd-alert-watchlistspage-type-error-access-denied-you-d-1m06xt",
-    "path": "src/components/Option/Admin/WatchlistsPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/WatchlistsPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Admin/WatchlistsPage.tsx:Alert#antd-alert-watchlistspage-type-warning-not-available-wat-n7zudo",
-    "path": "src/components/Option/Admin/WatchlistsPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/WatchlistsPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/AgentTasks/index.tsx:Alert#antd-alert-agenttaskspage-type-warning-line-744-ocj46l",
     "path": "src/components/Option/AgentTasks/index.tsx",
     "rule": "antd-product-state-import",
