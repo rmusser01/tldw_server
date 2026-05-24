@@ -14,6 +14,7 @@ import {
   useFlashcardShortcuts,
   useHasCardsQuery,
   useNextDueQuery,
+  useRecentFlashcardReviewSessionsQuery,
   useResetFlashcardSchedulingMutation,
   useReviewAnalyticsSummaryQuery,
   useReviewFlashcardMutation,
@@ -90,7 +91,13 @@ vi.mock("../../hooks", () => ({
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
   useEndFlashcardReviewSessionMutation: vi.fn(),
-  useRecentFlashcardReviewSessionsQuery: vi.fn(),
+  useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn()
+  })),
   useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useUpdateFlashcardMutation: vi.fn(),
   useResetFlashcardSchedulingMutation: vi.fn(),
@@ -202,6 +209,13 @@ describe("ReviewTab study assistant panel", () => {
     } as any)
     vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
     vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn()
+    } as any)
     assistantQueryState = {
       data: {
         thread: {
