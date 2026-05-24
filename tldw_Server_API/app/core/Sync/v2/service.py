@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -2280,22 +2280,37 @@ class SyncV2Service:
                 dataset_id=dataset_id,
                 attachment_id=attachment_id,
             )
-        payload = self._read_blob_payload(blob_store=blob_store, blob=blob)
+        self._validate_blob_storage_metadata(blob_store=blob_store, blob=blob)
         normalized_chunk_size = self._normalize_download_chunk_size(chunk_size)
-        chunks = [
-            SyncBlobDownloadChunk(
-                chunk_index=index,
-                offset_bytes=offset,
-                size_bytes=len(payload[offset : offset + normalized_chunk_size]),
-                chunk_hash=_sha256_bytes(payload[offset : offset + normalized_chunk_size]),
-                download_url=(
-                    f"/api/v1/sync/attachments/{attachment_id}"
-                    f"?dataset_id={dataset_id}&offset={offset}"
-                    f"&size={len(payload[offset : offset + normalized_chunk_size])}"
-                ),
-            )
-            for index, offset in enumerate(range(0, len(payload), normalized_chunk_size))
-        ]
+        hasher = hashlib.sha256()
+        chunks: list[SyncBlobDownloadChunk] = []
+        offset = 0
+        try:
+            for index, payload in enumerate(
+                blob_store.iter_blob(
+                    blob.storage_key,
+                    chunk_size=normalized_chunk_size,
+                )
+            ):
+                hasher.update(payload)
+                chunks.append(
+                    SyncBlobDownloadChunk(
+                        chunk_index=index,
+                        offset_bytes=offset,
+                        size_bytes=len(payload),
+                        chunk_hash=_sha256_bytes(payload),
+                        download_url=(
+                            f"/api/v1/sync/attachments/{attachment_id}"
+                            f"?dataset_id={dataset_id}&offset={offset}"
+                            f"&size={len(payload)}"
+                        ),
+                    )
+                )
+                offset += len(payload)
+        except (OSError, SyncBlobStoreError) as exc:
+            raise SyncStoreError("Sync blob was not found or is not accessible") from exc
+        if offset != blob.size_bytes or "sha256:" + hasher.hexdigest() != blob.payload_hash:
+            raise SyncStoreError("Sync blob storage integrity check failed")
         return SyncBlobDownloadManifest(
             dataset_id=dataset_id,
             attachment_id=attachment_id,
@@ -2306,6 +2321,71 @@ class SyncV2Service:
             payload_hash=blob.payload_hash,
             chunks=chunks,
         )
+
+    def iter_blob_bytes(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        attachment_id: str,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> Iterator[bytes]:
+        """Yield a byte range from an available Sync v2 M2 blob."""
+
+        if offset < 0:
+            raise SyncStoreError("Sync blob download offset is invalid")
+        if size is not None and size < 0:
+            raise SyncStoreError("Sync blob download size is invalid")
+        if size is not None:
+            self._normalize_download_chunk_size(size)
+        blob_store, blob = self._require_download_blob(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            attachment_id=attachment_id,
+        )
+        self._validate_blob_storage_metadata(blob_store=blob_store, blob=blob)
+        return self._iter_blob_storage_range(
+            blob_store=blob_store,
+            storage_key=blob.storage_key,
+            offset=offset,
+            size=size,
+        )
+
+    def blob_download_metadata(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        attachment_id: str,
+    ) -> SyncBlobObject:
+        """Return metadata for an available blob without reading its payload."""
+
+        blob_store, blob = self._require_download_blob(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            attachment_id=attachment_id,
+        )
+        self._validate_blob_storage_metadata(blob_store=blob_store, blob=blob)
+        return blob
+
+    def _iter_blob_storage_range(
+        self,
+        *,
+        blob_store: LocalSyncBlobStore,
+        storage_key: str,
+        offset: int,
+        size: int | None,
+    ) -> Iterator[bytes]:
+        try:
+            yield from blob_store.iter_blob(
+                storage_key,
+                offset=offset,
+                size=size,
+                chunk_size=self.settings.max_chunk_bytes,
+            )
+        except (OSError, SyncBlobStoreError) as exc:
+            raise SyncStoreError("Sync blob was not found or is not accessible") from exc
 
     def read_blob_bytes(
         self,
@@ -2322,18 +2402,15 @@ class SyncV2Service:
             raise SyncStoreError("Sync blob download offset is invalid")
         if size is not None and size < 0:
             raise SyncStoreError("Sync blob download size is invalid")
-        blob_store = self._require_blob_transfer()
-        self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id)
-        blob = self.store.get_blob_object(
-            dataset_id,
-            attachment_id=attachment_id,
-            owner_user_id=user_id,
+        return b"".join(
+            self.iter_blob_bytes(
+                user_id=user_id,
+                dataset_id=dataset_id,
+                attachment_id=attachment_id,
+                offset=offset,
+                size=size,
+            )
         )
-        if blob is None:
-            raise SyncStoreError("Sync blob was not found or is not accessible")
-        payload = self._read_blob_payload(blob_store=blob_store, blob=blob)
-        stop = None if size is None else offset + size
-        return payload[offset:stop]
 
     def list_conflicts(
         self,
@@ -3665,19 +3742,40 @@ class SyncV2Service:
             raise SyncStoreError("Sync blob chunk exceeds the server size limit")
         return normalized
 
-    def _read_blob_payload(
+    def _require_download_blob(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        attachment_id: str,
+    ) -> tuple[LocalSyncBlobStore, SyncBlobObject]:
+        """Return a verified blob-store handle and metadata for byte serving."""
+
+        blob_store = self._require_blob_transfer()
+        self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id)
+        blob = self.store.get_blob_object(
+            dataset_id,
+            attachment_id=attachment_id,
+            owner_user_id=user_id,
+        )
+        if blob is None:
+            raise SyncStoreError("Sync blob was not found or is not accessible")
+        return blob_store, blob
+
+    def _validate_blob_storage_metadata(
         self,
         *,
         blob_store: LocalSyncBlobStore,
         blob: SyncBlobObject,
-    ) -> bytes:
+    ) -> None:
+        """Validate cheap committed-blob metadata before streaming content."""
+
         try:
-            payload = blob_store.read_blob(blob.storage_key)
+            size_bytes = blob_store.blob_size(blob.storage_key)
         except (OSError, SyncBlobStoreError) as exc:
             raise SyncStoreError("Sync blob was not found or is not accessible") from exc
-        if len(payload) != blob.size_bytes or _sha256_bytes(payload) != blob.payload_hash:
+        if size_bytes != blob.size_bytes:
             raise SyncStoreError("Sync blob storage integrity check failed")
-        return payload
 
     def _require_blob_dataset(
         self,

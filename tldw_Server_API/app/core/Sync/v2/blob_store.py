@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
+
+STREAM_CHUNK_SIZE = 64 * 1024
 
 
 class SyncBlobStoreError(ValueError):
@@ -66,9 +69,10 @@ class LocalSyncBlobStore:
                     )
                     if not chunk_path.exists():
                         raise SyncBlobStoreError(f"Missing upload chunk: {chunk_index}")
-                    payload = chunk_path.read_bytes()
-                    hasher.update(payload)
-                    output.write(payload)
+                    with chunk_path.open("rb") as chunk_file:
+                        while chunk := chunk_file.read(STREAM_CHUNK_SIZE):
+                            hasher.update(chunk)
+                            output.write(chunk)
             actual_hash = "sha256:" + hasher.hexdigest()
             if actual_hash != payload_hash:
                 raise SyncBlobStoreError("Sync blob payload hash does not match chunks")
@@ -82,7 +86,42 @@ class LocalSyncBlobStore:
     def read_blob(self, storage_key: str) -> bytes:
         """Read a committed blob by storage key after path-containment checks."""
 
-        return self.resolve_storage_key(storage_key).read_bytes()
+        return b"".join(self.iter_blob(storage_key))
+
+    def iter_blob(
+        self,
+        storage_key: str,
+        *,
+        offset: int = 0,
+        size: int | None = None,
+        chunk_size: int = STREAM_CHUNK_SIZE,
+    ) -> Iterator[bytes]:
+        """Yield a committed blob or byte range in bounded chunks."""
+
+        if offset < 0:
+            raise SyncBlobStoreError("offset must be non-negative")
+        if size is not None and size < 0:
+            raise SyncBlobStoreError("size must be non-negative")
+        if chunk_size < 1:
+            raise SyncBlobStoreError("chunk_size must be positive")
+
+        remaining = size
+        with self.resolve_storage_key(storage_key).open("rb") as blob_file:
+            if offset:
+                blob_file.seek(offset)
+            while remaining is None or remaining > 0:
+                read_size = chunk_size if remaining is None else min(chunk_size, remaining)
+                chunk = blob_file.read(read_size)
+                if not chunk:
+                    break
+                yield chunk
+                if remaining is not None:
+                    remaining -= len(chunk)
+
+    def blob_size(self, storage_key: str) -> int:
+        """Return the size of a committed blob after path-containment checks."""
+
+        return self.resolve_storage_key(storage_key).stat().st_size
 
     def discard_upload(self, upload_id: str) -> None:
         """Remove staged chunks for an upload if present."""
@@ -130,4 +169,4 @@ def _safe_segment(value: str, *, field_name: str) -> str:
     return value
 
 
-__all__ = ["LocalSyncBlobStore", "SyncBlobStoreError"]
+__all__ = ["LocalSyncBlobStore", "STREAM_CHUNK_SIZE", "SyncBlobStoreError"]

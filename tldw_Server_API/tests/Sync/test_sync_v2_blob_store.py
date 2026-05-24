@@ -44,6 +44,40 @@ def test_local_blob_store_commits_verified_chunks_atomically(tmp_path: Path):
     assert not (tmp_path / "sync_blobs" / "_uploads" / "upload-1").exists()
 
 
+def test_local_blob_store_streams_commit_and_read_without_read_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    first = b"a" * 8
+    second = b"b" * 8
+    store.write_upload_chunk(
+        upload_id="upload-1",
+        chunk_index=0,
+        payload=first,
+        expected_hash=_sha256(first),
+    )
+    store.write_upload_chunk(
+        upload_id="upload-1",
+        chunk_index=1,
+        payload=second,
+        expected_hash=_sha256(second),
+    )
+
+    def fail_read_bytes(_path: Path) -> bytes:
+        raise AssertionError("blob store should stream files instead of using read_bytes")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
+
+    final_key = store.commit_upload(
+        upload_id="upload-1",
+        payload_hash=_sha256(first + second),
+        chunk_indexes=[0, 1],
+    )
+
+    assert b"".join(store.iter_blob(final_key, chunk_size=3)) == first + second
+
+
 def test_local_blob_store_rejects_bad_hashes_and_path_escape(tmp_path: Path):
     store = LocalSyncBlobStore(tmp_path / "sync_blobs")
 

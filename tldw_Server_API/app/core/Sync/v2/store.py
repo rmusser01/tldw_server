@@ -38,6 +38,7 @@ from .models import (
     SyncDeviceDomainAckCreate,
     SyncDeviceUpsert,
     SyncDomain,
+    SyncDomainEnvelopeSummary,
     SyncEnvelope,
     SyncEnvelopeCreate,
     SyncKeyRecord,
@@ -208,6 +209,13 @@ class SyncV2Store:
             status=status,
             exclude_device_id=exclude_device_id,
         )
+
+    def summarize_domain_envelopes(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+    ) -> SyncDomainEnvelopeSummary:
+        return self.db.summarize_domain_envelopes(dataset_id, domain)
 
     def list_envelopes_for_entity(
         self,

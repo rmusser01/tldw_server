@@ -1194,6 +1194,12 @@ def test_attachment_download_manifest_and_byte_serving_are_dataset_scoped(
         payload_ciphertext=private_payload.decode("utf-8"),
         payload_hash=_sha256(private_payload),
     )
+    assert service.blob_store is not None
+
+    def fail_read_blob(_storage_key: str) -> bytes:
+        raise AssertionError("download endpoints should stream blob content")
+
+    service.blob_store.read_blob = fail_read_blob  # type: ignore[method-assign]
 
     manifest_response = client.get(
         "/api/v1/sync/attachments/attachment-download/manifest",

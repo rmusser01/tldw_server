@@ -19,6 +19,7 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import ValidationError
 
@@ -1690,13 +1691,12 @@ def download_sync_v2_attachment(
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
     try:
-        manifest = service.blob_download_manifest(
+        blob = service.blob_download_metadata(
             user_id=_sync_user_id(user),
             dataset_id=dataset_id,
             attachment_id=attachment_id,
-            chunk_size=size,
         )
-        payload = service.read_blob_bytes(
+        payload = service.iter_blob_bytes(
             user_id=_sync_user_id(user),
             dataset_id=dataset_id,
             attachment_id=attachment_id,
@@ -1710,12 +1710,12 @@ def download_sync_v2_attachment(
             dataset_id=dataset_id,
             attachment_id=attachment_id,
         ) from exc
-    return Response(
-        content=payload,
-        media_type=manifest.content_type,
+    return StreamingResponse(
+        payload,
+        media_type=blob.content_type,
         headers={
             "Accept-Ranges": "bytes",
-            "X-Sync-Payload-Hash": manifest.payload_hash,
+            "X-Sync-Payload-Hash": blob.payload_hash,
         },
     )
 

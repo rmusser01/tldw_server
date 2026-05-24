@@ -325,7 +325,10 @@ def test_profile_status_reports_profile_and_per_domain_apply_health(tmp_path: Pa
     assert domains["chat.message"].last_apply_result["error_code"] == "projection_failed"
 
 
-def test_profile_status_uses_aggregates_beyond_scan_limit(tmp_path: Path) -> None:
+def test_profile_status_uses_aggregates_beyond_scan_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     service, store = _service(tmp_path, scan_limit=2)
     bootstrapped = service.bootstrap_profile(
         user_id="user-1",
@@ -356,6 +359,11 @@ def test_profile_status_uses_aggregates_beyond_scan_limit(tmp_path: Path) -> Non
                 apply_error_code="projection_failed",
                 apply_error_message=f"projection failed {index}",
             )
+
+    def fail_full_envelope_scan(*_args, **_kwargs):
+        raise AssertionError("profile status should use aggregate envelope queries")
+
+    monkeypatch.setattr(store, "list_envelopes_after", fail_full_envelope_scan)
 
     profile = service.profile_status(
         user_id="user-1",

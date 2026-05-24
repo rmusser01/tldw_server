@@ -639,6 +639,18 @@ class SyncEnvelope:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncDomainEnvelopeSummary:
+    """Aggregate envelope health for one dataset domain."""
+
+    domain: SyncDomain
+    envelope_count: int = 0
+    pending_apply_count: int = 0
+    failed_apply_count: int = 0
+    last_envelope: SyncEnvelope | None = None
+    last_failed_envelope: SyncEnvelope | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SyncObjectState:
     """Materialized latest object state tracked by Sync v2."""
 
@@ -1165,6 +1177,7 @@ __all__ = [
     "SyncDeviceCursor",
     "SyncDeviceUpsert",
     "SyncDomain",
+    "SyncDomainEnvelopeSummary",
     "SyncEnvelope",
     "SyncEnvelopeCreate",
     "SyncEncryptionPolicyMetadata",

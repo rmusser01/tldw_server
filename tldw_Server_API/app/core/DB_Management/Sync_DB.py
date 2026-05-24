@@ -57,6 +57,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceDomainAckCreate,
     SyncDeviceUpsert,
     SyncDomain,
+    SyncDomainEnvelopeSummary,
     SyncEnvelope,
     SyncEnvelopeCreate,
     SyncKeyRecord,
@@ -3122,6 +3123,75 @@ class SyncDatabase:
         params.append(limit)
         result = self.execute(sql, tuple(params))
         return [_envelope_from_row(row) for row in result.rows]
+
+    def summarize_domain_envelopes(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+    ) -> SyncDomainEnvelopeSummary:
+        """Return aggregate envelope health for one dataset domain."""
+
+        with self.backend.transaction() as conn:
+            self._require_dataset_domain(dataset_id, domain, connection=conn)
+            aggregate_row = _first(
+                self.execute(
+                    """
+                    SELECT COUNT(*) AS envelope_count,
+                           COALESCE(
+                               SUM(CASE WHEN apply_status = 'pending' THEN 1 ELSE 0 END),
+                               0
+                           ) AS pending_apply_count,
+                           COALESCE(
+                               SUM(CASE WHEN apply_status = 'failed' THEN 1 ELSE 0 END),
+                               0
+                           ) AS failed_apply_count
+                      FROM sync_envelopes
+                     WHERE dataset_id = ?
+                       AND domain = ?
+                    """,
+                    (dataset_id, domain),
+                    connection=conn,
+                )
+            ) or {}
+            last_row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ?
+                       AND domain = ?
+                     ORDER BY server_sequence DESC
+                     LIMIT 1
+                    """,
+                    (dataset_id, domain),
+                    connection=conn,
+                )
+            )
+            last_failed_row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_envelopes
+                     WHERE dataset_id = ?
+                       AND domain = ?
+                       AND apply_status = 'failed'
+                     ORDER BY server_sequence DESC
+                     LIMIT 1
+                    """,
+                    (dataset_id, domain),
+                    connection=conn,
+                )
+            )
+        return SyncDomainEnvelopeSummary(
+            domain=domain,
+            envelope_count=int(aggregate_row.get("envelope_count") or 0),
+            pending_apply_count=int(aggregate_row.get("pending_apply_count") or 0),
+            failed_apply_count=int(aggregate_row.get("failed_apply_count") or 0),
+            last_envelope=_envelope_from_row(last_row) if last_row is not None else None,
+            last_failed_envelope=(
+                _envelope_from_row(last_failed_row)
+                if last_failed_row is not None
+                else None
+            ),
+        )
 
     def list_envelopes_for_entity(
         self,

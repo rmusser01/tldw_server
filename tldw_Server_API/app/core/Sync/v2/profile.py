@@ -213,7 +213,7 @@ class SyncV2ProfileManager:
         device = self._device_status(user_id, device_id)
         dataset_status = _dataset_status(dataset) if dataset is not None else None
         domain_status = (
-            self._domain_status(user_id=user_id, dataset=dataset)
+            self._domain_status(dataset=dataset)
             if dataset is not None
             else []
         )
@@ -288,20 +288,13 @@ class SyncV2ProfileManager:
     def _domain_status(
         self,
         *,
-        user_id: str,
         dataset: SyncDataset,
     ) -> list[SyncProfileDomainStatus]:
-        stats = self.store.summarize_restore_manifest_dataset(
-            dataset.dataset_id,
-            user_id=user_id,
-            domains=dataset.domains,
-        )
         conflicts = self.store.list_conflicts(dataset.dataset_id, status="unresolved")
         return [
             self._single_domain_status(
                 dataset=dataset,
                 domain=domain,
-                envelope_count=stats.approximate_counts.get(domain, 0),
                 unresolved_conflicts=sum(
                     1 for conflict in conflicts if conflict.domain == domain
                 ),
@@ -314,29 +307,25 @@ class SyncV2ProfileManager:
         *,
         dataset: SyncDataset,
         domain: SyncDomain,
-        envelope_count: int,
         unresolved_conflicts: int,
     ) -> SyncProfileDomainStatus:
-        envelopes = self._all_domain_envelopes(dataset.dataset_id, domain)
-        last = _last_envelope(envelopes)
+        summary = self.store.summarize_domain_envelopes(dataset.dataset_id, domain)
+        last = summary.last_envelope
         last_apply_result = _last_apply_result(last)
-        pending_apply_count = sum(
-            1 for envelope in envelopes if envelope.apply_status == "pending"
-        )
-        failed_apply_count = sum(
-            1 for envelope in envelopes if envelope.apply_status == "failed"
-        )
         return SyncProfileDomainStatus(
             domain=domain,
             last_server_cursor=last.server_cursor if last is not None else 0,
-            envelope_count=envelope_count,
-            pending_apply_count=pending_apply_count,
-            pending_apply=pending_apply_count,
-            failed_apply_count=failed_apply_count,
+            envelope_count=summary.envelope_count,
+            pending_apply_count=summary.pending_apply_count,
+            pending_apply=summary.pending_apply_count,
+            failed_apply_count=summary.failed_apply_count,
             unresolved_conflicts=unresolved_conflicts,
             last_apply_status=last.apply_status if last is not None else None,
             last_apply_result=last_apply_result,
-            repair_status=_repair_status(envelopes, failed_apply_count),
+            repair_status=_repair_status(
+                summary.failed_apply_count,
+                summary.last_failed_envelope,
+            ),
             server_frontend_mutation_enabled=server_frontend_mutation_enabled_for_policy(
                 dataset.encryption_policy
             ),
@@ -344,29 +333,6 @@ class SyncV2ProfileManager:
                 dataset.encryption_policy
             ),
         )
-
-    def _all_domain_envelopes(
-        self,
-        dataset_id: str,
-        domain: SyncDomain,
-    ) -> list[SyncEnvelope]:
-        page_size = max(1, self.scan_limit)
-        cursor = 0
-        envelopes: list[SyncEnvelope] = []
-        while True:
-            page = self.store.list_envelopes_after(
-                dataset_id,
-                cursor,
-                domains=[domain],
-                limit=page_size,
-            )
-            if not page:
-                return envelopes
-            envelopes.extend(page)
-            next_cursor = max(envelope.server_cursor or cursor for envelope in page)
-            if next_cursor <= cursor:
-                return envelopes
-            cursor = next_cursor
 
 
 def _client_version(client_instance: dict[str, Any] | None) -> str | None:
@@ -420,12 +386,6 @@ def _append_warning_once(
     warnings.append(warning)
 
 
-def _last_envelope(envelopes: Sequence[SyncEnvelope]) -> SyncEnvelope | None:
-    if not envelopes:
-        return None
-    return max(envelopes, key=lambda envelope: envelope.server_cursor or 0)
-
-
 def _last_apply_result(envelope: SyncEnvelope | None) -> dict[str, Any]:
     if envelope is None:
         return {}
@@ -446,11 +406,9 @@ def _last_apply_result(envelope: SyncEnvelope | None) -> dict[str, Any]:
 
 
 def _repair_status(
-    envelopes: Sequence[SyncEnvelope],
     failed_apply_count: int,
+    last_failed: SyncEnvelope | None,
 ) -> dict[str, Any]:
-    failed_envelopes = [envelope for envelope in envelopes if envelope.apply_status == "failed"]
-    last_failed = _last_envelope(failed_envelopes)
     result: dict[str, Any] = {
         "status": "repair_needed" if failed_apply_count else "healthy",
         "failed_apply_count": failed_apply_count,
