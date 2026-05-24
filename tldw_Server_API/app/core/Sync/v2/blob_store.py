@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -61,7 +62,7 @@ class LocalSyncBlobStore:
         final_key = f"blobs/sha256/{digest[:2]}/{digest}.blob"
         final_path = self.resolve_storage_key(final_key)
         final_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = final_path.with_suffix(final_path.suffix + ".tmp")
+        temp_path = _commit_temp_path(final_path, digest=digest, upload_segment=upload_segment)
         hasher = hashlib.sha256()
         try:
             with temp_path.open("wb") as output:
@@ -89,14 +90,6 @@ class LocalSyncBlobStore:
         except OSError as exc:
             _discard_temp_path(temp_path)
             raise SyncBlobStoreError("Sync blob upload commit failed") from exc
-        try:
-            shutil.rmtree(self.resolve_storage_key(f"_uploads/{upload_segment}"))
-        except OSError as exc:
-            logger.warning(
-                "Sync blob upload committed but cleanup failed for upload_id={}: {}",
-                upload_id,
-                exc,
-            )
         return final_key
 
     def read_blob(self, storage_key: str) -> bytes:
@@ -190,6 +183,18 @@ def _discard_temp_path(temp_path: Path) -> None:
         temp_path.unlink(missing_ok=True)
     except OSError as exc:
         logger.warning("Failed to remove temporary Sync blob path {}: {}", temp_path, exc)
+
+
+def _commit_temp_path(final_path: Path, *, digest: str, upload_segment: str) -> Path:
+    temp_file = tempfile.NamedTemporaryFile(
+        delete=False,
+        dir=final_path.parent,
+        prefix=f"{digest}.{upload_segment}.",
+        suffix=".tmp",
+    )
+    temp_path = Path(temp_file.name)
+    temp_file.close()
+    return temp_path
 
 
 __all__ = ["LocalSyncBlobStore", "STREAM_CHUNK_SIZE", "SyncBlobStoreError"]

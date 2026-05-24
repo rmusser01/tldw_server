@@ -58,6 +58,7 @@ def sync_service(sync_store: SyncV2Store, tmp_path: Path) -> SyncV2Service:
         [
             StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1}),
             StaticSyncAdapter(domain="attachment.ref", supported_adapter_versions={1}),
+            StaticSyncAdapter(domain="workspaces.source_ref", supported_adapter_versions={1}),
         ]
     )
     service = SyncV2Service(
@@ -273,6 +274,64 @@ def test_retention_dry_run_reports_eligible_candidate_after_all_devices_ack(
     assert dry_run.blocker_counts == {}
     assert dry_run.candidates[0].server_sequence == first.server_sequence
     assert dry_run.candidates[0].blockers == []
+
+
+def test_workspace_retention_blocks_until_ack_scope_is_explicit(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.workspace_access_checker = lambda _user_id, workspace_id, permission: (
+        workspace_id == "workspace-1" and permission == "sync"
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="workspace-dataset",
+        scope_type="workspace",
+        workspace_id="workspace-1",
+        domains=["workspaces.source_ref"],
+    )
+    first = sync_service.push(
+        user_id="user-1",
+        dataset_id="workspace-dataset",
+        device_id="device-1",
+        envelopes=[
+            _note_envelope(
+                dataset_id="workspace-dataset",
+                domain="workspaces.source_ref",
+                client_envelope_id="workspace-note-v1",
+            )
+        ],
+    ).accepted[0]
+    sync_service.push(
+        user_id="user-1",
+        dataset_id="workspace-dataset",
+        device_id="device-1",
+        envelopes=[
+            _note_envelope(
+                dataset_id="workspace-dataset",
+                domain="workspaces.source_ref",
+                client_envelope_id="workspace-note-v2",
+                client_sequence=2,
+                object_revision=2,
+                base_server_cursor=first.server_sequence,
+                base_object_revision=1,
+                base_object_hash="sha256:note-v1",
+                payload_hash="sha256:note-v2",
+            )
+        ],
+    )
+
+    dry_run = sync_service.retention_dry_run(
+        user_id="user-1",
+        dataset_id="workspace-dataset",
+        audit_mode=False,
+        minimum_envelope_age_seconds=0,
+        minimum_tombstone_age_seconds=0,
+        offline_restore_window_seconds=0,
+    )
+
+    assert dry_run.candidates
+    assert "retention_workspace_ack_scope_unknown" in dry_run.candidates[0].blockers
+    assert dry_run.blocker_counts["retention_workspace_ack_scope_unknown"] >= 1
 
 
 def test_retention_dry_run_blocks_candidates_during_offline_restore_window(

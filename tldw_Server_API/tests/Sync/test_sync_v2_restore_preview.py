@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -260,6 +261,44 @@ def test_restore_preview_empty_inventory_returns_safe_applies_ranges_counts_and_
         ("chat.conversation", 2, 2, 1),
         ("chat.message", 3, 3, 1),
     ]
+
+
+def test_restore_preview_paginates_past_scan_limit_without_truncating_domain(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.settings = replace(sync_service.settings, restore_manifest_scan_limit=2)
+    _push(
+        sync_service,
+        _note_envelope(
+            object_id="note-1",
+            client_envelope_id="env-note-1",
+            client_sequence=1,
+            payload_hash="sha256:note-1",
+        ),
+        _note_envelope(
+            object_id="note-2",
+            client_envelope_id="env-note-2",
+            client_sequence=2,
+            payload_hash="sha256:note-2",
+        ),
+        _note_envelope(
+            object_id="note-3",
+            client_envelope_id="env-note-3",
+            client_sequence=3,
+            payload_hash="sha256:note-3",
+        ),
+    )
+
+    preview = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["notes.note"],
+        local_inventory=[],
+    )
+
+    assert [item.object_id for item in preview.safe_applies] == ["note-1", "note-2", "note-3"]
+    assert preview.datasets[0].latest_cursors == {"notes.note": 3}
+    assert preview.envelope_ranges[0].envelope_count == 3
     assert preview.object_conflicts == []
     assert preview.tombstones == []
     assert preview.encryption["policy"] == "server_trusted_v1"
