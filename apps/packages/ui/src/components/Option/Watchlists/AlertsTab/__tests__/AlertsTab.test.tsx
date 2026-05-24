@@ -188,4 +188,31 @@ describe("AlertsTab", () => {
       within(errorAlert as HTMLElement).getByRole("button", { name: "Refresh" })
     ).toBeInTheDocument()
   })
+
+  it("marks the load-error refresh action busy while retrying", async () => {
+    mocks.fetchAlerts.mockRejectedValue(new Error("offline"))
+
+    render(<AlertsTab />)
+
+    const errorTitle = await screen.findByText("Failed to load content alerts")
+    const errorAlert = errorTitle.closest('[data-ds-component="Alert"]') as HTMLElement
+    const refreshButton = within(errorAlert).getByRole("button", { name: "Refresh" })
+    const pendingRules = new Promise(() => {})
+    const pendingAlerts = new Promise(() => {})
+
+    mocks.fetchRules.mockImplementation(() => pendingRules)
+    mocks.fetchAlerts.mockImplementation(() => pendingAlerts)
+
+    fireEvent.click(refreshButton)
+
+    await waitFor(() => {
+      const retryingAlert = screen
+        .getByText("Failed to load content alerts")
+        .closest('[data-ds-component="Alert"]') as HTMLElement
+      const retryingButton = within(retryingAlert).getByRole("button", { name: "Refresh" })
+
+      expect(retryingButton).toHaveAttribute("aria-busy", "true")
+      expect(retryingButton).toBeDisabled()
+    })
+  })
 })

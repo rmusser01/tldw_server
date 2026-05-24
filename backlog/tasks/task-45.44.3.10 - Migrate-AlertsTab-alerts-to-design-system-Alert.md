@@ -4,7 +4,7 @@ title: Migrate AlertsTab alerts to design-system Alert
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-24 01:50'
+updated_date: '2026-05-24 02:00'
 labels:
   - design-system
   - webui
@@ -50,14 +50,15 @@ Continue TASK-45.44.3 by replacing Watchlists AlertsTab AntD Alert product-state
 - Bandit skipped because this slice only touches TypeScript/React test files, JSON baseline metadata, and Backlog task markdown.
 
 - PR: https://github.com/rmusser01/tldw_server/pull/2029
+
+- PR review follow-up: removed the duplicate FINAL_SUMMARY end marker, added a focused retry loading assertion, and kept the load-error Alert visible with a busy Refresh action while retry requests are pending.
+- Review verification: focused AlertsTab Vitest passed 4 tests; product-state guard passed 54 tests; verify:design-system-state passed with 251 total exceptions and 18 Jobs/Scheduler/Watchlists exceptions; git diff --check passed; TypeScript still exits 2 with 347 existing diagnostics and no touched-file matches.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated the AlertsTab boundary guidance and load-error callouts from AntD Alert to the shared design-system Alert primitive, preserved the refresh behavior, added focused design-system marker coverage, and removed the two AlertsTab baseline exceptions. Focused Vitest, product-state guard, design-system verifier, and whitespace checks passed; TypeScript remains blocked by existing unrelated repo-wide diagnostics with no touched-file matches; Bandit was skipped for this UI-only slice.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+Migrated the AlertsTab boundary guidance and load-error callouts from AntD Alert to the shared design-system Alert primitive, preserved retry behavior, added focused design-system marker and retry-busy coverage, removed the two AlertsTab baseline exceptions, and addressed PR review feedback by removing the duplicate task marker. Focused Vitest, product-state guard, design-system verifier, and whitespace checks passed; TypeScript remains blocked by existing unrelated repo-wide diagnostics with no touched-file matches; Bandit was skipped for this UI-only slice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
