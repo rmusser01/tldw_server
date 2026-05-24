@@ -3,23 +3,23 @@ id: TASK-45.44.3
 title: 'Migrate design-system product state: Jobs, Scheduler, and Watchlists'
 status: To Do
 assignee: []
-created_date: '2026-05-14 03:19'
-updated_date: '2026-05-24 01:50'
+created_date: 2026-05-14 03:19
+updated_date: 2026-05-24 01:50
 labels:
-  - design-system
-  - webui
-  - extension
-  - product-state
+- design-system
+- webui
+- extension
+- product-state
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/1660'
-  - >-
-    Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
-  - apps/packages/ui/scripts/design-system-product-state-baseline.json
-  - 'https://github.com/rmusser01/tldw_server/pull/2012'
-  - 'https://github.com/rmusser01/tldw_server/pull/2013'
-  - 'https://github.com/rmusser01/tldw_server/pull/2016'
-  - 'https://github.com/rmusser01/tldw_server/pull/2029'
+- https://github.com/rmusser01/tldw_server/issues/1660
+- Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
+- apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/pull/2012
+- https://github.com/rmusser01/tldw_server/pull/2013
+- https://github.com/rmusser01/tldw_server/pull/2016
+- https://github.com/rmusser01/tldw_server/pull/2029
+- https://github.com/rmusser01/tldw_server/pull/2037
 documentation:
   - |-
     TASK-45.44.3.6 / PR #2012 migrated OutputsTab delivery-issues Alert to the design-system Alert primitive.
@@ -56,6 +56,13 @@ documentation:
       - Jobs/Scheduler/Watchlists exceptions: 20 -> 18
       - AlertsTab target rows: 2 -> 0
     Verification recorded in TASK-45.44.3.10.
+  - |-
+    TASK-45.44.3.11 / PR #2037 migrated TemplateEditor version-drift and visual-repair warning callouts to the design-system Alert primitive.
+    Baseline evidence:
+      - total product-state exceptions: 251 -> 249
+      - Jobs/Scheduler/Watchlists exceptions: 18 -> 16
+      - TemplateEditor target rows: 2 -> 0
+    Verification recorded in TASK-45.44.3.11.
 parent_task_id: TASK-45.44
 priority: medium
 ---
