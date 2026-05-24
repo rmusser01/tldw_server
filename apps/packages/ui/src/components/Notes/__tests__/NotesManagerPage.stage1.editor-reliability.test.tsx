@@ -152,7 +152,7 @@ const updateCalls = () =>
   mockBgRequest.mock.calls.filter(([request]) => {
     const path = String(request?.path || "")
     const method = String(request?.method || "GET").toUpperCase()
-    return path.startsWith("/api/v1/notes/11?expected_version=") && method === "PUT"
+    return path === "/api/v1/notes/11" && method === "PUT"
   })
 
 describe("NotesManagerPage stage 1 editor reliability", () => {
@@ -189,7 +189,7 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
         }
       }
 
-      if (path.startsWith("/api/v1/notes/11?expected_version=") && method === "PUT") {
+      if (path === "/api/v1/notes/11" && method === "PUT") {
         return { id: 11, version: 2 }
       }
 

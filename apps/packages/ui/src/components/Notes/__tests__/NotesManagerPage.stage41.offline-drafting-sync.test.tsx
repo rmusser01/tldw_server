@@ -136,6 +136,28 @@ vi.mock('@/components/Notes/NotesListPanel', () => ({
 
 const OFFLINE_QUEUE_KEY = 'tldw:notesOfflineDraftQueue:v1'
 
+const ensureLocalStorage = () => {
+  if (typeof window.localStorage !== 'undefined') return
+  const storage = new Map<string, string>()
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      clear: () => storage.clear(),
+      getItem: (key: string) => storage.get(key) ?? null,
+      key: (index: number) => Array.from(storage.keys())[index] ?? null,
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      setItem: (key: string, value: string) => {
+        storage.set(key, String(value))
+      },
+      get length() {
+        return storage.size
+      }
+    }
+  })
+}
+
 const renderPage = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -161,12 +183,13 @@ const putUpdateCalls = () =>
   mockBgRequest.mock.calls.filter(([request]) => {
     const path = String(request?.path || '')
     const method = String(request?.method || 'GET').toUpperCase()
-    return path.startsWith('/api/v1/notes/11?expected_version=') && method === 'PUT'
+    return path === '/api/v1/notes/11' && method === 'PUT'
   })
 
 describe('NotesManagerPage stage 41 offline drafting and sync', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    ensureLocalStorage()
     window.localStorage.clear()
     mockOnlineState.value = true
     mockRemoteVersion.value = 1
@@ -204,7 +227,7 @@ describe('NotesManagerPage stage 41 offline drafting and sync', () => {
         }
       }
 
-      if (path.startsWith('/api/v1/notes/11?expected_version=') && method === 'PUT') {
+      if (path === '/api/v1/notes/11' && method === 'PUT') {
         return {
           id: 11,
           version: mockRemoteVersion.value + 1,

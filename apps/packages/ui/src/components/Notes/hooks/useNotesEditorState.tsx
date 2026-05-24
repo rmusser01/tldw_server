@@ -785,11 +785,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             return
           }
           const updated = await bgRequest<any>({
-            path: `/api/v1/notes/${selectedId}?expected_version=${encodeURIComponent(
-              String(expectedVersion)
-            )}` as any,
+            path: `/api/v1/notes/${encodeURIComponent(String(selectedId))}` as any,
             method: 'PUT' as any,
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'expected-version': String(expectedVersion)
+            },
             body: payload
           })
           const updatedKeywordWarning = toKeywordSyncWarning(updated)
@@ -941,11 +942,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
 
         const updated = await bgRequest<any>({
-          path: `/api/v1/notes/${encodedId}?expected_version=${encodeURIComponent(
-            String(expectedVersion)
-          )}` as any,
+          path: `/api/v1/notes/${encodedId}` as any,
           method: 'PUT' as any,
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'expected-version': String(expectedVersion)
+          },
           body: payload
         })
 
