@@ -85,6 +85,9 @@ export interface UseNotesEditorStateDeps {
   editorDisabled: boolean
 }
 
+const noteResourcePath = (id: string | number) =>
+  `/api/v1/notes/${encodeURIComponent(String(id))}`
+
 export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const {
     isOnline,
@@ -370,7 +373,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     clearAssistUndoState()
     setLoadingDetail(true)
     try {
-      const d = await bgRequest<any>({ path: `/api/v1/notes/${id}` as any, method: 'GET' as any })
+      const d = await bgRequest<any>({ path: noteResourcePath(id) as any, method: 'GET' as any })
       const loadedTitle = String(d?.title || `Note ${id}`)
       setSelectedId(id)
       setTitle(String(d?.title || ''))
@@ -546,7 +549,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     const target = noteId ?? selectedId
     if (target == null) return
     try {
-      const detail = await bgRequest<any>({ path: `/api/v1/notes/${target}` as any, method: 'GET' as any })
+      const detail = await bgRequest<any>({ path: noteResourcePath(target) as any, method: 'GET' as any })
       const version = toNoteVersion(detail)
       if (version != null) setSelectedVersion(version)
       setSelectedLastSavedAt(toNoteLastModified(detail))
@@ -765,7 +768,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           if (expectedVersion == null) {
             try {
               const latest = await bgRequest<any>({
-                path: `/api/v1/notes/${selectedId}` as any,
+                path: noteResourcePath(selectedId) as any,
                 method: 'GET' as any
               })
               expectedVersion = toNoteVersion(latest)
@@ -785,7 +788,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             return
           }
           const updated = await bgRequest<any>({
-            path: `/api/v1/notes/${encodeURIComponent(String(selectedId))}` as any,
+            path: noteResourcePath(selectedId) as any,
             method: 'PUT' as any,
             headers: {
               'Content-Type': 'application/json',
@@ -812,7 +815,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           } else if (selectedId != null) {
             try {
               const latest = await bgRequest<any>({
-                path: `/api/v1/notes/${selectedId}` as any,
+                path: noteResourcePath(selectedId) as any,
                 method: 'GET' as any
               })
               setSelectedVersion(toNoteVersion(latest))
@@ -915,9 +918,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           }
         }
 
-        const encodedId = encodeURIComponent(String(draft.noteId))
+        const draftNotePath = noteResourcePath(draft.noteId)
         const remote = await bgRequest<any>({
-          path: `/api/v1/notes/${encodedId}` as any,
+          path: draftNotePath as any,
           method: 'GET' as any
         })
         const remoteVersion = toNoteVersion(remote)
@@ -942,7 +945,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
 
         const updated = await bgRequest<any>({
-          path: `/api/v1/notes/${encodedId}` as any,
+          path: draftNotePath as any,
           method: 'PUT' as any,
           headers: {
             'Content-Type': 'application/json',
@@ -1457,7 +1460,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (saving) return
     try {
       const detail = await bgRequest<any>({
-        path: `/api/v1/notes/${selectedId}` as any,
+        path: noteResourcePath(selectedId) as any,
         method: 'GET' as any
       })
       const remoteVersion = toNoteVersion(detail)
@@ -1842,7 +1845,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
         try {
           const detail = await bgRequest<any>({
-            path: `/api/v1/notes/${encodeURIComponent(noteId)}` as any,
+            path: noteResourcePath(noteId) as any,
             method: 'GET' as any
           })
           return toNoteVersion(detail)

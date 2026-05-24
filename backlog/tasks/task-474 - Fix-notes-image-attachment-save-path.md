@@ -29,6 +29,7 @@ Investigate and fix user-reported failure saving a note after attaching an image
 - [x] #2 Frontend note update requests send the optimistic lock in the format accepted by the backend.
 - [x] #3 Targeted frontend tests pass.
 - [x] #4 Touched scope is checked with Bandit where applicable, or documented if no Python scope changed.
+- [x] #5 PR #2046 review comments about unencoded note-id refresh requests are addressed.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -37,12 +38,14 @@ Investigate and fix user-reported failure saving a note after attaching an image
 Root cause: NotesManagerPage sent expected_version as a query parameter on PUT /api/v1/notes/{id}, but the backend requires expected-version as a header. Image attachment upload succeeded and inserted markdown, but the next save hit the broken existing-note update path.
 
 Fix: send existing-note save and offline draft sync updates to /api/v1/notes/{id} with the expected-version header. No Python files were touched, so Bandit is not applicable for this task.
+
+Review follow-up: centralized note resource path construction with encodeURIComponent so load, reload, expected-version fallback, save refresh, freshness checks, offline sync, and attachment expected-version lookups all encode note ids consistently.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed notes image attachment save failure by aligning existing-note save requests with the backend optimistic-lock header contract. Added regression coverage for saving inserted image attachment markdown and updated related notes save/conflict/offline tests. Verification: bunx vitest run the six touched NotesManagerPage test files -- 6 files, 17 tests passed. Touched-file git diff --check passed. Repo-wide git diff --check still reports an unrelated pre-existing trailing whitespace issue in Docs/Design/Agents.md.
+Fixed notes image attachment save failure by aligning existing-note save requests with the backend optimistic-lock header contract. Added regression coverage for saving inserted image attachment markdown and reserved-character note ids, and updated related notes save/conflict/offline tests. PR #2046 review follow-up now encodes note ids consistently across the hook's note-resource GET and PUT paths. Verification: bunx vitest run the six touched NotesManagerPage test files -- 6 files, 18 tests passed. Touched-file git diff --check passed. Repo-wide git diff --check still reports an unrelated pre-existing trailing whitespace issue in Docs/Design/Agents.md.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
