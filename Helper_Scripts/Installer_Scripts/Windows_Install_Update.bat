@@ -45,7 +45,10 @@ if exist "%install_dir%" (
 call :cleanup
 call :log "Installation/Update process completed"
 echo Installation/Update completed successfully!
-echo To run TLDW, use the run_tldw.bat script.
+echo To launch tldw_server, use Windows_Run_tldw.bat:
+echo   Windows_Run_tldw.bat all    ^(API + WebUI^)
+echo   Windows_Run_tldw.bat api    ^(API only^)
+echo   Windows_Run_tldw.bat webui  ^(WebUI only^)
 pause
 exit /b 0
 
