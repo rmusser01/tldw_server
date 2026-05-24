@@ -169,7 +169,7 @@ describe("ServerAdminPage media budget diagnostics", () => {
     expect(timeoutMessage).toBeTruthy()
 
     const retryButton = within(
-      timeoutMessage.closest(".ant-alert") as HTMLElement
+      timeoutMessage.closest("section") as HTMLElement
     ).getByRole("button", { name: "Retry" })
     fireEvent.click(retryButton)
 
