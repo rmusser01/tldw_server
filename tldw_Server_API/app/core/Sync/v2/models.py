@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Internal storage models for Sync v2 M1."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -706,6 +707,7 @@ class SyncKeyRecordCreate:
     kdf_metadata: dict[str, Any] = field(default_factory=dict)
     recovery_hint: str | None = None
     rotation_of_key_record_id: str | None = None
+    rotation_source_key_record_ids: tuple[str, ...] = ()
     revoked_at: str | None = None
     encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
     key_epoch: int = 1
@@ -715,6 +717,11 @@ class SyncKeyRecordCreate:
     rewrap_status: SyncKeyRewrapStatus = "not_required"
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "rotation_source_key_record_ids",
+            _normalize_key_record_source_ids(self.rotation_source_key_record_ids),
+        )
         _validate_key_record_rotation_metadata(
             encryption_policy=self.encryption_policy,
             key_epoch=self.key_epoch,
@@ -738,6 +745,7 @@ class SyncKeyRecord:
     recovery_hint: str | None
     rotation_of_key_record_id: str | None
     created_at: str
+    rotation_source_key_record_ids: tuple[str, ...] = ()
     revoked_at: str | None = None
     encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
     key_epoch: int = 1
@@ -747,6 +755,11 @@ class SyncKeyRecord:
     rewrap_status: SyncKeyRewrapStatus = "not_required"
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "rotation_source_key_record_ids",
+            _normalize_key_record_source_ids(self.rotation_source_key_record_ids),
+        )
         _validate_key_record_rotation_metadata(
             encryption_policy=self.encryption_policy,
             key_epoch=self.key_epoch,
@@ -754,6 +767,18 @@ class SyncKeyRecord:
             wrapped_for=self.wrapped_for,
             rewrap_status=self.rewrap_status,
         )
+
+
+def _normalize_key_record_source_ids(source_ids: Sequence[str] | None) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                str(source_id).strip()
+                for source_id in source_ids or ()
+                if str(source_id).strip()
+            }
+        )
+    )
 
 
 def _validate_key_record_rotation_metadata(

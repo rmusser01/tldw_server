@@ -2252,57 +2252,12 @@ class SyncV2Service:
             kdf_metadata=kdf_metadata,
             rotation_of_key_record_id=None,
         )
-        new_key_record_id = f"key-{clean_rotation_id}"
-        existing_records = self.store.list_key_records(
-            dataset.dataset_id,
-            user_id=user_id,
-            key_purpose=SYNC_DATASET_RECOVERY_KEY_PURPOSE,
-        )
-        existing_new_record = next(
-            (
-                record
-                for record in existing_records
-                if record.key_record_id == new_key_record_id
-            ),
-            None,
-        )
-        retained_range = self.store.get_dataset_envelope_range(dataset.dataset_id)
-        if existing_new_record is not None:
-            self._validate_existing_key_rotation_record(
-                existing_new_record,
-                target_encryption_policy=target_encryption_policy,
-                wrapped_key_blob=wrapped_key_blob,
-                kdf_metadata=kdf_metadata,
-                wrapped_for=wrapped_for,
-                rewrap_status=rewrap_status,
-            )
-            source_records = self._existing_key_rotation_sources(
-                existing_records=existing_records,
-                existing_new_record=existing_new_record,
-                source_key_record_ids=source_key_record_ids,
-            )
-            return self._key_rotation_result_from_records(
-                dataset_id=dataset.dataset_id,
-                target_encryption_policy=target_encryption_policy,
-                next_key_epoch=existing_new_record.key_epoch,
-                active_from_server_sequence=existing_new_record.active_from_server_sequence or 1,
-                retained_range=retained_range,
-                source_records=source_records,
-                new_record=existing_new_record,
-                rotation_id=clean_rotation_id,
-                committed=True,
-            )
-
-        preview = self.preview_key_rotation(
+        new_key_record_id = self._key_rotation_record_id(
             user_id=user_id,
             dataset_id=dataset.dataset_id,
-            target_encryption_policy=target_encryption_policy,
-            source_key_record_ids=source_key_record_ids,
+            rotation_id=clean_rotation_id,
         )
-        if not preview.can_commit:
-            self._raise_invalid_key_rotation()
-        source_ids = [record.key_record_id for record in preview.affected_key_records]
-        new_record, superseded_records = self.store.commit_key_rotation(
+        new_record, superseded_records, retained_range = self.store.commit_key_rotation(
             SyncKeyRecordCreate(
                 key_record_id=new_key_record_id,
                 dataset_id=dataset.dataset_id,
@@ -2311,14 +2266,11 @@ class SyncV2Service:
                 wrapped_key_blob=wrapped_key_blob,
                 kdf_metadata=dict(kdf_metadata or {}),
                 recovery_hint=recovery_hint,
-                rotation_of_key_record_id=source_ids[0] if source_ids else None,
                 encryption_policy=target_encryption_policy,
-                key_epoch=preview.next_key_epoch,
-                active_from_server_sequence=preview.active_from_server_sequence,
                 wrapped_for=wrapped_for,
                 rewrap_status=rewrap_status,
             ),
-            source_key_record_ids=source_ids,
+            source_key_record_ids=source_key_record_ids or [],
             superseded_at=self.clock(),
         )
         return self._key_rotation_result_from_records(
@@ -2381,6 +2333,11 @@ class SyncV2Service:
     @staticmethod
     def _raise_invalid_key_rotation() -> None:
         raise SyncStoreError("Sync key rotation is invalid")
+
+    @staticmethod
+    def _key_rotation_record_id(*, user_id: str, dataset_id: str, rotation_id: str) -> str:
+        namespace = f"{user_id}\0{dataset_id}\0{rotation_id}".encode()
+        return f"key-rotation-{hashlib.sha256(namespace).hexdigest()[:32]}"
 
     @staticmethod
     def _key_rotation_record_summary(record: SyncKeyRecord) -> SyncKeyRotationKeyRecord:

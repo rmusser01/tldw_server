@@ -395,7 +395,7 @@ class SyncV2Store:
         *,
         source_key_record_ids: Sequence[str],
         superseded_at: str,
-    ) -> tuple[SyncKeyRecord, list[SyncKeyRecord]]:
+    ) -> tuple[SyncKeyRecord, list[SyncKeyRecord], SyncKeyRotationEnvelopeRange]:
         return self.db.commit_key_rotation(
             record,
             source_key_record_ids=source_key_record_ids,

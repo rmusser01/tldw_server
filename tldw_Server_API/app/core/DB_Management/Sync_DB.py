@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -321,6 +322,7 @@ CREATE TABLE IF NOT EXISTS sync_key_records (
     kdf_metadata_json TEXT NOT NULL DEFAULT '{}',
     recovery_hint TEXT,
     rotation_of_key_record_id TEXT,
+    rotation_source_key_record_ids_json TEXT NOT NULL DEFAULT '[]',
     encryption_policy TEXT NOT NULL DEFAULT 'server_trusted_v1',
     key_epoch INTEGER NOT NULL DEFAULT 1,
     active_from_server_sequence INTEGER,
@@ -665,6 +667,7 @@ CREATE TABLE IF NOT EXISTS sync_key_records (
     kdf_metadata_json TEXT NOT NULL DEFAULT '{}',
     recovery_hint TEXT,
     rotation_of_key_record_id TEXT,
+    rotation_source_key_record_ids_json TEXT NOT NULL DEFAULT '[]',
     encryption_policy TEXT NOT NULL DEFAULT 'server_trusted_v1',
     key_epoch INTEGER NOT NULL DEFAULT 1,
     active_from_server_sequence INTEGER,
@@ -825,6 +828,35 @@ def _optional_int_from_storage(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _key_rotation_source_ids_from_storage(value: str | None) -> tuple[str, ...]:
+    decoded = decode_json(value, default=[])
+    if not isinstance(decoded, list):
+        return ()
+    return tuple(
+        sorted(
+            {
+                str(source_id).strip()
+                for source_id in decoded
+                if str(source_id).strip()
+            }
+        )
+    )
+
+
+def _canonical_key_rotation_source_ids(
+    source_key_record_ids: Sequence[str] | None,
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                str(source_id).strip()
+                for source_id in source_key_record_ids or ()
+                if str(source_id).strip()
+            }
+        )
+    )
 
 
 def _parse_iso_datetime(value: str) -> datetime:
@@ -1118,6 +1150,9 @@ def _key_record_from_row(row: dict[str, Any]) -> SyncKeyRecord:
         kdf_metadata=decode_json(row.get("kdf_metadata_json"), default={}),
         recovery_hint=row.get("recovery_hint"),
         rotation_of_key_record_id=row.get("rotation_of_key_record_id"),
+        rotation_source_key_record_ids=_key_rotation_source_ids_from_storage(
+            row.get("rotation_source_key_record_ids_json")
+        ),
         created_at=row["created_at"],
         revoked_at=row.get("revoked_at"),
         encryption_policy=row.get("encryption_policy") or DEFAULT_M1_ENCRYPTION_POLICY,
@@ -1368,6 +1403,7 @@ def _key_record_fingerprint_from_create(record: SyncKeyRecordCreate) -> dict[str
         "kdf_metadata": record.kdf_metadata,
         "recovery_hint": record.recovery_hint,
         "rotation_of_key_record_id": record.rotation_of_key_record_id,
+        "rotation_source_key_record_ids": record.rotation_source_key_record_ids,
         "revoked_at": record.revoked_at,
         "encryption_policy": record.encryption_policy,
         "key_epoch": record.key_epoch,
@@ -1389,6 +1425,9 @@ def _key_record_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "kdf_metadata": decode_json(row.get("kdf_metadata_json"), default={}),
         "recovery_hint": row.get("recovery_hint"),
         "rotation_of_key_record_id": row.get("rotation_of_key_record_id"),
+        "rotation_source_key_record_ids": _key_rotation_source_ids_from_storage(
+            row.get("rotation_source_key_record_ids_json")
+        ),
         "revoked_at": row.get("revoked_at"),
         "encryption_policy": row.get("encryption_policy") or DEFAULT_M1_ENCRYPTION_POLICY,
         "key_epoch": int(row.get("key_epoch") or 1),
@@ -1399,6 +1438,26 @@ def _key_record_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "wrapped_for": row.get("wrapped_for") or "recovery",
         "rewrap_status": row.get("rewrap_status") or "not_required",
     }
+
+
+def _key_rotation_record_matches_request(
+    existing: SyncKeyRecord,
+    requested: SyncKeyRecordCreate,
+) -> bool:
+    return (
+        existing.key_record_id == requested.key_record_id
+        and existing.dataset_id == requested.dataset_id
+        and existing.user_id == requested.user_id
+        and existing.device_id == requested.device_id
+        and existing.key_purpose == requested.key_purpose
+        and existing.wrapped_key_blob == requested.wrapped_key_blob
+        and existing.kdf_metadata == requested.kdf_metadata
+        and existing.recovery_hint == requested.recovery_hint
+        and existing.encryption_policy == requested.encryption_policy
+        and existing.wrapped_for == requested.wrapped_for
+        and existing.rewrap_status == requested.rewrap_status
+        and existing.revoked_at == requested.revoked_at
+    )
 
 
 def _device_authorization_fingerprint_from_create(
@@ -3706,11 +3765,11 @@ class SyncDatabase:
                 INSERT INTO sync_key_records (
                     key_record_id, dataset_id, user_id, device_id, key_purpose,
                     wrapped_key_blob, kdf_metadata_json, recovery_hint,
-                    rotation_of_key_record_id, encryption_policy, key_epoch,
-                    active_from_server_sequence, superseded_at, wrapped_for,
-                    rewrap_status, created_at, revoked_at
+                    rotation_of_key_record_id, rotation_source_key_record_ids_json,
+                    encryption_policy, key_epoch, active_from_server_sequence,
+                    superseded_at, wrapped_for, rewrap_status, created_at, revoked_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (key_record_id) DO NOTHING
                 """,
                 (
@@ -3723,6 +3782,7 @@ class SyncDatabase:
                     encode_json(record.kdf_metadata, default={}),
                     record.recovery_hint,
                     record.rotation_of_key_record_id,
+                    encode_json(record.rotation_source_key_record_ids, default=[]),
                     record.encryption_policy,
                     record.key_epoch,
                     record.active_from_server_sequence,
@@ -3777,23 +3837,41 @@ class SyncDatabase:
         result = self.execute(sql, tuple(params))
         return [_key_record_from_row(row) for row in result.rows]
 
-    def get_dataset_envelope_range(self, dataset_id: str) -> SyncKeyRotationEnvelopeRange:
-        with self.backend.transaction() as conn:
-            self._require_dataset(dataset_id, connection=conn)
-            row = _first(
-                self.execute(
-                    """
-                    SELECT MIN(server_sequence) AS from_server_sequence,
-                           MAX(server_sequence) AS through_server_sequence,
-                           COUNT(*) AS envelope_count
-                      FROM sync_envelopes
-                     WHERE dataset_id = ?
-                       AND status = 'accepted'
-                    """,
-                    (dataset_id,),
-                    connection=conn,
-                )
-            ) or {}
+    def _dataset_envelope_range(
+        self,
+        dataset_id: str,
+        *,
+        connection: Any,
+        through_server_sequence: int | None = None,
+    ) -> SyncKeyRotationEnvelopeRange:
+        params: list[Any] = [dataset_id]
+        if through_server_sequence is not None:
+            params.append(through_server_sequence)
+            sql = """
+                SELECT MIN(server_sequence) AS from_server_sequence,
+                       MAX(server_sequence) AS through_server_sequence,
+                       COUNT(*) AS envelope_count
+                  FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND status = 'accepted'
+                   AND server_sequence <= ?
+            """
+        else:
+            sql = """
+                SELECT MIN(server_sequence) AS from_server_sequence,
+                       MAX(server_sequence) AS through_server_sequence,
+                       COUNT(*) AS envelope_count
+                  FROM sync_envelopes
+                 WHERE dataset_id = ?
+                   AND status = 'accepted'
+            """
+        row = _first(
+            self.execute(
+                sql,
+                tuple(params),
+                connection=connection,
+            )
+        ) or {}
         return SyncKeyRotationEnvelopeRange(
             from_server_sequence=_optional_int_from_storage(
                 row.get("from_server_sequence")
@@ -3804,41 +3882,52 @@ class SyncDatabase:
             envelope_count=int(row.get("envelope_count") or 0),
         )
 
+    def get_dataset_envelope_range(self, dataset_id: str) -> SyncKeyRotationEnvelopeRange:
+        with self.backend.transaction() as conn:
+            self._require_dataset(dataset_id, connection=conn)
+            return self._dataset_envelope_range(dataset_id, connection=conn)
+
     def commit_key_rotation(
         self,
         record: SyncKeyRecordCreate,
         *,
         source_key_record_ids: Sequence[str],
         superseded_at: str,
-    ) -> tuple[SyncKeyRecord, list[SyncKeyRecord]]:
-        source_ids = list(dict.fromkeys(str(item).strip() for item in source_key_record_ids))
-        source_ids = [item for item in source_ids if item]
-        if not source_ids:
-            raise SyncStoreError("Sync key rotation is invalid")
+    ) -> tuple[SyncKeyRecord, list[SyncKeyRecord], SyncKeyRotationEnvelopeRange]:
+        requested_source_ids = _canonical_key_rotation_source_ids(source_key_record_ids)
 
-        source_id_set = set(source_ids)
+        def source_rows_for_ids(source_ids: Sequence[str], *, connection: Any) -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = []
+            for source_id in source_ids:
+                row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_key_records
+                         WHERE dataset_id = ?
+                           AND user_id = ?
+                           AND key_purpose = ?
+                           AND key_record_id = ?
+                        """,
+                        (
+                            record.dataset_id,
+                            record.user_id,
+                            record.key_purpose,
+                            source_id,
+                        ),
+                        connection=connection,
+                    )
+                )
+                if row is not None:
+                    rows.append(row)
+            return rows
+
         with self.backend.transaction() as conn:
             self._require_dataset(record.dataset_id, connection=conn)
-            source_rows = [
-                row
-                for row in self.execute(
-                    """
-                SELECT * FROM sync_key_records
-                 WHERE dataset_id = ?
-                   AND user_id = ?
-                   AND key_purpose = ?
-                """,
-                    (
-                        record.dataset_id,
-                        record.user_id,
-                        record.key_purpose,
-                    ),
+            if self.backend_type == BackendType.POSTGRESQL:
+                self.execute(
+                    "LOCK TABLE sync_envelopes, sync_key_records IN SHARE ROW EXCLUSIVE MODE",
                     connection=conn,
-                ).rows
-                if row["key_record_id"] in source_id_set
-            ]
-            if len(source_rows) != len(source_ids):
-                raise SyncStoreError("Sync key rotation is invalid")
+                )
 
             existing = _first(
                 self.execute(
@@ -3848,80 +3937,55 @@ class SyncDatabase:
                 )
             )
             if existing is not None:
-                if (
-                    _key_record_fingerprint_from_row(existing)
-                    != _key_record_fingerprint_from_create(record)
-                ):
+                existing_record = _key_record_from_row(existing)
+                if not _key_rotation_record_matches_request(existing_record, record):
                     raise SyncIdempotencyConflictError(
                         "Sync key rotation ID was reused with different key material"
                     )
-            else:
-                if any(
-                    row.get("revoked_at") is not None
-                    or row.get("superseded_at") is not None
-                    for row in source_rows
+                manifest_source_ids = existing_record.rotation_source_key_record_ids
+                if (
+                    not manifest_source_ids
+                    and existing_record.rotation_of_key_record_id is not None
                 ):
+                    manifest_source_ids = (existing_record.rotation_of_key_record_id,)
+                if not manifest_source_ids:
                     raise SyncStoreError("Sync key rotation is invalid")
-                self.execute(
-                    """
-                    INSERT INTO sync_key_records (
-                        key_record_id, dataset_id, user_id, device_id, key_purpose,
-                        wrapped_key_blob, kdf_metadata_json, recovery_hint,
-                        rotation_of_key_record_id, encryption_policy, key_epoch,
-                        active_from_server_sequence, superseded_at, wrapped_for,
-                        rewrap_status, created_at, revoked_at
+                if requested_source_ids and requested_source_ids != manifest_source_ids:
+                    requested_rows = source_rows_for_ids(requested_source_ids, connection=conn)
+                    if len(requested_rows) != len(requested_source_ids):
+                        raise SyncStoreError("Sync key rotation is invalid")
+                    raise SyncIdempotencyConflictError(
+                        "Sync key rotation source set changed for an existing rotation"
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        record.key_record_id,
-                        record.dataset_id,
-                        record.user_id,
-                        record.device_id,
-                        record.key_purpose,
-                        record.wrapped_key_blob,
-                        encode_json(record.kdf_metadata, default={}),
-                        record.recovery_hint,
-                        record.rotation_of_key_record_id,
-                        record.encryption_policy,
-                        record.key_epoch,
-                        record.active_from_server_sequence,
-                        record.superseded_at,
-                        record.wrapped_for,
-                        record.rewrap_status,
-                        utcnow_iso(),
-                        record.revoked_at,
-                    ),
+                source_rows = source_rows_for_ids(manifest_source_ids, connection=conn)
+                if len(source_rows) != len(manifest_source_ids):
+                    raise SyncStoreError("Sync key rotation is invalid")
+                retained_range = self._dataset_envelope_range(
+                    record.dataset_id,
                     connection=conn,
+                    through_server_sequence=(existing_record.active_from_server_sequence or 1) - 1,
                 )
-                for source_id in source_ids:
+                return (
+                    existing_record,
+                    [_key_record_from_row(row) for row in source_rows],
+                    retained_range,
+                )
+
+            if requested_source_ids:
+                source_ids = requested_source_ids
+                source_rows = source_rows_for_ids(source_ids, connection=conn)
+            else:
+                source_rows = list(
                     self.execute(
                         """
-                    UPDATE sync_key_records
-                       SET superseded_at = ?
-                     WHERE dataset_id = ?
-                       AND user_id = ?
-                       AND key_record_id = ?
-                    """,
-                        (superseded_at, record.dataset_id, record.user_id, source_id),
-                        connection=conn,
-                    )
-                existing = _first(
-                    self.execute(
-                        "SELECT * FROM sync_key_records WHERE key_record_id = ?",
-                        (record.key_record_id,),
-                        connection=conn,
-                    )
-                )
-                source_rows = [
-                    row
-                    for row in self.execute(
-                        """
-                    SELECT * FROM sync_key_records
-                     WHERE dataset_id = ?
-                       AND user_id = ?
-                       AND key_purpose = ?
-                    """,
+                        SELECT * FROM sync_key_records
+                         WHERE dataset_id = ?
+                           AND user_id = ?
+                           AND key_purpose = ?
+                           AND revoked_at IS NULL
+                           AND superseded_at IS NULL
+                         ORDER BY key_record_id ASC
+                        """,
                         (
                             record.dataset_id,
                             record.user_id,
@@ -3929,13 +3993,102 @@ class SyncDatabase:
                         ),
                         connection=conn,
                     ).rows
-                    if row["key_record_id"] in source_id_set
-                ]
+                )
+                source_ids = tuple(row["key_record_id"] for row in source_rows)
+            if not source_ids or len(source_rows) != len(source_ids):
+                raise SyncStoreError("Sync key rotation is invalid")
+            if any(
+                row.get("revoked_at") is not None or row.get("superseded_at") is not None
+                for row in source_rows
+            ):
+                raise SyncStoreError("Sync key rotation is invalid")
 
-        source_row_by_id = {row["key_record_id"]: row for row in source_rows}
+            retained_range = self._dataset_envelope_range(record.dataset_id, connection=conn)
+            active_from = (retained_range.through_server_sequence or 0) + 1
+            epoch_row = _first(
+                self.execute(
+                    """
+                    SELECT MAX(key_epoch) AS highest_epoch
+                      FROM sync_key_records
+                     WHERE dataset_id = ?
+                       AND user_id = ?
+                       AND key_purpose = ?
+                    """,
+                    (record.dataset_id, record.user_id, record.key_purpose),
+                    connection=conn,
+                )
+            ) or {}
+            record_to_store = replace(
+                record,
+                rotation_of_key_record_id=source_ids[0],
+                rotation_source_key_record_ids=tuple(source_ids),
+                key_epoch=max(int(epoch_row.get("highest_epoch") or 0) + 1, 1),
+                active_from_server_sequence=active_from,
+            )
+            self.execute(
+                """
+                INSERT INTO sync_key_records (
+                    key_record_id, dataset_id, user_id, device_id, key_purpose,
+                    wrapped_key_blob, kdf_metadata_json, recovery_hint,
+                    rotation_of_key_record_id, rotation_source_key_record_ids_json,
+                    encryption_policy, key_epoch, active_from_server_sequence,
+                    superseded_at, wrapped_for, rewrap_status, created_at, revoked_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record_to_store.key_record_id,
+                    record_to_store.dataset_id,
+                    record_to_store.user_id,
+                    record_to_store.device_id,
+                    record_to_store.key_purpose,
+                    record_to_store.wrapped_key_blob,
+                    encode_json(record_to_store.kdf_metadata, default={}),
+                    record_to_store.recovery_hint,
+                    record_to_store.rotation_of_key_record_id,
+                    encode_json(record_to_store.rotation_source_key_record_ids, default=[]),
+                    record_to_store.encryption_policy,
+                    record_to_store.key_epoch,
+                    record_to_store.active_from_server_sequence,
+                    record_to_store.superseded_at,
+                    record_to_store.wrapped_for,
+                    record_to_store.rewrap_status,
+                    utcnow_iso(),
+                    record_to_store.revoked_at,
+                ),
+                connection=conn,
+            )
+            for source_id in source_ids:
+                self.execute(
+                    """
+                UPDATE sync_key_records
+                   SET superseded_at = ?
+                 WHERE dataset_id = ?
+                   AND user_id = ?
+                   AND key_record_id = ?
+                """,
+                    (superseded_at, record.dataset_id, record.user_id, source_id),
+                    connection=conn,
+                )
+            existing = _first(
+                self.execute(
+                    "SELECT * FROM sync_key_records WHERE key_record_id = ?",
+                    (record.key_record_id,),
+                    connection=conn,
+                )
+            )
+            if existing is None:
+                raise SyncStoreError(
+                    "Sync key rotation insert did not produce a retrievable record"
+                )
+            source_rows = source_rows_for_ids(source_ids, connection=conn)
+            if len(source_rows) != len(source_ids):
+                raise SyncStoreError("Sync key rotation is invalid")
+
         return (
             _key_record_from_row(existing),
-            [_key_record_from_row(source_row_by_id[source_id]) for source_id in source_ids],
+            [_key_record_from_row(row) for row in source_rows],
+            retained_range,
         )
 
     def store_attachment(self, attachment: SyncAttachmentCreate) -> SyncAttachment:
@@ -5053,6 +5206,7 @@ class SyncDatabase:
             ("key_epoch", "INTEGER NOT NULL DEFAULT 1"),
             ("active_from_server_sequence", "INTEGER"),
             ("superseded_at", superseded_type),
+            ("rotation_source_key_record_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("wrapped_for", "TEXT NOT NULL DEFAULT 'recovery'"),
             ("rewrap_status", "TEXT NOT NULL DEFAULT 'not_required'"),
         ]

@@ -756,6 +756,50 @@ def test_key_rotation_commit_endpoint_validation_error_is_redacted(
     assert salt not in rendered_logs
 
 
+def test_key_rotation_commit_endpoint_422_validation_error_is_redacted(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+    )
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    secret = "wrapped:new-secret-key-material"
+    salt = "new-secret-salt"
+    log_messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: log_messages.append(str(message)),
+        format="{message} {extra}",
+        level="WARNING",
+    )
+    try:
+        response = client.post(
+            "/api/v1/sync/key-rotation/commit",
+            json={
+                "dataset_id": "dataset-1",
+                "rotation_id": "rotation-1",
+                "target_encryption_policy": "passphrase_wrapped_v1",
+                "wrapped_key_blob": secret,
+                "kdf_metadata": f"salt={salt}",
+                "source_key_record_ids": ["missing-key"],
+                "wrapped_for": "passphrase",
+            },
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error_code"] == "sync_validation_failed"
+    assert secret not in response.text
+    assert salt not in response.text
+    rendered_logs = "\n".join(log_messages)
+    assert secret not in rendered_logs
+    assert salt not in rendered_logs
+
+
 def test_datasets_enroll_endpoint_fails_closed_when_encryption_is_not_ready(
     tmp_path: Path,
 ) -> None:

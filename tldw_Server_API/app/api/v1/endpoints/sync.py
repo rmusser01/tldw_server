@@ -11,6 +11,7 @@ from typing import Any
 # 3rd-party imports
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     HTTPException,
     Query,
@@ -262,6 +263,24 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
             "message": "Internal server error while processing sync request.",
         },
     )
+
+
+def _parse_sync_key_rotation_commit_request(
+    payload: Any = Body(...),
+) -> SyncKeyRotationCommitRequest:
+    try:
+        return SyncKeyRotationCommitRequest.model_validate(payload)
+    except ValidationError as exc:
+        logger.bind(error_type=type(exc).__name__, endpoint="sync_key_rotation_commit").warning(
+            "Sync v2 request validation failed"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error_code": "sync_validation_failed",
+                "message": "Sync request parameters are invalid.",
+            },
+        ) from exc
 
 
 def _core_envelope_from_api(envelope: SyncV2Envelope) -> SyncEnvelopeCreate:
@@ -1240,7 +1259,7 @@ def preview_sync_v2_key_rotation(
     summary="Commit a Sync v2 key rotation",
 )
 def commit_sync_v2_key_rotation(
-    request: SyncKeyRotationCommitRequest,
+    request: SyncKeyRotationCommitRequest = Depends(_parse_sync_key_rotation_commit_request),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
