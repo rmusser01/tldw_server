@@ -276,6 +276,7 @@ errors.log
 # Data files
 *.csv
 *.json
+!.impeccable/design.json
 !tldw_Server_API/app/core/Evaluations/data/bullshit_benchmark/questions_v2.json
 !tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json
 !apps/package.json
