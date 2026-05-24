@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"os/exec"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -13,16 +14,80 @@ import (
 )
 
 type stubAgent struct {
-	conn      *Conn
-	sessionID string
-	caps      map[string]interface{}
+	conn         *Conn
+	sessionID    string
+	caps         map[string]interface{}
 	sessionNewCh chan map[string]interface{}
-	promptCh  chan promptParams
+	promptCh     chan promptParams
 }
 
 type promptParams struct {
 	SessionID string                   `json:"sessionId"`
 	Prompt    []map[string]interface{} `json:"prompt"`
+}
+
+func TestExpandAgentEnvResolvesHostPlaceholders(t *testing.T) {
+	t.Setenv("TLDW_ACP_HOST_HOME", "/Users/operator")
+	t.Setenv("TOKEN", "secret")
+
+	got := expandAgentEnv([]string{
+		"HOME=${TLDW_ACP_HOST_HOME}",
+		"LITERAL=$TLDW_ACP_HOST_HOME",
+		"TOKEN_${TOKEN}=value_${TOKEN}",
+		"NO_EQUALS_${TOKEN}",
+		"MISSING=${UNSET_PLACEHOLDER}",
+		"TERM=xterm-256color",
+	})
+	want := []string{
+		"HOME=/Users/operator",
+		"LITERAL=$TLDW_ACP_HOST_HOME",
+		"TOKEN_${TOKEN}=value_secret",
+		"NO_EQUALS_${TOKEN}",
+		"MISSING=",
+		"TERM=xterm-256color",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expanded env mismatch:\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestRunnerDefaultAgentSkipsEmptyConfiguredDefault(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agents.Default = "custom"
+	cfg.Agents.Agents = []config.RegisteredAgent{
+		{
+			Type:    "custom",
+			Name:    "Custom",
+			Command: "",
+		},
+		{
+			Type:    "goose",
+			Name:    "Goose",
+			Command: "goose",
+			Args:    []string{"acp"},
+		},
+	}
+	runner := NewRunner(cfg)
+
+	entry, err := runner.resolveAgentEntry("")
+	if err != nil {
+		t.Fatalf("default agent resolution failed: %v", err)
+	}
+	if entry.Type != "goose" {
+		t.Fatalf("default agent type = %q, want goose", entry.Type)
+	}
+	if entry.Command != "goose" {
+		t.Fatalf("default agent command = %q, want goose", entry.Command)
+	}
+
+	explicit, err := runner.resolveAgentEntry("custom")
+	if err != nil {
+		t.Fatalf("explicit custom agent resolution failed: %v", err)
+	}
+	if explicit.Type != "custom" || explicit.Command != "" {
+		t.Fatalf("explicit custom should not fall back to goose: %#v", explicit)
+	}
 }
 
 func newStubAgent(conn *Conn, sessionID string, caps map[string]interface{}) *stubAgent {

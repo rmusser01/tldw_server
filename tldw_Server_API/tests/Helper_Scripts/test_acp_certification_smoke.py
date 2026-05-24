@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import threading
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -79,6 +80,18 @@ def test_live_e2e_manifest_requires_operator_supplied_runtime_state() -> None:
     assert all(command["safe_to_run_by_default"] is False for command in manifest["commands"])
 
 
+def test_live_e2e_python_command_uses_current_interpreter() -> None:
+    module = _load_module()
+
+    manifest = module.build_manifest("live-e2e")
+    backend_command = next(
+        command for command in manifest["commands"]
+        if command["id"] == "live_backend_acp_e2e"
+    )
+
+    assert backend_command["argv"][0] == sys.executable
+
+
 def test_manifest_json_output_is_stable_and_machine_readable() -> None:
     module = _load_module()
 
@@ -86,7 +99,7 @@ def test_manifest_json_output_is_stable_and_machine_readable() -> None:
     payload = json.loads(rendered)
 
     assert payload["profile"] == "stub-smoke"
-    assert payload["commands"][0]["argv"][0] in {"python", "python3"}
+    assert payload["commands"][0]["argv"][0] == sys.executable
     assert payload["commands"][0]["cwd"] == "."
     assert payload["commands"][0]["safe_to_run_by_default"] is True
 

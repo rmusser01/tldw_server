@@ -55,7 +55,7 @@ _MANIFESTS: dict[str, dict[str, Any]] = {
                 "description": "Focused backend ACP lifecycle, diagnostics, retention/redaction, and orchestration smoke checks.",
                 "cwd": ".",
                 "argv": [
-                    "python",
+                    sys.executable,
                     "-m",
                     "pytest",
                     "tldw_Server_API/tests/Agent_Client_Protocol/test_acp_e2e_smoke.py",
@@ -134,7 +134,7 @@ _MANIFESTS: dict[str, dict[str, Any]] = {
                 "description": "Live backend ACP API flow against a configured downstream agent profile.",
                 "cwd": ".",
                 "argv": [
-                    "python",
+                    sys.executable,
                     "Helper_Scripts/Testing-related/acp_certification_smoke.py",
                     "--backend-live-e2e",
                 ],

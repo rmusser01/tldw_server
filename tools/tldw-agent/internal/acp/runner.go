@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ const (
 	runnerName             = "tldw-agent-runner"
 	runnerVersion          = "0.1.0"
 )
+
+var envPlaceholderPattern = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
 
 type Runner struct {
 	cfg      *config.Config
@@ -175,7 +178,7 @@ func (r *Runner) handleSessionNew(msg *RPCMessage) (*RPCResponse, error) {
 	agentCfg := config.AgentConfig{
 		Command: agentEntry.Command,
 		Args:    agentEntry.Args,
-		Env:     agentEntry.Env,
+		Env:     expandAgentEnv(agentEntry.Env),
 	}
 	downstream, cmd, err := r.spawnFunc(agentCfg)
 	if err != nil {
@@ -327,13 +330,7 @@ func (r *Runner) handleSessionClose(msg *RPCMessage) (*RPCResponse, error) {
 func (r *Runner) getAgentEntries() ([]config.RegisteredAgent, string) {
 	registry := r.cfg.Agents.Agents
 	if len(registry) > 0 {
-		defaultType := r.cfg.Agents.Default
-		if defaultType == "" {
-			defaultType = registry[0].Type
-		} else if !agentTypeExists(registry, defaultType) {
-			defaultType = registry[0].Type
-		}
-		return registry, defaultType
+		return registry, defaultAgentType(registry, r.cfg.Agents.Default)
 	}
 
 	legacy := config.RegisteredAgent{
@@ -345,6 +342,28 @@ func (r *Runner) getAgentEntries() ([]config.RegisteredAgent, string) {
 		Env:         r.cfg.Agent.Env,
 	}
 	return []config.RegisteredAgent{legacy}, legacy.Type
+}
+
+func defaultAgentType(entries []config.RegisteredAgent, configuredDefault string) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	if configuredDefault != "" && agentTypeExists(entries, configuredDefault) {
+		for _, entry := range entries {
+			if entry.Type == configuredDefault && strings.TrimSpace(entry.Command) != "" {
+				return configuredDefault
+			}
+		}
+	}
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Command) != "" {
+			return entry.Type
+		}
+	}
+	if configuredDefault != "" && agentTypeExists(entries, configuredDefault) {
+		return configuredDefault
+	}
+	return entries[0].Type
 }
 
 func (r *Runner) resolveAgentEntry(agentType string) (config.RegisteredAgent, error) {
@@ -439,7 +458,7 @@ func (r *Runner) refreshCapabilities() map[string]interface{} {
 	agentCfg := config.AgentConfig{
 		Command: agentEntry.Command,
 		Args:    agentEntry.Args,
-		Env:     agentEntry.Env,
+		Env:     expandAgentEnv(agentEntry.Env),
 	}
 	caps := r.probeAgentCapabilities(agentCfg, 5*time.Second)
 	if caps == nil {
@@ -458,9 +477,32 @@ func (r *Runner) isAgentReady(entry config.RegisteredAgent) bool {
 	agentCfg := config.AgentConfig{
 		Command: entry.Command,
 		Args:    entry.Args,
-		Env:     entry.Env,
+		Env:     expandAgentEnv(entry.Env),
 	}
 	return r.probeAgentCapabilities(agentCfg, 2*time.Second) != nil
+}
+
+func expandAgentEnv(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	expanded := make([]string, len(values))
+	for i, value := range values {
+		key, rawValue, ok := strings.Cut(value, "=")
+		if !ok {
+			expanded[i] = value
+			continue
+		}
+		expanded[i] = key + "=" + expandBracedEnvValue(rawValue)
+	}
+	return expanded
+}
+
+func expandBracedEnvValue(value string) string {
+	return envPlaceholderPattern.ReplaceAllStringFunc(value, func(match string) string {
+		name := strings.TrimSuffix(strings.TrimPrefix(match, "${"), "}")
+		return os.Getenv(name)
+	})
 }
 
 func (r *Runner) probeAgentCapabilities(agentCfg config.AgentConfig, timeout time.Duration) map[string]interface{} {
