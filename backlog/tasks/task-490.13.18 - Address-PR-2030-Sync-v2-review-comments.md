@@ -13,6 +13,9 @@ modified_files:
 - tldw_Server_API/app/core/Sync/v2/profile.py
 - tldw_Server_API/app/core/Sync/v2/service.py
 - tldw_Server_API/app/core/Sync/v2/store.py
+- tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py
+- tldw_Server_API/app/api/v1/endpoints/character_messages.py
+- tldw_Server_API/app/api/v1/endpoints/notes.py
 - tldw_Server_API/tests/Sync/test_sync_v2_blob_store.py
 - tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py
 - tldw_Server_API/tests/Sync/test_sync_v2_profile_bootstrap.py
@@ -42,7 +45,7 @@ Address actionable Gemini review comments on PR #2030 for the Sync v2 roadmap im
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed PR #2030 Gemini review feedback by streaming blob upload assembly and download serving, adding streaming blob iteration helpers, generating blob manifests with bounded reads, and replacing profile domain envelope scans with DB-backed aggregate summaries for counts and last-envelope status. Verification: full Sync test package passed (413 passed, 6 warnings); Bandit over touched production files passed with no findings; git diff --check passed.
+Addressed PR #2030 review feedback by streaming blob upload assembly and download serving, adding streaming blob iteration helpers, generating blob manifests with bounded reads, replacing profile domain envelope scans with DB-backed aggregate summaries, adding explicit return types for active server-origin sync helpers, and making post-commit upload cleanup non-fatal. Verification: full Sync test package passed (414 passed, 6 warnings); server-origin endpoint suite passed (28 passed, 6 warnings); focused review regression tests passed (6 passed, 6 warnings); Bandit over touched production files passed with no findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

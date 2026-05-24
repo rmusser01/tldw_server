@@ -124,6 +124,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
     server_origin_object_id,
     server_origin_stable_key,
 )
+from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.Writing.note_title import TitleGenOptions, generate_note_title
 
 #
@@ -299,7 +300,7 @@ def _note_payload_from_row(note: dict[str, Any]) -> dict[str, object]:
     }
 
 
-def _active_notes_sync_service(current_user: User):
+def _active_notes_sync_service(current_user: User) -> SyncV2Service | None:
     return get_active_server_origin_sync_service_for_user(str(current_user.id))
 
 

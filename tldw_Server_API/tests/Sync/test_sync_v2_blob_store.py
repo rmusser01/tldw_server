@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,33 @@ def test_local_blob_store_streams_commit_and_read_without_read_bytes(
     )
 
     assert b"".join(store.iter_blob(final_key, chunk_size=3)) == first + second
+
+
+def test_local_blob_store_commit_cleanup_failure_is_nonfatal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"payload"
+    store.write_upload_chunk(
+        upload_id="upload-1",
+        chunk_index=0,
+        payload=payload,
+        expected_hash=_sha256(payload),
+    )
+
+    def fail_rmtree(_path: Path, *args, **kwargs) -> None:
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(shutil, "rmtree", fail_rmtree)
+
+    final_key = store.commit_upload(
+        upload_id="upload-1",
+        payload_hash=_sha256(payload),
+        chunk_indexes=[0],
+    )
+
+    assert store.read_blob(final_key) == payload
 
 
 def test_local_blob_store_rejects_bad_hashes_and_path_escape(tmp_path: Path):

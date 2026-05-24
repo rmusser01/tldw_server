@@ -7,6 +7,8 @@ import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
+from loguru import logger
+
 STREAM_CHUNK_SIZE = 64 * 1024
 
 
@@ -76,11 +78,25 @@ class LocalSyncBlobStore:
             actual_hash = "sha256:" + hasher.hexdigest()
             if actual_hash != payload_hash:
                 raise SyncBlobStoreError("Sync blob payload hash does not match chunks")
-        except (OSError, SyncBlobStoreError):
-            temp_path.unlink(missing_ok=True)
+        except SyncBlobStoreError:
+            _discard_temp_path(temp_path)
             raise
-        temp_path.replace(final_path)
-        shutil.rmtree(self.resolve_storage_key(f"_uploads/{upload_segment}"))
+        except OSError as exc:
+            _discard_temp_path(temp_path)
+            raise SyncBlobStoreError("Sync blob upload commit failed") from exc
+        try:
+            temp_path.replace(final_path)
+        except OSError as exc:
+            _discard_temp_path(temp_path)
+            raise SyncBlobStoreError("Sync blob upload commit failed") from exc
+        try:
+            shutil.rmtree(self.resolve_storage_key(f"_uploads/{upload_segment}"))
+        except OSError as exc:
+            logger.warning(
+                "Sync blob upload committed but cleanup failed for upload_id={}: {}",
+                upload_id,
+                exc,
+            )
         return final_key
 
     def read_blob(self, storage_key: str) -> bytes:
@@ -167,6 +183,13 @@ def _safe_segment(value: str, *, field_name: str) -> str:
     if value in {".", ".."}:
         raise SyncBlobStoreError(f"{field_name} contains unsafe path characters")
     return value
+
+
+def _discard_temp_path(temp_path: Path) -> None:
+    try:
+        temp_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Failed to remove temporary Sync blob path {}: {}", temp_path, exc)
 
 
 __all__ = ["LocalSyncBlobStore", "STREAM_CHUNK_SIZE", "SyncBlobStoreError"]

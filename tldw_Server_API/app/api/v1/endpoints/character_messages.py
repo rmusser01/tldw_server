@@ -62,6 +62,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
     server_origin_object_id,
     server_origin_stable_key,
 )
+from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 
 _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -195,10 +196,14 @@ def _message_sync_http_error(exc: Exception) -> HTTPException:
     )
 
 
-def _active_message_sync_service(current_user: User, scope: ConversationScopeParams):
+def _active_message_sync_service(
+    current_user: User,
+    scope: ConversationScopeParams,
+) -> SyncV2Service | None:
     if scope.scope_type == "workspace":
         return None
     return get_active_server_origin_sync_service_for_user(str(current_user.id))
+
 
 def _verify_conversation_access(
     db: CharactersRAGDB,
