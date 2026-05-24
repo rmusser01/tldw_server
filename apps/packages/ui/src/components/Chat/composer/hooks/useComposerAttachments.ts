@@ -18,6 +18,8 @@ const IMAGE_MIME_BY_EXTENSION = new Map<string, string>([
   ["webp", "image/webp"],
 ])
 
+const GENERIC_IMAGE_FALLBACK_MIME_TYPES = new Set(["", "application/octet-stream"])
+
 function getFileExtension(fileName: string): string | null {
   const dotIndex = fileName.lastIndexOf(".")
   if (dotIndex <= 0 || dotIndex === fileName.length - 1) return null
@@ -25,9 +27,13 @@ function getFileExtension(fileName: string): string | null {
   return fileName.slice(dotIndex + 1).toLowerCase()
 }
 
-function inferImageMimeType(file: File): string | null {
-  const fileType = file.type.trim().toLowerCase()
+function normalizeMimeType(mimeType: string): string {
+  return mimeType.trim().toLowerCase()
+}
+
+function inferImageMimeType(file: File, fileType: string): string | null {
   if (fileType.startsWith("image/")) return fileType
+  if (!GENERIC_IMAGE_FALLBACK_MIME_TYPES.has(fileType)) return null
 
   const extension = getFileExtension(file.name)
   return extension ? IMAGE_MIME_BY_EXTENSION.get(extension) ?? null : null
@@ -49,12 +55,13 @@ function normalizeImageDataUrl(dataUrl: string, mimeType: string): string {
  * (images only, toast feedback, no RAG guard) diverged on their inline
  * implementations. This primitive unifies the decision tree:
  *
- *   1. If the file type is in the unsupported list → `onUnsupportedType`.
- *   2. If it's an image:
+ *   1. If it's an image or a missing/generic MIME with a known image
+ *      extension:
  *        a. if `ragBlocksImages` + chatMode === "rag" → `onImageBlockedInRagMode`.
  *        b. otherwise read to base64, call `setImageField`, `onImageAccepted`.
  *        c. if read fails → `onImageReadError`.
- *   3. If it's a non-image:
+ *   2. If the normalized file type is in the unsupported list → `onUnsupportedType`.
+ *   3. If it's another non-image:
  *        a. surfaces that accept documents pass `onDocumentUpload`.
  *        b. image-only surfaces (Sidepanel) pass `onNonImageRejected` instead.
  *
@@ -144,9 +151,10 @@ export function useComposerAttachments(
 
   const processFile = React.useCallback(
     async (file: File) => {
-      const imageMimeType = inferImageMimeType(file)
+      const fileType = normalizeMimeType(file.type)
+      const imageMimeType = inferImageMimeType(file, fileType)
 
-      if (!imageMimeType && otherUnsupportedTypes.includes(file.type)) {
+      if (!imageMimeType && otherUnsupportedTypes.includes(fileType)) {
         onUnsupportedType?.(file)
         return
       }
