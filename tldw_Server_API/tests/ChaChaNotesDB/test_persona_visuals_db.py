@@ -1,10 +1,11 @@
 import json
-from collections.abc import Iterator
+import sqlite3
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 
@@ -106,6 +107,12 @@ def test_migration_v44_to_v45_creates_persona_visual_tables(
             "persona_visual_assets",
             "persona_visual_candidates",
         }.issubset(tables)
+
+        pack_indexes = migrated._sqlite_index_names(conn, "persona_visual_packs")
+        asset_indexes = migrated._sqlite_index_names(conn, "persona_visual_assets")
+        assert "idx_persona_visual_packs_one_active" in pack_indexes
+        assert "idx_persona_visual_packs_persona" in pack_indexes
+        assert "idx_persona_visual_assets_pack" in asset_indexes
     finally:
         migrated.close_connection()
 
@@ -120,6 +127,36 @@ def test_sqlite_linear_migration_registry_maps_v44_to_v45(db_path: Path) -> None
         assert migration_steps[44].__name__ == "_migrate_from_v44_to_v45"
     finally:
         db.close_connection()
+
+
+def test_new_database_initialization_uses_linear_migration_registry(
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify fresh databases use the same linear migration registry."""
+    original_steps = CharactersRAGDB._sqlite_linear_migration_steps
+
+    def registry_without_v44(
+        db: CharactersRAGDB,
+    ) -> dict[int, Callable[[sqlite3.Connection], None]]:
+        steps = dict(original_steps(db))
+        steps.pop(44)
+        return steps
+
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 45)
+    monkeypatch.setattr(
+        CharactersRAGDB,
+        "_sqlite_linear_migration_steps",
+        registry_without_v44,
+    )
+
+    db = None
+    try:
+        with pytest.raises(CharactersRAGDBError, match="Migration path undefined.*from version 0 to 45"):
+            db = CharactersRAGDB(db_path, "persona-visuals-new-db-registry")
+    finally:
+        if db is not None:
+            db.close_connection()
 
 
 def test_migration_v44_to_latest_repairs_missing_persona_tables(db_path: Path) -> None:
