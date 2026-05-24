@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
-import { Alert, Button, Empty, Input, Modal, Pagination, Select, Switch, Tag, Tooltip, message } from "antd"
+import { Button, Empty, Input, Modal, Pagination, Select, Switch, Tag, Tooltip, message } from "antd"
 import {
   BellRing,
   CheckCircle2,
@@ -19,6 +19,7 @@ import {
   updateWatchlistContentAlert,
   updateWatchlistContentAlertRule
 } from "@/services/watchlists"
+import { Alert } from "@/components/ui/primitives"
 import { useWatchlistsStore } from "@/store/watchlists"
 import type {
   WatchlistContentAlert,
@@ -142,6 +143,7 @@ export const AlertsTab: React.FC = () => {
   const [rulesLoading, setRulesLoading] = useState(false)
   const [alertsLoading, setAlertsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [retryError, setRetryError] = useState<string | null>(null)
   const [ruleFormOpen, setRuleFormOpen] = useState(false)
   const [ruleSaving, setRuleSaving] = useState(false)
   const [ruleForm, setRuleForm] = useState<RuleFormState>(DEFAULT_RULE_FORM)
@@ -158,21 +160,23 @@ export const AlertsTab: React.FC = () => {
   const debouncedSearchText = useDebouncedValue(searchText, ALERTS_FILTER_DEBOUNCE_MS)
 
   const loadRules = useCallback(async () => {
-    if (selectedWatchlistId == null) return
+    if (selectedWatchlistId == null) return true
     setRulesLoading(true)
     setError(null)
     try {
       const response = await fetchWatchlistContentAlertRules(selectedWatchlistId, { page: 1, size: 100 })
       setRules(Array.isArray(response.items) ? response.items : [])
+      return true
     } catch {
       setError(t("watchlists:alerts.loadRulesError", "Failed to load content alert rules"))
+      return false
     } finally {
       setRulesLoading(false)
     }
   }, [selectedWatchlistId, t])
 
   const loadAlerts = useCallback(async () => {
-    if (selectedWatchlistId == null) return
+    if (selectedWatchlistId == null) return true
     setAlertsLoading(true)
     setError(null)
     try {
@@ -187,12 +191,27 @@ export const AlertsTab: React.FC = () => {
       })
       setAlerts(Array.isArray(response.items) ? response.items : [])
       setAlertsTotal(Number(response.total || 0))
+      return true
     } catch {
       setError(t("watchlists:alerts.loadAlertsError", "Failed to load content alerts"))
+      return false
     } finally {
       setAlertsLoading(false)
     }
   }, [alertsPage, debouncedSearchText, debouncedSourceFilterText, ruleFilter, selectedWatchlistId, severityFilter, statusFilter, t])
+
+  const retryFailedLoads = useCallback(() => {
+    if (error) setRetryError(error)
+    void Promise.all([
+      loadRules(),
+      loadAlerts()
+    ]).then(([rulesLoaded, alertsLoaded]) => {
+      if (rulesLoaded && alertsLoaded) {
+        setError(null)
+      }
+      setRetryError(null)
+    })
+  }, [error, loadAlerts, loadRules])
 
   useEffect(() => {
     void loadRules()
@@ -339,28 +358,29 @@ export const AlertsTab: React.FC = () => {
     )
   }
 
+  const visibleError = error ?? retryError
+
   return (
     <div className="space-y-4" data-testid="watchlists-alerts-tab">
       <Alert
-        type="info"
-        showIcon
+        variant="info"
         title={t("watchlists:alerts.healthBoundary", "Run failures and source problems are health issues, not content alerts.")}
-        description={t(
+      >
+        {t(
           "watchlists:alerts.boundaryDescription",
           "Use content alert rules for newly collected items that match a descriptor, keyword, classification, entity, IOC, CVE, or source constraint."
         )}
-      />
+      </Alert>
 
-      {error && (
+      {visibleError && (
         <Alert
-          type="error"
-          showIcon
-          title={error}
-          action={(
-            <Button size="small" onClick={() => { void loadRules(); void loadAlerts() }}>
-              {t("common:refresh", "Refresh")}
-            </Button>
-          )}
+          variant="error"
+          title={visibleError}
+          action={{
+            label: t("common:refresh", "Refresh"),
+            loading: rulesLoading || alertsLoading,
+            onClick: retryFailedLoads
+          }}
         />
       )}
 
