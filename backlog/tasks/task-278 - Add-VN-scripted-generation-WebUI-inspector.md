@@ -1,9 +1,10 @@
 ---
 id: TASK-278
 title: Add VN scripted generation WebUI inspector
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-12 01:04'
+updated_date: '2026-05-23 17:49'
 labels:
   - vn-play
   - webui
@@ -62,3 +63,8 @@ Implement the WebUI consumer for the backend-owned scripted VN generation API fr
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added a session-scoped VN scripted generation inspector for the WebUI. It consumes backend-owned generation history/debug/action APIs, renders only public generation output by default, supports confirm/cancel/regenerate/activate commands with idempotency keys, and gates moderation-blocked raw debug reveal behind an explicit confirmation path. Focused API and workspace tests cover endpoint wiring, rendering, backend action controls, and guarded debug reveal behavior.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
+## Closeout Notes
+<!-- SECTION:CLOSEOUT:BEGIN -->
+Closed after verifying PR #1584 merged into `dev` on 2026-05-12 at merge commit `482e73c8ed082d01d7797b80269fdae9487bbda3`. The task already recorded completed acceptance criteria, completed Definition of Done items, implementation notes, verification evidence, and final summary; this closeout only corrects the stale Backlog status.
+<!-- SECTION:CLOSEOUT:END -->

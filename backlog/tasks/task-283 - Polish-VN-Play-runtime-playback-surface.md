@@ -1,9 +1,10 @@
 ---
 id: TASK-283
 title: Polish VN Play runtime playback surface
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-12 02:17'
+updated_date: '2026-05-23 17:49'
 labels:
   - vn-play
   - webui
@@ -12,6 +13,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1587'
   - 'https://github.com/rmusser01/tldw_server/issues/1391'
+  - 'https://github.com/rmusser01/tldw_server/pull/1590'
 documentation:
   - Docs/API/VN.md
 priority: medium
@@ -63,3 +65,8 @@ Implement GitHub issue #1587: improve the main VN Play WebUI runtime playback su
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Polished the VN Play runtime playback surface by rendering backend-provided visual metadata/fallbacks in `SceneStage`, labeling generated choices from backend metadata in `ChoicePanel`, and adding workspace coverage to keep normal play usable while the generation inspector remains a separate audit/debug route. The implementation keeps prompt generation, asset resolution, branch semantics, moderation, and debug state owned by the backend.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
+## Closeout Notes
+<!-- SECTION:CLOSEOUT:BEGIN -->
+Closed after verifying PR #1590 merged into `dev` on 2026-05-12 at merge commit `8869efda98aa9997ac43dd61e3fec0807c89bc90`. The task already recorded completed acceptance criteria, completed Definition of Done items, implementation notes, verification evidence, and final summary; this closeout only corrects the stale Backlog status and adds the merged PR reference.
+<!-- SECTION:CLOSEOUT:END -->
