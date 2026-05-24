@@ -309,7 +309,7 @@ git status --short
 
 Record included file boundaries, excluded unrelated paths, verification commands, known skips, and final summary.
 
-- [ ] **Step 3: Commit in reviewable chunks**
+- [x] **Step 3: Commit in reviewable chunks**
 
 Suggested commits:
 1. `docs: add research workspace hard replacement roadmap`
@@ -317,6 +317,8 @@ Suggested commits:
 3. `feat: add research workspace migration safety and protocol`
 4. `feat: wire research workspace trust and status surfaces`
 
-- [ ] **Step 4: Push and open PR**
+- [x] **Step 4: Push and open PR**
 
 Expected: PR targets `main`, includes only the Research Workspace prerequisite stack, and explicitly excludes chat-workspace/prototype/writing changes.
+
+Result: Draft PR opened at https://github.com/rmusser01/tldw_server/pull/2040. Draft status is intentional because the AI-generated PR merge gate requires the human requester to own the final Change summary before merge.

@@ -41,7 +41,7 @@ Package the existing Research Workspace WIP from the dirty checkout into a clean
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Research Workspace prerequisite stack is packaged on the clean branch with backend migration/status/capability APIs, WebUI route replacement, extension handoff updates, legacy migration safeguards, trust panel wiring, and focused coverage. Live validation used a real FastAPI backend and Playwright/CDP against the Next.js WebUI: `/research-workspace` rendered the trust panel, source status and capability calls returned 200, and `/workspace-playground` returned 404 without redirecting. No known blockers remain; push/PR publication is the remaining branch-management step.
+Research Workspace prerequisite stack is packaged on the clean branch with backend migration/status/capability APIs, WebUI route replacement, extension handoff updates, legacy migration safeguards, trust panel wiring, and focused coverage. Live validation used a real FastAPI backend and Playwright/CDP against the Next.js WebUI: `/research-workspace` rendered the trust panel, source status and capability calls returned 200, and `/workspace-playground` returned 404 without redirecting. Draft PR opened at https://github.com/rmusser01/tldw_server/pull/2040; draft status is intentional because the AI-generated PR merge gate requires the human requester to own the final Change summary before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
