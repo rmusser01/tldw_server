@@ -51,28 +51,26 @@ def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path) ->
     )
 
     migrated = CharactersRAGDB(db_path, "persona-visuals-migration")
-    conn = migrated.get_connection()
+    try:
+        conn = migrated.get_connection()
 
-    version = migrated._get_db_version(conn)
-    assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        version = migrated._get_db_version(conn)
+        assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
 
-    tables = migrated._sqlite_table_names(conn)
-    assert {
-        "persona_visual_packs",
-        "persona_visual_assets",
-        "persona_visual_candidates",
-    }.issubset(tables)
+        tables = migrated._sqlite_table_names(conn)
+        assert {
+            "persona_visual_packs",
+            "persona_visual_assets",
+            "persona_visual_candidates",
+        }.issubset(tables)
 
-    pack_indexes = {
-        row["name"] for row in conn.execute("PRAGMA index_list('persona_visual_packs')").fetchall()
-    }
-    asset_indexes = {
-        row["name"] for row in conn.execute("PRAGMA index_list('persona_visual_assets')").fetchall()
-    }
-    assert "idx_persona_visual_packs_one_active" in pack_indexes
-    assert "idx_persona_visual_packs_persona" in pack_indexes
-    assert "idx_persona_visual_assets_pack" in asset_indexes
-    migrated.close_connection()
+        pack_indexes = migrated._sqlite_index_names(conn, "persona_visual_packs")
+        asset_indexes = migrated._sqlite_index_names(conn, "persona_visual_assets")
+        assert "idx_persona_visual_packs_one_active" in pack_indexes
+        assert "idx_persona_visual_packs_persona" in pack_indexes
+        assert "idx_persona_visual_assets_pack" in asset_indexes
+    finally:
+        migrated.close_connection()
 
 
 def test_migration_v44_to_latest_repairs_missing_persona_tables(db_path: Path) -> None:
@@ -95,23 +93,48 @@ def test_migration_v44_to_latest_repairs_missing_persona_tables(db_path: Path) -
     )
 
     migrated = CharactersRAGDB(db_path, "persona-visuals-missing-persona-migration")
-    conn = migrated.get_connection()
+    try:
+        conn = migrated.get_connection()
 
-    version = migrated._get_db_version(conn)
-    assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        version = migrated._get_db_version(conn)
+        assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
 
-    tables = migrated._sqlite_table_names(conn)
-    assert {
-        "persona_profiles",
-        "persona_scope_rules",
-        "persona_policy_rules",
-        "persona_sessions",
-        "persona_memory_entries",
-        "persona_visual_packs",
-        "persona_visual_assets",
-        "persona_visual_candidates",
-    }.issubset(tables)
-    migrated.close_connection()
+        tables = migrated._sqlite_table_names(conn)
+        assert {
+            "persona_profiles",
+            "persona_scope_rules",
+            "persona_policy_rules",
+            "persona_sessions",
+            "persona_memory_entries",
+            "persona_visual_packs",
+            "persona_visual_assets",
+            "persona_visual_candidates",
+        }.issubset(tables)
+
+        profile_columns = migrated._sqlite_column_names(conn, "persona_profiles")
+        assert {
+            "use_persona_state_context_default",
+            "voice_defaults_json",
+            "setup_json",
+            "origin_character_id",
+            "origin_character_name",
+            "origin_character_snapshot_at",
+        }.issubset(profile_columns)
+
+        profile_indexes = migrated._sqlite_index_names(conn, "persona_profiles")
+        assert {
+            "idx_persona_profiles_user",
+            "idx_persona_profiles_user_active",
+            "idx_persona_profiles_character",
+        }.issubset(profile_indexes)
+
+        memory_columns = migrated._sqlite_column_names(conn, "persona_memory_entries")
+        assert {"scope_snapshot_id", "session_id"}.issubset(memory_columns)
+
+        memory_indexes = migrated._sqlite_index_names(conn, "persona_memory_entries")
+        assert {"idx_persona_memory_scope", "idx_persona_memory_session"}.issubset(memory_indexes)
+    finally:
+        migrated.close_connection()
 
 
 def test_postgres_v45_migration_does_not_define_candidate_provenance_column() -> None:
