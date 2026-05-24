@@ -21828,9 +21828,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             1 if data.get("selected", True) else 0,
             now,
         )
-        with self.transaction() as conn:
-            conn.execute(query, params)
-        return self._get_workspace_source(workspace_id, source_id)  # type: ignore[return-value]
+        try:
+            with self.transaction() as conn:
+                conn.execute(query, params)
+        except sqlite3.IntegrityError as exc:
+            existing = self.get_workspace_source(workspace_id, source_id)
+            if existing is not None:
+                return existing
+            raise ConflictError(  # noqa: TRY003
+                f"Workspace source '{source_id}' already exists.",
+                entity="workspace_sources",
+                entity_id=source_id,
+            ) from exc
+        return self.get_workspace_source(workspace_id, source_id)  # type: ignore[return-value]
 
     def _get_workspace_source(self, workspace_id: str, source_id: str) -> dict[str, Any] | None:
         cursor = self.execute_query(
@@ -21839,6 +21849,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         row = cursor.fetchone()
         return dict(row) if row else None
+
+    def get_workspace_source(self, workspace_id: str, source_id: str) -> dict[str, Any] | None:
+        """Return one workspace source by id, or None when it does not exist."""
+        return self._get_workspace_source(workspace_id, source_id)
 
     def list_workspace_sources(self, workspace_id: str) -> list[dict[str, Any]]:
         """List all sources for a workspace ordered by position."""

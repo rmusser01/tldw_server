@@ -1,12 +1,16 @@
 """Tests for workspace CRUD endpoints and scoped chat session isolation."""
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT,
+    WORKSPACES_WRITE_RATE_LIMIT,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -15,22 +19,50 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 
 
+class _CapturingJobManager:
+    def __init__(self) -> None:
+        self.created_jobs: list[dict[str, Any]] = []
+        self.jobs_by_key: dict[str, dict[str, Any]] = {}
+
+    def create_job(self, **kwargs: Any) -> dict[str, Any]:
+        idempotency_key = str(kwargs.get("idempotency_key") or "")
+        if idempotency_key and idempotency_key in self.jobs_by_key:
+            return self.jobs_by_key[idempotency_key]
+        self.created_jobs.append(kwargs)
+        job = {"id": len(self.created_jobs), **kwargs}
+        if idempotency_key:
+            self.jobs_by_key[idempotency_key] = job
+        return job
+
+
+class _FailingJobManager:
+    def create_job(self, **kwargs: Any) -> dict[str, Any]:
+        _ = kwargs
+        raise RuntimeError("jobs backend unavailable")
+
+
+class _ValidatingJobManager:
+    def create_job(self, **kwargs: Any) -> dict[str, Any]:
+        _ = kwargs
+        raise ValueError("workspace source ingest quota exceeded")
+
+
 @pytest.fixture
-def db(tmp_path):
+def db(tmp_path: Path) -> CharactersRAGDB:
     d = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
     d.add_character_card({"name": "Test Char"})
     return d
 
 
 @pytest.fixture
-def workspace_fastapi_app():
+def workspace_fastapi_app() -> Any:
     from tldw_Server_API.app.main import app
 
     return app
 
 
 class TestWorkspaceLifecycle:
-    def test_upsert_then_get(self, db):
+    def test_upsert_then_get(self, db: CharactersRAGDB) -> None:
         ws = db.upsert_workspace("ws-1", "My Workspace", study_materials_policy="workspace")
         assert ws["id"] == "ws-1"
         assert ws["study_materials_policy"] == "workspace"
@@ -38,7 +70,7 @@ class TestWorkspaceLifecycle:
         assert fetched["name"] == "My Workspace"
         assert fetched["study_materials_policy"] == "workspace"
 
-    def test_upsert_workspace_updates_existing_policy(self, db):
+    def test_upsert_workspace_updates_existing_policy(self, db: CharactersRAGDB) -> None:
         original = db.upsert_workspace("ws-1", "Original Name", study_materials_policy="general")
         updated = db.upsert_workspace("ws-1", "Renamed Workspace", study_materials_policy="workspace")
         assert updated["id"] == original["id"]
@@ -46,18 +78,18 @@ class TestWorkspaceLifecycle:
         assert updated["study_materials_policy"] == "workspace"
         assert updated["version"] == original["version"] + 1
 
-    def test_patch_workspace_name(self, db):
+    def test_patch_workspace_name(self, db: CharactersRAGDB) -> None:
         db.upsert_workspace("ws-1", "Old")
         ws = db.update_workspace("ws-1", {"name": "New"}, expected_version=1)
         assert ws["name"] == "New"
         assert ws["version"] == 2
 
-    def test_archive_workspace(self, db):
+    def test_archive_workspace(self, db: CharactersRAGDB) -> None:
         db.upsert_workspace("ws-1", "WS")
         ws = db.update_workspace("ws-1", {"archived": True}, expected_version=1)
         assert ws["archived"] in (True, 1)
 
-    def test_delete_workspace_cascade(self, db):
+    def test_delete_workspace_cascade(self, db: CharactersRAGDB) -> None:
         db.upsert_workspace("ws-1", "WS")
         conv_id = db.add_conversation({
             "title": "WS chat", "character_id": 1,
@@ -82,26 +114,57 @@ class TestWorkspaceLifecycle:
         assert quiz["workspace_id"] is None
         assert deck["workspace_id"] is None
 
-    def test_list_workspaces(self, db):
+    def test_list_workspaces(self, db: CharactersRAGDB) -> None:
         for i in range(5):
             db.upsert_workspace(f"ws-{i}", f"WS {i}")
         result = db.list_workspaces()
         assert len(result) == 5
 
-    def test_version_conflict_returns_error(self, db):
+    def test_version_conflict_returns_error(self, db: CharactersRAGDB) -> None:
         db.upsert_workspace("ws-1", "WS")
         db.update_workspace("ws-1", {"name": "V2"}, expected_version=1)
         with pytest.raises((ConflictError, Exception)):
             db.update_workspace("ws-1", {"name": "V3"}, expected_version=1)
 
-    def test_workspace_policy_updates(self, db):
+    def test_workspace_policy_updates(self, db: CharactersRAGDB) -> None:
         db.upsert_workspace("ws-1", "WS")
         ws = db.update_workspace("ws-1", {"study_materials_policy": "workspace"}, expected_version=1)
         assert ws["study_materials_policy"] == "workspace"
 
+    def test_add_workspace_source_returns_existing_row_on_duplicate_insert(
+        self,
+        db: CharactersRAGDB,
+    ) -> None:
+        db.upsert_workspace("ws-duplicate", "Duplicate Source Workspace")
+        created = db.add_workspace_source(
+            "ws-duplicate",
+            {
+                "id": "src-duplicate",
+                "media_id": 21,
+                "title": "First Source",
+                "source_type": "pdf",
+            },
+        )
+
+        duplicate = db.add_workspace_source(
+            "ws-duplicate",
+            {
+                "id": "src-duplicate",
+                "media_id": 21,
+                "title": "First Source",
+                "source_type": "pdf",
+            },
+        )
+
+        assert duplicate == created
+        assert db.get_workspace_source("ws-duplicate", "src-duplicate") == created
+
 
 @pytest.mark.integration
-def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fastapi_app, db):
+def test_workspace_api_accepts_and_returns_study_materials_policy(
+    workspace_fastapi_app: Any,
+    db: CharactersRAGDB,
+) -> None:
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
     from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
         WORKSPACES_READ_RATE_LIMIT,
@@ -162,7 +225,7 @@ def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fast
 
 
 class TestScopedChatSessions:
-    def test_workspace_chat_not_visible_in_global_list(self, db):
+    def test_workspace_chat_not_visible_in_global_list(self, db: CharactersRAGDB) -> None:
         db.upsert_workspace("ws-1", "WS")
         db.add_conversation({"title": "Global", "character_id": 1})
         db.add_conversation({
@@ -172,7 +235,7 @@ class TestScopedChatSessions:
         global_results = db.search_conversations(None, scope_type="global")
         assert all(r["scope_type"] == "global" for r in global_results)
 
-    def test_global_chat_not_visible_in_workspace_list(self, db):
+    def test_global_chat_not_visible_in_workspace_list(self, db: CharactersRAGDB) -> None:
         db.upsert_workspace("ws-1", "WS")
         db.add_conversation({"title": "Global", "character_id": 1})
         ws_results = db.search_conversations(None, scope_type="workspace", workspace_id="ws-1")
@@ -180,9 +243,9 @@ class TestScopedChatSessions:
 
 
 @pytest.mark.integration
-def test_delete_workspace_maps_conflict_to_409(workspace_fastapi_app):
+def test_delete_workspace_maps_conflict_to_409(workspace_fastapi_app: Any) -> None:
     class _ConflictDB:
-        def get_workspace(self, workspace_id: str):
+        def get_workspace(self, workspace_id: str) -> dict[str, Any]:
             return {"id": workspace_id, "version": 1}
 
         def delete_workspace(self, workspace_id: str, expected_version: int) -> None:
@@ -204,3 +267,203 @@ def test_delete_workspace_maps_conflict_to_409(workspace_fastapi_app):
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
 
     assert response.status_code == 409, response.text
+
+
+@pytest.mark.integration
+def test_add_workspace_source_enqueues_idempotent_ingest_job(
+    workspace_fastapi_app: Any,
+    db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=7,
+            username="researcher",
+            email="researcher@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    job_manager = _CapturingJobManager()
+    db.upsert_workspace("ws-job-api", "Workspace Source Jobs")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[workspaces_endpoint.try_get_workspace_job_manager] = lambda: job_manager
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/v1/workspaces/ws-job-api/sources",
+                json={
+                    "id": "src-job-1",
+                    "media_id": 55,
+                    "title": "NotebookLM Migration PDF",
+                    "source_type": "pdf",
+                    "url": "file:///imports/notebooklm.pdf",
+                },
+            )
+            duplicate_response = client.post(
+                "/api/v1/workspaces/ws-job-api/sources",
+                json={
+                    "id": "src-job-1",
+                    "media_id": 55,
+                    "title": "NotebookLM Migration PDF",
+                    "source_type": "pdf",
+                    "url": "file:///imports/notebooklm.pdf",
+                },
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(workspaces_endpoint.try_get_workspace_job_manager, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 201, response.text
+    assert duplicate_response.status_code == 201, duplicate_response.text
+    assert duplicate_response.json()["id"] == "src-job-1"
+    assert len(job_manager.created_jobs) == 1
+    job = job_manager.created_jobs[0]
+    assert job["domain"] == "media_ingest"
+    assert job["queue"] == "default"
+    assert job["job_type"] == "workspace_source_ingest"
+    assert job["owner_user_id"] == "7"
+    assert job["idempotency_key"] == "workspace-source:ws-job-api:src-job-1:55"
+    assert job["payload"] == {
+        "workspace_id": "ws-job-api",
+        "workspace_source_id": "src-job-1",
+        "source_id": "src-job-1",
+        "media_id": 55,
+        "source_type": "pdf",
+        "title": "NotebookLM Migration PDF",
+        "url": "file:///imports/notebooklm.pdf",
+        "requested_stages": ["ingestion", "extraction", "chunking", "indexing"],
+    }
+
+
+@pytest.mark.integration
+def test_add_workspace_source_preserves_row_when_job_enqueue_fails(
+    workspace_fastapi_app: Any,
+    db: CharactersRAGDB,
+) -> None:
+    async def _allow_rate_limit() -> None:
+        return None
+
+    db.upsert_workspace("ws-job-fail-api", "Workspace Source Job Failure")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=8)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[workspaces_endpoint.try_get_workspace_job_manager] = (
+        lambda: _FailingJobManager()
+    )
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/v1/workspaces/ws-job-fail-api/sources",
+                json={
+                    "id": "src-job-fail",
+                    "media_id": 56,
+                    "title": "Resilient Source",
+                    "source_type": "web",
+                    "url": "https://example.test/resilient-source",
+                },
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(workspaces_endpoint.try_get_workspace_job_manager, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["id"] == "src-job-fail"
+    assert [src["id"] for src in db.list_workspace_sources("ws-job-fail-api")] == ["src-job-fail"]
+
+
+@pytest.mark.integration
+def test_add_workspace_source_preserves_row_when_job_manager_dependency_fails(
+    workspace_fastapi_app: Any,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _allow_rate_limit() -> None:
+        return None
+
+    def _raise_job_manager() -> None:
+        raise RuntimeError("jobs manager construction failed")
+
+    db.upsert_workspace("ws-job-dep-fail-api", "Workspace Source Job Dependency Failure")
+    monkeypatch.setattr(workspaces_endpoint, "get_job_manager", _raise_job_manager)
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=9)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/v1/workspaces/ws-job-dep-fail-api/sources",
+                json={
+                    "id": "src-job-dep-fail",
+                    "media_id": 57,
+                    "title": "Dependency Resilient Source",
+                    "source_type": "pdf",
+                },
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["id"] == "src-job-dep-fail"
+    assert [src["id"] for src in db.list_workspace_sources("ws-job-dep-fail-api")] == ["src-job-dep-fail"]
+
+
+@pytest.mark.integration
+def test_add_workspace_source_maps_job_validation_failure_to_400(
+    workspace_fastapi_app: Any,
+    db: CharactersRAGDB,
+) -> None:
+    async def _allow_rate_limit() -> None:
+        return None
+
+    db.upsert_workspace("ws-job-validation-api", "Workspace Source Job Validation")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=10)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[workspaces_endpoint.try_get_workspace_job_manager] = (
+        lambda: _ValidatingJobManager()
+    )
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/v1/workspaces/ws-job-validation-api/sources",
+                json={
+                    "id": "src-job-validation",
+                    "media_id": 58,
+                    "title": "Validation Source",
+                    "source_type": "pdf",
+                },
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(workspaces_endpoint.try_get_workspace_job_manager, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "workspace source ingest quota exceeded"
+    assert [src["id"] for src in db.list_workspace_sources("ws-job-validation-api")] == ["src-job-validation"]
+
+
+def test_dedupe_jobs_keeps_id_zero_as_valid_identity() -> None:
+    jobs = workspaces_endpoint._dedupe_jobs_by_identity(
+        [
+            {"id": 0, "uuid": "first"},
+            {"id": 0, "uuid": "second"},
+        ]
+    )
+
+    assert jobs == [{"id": 0, "uuid": "first"}]

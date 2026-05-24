@@ -1,9 +1,14 @@
 """Workspace lifecycle CRUD endpoints."""
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     StatusResponse,
     WorkspaceArtifactCreateRequest,
@@ -14,11 +19,13 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceNoteResponse,
     WorkspaceNoteUpdateRequest,
     WorkspacePatchRequest,
+    WorkspaceCapabilitiesResponse,
     WorkspaceResponse,
     WorkspaceSourceCreateRequest,
     WorkspaceSourceReorderRequest,
     WorkspaceSourceResponse,
     WorkspaceSourceSelectionRequest,
+    WorkspaceSourceStatusListResponse,
     WorkspaceSourceUpdateRequest,
     WorkspaceUpsertRequest,
 )
@@ -28,9 +35,24 @@ from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_WRITE_RATE_LIMIT,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
+)
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Workspaces.status_projection import (
+    build_source_status_projection,
+    build_workspace_capability_projection,
+)
 
 router = APIRouter()
+
+WORKSPACE_SOURCE_JOB_DOMAIN = "media_ingest"
+WORKSPACE_SOURCE_JOB_QUEUE = "default"
+WORKSPACE_SOURCE_JOB_TYPE = "workspace_source_ingest"
+WORKSPACE_SOURCE_JOB_STAGES = ["ingestion", "extraction", "chunking", "indexing"]
 
 
 def _ws_to_response(ws: dict) -> WorkspaceResponse:
@@ -107,6 +129,154 @@ def _require_workspace(db: CharactersRAGDB, workspace_id: str) -> dict:
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return ws
+
+
+def _find_workspace_source(db: CharactersRAGDB, workspace_id: str, source_id: str) -> dict[str, Any] | None:
+    """Return an existing workspace source using the DB's direct public lookup."""
+    source = db.get_workspace_source(workspace_id, source_id)
+    return dict(source) if source else None
+
+
+def _workspace_access_level(workspace: dict[str, Any], current_user: User) -> str:
+    """Resolve owner/editor/viewer capability scope for the current workspace route."""
+    explicit = _normalize_access_level(workspace.get("access_level"))
+    if explicit is not None:
+        return explicit
+    owner_id = str(workspace.get("owner_user_id") or workspace.get("client_id") or "").strip()
+    if owner_id and owner_id == str(current_user.id):
+        return "owner"
+    # /workspaces is backed by the current user's ChaCha DB. Until shared routes
+    # pass explicit access metadata, absence of a share row means owned access.
+    return "owner"
+
+
+def _normalize_access_level(value: Any) -> str | None:
+    """Map sharing-layer access labels onto capability response labels."""
+    normalized = str(value or "").strip().lower()
+    if normalized in {"owner", "editor", "viewer"}:
+        return normalized
+    if normalized == "full_edit":
+        return "editor"
+    if normalized in {"view_chat", "view_chat_add"}:
+        return "viewer" if normalized == "view_chat" else "editor"
+    return None
+
+
+def _map_chacha_error_to_http(exc: Exception, *, default_detail: str) -> HTTPException:
+    """Map ChaChaNotes workspace exceptions to stable HTTP responses."""
+    if isinstance(exc, ConflictError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    if isinstance(exc, InputError):
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    logger.error("{}: {}", default_detail, exc)
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=default_detail)
+
+
+def try_get_workspace_job_manager() -> JobManager | None:
+    """Resolve the Jobs manager for workspace views without blocking workspace reads/writes."""
+    try:
+        return get_job_manager()
+    except Exception as exc:
+        logger.warning("Workspace Jobs manager unavailable: {}", exc)
+        return None
+
+
+def _dedupe_jobs_by_identity(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return jobs with duplicate identity keys removed while preserving order."""
+    deduped: list[dict[str, Any]] = []
+    seen: set[Any] = set()
+    for job in jobs:
+        key = job.get("id") if job.get("id") is not None else job.get("uuid")
+        if key is None:
+            key = (
+                job.get("domain"),
+                job.get("queue"),
+                job.get("job_type"),
+                job.get("created_at"),
+                str(job.get("payload") or ""),
+            )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(job)
+    return deduped
+
+
+def _safe_list_jobs(jm: JobManager, **kwargs: Any) -> list[dict[str, Any]]:
+    """List Jobs for status projection without breaking workspace reads."""
+    try:
+        return jm.list_jobs(**kwargs)
+    except Exception as exc:
+        logger.warning("Workspace status job listing failed with filters={}: {}", kwargs, exc)
+        return []
+
+
+def _list_recent_media_ingest_jobs(jm: JobManager | None, current_user: User) -> list[dict[str, Any]]:
+    """Return recent media-ingest Jobs for status projection, failing open."""
+    if jm is None:
+        return []
+    workspace_source_jobs = _safe_list_jobs(
+        jm,
+        domain=WORKSPACE_SOURCE_JOB_DOMAIN,
+        queue=WORKSPACE_SOURCE_JOB_QUEUE,
+        owner_user_id=str(current_user.id),
+        job_type=WORKSPACE_SOURCE_JOB_TYPE,
+        limit=500,
+        sort_by="created_at",
+        sort_order="desc",
+    )
+    legacy_media_jobs = _safe_list_jobs(
+        jm,
+        domain=WORKSPACE_SOURCE_JOB_DOMAIN,
+        owner_user_id=str(current_user.id),
+        limit=500,
+        sort_by="created_at",
+        sort_order="desc",
+    )
+    return _dedupe_jobs_by_identity(workspace_source_jobs + legacy_media_jobs)
+
+
+def _enqueue_workspace_source_ingest_job(
+    *,
+    jm: JobManager | None,
+    current_user: User,
+    workspace_id: str,
+    src: dict[str, Any],
+) -> None:
+    """Submit a source lifecycle job after the workspace source row exists."""
+    if jm is None:
+        return
+    source_id = str(src["id"])
+    media_id = int(src["media_id"])
+    payload = {
+        "workspace_id": workspace_id,
+        "workspace_source_id": source_id,
+        "source_id": source_id,
+        "media_id": media_id,
+        "source_type": str(src["source_type"]),
+        "title": str(src["title"]),
+        "url": src.get("url"),
+        "requested_stages": WORKSPACE_SOURCE_JOB_STAGES,
+    }
+    try:
+        jm.create_job(
+            domain=WORKSPACE_SOURCE_JOB_DOMAIN,
+            queue=WORKSPACE_SOURCE_JOB_QUEUE,
+            job_type=WORKSPACE_SOURCE_JOB_TYPE,
+            payload=payload,
+            owner_user_id=str(current_user.id),
+            idempotency_key=f"workspace-source:{workspace_id}:{source_id}:{media_id}",
+            max_retries=3,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning(
+            "Workspace source ingest job enqueue failed for workspace={} source={}: {}",
+            workspace_id,
+            source_id,
+            exc,
+        )
 
 
 # ── Workspace CRUD ──────────────────────────────────────────────
@@ -229,6 +399,75 @@ async def list_sources(
     return [_src_to_response(s) for s in db.list_workspace_sources(workspace_id)]
 
 
+@router.get(
+    "/{workspace_id}/sources/status",
+    response_model=WorkspaceSourceStatusListResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace source ingestion and indexing status",
+)
+async def get_sources_status(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceSourceStatusListResponse:
+    """Return read-computed ingestion, extraction, chunking, and indexing status."""
+    _require_workspace(db, workspace_id)
+    try:
+        sources = db.list_workspace_sources(workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise _map_chacha_error_to_http(
+            exc,
+            default_detail="Failed to fetch workspace source status",
+        ) from exc
+    payload = build_source_status_projection(
+        workspace_id=workspace_id,
+        sources=sources,
+        media_db=media_db,
+        jobs=_list_recent_media_ingest_jobs(jm, current_user),
+    )
+    return WorkspaceSourceStatusListResponse(**payload)
+
+
+@router.get(
+    "/{workspace_id}/capabilities",
+    response_model=WorkspaceCapabilitiesResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace capability gates",
+)
+async def get_workspace_capabilities(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceCapabilitiesResponse:
+    """Return conservative UI capability gates for the workspace model."""
+    workspace = _require_workspace(db, workspace_id)
+    try:
+        sources = db.list_workspace_sources(workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise _map_chacha_error_to_http(
+            exc,
+            default_detail="Failed to fetch workspace capabilities",
+        ) from exc
+    status_payload = build_source_status_projection(
+        workspace_id=workspace_id,
+        sources=sources,
+        media_db=media_db,
+        jobs=_list_recent_media_ingest_jobs(jm, current_user),
+    )
+    payload = build_workspace_capability_projection(
+        workspace={
+            **workspace,
+            "access_level": _workspace_access_level(workspace, current_user),
+        },
+        status_projection=status_payload,
+    )
+    return WorkspaceCapabilitiesResponse(**payload)
+
+
 @router.post(
     "/{workspace_id}/sources",
     response_model=WorkspaceSourceResponse,
@@ -240,11 +479,25 @@ async def add_source(
     workspace_id: str,
     body: WorkspaceSourceCreateRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceSourceResponse:
     """Add a media source to a workspace."""
     _require_workspace(db, workspace_id)
-    src = db.add_workspace_source(workspace_id, body.model_dump())
+    src = _find_workspace_source(db, workspace_id, body.id)
+    if src is None:
+        try:
+            src = db.add_workspace_source(workspace_id, body.model_dump())
+        except (ConflictError, InputError, CharactersRAGDBError):
+            src = _find_workspace_source(db, workspace_id, body.id)
+            if src is None:
+                raise
+    _enqueue_workspace_source_ingest_job(
+        jm=jm,
+        current_user=current_user,
+        workspace_id=workspace_id,
+        src=src,
+    )
     return _src_to_response(src)
 
 
