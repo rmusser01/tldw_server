@@ -463,6 +463,75 @@ Diagnostics must not include private payloads, ciphertext blobs, wrapped keys,
 KDF salts, passphrase metadata beyond algorithm identifiers, or recovery
 secrets.
 
+Initial query parameters:
+
+- `dataset_id` (required)
+- `device_id` (optional requesting-device context; diagnostics still report
+  profile-level device lag)
+- `retention_limit` (optional dry-run scan limit)
+
+Initial response shape:
+
+```json
+{
+  "dataset_id": "ds_personal_user_1",
+  "generated_at": "2026-05-24T02:00:00Z",
+  "domains": [
+    {
+      "domain": "notes.note",
+      "envelope_count": 42,
+      "object_count": 17,
+      "latest_server_sequence": 104,
+      "failed_apply_count": 0,
+      "unresolved_conflict_count": 1
+    }
+  ],
+  "devices": [
+    {
+      "device_id": "dev_phone",
+      "status": "active",
+      "last_seen_at": "2026-05-24T01:58:00Z",
+      "domain_lag": [
+        {
+          "domain": "notes.note",
+          "last_pulled_sequence": 100,
+          "latest_server_sequence": 104,
+          "lag_count": 4
+        }
+      ]
+    }
+  ],
+  "blob_health": {
+    "blob_object_count": 3,
+    "available_blob_bytes": 120000,
+    "active_upload_count": 1,
+    "reserved_blob_bytes": 32000,
+    "quota_limit_bytes": 104857600
+  },
+  "key_summary": {
+    "key_record_count": 1,
+    "active_key_record_count": 1,
+    "revoked_key_record_count": 0,
+    "superseded_key_record_count": 0,
+    "rewrap_pending_count": 0,
+    "recovery_available": true
+  },
+  "retention": {
+    "dry_run": true,
+    "mutation_performed": false,
+    "candidate_count": 2,
+    "blocked_count": 2,
+    "blocker_counts": {
+      "retention_audit_mode": 2
+    }
+  }
+}
+```
+
+This first diagnostics endpoint is dataset-scoped and user-visible. Global
+admin/operator aggregation, audit-event search, and destructive retention/GC
+execution remain separate later M3 work.
+
 ## Compatibility Requirements
 
 - M1/M2 endpoints remain valid.

@@ -253,7 +253,7 @@
 
   Add candidate calculation without deletion.
 
-- [ ] **Step 3: Add diagnostics endpoint**
+- [x] **Step 3: Add diagnostics endpoint**
 
   Report health, counts, lag, quota pressure, key blockers, and retention
   candidates with redaction.

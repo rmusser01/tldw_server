@@ -592,6 +592,84 @@ class SyncRetentionDryRunResponse(BaseModel):
     candidates: list[SyncRetentionCandidateResponse] = Field(default_factory=list)
 
 
+class SyncDiagnosticsDomainResponse(BaseModel):
+    """Redacted diagnostics for one Sync v2 domain."""
+
+    domain: SyncDomain
+    envelope_count: int = Field(0, ge=0)
+    object_count: int = Field(0, ge=0)
+    latest_server_sequence: int = Field(0, ge=0)
+    failed_apply_count: int = Field(0, ge=0)
+    unresolved_conflict_count: int = Field(0, ge=0)
+
+
+class SyncDiagnosticsDeviceDomainLagResponse(BaseModel):
+    """Redacted cursor lag for one device/domain pair."""
+
+    domain: SyncDomain
+    last_pulled_sequence: int = Field(0, ge=0)
+    latest_server_sequence: int = Field(0, ge=0)
+    lag_count: int = Field(0, ge=0)
+
+
+class SyncDiagnosticsDeviceResponse(BaseModel):
+    """Redacted diagnostics for one device."""
+
+    device_id: str
+    status: str
+    last_seen_at: str | None = None
+    domain_lag: list[SyncDiagnosticsDeviceDomainLagResponse] = Field(default_factory=list)
+
+
+class SyncDiagnosticsBlobHealthResponse(BaseModel):
+    """Redacted blob and upload diagnostics."""
+
+    blob_object_count: int = Field(0, ge=0)
+    available_blob_bytes: int = Field(0, ge=0)
+    active_upload_count: int = Field(0, ge=0)
+    reserved_blob_bytes: int = Field(0, ge=0)
+    quota_limit_bytes: int | None = Field(None, ge=0)
+
+
+class SyncDiagnosticsKeySummaryResponse(BaseModel):
+    """Redacted key diagnostics without wrapped key material."""
+
+    key_record_count: int = Field(0, ge=0)
+    active_key_record_count: int = Field(0, ge=0)
+    revoked_key_record_count: int = Field(0, ge=0)
+    superseded_key_record_count: int = Field(0, ge=0)
+    rewrap_pending_count: int = Field(0, ge=0)
+    recovery_available: bool = False
+
+
+class SyncDiagnosticsRetentionSummaryResponse(BaseModel):
+    """Redacted retention dry-run diagnostics."""
+
+    dry_run: bool = True
+    mutation_performed: bool = False
+    candidate_count: int = Field(0, ge=0)
+    blocked_count: int = Field(0, ge=0)
+    blocker_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class SyncDiagnosticsResponse(BaseModel):
+    """Redacted Sync v2 diagnostics response."""
+
+    dataset_id: str
+    generated_at: str | None = None
+    domains: list[SyncDiagnosticsDomainResponse] = Field(default_factory=list)
+    devices: list[SyncDiagnosticsDeviceResponse] = Field(default_factory=list)
+    blob_health: SyncDiagnosticsBlobHealthResponse = Field(
+        default_factory=SyncDiagnosticsBlobHealthResponse
+    )
+    key_summary: SyncDiagnosticsKeySummaryResponse = Field(
+        default_factory=SyncDiagnosticsKeySummaryResponse
+    )
+    retention: SyncDiagnosticsRetentionSummaryResponse = Field(
+        default_factory=SyncDiagnosticsRetentionSummaryResponse
+    )
+
+
 class SyncDatasetEnrollRequest(BaseModel):
     """Request to create or join a sync dataset."""
 
@@ -1601,6 +1679,13 @@ __all__ = [
     "SyncConflictResolveResponse",
     "SyncDatasetEnrollRequest",
     "SyncDatasetEnrollResponse",
+    "SyncDiagnosticsBlobHealthResponse",
+    "SyncDiagnosticsDeviceDomainLagResponse",
+    "SyncDiagnosticsDeviceResponse",
+    "SyncDiagnosticsDomainResponse",
+    "SyncDiagnosticsKeySummaryResponse",
+    "SyncDiagnosticsResponse",
+    "SyncDiagnosticsRetentionSummaryResponse",
     "SyncDeviceRegisterRequest",
     "SyncDeviceRegisterResponse",
     "SyncDomain",

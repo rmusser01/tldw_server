@@ -254,6 +254,85 @@ class SyncRetentionDryRunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncDiagnosticsDomain:
+    """Redacted diagnostics for one dataset domain."""
+
+    domain: SyncDomain
+    envelope_count: int = 0
+    object_count: int = 0
+    latest_server_sequence: int = 0
+    failed_apply_count: int = 0
+    unresolved_conflict_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDiagnosticsDeviceDomainLag:
+    """Redacted cursor lag for one device/domain pair."""
+
+    domain: SyncDomain
+    last_pulled_sequence: int = 0
+    latest_server_sequence: int = 0
+    lag_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDiagnosticsDevice:
+    """Redacted diagnostics for one sync device."""
+
+    device_id: str
+    status: str
+    last_seen_at: str | None = None
+    domain_lag: list[SyncDiagnosticsDeviceDomainLag] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDiagnosticsBlobHealth:
+    """Redacted blob/upload diagnostics."""
+
+    blob_object_count: int = 0
+    available_blob_bytes: int = 0
+    active_upload_count: int = 0
+    reserved_blob_bytes: int = 0
+    quota_limit_bytes: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDiagnosticsKeySummary:
+    """Redacted key-record diagnostics without wrapped key material."""
+
+    key_record_count: int = 0
+    active_key_record_count: int = 0
+    revoked_key_record_count: int = 0
+    superseded_key_record_count: int = 0
+    rewrap_pending_count: int = 0
+    recovery_available: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDiagnosticsRetentionSummary:
+    """Redacted retention dry-run summary."""
+
+    dry_run: bool = True
+    mutation_performed: bool = False
+    candidate_count: int = 0
+    blocked_count: int = 0
+    blocker_counts: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDiagnosticsReport:
+    """Redacted dataset diagnostics report."""
+
+    dataset_id: str
+    generated_at: str | None = None
+    domains: list[SyncDiagnosticsDomain] = field(default_factory=list)
+    devices: list[SyncDiagnosticsDevice] = field(default_factory=list)
+    blob_health: SyncDiagnosticsBlobHealth = field(default_factory=SyncDiagnosticsBlobHealth)
+    key_summary: SyncDiagnosticsKeySummary = field(default_factory=SyncDiagnosticsKeySummary)
+    retention: SyncDiagnosticsRetentionSummary = field(default_factory=SyncDiagnosticsRetentionSummary)
+
+
+@dataclass(frozen=True, slots=True)
 class SyncPushAccepted:
     client_envelope_id: str
     server_sequence: int
@@ -874,6 +953,67 @@ class SyncV2Service:
             quota_pressure=quota_pressure,
             restore_completeness=restore_completeness,
             server_time=self.clock(),
+        )
+
+    def diagnostics(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str | None = None,
+        retention_limit: int | None = None,
+    ) -> SyncDiagnosticsReport:
+        """Return redacted Sync v2 dataset diagnostics."""
+
+        if device_id is not None:
+            self._require_registered_device(user_id, device_id)
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        scan_limit = self.settings.restore_manifest_scan_limit
+        envelopes = self.store.list_accepted_envelopes_for_replay(
+            dataset_id,
+            since_cursor=0,
+            limit=scan_limit,
+        )
+        conflicts = self.store.list_conflicts(dataset_id, status="unresolved")
+        active_devices = self._retention_active_devices(dataset)
+        blob_quota = self.store.summarize_blob_quota(user_id, dataset_id=dataset_id)
+        blob_objects = self.store.list_blob_objects_for_dataset(dataset_id)
+        key_records = self.store.list_key_records(dataset_id, user_id=user_id)
+        retention = self.retention_dry_run(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            device_id=device_id,
+            audit_mode=True,
+            limit=retention_limit or min(scan_limit, 100),
+        )
+        return SyncDiagnosticsReport(
+            dataset_id=dataset_id,
+            generated_at=self.clock(),
+            domains=self._diagnostics_domains(
+                domains=dataset.domains,
+                envelopes=envelopes,
+                conflicts=conflicts,
+            ),
+            devices=self._diagnostics_devices(
+                dataset_id=dataset_id,
+                domains=dataset.domains,
+                devices=active_devices,
+            ),
+            blob_health=SyncDiagnosticsBlobHealth(
+                blob_object_count=len(blob_objects),
+                available_blob_bytes=sum(blob.size_bytes for blob in blob_objects),
+                active_upload_count=blob_quota.active_upload_count,
+                reserved_blob_bytes=blob_quota.reserved_blob_bytes,
+                quota_limit_bytes=self.settings.user_blob_quota_bytes,
+            ),
+            key_summary=self._diagnostics_key_summary(key_records),
+            retention=SyncDiagnosticsRetentionSummary(
+                dry_run=retention.dry_run,
+                mutation_performed=retention.mutation_performed,
+                candidate_count=retention.candidate_count,
+                blocked_count=retention.blocked_count,
+                blocker_counts=dict(retention.blocker_counts),
+            ),
         )
 
     def retention_dry_run(
@@ -2750,6 +2890,116 @@ class SyncV2Service:
             updated_at=self.clock(),
         )
 
+    def _diagnostics_domains(
+        self,
+        *,
+        domains: Sequence[SyncDomain],
+        envelopes: Sequence[SyncEnvelope],
+        conflicts: Sequence[SyncConflict],
+    ) -> list[SyncDiagnosticsDomain]:
+        stats = {
+            domain: {
+                "envelope_count": 0,
+                "object_ids": set(),
+                "latest_server_sequence": 0,
+                "failed_apply_count": 0,
+                "unresolved_conflict_count": 0,
+            }
+            for domain in domains
+        }
+        for envelope in envelopes:
+            if envelope.domain not in stats:
+                continue
+            domain_stats = stats[envelope.domain]
+            domain_stats["envelope_count"] = int(domain_stats["envelope_count"]) + 1
+            domain_stats["latest_server_sequence"] = max(
+                int(domain_stats["latest_server_sequence"]),
+                int(envelope.server_sequence or 0),
+            )
+            if envelope.apply_status == "failed":
+                domain_stats["failed_apply_count"] = int(domain_stats["failed_apply_count"]) + 1
+            object_ids = domain_stats["object_ids"]
+            if isinstance(object_ids, set):
+                object_ids.add(envelope.object_id)
+        for conflict in conflicts:
+            if conflict.domain in stats:
+                stats[conflict.domain]["unresolved_conflict_count"] = (
+                    int(stats[conflict.domain]["unresolved_conflict_count"]) + 1
+                )
+        return [
+            SyncDiagnosticsDomain(
+                domain=domain,
+                envelope_count=int(domain_stats["envelope_count"]),
+                object_count=len(domain_stats["object_ids"]),
+                latest_server_sequence=int(domain_stats["latest_server_sequence"]),
+                failed_apply_count=int(domain_stats["failed_apply_count"]),
+                unresolved_conflict_count=int(domain_stats["unresolved_conflict_count"]),
+            )
+            for domain, domain_stats in stats.items()
+        ]
+
+    def _diagnostics_devices(
+        self,
+        *,
+        dataset_id: str,
+        domains: Sequence[SyncDomain],
+        devices: Sequence[SyncDevice],
+    ) -> list[SyncDiagnosticsDevice]:
+        diagnostics: list[SyncDiagnosticsDevice] = []
+        for device in devices:
+            domain_statuses = self.store.summarize_background_domains(
+                dataset_id,
+                device.device_id,
+                domains=domains,
+            )
+            diagnostics.append(
+                SyncDiagnosticsDevice(
+                    device_id=device.device_id,
+                    status=device.status,
+                    last_seen_at=device.last_seen_at,
+                    domain_lag=[
+                        SyncDiagnosticsDeviceDomainLag(
+                            domain=status.domain,
+                            last_pulled_sequence=status.last_pulled_sequence,
+                            latest_server_sequence=status.last_server_sequence,
+                            lag_count=status.cursor_lag_count,
+                        )
+                        for status in domain_statuses
+                    ],
+                )
+            )
+        return diagnostics
+
+    def _diagnostics_key_summary(
+        self,
+        key_records: Sequence[SyncKeyRecord],
+    ) -> SyncDiagnosticsKeySummary:
+        revoked_count = sum(1 for record in key_records if record.revoked_at is not None)
+        superseded_count = sum(
+            1 for record in key_records if record.superseded_at is not None
+        )
+        active_count = sum(
+            1
+            for record in key_records
+            if record.revoked_at is None and record.superseded_at is None
+        )
+        rewrap_pending_count = sum(
+            1 for record in key_records if record.rewrap_status == "pending"
+        )
+        recovery_available = any(
+            record.key_purpose == SYNC_DATASET_RECOVERY_KEY_PURPOSE
+            and record.revoked_at is None
+            for record in key_records
+        )
+        return SyncDiagnosticsKeySummary(
+            key_record_count=len(key_records),
+            active_key_record_count=active_count,
+            revoked_key_record_count=revoked_count,
+            superseded_key_record_count=superseded_count,
+            rewrap_pending_count=rewrap_pending_count,
+            recovery_available=recovery_available,
+        )
+
     def _retention_active_devices(self, dataset: SyncDataset) -> list[SyncDevice]:
         devices = self.store.list_devices_for_user(dataset.owner_user_id)
         return sorted(
@@ -3540,6 +3790,13 @@ def _evaluate_accepts_context(evaluate: Callable[..., object]) -> bool:
 
 __all__ = [
     "SyncDatasetEnrollment",
+    "SyncDiagnosticsBlobHealth",
+    "SyncDiagnosticsDevice",
+    "SyncDiagnosticsDeviceDomainLag",
+    "SyncDiagnosticsDomain",
+    "SyncDiagnosticsKeySummary",
+    "SyncDiagnosticsReport",
+    "SyncDiagnosticsRetentionSummary",
     "SyncDeviceRegistration",
     "SyncPullResult",
     "SyncPushAccepted",

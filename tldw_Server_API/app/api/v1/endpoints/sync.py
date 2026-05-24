@@ -58,6 +58,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncDeviceResponse,
     SyncDeviceRevokeRequest,
     SyncDeviceUpdateRequest,
+    SyncDiagnosticsResponse,
     SyncDomain,
     SyncKeyRecoveryBundleListResponse,
     SyncKeyRecoveryBundleRecord,
@@ -363,6 +364,10 @@ def _api_background_status_from_core(status: Any) -> SyncBackgroundStatusRespons
 
 def _api_retention_dry_run_from_core(result: Any) -> SyncRetentionDryRunResponse:
     return SyncRetentionDryRunResponse(**asdict(result))
+
+
+def _api_diagnostics_from_core(result: Any) -> SyncDiagnosticsResponse:
+    return SyncDiagnosticsResponse(**asdict(result))
 
 
 def _api_empty_profile(user_id: str, device_id: str | None) -> SyncProfileResponse:
@@ -881,6 +886,35 @@ def get_sync_v2_background_status(
             device_id=device_id,
         ) from exc
     return _api_background_status_from_core(background_status)
+
+
+@router.get(
+    "/diagnostics",
+    response_model=SyncDiagnosticsResponse,
+    summary="Return redacted Sync v2 diagnostics for a dataset",
+)
+def get_sync_v2_diagnostics(
+    dataset_id: str = Query(...),
+    device_id: str | None = Query(None),
+    retention_limit: int | None = Query(None, ge=1),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        diagnostics = service.diagnostics(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+            retention_limit=retention_limit,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+        ) from exc
+    return _api_diagnostics_from_core(diagnostics)
 
 
 @router.post(
