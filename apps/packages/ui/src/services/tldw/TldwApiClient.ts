@@ -46,6 +46,14 @@ import {
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
 import {
+  buildProviderAvailabilityMap,
+  normalizeProviderAvailabilityKey,
+  shouldFetchProviderAvailability,
+  toNonEmptyProviderString,
+  toOptionalProviderBoolean,
+  type TldwProvidersResponse
+} from "@/services/tldw/model-provider-availability"
+import {
   buildContentPayload,
   mapApiDetailToUi,
   mapApiListToUi,
@@ -550,6 +558,8 @@ export interface TldwModel {
   type?: string
   is_configured?: boolean
   provider_is_configured?: boolean
+  provider_enabled?: boolean
+  availability?: string
   catalog_only?: boolean
   modalities?: {
     input?: string[]
@@ -1961,6 +1971,9 @@ export class TldwApiClientBase {
       if (/\s/.test(value)) return false
       return /[/:._-]/.test(value)
     }
+    const providerAvailability = shouldFetchProviderAvailability(list)
+      ? await buildProviderAvailabilityMap(() => this.getProviders())
+      : new Map()
 
     return list.map((m: any) => {
       const rawModel =
@@ -1977,12 +1990,16 @@ export class TldwApiClientBase {
         rawName && !isLikelyModelId(rawName) && rawName !== canonicalModelId
           ? `${rawName} (${canonicalModelId})`
           : canonicalModelId
+      const provider = toNonEmptyString(m.provider) || "default"
+      const inheritedAvailability = providerAvailability.get(
+        normalizeProviderAvailabilityKey(provider) || ""
+      )
 
       return {
         ...m,
         id: canonicalModelId,
         name: displayName,
-        provider: String(m.provider || "default"),
+        provider,
         description: m.description,
         capabilities: Array.isArray(m.capabilities)
           ? m.capabilities
@@ -2011,9 +2028,24 @@ export class TldwApiClientBase {
           (m.capabilities && m.capabilities.json_mode) ?? m.json_output
         ),
         type: typeof m.type === "string" ? m.type : undefined,
-        is_configured: m.is_configured,
-        provider_is_configured: m.provider_is_configured,
-        catalog_only: m.catalog_only,
+        is_configured:
+          toOptionalProviderBoolean(m.is_configured) ??
+          toOptionalProviderBoolean(m.provider_configured) ??
+          toOptionalProviderBoolean(m.configured) ??
+          inheritedAvailability?.is_configured,
+        provider_is_configured:
+          toOptionalProviderBoolean(m.provider_is_configured) ??
+          toOptionalProviderBoolean(m.provider_configured) ??
+          toOptionalProviderBoolean(m.configured) ??
+          inheritedAvailability?.is_configured,
+        provider_enabled:
+          toOptionalProviderBoolean(m.provider_enabled) ??
+          toOptionalProviderBoolean(m.enabled) ??
+          inheritedAvailability?.provider_enabled,
+        availability:
+          toNonEmptyProviderString(m.availability) ??
+          inheritedAvailability?.availability,
+        catalog_only: toOptionalProviderBoolean(m.catalog_only),
         modalities:
           m.modalities && typeof m.modalities === "object"
             ? {
@@ -2044,8 +2076,11 @@ export class TldwApiClientBase {
     })
   }
 
-  async getProviders(): Promise<any> {
-    return await bgRequest<any>({ path: '/api/v1/llm/providers', method: 'GET' })
+  async getProviders(): Promise<TldwProvidersResponse> {
+    return await bgRequest<TldwProvidersResponse>({
+      path: '/api/v1/llm/providers',
+      method: 'GET'
+    })
   }
 
   /**

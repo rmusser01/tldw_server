@@ -1,6 +1,14 @@
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
+import {
+  buildProviderAvailabilityMap,
+  normalizeProviderAvailabilityKey,
+  shouldFetchProviderAvailability,
+  toNonEmptyProviderString,
+  toOptionalProviderBoolean,
+  type TldwProvidersResponse
+} from "../model-provider-availability"
 import type {
   LlamacppAsset,
   LlamacppAcquisitionJobListResponse,
@@ -49,6 +57,7 @@ import type {
  */
 export interface TldwApiClientCore {
   getModelsMetadata(options?: { refreshOpenRouter?: boolean }): Promise<any>
+  getProviders(): Promise<TldwProvidersResponse>
   createImageArtifact(request: any): Promise<any>
   ensureConfigForRequest(requireAuth: boolean): Promise<any>
   request<T>(init: any, requireAuth?: boolean): Promise<T>
@@ -78,12 +87,13 @@ export const modelsAudioMethods = {
       const trimmed = value.trim()
       return trimmed.length > 0 ? trimmed : null
     }
-    const toOptionalBoolean = (value: unknown): boolean | undefined =>
-      typeof value === "boolean" ? value : undefined
     const isLikelyModelId = (value: string): boolean => {
       if (/\s/.test(value)) return false
       return /[/:._-]/.test(value)
     }
+    const providerAvailability = shouldFetchProviderAvailability(list)
+      ? await buildProviderAvailabilityMap(() => this.getProviders())
+      : new Map()
 
     return list.map((m: any) => {
       const rawModel =
@@ -100,11 +110,15 @@ export const modelsAudioMethods = {
         rawName && !isLikelyModelId(rawName) && rawName !== canonicalModelId
           ? `${rawName} (${canonicalModelId})`
           : canonicalModelId
+      const provider = toNonEmptyString(m.provider) || "default"
+      const inheritedAvailability = providerAvailability.get(
+        normalizeProviderAvailabilityKey(provider) || ""
+      )
 
       return {
         id: canonicalModelId,
         name: displayName,
-        provider: String(m.provider || "default"),
+        provider,
         description: m.description,
         capabilities: Array.isArray(m.capabilities)
           ? m.capabilities
@@ -133,9 +147,24 @@ export const modelsAudioMethods = {
           (m.capabilities && m.capabilities.json_mode) ?? m.json_output
         ),
         type: typeof m.type === "string" ? m.type : undefined,
-        is_configured: toOptionalBoolean(m.is_configured),
-        provider_is_configured: toOptionalBoolean(m.provider_is_configured),
-        catalog_only: toOptionalBoolean(m.catalog_only),
+        is_configured:
+          toOptionalProviderBoolean(m.is_configured) ??
+          toOptionalProviderBoolean(m.provider_configured) ??
+          toOptionalProviderBoolean(m.configured) ??
+          inheritedAvailability?.is_configured,
+        provider_is_configured:
+          toOptionalProviderBoolean(m.provider_is_configured) ??
+          toOptionalProviderBoolean(m.provider_configured) ??
+          toOptionalProviderBoolean(m.configured) ??
+          inheritedAvailability?.is_configured,
+        provider_enabled:
+          toOptionalProviderBoolean(m.provider_enabled) ??
+          toOptionalProviderBoolean(m.enabled) ??
+          inheritedAvailability?.provider_enabled,
+        availability:
+          toNonEmptyProviderString(m.availability) ??
+          inheritedAvailability?.availability,
+        catalog_only: toOptionalProviderBoolean(m.catalog_only),
         modalities:
           m.modalities && typeof m.modalities === "object"
             ? {
@@ -166,8 +195,11 @@ export const modelsAudioMethods = {
     })
   },
 
-  async getProviders(): Promise<any> {
-    return await bgRequest<any>({ path: '/api/v1/llm/providers', method: 'GET' })
+  async getProviders(): Promise<TldwProvidersResponse> {
+    return await bgRequest<TldwProvidersResponse>({
+      path: '/api/v1/llm/providers',
+      method: 'GET'
+    })
   },
 
   async getModelsMetadata(options?: {

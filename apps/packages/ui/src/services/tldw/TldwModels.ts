@@ -36,8 +36,24 @@ const AUDIO_MODEL_HINTS = [
 
 const NON_CHAT_MODEL_HINTS = ["rerank", "moderation", "safety"]
 
+const UNSELECTABLE_CHAT_MODEL_AVAILABILITY = new Set([
+  "disabled",
+  "failed",
+  "unavailable",
+  "not-configured"
+])
+
 const hasAnyHint = (value: string, hints: string[]): boolean =>
   hints.some((hint) => value.includes(hint))
+
+const normalizeAvailabilityStatus = (value: string | undefined): string | null => {
+  if (typeof value !== "string") return null
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "-")
+  return normalized.length > 0 ? normalized : null
+}
 
 const isAbortLikeModelFetchError = (error: unknown): boolean => {
   const candidate = error as
@@ -66,6 +82,8 @@ export interface ModelInfo {
   description?: string
   isConfigured?: boolean
   providerIsConfigured?: boolean
+  providerEnabled?: boolean
+  availability?: string
   catalogOnly?: boolean
   modalities?: {
     input?: string[]
@@ -80,7 +98,7 @@ export class TldwModelsService {
   private readonly CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
-  private readonly CACHE_SCHEMA_VERSION = 6
+  private readonly CACHE_SCHEMA_VERSION = 7
   private storage = createSafeStorage({ area: "local" })
   private storageLoaded = false
   private storageInitPromise: Promise<void> | null = null
@@ -249,7 +267,7 @@ export class TldwModelsService {
     options?: { refreshOpenRouter?: boolean }
   ): Promise<ModelInfo[]> {
     const models = await this.getModels(forceRefresh, options)
-    return models.filter(m => m.type === 'chat')
+    return models.filter((model) => this.isSelectableChatModel(model))
   }
 
   async getCachedChatModels(): Promise<ModelInfo[]> {
@@ -262,7 +280,9 @@ export class TldwModelsService {
       this.lastForcedFetchTime = 0
     }
     this.cacheScopeKey = scopeKey
-    return (this.cachedModels || []).filter((model) => model.type === "chat")
+    return (this.cachedModels || []).filter((model) =>
+      this.isSelectableChatModel(model)
+    )
   }
 
   /**
@@ -392,6 +412,8 @@ export class TldwModelsService {
       inferProviderFromModel(tldwModel.id, "llm") ||
       inferProviderFromModel(tldwModel.name, "llm")
     const provider = tldwModel.provider || inferred || "unknown"
+    const toOptionalBoolean = (value: unknown): boolean | undefined =>
+      typeof value === "boolean" ? value : undefined
 
     return {
       id: tldwModel.id,
@@ -401,11 +423,29 @@ export class TldwModelsService {
       capabilities: caps.length ? Array.from(new Set(caps)) : undefined,
       contextLength: tldwModel.context_length,
       description: tldwModel.description,
-      isConfigured: tldwModel.is_configured,
-      providerIsConfigured: tldwModel.provider_is_configured,
-      catalogOnly: tldwModel.catalog_only,
+      isConfigured: toOptionalBoolean(tldwModel.is_configured),
+      providerIsConfigured: toOptionalBoolean(tldwModel.provider_is_configured),
+      providerEnabled: toOptionalBoolean(tldwModel.provider_enabled),
+      availability:
+        typeof tldwModel.availability === "string"
+          ? tldwModel.availability
+          : undefined,
+      catalogOnly: toOptionalBoolean(tldwModel.catalog_only),
       modalities: tldwModel.modalities
     }
+  }
+
+  private isSelectableChatModel(model: ModelInfo): boolean {
+    if (model.type !== "chat") return false
+    if (model.isConfigured === false) return false
+    if (model.providerIsConfigured === false) return false
+    if (model.providerEnabled === false) return false
+    if (model.catalogOnly === true) return false
+    const availability = normalizeAvailabilityStatus(model.availability)
+    if (availability && UNSELECTABLE_CHAT_MODEL_AVAILABILITY.has(availability)) {
+      return false
+    }
+    return true
   }
 
   /**
