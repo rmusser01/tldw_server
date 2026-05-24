@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react"
-import { Alert, Button, Input, Modal, Switch, Tag } from "antd"
+import { Button, Input, Modal, Switch, Tag } from "antd"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import type {
   WatchlistContainer,
   WatchlistCreate,
@@ -306,14 +307,14 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
   const renderCollectionStep = () => (
     <div className="space-y-4">
       <Alert
+        variant="info"
         title={t("watchlists:setupWizard.boundaries.title", "Collection scope first")}
-        description={t(
+      >
+        {t(
           "watchlists:setupWizard.boundaries.alerts",
           "Content-match alerts come later. This setup defines the Watchlist and its initial collection scope."
         )}
-        type="info"
-        showIcon
-      />
+      </Alert>
 
       <label className="block text-sm font-medium" htmlFor="watchlist-setup-source-name">
         {t("watchlists:setupWizard.fields.sourceName", "Source name")}
@@ -469,7 +470,7 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
     >
       <div className="space-y-4">
         {validationError ? (
-          <Alert title={validationError} type="error" showIcon />
+          <Alert title={validationError} variant="error" />
         ) : null}
         {renderStep()}
       </div>
