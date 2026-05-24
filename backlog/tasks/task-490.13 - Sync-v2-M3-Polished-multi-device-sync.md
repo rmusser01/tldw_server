@@ -1,7 +1,7 @@
 ---
 id: TASK-490.13
 title: 'Sync v2 M3: Polished multi-device sync'
-status: In Progress
+status: Done
 assignee:
 - '@Codex'
 labels:
@@ -31,6 +31,7 @@ modified_files:
 - backlog/tasks/task-490.13.6 - Sync-v2-M3-Stricter-encryption-and-key-rotation.md
 - backlog/tasks/task-490.13.7 - Sync-v2-M3-Retention-GC-and-observability.md
 - backlog/tasks/task-490.13.8 - Sync-v2-M3-End-to-end-verification-and-docs.md
+- tldw_Server_API/tests/e2e/test_chatbook_sync_v2_restore.py
 ---
 
 ## Description
@@ -41,9 +42,9 @@ Roadmap epic for Milestone 3 after M1/M2 mature: scheduled/background sync, work
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 M3 requirements are refined after M1 and M2 outcomes are known.
-- [ ] #2 Workspace dataset and permission/key model are designed before implementation.
-- [ ] #3 Background sync, device lifecycle, retention, and observability have explicit product and operational success criteria.
+- [x] #1 M3 requirements are refined after M1 and M2 outcomes are known.
+- [x] #2 Workspace dataset and permission/key model are designed before implementation.
+- [x] #3 Background sync, device lifecycle, retention, and observability have explicit product and operational success criteria.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -56,21 +57,21 @@ Docs/superpowers/plans/2026-05-23-sync-v2-m3-polished-multi-device-implementatio
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - TASK-490.13.1 completed the M3 planning gate with design, API draft, implementation plan, and child tasks.
-- Implementation should proceed with TASK-490.13.2 first: device lifecycle and acknowledgments. That slice is a prerequisite for background sync leases/status and later retention/GC safety.
+- TASK-490.13.2 through TASK-490.13.8 completed the M3 foundation in planned order: device lifecycle/acknowledgments, background sync status, workspace datasets, broader metadata domains, stricter key policy/rotation, retention/diagnostics, and E2E closeout.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+M3 polished multi-device sync foundation completed across child tasks TASK-490.13.1 through TASK-490.13.8. Delivered planning docs, device lifecycle and acknowledgments, background policy/leases/status, workspace dataset foundation, source-cache/media/workspace metadata domains, stricter key metadata and key rotation, retention dry-run/guarded compaction, diagnostics, and end-to-end closeout coverage. Explicit deferrals remain documented: physical blob byte deletion, destructive envelope audit-log deletion, broad workspace Notes/Chat materialization, conflict summary/preview endpoints, passphrase/device-key unlock UX, and full client-only encrypted editing. Final Stage 8 verification: ruff check tldw_Server_API/tests/e2e/test_chatbook_sync_v2_restore.py passed; pytest tldw_Server_API/tests/e2e/test_chatbook_sync_v2_restore.py -q passed with 6 tests; pytest tldw_Server_API/tests/Sync -q passed with 412 tests; git diff --check passed; stale-doc phrase scan returned no matches. Bandit for Stage 8 skipped because only docs/tests/backlog were touched in the closeout slice; prior production-code M3 slices recorded their Bandit runs.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

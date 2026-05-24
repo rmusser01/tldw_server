@@ -22,7 +22,7 @@ from tldw_Server_API.app.core.Sync.v2.materializers import (
     ChatMessageMaterializer,
     NotesMaterializer,
 )
-from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS
+from tldw_Server_API.app.core.Sync.v2.models import M1_SYNC_DOMAINS, WORKSPACE_SYNC_DOMAINS
 from tldw_Server_API.app.core.Sync.v2.security import server_trusted_encryption_status_from_config
 from tldw_Server_API.app.core.Sync.v2.server_origin import SERVER_ORIGIN_DEVICE_ID
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
@@ -61,6 +61,7 @@ class SyncE2EHarness:
     client: TestClient
     service: SyncV2Service
     chacha_db: CharactersRAGDB
+    workspace_permissions: set[tuple[str, str, str]]
 
 
 class _NoopRateLimiter:
@@ -75,6 +76,7 @@ def harness(tmp_path: Path) -> SyncE2EHarness:
         db_path=str(tmp_path / "ChaChaNotes.db"),
         client_id="server-user-1",
     )
+    workspace_permissions = {("user-1", "workspace-1", "sync")}
     service = SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_restore_e2e.db")),
         adapters=default_sync_v2_registry(),
@@ -86,6 +88,14 @@ def harness(tmp_path: Path) -> SyncE2EHarness:
         },
         clock=_clock,
         id_factory=lambda prefix: f"{prefix}-generated",
+        workspace_access_checker=(
+            lambda user_id, workspace_id, permission: (
+                user_id,
+                workspace_id,
+                permission,
+            )
+            in workspace_permissions
+        ),
         settings=SyncV2Settings(
             max_batch_size=20,
             max_pull_page_size=20,
@@ -97,6 +107,7 @@ def harness(tmp_path: Path) -> SyncE2EHarness:
         client=_sync_client(service, _test_user()),
         service=service,
         chacha_db=chacha_db,
+        workspace_permissions=workspace_permissions,
     )
 
 
@@ -107,6 +118,7 @@ def m2_harness(tmp_path: Path) -> SyncE2EHarness:
         db_path=str(tmp_path / "ChaChaNotes.db"),
         client_id="server-user-1",
     )
+    workspace_permissions = {("user-1", "workspace-1", "sync")}
     service = SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_restore_m2_e2e.db")),
         adapters=default_sync_v2_registry(),
@@ -119,6 +131,14 @@ def m2_harness(tmp_path: Path) -> SyncE2EHarness:
         clock=_clock,
         id_factory=lambda prefix: f"{prefix}-generated",
         blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
+        workspace_access_checker=(
+            lambda user_id, workspace_id, permission: (
+                user_id,
+                workspace_id,
+                permission,
+            )
+            in workspace_permissions
+        ),
         settings=SyncV2Settings(
             max_batch_size=20,
             max_pull_page_size=20,
@@ -135,6 +155,7 @@ def m2_harness(tmp_path: Path) -> SyncE2EHarness:
         client=_sync_client(service, _test_user()),
         service=service,
         chacha_db=chacha_db,
+        workspace_permissions=workspace_permissions,
     )
 
 
@@ -321,10 +342,82 @@ def _attachment_ref_envelope(**overrides: Any) -> dict[str, Any]:
     return payload
 
 
+def _workspace_envelope(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "client_envelope_id": "env-workspace-1",
+        "dataset_id": "workspace-dataset",
+        "domain": "workspaces.workspace",
+        "object_id": "workspace-1",
+        "operation": "upsert",
+        "device_id": "device-a",
+        "client_sequence": 1,
+        "object_revision": 1,
+        "stable_key": "workspace:workspace-1",
+        "created_at_client": "2026-05-10T00:04:00+00:00",
+        "routing_metadata": {"entity_kind": "workspace", "workspace_id": "workspace-1"},
+        "payload": {
+            "entity_kind": "workspace",
+            "workspace_id": "workspace-1",
+            "name": "Shared research",
+        },
+        "payload_hash": "sha256:workspace-1",
+        "payload_size_bytes": 96,
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _workspace_source_ref_envelope(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "client_envelope_id": "env-workspace-source-1",
+        "dataset_id": "workspace-dataset",
+        "domain": "workspaces.source_ref",
+        "object_id": "workspace-1:source-1",
+        "operation": "upsert",
+        "device_id": "device-a",
+        "client_sequence": 2,
+        "object_revision": 1,
+        "stable_key": "workspace_source:workspace-1:source-1",
+        "created_at_client": "2026-05-10T00:05:00+00:00",
+        "routing_metadata": {
+            "entity_kind": "workspace_source_ref",
+            "workspace_id": "workspace-1",
+            "source_id": "source-1",
+        },
+        "payload": {
+            "entity_kind": "workspace_source_ref",
+            "workspace_id": "workspace-1",
+            "source_id": "source-1",
+            "title": "Reference source",
+        },
+        "payload_hash": "sha256:workspace-source-1",
+        "payload_size_bytes": 128,
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _push(client: TestClient, envelopes: list[dict[str, Any]]) -> dict[str, Any]:
     response = client.post(
         "/api/v1/sync/push",
         json={"dataset_id": "dataset-1", "device_id": "device-a", "envelopes": envelopes},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def _push_dataset(
+    client: TestClient,
+    *,
+    dataset_id: str,
+    device_id: str,
+    envelopes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    response = client.post(
+        "/api/v1/sync/push",
+        json={"dataset_id": dataset_id, "device_id": device_id, "envelopes": envelopes},
     )
     assert response.status_code == 200
     return response.json()
@@ -680,8 +773,7 @@ def test_chatbook_sync_v2_two_device_pagination_echo_and_cross_user_isolation(
     )
 
     assert forbidden_pull.status_code == 404
-    assert hidden_manifest.status_code == 200
-    assert hidden_manifest.json()["datasets"] == []
+    assert hidden_manifest.status_code == 404
     assert forbidden_preview.status_code == 404
     assert forbidden_conflicts.status_code == 404
     assert rejected_resolution.status_code == 200
@@ -878,3 +970,268 @@ def test_chatbook_sync_v2_server_frontend_note_write_pulls_as_server_origin(
     assert [(item["domain"], item["object_id"], item["device_id"]) for item in envelopes] == [
         ("notes.note", "note-server-api", SERVER_ORIGIN_DEVICE_ID)
     ]
+
+
+def test_chatbook_sync_v2_m3_multi_device_workspace_key_retention_and_diagnostics_flow(
+    harness: SyncE2EHarness,
+) -> None:
+    client = harness.client
+    secret = "wrapped:m3-passphrase-secret"
+    salt = "m3-secret-salt"
+
+    _register_device(client, "device-a", "Laptop A")
+    _register_device(client, "device-b", "Laptop B")
+    _enroll_dataset(client)
+
+    first_note = _push(client, [_note_envelope()])
+    first_cursor = first_note["accepted"][0]["server_cursor"]
+    second_note = _push(
+        client,
+        [
+            _note_envelope(
+                client_envelope_id="env-note-2",
+                client_sequence=2,
+                object_revision=2,
+                payload={"title": "Private note", "content": "Updated private note"},
+                payload_hash="sha256:note-2",
+                base_server_cursor=first_cursor,
+                base_object_revision=1,
+                base_object_hash="sha256:note-1",
+            )
+        ],
+    )
+    latest_cursor = second_note["accepted"][0]["server_cursor"]
+
+    stale_note = _push(
+        client,
+        [
+            _note_envelope(
+                client_envelope_id="env-note-stale-m3",
+                client_sequence=3,
+                object_revision=3,
+                payload={"title": "Stale note", "content": "Should be reviewed."},
+                payload_hash="sha256:note-stale-m3",
+                base_server_cursor=first_cursor,
+                base_object_revision=1,
+                base_object_hash="sha256:note-1",
+            )
+        ],
+    )
+    assert stale_note["accepted"] == []
+    assert stale_note["conflicts"][0]["domain"] == "notes.note"
+    conflict_id = stale_note["conflicts"][0]["conflict_id"]
+
+    resolved = client.post(
+        "/api/v1/sync/conflicts/resolve",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-a",
+            "resolutions": [{"conflict_id": conflict_id, "action": "skip"}],
+        },
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["resolved"][0]["conflict_id"] == conflict_id
+    assert resolved.json()["rejected"] == []
+
+    recovery = client.post(
+        "/api/v1/sync/keys/recovery-bundle",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-a",
+            "key_purpose": "dataset_recovery",
+            "wrapped_key_blob": "wrapped:m3-current-secret",
+            "kdf_metadata": {"algorithm": "scrypt", "salt": "m3-current-secret-salt"},
+        },
+    )
+    assert recovery.status_code == 200
+    recovery_key_id = recovery.json()["key_record_id"]
+
+    rotation_preview = client.post(
+        "/api/v1/sync/key-rotation/preview",
+        json={
+            "dataset_id": "dataset-1",
+            "target_encryption_policy": "passphrase_wrapped_v1",
+            "source_key_record_ids": [recovery_key_id],
+        },
+    )
+    rotation_commit = client.post(
+        "/api/v1/sync/key-rotation/commit",
+        json={
+            "dataset_id": "dataset-1",
+            "rotation_id": "rotation-m3-e2e",
+            "target_encryption_policy": "passphrase_wrapped_v1",
+            "wrapped_key_blob": secret,
+            "kdf_metadata": {"algorithm": "scrypt", "salt": salt},
+            "source_key_record_ids": [recovery_key_id],
+            "wrapped_for": "passphrase",
+        },
+    )
+    assert rotation_preview.status_code == 200
+    assert rotation_preview.json()["can_commit"] is True
+    assert rotation_commit.status_code == 200
+    assert rotation_commit.json()["committed"] is True
+    assert secret not in rotation_preview.text
+    assert salt not in rotation_preview.text
+    assert secret not in rotation_commit.text
+    assert salt not in rotation_commit.text
+
+    policy = client.patch(
+        "/api/v1/sync/background-policy",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-b",
+            "enabled": True,
+            "pending_local_changes": False,
+        },
+    )
+    lease = client.post(
+        "/api/v1/sync/background-leases",
+        json={"dataset_id": "dataset-1", "device_id": "device-b", "lease_id": "lease-m3"},
+    )
+    pre_pull_status = client.get(
+        "/api/v1/sync/background-status",
+        params={"dataset_id": "dataset-1", "device_id": "device-b"},
+    )
+    assert policy.status_code == 200
+    assert lease.status_code == 200
+    assert lease.json()["status"] == "acquired"
+    assert pre_pull_status.status_code == 200
+    notes_status = {
+        item["domain"]: item for item in pre_pull_status.json()["domains"]
+    }["notes.note"]
+    assert notes_status["cursor_lag_count"] >= 2
+    assert pre_pull_status.json()["restore_completeness"] == "content_complete"
+
+    pulled = client.get(
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-b",
+            "cursor": "0",
+            "domain": "notes.note",
+            "page_size": "20",
+        },
+    )
+    assert pulled.status_code == 200
+    assert [item["client_envelope_id"] for item in pulled.json()["envelopes"]] == [
+        "env-note-1",
+        "env-note-2",
+    ]
+
+    for device_id in ("device-a", "device-b"):
+        acked = client.post(
+            "/api/v1/sync/device-acknowledgments",
+            json={
+                "dataset_id": "dataset-1",
+                "device_id": device_id,
+                "domain_acks": [
+                    {
+                        "domain": "notes.note",
+                        "through_server_sequence": latest_cursor,
+                        "applied_at": _clock(),
+                    }
+                ],
+            },
+        )
+        assert acked.status_code == 200
+
+    dry_run = client.post(
+        "/api/v1/sync/retention/dry-run",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-a",
+            "domains": ["notes.note"],
+            "audit_mode": False,
+            "minimum_envelope_age_seconds": 0,
+            "offline_restore_window_seconds": 0,
+        },
+    )
+    compact_without_confirmation = client.post(
+        "/api/v1/sync/retention/compact",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-a",
+            "domains": ["notes.note"],
+            "confirm": False,
+            "minimum_envelope_age_seconds": 0,
+            "offline_restore_window_seconds": 0,
+        },
+    )
+    assert dry_run.status_code == 200
+    assert dry_run.json()["mutation_performed"] is False
+    assert any(
+        candidate["candidate_type"] == "envelope_compaction"
+        and candidate["object_id"] == "note-1"
+        and candidate["blockers"] == []
+        for candidate in dry_run.json()["candidates"]
+    )
+    assert compact_without_confirmation.status_code == 200
+    assert compact_without_confirmation.json()["confirmation_required"] is True
+    assert compact_without_confirmation.json()["mutation_performed"] is False
+
+    diagnostics = client.get(
+        "/api/v1/sync/diagnostics",
+        params={"dataset_id": "dataset-1", "device_id": "device-a", "retention_limit": "20"},
+    )
+    assert diagnostics.status_code == 200
+    assert diagnostics.json()["retention"]["dry_run"] is True
+    assert diagnostics.json()["key_summary"]["key_record_count"] == 2
+    assert diagnostics.json()["key_summary"]["superseded_key_record_count"] == 1
+    diagnostics_text = diagnostics.text
+    for private_marker in [PRIVATE_NOTE_BODY, secret, salt, "m3-current-secret-salt"]:
+        assert private_marker not in diagnostics_text
+
+    workspace = client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "workspace-dataset",
+            "device_id": "device-a",
+            "scope_type": "workspace",
+            "workspace_id": "workspace-1",
+            "domains": list(WORKSPACE_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+            "metadata": {"label": "Shared research"},
+        },
+    )
+    workspace_push = _push_dataset(
+        client,
+        dataset_id="workspace-dataset",
+        device_id="device-a",
+        envelopes=[_workspace_envelope(), _workspace_source_ref_envelope()],
+    )
+    workspace_status = client.get(
+        "/api/v1/sync/background-status",
+        params={"dataset_id": "workspace-dataset", "device_id": "device-a"},
+    )
+    assert workspace.status_code == 200
+    assert workspace_push["rejected"] == []
+    assert [item["client_envelope_id"] for item in workspace_push["accepted"]] == [
+        "env-workspace-1",
+        "env-workspace-source-1",
+    ]
+    assert workspace_status.status_code == 200
+    assert {item["domain"] for item in workspace_status.json()["domains"]} == set(WORKSPACE_SYNC_DOMAINS)
+
+    harness.workspace_permissions.clear()
+    workspace_denied = client.get(
+        "/api/v1/sync/background-status",
+        params={"dataset_id": "workspace-dataset", "device_id": "device-a"},
+    )
+    assert workspace_denied.status_code == 404
+
+    revoked = client.post(
+        "/api/v1/sync/devices/device-b/revoke",
+        json={"reason": "lost_device", "revoke_key_records": False},
+    )
+    revoked_pull = client.get(
+        "/api/v1/sync/pull",
+        params={"dataset_id": "dataset-1", "device_id": "device-b", "cursor": "0"},
+    )
+    revoked_status = client.get(
+        "/api/v1/sync/background-status",
+        params={"dataset_id": "dataset-1", "device_id": "device-b"},
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["status"] == "revoked"
+    assert revoked_pull.status_code == 404
+    assert revoked_status.status_code == 404

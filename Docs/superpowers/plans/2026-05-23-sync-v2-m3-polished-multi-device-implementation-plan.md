@@ -243,7 +243,7 @@
 
 **Tests:** Retention dry-run tests, compaction safety tests, blob GC tests, diagnostics redaction tests, and audit-event tests.
 
-**Status:** In Progress
+**Status:** Complete
 
 - [x] **Step 1: Write failing retention dry-run tests**
 
@@ -274,22 +274,22 @@
 
 **Tests:** E2E restore/sync tests plus full relevant Sync suite.
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Extend e2e restore/sync tests**
+- [x] **Step 1: Extend e2e restore/sync tests**
 
   Add M3 multi-device scenarios without requiring a real Chatbook client process.
 
-- [ ] **Step 2: Update API docs**
+- [x] **Step 2: Update API docs**
 
   Reflect implemented subset and explicit deferrals.
 
-- [ ] **Step 3: Run final verification**
+- [x] **Step 3: Run final verification**
 
   Run Sync tests, e2e tests, Ruff, Bandit on touched production scope, and
   `git diff --check`.
 
-- [ ] **Step 4: Close Backlog tasks**
+- [x] **Step 4: Close Backlog tasks**
 
   Update child tasks and parent `TASK-490.13` with final summaries and known
   deferrals.

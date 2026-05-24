@@ -1,7 +1,7 @@
-# Sync v2 M3 API Contract Draft
+# Sync v2 M3 API Contract
 
 Date: 2026-05-23
-Status: Planning draft
+Status: Implemented foundation with explicit deferrals
 Scope: Capability-gated additions to `/api/v1/sync` for polished multi-device sync
 
 ## Overview
@@ -20,13 +20,31 @@ M3 adds capability-gated surfaces for:
 - stricter encryption modes and key rotation;
 - retention, compaction, and diagnostics.
 
+## Current Implementation Status
+
+The current M3 foundation implements device lifecycle, device authorization,
+device acknowledgments, background policy/leases/status, workspace dataset
+enrollment, workspace/source-cache/media metadata domains, key rotation,
+retention dry-run, guarded retention compaction, and redacted diagnostics.
+
+Deferred beyond this foundation: conflict summary and preview-resolution
+endpoints, physical blob byte deletion, destructive envelope audit-log deletion,
+workspace Notes/Chat materialization, broad collaborative content editing,
+passphrase/device-key unlock UX, and full client-only encrypted editing.
+
 ## Capabilities
 
-`GET /api/v1/sync/capabilities` adds M3 feature flags:
+`GET /api/v1/sync/capabilities` returns the server-supported domains,
+operations, encryption policy metadata, blob transfer metadata, compatibility
+flags, warnings, and coarse support booleans. The current M3 foundation does
+not expose a separate `features` map; clients should gate behavior by
+advertised domains, policy lists, compatibility flags, endpoint availability,
+and documented server errors.
 
 ```json
 {
-  "protocol_version": "sync-v2-m3",
+  "protocol_version": "sync-v2-m1",
+  "min_supported_protocol_version": "sync-v2-m1",
   "domains": [
     "notes.note",
     "chat.conversation",
@@ -39,29 +57,32 @@ M3 adds capability-gated surfaces for:
     "media.keyword",
     "media.keyword_link"
   ],
-  "features": {
-    "background_sync": true,
-    "device_lifecycle": true,
-    "device_authorization": true,
-    "workspace_datasets": true,
-    "device_acknowledgments": true,
-    "conflict_review_v2": true,
-    "strict_encryption_modes": true,
-    "key_rotation": true,
-    "retention_gc": false,
-    "admin_diagnostics": true
+  "operations": {
+    "notes.note": ["upsert", "tombstone"],
+    "chat.conversation": ["upsert", "tombstone"],
+    "chat.message": ["append", "tombstone"],
+    "attachment.ref": ["upsert", "tombstone"],
+    "workspaces.workspace": ["upsert", "tombstone"],
+    "workspaces.source_ref": ["upsert", "tombstone"],
+    "source_cache.entry": ["upsert", "tombstone"],
+    "media.item": ["upsert", "tombstone"],
+    "media.keyword": ["upsert", "tombstone"],
+    "media.keyword_link": ["upsert", "tombstone"]
   },
   "encryption_policies": [
-    "server_trusted_v1",
-    "passphrase_wrapped_v1",
-    "device_wrapped_v1",
-    "client_private_v1"
-  ]
+    "server_trusted_v1"
+  ],
+  "supports_restore_manifest": true,
+  "supports_conflicts": true,
+  "supports_attachments": false,
+  "compatibility_flags": {},
+  "warnings": []
 }
 ```
 
-Servers may advertise any subset. Clients must not assume all M3 features are
-available just because `protocol_version` starts with `sync-v2-m3`.
+Servers may advertise any subset of domains and encryption policies. Clients
+must not assume every documented M3 endpoint is available just because a server
+supports Sync v2.
 
 ### Derived Content Domain Policy
 
@@ -180,11 +201,8 @@ Revokes a device:
 
 ```json
 {
-  "dataset_id": "ds_personal_user_1",
   "reason": "lost_device",
-  "revoke_device_key_records": true,
-  "confirm_current_device": false,
-  "idempotency_key": "revoke-device-2026-05-23"
+  "revoke_key_records": true
 }
 ```
 
@@ -297,25 +315,18 @@ delete data for datasets with offline devices.
 
 ## Workspace Datasets
 
-### `GET /api/v1/sync/datasets`
-
-Lists datasets available to the authenticated user:
-
-- personal datasets owned by the user;
-- workspace datasets where current workspace membership grants sync access.
-
-### `POST /api/v1/sync/datasets`
+### `POST /api/v1/sync/datasets/enroll`
 
 Creates or enrolls a dataset:
 
 ```json
 {
   "dataset_id": "ds_workspace_research",
-  "scope": "workspace",
+  "scope_type": "workspace",
   "workspace_id": "workspace_123",
   "domains": ["workspaces.workspace", "workspaces.source_ref"],
   "encryption_policy": "server_trusted_v1",
-  "mode": "offline_sync"
+  "metadata": {"mode": "offline_sync"}
 }
 ```
 
@@ -324,11 +335,11 @@ permission or when requested domains/key policy are not allowed for that
 workspace.
 
 Every existing push/pull/restore/blob/key/conflict endpoint must re-check
-workspace membership when `dataset.scope == "workspace"`.
+workspace membership when `dataset.scope_type == "workspace"`.
 
 ## Conflict Review V2
 
-### `GET /api/v1/sync/conflicts/summary`
+### Deferred: `GET /api/v1/sync/conflicts/summary`
 
 Returns conflict groups with safe summaries:
 
@@ -342,7 +353,7 @@ Returns conflict groups with safe summaries:
 - tombstone flags;
 - redacted field-level metadata when available.
 
-### `POST /api/v1/sync/conflicts/preview-resolution`
+### Deferred: `POST /api/v1/sync/conflicts/preview-resolution`
 
 Previews destructive or batch decisions before applying them:
 
@@ -364,8 +375,9 @@ Previews destructive or batch decisions before applying them:
 }
 ```
 
-The existing M1 batch resolution endpoint remains the apply path. Preview
-returns expected mutations, blocked decisions, and warnings.
+The existing M1 batch resolution endpoint remains the implemented apply path.
+Future preview support should return expected mutations, blocked decisions, and
+warnings before applying destructive changes.
 
 ## Stricter Encryption And Key Rotation
 
@@ -438,8 +450,7 @@ Initial blocker codes:
 - `retention_active_blob_reference`
 - `retention_blob_unverified_by_device`
 
-M3 first implements this endpoint as dry-run only. `mutation_performed` must
-remain `false`.
+The dry-run endpoint always reports `mutation_performed=false`.
 
 ### `POST /api/v1/sync/retention/compact`
 

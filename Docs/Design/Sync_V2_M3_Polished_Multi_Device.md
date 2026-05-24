@@ -1,7 +1,7 @@
 # Sync v2 M3 Polished Multi-Device Design
 
 Date: 2026-05-23
-Status: Planning gate
+Status: Implemented foundation with explicit deferrals
 Scope: Server-connected Chatbook sync after M1 personal sync and M2 blob restore completeness
 
 ## Context
@@ -18,6 +18,20 @@ completeness, and server-unlocked key recovery hardening.
 M3 should not replace that contract. It should graduate Sync v2 from reliable
 manual restore/sync into polished multi-device operation while keeping Chatbook
 valid as a standalone local-only application that never connects to a server.
+
+## Implemented Foundation
+
+The implemented M3 foundation now covers the server primitives needed for a
+polished multi-device client: device lifecycle and revocation, per-device
+acknowledgments, background policy/leases/status, workspace dataset admission
+with membership rechecks, workspace/source-cache/media metadata domains, key
+rotation metadata and redaction, retention dry-run, guarded retention
+compaction, and dataset-scoped diagnostics.
+
+The foundation deliberately defers destructive audit-log deletion, physical blob
+byte deletion, broad workspace Notes/Chat materialization, conflict
+summary/preview endpoints, passphrase/device-key unlock UX, and full
+client-only encrypted editing.
 
 ## Product Modes
 
