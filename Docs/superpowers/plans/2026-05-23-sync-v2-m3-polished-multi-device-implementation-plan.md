@@ -243,13 +243,13 @@
 
 **Tests:** Retention dry-run tests, compaction safety tests, blob GC tests, diagnostics redaction tests, and audit-event tests.
 
-**Status:** Not Started
+**Status:** In Progress
 
-- [ ] **Step 1: Write failing retention dry-run tests**
+- [x] **Step 1: Write failing retention dry-run tests**
 
   Cover unacknowledged devices, tombstone windows, audit mode, and blob refs.
 
-- [ ] **Step 2: Implement dry-run only**
+- [x] **Step 2: Implement dry-run only**
 
   Add candidate calculation without deletion.
 

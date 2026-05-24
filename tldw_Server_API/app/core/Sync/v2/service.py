@@ -217,6 +217,43 @@ class SyncBackgroundStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncRetentionCandidate:
+    """One read-only retention, compaction, or blob-GC candidate."""
+
+    candidate_type: str
+    dataset_id: str
+    domain: SyncDomain | None = None
+    object_id: str | None = None
+    server_sequence: int | None = None
+    blob_id: str | None = None
+    attachment_id: str | None = None
+    payload_hash: str | None = None
+    size_bytes: int | None = None
+    blockers: list[str] = field(default_factory=list)
+    required_device_ids: list[str] = field(default_factory=list)
+    unacknowledged_device_ids: list[str] = field(default_factory=list)
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncRetentionDryRunResult:
+    """Read-only retention scan result."""
+
+    dataset_id: str
+    dry_run: bool = True
+    mutation_performed: bool = False
+    evaluated_at: str | None = None
+    audit_mode: bool = True
+    minimum_envelope_age_seconds: int = 0
+    minimum_tombstone_age_seconds: int = 0
+    offline_restore_window_seconds: int = 0
+    candidate_count: int = 0
+    blocked_count: int = 0
+    blocker_counts: dict[str, int] = field(default_factory=dict)
+    candidates: list[SyncRetentionCandidate] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
 class SyncPushAccepted:
     client_envelope_id: str
     server_sequence: int
@@ -837,6 +874,124 @@ class SyncV2Service:
             quota_pressure=quota_pressure,
             restore_completeness=restore_completeness,
             server_time=self.clock(),
+        )
+
+    def retention_dry_run(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str | None = None,
+        domains: Sequence[SyncDomain] | None = None,
+        audit_mode: bool = True,
+        minimum_envelope_age_seconds: int = 0,
+        minimum_tombstone_age_seconds: int = 0,
+        offline_restore_window_seconds: int = 0,
+        limit: int | None = None,
+    ) -> SyncRetentionDryRunResult:
+        """Return read-only retention/GC candidates and safety blockers."""
+
+        if device_id is not None:
+            self._require_registered_device(user_id, device_id)
+        if minimum_envelope_age_seconds < 0 or minimum_tombstone_age_seconds < 0:
+            raise SyncStoreError("Sync retention age windows must be non-negative")
+        if offline_restore_window_seconds < 0:
+            raise SyncStoreError("Sync retention restore window must be non-negative")
+        scan_limit = limit or self.settings.restore_manifest_scan_limit
+        if scan_limit <= 0:
+            raise SyncStoreError("Sync retention scan limit must be greater than zero")
+
+        dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
+        selected_domains = [
+            domain for domain in dataset.domains if domains is None or domain in domains
+        ]
+        active_devices = self._retention_active_devices(dataset)
+        envelopes = self.store.list_accepted_envelopes_for_replay(
+            dataset_id,
+            since_cursor=0,
+            limit=scan_limit,
+        )
+        latest_by_object = self._retention_latest_envelopes_by_object(envelopes)
+        restore_window_blocked = self._retention_restore_window_active(
+            active_devices,
+            offline_restore_window_seconds,
+        )
+        candidates: list[SyncRetentionCandidate] = []
+
+        for envelope in envelopes:
+            if envelope.domain not in selected_domains:
+                continue
+            candidate_type = self._retention_envelope_candidate_type(
+                envelope,
+                latest_by_object=latest_by_object,
+            )
+            if candidate_type is None:
+                continue
+            blockers: list[str] = []
+            if audit_mode:
+                blockers.append("retention_audit_mode")
+            window_seconds = (
+                minimum_tombstone_age_seconds
+                if candidate_type == "tombstone_prune"
+                else minimum_envelope_age_seconds
+            )
+            window_blocker = (
+                "retention_tombstone_window_active"
+                if candidate_type == "tombstone_prune"
+                else "retention_envelope_window_active"
+            )
+            if self._retention_window_active(envelope.server_timestamp, window_seconds):
+                blockers.append(window_blocker)
+            if restore_window_blocked:
+                blockers.append("retention_restore_window_active")
+            unacknowledged = self._retention_unacknowledged_devices(
+                dataset_id=dataset_id,
+                domain=envelope.domain,
+                server_sequence=envelope.server_sequence,
+                active_devices=active_devices,
+            )
+            if unacknowledged:
+                blockers.append("retention_unacknowledged_device")
+            candidates.append(
+                SyncRetentionCandidate(
+                    candidate_type=candidate_type,
+                    dataset_id=dataset_id,
+                    domain=envelope.domain,
+                    object_id=envelope.object_id,
+                    server_sequence=envelope.server_sequence,
+                    blockers=blockers,
+                    required_device_ids=[device.device_id for device in active_devices],
+                    unacknowledged_device_ids=unacknowledged,
+                    reason=(
+                        "superseded envelope"
+                        if candidate_type == "envelope_compaction"
+                        else "tombstone retained for deletion window"
+                    ),
+                )
+            )
+
+        if "attachment.ref" in selected_domains:
+            candidates.extend(
+                self._retention_blob_candidates(
+                    dataset=dataset,
+                    active_devices=active_devices,
+                    audit_mode=audit_mode,
+                    restore_window_blocked=restore_window_blocked,
+                )
+            )
+
+        blocker_counts = _retention_blocker_counts(candidates)
+        return SyncRetentionDryRunResult(
+            dataset_id=dataset_id,
+            evaluated_at=self.clock(),
+            audit_mode=audit_mode,
+            minimum_envelope_age_seconds=minimum_envelope_age_seconds,
+            minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+            offline_restore_window_seconds=offline_restore_window_seconds,
+            candidate_count=len(candidates),
+            blocked_count=sum(1 for candidate in candidates if candidate.blockers),
+            blocker_counts=blocker_counts,
+            candidates=candidates,
         )
 
     def enroll_dataset(
@@ -2595,6 +2750,175 @@ class SyncV2Service:
             updated_at=self.clock(),
         )
 
+    def _retention_active_devices(self, dataset: SyncDataset) -> list[SyncDevice]:
+        devices = self.store.list_devices_for_user(dataset.owner_user_id)
+        return sorted(
+            [
+                device
+                for device in devices
+                if device.status == "active" and device.revoked_at is None
+            ],
+            key=lambda device: device.device_id,
+        )
+
+    def _retention_latest_envelopes_by_object(
+        self,
+        envelopes: Sequence[SyncEnvelope],
+    ) -> dict[tuple[SyncDomain, str], SyncEnvelope]:
+        latest: dict[tuple[SyncDomain, str], SyncEnvelope] = {}
+        for envelope in envelopes:
+            key = (envelope.domain, envelope.object_id)
+            existing = latest.get(key)
+            if existing is None or envelope.server_sequence > existing.server_sequence:
+                latest[key] = envelope
+        return latest
+
+    def _retention_envelope_candidate_type(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        latest_by_object: Mapping[tuple[SyncDomain, str], SyncEnvelope],
+    ) -> str | None:
+        latest = latest_by_object.get((envelope.domain, envelope.object_id))
+        if latest is None:
+            return None
+        if envelope.operation == "tombstone" or envelope.deleted:
+            return "tombstone_prune"
+        if latest.operation == "tombstone" or latest.deleted:
+            return None
+        if latest.server_sequence != envelope.server_sequence:
+            return "envelope_compaction"
+        return None
+
+    def _retention_restore_window_active(
+        self,
+        active_devices: Sequence[SyncDevice],
+        offline_restore_window_seconds: int,
+    ) -> bool:
+        if offline_restore_window_seconds <= 0:
+            return False
+        return any(
+            self._retention_window_active(
+                device.last_seen_at,
+                offline_restore_window_seconds,
+            )
+            for device in active_devices
+        )
+
+    def _retention_unacknowledged_devices(
+        self,
+        *,
+        dataset_id: str,
+        domain: SyncDomain,
+        server_sequence: int,
+        active_devices: Sequence[SyncDevice],
+    ) -> list[str]:
+        unacknowledged: list[str] = []
+        for device in active_devices:
+            summary = self.store.list_device_acknowledgments(dataset_id, device.device_id)
+            ack = summary.domain_acks.get(domain)
+            if ack is None or ack.through_server_sequence < server_sequence:
+                unacknowledged.append(device.device_id)
+        return unacknowledged
+
+    def _retention_blob_candidates(
+        self,
+        *,
+        dataset: SyncDataset,
+        active_devices: Sequence[SyncDevice],
+        audit_mode: bool,
+        restore_window_blocked: bool,
+    ) -> list[SyncRetentionCandidate]:
+        candidates: list[SyncRetentionCandidate] = []
+        for blob in self.store.list_blob_objects_for_dataset(dataset.dataset_id):
+            blockers: list[str] = []
+            if audit_mode:
+                blockers.append("retention_audit_mode")
+            if restore_window_blocked:
+                blockers.append("retention_restore_window_active")
+            state = self.store.get_object_state(dataset.dataset_id, "attachment.ref", blob.attachment_id)
+            if (
+                (state is not None and not state.deleted)
+                or self._retention_attachment_ref_active(
+                    dataset_id=dataset.dataset_id,
+                    attachment_id=blob.attachment_id,
+                )
+            ):
+                blockers.append("retention_active_blob_reference")
+            unacknowledged = self._retention_blob_unacknowledged_devices(
+                dataset_id=dataset.dataset_id,
+                attachment_id=blob.attachment_id,
+                payload_hash=blob.payload_hash,
+                active_devices=active_devices,
+            )
+            if unacknowledged:
+                blockers.append("retention_blob_unverified_by_device")
+            candidates.append(
+                SyncRetentionCandidate(
+                    candidate_type="blob_gc",
+                    dataset_id=dataset.dataset_id,
+                    domain="attachment.ref",
+                    object_id=blob.attachment_id,
+                    blob_id=blob.blob_id,
+                    attachment_id=blob.attachment_id,
+                    payload_hash=blob.payload_hash,
+                    size_bytes=blob.size_bytes,
+                    blockers=blockers,
+                    required_device_ids=[device.device_id for device in active_devices],
+                    unacknowledged_device_ids=unacknowledged,
+                    reason="server blob retained for attachment restore",
+                )
+            )
+        return candidates
+
+    def _retention_attachment_ref_active(
+        self,
+        *,
+        dataset_id: str,
+        attachment_id: str,
+    ) -> bool:
+        envelopes = self.store.list_envelopes_for_entity(
+            dataset_id,
+            "attachment.ref",
+            entity_id=attachment_id,
+            limit=1,
+        )
+        if not envelopes:
+            return False
+        latest = envelopes[0]
+        return latest.operation != "tombstone" and not latest.deleted
+
+    def _retention_blob_unacknowledged_devices(
+        self,
+        *,
+        dataset_id: str,
+        attachment_id: str,
+        payload_hash: str,
+        active_devices: Sequence[SyncDevice],
+    ) -> list[str]:
+        unacknowledged: list[str] = []
+        for device in active_devices:
+            summary = self.store.list_device_acknowledgments(dataset_id, device.device_id)
+            if not any(
+                ack.attachment_id == attachment_id and ack.payload_hash == payload_hash
+                for ack in summary.blob_acks
+            ):
+                unacknowledged.append(device.device_id)
+        return unacknowledged
+
+    def _retention_window_active(
+        self,
+        server_timestamp: str | None,
+        minimum_age_seconds: int,
+    ) -> bool:
+        if minimum_age_seconds <= 0:
+            return False
+        timestamp = _parse_sync_timestamp(server_timestamp)
+        now = _parse_sync_timestamp(self.clock())
+        if timestamp is None or now is None:
+            return True
+        return (now - timestamp).total_seconds() < minimum_age_seconds
+
     def _require_server_trusted_encryption_ready(self) -> None:
         if not self.settings.server_trusted_encryption.encryption.get("ready", False):
             raise SyncStoreError(
@@ -3021,6 +3345,28 @@ def _compact_json_size(value: object) -> int:
     return len(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
 
 
+def _parse_sync_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _retention_blocker_counts(
+    candidates: Sequence[SyncRetentionCandidate],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        for blocker in candidate.blockers:
+            counts[blocker] = counts.get(blocker, 0) + 1
+    return counts
+
+
 def _ciphertext_exceeds_attachment_limit(
     payload_ciphertext: str,
     max_attachment_bytes: int,
@@ -3200,6 +3546,8 @@ __all__ = [
     "SyncPushConflict",
     "SyncPushRejected",
     "SyncPushResult",
+    "SyncRetentionCandidate",
+    "SyncRetentionDryRunResult",
     "SyncRestoreManifest",
     "SyncRestoreManifestDataset",
     "SyncRestoreManifestDevice",

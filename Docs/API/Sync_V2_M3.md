@@ -399,6 +399,48 @@ Notes/Chat API writes routed through server-origin Sync return `409` with
 
 Returns compaction and deletion candidates without mutating data.
 
+Request:
+
+```json
+{
+  "dataset_id": "dataset-uuid",
+  "device_id": "optional-device-id",
+  "domains": ["notes.note", "attachment.ref"],
+  "audit_mode": true,
+  "minimum_envelope_age_seconds": 0,
+  "minimum_tombstone_age_seconds": 0,
+  "offline_restore_window_seconds": 0,
+  "limit": 1000
+}
+```
+
+Response candidates are redacted. They include object/blob references and
+stable blocker codes only; they never include clear payloads, ciphertext,
+wrapped keys, or blob bytes.
+
+Candidate types:
+
+- `envelope_compaction`: superseded accepted envelope that could be compacted
+  into a future snapshot after all blockers clear.
+- `tombstone_prune`: tombstone envelope that could be pruned after retention
+  and audit policy allow it.
+- `blob_gc`: server blob metadata that could be garbage-collected only after
+  active attachment refs, device verification, restore windows, and audit
+  policy allow it.
+
+Initial blocker codes:
+
+- `retention_audit_mode`
+- `retention_unacknowledged_device`
+- `retention_envelope_window_active`
+- `retention_tombstone_window_active`
+- `retention_restore_window_active`
+- `retention_active_blob_reference`
+- `retention_blob_unverified_by_device`
+
+M3 first implements this endpoint as dry-run only. `mutation_performed` must
+remain `false`.
+
 ### `POST /api/v1/sync/retention/compact`
 
 Applies policy-permitted compaction. This endpoint should remain disabled until

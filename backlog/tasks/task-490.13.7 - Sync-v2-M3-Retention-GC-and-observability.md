@@ -1,7 +1,7 @@
 ---
 id: TASK-490.13.7
 title: 'Sync v2 M3: Retention GC and observability'
-status: To Do
+status: In Progress
 labels:
 - sync
 - sync-v2
@@ -32,7 +32,8 @@ Add conservative retention, compaction, blob garbage-collection, and diagnostics
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Started Stage 7 with a dry-run-only retention candidate slice. This first implementation unit will not delete, compact, or GC data; it should only calculate candidates and blockers.
+Completed child TASK-490.13.7.1: dry-run-only retention candidate calculation now reports envelope_compaction, tombstone_prune, and blob_gc candidates with stable blockers and no mutation, including restore-window blockers and latest-tombstone object-chain handling. Destructive compaction/GC and diagnostics remain open for later Stage 7 slices.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

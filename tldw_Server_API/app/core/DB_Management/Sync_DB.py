@@ -4501,6 +4501,27 @@ class SyncDatabase:
             return None
         return _blob_object_from_row(row)
 
+    def list_blob_objects_for_dataset(
+        self,
+        dataset_id: str,
+        *,
+        status: str | None = "available",
+    ) -> list[SyncBlobObject]:
+        """Return committed blob metadata for a dataset without payload bytes."""
+
+        self._require_dataset(dataset_id)
+        rows = self.execute(
+            """
+            SELECT *
+              FROM sync_blob_objects
+             WHERE dataset_id = ?
+               AND (? IS NULL OR status = ?)
+             ORDER BY updated_at ASC, blob_id ASC
+            """,
+            (dataset_id, status, status),
+        ).rows
+        return [_blob_object_from_row(row) for row in rows]
+
     def summarize_blob_quota(
         self,
         owner_user_id: str,

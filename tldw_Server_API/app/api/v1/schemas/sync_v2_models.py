@@ -541,6 +541,57 @@ class SyncBackgroundStatusResponse(BaseModel):
     server_time: str | None = None
 
 
+SyncRetentionCandidateType = Literal["envelope_compaction", "tombstone_prune", "blob_gc"]
+
+
+class SyncRetentionDryRunRequest(BaseModel):
+    """Request a read-only retention/GC candidate scan."""
+
+    dataset_id: str = Field(..., min_length=1)
+    device_id: str | None = Field(None, min_length=1)
+    domains: list[SyncDomain] | None = None
+    audit_mode: bool = True
+    minimum_envelope_age_seconds: int = Field(0, ge=0)
+    minimum_tombstone_age_seconds: int = Field(0, ge=0)
+    offline_restore_window_seconds: int = Field(0, ge=0)
+    limit: int | None = Field(None, ge=1)
+
+
+class SyncRetentionCandidateResponse(BaseModel):
+    """One redacted dry-run retention, compaction, or blob-GC candidate."""
+
+    candidate_type: SyncRetentionCandidateType
+    dataset_id: str
+    domain: SyncDomain | None = None
+    object_id: str | None = None
+    server_sequence: int | None = Field(None, ge=1)
+    blob_id: str | None = None
+    attachment_id: str | None = None
+    payload_hash: str | None = None
+    size_bytes: int | None = Field(None, ge=0)
+    blockers: list[str] = Field(default_factory=list)
+    required_device_ids: list[str] = Field(default_factory=list)
+    unacknowledged_device_ids: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+
+class SyncRetentionDryRunResponse(BaseModel):
+    """Read-only retention/GC dry-run response."""
+
+    dataset_id: str
+    dry_run: bool = True
+    mutation_performed: bool = False
+    evaluated_at: str | None = None
+    audit_mode: bool = True
+    minimum_envelope_age_seconds: int = Field(0, ge=0)
+    minimum_tombstone_age_seconds: int = Field(0, ge=0)
+    offline_restore_window_seconds: int = Field(0, ge=0)
+    candidate_count: int = Field(0, ge=0)
+    blocked_count: int = Field(0, ge=0)
+    blocker_counts: dict[str, int] = Field(default_factory=dict)
+    candidates: list[SyncRetentionCandidateResponse] = Field(default_factory=list)
+
+
 class SyncDatasetEnrollRequest(BaseModel):
     """Request to create or join a sync dataset."""
 
@@ -1583,6 +1634,10 @@ __all__ = [
     "SyncRepairEnvelopeError",
     "SyncRepairRequest",
     "SyncRepairResponse",
+    "SyncRetentionCandidateResponse",
+    "SyncRetentionCandidateType",
+    "SyncRetentionDryRunRequest",
+    "SyncRetentionDryRunResponse",
     "SyncRestoreManifestDevice",
     "SyncRestoreManifestDataset",
     "SyncRestoreManifestResponse",

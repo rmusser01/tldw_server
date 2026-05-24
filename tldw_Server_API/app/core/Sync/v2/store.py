@@ -452,6 +452,16 @@ class SyncV2Store:
             owner_user_id=owner_user_id,
         )
 
+    def list_blob_objects_for_dataset(
+        self,
+        dataset_id: str,
+        *,
+        status: str | None = "available",
+    ) -> list[SyncBlobObject]:
+        """Return committed blob metadata for retention and diagnostics scans."""
+
+        return self.db.list_blob_objects_for_dataset(dataset_id, status=status)
+
     def summarize_blob_quota(
         self,
         owner_user_id: str,

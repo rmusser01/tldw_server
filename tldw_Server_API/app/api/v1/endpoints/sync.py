@@ -79,6 +79,8 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncRestoreManifestResponse,
     SyncRestorePreviewRequest,
     SyncRestorePreviewResponse,
+    SyncRetentionDryRunRequest,
+    SyncRetentionDryRunResponse,
     SyncV2Envelope,
 )
 from tldw_Server_API.app.core.Sync.v2.errors import (
@@ -357,6 +359,10 @@ def _api_background_lease_from_core(lease: Any) -> SyncBackgroundLeaseResponse:
 
 def _api_background_status_from_core(status: Any) -> SyncBackgroundStatusResponse:
     return SyncBackgroundStatusResponse(**asdict(status))
+
+
+def _api_retention_dry_run_from_core(result: Any) -> SyncRetentionDryRunResponse:
+    return SyncRetentionDryRunResponse(**asdict(result))
 
 
 def _api_empty_profile(user_id: str, device_id: str | None) -> SyncProfileResponse:
@@ -875,6 +881,38 @@ def get_sync_v2_background_status(
             device_id=device_id,
         ) from exc
     return _api_background_status_from_core(background_status)
+
+
+@router.post(
+    "/retention/dry-run",
+    response_model=SyncRetentionDryRunResponse,
+    summary="Return read-only Sync v2 retention and GC candidates",
+)
+def dry_run_sync_v2_retention(
+    request: SyncRetentionDryRunRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        result = service.retention_dry_run(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            domains=request.domains,
+            audit_mode=request.audit_mode,
+            minimum_envelope_age_seconds=request.minimum_envelope_age_seconds,
+            minimum_tombstone_age_seconds=request.minimum_tombstone_age_seconds,
+            offline_restore_window_seconds=request.offline_restore_window_seconds,
+            limit=request.limit,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+        ) from exc
+    return _api_retention_dry_run_from_core(result)
 
 
 @router.post(
