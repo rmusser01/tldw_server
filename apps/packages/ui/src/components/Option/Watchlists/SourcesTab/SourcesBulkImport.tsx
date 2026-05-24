@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Alert, Button, Modal, Select, Space, Switch, Table, Tag, Upload, message } from "antd"
+import { Button, Modal, Select, Space, Switch, Table, Tag, Upload, message } from "antd"
 import type { RcFile } from "antd/es/upload/interface"
 import { UploadCloud } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { fetchWatchlistSources, importOpml } from "@/services/watchlists"
 import type { SourcesImportResponse, WatchlistGroup, WatchlistTag } from "@/types/watchlists"
 import {
@@ -684,8 +685,7 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
 
         {existingUrlsLoading && (
           <Alert
-            type="info"
-            showIcon
+            variant="info"
             title={t(
               "watchlists:sources.importPreviewLoadingExisting",
               "Loading existing feeds for duplicate checks..."
@@ -695,10 +695,10 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
 
         {preflight && (
           <Alert
-            type={preflight.parseError ? "error" : preflight.ready > 0 ? "info" : "warning"}
-            showIcon
+            variant={preflight.parseError ? "error" : preflight.ready > 0 ? "info" : "warning"}
             title={t("watchlists:sources.importPreviewSummaryTitle", "Preflight Summary")}
-            description={preflight.parseError
+          >
+            {preflight.parseError
               ? t(
                   "watchlists:sources.importPreviewParseError",
                   "Could not parse this OPML file. Verify it contains outline nodes with xmlUrl attributes."
@@ -714,22 +714,22 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
                     missingUrl: preflight.missingUrl
                   }
                 )}
-          />
+          </Alert>
         )}
 
         {renderPreflightPreview()}
 
         {summary && (
           <Alert
-            type={summary.errors > 0 ? "warning" : "success"}
-            showIcon
+            variant={summary.errors > 0 ? "warning" : "success"}
             title={t("watchlists:sources.importSummary", "Import Summary")}
-            description={t(
+          >
+            {t(
               "watchlists:sources.importSummaryDesc",
               "{{created}} created, {{skipped}} skipped, {{errors}} errors",
               summary
             )}
-          />
+          </Alert>
         )}
 
         {renderFailedItems()}
