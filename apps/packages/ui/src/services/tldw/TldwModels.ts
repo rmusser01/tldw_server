@@ -36,8 +36,24 @@ const AUDIO_MODEL_HINTS = [
 
 const NON_CHAT_MODEL_HINTS = ["rerank", "moderation", "safety"]
 
+const UNSELECTABLE_CHAT_MODEL_AVAILABILITY = new Set([
+  "disabled",
+  "failed",
+  "unavailable",
+  "not-configured"
+])
+
 const hasAnyHint = (value: string, hints: string[]): boolean =>
   hints.some((hint) => value.includes(hint))
+
+const normalizeAvailabilityStatus = (value: string | undefined): string | null => {
+  if (typeof value !== "string") return null
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "-")
+  return normalized.length > 0 ? normalized : null
+}
 
 const isAbortLikeModelFetchError = (error: unknown): boolean => {
   const candidate = error as
@@ -424,13 +440,9 @@ export class TldwModelsService {
     if (model.isConfigured === false) return false
     if (model.providerIsConfigured === false) return false
     if (model.providerEnabled === false) return false
-    const availability = model.availability?.trim().toLowerCase()
-    if (
-      availability &&
-      ["disabled", "failed", "unavailable", "not-configured", "not_configured"].includes(
-        availability
-      )
-    ) {
+    if (model.catalogOnly === true) return false
+    const availability = normalizeAvailabilityStatus(model.availability)
+    if (availability && UNSELECTABLE_CHAT_MODEL_AVAILABILITY.has(availability)) {
       return false
     }
     return true

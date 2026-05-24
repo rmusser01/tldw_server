@@ -199,6 +199,98 @@ describe("TldwApiClient getModels normalization", () => {
     )
   })
 
+  it("matches provider availability across provider key aliases", async () => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
+      if (request.path === "/api/v1/llm/models/metadata") {
+        return {
+          models: [
+            {
+              id: "local/llama",
+              provider: "llamacpp",
+              type: "chat"
+            },
+            {
+              id: "custom/model",
+              provider: "custom-openai-api",
+              type: "chat"
+            }
+          ]
+        }
+      }
+      if (request.path === "/api/v1/llm/providers") {
+        return {
+          providers: [
+            {
+              name: "llama.cpp",
+              is_configured: false,
+              enabled: false
+            },
+            {
+              name: "custom_openai_api",
+              is_configured: true,
+              enabled: true
+            }
+          ]
+        }
+      }
+      return {}
+    })
+
+    const client = new TldwApiClient()
+    const models = await client.getModels()
+
+    expect(models.find((model) => model.id === "local/llama")).toEqual(
+      expect.objectContaining({
+        is_configured: false,
+        provider_is_configured: false,
+        provider_enabled: false
+      })
+    )
+    expect(models.find((model) => model.id === "custom/model")).toEqual(
+      expect.objectContaining({
+        is_configured: true,
+        provider_is_configured: true,
+        provider_enabled: true
+      })
+    )
+  })
+
+  it("skips provider listing when model metadata already has availability status", async () => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
+      if (request.path === "/api/v1/llm/models/metadata") {
+        return {
+          models: [
+            {
+              id: "openai/gpt-4o-mini",
+              provider: "openai",
+              type: "chat",
+              is_configured: true,
+              provider_enabled: true,
+              availability: "available"
+            }
+          ]
+        }
+      }
+      if (request.path === "/api/v1/llm/providers") {
+        throw new Error("provider listing should not be fetched")
+      }
+      return {}
+    })
+
+    const client = new TldwApiClient()
+    const models = await client.getModels()
+
+    expect(models[0]).toEqual(
+      expect.objectContaining({
+        id: "openai/gpt-4o-mini",
+        is_configured: true,
+        provider_enabled: true,
+        availability: "available"
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
   it("enriches chat providers even when non-chat catalog entries already have availability metadata", async () => {
     mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
       if (request.path === "/api/v1/llm/models/metadata") {

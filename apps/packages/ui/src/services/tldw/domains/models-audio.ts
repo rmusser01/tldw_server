@@ -1,6 +1,14 @@
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
+import {
+  buildProviderAvailabilityMap,
+  normalizeProviderAvailabilityKey,
+  shouldFetchProviderAvailability,
+  toNonEmptyProviderString,
+  toOptionalProviderBoolean,
+  type TldwProvidersResponse
+} from "../model-provider-availability"
 import type {
   LlamacppAsset,
   LlamacppAcquisitionJobListResponse,
@@ -49,7 +57,7 @@ import type {
  */
 export interface TldwApiClientCore {
   getModelsMetadata(options?: { refreshOpenRouter?: boolean }): Promise<any>
-  getProviders(): Promise<any>
+  getProviders(): Promise<TldwProvidersResponse>
   createImageArtifact(request: any): Promise<any>
   ensureConfigForRequest(requireAuth: boolean): Promise<any>
   request<T>(init: any, requireAuth?: boolean): Promise<T>
@@ -79,49 +87,13 @@ export const modelsAudioMethods = {
       const trimmed = value.trim()
       return trimmed.length > 0 ? trimmed : null
     }
-    const toOptionalBoolean = (value: unknown): boolean | undefined =>
-      typeof value === "boolean" ? value : undefined
     const isLikelyModelId = (value: string): boolean => {
       if (/\s/.test(value)) return false
       return /[/:._-]/.test(value)
     }
-    const providerKey = (value: unknown): string | null =>
-      toNonEmptyString(value)?.toLowerCase() ?? null
-    const providerAvailability = new Map<
-      string,
-      {
-        is_configured?: boolean
-        provider_enabled?: boolean
-        availability?: string
-      }
-    >()
-    try {
-      const providersPayload = await this.getProviders()
-      const providers = Array.isArray(providersPayload)
-        ? providersPayload
-        : Array.isArray(providersPayload?.providers)
-          ? providersPayload.providers
-          : []
-      for (const provider of providers) {
-        const key = providerKey(
-          typeof provider === "string"
-            ? provider
-            : provider?.name ?? provider?.provider ?? provider?.id
-        )
-        if (!key) continue
-        providerAvailability.set(key, {
-          is_configured:
-            toOptionalBoolean(provider?.is_configured) ??
-            toOptionalBoolean(provider?.configured),
-          provider_enabled:
-            toOptionalBoolean(provider?.provider_enabled) ??
-            toOptionalBoolean(provider?.enabled),
-          availability: toNonEmptyString(provider?.availability) ?? undefined
-        })
-      }
-    } catch {
-      // Older servers may not expose provider listings; keep legacy behavior.
-    }
+    const providerAvailability = shouldFetchProviderAvailability(list)
+      ? await buildProviderAvailabilityMap(() => this.getProviders())
+      : new Map()
 
     return list.map((m: any) => {
       const rawModel =
@@ -138,9 +110,9 @@ export const modelsAudioMethods = {
         rawName && !isLikelyModelId(rawName) && rawName !== canonicalModelId
           ? `${rawName} (${canonicalModelId})`
           : canonicalModelId
-      const provider = String(m.provider || "default")
+      const provider = toNonEmptyString(m.provider) || "default"
       const inheritedAvailability = providerAvailability.get(
-        provider.toLowerCase()
+        normalizeProviderAvailabilityKey(provider) || ""
       )
 
       return {
@@ -176,19 +148,23 @@ export const modelsAudioMethods = {
         ),
         type: typeof m.type === "string" ? m.type : undefined,
         is_configured:
-          toOptionalBoolean(m.is_configured) ??
-          toOptionalBoolean(m.provider_configured) ??
+          toOptionalProviderBoolean(m.is_configured) ??
+          toOptionalProviderBoolean(m.provider_configured) ??
+          toOptionalProviderBoolean(m.configured) ??
           inheritedAvailability?.is_configured,
         provider_is_configured:
-          toOptionalBoolean(m.provider_is_configured) ??
+          toOptionalProviderBoolean(m.provider_is_configured) ??
+          toOptionalProviderBoolean(m.provider_configured) ??
+          toOptionalProviderBoolean(m.configured) ??
           inheritedAvailability?.is_configured,
         provider_enabled:
-          toOptionalBoolean(m.provider_enabled) ??
-          toOptionalBoolean(m.enabled) ??
+          toOptionalProviderBoolean(m.provider_enabled) ??
+          toOptionalProviderBoolean(m.enabled) ??
           inheritedAvailability?.provider_enabled,
         availability:
-          toNonEmptyString(m.availability) ?? inheritedAvailability?.availability,
-        catalog_only: toOptionalBoolean(m.catalog_only),
+          toNonEmptyProviderString(m.availability) ??
+          inheritedAvailability?.availability,
+        catalog_only: toOptionalProviderBoolean(m.catalog_only),
         modalities:
           m.modalities && typeof m.modalities === "object"
             ? {
@@ -219,8 +195,11 @@ export const modelsAudioMethods = {
     })
   },
 
-  async getProviders(): Promise<any> {
-    return await bgRequest<any>({ path: '/api/v1/llm/providers', method: 'GET' })
+  async getProviders(): Promise<TldwProvidersResponse> {
+    return await bgRequest<TldwProvidersResponse>({
+      path: '/api/v1/llm/providers',
+      method: 'GET'
+    })
   },
 
   async getModelsMetadata(options?: {

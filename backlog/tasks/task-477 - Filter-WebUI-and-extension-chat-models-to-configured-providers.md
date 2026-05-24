@@ -12,6 +12,7 @@ priority: medium
 modified_files:
 - apps/packages/ui/src/services/tldw/TldwApiClient.ts
 - apps/packages/ui/src/services/tldw/domains/models-audio.ts
+- apps/packages/ui/src/services/tldw/model-provider-availability.ts
 - apps/packages/ui/src/services/tldw/TldwModels.ts
 - apps/packages/ui/src/services/__tests__/tldw-api-client.models-normalization.test.ts
 - apps/packages/ui/src/services/tldw/__tests__/TldwModels.test.ts
@@ -28,7 +29,7 @@ Ensure shared WebUI/extension chat model selector data only includes models from
 - [x] #1 Shared chat model discovery excludes models from providers explicitly reported as unconfigured or disabled.
 - [x] #2 Configured provider models remain visible, including catalog/pricing models for a configured provider.
 - [x] #3 Older server responses without provider availability metadata remain backward compatible.
-- [x] #4 Focused frontend tests cover configured, unconfigured, disabled, and legacy metadata cases.
+- [x] #4 Focused frontend tests cover configured, unconfigured, disabled, alias, catalog-only, and legacy metadata cases.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -43,15 +44,15 @@ Ensure shared WebUI/extension chat model selector data only includes models from
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented shared WebUI/extension chat model filtering in the tldw model service. The API client now preserves provider availability metadata and best-effort enriches models from /api/v1/llm/providers when /api/v1/llm/models/metadata omits provider status. Chat model selectors now exclude models from providers explicitly marked is_configured=false, provider_is_configured=false, provider_enabled=false, or failed/disabled/unavailable/not-configured availability, while keeping legacy unknown metadata visible for backward compatibility. Bumped the persisted model cache schema to force stale unfiltered lists to refresh.
+Implemented shared WebUI/extension chat model filtering in the tldw model service. The API client now preserves provider availability metadata and best-effort enriches models from /api/v1/llm/providers when /api/v1/llm/models/metadata omits provider status. Provider enrichment is centralized in a typed helper with alias-aware provider keys, conditional provider-list fetching, and dev-mode logging for fetch/enrichment failures. Chat model selectors now exclude models from providers explicitly marked is_configured=false, provider_is_configured=false, provider_enabled=false, catalog_only=true, or failed/disabled/unavailable/not-configured availability, while keeping legacy unknown metadata visible for backward compatibility. Bumped the persisted model cache schema to force stale unfiltered lists to refresh.
 
-Verification: bunx vitest run src/services/__tests__/tldw-api-client.models-normalization.test.ts src/services/tldw/__tests__/TldwModels.test.ts --maxWorkers=1 --no-file-parallelism passed 23 tests in the clean PR worktree. git diff --check exited 0. bunx tsc --noEmit --pretty false hit the default Node heap limit, then NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false completed and failed on existing package-wide baseline type errors; /tmp/tldw_ui_tsc_model_selector_pr_final.log has no entries for touched files. Bandit skipped because only TypeScript/Backlog files were touched.
+Verification: review follow-up focused tests passed 26 tests with `bunx vitest run src/services/__tests__/tldw-api-client.models-normalization.test.ts src/services/tldw/__tests__/TldwModels.test.ts --maxWorkers=1 --no-file-parallelism`. `git diff --check` exited 0. GitHub CI reported `Lint & Type Check` success for the initial PR commit 87972e9f44. Local optional package-wide `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` completed and reported unrelated baseline type errors outside touched files; /tmp/tldw_ui_tsc_model_selector_review_fix.log has no entries for touched files. Bandit skipped because only TypeScript/Backlog files were touched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Shared WebUI/extension chat model discovery is now provider-availability aware. Normal chat model selectors only receive models from providers that are explicitly configured/enabled/available, while legacy servers without status metadata remain compatible. Focused service regression tests cover metadata preservation, provider-list enrichment, image catalog edge cases, unconfigured providers, disabled providers, failed availability, cached unconfigured models, and legacy unknown status.
+Shared WebUI/extension chat model discovery is now provider-availability aware. Normal chat model selectors only receive models from providers that are explicitly configured/enabled/available and not catalog-only, while legacy servers without status metadata remain compatible. Focused service regression tests cover metadata preservation, provider-list enrichment, provider aliases, conditional provider fetching, image catalog edge cases, unconfigured providers, disabled providers, failed availability, separator variants, catalog-only models, cached unconfigured models, and legacy unknown status.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

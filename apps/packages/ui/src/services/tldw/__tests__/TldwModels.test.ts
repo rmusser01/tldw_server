@@ -322,6 +322,47 @@ describe("TldwModelsService caching", () => {
         type: "chat",
         is_configured: true,
         availability: "failed"
+      },
+      {
+        id: "custom/not-configured-model",
+        name: "custom/not-configured-model",
+        provider: "custom",
+        type: "chat",
+        is_configured: true,
+        availability: "not configured"
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
+  })
+
+  it("filters catalog-only chat models even when provider metadata says configured", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "openai/gpt-4o-mini",
+        name: "openai/gpt-4o-mini",
+        provider: "openai",
+        type: "chat",
+        is_configured: true,
+        provider_is_configured: true,
+        provider_enabled: true,
+        availability: "available"
+      },
+      {
+        id: "anthropic/catalog-only",
+        name: "anthropic/catalog-only",
+        provider: "anthropic",
+        type: "chat",
+        is_configured: true,
+        provider_is_configured: true,
+        provider_enabled: true,
+        availability: "available",
+        catalog_only: true
       }
     ])
 
