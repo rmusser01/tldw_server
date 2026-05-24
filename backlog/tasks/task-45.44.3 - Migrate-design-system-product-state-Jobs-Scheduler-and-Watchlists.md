@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.3
 title: 'Migrate design-system product state: Jobs, Scheduler, and Watchlists'
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-05-14 03:19
 updated_date: 2026-05-24 01:50
@@ -79,6 +79,14 @@ documentation:
       - Jobs/Scheduler/Watchlists exceptions: 14 -> 9
       - SettingsTab target rows: 5 -> 0
     Verification recorded in TASK-45.44.3.13.
+  - |-
+    TASK-45.44.3.14 / PR #2044 migrated the remaining Common Workflow AnalyzeBookWorkflow and AgentTasks product-state UI to design-system primitives.
+    Baseline evidence:
+      - total product-state exceptions: 242 -> 233
+      - Jobs/Scheduler/Watchlists exceptions: 9 -> 0
+      - AnalyzeBookWorkflow target rows: 3 -> 0
+      - AgentTasks target rows: 6 -> 0
+    Verification recorded in TASK-45.44.3.14.
 parent_task_id: TASK-45.44
 priority: medium
 ---
@@ -91,17 +99,23 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The linked GitHub issue owns current count and public status.
-- [ ] #2 Implementation PR tasks are created under this child when the area is too broad for one PR.
-- [ ] #3 Backlog notes record PR links and before/after count evidence.
+- [x] #1 The linked GitHub issue owns current count and public status.
+- [x] #2 Implementation PR tasks are created under this child when the area is too broad for one PR.
+- [x] #3 Backlog notes record PR links and before/after count evidence.
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the Jobs/Scheduler/Watchlists product-state migration tracker. The area moved from 24 baseline exceptions at the start of this tracker to zero after TASK-45.44.3.14, with PR/task notes recording each migration slice, before/after counts, and focused verification. Remaining product-state exceptions are outside this tracker area.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

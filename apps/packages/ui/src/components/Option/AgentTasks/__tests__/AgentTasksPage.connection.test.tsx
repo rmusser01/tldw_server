@@ -51,7 +51,7 @@ vi.mock("antd", () => {
   )
 
   return {
-  Alert: ({
+    Alert: ({
       title,
       message,
       description
@@ -381,9 +381,15 @@ describe("AgentTasksPage connection and payload normalization", () => {
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    renderAgentTasksPage()
+    const { container } = renderAgentTasksPage()
 
     expect(await screen.findByText("ACP setup needs attention")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("ACP setup needs attention")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(1)
     expect(screen.getByText("Runner is missing")).toBeInTheDocument()
     expect(screen.getByText("API keys are missing")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open agent registry/i })).toBeInTheDocument()
@@ -568,6 +574,11 @@ describe("AgentTasksPage connection and payload normalization", () => {
     const projectButton = await screen.findByText("Research Project")
     fireEvent.click(projectButton)
     expect(await screen.findByText("Draft spec")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Needs human attention")
+        .closest('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /inspect/i }))
 
@@ -731,9 +742,17 @@ describe("AgentTasksPage connection and payload normalization", () => {
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    renderAgentTasksPage("/agent-tasks?workspace=workspace-missing")
+    const { container } = renderAgentTasksPage(
+      "/agent-tasks?workspace=workspace-missing"
+    )
 
     expect(await screen.findByText("Workspace setup needs attention")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Workspace setup needs attention")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(1)
     expect(
       screen.getByText("No ACP execution workspace is linked to workspace-missing")
     ).toBeInTheDocument()

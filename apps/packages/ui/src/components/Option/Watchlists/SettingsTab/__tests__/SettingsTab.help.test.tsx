@@ -212,8 +212,8 @@ describe("SettingsTab contextual help", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     ensureLocalStorage()
+    localStorage.clear()
     setViewport(1024)
-    localStorage.removeItem(ONBOARDING_PATH_STORAGE_KEY)
     delete process.env.NEXT_PUBLIC_WATCHLISTS_SHOW_INTERNAL_DIAGNOSTICS
     mocks.getWatchlistSettingsMock.mockResolvedValue({
       default_output_ttl_seconds: 86400,

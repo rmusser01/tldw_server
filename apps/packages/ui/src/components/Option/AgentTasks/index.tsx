@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import {
-  Alert,
   Button,
   Card,
   Empty,
@@ -11,7 +10,6 @@ import {
   Spin,
   Tag,
   Tooltip,
-  Badge,
   Form,
   Collapse,
 } from "antd"
@@ -36,6 +34,8 @@ import { WORKSPACE_PLAYGROUND_PATH } from "@/routes/route-paths"
 import { buildACPAuthHeaders } from "@/services/acp/connection"
 import { buildACPSetupIssues, normalizeACPHealthStatus, type ACPSetupIssue } from "@/services/acp/readiness"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
+import { Alert } from "@/components/ui/primitives/Alert"
+import { Badge as DesignSystemBadge } from "@/components/ui/primitives/Badge"
 
 // Types matching the backend orchestration API
 type CanonicalWorkspaceLink = {
@@ -742,57 +742,56 @@ export const AgentTasksPage: React.FC = () => {
     <div className="space-y-6">
       {isUnsupported && (
         <Alert
-          type="warning"
-          message={AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE}
-          description={
-            <AgentTasksSetupDescription
-              body={AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION}
-              issues={[
-                {
-                  code: "orchestration_routes_missing",
-                  title: "Agent task routes are missing",
-                  description: "Upgrade or enable the agent orchestration API before creating tasks."
-                }
-              ]}
-            />
-          }
-          showIcon
-        />
+          variant="warning"
+          title={AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE}
+        >
+          <AgentTasksSetupDescription
+            body={AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION}
+            issues={[
+              {
+                code: "orchestration_routes_missing",
+                title: "Agent task routes are missing",
+                description: "Upgrade or enable the agent orchestration API before creating tasks."
+              }
+            ]}
+          />
+        </Alert>
       )}
       {!isUnsupported && setupIssues.length > 0 && (
         <Alert
-          type="warning"
-          message="ACP setup needs attention"
-          description={
-            <AgentTasksSetupDescription
-              body={
-                setupLoading
-                  ? "Checking ACP setup state..."
-                  : "Resolve these ACP setup items before dispatching production task runs."
-              }
-              issues={setupIssues}
-            />
-          }
-          showIcon
-        />
+          variant="warning"
+          title="ACP setup needs attention"
+        >
+          <AgentTasksSetupDescription
+            body={
+              setupLoading
+                ? "Checking ACP setup state..."
+                : "Resolve these ACP setup items before dispatching production task runs."
+            }
+            issues={setupIssues}
+          />
+        </Alert>
       )}
       {!isUnsupported && workspaceSetupIssues.length > 0 && (
         <Alert
-          type="warning"
-          message="Workspace setup needs attention"
-          description={
-            <AgentTasksSetupDescription
-              body="Resolve these workspace setup items before dispatching task runs."
-              issues={workspaceSetupIssues}
-              showAgentRegistry={false}
-              showWorkspacePlayground
-            />
-          }
-          showIcon
-        />
+          variant="warning"
+          title="Workspace setup needs attention"
+        >
+          <AgentTasksSetupDescription
+            body="Resolve these workspace setup items before dispatching task runs."
+            issues={workspaceSetupIssues}
+            showAgentRegistry={false}
+            showWorkspacePlayground
+          />
+        </Alert>
       )}
       {error && (
-        <Alert type="error" message={error} closable onClose={() => setError(null)} />
+        <Alert
+          variant="error"
+          title={error}
+          dismissible
+          onDismiss={() => setError(null)}
+        />
       )}
 
       {(workspaceOptions.length > 0 || workspaceFilterId) && (
@@ -1354,10 +1353,14 @@ const TaskCard: React.FC<{
           </>
         )}
         {task.status === "inprogress" && (
-          <Tag color="processing">Running...</Tag>
+          <DesignSystemBadge variant="info" size="sm">
+            Running...
+          </DesignSystemBadge>
         )}
         {task.status === "triage" && (
-          <Tag color="error">Needs human attention</Tag>
+          <DesignSystemBadge variant="danger" size="sm">
+            Needs human attention
+          </DesignSystemBadge>
         )}
       </div>
     </div>
