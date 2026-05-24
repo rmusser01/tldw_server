@@ -1,10 +1,10 @@
 ---
 id: TASK-333
 title: Add VN script graph and outline inspector
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-14 04:15'
-updated_date: '2026-05-14 05:10'
+updated_date: '2026-05-23 17:49'
 labels:
   - vn
   - frontend
@@ -13,6 +13,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1680'
   - 'https://github.com/rmusser01/tldw_server/issues/1391'
+  - 'https://github.com/rmusser01/tldw_server/pull/1681'
 priority: high
 ---
 
@@ -60,6 +61,12 @@ Implement GitHub issue #1680: add a WebUI consumer for the backend-owned VN scri
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added the VN script graph inspector WebUI slice for issue #1680. The frontend now has typed graph API helpers, a capability-gated read-only graph panel for saved drafts and unsaved draft previews, per-version graph inspection from published version cards, focused coverage for the new graph flows, and custom-frontend documentation for graph-inspector usage and staleness keys.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
+## Closeout Notes
+
+<!-- SECTION:CLOSEOUT:BEGIN -->
+Closed after verifying PR #1681 merged into `dev` on 2026-05-14 at merge commit `a1b7047d01c900dd6ea3ed71284f5281c9c2127e`. The task already recorded completed acceptance criteria, completed Definition of Done items, implementation notes, verification evidence, and final summary; this closeout only corrects the stale Backlog status and adds the merged PR reference.
+<!-- SECTION:CLOSEOUT:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

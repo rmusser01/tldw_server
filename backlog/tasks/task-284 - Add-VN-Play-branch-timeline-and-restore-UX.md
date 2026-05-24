@@ -1,10 +1,10 @@
 ---
 id: TASK-284
 title: Add VN Play branch timeline and restore UX
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-12 03:03'
-updated_date: '2026-05-12 03:04'
+updated_date: '2026-05-23 17:49'
 labels:
   - vn-play
   - webui
@@ -13,6 +13,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1592'
   - 'https://github.com/rmusser01/tldw_server/issues/1391'
+  - 'https://github.com/rmusser01/tldw_server/pull/1595'
 documentation:
   - Docs/API-related/VN_PLAY_API.md
 priority: medium
@@ -88,3 +89,9 @@ Added backend-owned VN Play branch navigation support to the frontend: typed bra
 
 Branch restore controls now call the guarded backend restore endpoint with scene-version and idempotency protection, update the selected session from the restore response, and surface stale/in-progress restore conflicts as recoverable play-state messages. Documentation now notes that custom frontends should use the backend branch-navigation read model rather than deriving branch state from raw events.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
+## Closeout Notes
+
+<!-- SECTION:CLOSEOUT:BEGIN -->
+Closed after verifying PR #1595 merged into `dev` on 2026-05-12 at merge commit `2137cbba0ef4dff1c14270bfd402084f49268ead`. The task already recorded completed acceptance criteria, completed Definition of Done items, implementation notes, verification evidence, and final summary; this closeout only corrects the stale Backlog status and adds the merged PR reference.
+<!-- SECTION:CLOSEOUT:END -->
