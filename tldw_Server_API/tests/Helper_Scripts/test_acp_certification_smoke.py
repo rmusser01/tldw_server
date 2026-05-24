@@ -5,6 +5,7 @@ import json
 import threading
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -425,19 +426,80 @@ def test_run_profile_manifest_uses_stdio_sequence_runner(monkeypatch) -> None:
     assert command["timeout_seconds"] == 10
 
 
+def test_normalized_server_url_allows_scheme_less_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+
+    monkeypatch.setenv("TLDW_E2E_SERVER_URL", "127.0.0.1:8000")
+
+    assert module._normalized_server_url() == "http://127.0.0.1:8000"
+
+
+def test_normalized_server_url_rejects_scheme_less_remote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+
+    monkeypatch.setenv("TLDW_E2E_SERVER_URL", "example.com")
+
+    with pytest.raises(ValueError, match="explicit scheme"):
+        module._normalized_server_url()
+
+
+def test_normalized_server_url_rejects_insecure_remote_http(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+
+    monkeypatch.setenv("TLDW_E2E_SERVER_URL", "http://example.com")
+    monkeypatch.delenv("ACP_BACKEND_E2E_ALLOW_INSECURE_HTTP", raising=False)
+
+    with pytest.raises(
+        ValueError,
+        match="Refusing to send X-API-KEY over plaintext HTTP",
+    ):
+        module._normalized_server_url()
+
+
+def test_backend_live_e2e_treats_whitespace_required_env_as_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+
+    monkeypatch.setenv("TLDW_E2E_SERVER_URL", "   ")
+    monkeypatch.setenv("TLDW_E2E_API_KEY", "test-key")
+    monkeypatch.setenv("ACP_AGENT_PROFILE", "hermes")
+
+    rc = module._run_backend_live_e2e_from_env()
+    captured = capsys.readouterr()
+
+    assert rc == 2
+    assert "TLDW_E2E_SERVER_URL" in captured.err
+
+
 def test_backend_live_e2e_runs_backend_session_sequence(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = _load_module()
     calls: list[tuple[str, str, object]] = []
+    timeouts: list[float | None] = []
 
     monkeypatch.setenv("TLDW_E2E_SERVER_URL", "127.0.0.1:8000")
     monkeypatch.setenv("TLDW_E2E_API_KEY", "test-key")
     monkeypatch.setenv("ACP_AGENT_PROFILE", "hermes")
+    monkeypatch.setenv("ACP_BACKEND_E2E_TIMEOUT_SECONDS", "42.5")
 
-    def _fake_http(method: str, path: str, body=None):
+    def _fake_http(
+        method: str,
+        path: str,
+        body: Any = None,
+        timeout_seconds: float | None = None,
+    ) -> tuple[int, dict[str, Any]]:
         calls.append((method, path, body))
+        timeouts.append(timeout_seconds)
         if path.startswith("/api/v1/acp/health"):
             return 200, {
                 "runner": {"status": "ok"},
@@ -476,6 +538,7 @@ def test_backend_live_e2e_runs_backend_session_sequence(
 
     assert rc == 0
     assert "PASS live_backend_acp_e2e" in captured.out
+    assert timeouts == [42.5] * len(calls)
     assert calls == [
         ("GET", "/api/v1/acp/health", None),
         ("GET", "/api/v1/acp/setup-guide?agent_type=hermes", None),
@@ -514,7 +577,13 @@ def test_backend_live_e2e_closes_session_after_prompt_failure(
     monkeypatch.setenv("TLDW_E2E_API_KEY", "test-key")
     monkeypatch.setenv("ACP_AGENT_PROFILE", "hermes")
 
-    def _fake_http(method: str, path: str, body=None):
+    def _fake_http(
+        method: str,
+        path: str,
+        body: Any = None,
+        timeout_seconds: float | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        del timeout_seconds
         calls.append((method, path, body))
         if path.startswith("/api/v1/acp/health"):
             return 200, {"runner": {"status": "ok"}, "agents": []}
@@ -540,6 +609,46 @@ def test_backend_live_e2e_closes_session_after_prompt_failure(
         "/api/v1/acp/sessions/close",
         {"session_id": "sess-hermes-1"},
     )
+
+
+def test_backend_live_e2e_reports_cleanup_close_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+
+    monkeypatch.setenv("TLDW_E2E_SERVER_URL", "http://127.0.0.1:8000")
+    monkeypatch.setenv("TLDW_E2E_API_KEY", "test-key")
+    monkeypatch.setenv("ACP_AGENT_PROFILE", "hermes")
+
+    def _fake_http(
+        method: str,
+        path: str,
+        body: Any = None,
+        timeout_seconds: float | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        del method, body, timeout_seconds
+        if path.startswith("/api/v1/acp/health"):
+            return 200, {"runner": {"status": "ok"}, "agents": []}
+        if path.startswith("/api/v1/acp/setup-guide"):
+            return 200, {"runner": {"status": "ok"}, "guides": []}
+        if path == "/api/v1/acp/sessions/new":
+            return 200, {"session_id": "sess-hermes-1", "agent_type": "hermes"}
+        if path == "/api/v1/acp/sessions/prompt":
+            return 502, {"detail": "ACP prompt failed"}
+        if path == "/api/v1/acp/sessions/close":
+            raise OSError("close failed")
+        raise AssertionError(path)
+
+    monkeypatch.setattr(module, "_http_json_request", _fake_http)
+
+    rc = module._run_backend_live_e2e_from_env()
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "FAIL live_backend_acp_e2e" in captured.err
+    assert "WARN live_backend_acp_e2e: failed to close session sess-hermes-1" in captured.err
+    assert "close failed" in captured.err
 
 
 def test_stdio_sequence_runner_stops_after_failed_initialize(monkeypatch) -> None:

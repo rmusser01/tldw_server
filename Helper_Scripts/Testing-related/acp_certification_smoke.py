@@ -8,6 +8,7 @@ place to find the commands and capability IDs needed for matrix evidence.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import queue
@@ -382,17 +383,70 @@ def _command_env(command: dict[str, Any]) -> dict[str, str]:
     return env
 
 
+def _is_loopback_host(host: str | None) -> bool:
+    """Return whether a parsed URL host is local loopback."""
+    if not host:
+        return False
+    normalized = host.strip().strip("[]").rstrip(".").lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _allow_insecure_backend_e2e_http() -> bool:
+    """Return whether non-local plaintext HTTP is explicitly allowed."""
+    return os.environ.get("ACP_BACKEND_E2E_ALLOW_INSECURE_HTTP", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 def _normalized_server_url() -> str:
     """Return the configured E2E server URL with a scheme and no trailing slash."""
     raw_url = os.environ.get("TLDW_E2E_SERVER_URL", "").strip()
     if not raw_url:
         raise ValueError("TLDW_E2E_SERVER_URL is required")
     if "://" not in raw_url:
+        parsed_without_scheme = urllib.parse.urlparse(f"//{raw_url}")
+        if not _is_loopback_host(parsed_without_scheme.hostname):
+            raise ValueError(
+                "TLDW_E2E_SERVER_URL requires an explicit scheme for non-local hosts"
+            )
         raw_url = f"http://{raw_url}"
+
+    parsed = urllib.parse.urlparse(raw_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("TLDW_E2E_SERVER_URL must use http:// or https://")
+    if not parsed.hostname:
+        raise ValueError("TLDW_E2E_SERVER_URL must include a host")
+    if (
+        parsed.scheme == "http"
+        and not _is_loopback_host(parsed.hostname)
+        and not _allow_insecure_backend_e2e_http()
+    ):
+        raise ValueError(
+            "Refusing to send X-API-KEY over plaintext HTTP to a non-local host; "
+            "use https:// or set ACP_BACKEND_E2E_ALLOW_INSECURE_HTTP=1"
+        )
     return raw_url.rstrip("/")
 
 
-def _http_json_request(method: str, path: str, body: Any = None) -> tuple[int, dict[str, Any]]:
+def _backend_e2e_timeout_seconds() -> float:
+    """Return the backend live-E2E request timeout."""
+    raw_timeout = os.environ.get("ACP_BACKEND_E2E_TIMEOUT_SECONDS", "120").strip()
+    return float(raw_timeout or "120")
+
+
+def _http_json_request(
+    method: str,
+    path: str,
+    body: Any = None,
+    timeout_seconds: float | None = None,
+) -> tuple[int, dict[str, Any]]:
     """Send one JSON request to the configured backend and return status/payload."""
     url = f"{_normalized_server_url()}{path}"
     request_body: bytes | None = None
@@ -409,7 +463,11 @@ def _http_json_request(method: str, path: str, body: Any = None) -> tuple[int, d
         headers=headers,
         method=method,
     )
-    timeout = float(os.environ.get("ACP_BACKEND_E2E_TIMEOUT_SECONDS", "120"))
+    timeout = (
+        timeout_seconds
+        if timeout_seconds is not None
+        else _backend_e2e_timeout_seconds()
+    )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
             payload_bytes = response.read()
@@ -455,9 +513,13 @@ def _check_backend_response(step: str, status: int, payload: Any) -> int | None:
 
 def _run_backend_live_e2e_from_env() -> int:
     """Run the backend ACP REST lifecycle for the configured live agent."""
+    required_env = {
+        name: os.environ.get(name, "").strip()
+        for name in ("TLDW_E2E_SERVER_URL", "TLDW_E2E_API_KEY", "ACP_AGENT_PROFILE")
+    }
     missing = [
-        name for name in ("TLDW_E2E_SERVER_URL", "TLDW_E2E_API_KEY", "ACP_AGENT_PROFILE")
-        if not os.environ.get(name)
+        name for name, value in required_env.items()
+        if not value
     ]
     if missing:
         print(
@@ -467,11 +529,21 @@ def _run_backend_live_e2e_from_env() -> int:
         )
         return 2
 
-    profile = os.environ["ACP_AGENT_PROFILE"].strip()
+    profile = required_env["ACP_AGENT_PROFILE"]
     workspace_cwd = os.environ.get("ACP_E2E_WORKSPACE_CWD", "").strip() or str(ROOT)
     session_id: str | None = None
+    timeout_seconds: float | None = None
+
+    def request(method: str, path: str, body: Any = None) -> tuple[int, dict[str, Any]]:
+        return _http_json_request(
+            method,
+            path,
+            body,
+            timeout_seconds=timeout_seconds,
+        )
 
     try:
+        timeout_seconds = _backend_e2e_timeout_seconds()
         for step, method, path, body in (
             ("health", "GET", "/api/v1/acp/health", None),
             (
@@ -482,7 +554,7 @@ def _run_backend_live_e2e_from_env() -> int:
                 None,
             ),
         ):
-            status, payload = _http_json_request(method, path, body)
+            status, payload = request(method, path, body)
             failed = _check_backend_response(step, status, payload)
             if failed is not None:
                 return failed
@@ -493,7 +565,7 @@ def _run_backend_live_e2e_from_env() -> int:
             "name": f"ACP live E2E {profile}",
             "mcp_servers": [],
         }
-        status, payload = _http_json_request("POST", "/api/v1/acp/sessions/new", new_body)
+        status, payload = request("POST", "/api/v1/acp/sessions/new", new_body)
         failed = _check_backend_response("sessions/new", status, payload)
         if failed is not None:
             return failed
@@ -510,7 +582,7 @@ def _run_backend_live_e2e_from_env() -> int:
                 }
             ],
         }
-        status, prompt_payload = _http_json_request("POST", "/api/v1/acp/sessions/prompt", prompt_body)
+        status, prompt_payload = request("POST", "/api/v1/acp/sessions/prompt", prompt_body)
         failed = _check_backend_response("sessions/prompt", status, prompt_payload)
         if failed is not None:
             return failed
@@ -531,14 +603,14 @@ def _run_backend_live_e2e_from_env() -> int:
             "stop_reason": stop_reason,
         }
         for step, path in redacted_paths:
-            status, payload = _http_json_request("GET", path, None)
+            status, payload = request("GET", path, None)
             failed = _check_backend_response(step, status, payload)
             if failed is not None:
                 return failed
             if "total" in payload:
                 evidence[f"{step}_total"] = payload.get("total")
 
-        status, payload = _http_json_request(
+        status, payload = request(
             "POST",
             "/api/v1/acp/sessions/cancel",
             {"session_id": session_id},
@@ -547,7 +619,7 @@ def _run_backend_live_e2e_from_env() -> int:
         if failed is not None:
             return failed
 
-        status, payload = _http_json_request(
+        status, payload = request(
             "POST",
             "/api/v1/acp/sessions/close",
             {"session_id": session_id},
@@ -565,13 +637,16 @@ def _run_backend_live_e2e_from_env() -> int:
     finally:
         if session_id:
             try:
-                _http_json_request(
+                request(
                     "POST",
                     "/api/v1/acp/sessions/close",
                     {"session_id": session_id},
                 )
-            except (OSError, ValueError, urllib.error.URLError):
-                pass
+            except (OSError, ValueError, urllib.error.URLError) as exc:
+                print(
+                    f"WARN live_backend_acp_e2e: failed to close session {session_id}: {exc}",
+                    file=sys.stderr,
+                )
 
 
 def _missing_executable_reason(command: dict[str, Any], cwd: Path) -> str | None:

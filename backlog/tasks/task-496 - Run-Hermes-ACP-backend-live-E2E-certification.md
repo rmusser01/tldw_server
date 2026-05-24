@@ -31,12 +31,16 @@ Run the next ACP certification slice for Hermes through the backend live-E2E pat
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a backend REST live-E2E path to `Helper_Scripts/Testing-related/acp_certification_smoke.py`. The live run found two contract issues, so the runner now strips routing-only `agentType` before forwarding `session/new` downstream, and the backend preserves explicit empty MCP server lists through REST -> runner client -> JSON-RPC. Hermes is now marked `supported_with_caveats` / `live_e2e_tested` for the verified macOS host profile only.
+
+PR review follow-up addressed Qodo and Gemini feedback: cleanup close failures now emit a warning with the session id, required env validation strips whitespace, non-local plaintext HTTP is rejected unless explicitly allowed, request timeout parsing is performed once per backend live-E2E run, `_fake_http` test helpers have complete type hints, and the Go runner documents why `json.RawMessage` is used for routing-param stripping.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Hermes ACP backend live E2E passed on May 23, 2026 with `ACP_AGENT_PROFILE=hermes`: `stop_reason=end_turn`, `events_total=2`, `artifacts_total=0`, and `diagnostics_total=0`. Verification also passed for focused pytest coverage, `tools/tldw-agent/scripts/verify-local-build.sh`, Bandit on touched Python files, and `git diff --check`. Remaining caveats: sandbox behavior, non-empty MCP injection, artifact-producing workflows, reviewer-loop behavior, and failure diagnostic payloads remain unverified.
+
+PR review remediation verification: 39 focused pytest checks passed, `tools/tldw-agent/scripts/verify-local-build.sh` passed, Bandit produced zero findings for touched Python files, and `git diff --check` passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

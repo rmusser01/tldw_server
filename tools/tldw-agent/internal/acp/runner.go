@@ -265,6 +265,7 @@ func (r *Runner) handleSessionNew(msg *RPCMessage) (*RPCResponse, error) {
 }
 
 func stripSessionRoutingParams(raw json.RawMessage) (json.RawMessage, error) {
+	// RawMessage preserves downstream-owned values without decoding nested payloads.
 	var params map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return nil, err

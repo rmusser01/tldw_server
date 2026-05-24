@@ -52,6 +52,11 @@ python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-
 python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --run
 ```
 
+`TLDW_E2E_SERVER_URL` may omit the scheme only for local loopback hosts such as
+`127.0.0.1`, `[::1]`, and `localhost`. Remote targets must use an explicit
+`https://` URL; non-local `http://` requires
+`ACP_BACKEND_E2E_ALLOW_INSECURE_HTTP=1` because the helper sends `X-API-KEY`.
+
 The live helper drives the backend REST lifecycle against the already running
 tldw_server instance: health, setup-guide, session create, prompt, redacted
 detail/events/artifacts, diagnostics, cancel, and close. The manifest also runs
