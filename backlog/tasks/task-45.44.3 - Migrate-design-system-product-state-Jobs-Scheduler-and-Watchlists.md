@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.3
 title: 'Migrate design-system product state: Jobs, Scheduler, and Watchlists'
-status: To Do
+status: In Progress
 assignee: []
 created_date: 2026-05-14 03:19
 updated_date: 2026-05-24 01:50
@@ -21,6 +21,7 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/2029
 - https://github.com/rmusser01/tldw_server/pull/2037
 - https://github.com/rmusser01/tldw_server/pull/2039
+- https://github.com/rmusser01/tldw_server/pull/2044
 documentation:
   - |-
     TASK-45.44.3.6 / PR #2012 migrated OutputsTab delivery-issues Alert to the design-system Alert primitive.
@@ -71,6 +72,13 @@ documentation:
       - Jobs/Scheduler/Watchlists exceptions: 16 -> 14
       - WatchlistSetupWizard target rows: 2 -> 0
     Verification recorded in TASK-45.44.3.12.
+  - |-
+    TASK-45.44.3.13 / PR #2044 migrated Watchlists SettingsTab settings guidance, diagnostics, cluster subscription, cluster error, and unavailable callouts to the design-system Alert primitive.
+    Baseline evidence:
+      - total product-state exceptions: 247 -> 242
+      - Jobs/Scheduler/Watchlists exceptions: 14 -> 9
+      - SettingsTab target rows: 5 -> 0
+    Verification recorded in TASK-45.44.3.13.
 parent_task_id: TASK-45.44
 priority: medium
 ---

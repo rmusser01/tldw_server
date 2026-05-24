@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  Alert,
   Button,
   Card,
   Descriptions,
@@ -15,6 +14,7 @@ import {
 import type { ColumnsType } from "antd/es/table"
 import { Clock, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives/Alert"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   fetchClaimClusters,
@@ -366,9 +366,8 @@ export const SettingsTab: React.FC = () => {
             </Descriptions>
             <Alert
               className="mt-4"
+              variant="info"
               title={t("watchlists:settings.ttl.note", "TTL values are configured on the server.")}
-              type="info"
-              showIcon
             />
           </Card>
 
@@ -392,14 +391,13 @@ export const SettingsTab: React.FC = () => {
               </Descriptions>
               <Alert
                 className="mt-4"
-                type="info"
-                showIcon
-              title={t(
-                "watchlists:settings.diagnostics.note",
-                "Internal diagnostics are enabled for this environment."
-              )}
-            />
-          </Card>
+                variant="info"
+                title={t(
+                  "watchlists:settings.diagnostics.note",
+                  "Internal diagnostics are enabled for this environment."
+                )}
+              />
+            </Card>
           )}
 
           <Card
@@ -506,8 +504,7 @@ export const SettingsTab: React.FC = () => {
 
               {!selectedJobId && (
                 <Alert
-                  type="info"
-                  showIcon
+                  variant="info"
                   title={t(
                     "watchlists:settings.clusters.selectJob",
                     "Select a monitor to manage cluster subscriptions."
@@ -516,7 +513,7 @@ export const SettingsTab: React.FC = () => {
               )}
 
               {clustersError ? (
-                <Alert type="warning" showIcon title={clustersError} />
+                <Alert variant="warning" title={clustersError} />
               ) : clusters.length === 0 && !clustersLoading ? (
                 <Empty
                   description={t("watchlists:settings.clusters.empty", "No clusters found")}
@@ -530,11 +527,11 @@ export const SettingsTab: React.FC = () => {
         </div>
       ) : (
         <Alert
+          variant="warning"
           title={t("watchlists:settings.unavailable", "Settings unavailable")}
-          description={t("watchlists:settings.unavailableDesc", "Could not load server settings. Make sure the server is running.")}
-          type="warning"
-          showIcon
-        />
+        >
+          {t("watchlists:settings.unavailableDesc", "Could not load server settings. Make sure the server is running.")}
+        </Alert>
       )}
     </div>
   )
