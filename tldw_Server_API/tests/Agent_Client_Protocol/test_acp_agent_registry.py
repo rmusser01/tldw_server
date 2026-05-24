@@ -311,8 +311,32 @@ def test_registry_loads_new_agent_types():
     types = {e.type for e in entries}
     assert "aider" in types
     assert "goose" in types
+    assert "hermes" in types
     assert "continue_dev" in types
     assert "claude_code" in types
+
+
+def test_default_agents_yaml_includes_hermes_native_acp_entrypoint():
+    """Hermes is shipped as a native ACP profile with its accept-hooks stdio entrypoint."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    real_yaml = os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "agents.yaml",
+    )
+    real_yaml = os.path.abspath(real_yaml)
+    registry = AgentRegistry(yaml_path=real_yaml)
+
+    entry = registry.get_entry("hermes")
+
+    assert entry is not None
+    assert entry.name == "Hermes"
+    assert entry.entrypoint_strategy == "native_acp"
+    assert entry.command == "hermes"
+    assert entry.acp_command == "hermes"
+    assert entry.acp_args == ["acp", "--accept-hooks"]
+    assert entry.support_state == "documented_unverified"
+    assert entry.verification_level == "documented_only"
 
 
 # ---------------------------------------------------------------------------

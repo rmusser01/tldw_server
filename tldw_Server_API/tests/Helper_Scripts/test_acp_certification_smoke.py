@@ -205,6 +205,16 @@ def test_profile_manifest_renders_native_acp_entrypoint(monkeypatch) -> None:
         "session/new",
         "session/prompt",
     ]
+    assert initialize["stdin_jsonl"][0]["params"]["protocolVersion"] == 1
+
+    session_new = initialize["stdin_jsonl"][1]
+    assert session_new["params"] == {"cwd": str(module.ROOT), "mcpServers": []}
+
+    session_prompt = initialize["stdin_jsonl"][2]
+    assert session_prompt["params"]["sessionId"] == "${session_id}"
+    assert session_prompt["params"]["prompt"] == [
+        {"type": "text", "text": "Reply with a short ACP certification acknowledgement."}
+    ]
 
 
 def test_profile_manifest_refuses_documented_candidate() -> None:
@@ -566,6 +576,155 @@ def test_stdio_sequence_runner_ignores_notification_before_initialize_success(mo
         "session/new",
         "session/prompt",
     ]
+
+
+def test_stdio_sequence_runner_substitutes_session_id_from_session_new(monkeypatch) -> None:
+    module = _load_module()
+    written = []
+    responses = iter(
+        [
+            '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}\n',
+            '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-from-agent"}}\n',
+            '{"jsonrpc":"2.0","id":3,"result":{"content":[]}}\n',
+        ]
+    )
+
+    class _Stdin:
+        def write(self, text):
+            written.append(text)
+
+        def flush(self):
+            return None
+
+        def close(self):
+            return None
+
+    class _Stdout:
+        def readline(self, _limit=-1):
+            return next(responses, "")
+
+        def close(self):
+            return None
+
+    class _Process:
+        stdin = _Stdin()
+        stdout = _Stdout()
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: _Process())
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/prompt",
+                "params": {"sessionId": "${session_id}", "prompt": []},
+            },
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    assert rc == 0
+    prompt_frame = json.loads(written[2])
+    assert prompt_frame["params"]["sessionId"] == "session-from-agent"
+
+
+def test_stdio_sequence_runner_fails_when_session_new_omits_session_id(
+    monkeypatch,
+) -> None:
+    module = _load_module()
+    written = []
+    logged_errors = []
+    responses = iter(
+        [
+            '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}\n',
+            '{"jsonrpc":"2.0","id":2,"result":{}}\n',
+        ]
+    )
+
+    class _Stdin:
+        def write(self, text):
+            written.append(text)
+
+        def flush(self):
+            return None
+
+        def close(self):
+            return None
+
+    class _Stdout:
+        def readline(self, _limit=-1):
+            return next(responses, "")
+
+        def close(self):
+            return None
+
+    class _Process:
+        stdin = _Stdin()
+        stdout = _Stdout()
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: _Process())
+    monkeypatch.setattr(
+        module.logger,
+        "error",
+        lambda message, *args: logged_errors.append(message.format(*args)),
+    )
+
+    rc = module._run_stdio_jsonrpc_sequence({
+        "id": "acp_initialize_probe",
+        "cwd": ".",
+        "argv": ["opencode", "acp"],
+        "stdin_jsonl": [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/prompt",
+                "params": {"sessionId": "${session_id}", "prompt": []},
+            },
+        ],
+        "timeout_seconds": 10,
+    }, module.ROOT)
+
+    assert rc != 0
+    assert [json.loads(frame)["method"] for frame in written] == [
+        "initialize",
+        "session/new",
+    ]
+    assert (
+        "Runtime placeholder '${session_id}' found but no sessionId was captured "
+        "from a previous session/new response."
+    ) in logged_errors[0]
 
 
 def test_stdio_sequence_runner_times_out_on_partial_line_and_cleans_up(monkeypatch) -> None:

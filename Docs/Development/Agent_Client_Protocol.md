@@ -830,10 +830,16 @@ Use the certification helper when updating downstream-agent compatibility
 claims. The `stub-smoke` profile reuses the in-repo backend, runner, and mocked
 browser gates; the `live-e2e` profile documents the operator-supplied runtime
 state needed before claiming support for a named downstream agent.
+Registry-backed profiles use protocol-shaped host-stdio probes with absolute
+workspace cwd, runtime `sessionId` substitution, and ACP content-list prompts.
+Live host-stdio probes may require the downstream agent's normal home-directory
+runtime state, such as credential files, session state, and logs.
 
 ```bash
 python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile stub-smoke --format json
 python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --format json
+python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile goose --run
+python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile hermes --format json
 ```
 
 Follow [ACP_Certification_Checklist.md](ACP_Certification_Checklist.md) before
