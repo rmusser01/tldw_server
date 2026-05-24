@@ -232,7 +232,12 @@ func (r *Runner) handleSessionNew(msg *RPCMessage) (*RPCResponse, error) {
 		r.updateCachedCapabilities(initResp.Result)
 	}
 
-	resp, err := downstream.CallRaw(context.Background(), "session/new", msg.Params)
+	downstreamParams, err := stripSessionRoutingParams(msg.Params)
+	if err != nil {
+		return NewErrorResponse(msg.ID, ErrInvalidParams, "invalid session/new params"), nil
+	}
+
+	resp, err := downstream.CallRaw(context.Background(), "session/new", downstreamParams)
 	if err != nil {
 		return NewErrorResponse(msg.ID, ErrInternal, fmt.Sprintf("downstream session/new failed: %v", err)), nil
 	}
@@ -257,6 +262,15 @@ func (r *Runner) handleSessionNew(msg *RPCMessage) (*RPCResponse, error) {
 	go r.watchSession(session.id, runErr)
 
 	return NewResultResponse(msg.ID, json.RawMessage(resp.Result)), nil
+}
+
+func stripSessionRoutingParams(raw json.RawMessage) (json.RawMessage, error) {
+	var params map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return nil, err
+	}
+	delete(params, "agentType")
+	return json.Marshal(params)
 }
 
 type sessionPromptParams struct {

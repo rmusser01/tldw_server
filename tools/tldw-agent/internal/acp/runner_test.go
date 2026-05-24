@@ -16,6 +16,7 @@ type stubAgent struct {
 	conn      *Conn
 	sessionID string
 	caps      map[string]interface{}
+	sessionNewCh chan map[string]interface{}
 	promptCh  chan promptParams
 }
 
@@ -26,10 +27,11 @@ type promptParams struct {
 
 func newStubAgent(conn *Conn, sessionID string, caps map[string]interface{}) *stubAgent {
 	agent := &stubAgent{
-		conn:      conn,
-		sessionID: sessionID,
-		caps:      caps,
-		promptCh:  make(chan promptParams, 1),
+		conn:         conn,
+		sessionID:    sessionID,
+		caps:         caps,
+		sessionNewCh: make(chan map[string]interface{}, 1),
+		promptCh:     make(chan promptParams, 1),
 	}
 
 	conn.SetHandler(func(msg *RPCMessage) (*RPCResponse, error) {
@@ -41,6 +43,13 @@ func newStubAgent(conn *Conn, sessionID string, caps map[string]interface{}) *st
 			}
 			return NewResultResponse(msg.ID, result), nil
 		case "session/new":
+			var params map[string]interface{}
+			if err := json.Unmarshal(msg.Params, &params); err == nil {
+				select {
+				case agent.sessionNewCh <- params:
+				default:
+				}
+			}
 			return NewResultResponse(msg.ID, map[string]interface{}{
 				"sessionId": agent.sessionID,
 			}), nil
@@ -194,6 +203,100 @@ func TestRunnerSessionRoutingAndUpdates(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("session/update not forwarded upstream")
+	}
+}
+
+func TestRunnerStripsAgentTypeBeforeForwardingSessionNew(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agents.Default = "hermes"
+	cfg.Agents.Agents = []config.RegisteredAgent{
+		{
+			Type:    "hermes",
+			Name:    "Hermes",
+			Command: "hermes",
+		},
+	}
+	runner := NewRunner(cfg)
+
+	var (
+		mu                sync.Mutex
+		stubAgentInstance *stubAgent
+		spawnedConns      []net.Conn
+	)
+
+	runner.SetSpawnFunc(func(_ config.AgentConfig) (*Conn, *exec.Cmd, error) {
+		clientConn, serverConn := net.Pipe()
+
+		stubConn := NewConn(serverConn, serverConn)
+		mu.Lock()
+		spawnedConns = append(spawnedConns, clientConn, serverConn)
+		stubAgentInstance = newStubAgent(stubConn, "session_hermes", map[string]interface{}{})
+		mu.Unlock()
+		go func() {
+			_ = stubConn.Run()
+		}()
+
+		return NewConn(clientConn, clientConn), nil, nil
+	})
+
+	upstreamConn, runnerConn := net.Pipe()
+	upstream := NewConn(upstreamConn, upstreamConn)
+	go func() {
+		_ = upstream.Run()
+	}()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- runner.Run(runnerConn, runnerConn)
+	}()
+
+	t.Cleanup(func() {
+		_ = upstreamConn.Close()
+		_ = runnerConn.Close()
+		mu.Lock()
+		conns := append([]net.Conn(nil), spawnedConns...)
+		mu.Unlock()
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+		select {
+		case <-runErr:
+		case <-time.After(time.Second):
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := upstream.Call(ctx, "session/new", map[string]interface{}{
+		"agentType":  "hermes",
+		"cwd":        t.TempDir(),
+		"mcpServers": []interface{}{},
+	})
+	if err != nil {
+		t.Fatalf("session/new failed: %v", err)
+	}
+
+	mu.Lock()
+	instance := stubAgentInstance
+	mu.Unlock()
+	if instance == nil {
+		t.Fatalf("stub agent was not spawned")
+	}
+
+	select {
+	case params := <-instance.sessionNewCh:
+		if _, ok := params["agentType"]; ok {
+			t.Fatalf("agentType should not be forwarded to downstream session/new: %#v", params)
+		}
+		if params["cwd"] == "" {
+			t.Fatalf("cwd should be preserved for downstream session/new: %#v", params)
+		}
+		if _, ok := params["mcpServers"]; !ok {
+			t.Fatalf("mcpServers should be preserved for downstream session/new: %#v", params)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("session/new was not forwarded to downstream")
 	}
 }
 

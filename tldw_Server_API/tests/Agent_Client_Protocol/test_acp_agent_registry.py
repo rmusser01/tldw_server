@@ -335,8 +335,8 @@ def test_default_agents_yaml_includes_hermes_native_acp_entrypoint():
     assert entry.command == "hermes"
     assert entry.acp_command == "hermes"
     assert entry.acp_args == ["acp", "--accept-hooks"]
-    assert entry.support_state == "documented_unverified"
-    assert entry.verification_level == "documented_only"
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "live_e2e_tested"
 
 
 # ---------------------------------------------------------------------------

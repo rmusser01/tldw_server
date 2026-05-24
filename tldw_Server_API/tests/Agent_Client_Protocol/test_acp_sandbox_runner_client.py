@@ -183,6 +183,39 @@ async def test_standard_runner_create_session_sends_session_env() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_standard_runner_create_session_sends_explicit_empty_mcp_servers() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            return _CallResult({"sessionId": "session-empty-mcp"})
+
+    runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    session_id = await runner.create_session(
+        "/repo",
+        mcp_servers=[],
+        agent_type="hermes",
+    )
+
+    assert session_id == "session-empty-mcp"
+    assert fake_client.calls == [
+        ("session/new", {"cwd": "/repo", "mcpServers": [], "agentType": "hermes"})
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_create_session_rejects_unavailable_vz_macos_runtime(monkeypatch) -> None:
     manager = ACPSandboxRunnerManager(
         ACPSandboxConfig(

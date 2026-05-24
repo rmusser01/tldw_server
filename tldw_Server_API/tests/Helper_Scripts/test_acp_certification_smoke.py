@@ -66,7 +66,15 @@ def test_live_e2e_manifest_requires_operator_supplied_runtime_state() -> None:
         "TLDW_E2E_API_KEY",
         "ACP_AGENT_PROFILE",
     ]
-    assert any(command["id"] == "live_backend_acp_e2e" for command in manifest["commands"])
+    backend_command = next(
+        command for command in manifest["commands"]
+        if command["id"] == "live_backend_acp_e2e"
+    )
+    assert backend_command["cwd"] == "."
+    assert backend_command["argv"][-1] == "--backend-live-e2e"
+    assert {"diagnostics", "redacted_support_view", "cancel_close"}.issubset(
+        set(backend_command["capabilities"])
+    )
     assert all(command["safe_to_run_by_default"] is False for command in manifest["commands"])
 
 
@@ -415,6 +423,123 @@ def test_run_profile_manifest_uses_stdio_sequence_runner(monkeypatch) -> None:
         "session/prompt",
     ]
     assert command["timeout_seconds"] == 10
+
+
+def test_backend_live_e2e_runs_backend_session_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+    calls: list[tuple[str, str, object]] = []
+
+    monkeypatch.setenv("TLDW_E2E_SERVER_URL", "127.0.0.1:8000")
+    monkeypatch.setenv("TLDW_E2E_API_KEY", "test-key")
+    monkeypatch.setenv("ACP_AGENT_PROFILE", "hermes")
+
+    def _fake_http(method: str, path: str, body=None):
+        calls.append((method, path, body))
+        if path.startswith("/api/v1/acp/health"):
+            return 200, {
+                "runner": {"status": "ok"},
+                "agents": [{"agent_type": "hermes", "status": "available"}],
+            }
+        if path.startswith("/api/v1/acp/setup-guide"):
+            return 200, {
+                "runner": {"status": "ok"},
+                "guides": [{"agent_type": "hermes", "status": "available"}],
+            }
+        if path == "/api/v1/acp/sessions/new":
+            return 200, {"session_id": "sess-hermes-1", "agent_type": "hermes"}
+        if path == "/api/v1/acp/sessions/prompt":
+            return 200, {
+                "stop_reason": "end_turn",
+                "raw_result": {"stopReason": "end_turn"},
+            }
+        if path.startswith("/api/v1/acp/sessions/sess-hermes-1/detail"):
+            return 200, {"session_id": "sess-hermes-1", "messages": []}
+        if path.startswith("/api/v1/acp/sessions/sess-hermes-1/events"):
+            return 200, {"session_id": "sess-hermes-1", "total": 0, "events": []}
+        if path.startswith("/api/v1/acp/sessions/sess-hermes-1/artifacts"):
+            return 200, {"session_id": "sess-hermes-1", "total": 0, "artifacts": []}
+        if path == "/api/v1/acp/sessions/sess-hermes-1/diagnostics":
+            return 200, {"session_id": "sess-hermes-1", "total": 0, "diagnostics": []}
+        if path == "/api/v1/acp/sessions/cancel":
+            return 200, {"status": "ok"}
+        if path == "/api/v1/acp/sessions/close":
+            return 200, {"status": "ok"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(module, "_http_json_request", _fake_http)
+
+    rc = module._run_backend_live_e2e_from_env()
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "PASS live_backend_acp_e2e" in captured.out
+    assert calls == [
+        ("GET", "/api/v1/acp/health", None),
+        ("GET", "/api/v1/acp/setup-guide?agent_type=hermes", None),
+        ("POST", "/api/v1/acp/sessions/new", {
+            "cwd": str(module.ROOT),
+            "agent_type": "hermes",
+            "name": "ACP live E2E hermes",
+            "mcp_servers": [],
+        }),
+        ("POST", "/api/v1/acp/sessions/prompt", {
+            "session_id": "sess-hermes-1",
+            "prompt": [
+                {
+                    "type": "text",
+                    "text": "Reply with a short ACP backend live E2E certification acknowledgement.",
+                }
+            ],
+        }),
+        ("GET", "/api/v1/acp/sessions/sess-hermes-1/detail?redacted=true", None),
+        ("GET", "/api/v1/acp/sessions/sess-hermes-1/events?redacted=true", None),
+        ("GET", "/api/v1/acp/sessions/sess-hermes-1/artifacts?redacted=true", None),
+        ("GET", "/api/v1/acp/sessions/sess-hermes-1/diagnostics", None),
+        ("POST", "/api/v1/acp/sessions/cancel", {"session_id": "sess-hermes-1"}),
+        ("POST", "/api/v1/acp/sessions/close", {"session_id": "sess-hermes-1"}),
+    ]
+
+
+def test_backend_live_e2e_closes_session_after_prompt_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+    calls: list[tuple[str, str, object]] = []
+
+    monkeypatch.setenv("TLDW_E2E_SERVER_URL", "http://127.0.0.1:8000")
+    monkeypatch.setenv("TLDW_E2E_API_KEY", "test-key")
+    monkeypatch.setenv("ACP_AGENT_PROFILE", "hermes")
+
+    def _fake_http(method: str, path: str, body=None):
+        calls.append((method, path, body))
+        if path.startswith("/api/v1/acp/health"):
+            return 200, {"runner": {"status": "ok"}, "agents": []}
+        if path.startswith("/api/v1/acp/setup-guide"):
+            return 200, {"runner": {"status": "ok"}, "guides": []}
+        if path == "/api/v1/acp/sessions/new":
+            return 200, {"session_id": "sess-hermes-1", "agent_type": "hermes"}
+        if path == "/api/v1/acp/sessions/prompt":
+            return 502, {"detail": "ACP prompt failed"}
+        if path == "/api/v1/acp/sessions/close":
+            return 200, {"status": "ok"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(module, "_http_json_request", _fake_http)
+
+    rc = module._run_backend_live_e2e_from_env()
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "FAIL live_backend_acp_e2e" in captured.err
+    assert calls[-1] == (
+        "POST",
+        "/api/v1/acp/sessions/close",
+        {"session_id": "sess-hermes-1"},
+    )
 
 
 def test_stdio_sequence_runner_stops_after_failed_initialize(monkeypatch) -> None:
