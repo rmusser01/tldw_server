@@ -173,7 +173,7 @@
     {
       "name": "Recovery Callout",
       "kind": "custom",
-      "refersTo": "alert-info",
+      "refersTo": "recovery-callout",
       "description": "State panel for unavailable, retrying, blocked, degraded, setup, auth, permission, and error states.",
       "html": "<section class=\"ds-recovery-callout\"><span>Setup required</span><h2>Connect a provider</h2><p>Add at least one model provider before chat can answer.</p><button>Open settings</button></section>",
       "css": ".ds-recovery-callout { border: 1px solid rgba(217,119,6,0.3); background: rgba(217,119,6,0.1); color: #1f2328; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); } .ds-recovery-callout span { display: inline-flex; width: fit-content; border-radius: 9999px; border: 1px solid rgba(217,119,6,0.3); padding: 2px 8px; color: #d97706; font-size: 12px; font-weight: 600; } .ds-recovery-callout h2 { margin: 10px 0 4px; font-size: 16px; font-weight: 600; } .ds-recovery-callout p { margin: 0 0 12px; color: #5b6472; font-size: 14px; }"

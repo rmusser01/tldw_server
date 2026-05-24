@@ -22,6 +22,8 @@ colors:
   border-strong-dark: "#3b4350"
   primary: "#2f6fed"
   primary-strong: "#2456c7"
+  info-surface: "#eaf0ff"
+  info-text: "#2456c7"
   primary-dark: "#5c8dff"
   primary-strong-dark: "#3e6ae0"
   accent: "#1fb59f"
@@ -29,6 +31,8 @@ colors:
   success: "#22a07b"
   success-dark: "#3bd696"
   warn: "#d97706"
+  warn-surface: "#fff3d8"
+  warn-text: "#8a4b04"
   warn-dark: "#f7b955"
   danger: "#e0586d"
   danger-dark: "#ff6b8b"
@@ -112,8 +116,13 @@ components:
     rounded: "{rounded.pill}"
     padding: "2px 8px"
   alert-info:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.surface-light}"
+    backgroundColor: "{colors.info-surface}"
+    textColor: "{colors.info-text}"
+    rounded: "{rounded.lg}"
+    padding: "12px"
+  recovery-callout:
+    backgroundColor: "{colors.warn-surface}"
+    textColor: "{colors.warn-text}"
     rounded: "{rounded.lg}"
     padding: "12px"
   panel-card:
