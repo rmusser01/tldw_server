@@ -83,6 +83,52 @@ def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path) ->
     migrated.close_connection()
 
 
+def test_migration_v44_to_latest_repairs_missing_persona_tables(db_path: Path) -> None:
+    seeded = CharactersRAGDB(db_path, "persona-visuals-missing-persona-seed")
+    seeded.close_connection()
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute(
+            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
+            (44, CharactersRAGDB._SCHEMA_NAME),
+        )
+        conn.execute("DROP TABLE IF EXISTS persona_visual_candidates")
+        conn.execute("DROP TABLE IF EXISTS persona_visual_assets")
+        conn.execute("DROP TABLE IF EXISTS persona_visual_packs")
+        conn.execute("DROP TABLE IF EXISTS persona_sessions")
+        conn.execute("DROP TABLE IF EXISTS persona_memory_entries")
+        conn.execute("DROP TABLE IF EXISTS persona_policy_rules")
+        conn.execute("DROP TABLE IF EXISTS persona_scope_rules")
+        conn.execute("DROP TABLE IF EXISTS persona_profiles")
+        conn.commit()
+
+    migrated = CharactersRAGDB(db_path, "persona-visuals-missing-persona-migration")
+    conn = migrated.get_connection()
+
+    version = conn.execute(
+        "SELECT version FROM db_schema_version WHERE schema_name = ?",
+        (CharactersRAGDB._SCHEMA_NAME,),
+    ).fetchone()["version"]
+    assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+
+    tables = {
+        row["name"]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    }
+    assert {
+        "persona_profiles",
+        "persona_scope_rules",
+        "persona_policy_rules",
+        "persona_sessions",
+        "persona_memory_entries",
+        "persona_visual_packs",
+        "persona_visual_assets",
+        "persona_visual_candidates",
+    }.issubset(tables)
+    migrated.close_connection()
+
+
 def test_postgres_v45_migration_does_not_define_candidate_provenance_column() -> None:
     assert "generation_provenance_json" not in CharactersRAGDB._MIGRATION_SQL_V44_TO_V45_POSTGRES
     assert "generation_provenance_json" in CharactersRAGDB._MIGRATION_SQL_V46_TO_V47_POSTGRES
