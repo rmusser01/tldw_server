@@ -18,11 +18,11 @@ describe("buildQuickChatDocsRagProfile", () => {
   it("injects current route context when query references this page", () => {
     const profile = buildQuickChatDocsRagProfile({
       query: "How do I do this on this page?",
-      currentRoute: "#/workspace-playground?tab=chat"
+      currentRoute: "#/research-workspace?tab=chat"
     })
 
     expect(profile.query).toContain("Current page context:")
-    expect(profile.query).toContain("/workspace-playground")
+    expect(profile.query).toContain("/research-workspace")
     expect(profile.options.include_parent_document).toBe(false)
   })
 

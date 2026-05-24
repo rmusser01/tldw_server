@@ -566,7 +566,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 44  # Schema v44 adds sync metadata to scene-link tables
+    _CURRENT_SCHEMA_VERSION = 45  # Schema v45 adds Research Workspace migration protocol state
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
     _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
@@ -5039,6 +5039,107 @@ UPDATE db_schema_version
    AND version < 44;
 """
 
+    _MIGRATION_SQL_V44_TO_V45 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 45 — Research Workspace migration protocol state (2026-05-23)
+───────────────────────────────────────────────────────────────*/
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
+  id                     TEXT PRIMARY KEY NOT NULL,
+  target_workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  target_workspace_name  TEXT NOT NULL,
+  source_product         TEXT NOT NULL,
+  idempotency_key        TEXT NOT NULL,
+  manifest_hash          TEXT NOT NULL,
+  manifest_json          TEXT NOT NULL DEFAULT '{}',
+  diagnostics_json       TEXT NOT NULL DEFAULT '{}',
+  declared_chunks_json   TEXT NOT NULL DEFAULT '[]',
+  status                 TEXT NOT NULL DEFAULT 'created',
+  finalized_at           DATETIME,
+  recovery_manifest_json TEXT,
+  client_delete_eligible BOOLEAN NOT NULL DEFAULT 0,
+  client_delete_ack_at   DATETIME,
+  created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  version                INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_migration_sessions_idempotency
+  ON workspace_migration_sessions(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_ws_migration_sessions_workspace
+  ON workspace_migration_sessions(target_workspace_id);
+
+CREATE TABLE IF NOT EXISTS workspace_migration_chunks (
+  migration_id  TEXT NOT NULL REFERENCES workspace_migration_sessions(id) ON DELETE CASCADE,
+  id            TEXT NOT NULL,
+  sha256        TEXT NOT NULL,
+  byte_count    INTEGER NOT NULL,
+  chunk_kind    TEXT NOT NULL DEFAULT 'workspace_bundle',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  accepted_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (migration_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ws_migration_chunks_migration
+  ON workspace_migration_chunks(migration_id);
+
+UPDATE db_schema_version
+   SET version = 45
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 45;
+"""
+
+    _MIGRATION_SQL_V44_TO_V45_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 45 — Research Workspace migration protocol state (2026-05-23) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
+  id                     TEXT PRIMARY KEY NOT NULL,
+  target_workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  target_workspace_name  TEXT NOT NULL,
+  source_product         TEXT NOT NULL,
+  idempotency_key        TEXT NOT NULL,
+  manifest_hash          TEXT NOT NULL,
+  manifest_json          TEXT NOT NULL DEFAULT '{}',
+  diagnostics_json       TEXT NOT NULL DEFAULT '{}',
+  declared_chunks_json   TEXT NOT NULL DEFAULT '[]',
+  status                 TEXT NOT NULL DEFAULT 'created',
+  finalized_at           TIMESTAMP,
+  recovery_manifest_json TEXT,
+  client_delete_eligible BOOLEAN NOT NULL DEFAULT FALSE,
+  client_delete_ack_at   TIMESTAMP,
+  created_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  version                INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_migration_sessions_idempotency
+  ON workspace_migration_sessions(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_ws_migration_sessions_workspace
+  ON workspace_migration_sessions(target_workspace_id);
+
+CREATE TABLE IF NOT EXISTS workspace_migration_chunks (
+  migration_id  TEXT NOT NULL REFERENCES workspace_migration_sessions(id) ON DELETE CASCADE,
+  id            TEXT NOT NULL,
+  sha256        TEXT NOT NULL,
+  byte_count    INTEGER NOT NULL,
+  chunk_kind    TEXT NOT NULL DEFAULT 'workspace_bundle',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  accepted_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (migration_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ws_migration_chunks_migration
+  ON workspace_migration_chunks(migration_id);
+
+UPDATE db_schema_version
+   SET version = 45
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 45;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -7079,6 +7180,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V43->V44: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V44 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _migrate_from_v44_to_v45(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V44 to V45 (Research Workspace migration protocol)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V44 to V45 for DB: {self.db_path_str}...")
+        try:
+            self._ensure_workspace_migration_schema_sqlite(conn)
+            conn.executescript(self._MIGRATION_SQL_V44_TO_V45)
+            final_version = self._get_db_version(conn)
+            if final_version != 45:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V44->V45 failed version check. Expected 45, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V45 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V44->V45 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V44->V45 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V44->V45: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V45 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
     def _ensure_recent_persona_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Backfill recent persona schema columns after version-number collisions."""
         profile_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_profiles')").fetchall()}
@@ -8082,6 +8204,102 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for statement in statements:
             self.backend.execute(statement, connection=conn)
 
+    def _ensure_workspace_migration_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure Research Workspace migration protocol tables exist for SQLite."""
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
+                    id                     TEXT PRIMARY KEY NOT NULL,
+                    target_workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    target_workspace_name  TEXT NOT NULL,
+                    source_product         TEXT NOT NULL,
+                    idempotency_key        TEXT NOT NULL,
+                    manifest_hash          TEXT NOT NULL,
+                    manifest_json          TEXT NOT NULL DEFAULT '{}',
+                    diagnostics_json       TEXT NOT NULL DEFAULT '{}',
+                    declared_chunks_json   TEXT NOT NULL DEFAULT '[]',
+                    status                 TEXT NOT NULL DEFAULT 'created',
+                    finalized_at           DATETIME,
+                    recovery_manifest_json TEXT,
+                    client_delete_eligible BOOLEAN NOT NULL DEFAULT 0,
+                    client_delete_ack_at   DATETIME,
+                    created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    version                INTEGER NOT NULL DEFAULT 1
+                )
+            """)
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_migration_sessions_idempotency "
+                "ON workspace_migration_sessions(idempotency_key)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_migration_sessions_workspace "
+                "ON workspace_migration_sessions(target_workspace_id)"
+            )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_migration_chunks (
+                    migration_id  TEXT NOT NULL REFERENCES workspace_migration_sessions(id) ON DELETE CASCADE,
+                    id            TEXT NOT NULL,
+                    sha256        TEXT NOT NULL,
+                    byte_count    INTEGER NOT NULL,
+                    chunk_kind    TEXT NOT NULL DEFAULT 'workspace_bundle',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    accepted_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (migration_id, id)
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_migration_chunks_migration "
+                "ON workspace_migration_chunks(migration_id)"
+            )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite workspace migration schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_workspace_migration_schema_postgres(self, conn: Any) -> None:
+        """Ensure Research Workspace migration protocol tables exist for PostgreSQL."""
+        if not hasattr(self.backend, "execute"):
+            return
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
+                id                     TEXT PRIMARY KEY NOT NULL,
+                target_workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                target_workspace_name  TEXT NOT NULL,
+                source_product         TEXT NOT NULL,
+                idempotency_key        TEXT NOT NULL,
+                manifest_hash          TEXT NOT NULL,
+                manifest_json          TEXT NOT NULL DEFAULT '{}',
+                diagnostics_json       TEXT NOT NULL DEFAULT '{}',
+                declared_chunks_json   TEXT NOT NULL DEFAULT '[]',
+                status                 TEXT NOT NULL DEFAULT 'created',
+                finalized_at           TIMESTAMP,
+                recovery_manifest_json TEXT,
+                client_delete_eligible BOOLEAN NOT NULL DEFAULT FALSE,
+                client_delete_ack_at   TIMESTAMP,
+                created_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                version                INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_migration_sessions_idempotency ON workspace_migration_sessions(idempotency_key)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_migration_sessions_workspace ON workspace_migration_sessions(target_workspace_id)",
+            """
+            CREATE TABLE IF NOT EXISTS workspace_migration_chunks (
+                migration_id  TEXT NOT NULL REFERENCES workspace_migration_sessions(id) ON DELETE CASCADE,
+                id            TEXT NOT NULL,
+                sha256        TEXT NOT NULL,
+                byte_count    INTEGER NOT NULL,
+                chunk_kind    TEXT NOT NULL DEFAULT 'workspace_bundle',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                accepted_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (migration_id, id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_migration_chunks_migration ON workspace_migration_chunks(migration_id)",
+        ]
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+
     def _ensure_workspace_study_material_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure workspace ownership columns and workspace study-material policy exist for SQLite."""
         try:
@@ -8283,6 +8501,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     # Verify core FTS tables exist to avoid silent search failures
                     self._verify_required_fts_tables_sqlite(conn)
                     self._ensure_workspace_subresource_schema_sqlite(conn)
+                    self._ensure_workspace_migration_schema_sqlite(conn)
                     self._ensure_flashcard_asset_schema_sqlite(conn)
                     self._ensure_flashcard_template_schema_sqlite(conn)
                     self._ensure_flashcard_scheduler_schema_sqlite(conn)
@@ -8879,6 +9098,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 44 and current_db_version == 43:
                     self._migrate_from_v43_to_v44(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 45 and current_db_version == 44:
+                    self._migrate_from_v44_to_v45(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
@@ -8893,6 +9115,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 # Verify core FTS tables after migrations complete
                 self._verify_required_fts_tables_sqlite(conn)
                 self._ensure_workspace_subresource_schema_sqlite(conn)
+                self._ensure_workspace_migration_schema_sqlite(conn)
                 self._ensure_workspace_study_material_schema_sqlite(conn)
                 self._ensure_flashcard_asset_schema_sqlite(conn)
                 self._ensure_flashcard_template_schema_sqlite(conn)
@@ -12584,6 +12807,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 44:
                 self._apply_postgres_migration_script(self._MIGRATION_SQL_V43_TO_V44_POSTGRES, conn, expected_version=44)
                 current_version = 44
+            if current_version < 45:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V44_TO_V45_POSTGRES, conn, expected_version=45)
+                current_version = 45
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -12596,6 +12822,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_study_pack_schema_postgres(conn)
             self._ensure_study_assistant_schema_postgres(conn)
             self._ensure_workspace_study_material_schema_postgres(conn)
+            self._ensure_workspace_migration_schema_postgres(conn)
             self._ensure_quiz_remediation_conversion_schema_postgres(conn)
             self._ensure_postgres_flashcards_tsvector(conn)
             self._ensure_recent_persona_schema_postgres(conn)
@@ -21804,6 +22031,451 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self.hard_delete_conversation(str(conversation_id))
         with self.transaction() as conn:
             conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+
+    # --- Workspace Migration Methods ---
+
+    @staticmethod
+    def _serialize_workspace_migration_json(value: Any, field_name: str, *, default: Any) -> str:
+        if value is None:
+            value = default
+        if isinstance(value, str):
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise InputError(f"{field_name} must be valid JSON when provided as a string.") from exc  # noqa: TRY003
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=True)
+        except TypeError as exc:
+            raise InputError(f"{field_name} must be JSON serializable.") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _parse_workspace_migration_json(value: Any, *, fallback: Any) -> Any:
+        if value is None:
+            return fallback
+        if isinstance(value, (dict, list)):
+            return value
+        if not isinstance(value, str) or not value.strip():
+            return fallback
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return fallback
+
+    def _get_workspace_migration_session_by_idempotency_key(
+        self,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_migration_sessions WHERE idempotency_key = ?",
+            (idempotency_key,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        session = dict(row)
+        session["_chunks"] = self._list_workspace_migration_chunks(str(session["id"]))
+        return session
+
+    def _list_workspace_migration_chunks(self, migration_id: str) -> list[dict[str, Any]]:
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_migration_chunks WHERE migration_id = ? ORDER BY accepted_at, id",
+            (migration_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_workspace_migration_session(self, migration_id: str) -> dict[str, Any] | None:
+        """Return a Research Workspace migration session and accepted chunk receipts."""
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_migration_sessions WHERE id = ?",
+            (migration_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        session = dict(row)
+        session["_chunks"] = self._list_workspace_migration_chunks(migration_id)
+        return session
+
+    def list_workspace_migration_sessions(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return recent Research Workspace migration sessions with accepted chunk receipts."""
+        bounded_limit = max(1, min(int(limit), 500))
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_migration_sessions ORDER BY updated_at DESC, created_at DESC LIMIT ?",
+            (bounded_limit,),
+        )
+        sessions: list[dict[str, Any]] = []
+        for row in cursor.fetchall():
+            session = dict(row)
+            session["_chunks"] = self._list_workspace_migration_chunks(str(session["id"]))
+            sessions.append(session)
+        return sessions
+
+    def _get_workspace_migration_chunk(self, migration_id: str, chunk_id: str) -> dict[str, Any] | None:
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_migration_chunks WHERE migration_id = ? AND id = ?",
+            (migration_id, chunk_id),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def upsert_workspace_migration_session(self, data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        """Create a workspace migration session or return the existing idempotent session."""
+        migration_id = str(data.get("id") or "").strip()
+        idempotency_key = str(data.get("idempotency_key") or "").strip()
+        target_workspace_id = str(data.get("target_workspace_id") or "").strip()
+        target_workspace_name = str(data.get("target_workspace_name") or "").strip()
+        manifest_hash = str(data.get("manifest_hash") or "").strip().lower()
+        source_product = str(data.get("source_product") or "research-workspace-webui").strip()
+        if not all((migration_id, idempotency_key, target_workspace_id, target_workspace_name, manifest_hash)):
+            raise InputError(  # noqa: TRY003
+                "id, idempotency_key, target_workspace_id, target_workspace_name, and manifest_hash are required."
+            )
+
+        existing = self.get_workspace_migration_session(migration_id)
+        existing_by_key = self._get_workspace_migration_session_by_idempotency_key(idempotency_key)
+        if existing_by_key is not None and existing_by_key["id"] != migration_id:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration idempotency key is already used by another migration.",
+                entity="workspace_migration_sessions",
+                entity_id=idempotency_key,
+            )
+        if existing is not None:
+            if existing["idempotency_key"] != idempotency_key or existing["manifest_hash"] != manifest_hash:
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration already exists with different idempotency data.",
+                    entity="workspace_migration_sessions",
+                    entity_id=migration_id,
+                )
+            return existing, False
+
+        self.upsert_workspace(
+            target_workspace_id,
+            target_workspace_name,
+            study_materials_policy="workspace",
+        )
+
+        now = self._get_current_utc_timestamp_iso()
+        manifest_json = self._serialize_workspace_migration_json(data.get("manifest"), "manifest", default={})
+        diagnostics_json = self._serialize_workspace_migration_json(
+            data.get("diagnostics"),
+            "diagnostics",
+            default={},
+        )
+        declared_chunks_json = self._serialize_workspace_migration_json(
+            data.get("declared_chunks"),
+            "declared_chunks",
+            default=[],
+        )
+        false_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        params = (
+            migration_id,
+            target_workspace_id,
+            target_workspace_name,
+            source_product,
+            idempotency_key,
+            manifest_hash,
+            manifest_json,
+            diagnostics_json,
+            declared_chunks_json,
+            "created",
+            false_value,
+            now,
+            now,
+            1,
+        )
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    "INSERT INTO workspace_migration_sessions ("
+                    "id, target_workspace_id, target_workspace_name, source_product, idempotency_key, "
+                    "manifest_hash, manifest_json, diagnostics_json, declared_chunks_json, status, "
+                    "client_delete_eligible, created_at, updated_at, version"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    params,
+                )
+        except sqlite3.IntegrityError as exc:
+            raced = self.get_workspace_migration_session(migration_id)
+            if raced is not None and raced["idempotency_key"] == idempotency_key and raced["manifest_hash"] == manifest_hash:
+                return raced, False
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration could not be created due to a uniqueness conflict.",
+                entity="workspace_migration_sessions",
+                entity_id=migration_id,
+            ) from exc
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
+                raced = self.get_workspace_migration_session(migration_id)
+                if (
+                    raced is not None
+                    and raced["idempotency_key"] == idempotency_key
+                    and raced["manifest_hash"] == manifest_hash
+                ):
+                    return raced, False
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration could not be created due to a uniqueness conflict.",
+                    entity="workspace_migration_sessions",
+                    entity_id=migration_id,
+                ) from exc
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to create workspace migration session: {exc}"
+            ) from exc
+        created = self.get_workspace_migration_session(migration_id)
+        if created is None:
+            raise CharactersRAGDBError(f"Failed to read workspace migration '{migration_id}' after create.")  # noqa: TRY003
+        return created, True
+
+    def _declared_workspace_migration_chunks(self, session: dict[str, Any]) -> list[dict[str, Any]]:
+        parsed = self._parse_workspace_migration_json(session.get("declared_chunks_json"), fallback=[])
+        return parsed if isinstance(parsed, list) else []
+
+    def _workspace_migration_missing_chunk_ids(self, session: dict[str, Any]) -> list[str]:
+        accepted = {str(chunk.get("id")) for chunk in session.get("_chunks", [])}
+        return [
+            str(chunk.get("id"))
+            for chunk in self._declared_workspace_migration_chunks(session)
+            if str(chunk.get("id")) not in accepted
+        ]
+
+    def add_workspace_migration_chunk(
+        self,
+        migration_id: str,
+        chunk_id: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Record an idempotent chunk receipt for a workspace migration."""
+        normalized_migration_id = str(migration_id or "").strip()
+        normalized_chunk_id = str(chunk_id or "").strip()
+        sha256 = str(data.get("sha256") or "").strip().lower()
+        chunk_kind = str(data.get("chunk_kind") or "workspace_bundle").strip()
+        try:
+            byte_count = int(data.get("byte_count"))
+        except (TypeError, ValueError) as exc:
+            raise InputError("byte_count must be an integer.") from exc  # noqa: TRY003
+        if not all((normalized_migration_id, normalized_chunk_id, sha256, chunk_kind)):
+            raise InputError("migration_id, chunk_id, sha256, and chunk_kind are required.")  # noqa: TRY003
+
+        session = self.get_workspace_migration_session(normalized_migration_id)
+        if session is None:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration not found.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+        if session.get("status") == "finalized":
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration is already finalized.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+
+        declared = self._declared_workspace_migration_chunks(session)
+        declared_by_id = {str(chunk.get("id")): chunk for chunk in declared}
+        if declared_by_id:
+            expected = declared_by_id.get(normalized_chunk_id)
+            if expected is None:
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration chunk was not declared in the manifest.",
+                    entity="workspace_migration_chunks",
+                    entity_id=normalized_chunk_id,
+                )
+            try:
+                expected_byte_count = int(expected.get("byte_count"))
+            except (TypeError, ValueError) as exc:
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration chunk declaration has an invalid byte count.",
+                    entity="workspace_migration_chunks",
+                    entity_id=normalized_chunk_id,
+                ) from exc
+            if (
+                str(expected.get("sha256") or "").lower() != sha256
+                or expected_byte_count != byte_count
+                or str(expected.get("chunk_kind") or "workspace_bundle") != chunk_kind
+            ):
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration chunk receipt does not match the declared manifest.",
+                    entity="workspace_migration_chunks",
+                    entity_id=normalized_chunk_id,
+                )
+
+        existing = self._get_workspace_migration_chunk(normalized_migration_id, normalized_chunk_id)
+        if existing is not None:
+            if existing["sha256"] == sha256 and int(existing["byte_count"]) == byte_count:
+                return existing
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration chunk already exists with different content.",
+                entity="workspace_migration_chunks",
+                entity_id=normalized_chunk_id,
+            )
+
+        metadata_json = self._serialize_workspace_migration_json(data.get("metadata"), "metadata", default={})
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    "INSERT INTO workspace_migration_chunks ("
+                    "migration_id, id, sha256, byte_count, chunk_kind, metadata_json, accepted_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        normalized_migration_id,
+                        normalized_chunk_id,
+                        sha256,
+                        byte_count,
+                        chunk_kind,
+                        metadata_json,
+                        now,
+                    ),
+                )
+                conn.execute(
+                    "UPDATE workspace_migration_sessions SET updated_at = ?, version = version + 1 WHERE id = ?",
+                    (now, normalized_migration_id),
+                )
+        except sqlite3.IntegrityError as exc:
+            raced = self._get_workspace_migration_chunk(normalized_migration_id, normalized_chunk_id)
+            if raced is not None and raced["sha256"] == sha256 and int(raced["byte_count"]) == byte_count:
+                return raced
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration chunk could not be accepted due to a uniqueness conflict.",
+                entity="workspace_migration_chunks",
+                entity_id=normalized_chunk_id,
+            ) from exc
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
+                raced = self._get_workspace_migration_chunk(normalized_migration_id, normalized_chunk_id)
+                if raced is not None and raced["sha256"] == sha256 and int(raced["byte_count"]) == byte_count:
+                    return raced
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration chunk could not be accepted due to a uniqueness conflict.",
+                    entity="workspace_migration_chunks",
+                    entity_id=normalized_chunk_id,
+                ) from exc
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to accept workspace migration chunk: {exc}"
+            ) from exc
+        accepted = self._get_workspace_migration_chunk(normalized_migration_id, normalized_chunk_id)
+        if accepted is None:
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to read workspace migration chunk '{normalized_chunk_id}' after insert."
+            )
+        return accepted
+
+    def finalize_workspace_migration(
+        self,
+        migration_id: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Finalize a workspace migration after all declared chunks have receipts."""
+        normalized_migration_id = str(migration_id or "").strip()
+        manifest_hash = str(data.get("manifest_hash") or "").strip().lower()
+        session = self.get_workspace_migration_session(normalized_migration_id)
+        if session is None:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration not found.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+        if session["manifest_hash"] != manifest_hash:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration manifest hash mismatch.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+        if session.get("status") == "finalized":
+            return session
+
+        missing = self._workspace_migration_missing_chunk_ids(session)
+        if missing:
+            raise ConflictError(  # noqa: TRY003
+                f"Workspace migration is missing declared chunks: {', '.join(missing)}",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+
+        now = self._get_current_utc_timestamp_iso()
+        declared_count = len(self._declared_workspace_migration_chunks(session))
+        accepted_count = len(session.get("_chunks", []))
+        recovery_manifest = {
+            "migration_id": normalized_migration_id,
+            "target_workspace_id": session["target_workspace_id"],
+            "source_product": session["source_product"],
+            "manifest_hash": session["manifest_hash"],
+            "status": "finalized",
+            "declared_chunk_count": declared_count,
+            "accepted_chunk_count": accepted_count,
+            "missing_chunk_ids": [],
+            "client_delete_eligible": False,
+            "can_delete_legacy_storage": False,
+            "next_step": "enqueue_workspace_source_ingestion_jobs",
+            "finalized_at": now,
+        }
+        recovery_json = self._serialize_workspace_migration_json(
+            recovery_manifest,
+            "recovery_manifest",
+            default={},
+        )
+        false_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    "UPDATE workspace_migration_sessions "
+                    "SET status = ?, finalized_at = ?, recovery_manifest_json = ?, "
+                    "client_delete_eligible = ?, updated_at = ?, version = version + 1 "
+                    "WHERE id = ?",
+                    ("finalized", now, recovery_json, false_value, now, normalized_migration_id),
+                )
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to finalize workspace migration '{normalized_migration_id}': {exc}"
+            ) from exc
+        finalized = self.get_workspace_migration_session(normalized_migration_id)
+        if finalized is None:
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to read workspace migration '{normalized_migration_id}' after finalize."
+            )
+        return finalized
+
+    def record_workspace_migration_client_delete_ack(
+        self,
+        migration_id: str,
+        data: dict[str, Any],
+    ) -> bool:
+        """Record client deletion acknowledgement only after deletion eligibility is explicitly enabled."""
+        normalized_migration_id = str(migration_id or "").strip()
+        manifest_hash = str(data.get("acknowledged_manifest_hash") or "").strip().lower()
+        session = self.get_workspace_migration_session(normalized_migration_id)
+        if session is None:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration not found.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+        if session["manifest_hash"] != manifest_hash:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration manifest hash mismatch.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+        if not bool(session.get("client_delete_eligible")):
+            raise ConflictError(  # noqa: TRY003
+                "Client deletion is not enabled for Research Workspace migrations.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    "UPDATE workspace_migration_sessions "
+                    "SET client_delete_ack_at = ?, updated_at = ?, version = version + 1 "
+                    "WHERE id = ?",
+                    (now, now, normalized_migration_id),
+                )
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to record workspace migration client delete acknowledgement: {exc}"
+            ) from exc
+        return True
 
     # --- Workspace Source Methods ---
 

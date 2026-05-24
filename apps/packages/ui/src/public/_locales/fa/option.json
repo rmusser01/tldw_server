@@ -2282,8 +2282,8 @@
   "moderationPlayground_subtitle": {
     "message": "کنترل‌های ایمنی خانواده و محافظ‌های سرور در یکجا."
   },
-  "header_workspacePlayground": {
-    "message": "Model Playground"
+  "header_researchWorkspace": {
+    "message": "Research Workspace"
   },
   "omniSearch_searchError": {
     "message": "جستجو ناموفق بود. لطفاً دوباره تلاش کنید."
@@ -2337,7 +2337,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Workspace Playground"
+    "message": "Model Playground"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"

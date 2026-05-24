@@ -20,7 +20,7 @@ import { dismissModals, waitForVisualSettle } from "../utils/helpers"
 const EXTRA_ROUTES: PageEntry[] = [
   { path: "/settings/guardian", name: "Guardian Settings", category: "settings" },
   { path: "/settings/splash", name: "Splash Settings", category: "settings" },
-  { path: "/workspace-playground", name: "Workspace Playground", category: "workspace" },
+  { path: "/research-workspace", name: "Research Workspace", category: "workspace" },
   { path: "/document-workspace", name: "Document Workspace", category: "workspace" },
   { path: "/workflow-editor", name: "Workflow Editor", category: "workspace" },
   { path: "/audiobook-studio", name: "Audiobook Studio", category: "audio" },

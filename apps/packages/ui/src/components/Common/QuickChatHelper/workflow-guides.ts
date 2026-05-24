@@ -41,9 +41,9 @@ export const QUICK_CHAT_WORKFLOW_GUIDES: QuickChatWorkflowGuide[] = [
     title: "Find which page fits my goal",
     question: "I know my goal, but not which page has the right tools. Where should I start?",
     answer:
-      "Start in Workspace Playground for guided multi-tool workflows, then open the specialized page it suggests (Media, Knowledge, Characters, or Evaluations).",
-    route: "/workspace-playground",
-    routeLabel: "Workspace Playground",
+      "Start in Research Workspace for guided multi-tool research workflows, then open the specialized page it suggests (Media, Knowledge, Characters, or Evaluations).",
+    route: "/research-workspace",
+    routeLabel: "Research Workspace",
     tags: ["workflow", "onboarding", "discovery", "navigation"]
   },
   {

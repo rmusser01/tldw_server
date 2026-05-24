@@ -164,9 +164,9 @@ describe("CommandPalette shortcut hints", () => {
     expect(newChat.className).toContain("focus-visible:ring-offset-bg")
   })
 
-  it("disables the global Cmd/Ctrl+K shortcut on the workspace playground route", async () => {
+  it("disables the global Cmd/Ctrl+K shortcut on the research workspace route", async () => {
     render(
-      <MemoryRouter initialEntries={["/workspace-playground"]}>
+      <MemoryRouter initialEntries={["/research-workspace"]}>
         <CommandPalette
           onNewChat={vi.fn()}
           onToggleRag={vi.fn()}

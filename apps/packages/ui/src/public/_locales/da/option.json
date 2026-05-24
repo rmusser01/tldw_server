@@ -2609,8 +2609,8 @@
   "moderationPlayground_subtitle": {
     "message": "Familiesikkerhed og serverværn på ét sted."
   },
-  "header_workspacePlayground": {
-    "message": "Model Playground"
+  "header_researchWorkspace": {
+    "message": "Research Workspace"
   },
   "omniSearch_searchError": {
     "message": "Søgningen mislykkedes. Prøv igen."
@@ -2664,7 +2664,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Workspace Playground"
+    "message": "Model Playground"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"

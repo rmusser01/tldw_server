@@ -65,9 +65,9 @@ vi.mock("react-router-dom", async () => {
   }
 })
 
-vi.mock("@/utils/workspace-playground-prefill", () => ({
+vi.mock("@/utils/research-workspace-prefill", () => ({
   buildKnowledgeQaWorkspacePrefill: vi.fn((payload) => payload),
-  queueWorkspacePlaygroundPrefill: vi.fn().mockResolvedValue(undefined),
+  queueResearchWorkspacePrefill: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock("@/utils/knowledge-qa-search-metrics", () => ({

@@ -17,7 +17,7 @@ const mockUseSetting = vi.hoisted(() => vi.fn())
 
 const ALL_SHORTCUT_IDS = [
   "chat", "prompts", "prompt-studio", "characters",
-  "chat-dictionaries", "world-books", "deep-research", "workspace-playground",
+  "chat-dictionaries", "world-books", "deep-research", "research-workspace",
   "knowledge-qa", "media", "document-workspace",
   "repo2txt",
   "multi-item-review", "collections",

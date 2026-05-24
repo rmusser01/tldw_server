@@ -10,7 +10,7 @@ import React, {
 import { useLocation } from "react-router-dom"
 
 import { useShortcut } from "@/hooks/useKeyboardShortcuts"
-import { WORKSPACE_PLAYGROUND_PATH } from "@/routes/route-paths"
+import { RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { usePromptPaletteCommands } from "@/components/Option/Prompt/usePromptPaletteCommands"
 
 import type { CommandPaletteProps } from "./CommandPalette"
@@ -32,7 +32,7 @@ export const CommandPaletteHost = ({
   includePromptCommands = false
 }: CommandPaletteHostProps) => {
   const location = useLocation()
-  const shortcutEnabled = location.pathname !== WORKSPACE_PLAYGROUND_PATH
+  const shortcutEnabled = location.pathname !== RESEARCH_WORKSPACE_PATH
   const [hasMountedPalette, setHasMountedPalette] = useState(false)
   const [openSignal, setOpenSignal] = useState(0)
   const [promptQuery, setPromptQuery] = useState("")

@@ -68,7 +68,7 @@ export interface TutorialDefinition {
  * Import tutorial definitions from individual files
  */
 import { playgroundTutorials } from "./definitions/playground"
-import { workspacePlaygroundTutorials } from "./definitions/workspace-playground"
+import { researchWorkspaceTutorials } from "./definitions/research-workspace"
 import { mediaTutorials } from "./definitions/media"
 import { knowledgeTutorials } from "./definitions/knowledge"
 import { charactersTutorials } from "./definitions/characters"
@@ -92,7 +92,7 @@ import { monitoringTutorials } from "./definitions/monitoring"
 export const TUTORIAL_REGISTRY: TutorialDefinition[] = [
   ...gettingStartedTutorials,
   ...playgroundTutorials,
-  ...workspacePlaygroundTutorials,
+  ...researchWorkspaceTutorials,
   ...mediaTutorials,
   ...knowledgeTutorials,
   ...charactersTutorials,
@@ -148,7 +148,7 @@ const LEGACY_ROUTE_ALIASES: Record<string, string> = {
   "/options/media": "/media",
   "/options/knowledge": "/knowledge",
   "/options/characters": "/characters",
-  "/options/workspace-playground": "/workspace-playground",
+  "/options/research-workspace": "/research-workspace",
   "/options/prompts": "/prompts",
   "/options/evaluations": "/evaluations",
   "/options/notes": "/notes",

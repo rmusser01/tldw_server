@@ -35,7 +35,7 @@ import {
 } from "@/hooks/useKeyboardShortcuts"
 import { useShortcutConfig } from "@/hooks/keyboard/useShortcutConfig"
 import type { KeyboardShortcut as ConfiguredKeyboardShortcut } from "@/hooks/keyboard/useKeyboardShortcuts"
-import { WORKSPACE_PLAYGROUND_PATH } from "@/routes/route-paths"
+import { RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
 import { cn } from "@/libs/utils"
 
@@ -123,7 +123,7 @@ export function CommandPalette({
   const navigate = useNavigate()
   const { t } = useTranslation(["common", "settings"])
   const isSidepanel = scope === "sidepanel"
-  const shortcutEnabled = location.pathname !== WORKSPACE_PLAYGROUND_PATH
+  const shortcutEnabled = location.pathname !== RESEARCH_WORKSPACE_PATH
   const { shortcuts: configuredShortcuts } = useShortcutConfig()
 
   const openPalette = useCallback(() => {

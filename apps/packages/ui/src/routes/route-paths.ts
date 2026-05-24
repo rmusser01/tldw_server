@@ -5,7 +5,7 @@ import {
 
 export const CHAT_PATH = "/chat"
 export const RESEARCH_PATH = "/research"
-export const WORKSPACE_PLAYGROUND_PATH = "/workspace-playground"
+export const RESEARCH_WORKSPACE_PATH = "/research-workspace"
 export const DOCUMENT_WORKSPACE_PATH = "/document-workspace"
 export const PRESENTATION_STUDIO_PATH = "/presentation-studio"
 export const PRESENTATION_STUDIO_NEW_PATH = "/presentation-studio/new"
@@ -19,7 +19,7 @@ export const ADMIN_SOURCES_PATH = "/admin/sources"
 
 export const VIEWPORT_CONSTRAINED_PATHS = [
   DOCUMENT_WORKSPACE_PATH,
-  WORKSPACE_PLAYGROUND_PATH,
+  RESEARCH_WORKSPACE_PATH,
   "/media-multi",
 ] as const
 
