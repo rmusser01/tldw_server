@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -153,7 +153,10 @@ describe("AlertsTab", () => {
     expect(screen.getByText("CVE-2026-9999 active exploitation observed")).toBeInTheDocument()
     expect(screen.getByText("Active exploitation is affecting healthcare providers.")).toBeInTheDocument()
     expect(screen.getByText("Advisory feed")).toBeInTheDocument()
-    expect(screen.getByText("Run failures and source problems are health issues, not content alerts.")).toBeInTheDocument()
+    const boundaryTitle = screen.getByText(
+      "Run failures and source problems are health issues, not content alerts."
+    )
+    expect(boundaryTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Mark read" }))
 
@@ -170,5 +173,19 @@ describe("AlertsTab", () => {
 
     expect(screen.getByText("Name and pattern are required")).toBeInTheDocument()
     expect(mocks.createRule).not.toHaveBeenCalled()
+  })
+
+  it("renders load errors with the design-system Alert primitive", async () => {
+    mocks.fetchAlerts.mockRejectedValue(new Error("offline"))
+
+    render(<AlertsTab />)
+
+    const errorTitle = await screen.findByText("Failed to load content alerts")
+    const errorAlert = errorTitle.closest('[data-ds-component="Alert"]')
+
+    expect(errorAlert).toBeInTheDocument()
+    expect(
+      within(errorAlert as HTMLElement).getByRole("button", { name: "Refresh" })
+    ).toBeInTheDocument()
   })
 })

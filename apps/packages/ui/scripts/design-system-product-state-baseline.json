@@ -2662,28 +2662,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/AlertsTab/AlertsTab.tsx:Alert#antd-alert-alertstab-type-info-line-344-19bm1rx",
-    "path": "src/components/Option/Watchlists/AlertsTab/AlertsTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/AlertsTab/AlertsTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/AlertsTab/AlertsTab.tsx:Alert#antd-alert-alertstab-type-error-line-355-10h3sox",
-    "path": "src/components/Option/Watchlists/AlertsTab/AlertsTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/AlertsTab/AlertsTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Watchlists/SettingsTab/SettingsTab.tsx:Alert#antd-alert-settingstab-type-info-line-367-m37220",
     "path": "src/components/Option/Watchlists/SettingsTab/SettingsTab.tsx",
     "rule": "antd-product-state-import",

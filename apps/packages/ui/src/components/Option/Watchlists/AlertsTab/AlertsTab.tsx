@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
-import { Alert, Button, Empty, Input, Modal, Pagination, Select, Switch, Tag, Tooltip, message } from "antd"
+import { Button, Empty, Input, Modal, Pagination, Select, Switch, Tag, Tooltip, message } from "antd"
 import {
   BellRing,
   CheckCircle2,
@@ -19,6 +19,7 @@ import {
   updateWatchlistContentAlert,
   updateWatchlistContentAlertRule
 } from "@/services/watchlists"
+import { Alert } from "@/components/ui/primitives"
 import { useWatchlistsStore } from "@/store/watchlists"
 import type {
   WatchlistContentAlert,
@@ -342,25 +343,26 @@ export const AlertsTab: React.FC = () => {
   return (
     <div className="space-y-4" data-testid="watchlists-alerts-tab">
       <Alert
-        type="info"
-        showIcon
+        variant="info"
         title={t("watchlists:alerts.healthBoundary", "Run failures and source problems are health issues, not content alerts.")}
-        description={t(
+      >
+        {t(
           "watchlists:alerts.boundaryDescription",
           "Use content alert rules for newly collected items that match a descriptor, keyword, classification, entity, IOC, CVE, or source constraint."
         )}
-      />
+      </Alert>
 
       {error && (
         <Alert
-          type="error"
-          showIcon
+          variant="error"
           title={error}
-          action={(
-            <Button size="small" onClick={() => { void loadRules(); void loadAlerts() }}>
-              {t("common:refresh", "Refresh")}
-            </Button>
-          )}
+          action={{
+            label: t("common:refresh", "Refresh"),
+            onClick: () => {
+              void loadRules()
+              void loadAlerts()
+            }
+          }}
         />
       )}
 
