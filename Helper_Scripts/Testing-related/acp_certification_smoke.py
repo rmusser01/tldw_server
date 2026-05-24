@@ -29,6 +29,7 @@ _STDOUT_EOF = object()
 _ERROR_MESSAGE_LIMIT = 240
 _STDOUT_LINE_LIMIT = 64 * 1024
 _STDOUT_QUEUE_MAXSIZE = 32
+_SESSION_ID_PLACEHOLDER = "${session_id}"
 
 
 _MANIFESTS: dict[str, dict[str, Any]] = {
@@ -228,7 +229,7 @@ def build_agent_profile_manifest(entrypoint: dict[str, Any]) -> dict[str, Any]:
                         "id": 1,
                         "method": "initialize",
                         "params": {
-                            "protocolVersion": "1",
+                            "protocolVersion": 1,
                             "clientInfo": {
                                 "name": "tldw-server-certification-smoke",
                                 "version": "0",
@@ -239,18 +240,24 @@ def build_agent_profile_manifest(entrypoint: dict[str, Any]) -> dict[str, Any]:
                         "jsonrpc": "2.0",
                         "id": 2,
                         "method": "session/new",
-                        "params": {"cwd": ".", "mcpServers": []},
+                        "params": {"cwd": str(ROOT), "mcpServers": []},
                     },
                     {
                         "jsonrpc": "2.0",
                         "id": 3,
                         "method": "session/prompt",
                         "params": {
-                            "prompt": "Reply with a short ACP certification acknowledgement."
+                            "sessionId": _SESSION_ID_PLACEHOLDER,
+                            "prompt": [
+                                {
+                                    "type": "text",
+                                    "text": "Reply with a short ACP certification acknowledgement.",
+                                }
+                            ],
                         },
                     },
                 ],
-                "timeout_seconds": 10,
+                "timeout_seconds": 120,
                 "capabilities": ["init", "session_new", "prompt"],
                 "safe_to_run_by_default": False,
             }
@@ -597,6 +604,36 @@ def _read_jsonrpc_response(
         return payload
 
 
+def _substitute_runtime_placeholders(value: Any, *, session_id: str | None) -> Any:
+    """Return a JSON-RPC value with runtime placeholders resolved."""
+    if value == _SESSION_ID_PLACEHOLDER:
+        if not session_id:
+            raise ValueError("session/new did not return a sessionId before session/prompt")
+        return session_id
+    if isinstance(value, list):
+        return [
+            _substitute_runtime_placeholders(item, session_id=session_id)
+            for item in value
+        ]
+    if isinstance(value, dict):
+        return {
+            key: _substitute_runtime_placeholders(item, session_id=session_id)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _extract_session_id(response: dict[str, Any]) -> str | None:
+    """Return the session id from a session/new response if present."""
+    result = response.get("result")
+    if not isinstance(result, dict):
+        return None
+    session_id = result.get("sessionId") or result.get("session_id")
+    if session_id is None:
+        return None
+    return str(session_id)
+
+
 def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
     """Run an ordered stdio JSON-RPC sequence, stopping after the first error."""
     timeout_seconds = float(command.get("timeout_seconds", 10))
@@ -639,6 +676,7 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
         daemon=True,
     )
     reader_thread.start()
+    session_id: str | None = None
 
     for frame in frames:
         remaining = deadline - time.monotonic()
@@ -665,7 +703,18 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
             expected_response["matched"] = False
             expected_response_condition.notify_all()
         try:
-            process.stdin.write(json.dumps(frame) + "\n")
+            frame_to_send = _substitute_runtime_placeholders(frame, session_id=session_id)
+        except ValueError as exc:
+            _finish_stdio_process(
+                process,
+                force_kill=True,
+                reader_stop=reader_stop,
+                reader_thread=reader_thread,
+            )
+            print(f"FAIL {command_id}: {exc}", file=sys.stderr)
+            return 1
+        try:
+            process.stdin.write(json.dumps(frame_to_send) + "\n")
             process.stdin.flush()
         except (BrokenPipeError, OSError, ValueError):
             _finish_stdio_process(
@@ -701,6 +750,8 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
             )
             return 1
         _drain_stdout_payloads(responses)
+        if frame.get("method") == "session/new":
+            session_id = _extract_session_id(response)
 
     exit_code = process.poll()
     if exit_code not in (None, 0):

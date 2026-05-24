@@ -92,12 +92,33 @@ agents:
     docs_url: "https://github.com/block/goose"
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live Goose ACP compatibility remains blocked until an ACP-compatible Goose command is installed and verified."
+    compatibility_notes: "Goose native ACP is configured and the May 23, 2026 host-stdio probe passed initialize, session-new, and prompt with the installed CLI; backend live E2E evidence is still required before release support claims."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: native_acp
     acp_command: goose
     acp_args:
       - acp
+
+  - type: hermes
+    name: Hermes
+    description: "Nous Research Hermes agent"
+    command: hermes
+    args: []
+    env: {}
+    requires_api_key: null
+    install_instructions:
+      - "Install Hermes Agent from https://github.com/NousResearch/hermes-agent"
+    docs_url: "https://github.com/NousResearch/hermes-agent"
+    default: false
+    support_state: documented_unverified
+    verification_level: documented_only
+    compatibility_notes: "Local May 23, 2026 host-stdio probe passed initialize, session-new, and prompt using hermes acp --accept-hooks; backend live E2E evidence is still required before release support claims."
+    compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    entrypoint_strategy: native_acp
+    acp_command: hermes
+    acp_args:
+      - acp
+      - --accept-hooks
 
   - type: continue_dev
     name: Continue
