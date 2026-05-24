@@ -152,7 +152,14 @@ const updateCalls = () =>
   mockBgRequest.mock.calls.filter(([request]) => {
     const path = String(request?.path || "")
     const method = String(request?.method || "GET").toUpperCase()
-    return path.startsWith("/api/v1/notes/11?expected_version=") && method === "PUT"
+    return path === "/api/v1/notes/11" && method === "PUT"
+  })
+
+const callsFor = (path: string, method: string) =>
+  mockBgRequest.mock.calls.filter(([request]) => {
+    const requestPath = String(request?.path || "")
+    const requestMethod = String(request?.method || "GET").toUpperCase()
+    return requestPath === path && requestMethod === method.toUpperCase()
   })
 
 describe("NotesManagerPage stage 1 editor reliability", () => {
@@ -189,7 +196,7 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
         }
       }
 
-      if (path.startsWith("/api/v1/notes/11?expected_version=") && method === "PUT") {
+      if (path === "/api/v1/notes/11" && method === "PUT") {
         return { id: 11, version: 2 }
       }
 
@@ -293,6 +300,84 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
       expect(createCalls()).toHaveLength(0)
     })
     expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
+  })
+
+  it("encodes reserved note ids for save refresh requests", async () => {
+    const reservedId = "folder/note?image#1"
+    const rawPath = `/api/v1/notes/${reservedId}`
+    const encodedPath = `/api/v1/notes/${encodeURIComponent(reservedId)}`
+    let detailLoadCount = 0
+
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+
+      if (path.startsWith("/api/v1/notes/?")) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+
+      if (path === "/api/v1/notes/" && method === "POST") {
+        return { id: reservedId }
+      }
+
+      if ((path === rawPath || path === encodedPath) && method === "GET") {
+        detailLoadCount += 1
+        return {
+          id: reservedId,
+          title: "Reserved route note",
+          content: detailLoadCount === 1 ? "Saved first pass" : "Updated reserved route note",
+          metadata: { keywords: [] },
+          ...(detailLoadCount === 1 ? {} : { version: detailLoadCount })
+        }
+      }
+
+      if (path === encodedPath && method === "PUT") {
+        return { id: reservedId }
+      }
+
+      return {}
+    })
+
+    renderPage()
+
+    const titleInput = screen.getByPlaceholderText("Title")
+    const contentInput = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    )
+
+    fireEvent.change(titleInput, {
+      target: { value: "Reserved route note" }
+    })
+    fireEvent.change(contentInput, {
+      target: { value: "Saved first pass" }
+    })
+
+    fireEvent.focus(contentInput)
+    fireEvent.keyDown(contentInput, { key: "s", ctrlKey: true })
+
+    await waitFor(() => {
+      expect(createCalls()).toHaveLength(1)
+    })
+
+    fireEvent.change(contentInput, {
+      target: { value: "Updated reserved route note" }
+    })
+
+    fireEvent.focus(titleInput)
+    fireEvent.keyDown(titleInput, { key: "s", metaKey: true })
+
+    await waitFor(() => {
+      expect(callsFor(encodedPath, "PUT")).toHaveLength(1)
+    })
+
+    expect(callsFor(rawPath, "GET")).toHaveLength(0)
+    expect(callsFor(encodedPath, "GET").length).toBeGreaterThanOrEqual(3)
+    expect(callsFor(encodedPath, "PUT")[0]?.[0]?.headers).toMatchObject({
+      "expected-version": "2"
+    })
   })
 
 })

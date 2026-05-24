@@ -182,7 +182,7 @@ describe("NotesManagerPage stage 1 editor reliability follow-up", () => {
         }
       }
 
-      if (path.startsWith("/api/v1/notes/11?expected_version=") && method === "PUT") {
+      if (path === "/api/v1/notes/11" && method === "PUT") {
         return { id: 11, version: 2 }
       }
 
