@@ -113,7 +113,7 @@ components:
     padding: "2px 8px"
   alert-info:
     backgroundColor: "{colors.primary}"
-    textColor: "{colors.primary}"
+    textColor: "{colors.surface-light}"
     rounded: "{rounded.lg}"
     padding: "12px"
   panel-card:
