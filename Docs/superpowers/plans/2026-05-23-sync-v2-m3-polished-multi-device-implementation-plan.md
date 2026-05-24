@@ -149,29 +149,29 @@
 
 **Tests:** Store/service/endpoint tests for workspace enrollment, permission changes, cross-user isolation, and domain admission.
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Identify existing workspace auth helpers**
+- [x] **Step 1: Identify existing workspace auth helpers**
 
   Read existing workspace/RBAC code and document the helper boundary in the
   task notes before production edits.
 
-- [ ] **Step 2: Write failing dataset scope tests**
+- [x] **Step 2: Write failing dataset scope tests**
 
   Cover workspace dataset creation, membership checks, and personal/workspace
   object isolation.
 
-- [ ] **Step 3: Implement dataset scope and permission checks**
+- [x] **Step 3: Implement dataset scope and permission checks**
 
   Extend dataset records and centralize permission enforcement for push, pull,
   restore, blobs, keys, conflicts, and repair.
 
-- [ ] **Step 4: Enable first workspace domains**
+- [x] **Step 4: Enable first workspace domains**
 
   Register only `workspaces.workspace` and `workspaces.source_ref` where
   materialization ownership is clear.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
   Run targeted tests, relevant Sync tests, Ruff, Bandit, and `git diff --check`.
 
@@ -212,7 +212,7 @@
 
 **Tests:** Model/store/service/endpoint tests for policy validation, rotation preview/commit, revoked key rejection, safe redaction, and server-front-end limitations.
 
-**Status:** In Progress
+**Status:** Complete
 
 - [x] **Step 1: Write failing policy model tests**
 
