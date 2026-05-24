@@ -2,6 +2,52 @@ import React from "react"
 import { toBase64 } from "~/libs/to-base64"
 import { otherUnsupportedTypes } from "@/components/Option/Knowledge/utils/unsupported-types"
 
+const IMAGE_MIME_BY_EXTENSION = new Map<string, string>([
+  ["avif", "image/avif"],
+  ["bmp", "image/bmp"],
+  ["gif", "image/gif"],
+  ["heic", "image/heic"],
+  ["heif", "image/heif"],
+  ["ico", "image/x-icon"],
+  ["jpeg", "image/jpeg"],
+  ["jpg", "image/jpeg"],
+  ["png", "image/png"],
+  ["svg", "image/svg+xml"],
+  ["tif", "image/tiff"],
+  ["tiff", "image/tiff"],
+  ["webp", "image/webp"],
+])
+
+const GENERIC_IMAGE_FALLBACK_MIME_TYPES = new Set(["", "application/octet-stream"])
+
+function getFileExtension(fileName: string): string | null {
+  const dotIndex = fileName.lastIndexOf(".")
+  if (dotIndex <= 0 || dotIndex === fileName.length - 1) return null
+
+  return fileName.slice(dotIndex + 1).toLowerCase()
+}
+
+function normalizeMimeType(mimeType: string): string {
+  return mimeType.trim().toLowerCase()
+}
+
+function inferImageMimeType(file: File, fileType: string): string | null {
+  if (fileType.startsWith("image/")) return fileType
+  if (!GENERIC_IMAGE_FALLBACK_MIME_TYPES.has(fileType)) return null
+
+  const extension = getFileExtension(file.name)
+  return extension ? IMAGE_MIME_BY_EXTENSION.get(extension) ?? null : null
+}
+
+function normalizeImageDataUrl(dataUrl: string, mimeType: string): string {
+  if (dataUrl.toLowerCase().startsWith("data:image/")) return dataUrl
+
+  const commaIndex = dataUrl.indexOf(",")
+  if (commaIndex === -1) return dataUrl
+
+  return `data:${mimeType};base64,${dataUrl.slice(commaIndex + 1)}`
+}
+
 /**
  * Shared attachment handler consumed by both composer surfaces.
  *
@@ -9,12 +55,13 @@ import { otherUnsupportedTypes } from "@/components/Option/Knowledge/utils/unsup
  * (images only, toast feedback, no RAG guard) diverged on their inline
  * implementations. This primitive unifies the decision tree:
  *
- *   1. If the file type is in the unsupported list → `onUnsupportedType`.
- *   2. If it's an image:
+ *   1. If it's an image or a missing/generic MIME with a known image
+ *      extension:
  *        a. if `ragBlocksImages` + chatMode === "rag" → `onImageBlockedInRagMode`.
  *        b. otherwise read to base64, call `setImageField`, `onImageAccepted`.
  *        c. if read fails → `onImageReadError`.
- *   3. If it's a non-image:
+ *   2. If the normalized file type is in the unsupported list → `onUnsupportedType`.
+ *   3. If it's another non-image:
  *        a. surfaces that accept documents pass `onDocumentUpload`.
  *        b. image-only surfaces (Sidepanel) pass `onNonImageRejected` instead.
  *
@@ -104,20 +151,22 @@ export function useComposerAttachments(
 
   const processFile = React.useCallback(
     async (file: File) => {
-      if (otherUnsupportedTypes.includes(file.type)) {
+      const fileType = normalizeMimeType(file.type)
+      const imageMimeType = inferImageMimeType(file, fileType)
+
+      if (!imageMimeType && otherUnsupportedTypes.includes(fileType)) {
         onUnsupportedType?.(file)
         return
       }
 
-      const isImage = file.type.startsWith("image/")
-      if (isImage) {
+      if (imageMimeType) {
         if (ragBlocksImages && chatMode === "rag") {
           onImageBlockedInRagMode?.()
           return
         }
         try {
           const base64 = await toBase64(file)
-          setImageField(base64)
+          setImageField(normalizeImageDataUrl(base64, imageMimeType))
           onImageAccepted?.(file)
         } catch (error) {
           onImageReadError?.(error)
