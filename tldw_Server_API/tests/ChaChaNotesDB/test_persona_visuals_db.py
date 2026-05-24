@@ -152,8 +152,58 @@ def test_new_database_initialization_uses_linear_migration_registry(
 
     db = None
     try:
-        with pytest.raises(CharactersRAGDBError, match="Migration path undefined.*from version 0 to 45"):
+        with pytest.raises(
+            CharactersRAGDBError,
+            match="Migration path undefined.*from version 44 to 45.*while migrating from 0 to 45",
+        ):
             db = CharactersRAGDB(db_path, "persona-visuals-new-db-registry")
+    finally:
+        if db is not None:
+            db.close_connection()
+
+
+def test_sqlite_linear_migration_rejects_skipped_versions(
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify linear migrations cannot skip intermediate registered handlers."""
+    seeded = CharactersRAGDB(db_path, "persona-visuals-skip-seed")
+    seeded.close_connection()
+    CharactersRAGDB._prepare_sqlite_schema_drift_fixture(
+        db_path,
+        version=44,
+        drop_tables=(),
+    )
+
+    original_steps = CharactersRAGDB._sqlite_linear_migration_steps
+
+    def skip_v44_to_v46(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "UPDATE db_schema_version SET version = 46 WHERE schema_name = ?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        )
+
+    def registry_with_skip(
+        db: CharactersRAGDB,
+    ) -> dict[int, Callable[[sqlite3.Connection], None]]:
+        steps = dict(original_steps(db))
+        steps[44] = skip_v44_to_v46
+        return steps
+
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 46)
+    monkeypatch.setattr(
+        CharactersRAGDB,
+        "_sqlite_linear_migration_steps",
+        registry_with_skip,
+    )
+
+    db = None
+    try:
+        with pytest.raises(
+            CharactersRAGDBError,
+            match="advanced from version 44 to 46; expected 45",
+        ):
+            db = CharactersRAGDB(db_path, "persona-visuals-skip-migration")
     finally:
         if db is not None:
             db.close_connection()

@@ -7618,17 +7618,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         while current_db_version < target_version:
             migration_step = migration_steps.get(current_db_version)
             if migration_step is None:
+                missing_target_version = current_db_version + 1
                 raise SchemaError(  # noqa: TRY003, TRY301
                     f"Migration path undefined for '{self._SCHEMA_NAME}' from version "
-                    f"{current_initial_version} to {target_version}. "
+                    f"{current_db_version} to {missing_target_version} while migrating "
+                    f"from {current_initial_version} to {target_version}. "
                     f"Manual migration or a new database may be required."
                 )
             migration_step(conn)
             next_version = self._get_db_version(conn)
-            if next_version <= current_db_version:
+            expected_next_version = current_db_version + 1
+            if next_version != expected_next_version:
                 raise SchemaError(  # noqa: TRY003, TRY301
-                    f"Migration for '{self._SCHEMA_NAME}' did not advance from version "
-                    f"{current_db_version}; current version is {next_version}."
+                    f"Migration for '{self._SCHEMA_NAME}' advanced from version "
+                    f"{current_db_version} to {next_version}; expected {expected_next_version}."
                 )
             current_db_version = next_version
         return current_db_version
