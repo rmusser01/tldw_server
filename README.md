@@ -319,10 +319,11 @@ Use these paths when `make` is not available.
 
 Local single-user:
 - Shortcut scripts from the repository root:
-  - macOS/Linux terminal: `./quick-launch.sh`
-  - macOS Finder: double-click `quick-launch.command`
-  - Windows PowerShell: `.\quick-launch.ps1`
-- These scripts create or update `.venv`, run the `local-single` setup wizard, and start the API at `http://127.0.0.1:8000`.
+  - macOS/Linux terminal: `./quick-launch.sh [api|webui|all]`
+  - macOS Finder: double-click `quick-launch.command` for the default `all` mode.
+  - Windows PowerShell: `.\quick-launch.ps1 [api|webui|all]`
+- These scripts create or update `.venv`, run the `local-single` setup wizard when the API is started, and default to `all`: API at `http://127.0.0.1:8000` plus WebUI at `http://127.0.0.1:8080`.
+- Use `api` for backend-only startup or `webui` when the API is already running.
 - For manual control, follow [Manual Setup](#manual-setup) below, then start with `python -m uvicorn tldw_Server_API.app.main:app --reload`.
 
 Docker single-user + WebUI:
@@ -469,6 +470,16 @@ See [MCP System Admin Guide](Docs/MCP/Unified/System_Admin_Guide.md) for details
 | Develop the WebUI or browser extension | [Extension & Web UI Development Guide](apps/DEVELOPMENT.md) |
 
 ### Local Profile: Add the WebUI
+
+The repo-root quick-launch scripts start the local API and WebUI together by default:
+
+```bash
+./quick-launch.sh all
+```
+
+```powershell
+.\quick-launch.ps1 all
+```
 
 If you already completed the [Local Single-User Profile](Docs/Getting_Started/Profile_Local_Single_User.md) and your API is running at `http://127.0.0.1:8000`, this is the shortest add-on path:
 

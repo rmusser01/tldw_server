@@ -23,15 +23,15 @@ No-`make` shortcut scripts from the repository root:
 
 ```bash
 # macOS/Linux terminal
-./quick-launch.sh
+./quick-launch.sh all
 ```
 
 ```powershell
 # Windows PowerShell
-.\quick-launch.ps1
+.\quick-launch.ps1 all
 ```
 
-On macOS, you can also double-click `quick-launch.command` from Finder. These shortcuts create or update `.venv`, run the `local-single` setup wizard, and start the API at `http://127.0.0.1:8000`.
+On macOS, you can also double-click `quick-launch.command` from Finder. These shortcuts create or update `.venv`, run the `local-single` setup wizard when the API is started, and default to `all`: API at `http://127.0.0.1:8000` plus WebUI at `http://127.0.0.1:8080`. Use `api` for backend-only startup or `webui` when the API is already running.
 
 PowerShell / manual no-`make` equivalent:
 
