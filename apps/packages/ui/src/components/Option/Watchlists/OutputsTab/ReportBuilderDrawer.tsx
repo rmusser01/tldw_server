@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
-import { Alert, Button, Checkbox, Drawer, Empty, Input, Select, Spin, Tag, message } from "antd"
+import { Button, Checkbox, Drawer, Empty, Input, Select, Spin, Tag, message } from "antd"
 import { useTranslation } from "react-i18next"
 import {
   createWatchlistOutput,
@@ -15,6 +15,7 @@ import type {
   WatchlistRun,
   WatchlistTemplate
 } from "@/types/watchlists"
+import { Alert } from "@/components/ui"
 import { Badge } from "@/components/ui/primitives/Badge"
 import { READY_STATE_LABEL } from "@/design-system/states"
 
@@ -434,8 +435,7 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
             </div>
             {selectedRunId == null && (
               <Alert
-                type="warning"
-                showIcon
+                variant="warning"
                 title={t("watchlists:reports.builder.runRequired", "Select a run to generate a report.")}
               />
             )}
@@ -452,8 +452,7 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
                 {preflightWarnings.map((warning) => (
                   <Alert
                     key={warning.code}
-                    type={warning.severity === "blocking" ? "error" : "warning"}
-                    showIcon
+                    variant={warning.severity === "blocking" ? "error" : "warning"}
                     title={warning.label}
                   />
                 ))}

@@ -2706,17 +2706,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/OutputsTab/ReportBuilderDrawer.tsx:Alert",
-    "path": "src/components/Option/Watchlists/OutputsTab/ReportBuilderDrawer.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/OutputsTab/ReportBuilderDrawer.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Watchlists/SettingsTab/SettingsTab.tsx:Alert#antd-alert-settingstab-type-info-line-367-m37220",
     "path": "src/components/Option/Watchlists/SettingsTab/SettingsTab.tsx",
     "rule": "antd-product-state-import",
