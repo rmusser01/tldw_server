@@ -247,7 +247,8 @@ describe("ReportBuilderDrawer", () => {
       />
     )
 
-    await screen.findByText("Select a run to generate a report.")
+    const runRequiredTitle = await screen.findByText("Select a run to generate a report.")
+    expect(runRequiredTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Generate defensible report" })).toBeDisabled()
 
     expect(uiMocks.messageError).not.toHaveBeenCalled()
@@ -268,7 +269,8 @@ describe("ReportBuilderDrawer", () => {
 
     expect(await screen.findByText("0 queued updates")).toBeInTheDocument()
     expect(screen.getByText("No queued updates found for this run.")).toBeInTheDocument()
-    expect(screen.getByText("No included updates")).toBeInTheDocument()
+    const blockingWarning = screen.getByText("No included updates")
+    expect(blockingWarning.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
   })
 
   it("uses the design-system registry label when report readiness is ready", async () => {

@@ -41,6 +41,13 @@ documentation:
       - Jobs/Scheduler/Watchlists exceptions: 22 -> 21
       - SourcesBulkImport target rows: 1 -> 0
     Verification recorded in TASK-45.44.3.8.
+  - |-
+    TASK-45.44.3.9 migrated ReportBuilderDrawer run-required and preflight warning notices to the design-system Alert primitive.
+    Baseline evidence:
+      - total product-state exceptions: 256 -> 255
+      - Jobs/Scheduler/Watchlists exceptions: 21 -> 20
+      - ReportBuilderDrawer target rows: 1 -> 0
+    Verification recorded in TASK-45.44.3.9.
 parent_task_id: TASK-45.44
 priority: medium
 ---
