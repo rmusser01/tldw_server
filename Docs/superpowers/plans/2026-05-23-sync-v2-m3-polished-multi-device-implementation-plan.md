@@ -270,7 +270,7 @@
 
 **Goal:** Prove the polished multi-device path works across realistic scenarios.
 
-**Success Criteria:** E2E coverage includes two devices with background status, revoked-device denial, workspace dataset access changes, conflict preview/resolution, stricter key policy behavior, retention dry-run, and diagnostics redaction.
+**Success Criteria:** E2E coverage includes two devices with background status, revoked-device denial, workspace dataset access changes, conflict resolution with documented preview endpoint deferral, stricter key policy behavior, retention dry-run, and diagnostics redaction.
 
 **Tests:** E2E restore/sync tests plus full relevant Sync suite.
 

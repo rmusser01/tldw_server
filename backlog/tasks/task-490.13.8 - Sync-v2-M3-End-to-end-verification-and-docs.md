@@ -30,7 +30,7 @@ Close M3 with end-to-end verification, API docs updates, backlog final summaries
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 E2E coverage proves multi-device background status, revoked-device denial, workspace access changes, conflict preview/resolution, stricter key policy behavior, retention dry-run, and diagnostics redaction.
+- [x] #1 E2E coverage proves multi-device background status, revoked-device denial, workspace access changes, conflict resolution with documented preview endpoint deferral, stricter key policy behavior, retention dry-run, and diagnostics redaction.
 - [x] #2 API and design docs reflect the implemented M3 subset and any explicitly deferred features.
 - [x] #3 Parent and child Backlog tasks record verification, Bandit results, final summaries, and known blockers or skips.
 <!-- AC:END -->

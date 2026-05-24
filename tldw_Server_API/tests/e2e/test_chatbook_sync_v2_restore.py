@@ -1118,6 +1118,25 @@ def test_chatbook_sync_v2_m3_multi_device_workspace_key_retention_and_diagnostic
         "env-note-2",
     ]
 
+    pre_ack_retention = client.post(
+        "/api/v1/sync/retention/dry-run",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-a",
+            "domains": ["notes.note"],
+            "audit_mode": False,
+            "minimum_envelope_age_seconds": 0,
+            "offline_restore_window_seconds": 0,
+        },
+    )
+    assert pre_ack_retention.status_code == 200
+    assert any(
+        candidate["candidate_type"] == "envelope_compaction"
+        and candidate["object_id"] == "note-1"
+        and "retention_unacknowledged_device" in candidate["blockers"]
+        for candidate in pre_ack_retention.json()["candidates"]
+    )
+
     for device_id in ("device-a", "device-b"):
         acked = client.post(
             "/api/v1/sync/device-acknowledgments",
@@ -1134,6 +1153,8 @@ def test_chatbook_sync_v2_m3_multi_device_workspace_key_retention_and_diagnostic
             },
         )
         assert acked.status_code == 200
+        note_ack = acked.json()["domain_acks"]["notes.note"]
+        assert note_ack["through_server_sequence"] == latest_cursor
 
     dry_run = client.post(
         "/api/v1/sync/retention/dry-run",

@@ -269,6 +269,7 @@ class SyncCapabilitiesResponse(BaseModel):
         default_factory=lambda: {domain: list(operations) for domain, operations in SYNC_V2_SUPPORTED_OPERATIONS.items()}
     )
     encryption: dict[str, Any] = Field(default_factory=_default_encryption)
+    encryption_policies: list[EncryptionPolicy] = Field(default_factory=lambda: [DEFAULT_M1_ENCRYPTION_POLICY])
     blob_transfer: dict[str, Any] = Field(default_factory=_default_blob_transfer)
     quota: dict[str, Any] = Field(default_factory=dict)
     max_batch_size: int = Field(100, ge=1)

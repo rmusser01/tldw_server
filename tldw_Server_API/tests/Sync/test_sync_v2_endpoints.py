@@ -152,6 +152,7 @@ def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
     assert body["encryption"]["policy"] == "server_trusted_v1"
     assert body["encryption"]["ready"] is True
     assert body["encryption"]["attestation"]["mode"] == "managed_storage"
+    assert body["encryption_policies"] == ["server_trusted_v1"]
     assert body["blob_transfer"] == {"supported": False}
     assert body["warnings"] == []
 
@@ -607,6 +608,7 @@ def test_lower_level_register_and_enroll_routes_remain_available_for_internal_ca
     assert registered.status_code == 200
     assert registered.json()["device_id"] == "device-1"
     assert registered.json()["server_capabilities"]["domains"] == list(SYNC_V2_SUPPORTED_DOMAINS)
+    assert registered.json()["server_capabilities"]["encryption_policies"] == ["server_trusted_v1"]
     assert enrolled.status_code == 200
     assert enrolled.json()["dataset_id"] == "dataset-1"
     assert enrolled.json()["encryption_policy"] == "server_trusted_v1"

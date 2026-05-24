@@ -94,6 +94,7 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
     }
     assert capabilities.encryption["policy"] == "server_trusted_v1"
     assert capabilities.encryption["ready"] is True
+    assert capabilities.encryption_policies == ["server_trusted_v1"]
     assert capabilities.blob_transfer == {"supported": False}
     assert "client_private_v1" not in capabilities.model_dump_json()
 
