@@ -1,7 +1,8 @@
 import React from "react"
-import { Input, Radio, Upload, message, Button, Select, Alert, Spin } from "antd"
+import { Input, Radio, Upload, message, Button, Select, Spin } from "antd"
 import { ImageIcon, Link, X, Upload as UploadIcon, Sparkles, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives/Alert"
 import {
   ALLOWED_IMAGE_MIME_TYPES,
   createImageDataUrl,
@@ -396,16 +397,16 @@ export function AvatarField({
             </div>
           ) : !hasConfiguredBackends ? (
             <Alert
-              type="info"
-              showIcon
+              variant="info"
               title={t("settings:manageCharacters.avatar.generate.noBackendsTitle", {
                 defaultValue: "No image backends configured"
               })}
-              description={t("settings:manageCharacters.avatar.generate.noBackendsDesc", {
+            >
+              {t("settings:manageCharacters.avatar.generate.noBackendsDesc", {
                 defaultValue:
                   "Configure stable-diffusion or SwarmUI in server settings to enable avatar generation."
               })}
-            />
+            </Alert>
           ) : (
             <>
               {/* Prompt input */}
@@ -450,11 +451,10 @@ export function AvatarField({
               {/* Error display */}
               {generationError && (
                 <Alert
-                  type="error"
-                  showIcon
+                  variant="error"
                   title={generationError}
-                  closable
-                  onClose={() => setGenerationError(null)}
+                  dismissible
+                  onDismiss={() => setGenerationError(null)}
                 />
               )}
 
