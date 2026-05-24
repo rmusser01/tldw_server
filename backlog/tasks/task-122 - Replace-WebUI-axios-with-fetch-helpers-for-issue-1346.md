@@ -1,11 +1,11 @@
 ---
 id: TASK-122
 title: Replace WebUI axios with fetch helpers for issue 1346
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-05-08 03:19'
-updated_date: '2026-05-08 03:25'
+updated_date: '2026-05-23 16:32'
 labels:
   - webui
   - dependencies
@@ -70,6 +70,12 @@ Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1375.
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Replaced direct WebUI/shared UI axios usage with fetch-backed helpers. The first-party API client now preserves auth, CSRF, session, credentials, timeout/signal, response parsing, request history, retry-after, and baseURL mutation behavior without importing axios, while ElevenLabs now uses a small external-origin fetch helper for voices, models, and speech ArrayBuffer responses. Removed direct axios declarations from the audited WebUI, shared UI, and extension manifests and regenerated apps/bun.lock. Focused compatibility tests, lint, typecheck, frontend compile, extension compile, frozen install, direct axios guards, and git diff checks were recorded; the broad changed-test sweep still hits unrelated dev-baseline UI test failures that reproduce with this patch stashed.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
+## Closeout Notes
+
+<!-- SECTION:CLOSEOUT:BEGIN -->
+Closed after verifying PR #1375 merged into `dev` on 2026-05-09 at merge commit `95eb67138716a63fc0b1b99dfd97611f0806da32`. The task already recorded completed acceptance criteria, completed Definition of Done items, implementation notes, verification evidence, and final summary; this closeout only corrects the stale Backlog status.
+<!-- SECTION:CLOSEOUT:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

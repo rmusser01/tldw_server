@@ -1,11 +1,11 @@
 ---
 id: TASK-123
 title: 'Fix PR #1375 CI failures for axios-to-fetch WebUI dependency cleanup'
-status: In Progress
+status: Done
 assignee:
   - Codex
 created_date: '2026-05-08 13:29'
-updated_date: '2026-05-08 17:25'
+updated_date: '2026-05-23 16:32'
 labels:
   - ci
   - webui
@@ -88,6 +88,12 @@ Stabilized PR #1375 CI by keeping the axios-to-fetch WebUI/Notes fixes and addre
 
 Addressed the follow-on PR review threads by restoring axios-like default header merging, preserving request-specific auth headers, supporting protocol-relative URLs, forcing explicit JSON parsing, parsing error bodies before success responseType handling, normalizing response headers for session capture, and routing ElevenLabs speech generation through the shared fetch helper.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
+## Closeout Notes
+
+<!-- SECTION:CLOSEOUT:BEGIN -->
+Closed after verifying PR #1375 merged into `dev` on 2026-05-09 at merge commit `95eb67138716a63fc0b1b99dfd97611f0806da32`. The task already recorded completed acceptance criteria, completed Definition of Done items, CI/review remediation notes, verification evidence, and final summary; this closeout only corrects the stale Backlog status.
+<!-- SECTION:CLOSEOUT:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
