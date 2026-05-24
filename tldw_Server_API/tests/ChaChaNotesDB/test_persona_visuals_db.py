@@ -1,5 +1,4 @@
 import json
-import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -41,30 +40,23 @@ def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path) ->
     seeded = CharactersRAGDB(db_path, "persona-visuals-seed")
     seeded.close_connection()
 
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute(
-            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (44, CharactersRAGDB._SCHEMA_NAME),
-        )
-        conn.execute("DROP TABLE IF EXISTS persona_visual_candidates")
-        conn.execute("DROP TABLE IF EXISTS persona_visual_assets")
-        conn.execute("DROP TABLE IF EXISTS persona_visual_packs")
-        conn.commit()
+    CharactersRAGDB._prepare_sqlite_schema_drift_fixture(
+        db_path,
+        version=44,
+        drop_tables=(
+            "persona_visual_candidates",
+            "persona_visual_assets",
+            "persona_visual_packs",
+        ),
+    )
 
     migrated = CharactersRAGDB(db_path, "persona-visuals-migration")
     conn = migrated.get_connection()
 
-    version = conn.execute(
-        "SELECT version FROM db_schema_version WHERE schema_name = ?",
-        (CharactersRAGDB._SCHEMA_NAME,),
-    ).fetchone()["version"]
+    version = migrated._get_db_version(conn)
     assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
 
-    tables = {
-        row["name"]
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-    }
+    tables = migrated._sqlite_table_names(conn)
     assert {
         "persona_visual_packs",
         "persona_visual_assets",
@@ -87,35 +79,28 @@ def test_migration_v44_to_latest_repairs_missing_persona_tables(db_path: Path) -
     seeded = CharactersRAGDB(db_path, "persona-visuals-missing-persona-seed")
     seeded.close_connection()
 
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute(
-            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (44, CharactersRAGDB._SCHEMA_NAME),
-        )
-        conn.execute("DROP TABLE IF EXISTS persona_visual_candidates")
-        conn.execute("DROP TABLE IF EXISTS persona_visual_assets")
-        conn.execute("DROP TABLE IF EXISTS persona_visual_packs")
-        conn.execute("DROP TABLE IF EXISTS persona_sessions")
-        conn.execute("DROP TABLE IF EXISTS persona_memory_entries")
-        conn.execute("DROP TABLE IF EXISTS persona_policy_rules")
-        conn.execute("DROP TABLE IF EXISTS persona_scope_rules")
-        conn.execute("DROP TABLE IF EXISTS persona_profiles")
-        conn.commit()
+    CharactersRAGDB._prepare_sqlite_schema_drift_fixture(
+        db_path,
+        version=44,
+        drop_tables=(
+            "persona_visual_candidates",
+            "persona_visual_assets",
+            "persona_visual_packs",
+            "persona_sessions",
+            "persona_memory_entries",
+            "persona_policy_rules",
+            "persona_scope_rules",
+            "persona_profiles",
+        ),
+    )
 
     migrated = CharactersRAGDB(db_path, "persona-visuals-missing-persona-migration")
     conn = migrated.get_connection()
 
-    version = conn.execute(
-        "SELECT version FROM db_schema_version WHERE schema_name = ?",
-        (CharactersRAGDB._SCHEMA_NAME,),
-    ).fetchone()["version"]
+    version = migrated._get_db_version(conn)
     assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
 
-    tables = {
-        row["name"]
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-    }
+    tables = migrated._sqlite_table_names(conn)
     assert {
         "persona_profiles",
         "persona_scope_rules",

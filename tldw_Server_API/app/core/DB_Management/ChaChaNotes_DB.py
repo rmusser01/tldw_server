@@ -645,6 +645,16 @@ class CharactersRAGDB:
         "rejected",
         "failed",
     )
+    _SQLITE_MIGRATION_FIXTURE_DROP_STATEMENTS: dict[str, str] = {
+        "persona_profiles": "DROP TABLE IF EXISTS persona_profiles",
+        "persona_scope_rules": "DROP TABLE IF EXISTS persona_scope_rules",
+        "persona_policy_rules": "DROP TABLE IF EXISTS persona_policy_rules",
+        "persona_sessions": "DROP TABLE IF EXISTS persona_sessions",
+        "persona_memory_entries": "DROP TABLE IF EXISTS persona_memory_entries",
+        "persona_visual_packs": "DROP TABLE IF EXISTS persona_visual_packs",
+        "persona_visual_assets": "DROP TABLE IF EXISTS persona_visual_assets",
+        "persona_visual_candidates": "DROP TABLE IF EXISTS persona_visual_candidates",
+    }
     _ALLOWED_WORKSPACE_ARTIFACT_REVIEW_STATES: tuple[str, ...] = (
         "draft",
         "reviewing",
@@ -6224,6 +6234,40 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return BackendManagedTransaction(self)
 
     # --- Schema Initialization and Migration ---
+    @classmethod
+    def _prepare_sqlite_schema_drift_fixture(
+        cls,
+        db_path: Path | str,
+        *,
+        version: int,
+        drop_tables: tuple[str, ...],
+    ) -> None:
+        """Prepare a controlled SQLite schema drift fixture for migration regression tests."""
+        if version < 0 or version > cls._CURRENT_SCHEMA_VERSION:
+            raise ValueError(f"Unsupported schema fixture version: {version}")
+
+        unsupported_tables = set(drop_tables) - set(cls._SQLITE_MIGRATION_FIXTURE_DROP_STATEMENTS)
+        if unsupported_tables:
+            raise ValueError(f"Unsupported schema fixture table drops: {sorted(unsupported_tables)}")
+
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute(
+                "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
+                (version, cls._SCHEMA_NAME),
+            )
+            for table_name in drop_tables:
+                conn.execute(cls._SQLITE_MIGRATION_FIXTURE_DROP_STATEMENTS[table_name])
+            conn.commit()
+
+    @staticmethod
+    def _sqlite_table_names(conn: sqlite3.Connection) -> set[str]:
+        """Return the SQLite table names visible to a migration connection."""
+        return {
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        }
+
     def _get_db_version(self, conn: sqlite3.Connection) -> int:
         """
         Retrieves the current schema version from the `db_schema_version` table
@@ -7497,10 +7541,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "persona_sessions",
             "persona_memory_entries",
         }
-        existing_tables = {
-            row[0]
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-        }
+        existing_tables = self._sqlite_table_names(conn)
         missing_tables = required_tables - existing_tables
         if missing_tables:
             logger.warning(
