@@ -19,7 +19,7 @@ describe("persona shortcut defaults", () => {
     expect(shortcuts).toContain("deep-research")
     expect(shortcuts).toContain("knowledge-qa")
     expect(shortcuts).toContain("media")
-    expect(shortcuts).toContain("workspace-playground")
+    expect(shortcuts).toContain("research-workspace")
     expect(shortcuts).toContain("chat")
   })
 

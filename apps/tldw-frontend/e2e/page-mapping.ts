@@ -832,12 +832,12 @@ export const EXTENSION_ONLY_PAGES: PageMapping[] = [
     ]
   },
   {
-    name: "Workspace Playground",
+    name: "Research Workspace",
     category: "workspace",
     webuiPath: null,
-    extensionOptionsPath: "/workspace-playground",
+    extensionOptionsPath: "/research-workspace",
     extensionSidepanelPath: null,
-    sharedComponent: "OptionWorkspacePlayground",
+    sharedComponent: "OptionResearchWorkspace",
     session: 7,
     checklistItems: CHECKLIST_TEMPLATES.workspace
   }

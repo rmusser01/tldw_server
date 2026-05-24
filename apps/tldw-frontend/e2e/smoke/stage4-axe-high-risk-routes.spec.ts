@@ -42,7 +42,7 @@ const HIGH_RISK_ROUTES: HighRiskRoute[] = [
   { path: "/companion", name: "Companion" },
   { path: "/admin/mlx", name: "Admin MLX" },
   { path: "/quick-chat-popout", name: "Quick Chat Popout" },
-  { path: "/workspace-playground", name: "Workspace Playground" },
+  { path: "/research-workspace", name: "Research Workspace" },
   { path: "/settings/image-generation", name: "Image Generation Settings" }
 ]
 

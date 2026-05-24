@@ -428,7 +428,7 @@ export const HEADER_SHORTCUT_IDS = [
   "collections",
   "skills",
   "model-playground",
-  "workspace-playground",
+  "research-workspace",
   "writing-playground",
   "quizzes",
   "evaluations",

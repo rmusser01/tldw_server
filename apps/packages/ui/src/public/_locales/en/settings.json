@@ -5648,8 +5648,8 @@
   "splashSettings_searchNoResults": {
     "message": "No splash cards match your search."
   },
-  "researchStudioNav": {
-    "message": "Research Studio"
+  "researchWorkspaceNav": {
+    "message": "Research Workspace"
   },
   "modelPlaygroundNav": {
     "message": "Model Playground"

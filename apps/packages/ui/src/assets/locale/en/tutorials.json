@@ -74,9 +74,9 @@
       "settingsContent": "Configure voice chat settings including the voice model, auto-send timing, and trigger phrases."
     }
   },
-  "workspacePlayground": {
+  "researchWorkspace": {
     "basics": {
-      "label": "Research Studio Basics",
+      "label": "Research Workspace Basics",
       "description": "Learn the three-pane workspace flow: sources, chat, and studio outputs",
       "headerTitle": "Workspace Header",
       "headerContent": "Use the header to rename, switch, import, and manage workspaces while tracking system status.",

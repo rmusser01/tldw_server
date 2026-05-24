@@ -208,8 +208,8 @@ export function KnowledgeReadyState({
 
       <p className="text-[11px] text-text-subtle">
         Need a full workspace?{" "}
-        <Link to="/workspace-playground" className="text-primary/70 hover:text-primary transition-colors">
-          Try Research Studio &rarr;
+        <Link to="/research-workspace" className="text-primary/70 hover:text-primary transition-colors">
+          Try Research Workspace &rarr;
         </Link>
       </p>
     </div>

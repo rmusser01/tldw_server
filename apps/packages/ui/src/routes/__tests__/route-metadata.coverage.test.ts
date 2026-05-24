@@ -32,7 +32,7 @@ const AUDITED_ROOT_ROUTES = [
   "/knowledge",
   "/search",
   "/research",
-  "/workspace-playground",
+  "/research-workspace",
   "/document-workspace",
   "/repo2txt",
   "/model-playground",
@@ -114,6 +114,21 @@ describe("route metadata coverage", () => {
     expect(getCanonicalRoutePath("/audio")).toBe("/speech")
     expect(getCanonicalRoutePath("/search")).toBe("/knowledge")
     expect(getCanonicalRoutePath("/prompt-studio")).toBe("/prompts")
+    expect(getCanonicalRoutePath("/workspace-playground")).toBeUndefined()
+  })
+
+  it("defines research workspace as the canonical workspace research route without legacy aliases", () => {
+    const metadata = getRouteMetadata("/research-workspace")
+
+    expect(metadata).toMatchObject({
+      path: "/research-workspace",
+      canonicalPath: "/research-workspace",
+      label: "Research Workspace",
+      group: "workspace"
+    })
+    expect(metadata?.aliases).toBeUndefined()
+    expect(metadata?.redirectsTo).toBeUndefined()
+    expect(getRouteMetadata("/workspace-playground")).toBeUndefined()
   })
 
   it("exposes command palette routes through metadata-owned targets", () => {

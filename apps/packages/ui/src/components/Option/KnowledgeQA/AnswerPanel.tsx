@@ -13,8 +13,8 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import {
   buildKnowledgeQaWorkspacePrefill,
-  queueWorkspacePlaygroundPrefill,
-} from "@/utils/workspace-playground-prefill"
+  queueResearchWorkspacePrefill,
+} from "@/utils/research-workspace-prefill"
 import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metrics"
 import { remarkCitationLinks } from "./answerMarkdown"
 import { LowQualityRecoveryBanner } from "./panels/LowQualityRecoveryBanner"
@@ -406,7 +406,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         citations: citations.map((citation) => citation.index),
         results,
       })
-      await queueWorkspacePlaygroundPrefill(payload)
+      await queueResearchWorkspacePrefill(payload)
       if (activeAnswerSessionKeyRef.current !== requestSessionKey) {
         return
       }
@@ -414,7 +414,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         type: "workspace_handoff",
         source_count: results.length,
       })
-      navigate("/workspace-playground")
+      navigate("/research-workspace")
     } catch (error) {
       if (activeAnswerSessionKeyRef.current !== requestSessionKey) {
         return

@@ -1,0 +1,1087 @@
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { Modal } from "antd"
+import {
+  clearWorkspaceUndoActionsForTests,
+  getWorkspaceUndoPendingCount
+} from "../undo-manager"
+import { WorkspaceHeader } from "../WorkspaceHeader"
+import {
+  FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS,
+  FEATURE_ROLLOUT_SUBJECT_ID_STORAGE_KEY
+} from "@/utils/feature-rollout"
+
+const mockNavigate = vi.fn()
+const mockSwitchWorkspace = vi.fn()
+const mockCreateNewWorkspace = vi.fn()
+const mockExportWorkspaceBundle = vi.fn()
+const mockImportWorkspaceBundle = vi.fn()
+const mockDuplicateWorkspace = vi.fn()
+const mockArchiveWorkspace = vi.fn()
+const mockRestoreArchivedWorkspace = vi.fn()
+const mockDeleteWorkspace = vi.fn()
+const mockCreateWorkspaceCollection = vi.fn()
+const mockDeleteWorkspaceCollection = vi.fn()
+const mockAssignWorkspaceToCollection = vi.fn()
+const mockSaveCurrentWorkspace = vi.fn()
+const mockSetWorkspaceName = vi.fn()
+const mockSetWorkspaceBanner = vi.fn()
+const mockClearWorkspaceBannerImage = vi.fn()
+const mockResetWorkspaceBanner = vi.fn()
+const mockSetCurrentNote = vi.fn()
+const mockCaptureUndoSnapshot = vi.fn()
+const mockRestoreUndoSnapshot = vi.fn()
+const mockCreateWorkspaceExportZipBlob = vi.fn()
+const mockCreateWorkspaceExportZipFilename = vi.fn()
+const mockParseWorkspaceImportFile = vi.fn()
+const mockNormalizeWorkspaceBannerImage = vi.fn()
+const mockTrackResearchWorkspaceTelemetry = vi.fn()
+const mockGetResearchWorkspaceTelemetryState = vi.fn()
+const mockResetResearchWorkspaceTelemetryState = vi.fn()
+
+const now = new Date("2026-02-18T12:00:00.000Z")
+
+const mockStoreState = {
+  workspaceName: "Alpha Research",
+  workspaceId: "workspace-alpha",
+  workspaceTag: "workspace:alpha-research",
+  workspaceBanner: {
+    title: "Alpha Banner",
+    subtitle: "Alpha subtitle",
+    image: null as null | {
+      dataUrl: string
+      mimeType: "image/jpeg" | "image/png" | "image/webp"
+      width: number
+      height: number
+      bytes: number
+      updatedAt: Date
+    }
+  },
+  sources: [
+    {
+      id: "source-1",
+      mediaId: 101,
+      title: "Alpha Whitepaper",
+      type: "pdf",
+      addedAt: new Date("2026-02-17T11:00:00.000Z"),
+      url: "https://example.com/alpha-whitepaper"
+    }
+  ],
+  setWorkspaceName: mockSetWorkspaceName,
+  setWorkspaceBanner: mockSetWorkspaceBanner,
+  clearWorkspaceBannerImage: mockClearWorkspaceBannerImage,
+  resetWorkspaceBanner: mockResetWorkspaceBanner,
+  setCurrentNote: mockSetCurrentNote,
+  savedWorkspaces: [
+    {
+      id: "workspace-alpha",
+      name: "Alpha Research",
+      tag: "workspace:alpha-research",
+      collectionId: "collection-topic-a",
+      createdAt: new Date("2026-02-10T10:00:00.000Z"),
+      lastAccessedAt: now,
+      sourceCount: 3
+    },
+    {
+      id: "workspace-beta",
+      name: "Beta Deep Dive",
+      tag: "workspace:beta-deep-dive",
+      collectionId: null,
+      createdAt: new Date("2026-02-09T10:00:00.000Z"),
+      lastAccessedAt: new Date("2026-02-18T11:00:00.000Z"),
+      sourceCount: 5
+    },
+    {
+      id: "workspace-gamma",
+      name: "Gamma Notes",
+      tag: "workspace:gamma-notes",
+      collectionId: null,
+      createdAt: new Date("2026-02-08T10:00:00.000Z"),
+      lastAccessedAt: new Date("2026-02-18T09:00:00.000Z"),
+      sourceCount: 2
+    }
+  ],
+  archivedWorkspaces: [],
+  workspaceCollections: [
+    {
+      id: "collection-topic-a",
+      name: "Topic A",
+      description: null,
+      createdAt: new Date("2026-02-01T10:00:00.000Z"),
+      updatedAt: new Date("2026-02-01T10:00:00.000Z")
+    }
+  ],
+  createNewWorkspace: mockCreateNewWorkspace,
+  exportWorkspaceBundle: mockExportWorkspaceBundle,
+  importWorkspaceBundle: mockImportWorkspaceBundle,
+  createWorkspaceCollection: mockCreateWorkspaceCollection,
+  deleteWorkspaceCollection: mockDeleteWorkspaceCollection,
+  assignWorkspaceToCollection: mockAssignWorkspaceToCollection,
+  switchWorkspace: mockSwitchWorkspace,
+  duplicateWorkspace: mockDuplicateWorkspace,
+  archiveWorkspace: mockArchiveWorkspace,
+  restoreArchivedWorkspace: mockRestoreArchivedWorkspace,
+  deleteWorkspace: mockDeleteWorkspace,
+  saveCurrentWorkspace: mockSaveCurrentWorkspace,
+  captureUndoSnapshot: mockCaptureUndoSnapshot,
+  restoreUndoSnapshot: mockRestoreUndoSnapshot
+}
+
+const mockConnectionStoreState = {
+  state: {
+    phase: "connected" as const,
+    serverUrl: "http://127.0.0.1:8000",
+    lastCheckedAt: Date.now(),
+    lastError: null as string | null,
+    lastStatusCode: 200 as number | null,
+    isConnected: true,
+    isChecking: false,
+    consecutiveFailures: 0,
+    offlineBypass: false,
+    knowledgeStatus: "ready" as const,
+    knowledgeLastCheckedAt: Date.now(),
+    knowledgeError: null as string | null,
+    mode: "normal" as const,
+    configStep: "none" as const,
+    errorKind: "none" as const,
+    hasCompletedFirstRun: true,
+    lastConfigUpdatedAt: Date.now(),
+    checksSinceConfigChange: 0
+  }
+}
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (
+      key: string,
+      defaultValueOrOptions?:
+        | string
+        | {
+            defaultValue?: string
+          }
+    ) => {
+      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
+      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+      return key
+    }
+  })
+}))
+
+vi.mock("react-router-dom", () => ({
+  useNavigate: () => mockNavigate
+}))
+
+vi.mock("@/store/workspace", () => ({
+  useWorkspaceStore: (
+    selector: (state: typeof mockStoreState) => unknown
+  ) => selector(mockStoreState)
+}))
+
+vi.mock("@/store/connection", () => ({
+  useConnectionStore: (
+    selector: (state: typeof mockConnectionStoreState) => unknown
+  ) => selector(mockConnectionStoreState)
+}))
+
+vi.mock("@/store/workspace-bundle", async () => {
+  const actual = await vi.importActual<typeof import("@/store/workspace-bundle")>(
+    "@/store/workspace-bundle"
+  )
+  return {
+    ...actual,
+    createWorkspaceExportZipBlob: (...args: unknown[]) =>
+      mockCreateWorkspaceExportZipBlob(...args),
+    createWorkspaceExportZipFilename: (...args: unknown[]) =>
+      mockCreateWorkspaceExportZipFilename(...args),
+    parseWorkspaceImportFile: (...args: unknown[]) =>
+      mockParseWorkspaceImportFile(...args)
+  }
+})
+
+vi.mock("../workspace-banner-image", () => ({
+  normalizeWorkspaceBannerImage: (...args: unknown[]) =>
+    mockNormalizeWorkspaceBannerImage(...args),
+  WorkspaceBannerImageNormalizationError: class WorkspaceBannerImageNormalizationError extends Error {
+    code: string
+    constructor(code: string, message: string) {
+      super(message)
+      this.code = code
+    }
+  }
+}))
+
+vi.mock("@/utils/research-workspace-telemetry", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/utils/research-workspace-telemetry")>(
+      "@/utils/research-workspace-telemetry"
+    )
+  return {
+    ...actual,
+    trackResearchWorkspaceTelemetry: (...args: unknown[]) =>
+      mockTrackResearchWorkspaceTelemetry(...args),
+    getResearchWorkspaceTelemetryState: (...args: unknown[]) =>
+      mockGetResearchWorkspaceTelemetryState(...args),
+    resetResearchWorkspaceTelemetryState: (...args: unknown[]) =>
+      mockResetResearchWorkspaceTelemetryState(...args)
+  }
+})
+
+if (!(globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver) {
+  ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}
+
+describe("WorkspaceHeader workspace browser modal", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.localStorage.clear()
+    clearWorkspaceUndoActionsForTests()
+    mockStoreState.savedWorkspaces = [
+      {
+        id: "workspace-alpha",
+        name: "Alpha Research",
+        tag: "workspace:alpha-research",
+        collectionId: "collection-topic-a",
+        createdAt: new Date("2026-02-10T10:00:00.000Z"),
+        lastAccessedAt: now,
+        sourceCount: 3
+      },
+      {
+        id: "workspace-beta",
+        name: "Beta Deep Dive",
+        tag: "workspace:beta-deep-dive",
+        collectionId: null,
+        createdAt: new Date("2026-02-09T10:00:00.000Z"),
+        lastAccessedAt: new Date("2026-02-18T11:00:00.000Z"),
+        sourceCount: 5
+      },
+      {
+        id: "workspace-gamma",
+        name: "Gamma Notes",
+        tag: "workspace:gamma-notes",
+        collectionId: null,
+        createdAt: new Date("2026-02-08T10:00:00.000Z"),
+        lastAccessedAt: new Date("2026-02-18T09:00:00.000Z"),
+        sourceCount: 2
+      }
+    ]
+    mockStoreState.workspaceCollections = [
+      {
+        id: "collection-topic-a",
+        name: "Topic A",
+        description: null,
+        createdAt: new Date("2026-02-01T10:00:00.000Z"),
+        updatedAt: new Date("2026-02-01T10:00:00.000Z")
+      }
+    ]
+    mockCaptureUndoSnapshot.mockReturnValue({
+      workspaceId: "workspace-alpha",
+      workspaceName: "Alpha Research"
+    })
+    mockConnectionStoreState.state = {
+      ...mockConnectionStoreState.state,
+      phase: "connected",
+      isConnected: true,
+      isChecking: false,
+      errorKind: "none",
+      knowledgeStatus: "ready",
+      lastError: null,
+      knowledgeError: null
+    }
+    mockExportWorkspaceBundle.mockReturnValue({
+      format: "tldw.research-workspace.bundle",
+      schemaVersion: 1,
+      exportedAt: "2026-02-18T12:00:00.000Z",
+      workspace: {
+        name: "Alpha Research",
+        tag: "workspace:alpha-research",
+        createdAt: "2026-02-10T10:00:00.000Z",
+        snapshot: {
+          workspaceName: "Alpha Research",
+          workspaceTag: "workspace:alpha-research",
+          workspaceCreatedAt: "2026-02-10T10:00:00.000Z",
+          sources: [],
+          selectedSourceIds: [],
+          generatedArtifacts: [],
+          notes: "",
+          currentNote: {
+            title: "",
+            content: "",
+            keywords: [],
+            isDirty: false
+          },
+          workspaceBanner: {
+            title: "",
+            subtitle: "",
+            image: null
+          },
+          leftPaneCollapsed: false,
+          rightPaneCollapsed: false,
+          audioSettings: {
+            provider: "tldw",
+            model: "kokoro",
+            voice: "af_heart",
+            speed: 1,
+            format: "mp3"
+          }
+        }
+      }
+    })
+    mockImportWorkspaceBundle.mockReturnValue("workspace-imported")
+    mockCreateWorkspaceExportZipBlob.mockResolvedValue(
+      new Blob(["zip-bytes"], { type: "application/zip" })
+    )
+    mockCreateWorkspaceExportZipFilename.mockReturnValue("alpha.workspace.zip")
+    mockParseWorkspaceImportFile.mockResolvedValue({
+      format: "tldw.research-workspace.bundle",
+      schemaVersion: 1,
+      exportedAt: "2026-02-18T12:00:00.000Z",
+      workspace: {
+        name: "Imported",
+        tag: "workspace:imported",
+        createdAt: "2026-02-18T10:00:00.000Z",
+        snapshot: {
+          workspaceName: "Imported",
+          workspaceTag: "workspace:imported",
+          workspaceCreatedAt: "2026-02-18T10:00:00.000Z",
+          sources: [],
+          selectedSourceIds: [],
+          generatedArtifacts: [],
+          notes: "",
+          currentNote: {
+            title: "",
+            content: "",
+            keywords: [],
+            isDirty: false
+          },
+          workspaceBanner: {
+            title: "",
+            subtitle: "",
+            image: null
+          },
+          leftPaneCollapsed: false,
+          rightPaneCollapsed: false,
+          audioSettings: {
+            provider: "tldw",
+            model: "kokoro",
+            voice: "af_heart",
+            speed: 1,
+            format: "mp3"
+          }
+        }
+      }
+    })
+    mockGetResearchWorkspaceTelemetryState.mockResolvedValue({
+      version: 1,
+      counters: {
+        status_viewed: 3,
+        citation_provenance_opened: 1,
+        token_cost_rendered: 2,
+        diagnostics_toggled: 1,
+        quota_warning_seen: 0,
+        conflict_modal_opened: 1,
+        undo_triggered: 2,
+        operation_cancelled: 1,
+        artifact_rehydrated_failed: 0,
+        source_status_polled: 5,
+        source_status_ready: 4,
+        connectivity_state_changed: 2,
+        confusion_retry_burst: 0,
+        confusion_refresh_loop: 0,
+        confusion_duplicate_submission: 0
+      },
+      last_event_at: Date.parse("2026-02-20T01:23:45.000Z"),
+      recent_events: [
+        {
+          type: "status_viewed",
+          at: Date.parse("2026-02-20T01:22:00.000Z"),
+          details: { workspace_id: "workspace-alpha" }
+        },
+        {
+          type: "operation_cancelled",
+          at: Date.parse("2026-02-20T01:23:45.000Z"),
+          details: { scope: "chat" }
+        },
+        {
+          type: "confusion_retry_burst",
+          at: Date.parse("2026-02-20T01:24:12.000Z"),
+          details: { retry_count: 3, window_ms: 30000 }
+        }
+      ]
+    })
+    mockResetResearchWorkspaceTelemetryState.mockResolvedValue(undefined)
+    mockNormalizeWorkspaceBannerImage.mockResolvedValue({
+      dataUrl: "data:image/webp;base64,banner",
+      mimeType: "image/webp",
+      width: 1200,
+      height: 400,
+      bytes: 16000,
+      updatedAt: new Date("2026-02-25T10:00:00.000Z")
+    })
+  })
+
+  it("opens view-all modal and filters workspaces by search query", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }))
+    fireEvent.click(await screen.findByText("View all workspaces"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "All Workspaces"
+    })
+    expect(modal).toBeInTheDocument()
+    expect(within(modal).getByText("Beta Deep Dive")).toBeInTheDocument()
+    expect(within(modal).getByText("Gamma Notes")).toBeInTheDocument()
+
+    const searchInput = within(modal).getByPlaceholderText(
+      "Search workspaces by name or tag"
+    )
+    fireEvent.change(searchInput, { target: { value: "gamma" } })
+
+    await waitFor(() => {
+      expect(within(modal).queryByText("Beta Deep Dive")).not.toBeInTheDocument()
+      expect(within(modal).getByText("Gamma Notes")).toBeInTheDocument()
+    })
+  })
+
+  it("switches workspace when selecting from view-all modal", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }))
+    fireEvent.click(await screen.findByText("View all workspaces"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "All Workspaces"
+    })
+    const targetWorkspaceRow = await within(modal).findByRole("button", {
+      name: /Beta Deep Dive/
+    })
+    fireEvent.click(targetWorkspaceRow)
+
+    expect(mockSwitchWorkspace).toHaveBeenCalledWith("workspace-beta")
+  })
+
+  it("renders collection groups and assigns workspaces from the browser modal", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }))
+    fireEvent.click(await screen.findByText("View all workspaces"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "All Workspaces"
+    })
+    expect(
+      within(modal).getByLabelText("Collection group Topic A")
+    ).toBeInTheDocument()
+    expect(
+      within(modal).getByLabelText("Collection group Unassigned")
+    ).toBeInTheDocument()
+
+    fireEvent.change(
+      within(modal).getByLabelText("Collection for Beta Deep Dive"),
+      { target: { value: "collection-topic-a" } }
+    )
+
+    expect(mockAssignWorkspaceToCollection).toHaveBeenCalledWith(
+      "workspace-beta",
+      "collection-topic-a"
+    )
+  })
+
+  it("creates and deletes collections from the browser modal", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }))
+    fireEvent.click(await screen.findByText("View all workspaces"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "All Workspaces"
+    })
+
+    fireEvent.change(
+      within(modal).getByPlaceholderText("New collection name"),
+      { target: { value: "Topic B" } }
+    )
+    fireEvent.click(within(modal).getByRole("button", { name: "Add collection" }))
+    fireEvent.click(
+      within(modal).getByRole("button", { name: "Delete collection Topic A" })
+    )
+
+    expect(mockCreateWorkspaceCollection).toHaveBeenCalledWith("Topic B", null)
+    expect(mockDeleteWorkspaceCollection).toHaveBeenCalledWith(
+      "collection-topic-a"
+    )
+  })
+
+  it("exports workspace bundle from the settings menu", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Export Workspace"))
+
+    await waitFor(() => {
+      expect(mockExportWorkspaceBundle).toHaveBeenCalledWith("workspace-alpha")
+      expect(mockCreateWorkspaceExportZipBlob).toHaveBeenCalledTimes(1)
+      expect(mockCreateWorkspaceExportZipFilename).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("raises split workspace intent from the settings menu", async () => {
+    const onOpenSplitWorkspace = vi.fn()
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+        onOpenSplitWorkspace={onOpenSplitWorkspace}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Split workspace"))
+
+    expect(onOpenSplitWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it("hides the split workspace menu item when no split callback is provided", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+
+    expect(screen.queryByText("Split workspace")).not.toBeInTheDocument()
+  })
+
+  it("falls back to JSON export when ZIP creation fails", async () => {
+    mockCreateWorkspaceExportZipBlob.mockRejectedValueOnce(
+      new Error("zip unavailable")
+    )
+    const createObjectUrlSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:workspace-export")
+    const revokeObjectUrlSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Export Workspace"))
+
+    await waitFor(() => {
+      expect(createObjectUrlSpy).toHaveBeenCalled()
+    })
+
+    const exportedBlob = createObjectUrlSpy.mock.calls[0]?.[0] as Blob
+    expect(exportedBlob.type).toContain("application/json")
+    expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:workspace-export")
+  })
+
+  it("exports workspace citations in BibTeX format", async () => {
+    const createObjectUrlSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:workspace-bibtex")
+    const revokeObjectUrlSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Export Citations (BibTeX)"))
+
+    expect(createObjectUrlSpy).toHaveBeenCalledTimes(1)
+    expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:workspace-bibtex")
+  })
+
+  it("creates a workspace from a template and seeds starter note content", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Literature Review"))
+
+    expect(mockCreateNewWorkspace).toHaveBeenCalledWith(
+      "Literature Review Workspace"
+    )
+    expect(mockSetCurrentNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Literature Review Plan",
+        keywords: expect.arrayContaining(["literature", "evidence"])
+      })
+    )
+  })
+
+  it("imports workspace bundle file from the workspace menu", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    const input = screen.getByTestId("workspace-import-input")
+    const file = new File(["{}"], "workspace.json", {
+      type: "application/json"
+    })
+
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() => {
+      expect(mockParseWorkspaceImportFile).toHaveBeenCalledWith(file)
+      expect(mockImportWorkspaceBundle).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("opens Customize banner modal from settings menu", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Customize banner"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Customize banner"
+    })
+    expect(modal).toBeInTheDocument()
+    expect(within(modal).getByTestId("workspace-banner-title-input")).toHaveValue(
+      "Alpha Banner"
+    )
+    expect(
+      within(modal).getByTestId("workspace-banner-subtitle-input")
+    ).toHaveValue("Alpha subtitle")
+  })
+
+  it("saves title, subtitle, and image into workspace store", async () => {
+    const normalizedImage = {
+      dataUrl: "data:image/webp;base64,saved-banner",
+      mimeType: "image/webp" as const,
+      width: 1400,
+      height: 420,
+      bytes: 21000,
+      updatedAt: new Date("2026-02-25T11:00:00.000Z")
+    }
+    mockNormalizeWorkspaceBannerImage.mockResolvedValueOnce(normalizedImage)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Customize banner"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Customize banner"
+    })
+    fireEvent.change(within(modal).getByTestId("workspace-banner-title-input"), {
+      target: { value: "Updated Banner" }
+    })
+    fireEvent.change(
+      within(modal).getByTestId("workspace-banner-subtitle-input"),
+      {
+        target: { value: "Updated subtitle" }
+      }
+    )
+
+    const file = new File(["banner"], "banner.png", { type: "image/png" })
+    fireEvent.change(screen.getByTestId("workspace-banner-upload-input"), {
+      target: { files: [file] }
+    })
+
+    await waitFor(() => {
+      expect(mockNormalizeWorkspaceBannerImage).toHaveBeenCalledWith(file)
+    })
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Save" }))
+
+    expect(mockSetWorkspaceBanner).toHaveBeenCalledWith({
+      title: "Updated Banner",
+      subtitle: "Updated subtitle",
+      image: normalizedImage
+    })
+  })
+
+  it("resets banner fields", async () => {
+    const confirmSpy = vi
+      .spyOn(Modal, "confirm")
+      .mockImplementation((config) => {
+        config.onOk?.()
+        return {
+          destroy: vi.fn(),
+          update: vi.fn()
+        } as any
+      })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Customize banner"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Customize banner"
+    })
+    fireEvent.click(within(modal).getByRole("button", { name: "Reset banner" }))
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(mockResetWorkspaceBanner).toHaveBeenCalledTimes(1)
+  })
+
+  it("archives current workspace with undo availability", async () => {
+    const confirmSpy = vi
+      .spyOn(Modal, "confirm")
+      .mockImplementation((config) => {
+        config.onOk?.()
+        return {
+          destroy: vi.fn(),
+          update: vi.fn()
+        } as any
+      })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Archive Current Workspace"))
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(mockArchiveWorkspace).toHaveBeenCalledWith("workspace-alpha")
+    expect(getWorkspaceUndoPendingCount()).toBeGreaterThan(0)
+  })
+
+  it("accepts ZIP workspace imports via the hidden file input", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    const input = screen.getByTestId("workspace-import-input")
+    expect(input).toHaveAttribute(
+      "accept",
+      ".json,.workspace.json,.zip,.workspace.zip"
+    )
+
+    const zipFile = new File(["zip"], "workspace.workspace.zip", {
+      type: "application/zip"
+    })
+    fireEvent.change(input, { target: { files: [zipFile] } })
+
+    await waitFor(() => {
+      expect(mockParseWorkspaceImportFile).toHaveBeenCalledWith(zipFile)
+      expect(mockImportWorkspaceBundle).toHaveBeenCalled()
+    })
+  })
+
+  it("opens keyboard shortcuts cheat sheet from workspace menu", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Keyboard Shortcuts"))
+
+    const shortcutsModal = await screen.findByRole("dialog", {
+      name: "Keyboard Shortcuts"
+    })
+    expect(shortcutsModal).toBeInTheDocument()
+    expect(within(shortcutsModal).getByText("Search workspace")).toBeInTheDocument()
+    expect(within(shortcutsModal).getByText("Focus sources pane")).toBeInTheDocument()
+    expect(within(shortcutsModal).getByText("Focus chat pane")).toBeInTheDocument()
+    expect(within(shortcutsModal).getByText("Focus studio pane")).toBeInTheDocument()
+  })
+
+  it("opens telemetry summary modal from settings menu", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Telemetry summary"))
+
+    const telemetryModal = await screen.findByRole("dialog", {
+      name: "Telemetry summary"
+    })
+    expect(telemetryModal).toBeInTheDocument()
+    expect(mockGetResearchWorkspaceTelemetryState).toHaveBeenCalledTimes(1)
+    expect(
+      within(telemetryModal).getByTestId(
+        "workspace-telemetry-counter-status_viewed"
+      )
+    ).toHaveTextContent("3")
+    expect(
+      within(telemetryModal).getByTestId(
+        "workspace-telemetry-counter-connectivity_state_changed"
+      )
+    ).toHaveTextContent("2")
+  })
+
+  it("resets telemetry summary state from the telemetry modal", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Telemetry summary"))
+
+    const telemetryModal = await screen.findByRole("dialog", {
+      name: "Telemetry summary"
+    })
+    fireEvent.click(within(telemetryModal).getByRole("button", { name: "Reset" }))
+
+    await waitFor(() => {
+      expect(mockResetResearchWorkspaceTelemetryState).toHaveBeenCalledTimes(1)
+      expect(mockGetResearchWorkspaceTelemetryState).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it("exports telemetry summary and confusion CSV from telemetry modal", async () => {
+    const createObjectUrlSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:workspace-telemetry")
+    const revokeObjectUrlSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Telemetry summary"))
+
+    const telemetryModal = await screen.findByRole("dialog", {
+      name: "Telemetry summary"
+    })
+    fireEvent.click(
+      within(telemetryModal).getByRole("button", { name: "Export JSON" })
+    )
+    fireEvent.click(
+      within(telemetryModal).getByRole("button", {
+        name: "Export confusion CSV"
+      })
+    )
+
+    await waitFor(() => {
+      expect(createObjectUrlSpy).toHaveBeenCalledTimes(2)
+    })
+
+    const firstBlob = createObjectUrlSpy.mock.calls[0]?.[0] as Blob
+    const secondBlob = createObjectUrlSpy.mock.calls[1]?.[0] as Blob
+    expect(firstBlob.type).toContain("application/json")
+    expect(secondBlob.type).toContain("text/csv")
+    expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:workspace-telemetry")
+  })
+
+  it("loads rollout execution controls from localStorage in telemetry modal", async () => {
+    window.localStorage.setItem(
+      FEATURE_ROLLOUT_SUBJECT_ID_STORAGE_KEY,
+      "subject-ops-42"
+    )
+    window.localStorage.setItem(
+      FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_studio_provenance_v1,
+      "10"
+    )
+    window.localStorage.setItem(
+      FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS
+        .research_studio_status_guardrails_v1,
+      "50"
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Telemetry summary"))
+
+    const telemetryModal = await screen.findByRole("dialog", {
+      name: "Telemetry summary"
+    })
+    expect(
+      within(telemetryModal).getByTestId("workspace-rollout-subject-id")
+    ).toHaveTextContent("subject-ops-42")
+    expect(
+      within(telemetryModal).getByTestId(
+        "workspace-rollout-percentage-research_studio_provenance_v1"
+      )
+    ).toHaveTextContent("10%")
+    expect(
+      within(telemetryModal).getByTestId(
+        "workspace-rollout-percentage-research_studio_status_guardrails_v1"
+      )
+    ).toHaveTextContent("50%")
+  })
+
+  it("persists rollout preset updates from telemetry modal controls", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Telemetry summary"))
+
+    const telemetryModal = await screen.findByRole("dialog", {
+      name: "Telemetry summary"
+    })
+    const provenanceControl = within(telemetryModal).getByTestId(
+      "workspace-rollout-control-research_studio_provenance_v1"
+    )
+    fireEvent.click(within(provenanceControl).getByRole("button", { name: "10%" }))
+
+    await waitFor(() => {
+      expect(
+        window.localStorage.getItem(
+          FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_studio_provenance_v1
+        )
+      ).toBe("10")
+    })
+    expect(
+      within(provenanceControl).getByTestId(
+        "workspace-rollout-percentage-research_studio_provenance_v1"
+      )
+    ).toHaveTextContent("10%")
+  })
+
+  // Storage and connection indicators moved to WorkspaceStatusBar component
+
+  it("hides telemetry menu when rollout flags are disabled", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+        statusGuardrailsEnabled={false}
+        provenanceEnabled={false}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    expect(screen.queryByText("Telemetry summary")).not.toBeInTheDocument()
+  })
+})

@@ -20,7 +20,7 @@ tutorials/
 ├── registry.ts           # Central registry and types
 ├── definitions/          # Tutorial definitions by page
 │   ├── playground.ts
-│   ├── workspace-playground.ts
+│   ├── research-workspace.ts
 │   ├── media.ts
 │   ├── knowledge.ts
 │   ├── characters.ts

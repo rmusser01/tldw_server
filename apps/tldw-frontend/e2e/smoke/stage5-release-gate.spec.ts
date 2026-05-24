@@ -99,7 +99,7 @@ const CRITICAL_ROUTES: CriticalRoute[] = [
     expectedPath: "/content-review",
     allowRedirectPanel: true
   },
-  { path: "/workspace-playground", name: "Workspace Playground" },
+  { path: "/research-workspace", name: "Research Workspace" },
   { path: "/writing-playground", name: "Writing Playground" },
   { path: "/stt", name: "STT" },
   { path: "/speech", name: "Speech" }

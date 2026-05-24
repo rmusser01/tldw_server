@@ -166,11 +166,11 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         descriptionDefault: "Long-running research with citations and checkpoints"
       },
       {
-        id: "workspace-playground",
-        to: "/workspace-playground",
+        id: "research-workspace",
+        to: "/research-workspace",
         icon: GitCompare,
-        labelKey: "settings:researchStudioNav",
-        labelDefault: "Research Studio",
+        labelKey: "settings:researchWorkspaceNav",
+        labelDefault: "Research Workspace",
         shortcutIndex: 7,
         descriptionKey: "settings:researchStudioDesc",
         descriptionDefault: "Three-pane workspace: sources, chat, and generated outputs"
@@ -613,7 +613,7 @@ export const PERSONA_SHORTCUT_DEFAULTS: Record<
     "deep-research",
     "knowledge-qa",
     "media",
-    "workspace-playground",
+    "research-workspace",
     "collections",
     "notes",
     "evaluations",

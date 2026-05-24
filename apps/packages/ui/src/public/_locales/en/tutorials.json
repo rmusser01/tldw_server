@@ -170,40 +170,40 @@
   "playground_voice_settingsContent": {
     "message": "Configure voice chat settings including the voice model, auto-send timing, and trigger phrases."
   },
-  "workspacePlayground_basics_label": {
-    "message": "Research Studio Basics"
+  "researchWorkspace_basics_label": {
+    "message": "Research Workspace Basics"
   },
-  "workspacePlayground_basics_description": {
+  "researchWorkspace_basics_description": {
     "message": "Learn the three-pane workspace flow: sources, chat, and studio outputs"
   },
-  "workspacePlayground_basics_headerTitle": {
+  "researchWorkspace_basics_headerTitle": {
     "message": "Workspace Header"
   },
-  "workspacePlayground_basics_headerContent": {
+  "researchWorkspace_basics_headerContent": {
     "message": "Use the header to rename, switch, import, and manage workspaces while tracking system status."
   },
-  "workspacePlayground_basics_sourcesTitle": {
+  "researchWorkspace_basics_sourcesTitle": {
     "message": "Sources Pane"
   },
-  "workspacePlayground_basics_sourcesContent": {
+  "researchWorkspace_basics_sourcesContent": {
     "message": "Add and select sources here. Your selected source set controls what the chat and studio use."
   },
-  "workspacePlayground_basics_chatTitle": {
+  "researchWorkspace_basics_chatTitle": {
     "message": "Chat Workspace"
   },
-  "workspacePlayground_basics_chatContent": {
+  "researchWorkspace_basics_chatContent": {
     "message": "Ask questions against your selected sources and review grounded answers before generating outputs."
   },
-  "workspacePlayground_basics_studioTitle": {
+  "researchWorkspace_basics_studioTitle": {
     "message": "Studio Outputs"
   },
-  "workspacePlayground_basics_studioContent": {
+  "researchWorkspace_basics_studioContent": {
     "message": "Turn source context into summaries, reports, quizzes, flashcards, and other artifacts."
   },
-  "workspacePlayground_basics_switcherTitle": {
+  "researchWorkspace_basics_switcherTitle": {
     "message": "Workspace Switcher"
   },
-  "workspacePlayground_basics_switcherContent": {
+  "researchWorkspace_basics_switcherContent": {
     "message": "Open the workspace switcher to jump between saved workspaces and continue different projects."
   },
   "media_basics_label": {
