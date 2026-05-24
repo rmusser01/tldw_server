@@ -80,6 +80,8 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncRestoreManifestResponse,
     SyncRestorePreviewRequest,
     SyncRestorePreviewResponse,
+    SyncRetentionCompactRequest,
+    SyncRetentionCompactResponse,
     SyncRetentionDryRunRequest,
     SyncRetentionDryRunResponse,
     SyncV2Envelope,
@@ -364,6 +366,10 @@ def _api_background_status_from_core(status: Any) -> SyncBackgroundStatusRespons
 
 def _api_retention_dry_run_from_core(result: Any) -> SyncRetentionDryRunResponse:
     return SyncRetentionDryRunResponse(**asdict(result))
+
+
+def _api_retention_compact_from_core(result: Any) -> SyncRetentionCompactResponse:
+    return SyncRetentionCompactResponse(**asdict(result))
 
 
 def _api_diagnostics_from_core(result: Any) -> SyncDiagnosticsResponse:
@@ -947,6 +953,41 @@ def dry_run_sync_v2_retention(
             device_id=request.device_id,
         ) from exc
     return _api_retention_dry_run_from_core(result)
+
+
+@router.post(
+    "/retention/compact",
+    response_model=SyncRetentionCompactResponse,
+    summary="Apply guarded Sync v2 retention compaction and blob GC",
+)
+def compact_sync_v2_retention(
+    request: SyncRetentionCompactRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        result = service.retention_compact(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            domains=request.domains,
+            confirm=request.confirm,
+            apply_envelope_compaction=request.apply_envelope_compaction,
+            apply_tombstone_prune=request.apply_tombstone_prune,
+            apply_blob_gc=request.apply_blob_gc,
+            minimum_envelope_age_seconds=request.minimum_envelope_age_seconds,
+            minimum_tombstone_age_seconds=request.minimum_tombstone_age_seconds,
+            offline_restore_window_seconds=request.offline_restore_window_seconds,
+            limit=request.limit,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+        ) from exc
+    return _api_retention_compact_from_core(result)
 
 
 @router.post(

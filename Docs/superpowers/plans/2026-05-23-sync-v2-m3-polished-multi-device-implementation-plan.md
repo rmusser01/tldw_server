@@ -258,11 +258,11 @@
   Report health, counts, lag, quota pressure, key blockers, and retention
   candidates with redaction.
 
-- [ ] **Step 4: Implement guarded compaction/GC**
+- [x] **Step 4: Implement guarded compaction/GC**
 
   Only after dry-run tests prove safety and defaults remain conservative.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
   Run targeted tests, broader Sync suite, Ruff, Bandit, and `git diff --check`.
 

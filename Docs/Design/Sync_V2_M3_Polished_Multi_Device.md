@@ -274,12 +274,15 @@ Required primitives:
 Default policy should be conservative: retain the audit log and tombstones until
 explicitly configured.
 
-The first M3 retention slice is dry-run only. It reports redacted
-`envelope_compaction`, `tombstone_prune`, and `blob_gc` candidates plus stable
-blocker codes for audit mode, unacknowledged devices, active retention windows,
-offline restore windows, active blob references, and missing per-device blob
-verification. It must not delete envelopes, compact snapshots, remove blobs,
-update key state, or mutate materialized records.
+The first M3 retention slices start with dry-run candidate reporting, then add a
+guarded apply path. Dry-run reports redacted `envelope_compaction`,
+`tombstone_prune`, and `blob_gc` candidates plus stable blocker codes for audit
+mode, unacknowledged devices, active retention windows, offline restore windows,
+active blob references, and missing per-device blob verification. The guarded
+apply path requires explicit confirmation, refuses blocked selected candidates,
+records non-destructive domain compaction checkpoints, and soft-deletes eligible
+blob metadata. It must not delete envelope audit logs, physically remove blob
+bytes, update key state, or mutate materialized records in this slice.
 
 ## Workstream 8: Observability And Admin Diagnostics
 

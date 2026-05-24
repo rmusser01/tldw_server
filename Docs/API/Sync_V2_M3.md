@@ -443,8 +443,63 @@ remain `false`.
 
 ### `POST /api/v1/sync/retention/compact`
 
-Applies policy-permitted compaction. This endpoint should remain disabled until
-device acknowledgments, retention windows, and audit policy are enforced.
+Applies policy-permitted compaction/GC after re-running the same blocker checks
+as dry-run mode. This M3 foundation keeps the envelope audit log append-only:
+eligible envelope and tombstone candidates only advance per-domain compaction
+checkpoints. Eligible blob-GC candidates soft-delete available blob metadata so
+the blob no longer appears restore-available; physical blob byte deletion is
+left to a later storage-backend GC pass.
+
+Request:
+
+```json
+{
+  "dataset_id": "dataset-uuid",
+  "device_id": "optional-device-id",
+  "domains": ["notes.note", "attachment.ref"],
+  "confirm": true,
+  "apply_envelope_compaction": true,
+  "apply_tombstone_prune": true,
+  "apply_blob_gc": true,
+  "minimum_envelope_age_seconds": 0,
+  "minimum_tombstone_age_seconds": 0,
+  "offline_restore_window_seconds": 0,
+  "limit": 1000
+}
+```
+
+`confirm=false` never mutates and returns
+`retention_confirmation_required`. If any selected candidate has blockers, the
+endpoint refuses the whole apply request and returns
+`retention_blocked_candidates_present`.
+
+Response:
+
+```json
+{
+  "dataset_id": "dataset-uuid",
+  "dry_run": false,
+  "mutation_performed": true,
+  "confirmation_required": false,
+  "candidate_count": 2,
+  "applied_count": 1,
+  "blocked_count": 0,
+  "skipped_count": 1,
+  "blockers": [],
+  "blocker_counts": {},
+  "domain_compactions": [
+    {
+      "domain": "notes.note",
+      "through_server_sequence": 10,
+      "candidate_count": 1
+    }
+  ],
+  "blob_gc": []
+}
+```
+
+Responses are redacted and must not include payloads, ciphertext, wrapped keys,
+blob storage keys, or blob bytes.
 
 ### `GET /api/v1/sync/diagnostics`
 

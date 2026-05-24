@@ -462,6 +462,35 @@ class SyncV2Store:
 
         return self.db.list_blob_objects_for_dataset(dataset_id, status=status)
 
+    def mark_blob_object_deleted(
+        self,
+        dataset_id: str,
+        blob_id: str,
+    ) -> SyncBlobObject | None:
+        return self.db.mark_blob_object_deleted(dataset_id, blob_id)
+
+    def get_domain_compaction_sequence(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+    ) -> int:
+        return self.db.get_domain_compaction_sequence(dataset_id, domain)
+
+    def record_domain_compaction(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        through_server_sequence: int,
+        state: dict[str, object],
+    ) -> int:
+        return self.db.record_domain_compaction(
+            dataset_id,
+            domain,
+            through_server_sequence=through_server_sequence,
+            state=state,
+        )
+
     def summarize_blob_quota(
         self,
         owner_user_id: str,

@@ -470,3 +470,269 @@ def test_retention_dry_run_endpoint_returns_redacted_candidates(
     assert body["candidates"][0]["server_sequence"] == first.server_sequence
     assert "payload" not in body["candidates"][0]
     assert "payload_ciphertext" not in body["candidates"][0]
+
+
+def test_retention_compact_requires_confirmation_without_mutation(
+    sync_service: SyncV2Service,
+) -> None:
+    first = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_note_envelope()],
+    ).accepted[0]
+    second = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _note_envelope(
+                client_envelope_id="note-env-2",
+                client_sequence=2,
+                object_revision=2,
+                payload={"title": "Updated note"},
+                payload_hash="sha256:note-v2",
+                base_server_cursor=first.server_sequence,
+                base_object_revision=first.object_revision,
+                base_object_hash="sha256:note-v1",
+            )
+        ],
+    ).accepted[0]
+    _ack_all_domains(sync_service, through_sequence=second.server_sequence)
+    envelope_count_before = len(sync_service.store.list_envelopes_after("dataset-1", 0, limit=10))
+
+    result = sync_service.retention_compact(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        confirm=False,
+        minimum_envelope_age_seconds=0,
+    )
+
+    assert result.dry_run is True
+    assert result.mutation_performed is False
+    assert result.confirmation_required is True
+    assert result.blockers == ["retention_confirmation_required"]
+    assert result.candidate_count == 1
+    assert sync_service.store.get_domain_compaction_sequence("dataset-1", "notes.note") == 0
+    assert len(sync_service.store.list_envelopes_after("dataset-1", 0, limit=10)) == envelope_count_before
+
+
+def test_retention_compact_refuses_blocked_candidates_without_mutation(
+    sync_service: SyncV2Service,
+) -> None:
+    first = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_note_envelope()],
+    ).accepted[0]
+    sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _note_envelope(
+                client_envelope_id="note-env-2",
+                client_sequence=2,
+                object_revision=2,
+                payload={"title": "Updated note"},
+                payload_hash="sha256:note-v2",
+                base_server_cursor=first.server_sequence,
+                base_object_revision=first.object_revision,
+                base_object_hash="sha256:note-v1",
+            )
+        ],
+    )
+
+    result = sync_service.retention_compact(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        confirm=True,
+        minimum_envelope_age_seconds=0,
+    )
+
+    assert result.mutation_performed is False
+    assert result.blockers == ["retention_blocked_candidates_present"]
+    assert result.blocked_count == 1
+    assert result.applied_count == 0
+    assert sync_service.store.get_domain_compaction_sequence("dataset-1", "notes.note") == 0
+
+
+def test_retention_compact_records_domain_checkpoint_without_deleting_envelopes(
+    sync_service: SyncV2Service,
+) -> None:
+    first = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_note_envelope()],
+    ).accepted[0]
+    second = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _note_envelope(
+                client_envelope_id="note-env-2",
+                client_sequence=2,
+                object_revision=2,
+                payload={"title": "Updated note"},
+                payload_hash="sha256:note-v2",
+                base_server_cursor=first.server_sequence,
+                base_object_revision=first.object_revision,
+                base_object_hash="sha256:note-v1",
+            )
+        ],
+    ).accepted[0]
+    _ack_all_domains(sync_service, through_sequence=second.server_sequence)
+
+    result = sync_service.retention_compact(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        confirm=True,
+        minimum_envelope_age_seconds=0,
+        apply_blob_gc=False,
+    )
+
+    assert result.dry_run is False
+    assert result.mutation_performed is True
+    assert result.applied_count == 1
+    assert result.domain_compactions == [
+        {
+            "domain": "notes.note",
+            "through_server_sequence": first.server_sequence,
+            "candidate_count": 1,
+        }
+    ]
+    assert sync_service.store.get_domain_compaction_sequence("dataset-1", "notes.note") == first.server_sequence
+    assert len(sync_service.store.list_envelopes_after("dataset-1", 0, limit=10)) == 2
+
+
+def test_retention_compact_soft_deletes_eligible_blob_metadata(
+    sync_service: SyncV2Service,
+) -> None:
+    upsert = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_attachment_ref_envelope()],
+    ).accepted[0]
+    tombstone = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _attachment_ref_envelope(
+                client_envelope_id="attachment-env-tombstone",
+                operation="tombstone",
+                client_sequence=51,
+                base_server_cursor=upsert.server_sequence,
+                base_object_revision=upsert.object_revision or 1,
+                base_object_hash=_sha256(b"paper payload"),
+                object_revision=2,
+            )
+        ],
+    ).accepted[0]
+    payload_hash = _sha256(b"paper payload")
+    sync_service.store.complete_blob_upload(
+        SyncBlobObjectCreate(
+            blob_id="blob-1",
+            dataset_id="dataset-1",
+            owner_user_id="user-1",
+            attachment_id="attachment-1",
+            payload_hash=payload_hash,
+            content_type="application/pdf",
+            size_bytes=13,
+            storage_backend="local_fs",
+            storage_key="blob-1.bin",
+        )
+    )
+    _ack_all_domains(sync_service, through_sequence=tombstone.server_sequence)
+    for device_id in ("device-1", "device-2"):
+        sync_service.acknowledge_device_state(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id=device_id,
+            blob_acks=[
+                SyncDeviceBlobAckCreate(
+                    dataset_id="dataset-1",
+                    device_id=device_id,
+                    attachment_id="attachment-1",
+                    payload_hash=payload_hash,
+                    verified_at=_clock(),
+                )
+            ],
+        )
+
+    result = sync_service.retention_compact(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        confirm=True,
+        apply_envelope_compaction=False,
+        apply_tombstone_prune=False,
+        apply_blob_gc=True,
+    )
+
+    assert result.mutation_performed is True
+    assert result.applied_count == 1
+    assert result.blob_gc == [
+        {
+            "attachment_id": "attachment-1",
+            "blob_id": "blob-1",
+            "payload_hash": payload_hash,
+            "size_bytes": 13,
+        }
+    ]
+    assert sync_service.store.list_blob_objects_for_dataset("dataset-1") == []
+    deleted_blobs = sync_service.store.list_blob_objects_for_dataset("dataset-1", status=None)
+    assert len(deleted_blobs) == 1
+    assert deleted_blobs[0].status == "deleted"
+
+
+def test_retention_compact_endpoint_returns_redacted_apply_summary(
+    sync_service: SyncV2Service,
+) -> None:
+    first = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_note_envelope()],
+    ).accepted[0]
+    second = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _note_envelope(
+                client_envelope_id="note-env-2",
+                client_sequence=2,
+                object_revision=2,
+                payload={"title": "Updated note"},
+                payload_hash="sha256:note-v2",
+                base_server_cursor=first.server_sequence,
+                base_object_revision=first.object_revision,
+                base_object_hash="sha256:note-v1",
+            )
+        ],
+    ).accepted[0]
+    _ack_all_domains(sync_service, through_sequence=second.server_sequence)
+    client = _client_for_service(sync_service)
+
+    response = client.post(
+        "/api/v1/sync/retention/compact",
+        json={
+            "dataset_id": "dataset-1",
+            "confirm": True,
+            "minimum_envelope_age_seconds": 0,
+            "apply_blob_gc": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dataset_id"] == "dataset-1"
+    assert body["mutation_performed"] is True
+    assert body["applied_count"] == 1
+    assert body["domain_compactions"][0]["domain"] == "notes.note"
+    assert "payload" not in body
+    assert "payload_ciphertext" not in body

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -4521,6 +4521,133 @@ class SyncDatabase:
             (dataset_id, status, status),
         ).rows
         return [_blob_object_from_row(row) for row in rows]
+
+    def mark_blob_object_deleted(
+        self,
+        dataset_id: str,
+        blob_id: str,
+    ) -> SyncBlobObject | None:
+        """Soft-delete available blob metadata without removing blob bytes."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            self.execute(
+                """
+                UPDATE sync_blob_objects
+                   SET status = 'deleted',
+                       deleted_at = ?
+                 WHERE dataset_id = ?
+                   AND blob_id = ?
+                   AND status = 'available'
+                   AND deleted_at IS NULL
+                """,
+                (now, dataset_id, blob_id),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT *
+                      FROM sync_blob_objects
+                     WHERE dataset_id = ? AND blob_id = ?
+                    """,
+                    (dataset_id, blob_id),
+                    connection=conn,
+                )
+            )
+        if row is None:
+            return None
+        return _blob_object_from_row(row)
+
+    def get_domain_compaction_sequence(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+    ) -> int:
+        """Return the last retained compaction checkpoint sequence for a domain."""
+
+        row = _first(
+            self.execute(
+                """
+                SELECT last_compacted_sequence
+                  FROM sync_domain_state
+                 WHERE dataset_id = ? AND domain = ?
+                """,
+                (dataset_id, domain),
+            )
+        )
+        return int((row or {}).get("last_compacted_sequence") or 0)
+
+    def record_domain_compaction(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        through_server_sequence: int,
+        state: Mapping[str, Any],
+        adapter_version: int = 1,
+    ) -> int:
+        """Record a non-destructive compaction checkpoint for a domain."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            self._require_dataset_domain(dataset_id, domain, connection=conn)
+            existing = _first(
+                self.execute(
+                    """
+                    SELECT last_compacted_sequence
+                      FROM sync_domain_state
+                     WHERE dataset_id = ? AND domain = ?
+                    """,
+                    (dataset_id, domain),
+                    connection=conn,
+                )
+            )
+            last_compacted_sequence = max(
+                int((existing or {}).get("last_compacted_sequence") or 0),
+                through_server_sequence,
+            )
+            if existing is None:
+                self.execute(
+                    """
+                    INSERT INTO sync_domain_state (
+                        dataset_id, domain, adapter_version, server_sequence,
+                        last_compacted_sequence, state_json, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        dataset_id,
+                        domain,
+                        adapter_version,
+                        0,
+                        last_compacted_sequence,
+                        encode_json(state, default={}),
+                        now,
+                    ),
+                    connection=conn,
+                )
+            else:
+                self.execute(
+                    """
+                    UPDATE sync_domain_state
+                       SET adapter_version = ?,
+                           last_compacted_sequence = ?,
+                           state_json = ?,
+                           updated_at = ?
+                     WHERE dataset_id = ? AND domain = ?
+                    """,
+                    (
+                        adapter_version,
+                        last_compacted_sequence,
+                        encode_json(state, default={}),
+                        now,
+                        dataset_id,
+                        domain,
+                    ),
+                    connection=conn,
+                )
+        return last_compacted_sequence
 
     def summarize_blob_quota(
         self,

@@ -592,6 +592,40 @@ class SyncRetentionDryRunResponse(BaseModel):
     candidates: list[SyncRetentionCandidateResponse] = Field(default_factory=list)
 
 
+class SyncRetentionCompactRequest(BaseModel):
+    """Request guarded Sync v2 retention compaction/GC."""
+
+    dataset_id: str = Field(..., min_length=1)
+    device_id: str | None = Field(None, min_length=1)
+    domains: list[SyncDomain] | None = None
+    confirm: bool = False
+    apply_envelope_compaction: bool = True
+    apply_tombstone_prune: bool = True
+    apply_blob_gc: bool = True
+    minimum_envelope_age_seconds: int = Field(0, ge=0)
+    minimum_tombstone_age_seconds: int = Field(0, ge=0)
+    offline_restore_window_seconds: int = Field(0, ge=0)
+    limit: int | None = Field(None, ge=1)
+
+
+class SyncRetentionCompactResponse(BaseModel):
+    """Guarded retention compaction/GC apply response."""
+
+    dataset_id: str
+    dry_run: bool = True
+    mutation_performed: bool = False
+    confirmation_required: bool = False
+    evaluated_at: str | None = None
+    candidate_count: int = Field(0, ge=0)
+    applied_count: int = Field(0, ge=0)
+    blocked_count: int = Field(0, ge=0)
+    skipped_count: int = Field(0, ge=0)
+    blockers: list[str] = Field(default_factory=list)
+    blocker_counts: dict[str, int] = Field(default_factory=dict)
+    domain_compactions: list[dict[str, Any]] = Field(default_factory=list)
+    blob_gc: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class SyncDiagnosticsDomainResponse(BaseModel):
     """Redacted diagnostics for one Sync v2 domain."""
 
@@ -1721,6 +1755,8 @@ __all__ = [
     "SyncRepairResponse",
     "SyncRetentionCandidateResponse",
     "SyncRetentionCandidateType",
+    "SyncRetentionCompactRequest",
+    "SyncRetentionCompactResponse",
     "SyncRetentionDryRunRequest",
     "SyncRetentionDryRunResponse",
     "SyncRestoreManifestDevice",

@@ -254,6 +254,25 @@ class SyncRetentionDryRunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncRetentionApplyResult:
+    """Guarded retention compaction/GC apply result."""
+
+    dataset_id: str
+    dry_run: bool = True
+    mutation_performed: bool = False
+    confirmation_required: bool = False
+    evaluated_at: str | None = None
+    candidate_count: int = 0
+    applied_count: int = 0
+    blocked_count: int = 0
+    skipped_count: int = 0
+    blockers: list[str] = field(default_factory=list)
+    blocker_counts: dict[str, int] = field(default_factory=dict)
+    domain_compactions: list[dict[str, object]] = field(default_factory=list)
+    blob_gc: list[dict[str, object]] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
 class SyncDiagnosticsDomain:
     """Redacted diagnostics for one dataset domain."""
 
@@ -1014,6 +1033,103 @@ class SyncV2Service:
                 blocked_count=retention.blocked_count,
                 blocker_counts=dict(retention.blocker_counts),
             ),
+        )
+
+    def retention_compact(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str | None = None,
+        domains: Sequence[SyncDomain] | None = None,
+        confirm: bool = False,
+        apply_envelope_compaction: bool = True,
+        apply_tombstone_prune: bool = True,
+        apply_blob_gc: bool = True,
+        minimum_envelope_age_seconds: int = 0,
+        minimum_tombstone_age_seconds: int = 0,
+        offline_restore_window_seconds: int = 0,
+        limit: int | None = None,
+    ) -> SyncRetentionApplyResult:
+        """Apply unblocked retention candidates with conservative guards."""
+
+        dry_run = self.retention_dry_run(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            device_id=device_id,
+            domains=domains,
+            audit_mode=False,
+            minimum_envelope_age_seconds=minimum_envelope_age_seconds,
+            minimum_tombstone_age_seconds=minimum_tombstone_age_seconds,
+            offline_restore_window_seconds=offline_restore_window_seconds,
+            limit=limit,
+        )
+        selected = [
+            candidate
+            for candidate in dry_run.candidates
+            if _retention_apply_candidate_enabled(
+                candidate,
+                apply_envelope_compaction=apply_envelope_compaction,
+                apply_tombstone_prune=apply_tombstone_prune,
+                apply_blob_gc=apply_blob_gc,
+            )
+        ]
+        if not confirm:
+            return SyncRetentionApplyResult(
+                dataset_id=dataset_id,
+                dry_run=True,
+                mutation_performed=False,
+                confirmation_required=True,
+                evaluated_at=self.clock(),
+                candidate_count=dry_run.candidate_count,
+                blocked_count=dry_run.blocked_count,
+                skipped_count=dry_run.candidate_count - len(selected),
+                blockers=["retention_confirmation_required"],
+                blocker_counts=dict(dry_run.blocker_counts),
+            )
+
+        blocked = [candidate for candidate in selected if candidate.blockers]
+        if blocked:
+            return SyncRetentionApplyResult(
+                dataset_id=dataset_id,
+                dry_run=False,
+                mutation_performed=False,
+                evaluated_at=self.clock(),
+                candidate_count=dry_run.candidate_count,
+                blocked_count=len(blocked),
+                skipped_count=dry_run.candidate_count - len(selected),
+                blockers=["retention_blocked_candidates_present"],
+                blocker_counts=_retention_blocker_counts(blocked),
+            )
+
+        domain_compactions = self._apply_retention_domain_compactions(
+            dataset_id=dataset_id,
+            candidates=[
+                candidate
+                for candidate in selected
+                if candidate.candidate_type in {"envelope_compaction", "tombstone_prune"}
+            ],
+        )
+        blob_gc = self._apply_retention_blob_gc(
+            dataset_id=dataset_id,
+            candidates=[
+                candidate for candidate in selected if candidate.candidate_type == "blob_gc"
+            ],
+        )
+        applied_count = sum(
+            int(item["candidate_count"]) for item in domain_compactions
+        ) + len(blob_gc)
+        return SyncRetentionApplyResult(
+            dataset_id=dataset_id,
+            dry_run=False,
+            mutation_performed=applied_count > 0,
+            evaluated_at=self.clock(),
+            candidate_count=dry_run.candidate_count,
+            applied_count=applied_count,
+            blocked_count=0,
+            skipped_count=dry_run.candidate_count - len(selected),
+            domain_compactions=domain_compactions,
+            blob_gc=blob_gc,
         )
 
     def retention_dry_run(
@@ -3000,6 +3116,64 @@ class SyncV2Service:
             recovery_available=recovery_available,
         )
 
+    def _apply_retention_domain_compactions(
+        self,
+        *,
+        dataset_id: str,
+        candidates: Sequence[SyncRetentionCandidate],
+    ) -> list[dict[str, object]]:
+        grouped: dict[SyncDomain, list[SyncRetentionCandidate]] = {}
+        for candidate in candidates:
+            if candidate.domain is None or candidate.server_sequence is None:
+                continue
+            grouped.setdefault(candidate.domain, []).append(candidate)
+        applied: list[dict[str, object]] = []
+        for domain, domain_candidates in sorted(grouped.items()):
+            through_sequence = max(
+                candidate.server_sequence or 0 for candidate in domain_candidates
+            )
+            stored_sequence = self.store.record_domain_compaction(
+                dataset_id,
+                domain,
+                through_server_sequence=through_sequence,
+                state={
+                    "compacted_at": self.clock(),
+                    "candidate_count": len(domain_candidates),
+                    "through_server_sequence": through_sequence,
+                },
+            )
+            applied.append(
+                {
+                    "domain": domain,
+                    "through_server_sequence": stored_sequence,
+                    "candidate_count": len(domain_candidates),
+                }
+            )
+        return applied
+
+    def _apply_retention_blob_gc(
+        self,
+        *,
+        dataset_id: str,
+        candidates: Sequence[SyncRetentionCandidate],
+    ) -> list[dict[str, object]]:
+        applied: list[dict[str, object]] = []
+        for candidate in candidates:
+            if candidate.blob_id is None:
+                continue
+            blob = self.store.mark_blob_object_deleted(dataset_id, candidate.blob_id)
+            if blob is None or blob.status != "deleted":
+                continue
+            applied.append(
+                {
+                    "attachment_id": blob.attachment_id,
+                    "blob_id": blob.blob_id,
+                    "payload_hash": blob.payload_hash,
+                    "size_bytes": blob.size_bytes,
+                }
+            )
+        return applied
+
     def _retention_active_devices(self, dataset: SyncDataset) -> list[SyncDevice]:
         devices = self.store.list_devices_for_user(dataset.owner_user_id)
         return sorted(
@@ -3617,6 +3791,22 @@ def _retention_blocker_counts(
     return counts
 
 
+def _retention_apply_candidate_enabled(
+    candidate: SyncRetentionCandidate,
+    *,
+    apply_envelope_compaction: bool,
+    apply_tombstone_prune: bool,
+    apply_blob_gc: bool,
+) -> bool:
+    if candidate.candidate_type == "envelope_compaction":
+        return apply_envelope_compaction
+    if candidate.candidate_type == "tombstone_prune":
+        return apply_tombstone_prune
+    if candidate.candidate_type == "blob_gc":
+        return apply_blob_gc
+    return False
+
+
 def _ciphertext_exceeds_attachment_limit(
     payload_ciphertext: str,
     max_attachment_bytes: int,
@@ -3803,6 +3993,7 @@ __all__ = [
     "SyncPushConflict",
     "SyncPushRejected",
     "SyncPushResult",
+    "SyncRetentionApplyResult",
     "SyncRetentionCandidate",
     "SyncRetentionDryRunResult",
     "SyncRestoreManifest",
