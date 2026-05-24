@@ -21,6 +21,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -608,7 +610,10 @@ def _substitute_runtime_placeholders(value: Any, *, session_id: str | None) -> A
     """Return a JSON-RPC value with runtime placeholders resolved."""
     if value == _SESSION_ID_PLACEHOLDER:
         if not session_id:
-            raise ValueError("session/new did not return a sessionId before session/prompt")
+            raise ValueError(
+                f"Runtime placeholder '{_SESSION_ID_PLACEHOLDER}' found but no "
+                "sessionId was captured from a previous session/new response."
+            )
         return session_id
     if isinstance(value, list):
         return [
@@ -711,7 +716,7 @@ def _run_stdio_jsonrpc_sequence(command: dict[str, Any], cwd: Path) -> int:
                 reader_stop=reader_stop,
                 reader_thread=reader_thread,
             )
-            print(f"FAIL {command_id}: {exc}", file=sys.stderr)
+            logger.error("FAIL {}: {}", command_id, exc)
             return 1
         try:
             process.stdin.write(json.dumps(frame_to_send) + "\n")

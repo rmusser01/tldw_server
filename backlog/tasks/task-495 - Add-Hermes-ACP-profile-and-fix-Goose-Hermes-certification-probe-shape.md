@@ -38,18 +38,29 @@ Track ACP-adjacent certification work for Goose and Hermes after Goose CLI insta
 - Updated registry-backed native ACP probe shape to use numeric `protocolVersion`, absolute workspace `cwd`, required `mcpServers`, ACP content-list prompts, and runtime `sessionId` substitution.
 - Local sandbox blocks Hermes home-directory log writes, so live downstream host-stdio probes were run with normal host permissions.
 - Verification:
-  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile hermes --run` -> exit 0.
-  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile goose --run` -> exit 0.
-  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_agent_registry.py tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py -q` -> 75 passed, 5 warnings.
-  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r Helper_Scripts/Testing-related/acp_certification_smoke.py -f json -o /tmp/bandit_acp_goose_hermes.json` -> 0 findings.
+  - `python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile hermes --run` -> exit 0.
+  - `python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile goose --run` -> exit 0.
+  - `python -m pytest tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_agent_registry.py tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py -q` -> 75 passed, 5 warnings.
+  - `python -m bandit -r Helper_Scripts/Testing-related/acp_certification_smoke.py -f json -o /tmp/bandit_acp_goose_hermes.json` -> 0 findings.
   - `git diff --check` -> clean.
+- PR #2015 review pass:
+  - Added commit and runner-version metadata to the Goose/Hermes compatibility-matrix evidence.
+  - Removed local absolute paths from task verification notes.
+  - Generalized the runtime placeholder error text and routed that new failure path through Loguru.
+  - Added no-`sessionId` regression coverage and made the mocked protocol version numeric.
+  - Review-fix verification:
+    - `python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile hermes --run` -> exit 0.
+    - `python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile goose --run` -> exit 0.
+    - `python -m pytest tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_agent_registry.py tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py -q` -> 76 passed, 5 warnings.
+    - `python -m bandit -r Helper_Scripts/Testing-related/acp_certification_smoke.py -f json -o /tmp/bandit_acp_goose_hermes_review.json` -> 0 findings.
+    - `git diff --check` -> clean.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added Hermes ACP profile, corrected native ACP certification probe payload shape, recorded Goose and Hermes host-stdio probe results, and added focused regression coverage for the profile manifest, sessionId substitution, and Hermes registry entry.
+Added Hermes ACP profile, corrected native ACP certification probe payload shape, recorded Goose and Hermes host-stdio probe results with commit/runner evidence metadata, and added focused regression coverage for the profile manifest, sessionId substitution, missing-sessionId failure path, and Hermes registry entry.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
