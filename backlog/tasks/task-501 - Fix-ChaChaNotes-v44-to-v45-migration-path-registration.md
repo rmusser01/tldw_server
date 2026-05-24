@@ -33,6 +33,8 @@ Investigate and repair the user-reported ChaChaNotes `rag_char_chat_schema` migr
 - PR review red/green: `test_new_database_initialization_uses_linear_migration_registry` failed before the refactor with `Failed: DID NOT RAISE <class '...SchemaError'>`; passed after routing fresh DB migrations through `_migrate_sqlite_linearly_to_target`.
 - CodeRabbit follow-up: updated missing-handler errors to report the exact unresolved migration edge, and made linear migration steps require strict +1 schema-version advancement.
 - CodeRabbit red/green: `test_new_database_initialization_uses_linear_migration_registry` failed before the error-message update because the message only reported `from version 0 to 45`; `test_sqlite_linear_migration_rejects_skipped_versions` failed with `Failed: DID NOT RAISE` when the strict advancement guard was temporarily removed; both passed after the helper update.
+- Registry unification follow-up: removed the remaining pre-existing database manual migration chain and routed it through `_migrate_sqlite_linearly_to_target` as well, leaving one SQLite linear migration sequence source of truth.
+- Registry unification red/green: `test_existing_database_migration_uses_linear_migration_registry` failed before the refactor with `Failed: DID NOT RAISE` because the manual v4 branch bypassed the registry; passed after existing DB migrations were routed through the shared helper.
 - Verification:
   - `python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py::test_migration_v44_to_v45_creates_persona_visual_tables tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py::test_sqlite_linear_migration_registry_maps_v44_to_v45 -q` -> 2 passed.
   - `python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py -q` -> 12 passed.
@@ -54,12 +56,19 @@ Investigate and repair the user-reported ChaChaNotes `rag_char_chat_schema` migr
   - `python -m py_compile tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py` -> passed.
   - `git diff --check` -> passed.
   - `python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py -s B101 -f json -o /tmp/bandit_chacha_v44_v45_path_coderabbit_final.json` -> 0 findings.
+- Registry unification verification:
+  - `python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py::test_existing_database_migration_uses_linear_migration_registry -q` -> 1 passed.
+  - `python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py -q` -> 15 passed.
+  - `python -m pytest tldw_Server_API/tests/DB_Management/test_chacha_migration_v10.py tldw_Server_API/tests/DB_Management/test_chacha_migration_v39.py tldw_Server_API/tests/DB_Management/test_chacha_conversations_fts_healing.py -q` -> 4 passed.
+  - `python -m py_compile tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py` -> passed.
+  - `git diff --check` -> passed.
+  - `python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py -s B101 -f json -o /tmp/bandit_chacha_v44_v45_path_registry_unification.json` -> 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a SQLite migration-step registry to `CharactersRAGDB` and routed fallback migrations through it, including an explicit v44 -> v45 handler. Added regression coverage for the exact reported v44 -> v45 update boundary, dispatcher registration, exact-path index creation, fresh database initialization through the same registry, exact missing-step diagnostics, and strict +1 migration advancement so future schema bumps cannot omit or skip a path silently. Redacted the local worktree path from this task record after PR review.
+Added a SQLite migration-step registry to `CharactersRAGDB` and routed fresh, existing, and fallback SQLite migrations through it, including an explicit v44 -> v45 handler. Added regression coverage for the exact reported v44 -> v45 update boundary, dispatcher registration, exact-path index creation, fresh database initialization, existing database initialization, exact missing-step diagnostics, and strict +1 migration advancement so future schema bumps cannot omit or skip a path silently. Redacted the local worktree path from this task record after PR review.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

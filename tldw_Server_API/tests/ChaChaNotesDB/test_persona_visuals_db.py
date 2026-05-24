@@ -162,6 +162,54 @@ def test_new_database_initialization_uses_linear_migration_registry(
             db.close_connection()
 
 
+def test_existing_database_migration_uses_linear_migration_registry(
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify pre-existing databases use the same linear migration registry."""
+    seeded = CharactersRAGDB(db_path, "persona-visuals-existing-registry-seed")
+    seeded.close_connection()
+    CharactersRAGDB._prepare_sqlite_schema_drift_fixture(
+        db_path,
+        version=4,
+        drop_tables=(),
+    )
+
+    original_steps = CharactersRAGDB._sqlite_linear_migration_steps
+
+    def direct_v4_to_v5(db: CharactersRAGDB, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "UPDATE db_schema_version SET version = 5 WHERE schema_name = ?",
+            (db._SCHEMA_NAME,),
+        )
+
+    def registry_without_v4(
+        db: CharactersRAGDB,
+    ) -> dict[int, Callable[[sqlite3.Connection], None]]:
+        steps = dict(original_steps(db))
+        steps.pop(4)
+        return steps
+
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 5)
+    monkeypatch.setattr(CharactersRAGDB, "_migrate_from_v4_to_v5", direct_v4_to_v5)
+    monkeypatch.setattr(
+        CharactersRAGDB,
+        "_sqlite_linear_migration_steps",
+        registry_without_v4,
+    )
+
+    db = None
+    try:
+        with pytest.raises(
+            CharactersRAGDBError,
+            match="Migration path undefined.*from version 4 to 5.*while migrating from 4 to 5",
+        ):
+            db = CharactersRAGDB(db_path, "persona-visuals-existing-registry")
+    finally:
+        if db is not None:
+            db.close_connection()
+
+
 def test_sqlite_linear_migration_rejects_skipped_versions(
     db_path: Path,
     monkeypatch: pytest.MonkeyPatch,
