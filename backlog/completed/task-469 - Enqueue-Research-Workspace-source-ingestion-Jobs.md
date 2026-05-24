@@ -18,6 +18,11 @@ Phase A backend follow-up for the Research Workspace hard replacement roadmap. W
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] `POST /api/v1/workspaces/{workspace_id}/sources` persists a workspace source and enqueues one `media_ingest/default/workspace_source_ingest` Job.
+- [x] Enqueued Jobs include workspace id, workspace source id, media id, source type, title, URL, requested lifecycle stages, owner user id, and a stable idempotency key.
+- [x] Re-adding the same workspace source is idempotent and does not create duplicate Jobs.
+- [x] Runtime Jobs backend failures are logged without deleting the source row, so recovery/status inspection remains possible.
+- [x] Focused Workspaces tests, full Workspaces tests, Bandit on touched production code, diff checks, and live backend smoke verification were recorded.
 <!-- AC:END -->
 
 ## Implementation Plan

@@ -9,7 +9,6 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     StatusResponse,
     WorkspaceArtifactCreateRequest,
@@ -133,15 +132,44 @@ def _require_workspace(db: CharactersRAGDB, workspace_id: str) -> dict:
 
 
 def _find_workspace_source(db: CharactersRAGDB, workspace_id: str, source_id: str) -> dict[str, Any] | None:
-    """Return an existing workspace source without requiring a public DB helper."""
-    private_getter = getattr(db, "_get_workspace_source", None)
-    if callable(private_getter):
-        source = private_getter(workspace_id, source_id)
-        return dict(source) if source else None
-    for source in db.list_workspace_sources(workspace_id):
-        if str(source.get("id")) == source_id:
-            return source
+    """Return an existing workspace source using the DB's direct public lookup."""
+    source = db.get_workspace_source(workspace_id, source_id)
+    return dict(source) if source else None
+
+
+def _workspace_access_level(workspace: dict[str, Any], current_user: User) -> str:
+    """Resolve owner/editor/viewer capability scope for the current workspace route."""
+    explicit = _normalize_access_level(workspace.get("access_level"))
+    if explicit is not None:
+        return explicit
+    owner_id = str(workspace.get("owner_user_id") or workspace.get("client_id") or "").strip()
+    if owner_id and owner_id == str(current_user.id):
+        return "owner"
+    # /workspaces is backed by the current user's ChaCha DB. Until shared routes
+    # pass explicit access metadata, absence of a share row means owned access.
+    return "owner"
+
+
+def _normalize_access_level(value: Any) -> str | None:
+    """Map sharing-layer access labels onto capability response labels."""
+    normalized = str(value or "").strip().lower()
+    if normalized in {"owner", "editor", "viewer"}:
+        return normalized
+    if normalized == "full_edit":
+        return "editor"
+    if normalized in {"view_chat", "view_chat_add"}:
+        return "viewer" if normalized == "view_chat" else "editor"
     return None
+
+
+def _map_chacha_error_to_http(exc: Exception, *, default_detail: str) -> HTTPException:
+    """Map ChaChaNotes workspace exceptions to stable HTTP responses."""
+    if isinstance(exc, ConflictError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    if isinstance(exc, InputError):
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    logger.error("{}: {}", default_detail, exc)
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=default_detail)
 
 
 def try_get_workspace_job_manager() -> JobManager | None:
@@ -154,10 +182,11 @@ def try_get_workspace_job_manager() -> JobManager | None:
 
 
 def _dedupe_jobs_by_identity(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return jobs with duplicate identity keys removed while preserving order."""
     deduped: list[dict[str, Any]] = []
     seen: set[Any] = set()
     for job in jobs:
-        key = job.get("id") or job.get("uuid")
+        key = job.get("id") if job.get("id") is not None else job.get("uuid")
         if key is None:
             key = (
                 job.get("domain"),
@@ -174,9 +203,11 @@ def _dedupe_jobs_by_identity(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def _safe_list_jobs(jm: JobManager, **kwargs: Any) -> list[dict[str, Any]]:
+    """List Jobs for status projection without breaking workspace reads."""
     try:
         return jm.list_jobs(**kwargs)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Workspace status job listing failed with filters={}: {}", kwargs, exc)
         return []
 
 
@@ -237,6 +268,8 @@ def _enqueue_workspace_source_ingest_job(
             idempotency_key=f"workspace-source:{workspace_id}:{source_id}:{media_id}",
             max_retries=3,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         logger.warning(
             "Workspace source ingest job enqueue failed for workspace={} source={}: {}",
@@ -384,7 +417,10 @@ async def get_sources_status(
     try:
         sources = db.list_workspace_sources(workspace_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
-        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace source status") from exc
+        raise _map_chacha_error_to_http(
+            exc,
+            default_detail="Failed to fetch workspace source status",
+        ) from exc
     payload = build_source_status_projection(
         workspace_id=workspace_id,
         sources=sources,
@@ -412,7 +448,10 @@ async def get_workspace_capabilities(
     try:
         sources = db.list_workspace_sources(workspace_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
-        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace capabilities") from exc
+        raise _map_chacha_error_to_http(
+            exc,
+            default_detail="Failed to fetch workspace capabilities",
+        ) from exc
     status_payload = build_source_status_projection(
         workspace_id=workspace_id,
         sources=sources,
@@ -420,7 +459,10 @@ async def get_workspace_capabilities(
         jobs=_list_recent_media_ingest_jobs(jm, current_user),
     )
     payload = build_workspace_capability_projection(
-        workspace=workspace,
+        workspace={
+            **workspace,
+            "access_level": _workspace_access_level(workspace, current_user),
+        },
         status_projection=status_payload,
     )
     return WorkspaceCapabilitiesResponse(**payload)

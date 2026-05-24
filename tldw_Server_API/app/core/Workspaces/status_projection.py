@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 
@@ -48,11 +50,13 @@ def build_workspace_capability_projection(
     """Build conservative capability gates for Research Workspace clients."""
     summary = dict(status_projection.get("summary") or {})
     has_queryable_sources = int(summary.get("queryable") or 0) > 0
+    access_level = _normalize_access_level(workspace.get("access_level"))
+    can_modify_workspace = access_level in {"owner", "editor"}
 
     return {
         "workspace_id": workspace["id"],
         "workspace_kind": "research_workspace",
-        "access_level": "owner",
+        "access_level": access_level,
         "source_summary": summary,
         "workspace_services": {
             "migration": {
@@ -87,7 +91,7 @@ def build_workspace_capability_projection(
             },
         },
         "allowed_actions": {
-            "add_sources": _allowed(True),
+            "add_sources": _allowed(can_modify_workspace, "insufficient_access"),
             "inspect_sources": _allowed(
                 int(summary.get("total") or 0) > 0,
                 "no_sources",
@@ -96,8 +100,8 @@ def build_workspace_capability_projection(
                 has_queryable_sources,
                 "no_queryable_sources",
             ),
-            "export_workspace": _allowed(True),
-            "manage_tools": _allowed(True),
+            "export_workspace": _allowed(can_modify_workspace, "insufficient_access"),
+            "manage_tools": _allowed(can_modify_workspace, "insufficient_access"),
             "run_mcp_tools": _allowed(False, "mcp_not_configured"),
             "use_acp_agents": _allowed(False, "acp_not_configured"),
             "use_sandbox": _allowed(False, "sandbox_not_configured"),
@@ -149,7 +153,7 @@ def _status_from_media(
     media_id: int,
 ) -> dict[str, Any]:
     content = str(media.get("content") or "")
-    text_ready = bool(content.strip())
+    text_ready = bool(content and not content.isspace())
     chunking_status = str(media.get("chunking_status") or "").strip().lower()
     vector_processing = media.get("vector_processing")
     vector_ready = _is_vector_ready(vector_processing)
@@ -229,12 +233,20 @@ def _status_from_active_job(source: dict[str, Any], job: dict[str, Any]) -> dict
 
 
 def _status_from_failed_job(source: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
+    raw_error = job.get("error_message") or _job_result_error(job)
+    if raw_error:
+        logger.warning(
+            "Workspace source ingest job failed for source={} job_id={} error={}",
+            source.get("id"),
+            job.get("id") if job.get("id") is not None else job.get("uuid"),
+            raw_error,
+        )
     return _base_status(
         source,
         state="failed",
         reason="job_failed",
         progress_percent=_coerce_float(job.get("progress_percent")),
-        progress_message=job.get("error_message") or _job_result_error(job) or "Ingestion job failed.",
+        progress_message="Ingestion job failed.",
         job=_job_payload(job),
     )
 
@@ -312,7 +324,8 @@ def _get_media(media_db: Any | None, media_id: int) -> dict[str, Any] | None:
         return None
     try:
         return media_db_api.get_media_by_id(media_db, media_id)
-    except (AttributeError, DatabaseError, RuntimeError, TypeError, ValueError):
+    except (AttributeError, DatabaseError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Workspace source status media lookup failed for media_id={}: {}", media_id, exc)
         return None
 
 
@@ -321,7 +334,8 @@ def _has_unvectorized_chunks(media_db: Any | None, media_id: int) -> bool:
         return False
     try:
         return media_db_api.has_unvectorized_chunks(media_db, media_id)
-    except (AttributeError, DatabaseError, RuntimeError, TypeError, ValueError):
+    except (AttributeError, DatabaseError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Workspace source status chunk lookup failed for media_id={}: {}", media_id, exc)
         return False
 
 
@@ -352,6 +366,20 @@ def _allowed(allowed: bool, reason_code: str | None = None) -> dict[str, Any]:
     }
 
 
+def _normalize_access_level(value: Any) -> str:
+    """Normalize owned/shared workspace access labels for capability gating."""
+    normalized = str(value or "").strip().lower()
+    if normalized in {"owner", "editor", "viewer"}:
+        return normalized
+    if normalized == "full_edit":
+        return "editor"
+    if normalized == "view_chat_add":
+        return "editor"
+    if normalized == "view_chat":
+        return "viewer"
+    return "viewer"
+
+
 def _build_job_index(jobs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     index: dict[str, dict[str, Any]] = {}
     for job in jobs:
@@ -370,15 +398,18 @@ def _match_job_for_source(source: dict[str, Any], job_index: dict[str, dict[str,
     return None
 
 
-def _source_match_keys(source: dict[str, Any]) -> set[str]:
-    keys: set[str] = set()
+def _source_match_keys(source: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    raw_id = source.get("id")
+    if raw_id:
+        keys.append(f"id:{str(raw_id).strip()}")
     media_id = _coerce_int(source.get("media_id"))
     if media_id is not None and media_id > 0:
-        keys.add(f"media:{media_id}")
-    for field in ("id", "url", "title"):
+        keys.append(f"media:{media_id}")
+    for field in ("url", "title"):
         raw = source.get(field)
         if raw:
-            keys.add(f"{field}:{str(raw).strip()}")
+            keys.append(f"{field}:{str(raw).strip()}")
     return keys
 
 
@@ -442,6 +473,7 @@ def _state_from_job(job: dict[str, Any]) -> str:
 
 
 def _job_payload(job: dict[str, Any]) -> dict[str, Any]:
+    error_message = None if _is_failed_job(job) else job.get("error_message") or _job_result_error(job)
     return {
         "id": job.get("id"),
         "uuid": job.get("uuid"),
@@ -449,7 +481,7 @@ def _job_payload(job: dict[str, Any]) -> dict[str, Any]:
         "job_type": job.get("job_type"),
         "progress_percent": _coerce_float(job.get("progress_percent")),
         "progress_message": job.get("progress_message"),
-        "error_message": job.get("error_message") or _job_result_error(job),
+        "error_message": error_message,
     }
 
 
@@ -461,7 +493,8 @@ def _job_result_error(job: dict[str, Any]) -> str | None:
 
 def _job_sort_value(job: dict[str, Any]) -> tuple[str, int]:
     created_at = str(job.get("created_at") or "")
-    return created_at, _coerce_int(job.get("id")) or 0
+    job_id = _coerce_int(job.get("id"))
+    return created_at, job_id if job_id is not None else 0
 
 
 def _coerce_int(value: Any) -> int | None:

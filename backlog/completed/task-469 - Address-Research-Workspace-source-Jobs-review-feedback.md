@@ -20,6 +20,12 @@ Follow-up to TASK-469. Fix code-review findings for workspace source job enqueue
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] Source creation still succeeds when Jobs manager construction is unavailable.
+- [x] Source creation still persists the source row when non-validation Jobs enqueue failures occur.
+- [x] Jobs validation/quota failures return HTTP 400 instead of a misleading successful enqueue response.
+- [x] Source status queries prioritize `workspace_source_ingest` Jobs before broad legacy `media_ingest` Jobs and choose source matches deterministically.
+- [x] Source status/capability endpoints expose non-sensitive failed-job messages and map ChaChaNotes workspace errors to correct HTTP statuses.
+- [x] Focused regression tests, full Workspaces tests, Bandit on touched production code, diff checks, and live backend smoke verification were recorded.
 <!-- AC:END -->
 
 ## Implementation Notes

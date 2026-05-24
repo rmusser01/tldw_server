@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,7 +13,12 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_use
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
+from tldw_Server_API.app.core.Workspaces import status_projection
+from tldw_Server_API.app.core.Workspaces.status_projection import (
+    build_source_status_projection,
+    build_workspace_capability_projection,
+)
 
 
 class _MediaStatusDB:
@@ -45,7 +51,7 @@ class _JobManagerDouble:
 
 
 @pytest.fixture
-def workspace_status_db(tmp_path):
+def workspace_status_db(tmp_path: Path) -> CharactersRAGDB:
     db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
     db.upsert_workspace("ws-status", "Source Status")
     db.add_workspace_source(
@@ -85,7 +91,7 @@ def workspace_status_db(tmp_path):
 
 
 @pytest.fixture
-def workspace_status_app():
+def workspace_status_app() -> Any:
     from tldw_Server_API.app.main import app
 
     return app
@@ -96,12 +102,18 @@ async def _allow_rate_limit() -> None:
 
 
 async def _user() -> SimpleNamespace:
-    return SimpleNamespace(id=1, username="testuser", email="test@example.com", roles=["admin"], is_admin=True)
+    return SimpleNamespace(
+        id=1,
+        username="testuser",
+        email="test@example.com",
+        roles=["admin"],
+        is_admin=True,
+    )
 
 
 def _install_overrides(
     app: Any,
-    db: CharactersRAGDB,
+    db: Any,
     media_db: _MediaStatusDB,
     jobs: list[dict[str, Any]] | None = None,
 ) -> None:
@@ -125,9 +137,9 @@ def _clear_overrides(app: Any) -> None:
 
 @pytest.mark.integration
 def test_workspace_sources_status_reports_readiness_and_missing_media(
-    workspace_status_app,
-    workspace_status_db,
-):
+    workspace_status_app: Any,
+    workspace_status_db: CharactersRAGDB,
+) -> None:
     media_db = _MediaStatusDB(
         {
             1: {
@@ -188,9 +200,9 @@ def test_workspace_sources_status_reports_readiness_and_missing_media(
 
 @pytest.mark.integration
 def test_workspace_capabilities_fail_closed_without_queryable_sources(
-    workspace_status_app,
-    tmp_path,
-):
+    workspace_status_app: Any,
+    tmp_path: Path,
+) -> None:
     db = CharactersRAGDB(db_path=str(tmp_path / "empty-chacha.db"), client_id="user-1")
     db.upsert_workspace("ws-empty", "Empty Workspace")
     _install_overrides(workspace_status_app, db, _MediaStatusDB({}))
@@ -222,9 +234,9 @@ def test_workspace_capabilities_fail_closed_without_queryable_sources(
 
 @pytest.mark.integration
 def test_workspace_sources_status_uses_active_media_ingest_job_progress(
-    workspace_status_app,
-    tmp_path,
-):
+    workspace_status_app: Any,
+    tmp_path: Path,
+) -> None:
     db = CharactersRAGDB(db_path=str(tmp_path / "jobs-chacha.db"), client_id="user-1")
     db.upsert_workspace("ws-jobs", "Jobs Workspace")
     db.add_workspace_source(
@@ -317,3 +329,136 @@ def test_workspace_job_manager_resolver_fails_open(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(workspaces_endpoint, "get_job_manager", _raise_job_manager)
 
     assert workspaces_endpoint.try_get_workspace_job_manager() is None
+
+
+def test_workspace_capabilities_honor_viewer_access_level() -> None:
+    payload = build_workspace_capability_projection(
+        workspace={"id": "ws-viewer", "access_level": "viewer"},
+        status_projection={
+            "summary": {
+                "total": 1,
+                "selected": 1,
+                "queryable": 1,
+                "partially_queryable": 0,
+                "processing": 0,
+                "failed": 0,
+                "missing": 0,
+            }
+        },
+    )
+
+    assert payload["access_level"] == "viewer"
+    assert payload["allowed_actions"]["inspect_sources"]["allowed"] is True
+    assert payload["allowed_actions"]["ask_grounded_questions"]["allowed"] is True
+    assert payload["allowed_actions"]["add_sources"] == {
+        "allowed": False,
+        "reason_code": "insufficient_access",
+    }
+    assert payload["allowed_actions"]["export_workspace"] == {
+        "allowed": False,
+        "reason_code": "insufficient_access",
+    }
+    assert payload["allowed_actions"]["manage_tools"] == {
+        "allowed": False,
+        "reason_code": "insufficient_access",
+    }
+
+
+def test_failed_job_status_does_not_expose_raw_error_text() -> None:
+    payload = build_source_status_projection(
+        workspace_id="ws-errors",
+        sources=[
+            {
+                "id": "src-failed",
+                "workspace_id": "ws-errors",
+                "media_id": 71,
+                "title": "Failed import",
+                "source_type": "pdf",
+                "selected": True,
+            }
+        ],
+        jobs=[
+            {
+                "id": 12,
+                "uuid": "job-12",
+                "status": "failed",
+                "job_type": "workspace_source_ingest",
+                "payload": {"workspace_source_id": "src-failed", "media_id": 71},
+                "result": {"error": "sqlite stack trace with /private/path"},
+                "error_message": "provider secret leaked",
+                "progress_percent": 25,
+                "created_at": "2026-05-23T12:00:00Z",
+            }
+        ],
+    )
+
+    source = payload["sources"][0]
+    assert source["state"] == "failed"
+    assert source["progress_message"] == "Ingestion job failed."
+    assert source["job"]["error_message"] is None
+
+
+def test_source_job_matching_uses_specificity_order() -> None:
+    source = {
+        "id": "src-specific",
+        "workspace_id": "ws-match",
+        "media_id": 88,
+        "title": "Shared Title",
+        "source_type": "web",
+        "url": "https://example.test/shared",
+        "selected": True,
+    }
+
+    assert status_projection._source_match_keys(source) == [
+        "id:src-specific",
+        "media:88",
+        "url:https://example.test/shared",
+        "title:Shared Title",
+    ]
+
+    payload = build_source_status_projection(
+        workspace_id="ws-match",
+        sources=[source],
+        jobs=[
+            {
+                "id": 90,
+                "status": "failed",
+                "job_type": "media_ingest_item",
+                "payload": {"source": "https://example.test/shared"},
+                "created_at": "2026-05-23T13:00:00Z",
+            },
+            {
+                "id": 91,
+                "status": "queued",
+                "job_type": "workspace_source_ingest",
+                "payload": {"workspace_source_id": "src-specific"},
+                "created_at": "2026-05-23T12:00:00Z",
+            },
+        ],
+    )
+
+    assert payload["sources"][0]["state"] == "queued"
+    assert payload["sources"][0]["job"]["id"] == 91
+
+
+@pytest.mark.integration
+def test_workspace_sources_status_maps_chacha_input_errors_to_400(
+    workspace_status_app: Any,
+) -> None:
+    class _InputErrorDB:
+        def get_workspace(self, workspace_id: str) -> dict[str, Any]:
+            return {"id": workspace_id}
+
+        def list_workspace_sources(self, workspace_id: str) -> list[dict[str, Any]]:
+            _ = workspace_id
+            raise InputError("invalid workspace source filter")
+
+    _install_overrides(workspace_status_app, _InputErrorDB(), _MediaStatusDB({}))
+    try:
+        with TestClient(workspace_status_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-error/sources/status")
+    finally:
+        _clear_overrides(workspace_status_app)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid workspace source filter"

@@ -116,6 +116,8 @@ WorkspaceCapabilityServiceState = Literal[
 
 
 class WorkspaceSourceReadiness(BaseModel):
+    """Boolean readiness flags for each source capability used by the UI."""
+
     metadata_ready: bool = False
     text_extracted: bool = False
     fts_ready: bool = False
@@ -126,6 +128,8 @@ class WorkspaceSourceReadiness(BaseModel):
 
 
 class WorkspaceSourceJobStatus(BaseModel):
+    """Public, non-sensitive status summary for the matched source ingestion Job."""
+
     id: int | None = None
     uuid: str | None = None
     status: str | None = None
@@ -136,6 +140,8 @@ class WorkspaceSourceJobStatus(BaseModel):
 
 
 class WorkspaceSourceStatusResponse(BaseModel):
+    """Ingestion, extraction, chunking, and indexing status for one workspace source."""
+
     id: str
     workspace_id: str
     media_id: int | None = None
@@ -153,6 +159,8 @@ class WorkspaceSourceStatusResponse(BaseModel):
 
 
 class WorkspaceSourceStatusSummary(BaseModel):
+    """Aggregate counts used to drive workspace-level source readiness UI."""
+
     total: int = 0
     selected: int = 0
     queryable: int = 0
@@ -163,23 +171,31 @@ class WorkspaceSourceStatusSummary(BaseModel):
 
 
 class WorkspaceSourceStatusListResponse(BaseModel):
+    """Source status projection response for all sources in one workspace."""
+
     workspace_id: str
     sources: list[WorkspaceSourceStatusResponse]
     summary: WorkspaceSourceStatusSummary
 
 
 class WorkspaceCapabilityService(BaseModel):
+    """Availability state for a workspace-adjacent service or management surface."""
+
     state: WorkspaceCapabilityServiceState
     reason_code: str | None = None
     management_surface: str | None = None
 
 
 class WorkspaceAllowedAction(BaseModel):
+    """Whether the current principal may perform a workspace action."""
+
     allowed: bool
     reason_code: str | None = None
 
 
 class WorkspaceCapabilitiesResponse(BaseModel):
+    """Capability gates for Research Workspace controls for the current principal."""
+
     workspace_id: str
     workspace_kind: Literal["research_workspace"]
     access_level: Literal["owner", "editor", "viewer"] = "owner"
