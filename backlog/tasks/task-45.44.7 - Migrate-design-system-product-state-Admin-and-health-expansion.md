@@ -4,6 +4,7 @@ title: 'Migrate design-system product state: Admin and health expansion'
 status: To Do
 assignee: []
 created_date: '2026-05-14 03:19'
+updated_date: '2026-05-24 01:05'
 labels:
   - design-system
   - webui
@@ -15,6 +16,16 @@ references:
   - >-
     Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
   - apps/packages/ui/scripts/design-system-product-state-baseline.json
+documentation:
+  - >-
+    TASK-45.44.3.9 / PR #2019 migrated Admin WatchlistsPage forbidden/not-found
+    guard Alerts to the design-system Alert primitive.
+
+    Baseline evidence:
+      - total product-state exceptions: 256 -> 254
+      - Admin and health expansion exceptions: 41 -> 39
+      - WatchlistsPage target rows: 2 -> 0
+    Verification recorded in TASK-45.44.3.9.
 parent_task_id: TASK-45.44
 priority: medium
 ---
