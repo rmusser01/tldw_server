@@ -4,13 +4,15 @@ title: Migrate WatchlistsPage admin guard alerts to design-system Alert
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-24 01:03'
+updated_date: '2026-05-24 01:05'
 labels:
   - design-system
   - webui
   - watchlists
   - product-state
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2019'
 parent_task_id: TASK-45.44.3
 priority: medium
 ---
@@ -56,6 +58,8 @@ Verification:
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Migrated the Admin WatchlistsPage forbidden and not-found guard callouts from AntD Alert to the shared design-system Alert primitive, added focused guard-state coverage for both paths, and removed the two WatchlistsPage Alert entries from the product-state baseline. The full design-system verifier passes with total baseline exceptions reduced to 254.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2019
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

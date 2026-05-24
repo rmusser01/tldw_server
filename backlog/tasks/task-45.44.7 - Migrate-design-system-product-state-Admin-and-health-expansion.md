@@ -3,24 +3,31 @@ id: TASK-45.44.7
 title: 'Migrate design-system product state: Admin and health expansion'
 status: To Do
 assignee: []
-created_date: 2026-05-14 03:19
+created_date: '2026-05-14 03:19'
+updated_date: '2026-05-24 01:05'
 labels:
-- design-system
-- webui
-- extension
-- product-state
+  - design-system
+  - webui
+  - extension
+  - product-state
 dependencies: []
 references:
-- https://github.com/rmusser01/tldw_server/issues/1664
-- Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
-- apps/packages/ui/scripts/design-system-product-state-baseline.json
+  - 'https://github.com/rmusser01/tldw_server/issues/1664'
+  - >-
+    Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
+  - apps/packages/ui/scripts/design-system-product-state-baseline.json
+documentation:
+  - >-
+    TASK-45.44.3.9 / PR #2019 migrated Admin WatchlistsPage forbidden/not-found
+    guard Alerts to the design-system Alert primitive.
+
+    Baseline evidence:
+      - total product-state exceptions: 256 -> 254
+      - Admin and health expansion exceptions: 41 -> 39
+      - WatchlistsPage target rows: 2 -> 0
+    Verification recorded in TASK-45.44.3.9.
 parent_task_id: TASK-45.44
 priority: medium
-documentation:
-- "TASK-45.44.3.9 migrated Admin WatchlistsPage forbidden/not-found guard Alerts to\
-  \ the design-system Alert primitive.\nBaseline evidence:\n  - total product-state\
-  \ exceptions: 256 -> 254\n  - Admin and health expansion exceptions: 41 -> 39\n\
-  \  - WatchlistsPage target rows: 2 -> 0\nVerification recorded in TASK-45.44.3.9."
 ---
 
 ## Description
