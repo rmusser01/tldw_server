@@ -224,14 +224,46 @@ describe("TldwModelsService caching", () => {
     expect(chatIds).not.toContain("black-forest-labs/flux.1-schnell")
   })
 
-  it("carries provider configuration flags into chat model descriptors", async () => {
+  it("filters chat models from explicitly unconfigured providers", async () => {
     mocks.getModels.mockResolvedValue([
+      {
+        id: "openai/gpt-4o-mini",
+        name: "openai/gpt-4o-mini",
+        provider: "openai",
+        type: "chat",
+        is_configured: true
+      },
+      {
+        id: "anthropic/claude-sonnet-4",
+        name: "anthropic/claude-sonnet-4",
+        provider: "anthropic",
+        type: "chat",
+        is_configured: false
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
+  })
+
+  it("filters chat models from explicitly unconfigured providers using provider-level metadata", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "openai/gpt-4o-mini",
+        name: "openai/gpt-4o-mini",
+        provider: "openai",
+        type: "chat",
+        provider_is_configured: true
+      },
       {
         id: "qwen/qwen-max",
         name: "qwen-max",
         provider: "qwen",
         type: "chat",
-        is_configured: false,
         provider_is_configured: false,
         catalog_only: true
       }
@@ -242,14 +274,113 @@ describe("TldwModelsService caching", () => {
 
     const chatModels = await service.getChatModels(true)
 
-    expect(chatModels[0]?.isConfigured).toBe(false)
-    expect(chatModels[0]?.providerIsConfigured).toBe(false)
-    expect(chatModels[0]?.catalogOnly).toBe(true)
+    expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
+  })
+
+  it("filters chat models from explicitly disabled providers", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "openai/gpt-4o-mini",
+        name: "openai/gpt-4o-mini",
+        provider: "openai",
+        type: "chat",
+        is_configured: true,
+        provider_enabled: true
+      },
+      {
+        id: "openrouter/meta-llama/llama-3.1-8b-instruct",
+        name: "openrouter/meta-llama/llama-3.1-8b-instruct",
+        provider: "openrouter",
+        type: "chat",
+        is_configured: true,
+        provider_enabled: false
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
+  })
+
+  it("filters chat models from providers with failed availability", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "openai/gpt-4o-mini",
+        name: "openai/gpt-4o-mini",
+        provider: "openai",
+        type: "chat",
+        is_configured: true,
+        availability: "available"
+      },
+      {
+        id: "vllm/local-model",
+        name: "vllm/local-model",
+        provider: "vllm",
+        type: "chat",
+        is_configured: true,
+        availability: "failed"
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
+  })
+
+  it("keeps legacy chat models when provider availability metadata is absent", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "legacy/model-a",
+        name: "legacy/model-a",
+        provider: "custom",
+        type: "chat"
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels.map((model) => model.id)).toEqual(["legacy/model-a"])
+  })
+
+  it("carries provider configuration flags into model descriptors", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "qwen/qwen-max",
+        name: "qwen-max",
+        provider: "qwen",
+        type: "chat",
+        is_configured: false,
+        provider_is_configured: false,
+        provider_enabled: false,
+        availability: "unavailable",
+        catalog_only: true
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const models = await service.getModels(true)
+
+    expect(models[0]?.isConfigured).toBe(false)
+    expect(models[0]?.providerIsConfigured).toBe(false)
+    expect(models[0]?.providerEnabled).toBe(false)
+    expect(models[0]?.availability).toBe("unavailable")
+    expect(models[0]?.catalogOnly).toBe(true)
   })
 
   it("returns cached chat models without fetching provider metadata again", async () => {
     mocks.storageGet.mockResolvedValue({
-      version: 6,
+      version: 7,
       timestamp: Date.now(),
       scope: "http://127.0.0.1:8000|single-user|key|none",
       models: [
@@ -258,6 +389,13 @@ describe("TldwModelsService caching", () => {
           name: "openai/gpt-4o-mini",
           provider: "openai",
           type: "chat"
+        },
+        {
+          id: "anthropic/claude-sonnet-4",
+          name: "anthropic/claude-sonnet-4",
+          provider: "anthropic",
+          type: "chat",
+          isConfigured: false
         },
         {
           id: "black-forest-labs/flux.1-schnell",

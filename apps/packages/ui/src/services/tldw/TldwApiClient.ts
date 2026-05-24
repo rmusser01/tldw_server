@@ -550,6 +550,8 @@ export interface TldwModel {
   type?: string
   is_configured?: boolean
   provider_is_configured?: boolean
+  provider_enabled?: boolean
+  availability?: string
   catalog_only?: boolean
   modalities?: {
     input?: string[]
@@ -1957,9 +1959,48 @@ export class TldwApiClientBase {
       const trimmed = value.trim()
       return trimmed.length > 0 ? trimmed : null
     }
+    const toOptionalBoolean = (value: unknown): boolean | undefined =>
+      typeof value === "boolean" ? value : undefined
     const isLikelyModelId = (value: string): boolean => {
       if (/\s/.test(value)) return false
       return /[/:._-]/.test(value)
+    }
+    const providerKey = (value: unknown): string | null =>
+      toNonEmptyString(value)?.toLowerCase() ?? null
+    const providerAvailability = new Map<
+      string,
+      {
+        is_configured?: boolean
+        provider_enabled?: boolean
+        availability?: string
+      }
+    >()
+    try {
+      const providersPayload = await this.getProviders()
+      const providers = Array.isArray(providersPayload)
+        ? providersPayload
+        : Array.isArray(providersPayload?.providers)
+          ? providersPayload.providers
+          : []
+      for (const provider of providers) {
+        const key = providerKey(
+          typeof provider === "string"
+            ? provider
+            : provider?.name ?? provider?.provider ?? provider?.id
+        )
+        if (!key) continue
+        providerAvailability.set(key, {
+          is_configured:
+            toOptionalBoolean(provider?.is_configured) ??
+            toOptionalBoolean(provider?.configured),
+          provider_enabled:
+            toOptionalBoolean(provider?.provider_enabled) ??
+            toOptionalBoolean(provider?.enabled),
+          availability: toNonEmptyString(provider?.availability) ?? undefined
+        })
+      }
+    } catch {
+      // Older servers may not expose provider listings; keep legacy behavior.
     }
 
     return list.map((m: any) => {
@@ -1977,12 +2018,16 @@ export class TldwApiClientBase {
         rawName && !isLikelyModelId(rawName) && rawName !== canonicalModelId
           ? `${rawName} (${canonicalModelId})`
           : canonicalModelId
+      const provider = String(m.provider || "default")
+      const inheritedAvailability = providerAvailability.get(
+        provider.toLowerCase()
+      )
 
       return {
         ...m,
         id: canonicalModelId,
         name: displayName,
-        provider: String(m.provider || "default"),
+        provider,
         description: m.description,
         capabilities: Array.isArray(m.capabilities)
           ? m.capabilities
@@ -2011,9 +2056,20 @@ export class TldwApiClientBase {
           (m.capabilities && m.capabilities.json_mode) ?? m.json_output
         ),
         type: typeof m.type === "string" ? m.type : undefined,
-        is_configured: m.is_configured,
-        provider_is_configured: m.provider_is_configured,
-        catalog_only: m.catalog_only,
+        is_configured:
+          toOptionalBoolean(m.is_configured) ??
+          toOptionalBoolean(m.provider_configured) ??
+          inheritedAvailability?.is_configured,
+        provider_is_configured:
+          toOptionalBoolean(m.provider_is_configured) ??
+          inheritedAvailability?.is_configured,
+        provider_enabled:
+          toOptionalBoolean(m.provider_enabled) ??
+          toOptionalBoolean(m.enabled) ??
+          inheritedAvailability?.provider_enabled,
+        availability:
+          toNonEmptyString(m.availability) ?? inheritedAvailability?.availability,
+        catalog_only: toOptionalBoolean(m.catalog_only),
         modalities:
           m.modalities && typeof m.modalities === "object"
             ? {
