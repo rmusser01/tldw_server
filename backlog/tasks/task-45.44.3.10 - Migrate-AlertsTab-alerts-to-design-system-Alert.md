@@ -4,13 +4,15 @@ title: Migrate AlertsTab alerts to design-system Alert
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-24 01:48'
+updated_date: '2026-05-24 01:50'
 labels:
   - design-system
   - webui
   - watchlists
   - product-state
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2029'
 parent_task_id: TASK-45.44.3
 priority: medium
 ---
@@ -46,6 +48,8 @@ Continue TASK-45.44.3 by replacing Watchlists AlertsTab AntD Alert product-state
 - Verification: bunx vitest run src/components/Option/Watchlists/AlertsTab/__tests__/AlertsTab.test.tsx --reporter=dot passed 3 tests; bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed 54 tests; bun run verify:design-system-state passed with 251 total exceptions and 18 Jobs/Scheduler/Watchlists exceptions; AlertsTab baseline rows are 0; git diff --check passed.
 - TypeScript: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false still exits 2 with 347 existing diagnostics; no diagnostics mention AlertsTab, the AlertsTab test, the baseline file, or this task record.
 - Bandit skipped because this slice only touches TypeScript/React test files, JSON baseline metadata, and Backlog task markdown.
+
+- PR: https://github.com/rmusser01/tldw_server/pull/2029
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
