@@ -66,8 +66,6 @@ Continue TASK-45.44.3 by replacing Watchlists SetupWizard AntD Alert callouts wi
 Migrated the WatchlistSetupWizard collection-scope guidance and validation error callouts to the shared design-system Alert primitive, added focused coverage for both migrated paths, and removed the two obsolete WatchlistSetupWizard product-state baseline exceptions. Focused SetupWizard and design-system guard verification passed; the full product-state verifier now reports 247 total baseline exceptions and 14 Jobs/Scheduler/Watchlists exceptions. TypeScript remains blocked by existing unrelated repo-wide diagnostics, with none in this slice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
