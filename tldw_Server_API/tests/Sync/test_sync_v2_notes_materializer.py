@@ -360,6 +360,47 @@ def test_materialization_conflict_is_not_returned_by_normal_pull(
     assert note["title"] == "Server winner"
 
 
+def test_push_stop_on_conflict_rejects_remaining_envelopes(
+    sync_service: SyncV2Service,
+) -> None:
+    _push_one(sync_service, _note_envelope())
+    current = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
+    assert current is not None
+
+    result = sync_service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        stop_on_conflict=True,
+        envelopes=[
+            _note_envelope(
+                client_envelope_id="env-stale",
+                client_sequence=2,
+                base_server_cursor=current.latest_server_cursor,
+                base_object_revision=current.object_revision + 1,
+                base_object_hash=current.object_hash,
+                object_revision=2,
+                payload={"title": "Stale", "body": "Do not apply."},
+                payload_hash="sha256:stale",
+            ),
+            _note_envelope(
+                client_envelope_id="env-after-conflict",
+                object_id="note-2",
+                client_sequence=3,
+                object_revision=1,
+                payload={"title": "Skipped", "body": "Should not be applied."},
+                payload_hash="sha256:note-2",
+            ),
+        ],
+    )
+
+    assert [item.client_envelope_id for item in result.conflicts] == ["env-stale"]
+    assert [(item.client_envelope_id, item.error_code) for item in result.rejected] == [
+        ("env-after-conflict", "stopped_after_conflict")
+    ]
+    assert sync_service.store.get_object_state("dataset-1", "notes.note", "note-2") is None
+
+
 def test_pull_paginates_across_hidden_materialization_conflict(
     sync_service: SyncV2Service,
 ) -> None:

@@ -62,6 +62,18 @@ capabilities response:
 If `blob_transfer.supported` is false, clients must treat the server as M1 for
 binary content and may still restore `attachment.ref` metadata.
 
+Production deployments keep M2 blob transfer disabled unless explicitly enabled.
+The server factory reads these environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNC_V2_ENABLE_BLOB_TRANSFER` | `false` | Enables blob upload/download capabilities when truthy (`1`, `true`, `yes`, `on`). |
+| `SYNC_V2_BLOB_STORE_PATH` | shared user DB root `_sync_v2_blobs` | Local filesystem root for committed blobs and staged upload chunks. |
+| `SYNC_V2_MAX_BLOB_BYTES` | `max_attachment_bytes` | Optional maximum logical blob size. |
+| `SYNC_V2_MAX_CHUNK_BYTES` | `4194304` | Maximum raw upload/download chunk size. |
+| `SYNC_V2_MAX_ACTIVE_BLOB_UPLOADS` | `8` | Maximum active upload sessions counted by quota. |
+| `SYNC_V2_USER_BLOB_QUOTA_BYTES` | unset | Optional per-user blob quota. |
+
 ## Upload Flow
 
 The primary M2 upload path is resumable:

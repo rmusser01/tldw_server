@@ -1278,17 +1278,28 @@ class SyncV2Envelope(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
+class SyncPushOptions(BaseModel):
+    """Client push behavior flags from the locked Sync v2 M1 contract."""
+
+    stop_on_conflict: bool = False
+
+    model_config = ConfigDict(extra="ignore")
+
+
 class SyncPushRequest(BaseModel):
     """Batch of client-originated envelopes pushed to the server."""
 
     dataset_id: str
     device_id: str = Field(..., min_length=1)
+    client_profile_id: str | None = None
+    base_server_cursor: int | None = Field(None, ge=0)
     envelopes: list[SyncV2Envelope] = Field(
         default_factory=list,
         max_length=SYNC_V2_MAX_PUSH_ENVELOPES,
     )
     idempotency_key: str | None = None
     last_known_cursor: str | None = None
+    options: SyncPushOptions = Field(default_factory=SyncPushOptions)
 
 
 class SyncPushAcceptedEnvelope(BaseModel):

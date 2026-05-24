@@ -202,6 +202,14 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                     "message": "Sync attachment exceeds the server size limit.",
                 },
             )
+        if "blob chunk exceeds" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "error_code": "sync_blob_chunk_too_large",
+                    "message": "Sync blob chunk exceeds the server size limit.",
+                },
+            )
         if "quota" in lowered:
             return HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -269,6 +277,32 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
             "message": "Internal server error while processing sync request.",
         },
     )
+
+
+async def _read_limited_sync_blob_chunk(raw_request: Request, *, max_bytes: int) -> bytes:
+    """Read a raw blob chunk without unbounded request-body buffering."""
+
+    if max_bytes < 1:
+        raise SyncStoreError("Sync blob chunk exceeds the server size limit")
+    content_length = raw_request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_size = int(content_length)
+        except ValueError as exc:
+            raise SyncStoreError("Sync blob chunk size is invalid") from exc
+        if declared_size > max_bytes:
+            raise SyncStoreError("Sync blob chunk exceeds the server size limit")
+
+    chunks: list[bytes] = []
+    total_size = 0
+    async for chunk in raw_request.stream():
+        if not chunk:
+            continue
+        total_size += len(chunk)
+        if total_size > max_bytes:
+            raise SyncStoreError("Sync blob chunk exceeds the server size limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _parse_sync_key_rotation_commit_request(
@@ -1148,6 +1182,8 @@ def push_sync_v2_envelopes(
             dataset_id=request.dataset_id,
             device_id=request.device_id,
             envelopes=[_core_envelope_from_api(envelope) for envelope in request.envelopes],
+            base_server_cursor=request.base_server_cursor,
+            stop_on_conflict=request.options.stop_on_conflict,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
@@ -1176,11 +1212,19 @@ def pull_sync_v2_envelopes(
     device_id: str,
     cursor: str | None = None,
     domains: list[SyncDomain] | None = Query(None, alias="domain"),
-    page_size: int | None = Query(None, ge=1),
-    include_own_changes: bool = False,
+    limit: int | None = Query(None, ge=1),
+    include_same_device_echoes: bool | None = Query(None),
+    page_size: int | None = Query(None, ge=1, include_in_schema=False),
+    include_own_changes: bool | None = Query(None, include_in_schema=False),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
+    effective_page_size = limit if limit is not None else page_size
+    effective_include_own_changes = (
+        include_same_device_echoes
+        if include_same_device_echoes is not None
+        else bool(include_own_changes)
+    )
     try:
         result = service.pull(
             user_id=_sync_user_id(user),
@@ -1188,8 +1232,8 @@ def pull_sync_v2_envelopes(
             device_id=device_id,
             cursor=cursor,
             domains=domains,
-            page_size=page_size,
-            include_own_changes=include_own_changes,
+            page_size=effective_page_size,
+            include_own_changes=effective_include_own_changes,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
@@ -1198,6 +1242,8 @@ def pull_sync_v2_envelopes(
             dataset_id=dataset_id,
             device_id=device_id,
             cursor=cursor,
+            limit=limit,
+            page_size=page_size,
         ) from exc
     return SyncPullResponse(
         dataset_id=result.dataset_id,
@@ -1481,8 +1527,11 @@ async def upload_sync_v2_blob_chunk(
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
-    payload = await raw_request.body()
     try:
+        payload = await _read_limited_sync_blob_chunk(
+            raw_request,
+            max_bytes=service.settings.max_chunk_bytes,
+        )
         chunk = await asyncio.to_thread(
             service.upload_blob_chunk,
             user_id=_sync_user_id(user),

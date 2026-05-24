@@ -89,14 +89,6 @@ class LocalSyncBlobStore:
         except OSError as exc:
             _discard_temp_path(temp_path)
             raise SyncBlobStoreError("Sync blob upload commit failed") from exc
-        try:
-            shutil.rmtree(self.resolve_storage_key(f"_uploads/{upload_segment}"))
-        except OSError as exc:
-            logger.warning(
-                "Sync blob upload committed but cleanup failed for upload_id={}: {}",
-                upload_id,
-                exc,
-            )
         return final_key
 
     def read_blob(self, storage_key: str) -> bytes:

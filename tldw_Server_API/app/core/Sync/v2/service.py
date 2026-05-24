@@ -1172,6 +1172,7 @@ class SyncV2Service:
             active_devices,
             offline_restore_window_seconds,
         )
+        workspace_ack_scope_blocked = self._retention_workspace_ack_scope_blocked(dataset)
         candidates: list[SyncRetentionCandidate] = []
 
         for envelope in envelopes:
@@ -1200,6 +1201,8 @@ class SyncV2Service:
                 blockers.append(window_blocker)
             if restore_window_blocked:
                 blockers.append("retention_restore_window_active")
+            if workspace_ack_scope_blocked:
+                blockers.append("retention_workspace_ack_scope_unknown")
             unacknowledged = self._retention_unacknowledged_devices(
                 dataset_id=dataset_id,
                 domain=envelope.domain,
@@ -1343,7 +1346,11 @@ class SyncV2Service:
         dataset_id: str,
         device_id: str,
         envelopes: Sequence[SyncEnvelopeCreate],
+        base_server_cursor: int | None = None,
+        stop_on_conflict: bool = False,
     ) -> SyncPushResult:
+        # The top-level cursor is a client dataset checkpoint; object conflict checks use envelope bases.
+        _ = base_server_cursor
         self._require_registered_device(user_id, device_id)
         try:
             dataset = self._require_dataset_access(user_id=user_id, dataset_id=dataset_id)
@@ -1363,8 +1370,19 @@ class SyncV2Service:
         accepted: list[SyncPushAccepted] = []
         rejected: list[SyncPushRejected] = []
         conflicts: list[SyncPushConflict] = []
+        stopped_after_conflict = False
 
         for index, envelope in enumerate(envelopes):
+            if stopped_after_conflict:
+                rejected.append(
+                    SyncPushRejected(
+                        client_envelope_id=envelope.client_envelope_id,
+                        error_code="stopped_after_conflict",
+                        message="Sync push stopped after a previous envelope conflicted.",
+                        retryable=True,
+                    )
+                )
+                continue
             if index >= self.settings.max_batch_size:
                 rejected.append(
                     SyncPushRejected(
@@ -1463,6 +1481,8 @@ class SyncV2Service:
                             message="Sync envelope ID was reused with different content",
                         )
                     )
+                if stop_on_conflict:
+                    stopped_after_conflict = True
                 continue
 
             try:
@@ -1496,6 +1516,8 @@ class SyncV2Service:
                             materialization,
                         )
                     )
+                    if stop_on_conflict:
+                        stopped_after_conflict = True
                     continue
             accepted.append(self._push_accepted_from_envelope(inserted))
 
@@ -1656,12 +1678,9 @@ class SyncV2Service:
             for domain, count in stats.approximate_counts.items():
                 total_counts[domain] = total_counts.get(domain, 0) + count
             domain_envelopes = {
-                domain: self.store.list_envelopes_after(
-                    dataset.dataset_id,
-                    0,
-                    limit=self.settings.restore_manifest_scan_limit,
-                    domains=[domain],
-                    status="accepted",
+                domain: self._list_restore_preview_domain_envelopes(
+                    dataset_id=dataset.dataset_id,
+                    domain=domain,
                 )
                 for domain in dataset_domains
             }
@@ -1838,11 +1857,15 @@ class SyncV2Service:
                 seen_refs.add(ref_key)
                 server_blob = None
                 if self.settings.supports_attachments:
+                    blob_owner_user_id = self._blob_owner_user_id(
+                        dataset=dataset,
+                        user_id=user_id,
+                    )
                     server_blob = self.store.get_blob_object(
                         dataset.dataset_id,
                         attachment_id=metadata.attachment_id,
                         payload_hash=metadata.payload_hash,
-                        owner_user_id=user_id,
+                        owner_user_id=blob_owner_user_id,
                     )
                 metadata_claims_server_blob = (
                     not self.settings.supports_attachments
@@ -2223,7 +2246,7 @@ class SyncV2Service:
             )
         except SyncBlobStoreError as exc:
             raise SyncStoreError(str(exc)) from exc
-        return self.store.complete_blob_upload(
+        blob = self.store.complete_blob_upload(
             SyncBlobObjectCreate(
                 blob_id=self.id_factory("blob"),
                 dataset_id=dataset_id,
@@ -2238,6 +2261,15 @@ class SyncV2Service:
                 metadata={},
             )
         )
+        try:
+            blob_store.discard_upload(upload_id)
+        except OSError as exc:
+            logger.warning(
+                "Sync blob upload completed but cleanup failed for upload_id={}: {}",
+                upload_id,
+                exc,
+            )
+        return blob
 
     def cancel_blob_upload(
         self,
@@ -2269,11 +2301,11 @@ class SyncV2Service:
         """Return resumable download metadata for an available blob or metadata-only ref."""
 
         blob_store = self._require_blob_transfer()
-        self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id)
+        dataset = self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id)
         blob = self.store.get_blob_object(
             dataset_id,
             attachment_id=attachment_id,
-            owner_user_id=user_id,
+            owner_user_id=self._blob_owner_user_id(dataset=dataset, user_id=user_id),
         )
         if blob is None:
             return self._metadata_only_blob_manifest(
@@ -3262,6 +3294,9 @@ class SyncV2Service:
             key=lambda device: device.device_id,
         )
 
+    def _retention_workspace_ack_scope_blocked(self, dataset: SyncDataset) -> bool:
+        return dataset.scope_type == "workspace"
+
     def _retention_latest_envelopes_by_object(
         self,
         envelopes: Sequence[SyncEnvelope],
@@ -3337,6 +3372,8 @@ class SyncV2Service:
                 blockers.append("retention_audit_mode")
             if restore_window_blocked:
                 blockers.append("retention_restore_window_active")
+            if self._retention_workspace_ack_scope_blocked(dataset):
+                blockers.append("retention_workspace_ack_scope_unknown")
             state = self.store.get_object_state(dataset.dataset_id, "attachment.ref", blob.attachment_id)
             if (
                 (state is not None and not state.deleted)
@@ -3663,6 +3700,36 @@ class SyncV2Service:
         visible = [envelope for envelope in raw if envelope.apply_status != "conflict"]
         return raw, visible
 
+    def _list_restore_preview_domain_envelopes(
+        self,
+        *,
+        dataset_id: str,
+        domain: SyncDomain,
+    ) -> list[SyncEnvelope]:
+        page_limit = self.settings.restore_manifest_scan_limit
+        if page_limit < 1:
+            raise SyncStoreError("Sync restore manifest scan limit must be greater than zero")
+        envelopes: list[SyncEnvelope] = []
+        since_sequence = 0
+        while True:
+            page = self.store.list_envelopes_after(
+                dataset_id,
+                since_sequence,
+                limit=page_limit,
+                domains=[domain],
+                status="accepted",
+            )
+            if not page:
+                break
+            envelopes.extend(page)
+            next_sequence = max(envelope.server_sequence for envelope in page)
+            if next_sequence <= since_sequence:
+                raise SyncStoreError("Sync restore manifest cursor did not advance")
+            since_sequence = next_sequence
+            if len(page) < page_limit:
+                break
+        return envelopes
+
     def _manifest_dataset(
         self,
         dataset: SyncDataset,
@@ -3752,15 +3819,20 @@ class SyncV2Service:
         """Return a verified blob-store handle and metadata for byte serving."""
 
         blob_store = self._require_blob_transfer()
-        self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id)
+        dataset = self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id)
         blob = self.store.get_blob_object(
             dataset_id,
             attachment_id=attachment_id,
-            owner_user_id=user_id,
+            owner_user_id=self._blob_owner_user_id(dataset=dataset, user_id=user_id),
         )
         if blob is None:
             raise SyncStoreError("Sync blob was not found or is not accessible")
         return blob_store, blob
+
+    def _blob_owner_user_id(self, *, dataset: SyncDataset, user_id: str) -> str | None:
+        if dataset.scope_type == "workspace":
+            return None
+        return user_id
 
     def _validate_blob_storage_metadata(
         self,

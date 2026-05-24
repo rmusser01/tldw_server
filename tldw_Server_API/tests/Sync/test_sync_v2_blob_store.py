@@ -42,6 +42,8 @@ def test_local_blob_store_commits_verified_chunks_atomically(tmp_path: Path):
     assert first_key.endswith("0.part")
     assert second_key.endswith("1.part")
     assert store.read_blob(final_key) == first + second
+    assert (tmp_path / "sync_blobs" / "_uploads" / "upload-1").exists()
+    store.discard_upload("upload-1")
     assert not (tmp_path / "sync_blobs" / "_uploads" / "upload-1").exists()
 
 

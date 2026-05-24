@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceUpsert,
     SyncObjectState,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -916,6 +917,58 @@ def test_push_and_pull_endpoint_expose_apply_outcomes_for_replayable_failures(
     assert "replayable" in failed["apply_error_message"]
 
 
+def test_pull_endpoint_accepts_m1_contract_limit_and_echo_aliases(
+    client: TestClient,
+) -> None:
+    client.post(
+        "/api/v1/sync/devices/register",
+        json={"device_id": "device-1", "display_name": "Laptop", "client_type": "chatbook"},
+    )
+    client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-1",
+            "domains": list(M1_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+        },
+    )
+    pushed = client.post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "base_server_cursor": 0,
+            "options": {"stop_on_conflict": False},
+            "envelopes": [
+                _note_envelope_json(client_envelope_id="env-note-1", payload_hash="sha256:note-1"),
+                _note_envelope_json(
+                    client_envelope_id="env-note-2",
+                    object_id="note-2",
+                    client_sequence=2,
+                    payload_hash="sha256:note-2",
+                ),
+            ],
+        },
+    )
+
+    pulled = client.get(
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "cursor": "0",
+            "domain": "notes.note",
+            "limit": "1",
+            "include_same_device_echoes": "true",
+        },
+    )
+
+    assert pushed.status_code == 200
+    assert pulled.status_code == 200
+    assert [item["client_envelope_id"] for item in pulled.json()["envelopes"]] == ["env-note-1"]
+    assert pulled.json()["has_more"] is True
+
+
 def test_push_endpoint_reports_dataset_mismatch_per_envelope_in_mixed_batch(
     client: TestClient,
 ) -> None:
@@ -1060,6 +1113,103 @@ def test_resumable_blob_upload_endpoints_accept_raw_chunks_and_complete(
     assert body["stored"] is True
     assert body["payload_hash"] == _sha256(payload)
     assert body["quota"]["used_blob_bytes"] == len(payload)
+
+
+def test_blob_chunk_endpoint_rejects_oversized_body_before_buffering(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    client = _client_for_service(service)
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    payload = b"12345678"
+    create_response = client.post(
+        "/api/v1/sync/blob-uploads",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "domain": "notes.note",
+            "object_id": "note-1",
+            "attachment_id": "attachment-1",
+            "content_type": "application/octet-stream",
+            "size_bytes": len(payload),
+            "payload_hash": _sha256(payload),
+            "chunk_size": len(payload),
+            "chunk_count": 1,
+        },
+    )
+    assert create_response.status_code == 200
+    upload_id = create_response.json()["upload_id"]
+
+    response = client.put(
+        f"/api/v1/sync/blob-uploads/{upload_id}/chunks/0",
+        params={
+            "dataset_id": "dataset-1",
+            "offset_bytes": 0,
+            "chunk_hash": _sha256(payload + b"x"),
+        },
+        content=payload + b"x",
+        headers={"content-type": "application/octet-stream"},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"]["error_code"] == "sync_blob_chunk_too_large"
+
+
+def test_blob_completion_preserves_staged_chunks_when_db_commit_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    payload = b"retry me"
+    session = service.create_blob_upload_session(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        domain="notes.note",
+        entity_id="note-1",
+        attachment_id="attachment-1",
+        content_type="application/octet-stream",
+        size_bytes=len(payload),
+        payload_hash=_sha256(payload),
+        chunk_size=len(payload),
+        chunk_count=1,
+    )
+    service.upload_blob_chunk(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        upload_id=session.upload_id,
+        chunk_index=0,
+        offset_bytes=0,
+        chunk_payload=payload,
+        chunk_hash=_sha256(payload),
+    )
+
+    def fail_complete_blob_upload(_blob):
+        raise SyncStoreError("database commit failed")
+
+    monkeypatch.setattr(service.store, "complete_blob_upload", fail_complete_blob_upload)
+
+    with pytest.raises(SyncStoreError):
+        service.complete_blob_upload(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            upload_id=session.upload_id,
+        )
+
+    assert (tmp_path / "sync_blobs" / "_uploads" / session.upload_id / "0.part").exists()
 
 
 def test_blob_upload_endpoint_maps_validation_errors_to_safe_statuses(

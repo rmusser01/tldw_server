@@ -581,6 +581,23 @@ def test_sync_envelope_rejects_non_object_payload_as_validation_error():
         SyncV2Envelope.model_validate(_m1_envelope_payload(payload=[]))
 
 
+def test_push_request_accepts_locked_contract_cursor_and_options():
+    request = SyncPushRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "client_profile_id": "profile-1",
+            "base_server_cursor": 128,
+            "envelopes": [],
+            "options": {"stop_on_conflict": True},
+        }
+    )
+
+    assert request.client_profile_id == "profile-1"
+    assert request.base_server_cursor == 128
+    assert request.options.stop_on_conflict is True
+
+
 def test_whole_object_tombstone_requires_base_metadata():
     with pytest.raises(ValidationError):
         SyncV2Envelope.model_validate(

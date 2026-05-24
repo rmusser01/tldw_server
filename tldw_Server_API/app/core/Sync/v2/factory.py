@@ -74,9 +74,7 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
             "media.keyword_link": MediaMetadataMaterializer(domain="media.keyword_link"),
         },
         blob_store=_sync_v2_blob_store_for_user(user_id),
-        settings=SyncV2Settings(
-            server_trusted_encryption=server_trusted_encryption_status_from_env(),
-        ),
+        settings=_sync_v2_settings_from_env(),
         workspace_access_checker=_workspace_access_checker,
     )
 
@@ -113,9 +111,52 @@ def _chacha_notes_db_for_user(user_id: str) -> CharactersRAGDB:
 
 @lru_cache(maxsize=256)
 def _sync_v2_blob_store_for_user(user_id: str) -> LocalSyncBlobStore:
+    del user_id
+    configured_path = os.getenv("SYNC_V2_BLOB_STORE_PATH", "").strip()
+    if configured_path:
+        return LocalSyncBlobStore(configured_path)
     base_dir = DatabasePaths.resolve_user_db_base_dir()
-    safe_user_id = _resolve_user_id_for_storage(user_id)
-    return LocalSyncBlobStore(base_dir / safe_user_id / "sync_blobs")
+    return LocalSyncBlobStore(base_dir / "_sync_v2_blobs")
+
+
+def _sync_v2_settings_from_env() -> SyncV2Settings:
+    return SyncV2Settings(
+        supports_attachments=_sync_v2_bool_env("SYNC_V2_ENABLE_BLOB_TRANSFER", default=False),
+        max_blob_bytes=_sync_v2_optional_positive_int_env("SYNC_V2_MAX_BLOB_BYTES"),
+        max_chunk_bytes=_sync_v2_positive_int_env("SYNC_V2_MAX_CHUNK_BYTES", default=4_194_304),
+        max_active_blob_uploads=_sync_v2_positive_int_env("SYNC_V2_MAX_ACTIVE_BLOB_UPLOADS", default=8),
+        user_blob_quota_bytes=_sync_v2_optional_positive_int_env("SYNC_V2_USER_BLOB_QUOTA_BYTES"),
+        server_trusted_encryption=server_trusted_encryption_status_from_env(),
+    )
+
+
+def _sync_v2_bool_env(name: str, *, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _sync_v2_positive_int_env(name: str, *, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _sync_v2_optional_positive_int_env(name: str) -> int | None:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _workspace_access_checker(user_id: str, workspace_id: str, permission: str) -> bool:
