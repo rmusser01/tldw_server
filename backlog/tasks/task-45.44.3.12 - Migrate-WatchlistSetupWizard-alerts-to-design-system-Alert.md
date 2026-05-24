@@ -13,6 +13,8 @@ labels:
 dependencies: []
 parent_task_id: TASK-45.44.3
 priority: medium
+references:
+  - https://github.com/rmusser01/tldw_server/pull/2039
 modified_files:
   - apps/packages/ui/src/components/Option/Watchlists/SetupWizard/WatchlistSetupWizard.tsx
   - apps/packages/ui/src/components/Option/Watchlists/SetupWizard/__tests__/WatchlistSetupWizard.test.tsx
@@ -55,6 +57,7 @@ Continue TASK-45.44.3 by replacing Watchlists SetupWizard AntD Alert callouts wi
 - Verification: `git diff --check` passed.
 - TypeScript: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` exits 2 with 347 existing diagnostics; no diagnostics mention WatchlistSetupWizard, its tests, the product-state baseline, or this task.
 - Bandit skipped: UI-only TypeScript/JSON/backlog changes; no Python touched.
+- PR: https://github.com/rmusser01/tldw_server/pull/2039
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
