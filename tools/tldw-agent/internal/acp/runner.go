@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ const (
 	runnerName             = "tldw-agent-runner"
 	runnerVersion          = "0.1.0"
 )
+
+var envPlaceholderPattern = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
 
 type Runner struct {
 	cfg      *config.Config
@@ -485,9 +488,21 @@ func expandAgentEnv(values []string) []string {
 	}
 	expanded := make([]string, len(values))
 	for i, value := range values {
-		expanded[i] = os.ExpandEnv(value)
+		key, rawValue, ok := strings.Cut(value, "=")
+		if !ok {
+			expanded[i] = value
+			continue
+		}
+		expanded[i] = key + "=" + expandBracedEnvValue(rawValue)
 	}
 	return expanded
+}
+
+func expandBracedEnvValue(value string) string {
+	return envPlaceholderPattern.ReplaceAllStringFunc(value, func(match string) string {
+		name := strings.TrimSuffix(strings.TrimPrefix(match, "${"), "}")
+		return os.Getenv(name)
+	})
 }
 
 func (r *Runner) probeAgentCapabilities(agentCfg config.AgentConfig, timeout time.Duration) map[string]interface{} {

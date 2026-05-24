@@ -28,13 +28,22 @@ type promptParams struct {
 
 func TestExpandAgentEnvResolvesHostPlaceholders(t *testing.T) {
 	t.Setenv("TLDW_ACP_HOST_HOME", "/Users/operator")
+	t.Setenv("TOKEN", "secret")
 
 	got := expandAgentEnv([]string{
 		"HOME=${TLDW_ACP_HOST_HOME}",
+		"LITERAL=$TLDW_ACP_HOST_HOME",
+		"TOKEN_${TOKEN}=value_${TOKEN}",
+		"NO_EQUALS_${TOKEN}",
+		"MISSING=${UNSET_PLACEHOLDER}",
 		"TERM=xterm-256color",
 	})
 	want := []string{
 		"HOME=/Users/operator",
+		"LITERAL=$TLDW_ACP_HOST_HOME",
+		"TOKEN_${TOKEN}=value_secret",
+		"NO_EQUALS_${TOKEN}",
+		"MISSING=",
 		"TERM=xterm-256color",
 	}
 

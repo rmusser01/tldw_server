@@ -15,6 +15,7 @@ documentation:
 - tldw_Server_API/Config_Files/agents.yaml
 - tldw_Server_API/Config_Files/acp_runner_home/.tldw-agent/config.yaml
 modified_files:
+- IMPLEMENTATION_PLAN_acp_goose_backend_live_e2e.md
 - Docs/Plans/IMPLEMENTATION_PLAN_acp_pr2038_review_fixes.md
 - Docs/Development/ACP_Compatibility_Matrix.md
 - Docs/superpowers/specs/2026-05-12-acp-downstream-entrypoint-strategy-design.md
@@ -61,6 +62,8 @@ Docs/Plans/IMPLEMENTATION_PLAN_acp_pr2038_review_fixes.md
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Resolved the PR #2038 review feedback by exporting TLDW_ACP_HOST_HOME for absolute and override runner env paths, making omitted ACP agentType selection skip configured profiles without runnable commands, adding regression coverage for both behaviors, and adding return annotations to the reviewed Python tests. Updated ACP registry metadata and compatibility docs with branch, commit, host, and tldw-agent runner evidence for Goose/OpenCode/Aider/Hermes, and aligned the entrypoint-strategy design doc support states with the current live-E2E certification results.
+
+Addressed the subsequent CodeRabbit comments by adding a top-level heading plus MD022 spacing to the Goose live-E2E plan and narrowing registered-agent env expansion so only `${NAME}` placeholders in the value side of `KEY=VALUE` entries are expanded; literal `$NAME`, keys, and no-equals entries are preserved.
 
 Verification: `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_config_cwd.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_agent_registry.py -q` passed 47 tests; `go test ./internal/acp -count=1` passed; `tools/tldw-agent/scripts/verify-local-build.sh` passed; `python -m bandit -r ... -s B101 -f json` reported zero findings; `git diff --check` passed.
 
