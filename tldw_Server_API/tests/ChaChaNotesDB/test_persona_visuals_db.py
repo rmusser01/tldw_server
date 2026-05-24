@@ -37,6 +37,7 @@ def test_user_persona_visuals_dir_is_created_under_user_base(
 
 
 def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path) -> None:
+    """Verify v44 migration recreates persona visual tables and indexes."""
     seeded = CharactersRAGDB(db_path, "persona-visuals-seed")
     seeded.close_connection()
 
@@ -74,6 +75,7 @@ def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path) ->
 
 
 def test_migration_v44_to_latest_repairs_missing_persona_tables(db_path: Path) -> None:
+    """Verify drifted v44 databases repair missing persona schema artifacts."""
     seeded = CharactersRAGDB(db_path, "persona-visuals-missing-persona-seed")
     seeded.close_connection()
 
