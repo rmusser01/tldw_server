@@ -45,10 +45,23 @@ without these variables:
 export TLDW_E2E_SERVER_URL=127.0.0.1:8000
 export TLDW_E2E_API_KEY=<local-api-key>
 export ACP_AGENT_PROFILE=<profile-key-from-matrix>
+# Optional: override the session cwd; defaults to the repository root.
+export ACP_E2E_WORKSPACE_CWD=<absolute-workspace-path>
 
 python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --format json
 python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --run
 ```
+
+`TLDW_E2E_SERVER_URL` may omit the scheme only for local loopback hosts such as
+`127.0.0.1`, `[::1]`, and `localhost`. Remote targets must use an explicit
+`https://` URL; non-local `http://` requires
+`ACP_BACKEND_E2E_ALLOW_INSECURE_HTTP=1` because the helper sends `X-API-KEY`.
+
+The live helper drives the backend REST lifecycle against the already running
+tldw_server instance: health, setup-guide, session create, prompt, redacted
+detail/events/artifacts, diagnostics, cancel, and close. The manifest also runs
+the Go runner verification script so runner/profile changes are covered by the
+same evidence record.
 
 ## Stub-Smoke Checklist
 

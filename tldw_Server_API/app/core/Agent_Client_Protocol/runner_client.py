@@ -575,7 +575,7 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         session_env: dict[str, str] | None = None,
     ) -> str:
         params: dict[str, Any] = {"cwd": cwd}
-        if mcp_servers:
+        if mcp_servers is not None:
             params["mcpServers"] = mcp_servers
         if agent_type:
             params["agentType"] = agent_type

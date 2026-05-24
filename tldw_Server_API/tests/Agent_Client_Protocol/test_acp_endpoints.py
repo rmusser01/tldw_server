@@ -221,6 +221,26 @@ def test_acp_session_new_forwards_tenancy_fields(client_user_only, stub_runner_c
     assert isinstance(call["user_id"], int) and call["user_id"] > 0
 
 
+def test_acp_session_new_preserves_explicit_empty_mcp_servers(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/new",
+        json={
+            "cwd": str(tmp_path),
+            "agent_type": "hermes",
+            "mcp_servers": [],
+        },
+    )
+
+    assert resp.status_code == 200
+    call = stub_runner_client.create_session_calls[-1]
+    assert call["agent_type"] == "hermes"
+    assert call["mcp_servers"] == []
+
+
 def test_acp_session_new_records_sanitized_audit_event(
     client_user_only,
     stub_runner_client,

@@ -110,9 +110,9 @@ agents:
       - "Install Hermes Agent from https://github.com/NousResearch/hermes-agent"
     docs_url: "https://github.com/NousResearch/hermes-agent"
     default: false
-    support_state: documented_unverified
-    verification_level: documented_only
-    compatibility_notes: "Local May 23, 2026 host-stdio probe passed initialize, session-new, and prompt using hermes acp --accept-hooks; backend live E2E evidence is still required before release support claims."
+    support_state: supported_with_caveats
+    verification_level: live_e2e_tested
+    compatibility_notes: "Hermes native ACP completed May 23, 2026 backend live E2E through the macOS host runner: health/setup-guide, session-new, prompt, redacted support views, diagnostics endpoint, cancel, and close passed. Sandbox, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior remain unverified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: native_acp
     acp_command: hermes

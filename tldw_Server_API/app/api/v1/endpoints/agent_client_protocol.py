@@ -2382,7 +2382,7 @@ async def acp_session_new(
 
     # Convert MCP server configs to dicts for the runner client
     mcp_servers_dicts = None
-    if payload.mcp_servers:
+    if payload.mcp_servers is not None:
         mcp_servers_dicts = [
             server.model_dump(exclude_none=True) for server in payload.mcp_servers
         ]
