@@ -5,6 +5,7 @@ import os
 import tempfile
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -337,6 +338,51 @@ def test_default_agents_yaml_includes_hermes_native_acp_entrypoint():
     assert entry.acp_args == ["acp", "--accept-hooks"]
     assert entry.support_state == "supported_with_caveats"
     assert entry.verification_level == "live_e2e_tested"
+
+
+def test_default_agents_yaml_includes_goose_backend_live_e2e_metadata():
+    """Goose is shipped as a native ACP profile with backend live-E2E evidence."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    real_yaml = os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "agents.yaml",
+    )
+    real_yaml = os.path.abspath(real_yaml)
+    registry = AgentRegistry(yaml_path=real_yaml)
+
+    entry = registry.get_entry("goose")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "native_acp"
+    assert entry.command == "goose"
+    assert entry.acp_command == "goose"
+    assert entry.acp_args == ["acp"]
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "live_e2e_tested"
+    assert "backend live E2E" in entry.compatibility_notes
+
+
+def test_default_runner_home_config_exposes_goose_backend_profile():
+    """The bundled runner config should know the same Goose profile used by the API registry."""
+    runner_config = os.path.abspath(os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "acp_runner_home", ".tldw-agent", "config.yaml",
+    ))
+
+    with open(runner_config, "r", encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle)
+
+    entries = {
+        entry["type"]: entry
+        for entry in payload["agents"]["agents"]
+    }
+
+    goose = entries["goose"]
+    assert goose["command"] == "goose"
+    assert goose["args"] == ["acp"]
+    assert "TERM=xterm-256color" in goose["env"]
+    assert "HOME=${TLDW_ACP_HOST_HOME}" in goose["env"]
 
 
 # ---------------------------------------------------------------------------

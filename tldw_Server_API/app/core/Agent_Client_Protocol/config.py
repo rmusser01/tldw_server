@@ -180,9 +180,12 @@ def _resolve_runner_env_paths(
     if not home or os.path.isabs(home):
         return env
 
+    host_home = os.getenv("TLDW_ACP_HOST_HOME") or os.path.expanduser("~")
     config_dir = _get_config_file_dir()
     resolved_home = os.path.normpath(os.path.join(config_dir, home))
     env["HOME"] = resolved_home
+    if host_home and os.path.isabs(host_home):
+        env.setdefault("TLDW_ACP_HOST_HOME", host_home)
     logger.debug(
         "ACP runner_env HOME resolved: '{}' -> '{}' (config dir: {})",
         home,

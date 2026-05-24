@@ -90,9 +90,9 @@ agents:
       - "brew install block/goose/goose"
       - "# or: cargo install goose-cli"
     docs_url: "https://github.com/block/goose"
-    support_state: documented_unverified
-    verification_level: documented_only
-    compatibility_notes: "Goose native ACP is configured and the May 23, 2026 host-stdio probe passed initialize, session-new, and prompt with the installed CLI; backend live E2E evidence is still required before release support claims."
+    support_state: supported_with_caveats
+    verification_level: live_e2e_tested
+    compatibility_notes: "Goose native ACP completed May 23, 2026 backend live E2E through the macOS host runner: health/setup-guide, session-new, prompt, redacted support views, diagnostics endpoint, cancel, and close passed. Sandbox, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior remain unverified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: native_acp
     acp_command: goose

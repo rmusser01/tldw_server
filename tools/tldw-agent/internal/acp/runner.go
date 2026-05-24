@@ -175,7 +175,7 @@ func (r *Runner) handleSessionNew(msg *RPCMessage) (*RPCResponse, error) {
 	agentCfg := config.AgentConfig{
 		Command: agentEntry.Command,
 		Args:    agentEntry.Args,
-		Env:     agentEntry.Env,
+		Env:     expandAgentEnv(agentEntry.Env),
 	}
 	downstream, cmd, err := r.spawnFunc(agentCfg)
 	if err != nil {
@@ -439,7 +439,7 @@ func (r *Runner) refreshCapabilities() map[string]interface{} {
 	agentCfg := config.AgentConfig{
 		Command: agentEntry.Command,
 		Args:    agentEntry.Args,
-		Env:     agentEntry.Env,
+		Env:     expandAgentEnv(agentEntry.Env),
 	}
 	caps := r.probeAgentCapabilities(agentCfg, 5*time.Second)
 	if caps == nil {
@@ -458,9 +458,20 @@ func (r *Runner) isAgentReady(entry config.RegisteredAgent) bool {
 	agentCfg := config.AgentConfig{
 		Command: entry.Command,
 		Args:    entry.Args,
-		Env:     entry.Env,
+		Env:     expandAgentEnv(entry.Env),
 	}
 	return r.probeAgentCapabilities(agentCfg, 2*time.Second) != nil
+}
+
+func expandAgentEnv(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	expanded := make([]string, len(values))
+	for i, value := range values {
+		expanded[i] = os.ExpandEnv(value)
+	}
+	return expanded
 }
 
 func (r *Runner) probeAgentCapabilities(agentCfg config.AgentConfig, timeout time.Duration) map[string]interface{} {

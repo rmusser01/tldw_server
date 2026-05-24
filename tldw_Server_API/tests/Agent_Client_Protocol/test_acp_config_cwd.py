@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -10,6 +11,16 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.config import (
     _resolve_cwd,
     _get_config_file_dir,
     load_acp_runner_config,
+)
+
+
+_ACP_ENV_KEYS = (
+    "ACP_RUNNER_CWD",
+    "ACP_RUNNER_COMMAND",
+    "ACP_RUNNER_ARGS",
+    "ACP_RUNNER_ENV",
+    "ACP_RUNNER_BINARY_PATH",
+    "ACP_RUNNER_STARTUP_TIMEOUT_MS",
 )
 
 
@@ -59,6 +70,22 @@ class TestResolveCwd:
 
 class TestLoadAcpRunnerConfigCwd:
     """Integration-level tests verifying cwd resolution in load_acp_runner_config."""
+
+    def test_shipped_config_runner_cwd_points_at_in_repo_runner(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """The default config should point at the bundled tldw-agent runner."""
+        for key in _ACP_ENV_KEYS:
+            monkeypatch.delenv(key, raising=False)
+
+        cfg = load_acp_runner_config()
+
+        repo_root = Path(__file__).resolve().parents[3]
+        expected = (repo_root / "tools" / "tldw-agent").resolve()
+        assert cfg.cwd is not None
+        assert Path(cfg.cwd).resolve() == expected
+        assert expected.is_dir()
 
     def test_relative_cwd_resolved_in_loaded_config(self):
         """load_acp_runner_config should resolve a relative runner_cwd."""
@@ -148,6 +175,41 @@ class TestLoadAcpRunnerConfigEnv:
         expected_home = os.path.normpath(os.path.join(fake_config_dir, "./acp_runner_home"))
         assert cfg.env["HOME"] == expected_home
         assert cfg.env["PYTHONUNBUFFERED"] == "1"
+
+    def test_relative_runner_home_exports_host_home_for_downstream_agents(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """The isolated runner HOME should preserve the operator HOME for agent env expansion."""
+        fake_config_dir = "/srv/tldw/Config_Files"
+        fake_section = {
+            "runner_command": "node",
+            "runner_env": "HOME=./acp_runner_home,PYTHONUNBUFFERED=1",
+        }
+        monkeypatch.setenv("HOME", "/Users/operator")
+        monkeypatch.delenv("TLDW_ACP_HOST_HOME", raising=False)
+
+        with patch(
+            "tldw_Server_API.app.core.Agent_Client_Protocol.config.get_config_section",
+            return_value=fake_section,
+        ), patch(
+            "tldw_Server_API.app.core.Agent_Client_Protocol.config._get_config_file_dir",
+            return_value=fake_config_dir,
+        ):
+            for key in (
+                "ACP_RUNNER_CWD",
+                "ACP_RUNNER_COMMAND",
+                "ACP_RUNNER_ARGS",
+                "ACP_RUNNER_ENV",
+                "ACP_RUNNER_BINARY_PATH",
+                "ACP_RUNNER_STARTUP_TIMEOUT_MS",
+            ):
+                monkeypatch.delenv(key, raising=False)
+
+            cfg = load_acp_runner_config()
+
+        assert cfg.env["HOME"] == os.path.normpath(os.path.join(fake_config_dir, "./acp_runner_home"))
+        assert cfg.env["TLDW_ACP_HOST_HOME"] == "/Users/operator"
 
     def test_absolute_home_in_runner_env_is_unchanged(self):
         """An absolute HOME in runner_env should be preserved as-is."""

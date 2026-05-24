@@ -103,8 +103,8 @@ modelstudio_image_allowed_extra_params = []
 runner_command = go
 # Accepts JSON array or shell-style args.
 runner_args = ["run", "./cmd/tldw-agent-acp"]
-# Working directory for the runner process (e.g. ../tldw-agent).
-runner_cwd = ../tldw-agent
+# Working directory for the runner process. Relative paths resolve from this Config_Files directory.
+runner_cwd = ../../tools/tldw-agent
 # Runner environment (comma-separated key=value or JSON).
 # Relative HOME values are resolved against this Config_Files directory.
 runner_env = HOME=./acp_runner_home,PYTHONUNBUFFERED=1

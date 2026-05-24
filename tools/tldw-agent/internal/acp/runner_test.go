@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"os/exec"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -13,16 +14,33 @@ import (
 )
 
 type stubAgent struct {
-	conn      *Conn
-	sessionID string
-	caps      map[string]interface{}
+	conn         *Conn
+	sessionID    string
+	caps         map[string]interface{}
 	sessionNewCh chan map[string]interface{}
-	promptCh  chan promptParams
+	promptCh     chan promptParams
 }
 
 type promptParams struct {
 	SessionID string                   `json:"sessionId"`
 	Prompt    []map[string]interface{} `json:"prompt"`
+}
+
+func TestExpandAgentEnvResolvesHostPlaceholders(t *testing.T) {
+	t.Setenv("TLDW_ACP_HOST_HOME", "/Users/operator")
+
+	got := expandAgentEnv([]string{
+		"HOME=${TLDW_ACP_HOST_HOME}",
+		"TERM=xterm-256color",
+	})
+	want := []string{
+		"HOME=/Users/operator",
+		"TERM=xterm-256color",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expanded env mismatch:\n got: %#v\nwant: %#v", got, want)
+	}
 }
 
 func newStubAgent(conn *Conn, sessionID string, caps map[string]interface{}) *stubAgent {
