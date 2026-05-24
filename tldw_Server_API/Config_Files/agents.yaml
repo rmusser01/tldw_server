@@ -74,7 +74,7 @@ agents:
     docs_url: "https://aider.chat"
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live Aider ACP compatibility remains blocked until an ACP-compatible Aider command is installed and verified."
+    compatibility_notes: "Aider v0.86.2 was installed and configured May 23, 2026 to use a local llama.cpp OpenAI-compatible server at 127.0.0.1:9099; direct Aider prompting succeeded. ACP certification remains blocked because the installed Aider CLI exposes no ACP-compatible stdio server entrypoint."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: documented_candidate
     acp_command: ""
@@ -149,9 +149,9 @@ agents:
       - "go install github.com/sst/opencode@latest"
     docs_url: "https://github.com/sst/opencode"
     default: false
-    support_state: documented_unverified
-    verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live OpenCode ACP compatibility remains blocked until an ACP-compatible OpenCode command is installed and verified."
+    support_state: supported_with_caveats
+    verification_level: live_e2e_tested
+    compatibility_notes: "OpenCode v1.15.7 native ACP completed May 23, 2026 backend live E2E through the macOS host runner using a local llama.cpp OpenAI-compatible server at 127.0.0.1:9099: health/setup-guide, session-new, prompt, redacted support views, diagnostics endpoint, cancel, and close passed. Sandbox, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior remain unverified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: native_acp
     acp_command: opencode
