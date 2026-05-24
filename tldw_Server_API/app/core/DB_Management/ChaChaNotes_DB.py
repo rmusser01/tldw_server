@@ -22184,8 +22184,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             now,
             1,
         )
-        with self.transaction() as conn:
-            try:
+        try:
+            with self.transaction() as conn:
                 conn.execute(
                     "INSERT INTO workspace_migration_sessions ("
                     "id, target_workspace_id, target_workspace_name, source_product, idempotency_key, "
@@ -22194,15 +22194,32 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     params,
                 )
-            except sqlite3.IntegrityError as exc:
+        except sqlite3.IntegrityError as exc:
+            raced = self.get_workspace_migration_session(migration_id)
+            if raced is not None and raced["idempotency_key"] == idempotency_key and raced["manifest_hash"] == manifest_hash:
+                return raced, False
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration could not be created due to a uniqueness conflict.",
+                entity="workspace_migration_sessions",
+                entity_id=migration_id,
+            ) from exc
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
                 raced = self.get_workspace_migration_session(migration_id)
-                if raced is not None and raced["idempotency_key"] == idempotency_key and raced["manifest_hash"] == manifest_hash:
+                if (
+                    raced is not None
+                    and raced["idempotency_key"] == idempotency_key
+                    and raced["manifest_hash"] == manifest_hash
+                ):
                     return raced, False
                 raise ConflictError(  # noqa: TRY003
                     "Workspace migration could not be created due to a uniqueness conflict.",
                     entity="workspace_migration_sessions",
                     entity_id=migration_id,
                 ) from exc
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to create workspace migration session: {exc}"
+            ) from exc
         created = self.get_workspace_migration_session(migration_id)
         if created is None:
             raise CharactersRAGDBError(f"Failed to read workspace migration '{migration_id}' after create.")  # noqa: TRY003
@@ -22293,8 +22310,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         metadata_json = self._serialize_workspace_migration_json(data.get("metadata"), "metadata", default={})
         now = self._get_current_utc_timestamp_iso()
-        with self.transaction() as conn:
-            try:
+        try:
+            with self.transaction() as conn:
                 conn.execute(
                     "INSERT INTO workspace_migration_chunks ("
                     "migration_id, id, sha256, byte_count, chunk_kind, metadata_json, accepted_at"
@@ -22313,7 +22330,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "UPDATE workspace_migration_sessions SET updated_at = ?, version = version + 1 WHERE id = ?",
                     (now, normalized_migration_id),
                 )
-            except sqlite3.IntegrityError as exc:
+        except sqlite3.IntegrityError as exc:
+            raced = self._get_workspace_migration_chunk(normalized_migration_id, normalized_chunk_id)
+            if raced is not None and raced["sha256"] == sha256 and int(raced["byte_count"]) == byte_count:
+                return raced
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration chunk could not be accepted due to a uniqueness conflict.",
+                entity="workspace_migration_chunks",
+                entity_id=normalized_chunk_id,
+            ) from exc
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
                 raced = self._get_workspace_migration_chunk(normalized_migration_id, normalized_chunk_id)
                 if raced is not None and raced["sha256"] == sha256 and int(raced["byte_count"]) == byte_count:
                     return raced
@@ -22322,6 +22349,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     entity="workspace_migration_chunks",
                     entity_id=normalized_chunk_id,
                 ) from exc
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to accept workspace migration chunk: {exc}"
+            ) from exc
         accepted = self._get_workspace_migration_chunk(normalized_migration_id, normalized_chunk_id)
         if accepted is None:
             raise CharactersRAGDBError(  # noqa: TRY003
@@ -22384,14 +22414,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             default={},
         )
         false_value = False if self.backend_type == BackendType.POSTGRESQL else 0
-        with self.transaction() as conn:
-            conn.execute(
-                "UPDATE workspace_migration_sessions "
-                "SET status = ?, finalized_at = ?, recovery_manifest_json = ?, "
-                "client_delete_eligible = ?, updated_at = ?, version = version + 1 "
-                "WHERE id = ?",
-                ("finalized", now, recovery_json, false_value, now, normalized_migration_id),
-            )
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    "UPDATE workspace_migration_sessions "
+                    "SET status = ?, finalized_at = ?, recovery_manifest_json = ?, "
+                    "client_delete_eligible = ?, updated_at = ?, version = version + 1 "
+                    "WHERE id = ?",
+                    ("finalized", now, recovery_json, false_value, now, normalized_migration_id),
+                )
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to finalize workspace migration '{normalized_migration_id}': {exc}"
+            ) from exc
         finalized = self.get_workspace_migration_session(normalized_migration_id)
         if finalized is None:
             raise CharactersRAGDBError(  # noqa: TRY003
@@ -22428,13 +22463,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
 
         now = self._get_current_utc_timestamp_iso()
-        with self.transaction() as conn:
-            conn.execute(
-                "UPDATE workspace_migration_sessions "
-                "SET client_delete_ack_at = ?, updated_at = ?, version = version + 1 "
-                "WHERE id = ?",
-                (now, now, normalized_migration_id),
-            )
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    "UPDATE workspace_migration_sessions "
+                    "SET client_delete_ack_at = ?, updated_at = ?, version = version + 1 "
+                    "WHERE id = ?",
+                    (now, now, normalized_migration_id),
+                )
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to record workspace migration client delete acknowledgement: {exc}"
+            ) from exc
         return True
 
     # --- Workspace Source Methods ---

@@ -155,12 +155,12 @@ def _require_migration(db: CharactersRAGDB, migration_id: str) -> dict[str, Any]
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Create a Research Workspace migration session",
 )
-async def create_workspace_migration(
+def create_workspace_migration(
     body: WorkspaceMigrationCreateRequest,
     response: Response,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> WorkspaceMigrationResponse:
     """Create or idempotently return a Research Workspace migration session."""
     _ = current_user
     try:
@@ -181,10 +181,10 @@ async def create_workspace_migration(
     dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
     summary="List Research Workspace migration sessions",
 )
-async def list_workspace_migrations(
+def list_workspace_migrations(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> list[WorkspaceMigrationResponse]:
     """List recent durable Research Workspace migration sessions."""
     _ = current_user
     try:
@@ -203,11 +203,11 @@ async def list_workspace_migrations(
     dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
     summary="Get a Research Workspace migration session",
 )
-async def get_workspace_migration(
+def get_workspace_migration(
     migration_id: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> WorkspaceMigrationResponse:
     """Return a durable migration session and recovery manifest."""
     _ = current_user
     try:
@@ -228,13 +228,13 @@ async def get_workspace_migration(
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Accept a Research Workspace migration chunk receipt",
 )
-async def put_workspace_migration_chunk(
+def put_workspace_migration_chunk(
     migration_id: str,
     chunk_id: str,
     body: WorkspaceMigrationChunkUploadRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> WorkspaceMigrationChunkReceiptResponse:
     """Record an idempotent chunk receipt for a migration session."""
     _ = current_user
     try:
@@ -257,12 +257,12 @@ async def put_workspace_migration_chunk(
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Finalize a Research Workspace migration session",
 )
-async def finalize_workspace_migration(
+def finalize_workspace_migration(
     migration_id: str,
     body: WorkspaceMigrationFinalizeRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> WorkspaceMigrationResponse:
     """Finalize a migration only after all declared chunks have receipts."""
     _ = current_user
     try:
@@ -298,12 +298,12 @@ async def finalize_workspace_migration(
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Acknowledge local legacy deletion for a migration",
 )
-async def acknowledge_workspace_migration_client_delete(
+def acknowledge_workspace_migration_client_delete(
     migration_id: str,
     body: WorkspaceMigrationClientDeleteAckRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> StatusResponse:
     """Reject client deletion acknowledgement until deletion eligibility exists."""
     _ = current_user
     try:
