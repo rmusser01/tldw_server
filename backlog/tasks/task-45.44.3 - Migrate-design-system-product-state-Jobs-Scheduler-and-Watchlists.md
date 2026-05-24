@@ -4,7 +4,7 @@ title: 'Migrate design-system product state: Jobs, Scheduler, and Watchlists'
 status: To Do
 assignee: []
 created_date: '2026-05-14 03:19'
-updated_date: '2026-05-23 22:17'
+updated_date: '2026-05-23 22:34'
 labels:
   - design-system
   - webui
@@ -17,6 +17,7 @@ references:
     Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
   - apps/packages/ui/scripts/design-system-product-state-baseline.json
   - 'https://github.com/rmusser01/tldw_server/pull/2012'
+  - 'https://github.com/rmusser01/tldw_server/pull/2013'
 documentation:
   - |-
     TASK-45.44.3.6 / PR #2012 migrated OutputsTab delivery-issues Alert to the design-system Alert primitive.
@@ -25,6 +26,13 @@ documentation:
       - Jobs/Scheduler/Watchlists exceptions: 24 -> 23
       - OutputsTab target rows: 1 -> 0
     Verification recorded in TASK-45.44.3.6.
+  - |-
+    TASK-45.44.3.7 / PR #2013 migrated RunsTab load-error and reliability-attention banners to the design-system Alert primitive.
+    Baseline evidence:
+      - total product-state exceptions: 258 -> 257
+      - Jobs/Scheduler/Watchlists exceptions: 23 -> 22
+      - RunsTab target rows: 1 -> 0
+    Verification recorded in TASK-45.44.3.7.
 parent_task_id: TASK-45.44
 priority: medium
 ---
