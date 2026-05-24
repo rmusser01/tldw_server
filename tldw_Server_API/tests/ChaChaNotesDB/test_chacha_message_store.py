@@ -13,6 +13,9 @@ pytestmark = pytest.mark.unit
 
 _DELEGATED_MESSAGE_METHODS = {
     "add_message",
+    "append_message_from_sync",
+    "tombstone_message_from_sync",
+    "get_messages_by_sync_stable_id",
     "_insert_message_images",
     "get_message_images",
     "get_message_conversation_id",
@@ -91,6 +94,80 @@ def test_message_store_owns_delegated_methods_without_monolith_duplicates(db, mo
         "sender": "user",
         "content": "hi",
     }
+
+
+def test_message_store_sync_append_dedupe_divergent_versions_and_tombstone(db):
+    store = db["db"]
+    conversation_id = db["conversation_id"]
+
+    first = store.append_message_from_sync(
+        stable_message_id="sync-msg-1",
+        conversation_id=conversation_id,
+        sender="user",
+        content="First synced message",
+        timestamp="2026-05-23T18:13:00+00:00",
+        sync_client_id="sync-device",
+        object_revision=1,
+        payload_hash="sha256:msg-v1",
+    )
+
+    assert first["message_id"] == "sync-msg-1"
+    assert first["created"] is True
+    assert first["idempotent"] is False
+    assert first["conflict"] is False
+    assert store.get_message_by_id("sync-msg-1")["content"] == "First synced message"
+
+    duplicate = store.append_message_from_sync(
+        stable_message_id="sync-msg-1",
+        conversation_id=conversation_id,
+        sender="user",
+        content="First synced message",
+        timestamp="2026-05-23T18:13:00+00:00",
+        sync_client_id="sync-device",
+        object_revision=1,
+        payload_hash="sha256:msg-v1",
+    )
+
+    assert duplicate["message_id"] == "sync-msg-1"
+    assert duplicate["created"] is False
+    assert duplicate["idempotent"] is True
+    assert duplicate["conflict"] is False
+    assert store.count_messages_for_conversation(conversation_id, include_deleted=True) == 1
+
+    divergent = store.append_message_from_sync(
+        stable_message_id="sync-msg-1",
+        conversation_id=conversation_id,
+        sender="assistant",
+        content="Conflicting synced message",
+        timestamp="2026-05-23T18:14:00+00:00",
+        sync_client_id="sync-device",
+        object_revision=2,
+        payload_hash="sha256:msg-v2",
+        projection_message_id="sync-msg-1-conflict",
+    )
+
+    assert divergent["message_id"] == "sync-msg-1-conflict"
+    assert divergent["created"] is True
+    assert divergent["idempotent"] is False
+    assert divergent["conflict"] is True
+    versions = store.get_messages_by_sync_stable_id("sync-msg-1", include_deleted=True)
+    assert [item["id"] for item in versions] == ["sync-msg-1", "sync-msg-1-conflict"]
+
+    assert store.tombstone_message_from_sync(
+        stable_message_id="sync-msg-1",
+        sync_client_id="sync-device",
+        object_revision=3,
+        object_hash="sha256:msg-v1",
+    )
+    assert store.get_messages_by_sync_stable_id("sync-msg-1") == []
+    assert store.get_message_by_id("sync-msg-1") is None
+    deleted = store.get_message_by_id("sync-msg-1", include_deleted=True)
+    assert deleted is not None
+    assert bool(deleted["deleted"]) is True
+    conflict = store.get_message_by_id("sync-msg-1-conflict", include_deleted=True)
+    assert conflict is not None
+    assert bool(conflict["deleted"]) is True
+    assert store.get_conversation_by_id(conversation_id) is not None
 
 
 def test_message_store_add_and_fetch_roundtrip(db):

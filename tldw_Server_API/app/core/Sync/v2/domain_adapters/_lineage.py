@@ -36,6 +36,18 @@ def incoming_references_head(
 
     if head is None:
         return True
+    if envelope.base_server_cursor is not None and _same_token(
+        envelope.base_server_cursor,
+        head.server_cursor,
+    ):
+        return True
+    if (
+        envelope.base_object_revision is not None
+        and envelope.base_object_hash is not None
+        and _same_token(envelope.base_object_revision, head.object_revision)
+        and _same_token(envelope.base_object_hash, head.payload_hash)
+    ):
+        return True
     if envelope.base_version is not None and _same_token(envelope.base_version, head.entity_version):
         return True
     return any(_dependency_references_head(dependency, head) for dependency in envelope.dependencies)

@@ -9,10 +9,18 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from tldw_Server_API.app.core.Sync.sync_contract import SyncEntity, SyncOperation as LegacySyncOperation
+from tldw_Server_API.app.core.Sync.sync_contract import SyncEntity
+from tldw_Server_API.app.core.Sync.sync_contract import SyncOperation as LegacySyncOperation
 
-from ..adapters import AdapterAccepted, AdapterRejected, SyncAdapterContext, SyncAdapterOutcome
-from ..models import SyncDataset, SyncDomain, SyncEnvelopeCreate
+from ..adapters import (
+    AdapterAccepted,
+    AdapterConflict,
+    AdapterRejected,
+    SyncAdapterContext,
+    SyncAdapterOutcome,
+)
+from ..models import SyncDataset, SyncDomain, SyncEnvelope, SyncEnvelopeCreate
+from ._lineage import delete_update_conflict, prior_envelopes
 
 _LEGACY_TO_V2_OPERATION = {
     LegacySyncOperation.CREATE.value: "upsert",
@@ -34,6 +42,90 @@ _VERSIONED_MEDIA_OPERATIONS = {
     LegacySyncOperation.UPDATE.value,
     LegacySyncOperation.DELETE.value,
 }
+_MEDIA_METADATA_DOMAINS = {"media.item", "media.keyword", "media.keyword_link"}
+_RAW_MEDIA_PAYLOAD_KEYS = {
+    "audio",
+    "binary",
+    "blob",
+    "blob_ciphertext",
+    "content_bytes",
+    "embedding",
+    "file_bytes",
+    "image",
+    "media_bytes",
+    "media_blob",
+    "raw_media",
+    "summary",
+    "transcript",
+    "video",
+}
+
+
+@dataclass(slots=True)
+class MediaMetadataAdapter:
+    """Validate metadata-only M3 media library envelopes."""
+
+    domain: SyncDomain = "media.item"
+    supported_adapter_versions: set[int] = field(default_factory=lambda: {1})
+
+    def evaluate_envelope(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        dataset: SyncDataset,
+        context: SyncAdapterContext | None = None,
+    ) -> SyncAdapterOutcome:
+        """Accept stable metadata changes and conflict divergent stable IDs."""
+
+        del dataset
+        if envelope.domain not in _MEDIA_METADATA_DOMAINS:
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="unsupported_media_metadata_domain",
+                message="Media metadata envelopes must use a promoted media metadata domain.",
+            )
+        validation_error = _validate_media_metadata_identity(envelope)
+        if validation_error is not None:
+            return validation_error
+        if _contains_raw_media_payload(envelope):
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="media_metadata_payload_not_metadata_only",
+                message="Media metadata envelopes must not carry raw media, transcripts, summaries, or embeddings.",
+            )
+
+        prior = prior_envelopes(envelope, context)
+        delete_conflict = delete_update_conflict(
+            envelope,
+            prior,
+            is_delete=_is_delete,
+            conflict_factory=_manual_delete_conflict,
+        )
+        if delete_conflict is not None:
+            return delete_conflict
+        if _is_delete(envelope):
+            return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
+
+        conflicting = next(
+            (
+                item
+                for item in prior
+                if not _is_delete(item)
+                and _same_media_metadata_identity(item, envelope)
+                and item.payload_hash != envelope.payload_hash
+            ),
+            None,
+        )
+        if conflicting is not None:
+            return AdapterConflict(
+                client_envelope_id=envelope.client_envelope_id,
+                domain=envelope.domain,
+                entity_id=envelope.entity_id,
+                conflict_type="media_metadata_hash_mismatch",
+                message="Media metadata stable object ID was reused with a different payload hash.",
+                metadata={"conflicting_envelope_id": conflicting.client_envelope_id},
+            )
+        return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
 
 
 @dataclass(slots=True)
@@ -189,6 +281,93 @@ def _media_keyword_link_metadata(envelope: SyncEnvelopeCreate) -> bool:
     return bool(media_uuid and keyword_uuid)
 
 
+def _validate_media_metadata_identity(envelope: SyncEnvelopeCreate) -> AdapterRejected | None:
+    if envelope.domain == "media.item":
+        media_id = _metadata_string(envelope, "media_id")
+        if media_id is None:
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="missing_media_item_metadata",
+                message="media.item envelopes require media_id metadata.",
+            )
+        return _identity_mismatch(envelope, expected=media_id)
+    if envelope.domain == "media.keyword":
+        keyword_id = _metadata_string(envelope, "keyword_id")
+        if keyword_id is None:
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="missing_media_keyword_metadata",
+                message="media.keyword envelopes require keyword_id metadata.",
+            )
+        return _identity_mismatch(envelope, expected=keyword_id)
+    if envelope.domain == "media.keyword_link":
+        media_id = _metadata_string(envelope, "media_id")
+        keyword_id = _metadata_string(envelope, "keyword_id")
+        if media_id is None or keyword_id is None:
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="missing_media_keyword_link_metadata",
+                message="media.keyword_link envelopes require media_id and keyword_id metadata.",
+            )
+        return _identity_mismatch(envelope, expected=f"{media_id}:{keyword_id}")
+    return None
+
+
+def _identity_mismatch(
+    envelope: SyncEnvelopeCreate,
+    *,
+    expected: str,
+) -> AdapterRejected | None:
+    if envelope.object_id != expected:
+        return AdapterRejected(
+            client_envelope_id=envelope.client_envelope_id,
+            error_code="media_metadata_identity_mismatch",
+            message="Media metadata object_id must match its stable metadata identity.",
+        )
+    return None
+
+
+def _same_media_metadata_identity(
+    prior: SyncEnvelope,
+    incoming: SyncEnvelopeCreate,
+) -> bool:
+    return prior.object_id == incoming.object_id or (
+        bool(prior.stable_key and incoming.stable_key)
+        and prior.stable_key == incoming.stable_key
+    )
+
+
+def _contains_raw_media_payload(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bool:
+    payload = envelope.payload or envelope.payload_clear
+    return any(str(key).strip().lower() in _RAW_MEDIA_PAYLOAD_KEYS for key in payload)
+
+
+def _is_delete(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bool:
+    return envelope.operation == "tombstone" or bool(
+        envelope.payload_clear.get("deleted")
+        or envelope.payload_clear.get("soft_deleted")
+        or envelope.payload_clear.get("tombstone")
+    )
+
+
+def _manual_delete_conflict(envelope: SyncEnvelopeCreate) -> AdapterConflict:
+    return AdapterConflict(
+        client_envelope_id=envelope.client_envelope_id,
+        domain=envelope.domain,
+        entity_id=envelope.entity_id,
+        conflict_type="delete_update_conflict",
+        message="Delete-vs-update media metadata changes require manual resolution.",
+    )
+
+
+def _metadata_string(envelope: SyncEnvelope | SyncEnvelopeCreate, key: str) -> str | None:
+    value = envelope.routing_metadata.get(key) or envelope.payload_clear.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _entry_mapping(entry: Any) -> dict[str, Any]:
     if isinstance(entry, dict):
         return dict(entry)
@@ -244,5 +423,6 @@ def _enum_value(value: Any) -> str:
 
 __all__ = [
     "MediaCompatibilityAdapter",
+    "MediaMetadataAdapter",
     "legacy_media_sync_log_to_envelope",
 ]

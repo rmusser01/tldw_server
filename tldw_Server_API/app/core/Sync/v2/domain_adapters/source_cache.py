@@ -19,7 +19,7 @@ from ._lineage import delete_update_conflict, prior_envelopes
 class SourceCacheAdapter:
     """Evaluate source-cache envelopes using source ID plus content hash."""
 
-    domain: SyncDomain = "source_cache"
+    domain: SyncDomain = "source_cache.entry"
     supported_adapter_versions: set[int] = field(default_factory=lambda: {1})
 
     def evaluate_envelope(
@@ -37,6 +37,12 @@ class SourceCacheAdapter:
                 client_envelope_id=envelope.client_envelope_id,
                 error_code="missing_source_cache_identity",
                 message="Source cache envelopes require source_id and content_hash metadata.",
+            )
+        if not _provenance(envelope):
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="missing_source_cache_provenance",
+                message="Source cache envelopes require provenance metadata.",
             )
         prior = prior_envelopes(envelope, context)
         delete_conflict = delete_update_conflict(
@@ -82,7 +88,7 @@ def _manual_delete_conflict(envelope: SyncEnvelopeCreate) -> AdapterConflict:
 
 
 def _is_delete(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bool:
-    return envelope.operation == "delete" or bool(
+    return envelope.operation == "tombstone" or bool(
         envelope.payload_clear.get("deleted")
         or envelope.payload_clear.get("soft_deleted")
         or envelope.payload_clear.get("tombstone")
@@ -97,8 +103,18 @@ def _content_hash(envelope: SyncEnvelope | SyncEnvelopeCreate) -> object | None:
     return (
         envelope.routing_metadata.get("content_hash")
         or envelope.payload_clear.get("content_hash")
-        or envelope.payload_clear.get("payload_hash")
     )
+
+
+def _provenance(envelope: SyncEnvelope | SyncEnvelopeCreate) -> object | None:
+    explicit = envelope.routing_metadata.get("provenance") or envelope.payload_clear.get("provenance")
+    if explicit:
+        return explicit
+    for key in ("source_uri", "url", "origin", "provider"):
+        value = envelope.routing_metadata.get(key) or envelope.payload_clear.get(key)
+        if value:
+            return value
+    return None
 
 
 __all__ = ["SourceCacheAdapter"]

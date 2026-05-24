@@ -24268,6 +24268,8 @@ for _conversation_store_method in (
     "_normalize_scope",
     "_normalize_conversation_assistant_identity",
     "add_conversation",
+    "upsert_conversation_from_sync",
+    "tombstone_conversation_from_sync",
     "get_conversation_by_id",
     "get_conversation_by_source_ref",
     "conversation_title_exists",
@@ -24335,6 +24337,9 @@ for _character_store_method in (
 
 for _message_store_method in (
     "add_message",
+    "append_message_from_sync",
+    "tombstone_message_from_sync",
+    "get_messages_by_sync_stable_id",
     "_insert_message_images",
     "append_message_image",
     "get_message_images",
@@ -24395,6 +24400,8 @@ for _note_store_method in (
     "get_keywords_for_note",
     "get_keywords_for_notes",
     "get_note_counts_for_keywords",
+    "upsert_note_from_sync",
+    "tombstone_note_from_sync",
 ):
     setattr(
         CharactersRAGDB,

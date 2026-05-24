@@ -20,14 +20,14 @@ _SOURCE_REF_KINDS = {
     "workspace_source_ref",
     "workspace_source_membership",
 }
-_MEMBERSHIP_OPERATIONS = {"delete", "link", "unlink", "upsert"}
+_SOURCE_REF_OPERATIONS = {"tombstone", "upsert"}
 
 
 @dataclass(slots=True)
 class WorkspacesDomainAdapter:
     """Evaluate workspace envelopes using V1 server-side metadata rules."""
 
-    domain: SyncDomain = "workspaces"
+    domain: SyncDomain = "workspaces.workspace"
     supported_adapter_versions: set[int] = field(default_factory=lambda: {1})
 
     def evaluate_envelope(
@@ -52,12 +52,12 @@ class WorkspacesDomainAdapter:
         )
         if delete_conflict is not None:
             return delete_conflict
-        if _is_source_ref(envelope):
-            if envelope.operation not in _MEMBERSHIP_OPERATIONS:
+        if envelope.domain == "workspaces.source_ref" or _is_source_ref(envelope):
+            if envelope.operation not in _SOURCE_REF_OPERATIONS:
                 return AdapterRejected(
                     client_envelope_id=envelope.client_envelope_id,
                     error_code="invalid_workspace_source_ref_operation",
-                    message="Workspace source refs only support link, unlink, upsert, or delete.",
+                    message="Workspace source refs only support upsert or tombstone.",
                 )
             if not (_metadata_value(envelope, "workspace_id") and _source_id(envelope)):
                 return AdapterRejected(

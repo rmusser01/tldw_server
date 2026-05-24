@@ -31,7 +31,7 @@ _CONTENT_FIELD_NAMES = {"body", "content", "title"}
 class NotesDomainAdapter:
     """Evaluate notes envelopes using private-content conflict rules."""
 
-    domain: SyncDomain = "notes"
+    domain: SyncDomain = "notes.note"
     supported_adapter_versions: set[int] = field(default_factory=lambda: {1})
 
     def evaluate_envelope(

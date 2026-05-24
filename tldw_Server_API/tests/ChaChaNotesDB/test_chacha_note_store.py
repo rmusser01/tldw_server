@@ -33,6 +33,8 @@ _DELEGATED_NOTE_METHODS = {
     "get_keywords_for_note",
     "get_keywords_for_notes",
     "get_note_counts_for_keywords",
+    "upsert_note_from_sync",
+    "tombstone_note_from_sync",
 }
 
 
@@ -124,6 +126,90 @@ class TestNoteStoreUpdate:
         assert result is True
         updated = store.get_note_by_id(note_id)
         assert updated["title"] == "Updated"
+
+
+class TestNoteStoreSyncHelpers:
+    def test_upsert_note_from_sync_creates_note_with_stable_id_and_revision(self, db):
+        result = db.upsert_note_from_sync(
+            note_id="sync-note-1",
+            title="Synced note",
+            content="Synced body",
+            conversation_id=None,
+            message_id=None,
+            sync_client_id="device-1",
+            object_revision=4,
+            object_hash="sha256:note-v4",
+        )
+
+        assert result is True
+        note = db.get_note_by_id("sync-note-1")
+        assert note is not None
+        assert note["title"] == "Synced note"
+        assert note["content"] == "Synced body"
+        assert note["client_id"] == "device-1"
+        assert note["version"] == 4
+        assert bool(note["deleted"]) is False
+
+    def test_upsert_note_from_sync_updates_note_without_changing_created_at(self, db):
+        db.upsert_note_from_sync(
+            note_id="sync-note-1",
+            title="Synced note",
+            content="Synced body",
+            conversation_id=None,
+            message_id=None,
+            sync_client_id="device-1",
+            object_revision=1,
+            object_hash="sha256:note-v1",
+        )
+        before = db.get_note_by_id("sync-note-1")
+        assert before is not None
+
+        result = db.upsert_note_from_sync(
+            note_id="sync-note-1",
+            title="Synced note revised",
+            content="Updated body",
+            conversation_id=None,
+            message_id=None,
+            sync_client_id="device-2",
+            object_revision=2,
+            object_hash="sha256:note-v2",
+        )
+
+        assert result is True
+        after = db.get_note_by_id("sync-note-1")
+        assert after is not None
+        assert after["title"] == "Synced note revised"
+        assert after["content"] == "Updated body"
+        assert after["client_id"] == "device-2"
+        assert after["version"] == 2
+        assert after["created_at"] == before["created_at"]
+
+    def test_tombstone_note_from_sync_soft_deletes_existing_note(self, db):
+        db.upsert_note_from_sync(
+            note_id="sync-note-1",
+            title="Synced note",
+            content="Synced body",
+            conversation_id=None,
+            message_id=None,
+            sync_client_id="device-1",
+            object_revision=1,
+            object_hash="sha256:note-v1",
+        )
+
+        result = db.tombstone_note_from_sync(
+            note_id="sync-note-1",
+            sync_client_id="device-1",
+            object_revision=2,
+            object_hash="sha256:note-delete",
+        )
+
+        assert result is True
+        assert db.get_note_by_id("sync-note-1") is None
+        deleted = db.get_note_by_id("sync-note-1", include_deleted=True)
+        assert deleted is not None
+        assert bool(deleted["deleted"]) is True
+        assert deleted["version"] == 2
+        assert deleted["client_id"] == "device-1"
 
 
 class TestNoteStoreSoftDelete:

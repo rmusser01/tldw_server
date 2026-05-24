@@ -308,7 +308,7 @@ class MessageStore:
             logger.error(f"Database error fetching conversation_id for message {message_id}: {e}")
             raise
 
-    def get_message_by_id(self, message_id: str) -> dict[str, Any] | None:
+    def get_message_by_id(self, message_id: str, include_deleted: bool = False) -> dict[str, Any] | None:
         """
         Retrieves a specific message by its UUID.
 
@@ -324,13 +324,14 @@ class MessageStore:
         Raises:
             CharactersRAGDBError: For database errors.
         """
+        deleted_clause = "" if include_deleted else "AND m.deleted = FALSE AND c.deleted = FALSE"
         query = (
             "SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content, "
             "m.image_data, m.image_mime_type, m.timestamp, m.ranking, m.last_modified, "
             "m.version, m.client_id, m.deleted "
             "FROM messages m "
             "JOIN conversations c ON c.id = m.conversation_id "
-            "WHERE m.id = ? AND m.deleted = FALSE AND c.deleted = FALSE"
+            f"WHERE m.id = ? {deleted_clause}"  # nosec B608
         )
         try:
             cursor = self._db.execute_query(query, (message_id,))
@@ -350,6 +351,323 @@ class MessageStore:
         except CharactersRAGDBError as e:
             logger.error(f"Database error fetching message ID {message_id}: {e}")
             raise
+
+    def append_message_from_sync(
+        self,
+        *,
+        stable_message_id: str,
+        conversation_id: str,
+        sender: str,
+        content: str | None,
+        timestamp: str | None,
+        sync_client_id: str,
+        object_revision: int,
+        payload_hash: str,
+        parent_message_id: str | None = None,
+        ranking: int | None = None,
+        projection_message_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Append a chat message from Sync v2 with stable-ID dedupe and divergence preservation."""
+
+        normalized_stable_id = str(stable_message_id).strip()
+        if not normalized_stable_id:
+            raise InputError("stable_message_id cannot be empty.")  # noqa: TRY003
+        if object_revision < 1:
+            raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
+
+        projection_id = projection_message_id or normalized_stable_id
+        forced_conflict = projection_message_id is not None
+        existing_versions = self.get_messages_by_sync_stable_id(normalized_stable_id, include_deleted=True)
+        projection_id_blocked = False
+        for version in existing_versions:
+            sync_meta = ((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {}
+            if sync_meta.get("payload_hash") == payload_hash:
+                return {
+                    "message_id": version["id"],
+                    "stable_message_id": normalized_stable_id,
+                    "created": False,
+                    "idempotent": True,
+                    "conflict": bool(sync_meta.get("projection_conflict")),
+                }
+        for version in existing_versions:
+            if version["id"] == projection_id:
+                sync_meta = ((version.get("metadata") or {}).get("extra") or {}).get("sync_v2", {})
+                sync_payload_hash = sync_meta.get("payload_hash")
+                if sync_payload_hash and sync_payload_hash != payload_hash:
+                    projection_id_blocked = True
+                    continue
+                if (
+                    not sync_payload_hash
+                    and not self._sync_projection_matches(
+                        version,
+                        conversation_id=conversation_id,
+                        parent_message_id=parent_message_id,
+                        sender=sender,
+                        content=content,
+                        timestamp=timestamp,
+                        ranking=ranking,
+                        sync_client_id=sync_client_id,
+                    )
+                ):
+                    projection_id_blocked = True
+                    continue
+                projection_conflict = forced_conflict or bool(
+                    sync_meta.get("projection_conflict")
+                )
+                self._set_sync_v2_message_metadata_or_raise(
+                    message_id=projection_id,
+                    stable_message_id=normalized_stable_id,
+                    payload_hash=payload_hash,
+                    object_revision=object_revision,
+                    projection_conflict=projection_conflict,
+                )
+                return {
+                    "message_id": projection_id,
+                    "stable_message_id": normalized_stable_id,
+                    "created": False,
+                    "idempotent": True,
+                    "conflict": projection_conflict,
+                }
+
+        is_conflict = forced_conflict or bool(existing_versions)
+        if is_conflict and (projection_message_id is None or projection_id_blocked):
+            projection_id = self._available_sync_conflict_projection_id(
+                normalized_stable_id,
+                object_revision,
+                existing_versions,
+            )
+
+        message_id = self.add_message(
+            {
+                "id": projection_id,
+                "conversation_id": conversation_id,
+                "parent_message_id": parent_message_id,
+                "sender": sender,
+                "content": content or "",
+                "timestamp": timestamp,
+                "ranking": ranking,
+                "client_id": sync_client_id,
+            }
+        )
+        if message_id is None:
+            raise CharactersRAGDBError("Failed to append Sync v2 message projection.")  # noqa: TRY003
+        if object_revision != 1:
+            self._db.execute_query(
+                "UPDATE messages SET version = ?, client_id = ? WHERE id = ?",
+                (object_revision, sync_client_id, message_id),
+                commit=True,
+            )
+        self._set_sync_v2_message_metadata_or_raise(
+            message_id=message_id,
+            stable_message_id=normalized_stable_id,
+            payload_hash=payload_hash,
+            object_revision=object_revision,
+            projection_conflict=is_conflict,
+        )
+        return {
+            "message_id": message_id,
+            "stable_message_id": normalized_stable_id,
+            "created": True,
+            "idempotent": False,
+            "conflict": is_conflict,
+        }
+
+    def tombstone_message_from_sync(
+        self,
+        *,
+        stable_message_id: str,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+    ) -> bool:
+        """Soft-delete all projections for a stable message from an accepted Sync v2 tombstone."""
+
+        normalized_stable_id = str(stable_message_id).strip()
+        if not normalized_stable_id:
+            raise InputError("stable_message_id cannot be empty.")  # noqa: TRY003
+        if object_revision < 1:
+            raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
+
+        existing_versions = self.get_messages_by_sync_stable_id(normalized_stable_id, include_deleted=True)
+        matched_versions = [
+            version
+            for version in existing_versions
+            if (((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {}).get("payload_hash")
+            == object_hash
+        ]
+        if not matched_versions:
+            matched_versions = [
+                version
+                for version in existing_versions
+                if version["id"] == normalized_stable_id
+                and not (((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {}).get(
+                    "payload_hash"
+                )
+            ]
+        if not matched_versions:
+            raise ConflictError(  # noqa: TRY003
+                "Message projection matching Sync v2 tombstone base hash was not found.",
+                entity="messages",
+                entity_id=normalized_stable_id,
+            )
+
+        matched_ids = {str(version["id"]) for version in matched_versions}
+        target_ids = [str(version["id"]) for version in existing_versions]
+        now = self._db._get_current_utc_timestamp_iso()
+        updated = 0
+        with self._db.transaction() as conn:
+            for target_id in target_ids:
+                cursor = conn.execute(
+                    """
+                    UPDATE messages
+                       SET deleted = ?,
+                           last_modified = ?,
+                           version = ?,
+                           client_id = ?
+                     WHERE id = ?
+                    """,
+                    (True, now, object_revision, sync_client_id, target_id),
+                )
+                updated += cursor.rowcount
+        if updated == 0:
+            raise ConflictError(  # noqa: TRY003
+                "Message not found for Sync v2 tombstone.",
+                entity="messages",
+                entity_id=normalized_stable_id,
+            )
+        for version in existing_versions:
+            sync_meta = dict(((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {})
+            sync_meta.setdefault("stable_message_id", normalized_stable_id)
+            sync_meta.setdefault("payload_hash", object_hash if str(version["id"]) in matched_ids else "")
+            sync_meta.update(
+                {
+                    "object_revision": object_revision,
+                    "tombstoned": True,
+                }
+            )
+            persisted = self.set_message_metadata_extra(version["id"], {"sync_v2": sync_meta}, merge=True)
+            if not persisted:
+                raise CharactersRAGDBError(  # noqa: TRY003
+                    f"Failed to persist Sync v2 tombstone metadata for message {version['id']}."
+                )
+        return True
+
+    def get_messages_by_sync_stable_id(
+        self,
+        stable_message_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Fetch message projections associated with a Sync v2 stable message ID."""
+
+        self._db._ensure_message_metadata_table()
+        deleted_clause = "" if include_deleted else "AND m.deleted = FALSE AND c.deleted = FALSE"
+        query = (
+            "SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content, "
+            "m.image_data, m.image_mime_type, m.timestamp, m.ranking, m.last_modified, "
+            "m.version, m.client_id, m.deleted, mm.tool_calls_json, mm.extra_json "
+            "FROM messages m "
+            "LEFT JOIN message_metadata mm ON mm.message_id = m.id "
+            "JOIN conversations c ON c.id = m.conversation_id "
+            f"WHERE 1 = 1 {deleted_clause} "  # nosec B608
+            "ORDER BY m.timestamp ASC, m.id ASC"
+        )
+        cursor = self._db.execute_query(query)
+        rows = cursor.fetchall()
+        columns = [col[0] for col in cursor.description] if cursor.description else []
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            record = dict(row) if isinstance(row, dict) else {columns[idx]: row[idx] for idx in range(len(columns))}
+            extra = json.loads(record.pop("extra_json") or "{}")
+            if not isinstance(extra, dict):
+                extra = {}
+            tool_calls = json.loads(record.pop("tool_calls_json") or "null")
+            metadata = {"tool_calls": tool_calls, "extra": extra}
+            sync_meta = extra.get("sync_v2") if isinstance(extra, dict) else None
+            fallback_match = record["id"] == stable_message_id or str(record["id"]).startswith(
+                f"{stable_message_id}__sync_conflict__"
+            )
+            metadata_match = isinstance(sync_meta, dict) and sync_meta.get("stable_message_id") == stable_message_id
+            if not metadata_match and not fallback_match:
+                continue
+            if not isinstance(sync_meta, dict):
+                extra["sync_v2"] = {"stable_message_id": stable_message_id}
+            img_blob = record.get("image_data")
+            if isinstance(img_blob, memoryview):
+                record["image_data"] = img_blob.tobytes()
+            record["images"] = self.get_message_images(record["id"])
+            record["metadata"] = metadata
+            results.append(record)
+        return results
+
+    def _set_sync_v2_message_metadata_or_raise(
+        self,
+        *,
+        message_id: str,
+        stable_message_id: str,
+        payload_hash: str,
+        object_revision: int,
+        projection_conflict: bool,
+    ) -> None:
+        persisted = self.set_message_metadata_extra(
+            message_id,
+            {
+                "sync_v2": {
+                    "stable_message_id": stable_message_id,
+                    "payload_hash": payload_hash,
+                    "object_revision": object_revision,
+                    "projection_conflict": projection_conflict,
+                }
+            },
+            merge=True,
+        )
+        if not persisted:
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to persist Sync v2 metadata for message {message_id}."
+            )
+
+    @staticmethod
+    def _sync_projection_matches(
+        version: dict[str, Any],
+        *,
+        conversation_id: str,
+        parent_message_id: str | None,
+        sender: str,
+        content: str | None,
+        timestamp: str | None,
+        ranking: int | None,
+        sync_client_id: str,
+    ) -> bool:
+        """Return whether a metadata-less row matches the incoming Sync v2 projection."""
+
+        if version.get("conversation_id") != conversation_id:
+            return False
+        if version.get("parent_message_id") != parent_message_id:
+            return False
+        if version.get("sender") != sender:
+            return False
+        if version.get("content") != (content or ""):
+            return False
+        if timestamp is not None and version.get("timestamp") != timestamp:
+            return False
+        if version.get("ranking") != ranking:
+            return False
+        return version.get("client_id") == sync_client_id
+
+    @staticmethod
+    def _available_sync_conflict_projection_id(
+        stable_message_id: str,
+        object_revision: int,
+        existing_versions: list[dict[str, Any]],
+    ) -> str:
+        existing_ids = {str(version["id"]) for version in existing_versions}
+        base_projection_id = f"{stable_message_id}__sync_conflict__{object_revision}"
+        projection_id = base_projection_id
+        suffix = 2
+        while projection_id in existing_ids:
+            projection_id = f"{base_projection_id}_{suffix}"
+            suffix += 1
+        return projection_id
 
     # ------------------------------------------------------------------
     # Message listing / querying

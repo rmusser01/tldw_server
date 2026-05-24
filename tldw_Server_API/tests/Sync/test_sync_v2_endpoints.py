@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -8,752 +9,1218 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
-from tldw_Server_API.app.core.Sync.v2.adapters import (
-    AdapterConflict,
-    StaticSyncAdapter,
-    SyncAdapterRegistry,
+from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
+from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
+from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
+from tldw_Server_API.app.core.Sync.v2.models import (
+    M1_SYNC_DOMAINS,
+    SYNC_V2_SUPPORTED_DOMAINS,
+    SyncDeviceUpsert,
+    SyncObjectState,
 )
-from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.security import (
+    server_trusted_encryption_status_from_config,
+)
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
 from tldw_Server_API.app.core.Sync.v2.store import SyncV2Store
 
 
 def _clock() -> str:
-    return "2026-05-10T12:00:00+00:00"
+    return "2026-05-23T18:12:00+00:00"
+
+
+def _sha256(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def _test_user() -> User:
     return User(id="user-1", username="user-1")
 
 
-@pytest.fixture()
-def registry() -> SyncAdapterRegistry:
-    registry = SyncAdapterRegistry()
-    registry.register(StaticSyncAdapter(domain="notes", supported_adapter_versions={1}))
-    registry.register(
-        StaticSyncAdapter(
-            domain="chat",
-            supported_adapter_versions={1},
-            outcomes={
-                "env-conflict": AdapterConflict(
-                    client_envelope_id="env-conflict",
-                    domain="chat",
-                    entity_id="conversation-1",
-                    conflict_type="version_divergence",
-                    message="chat conflict",
-                )
-            },
-        )
+def _ready_encryption():
+    return server_trusted_encryption_status_from_config(
+        mode="managed_storage",
+        server_trusted_enabled=True,
+        auth_mode="multi_user",
     )
-    registry.register(StaticSyncAdapter(domain="source_cache", supported_adapter_versions={1}))
-    return registry
 
 
-@pytest.fixture()
-def sync_service(tmp_path: Path, registry: SyncAdapterRegistry) -> SyncV2Service:
+def _not_ready_encryption():
+    return server_trusted_encryption_status_from_config(
+        mode=None,
+        server_trusted_enabled=False,
+        auth_mode="multi_user",
+    )
+
+
+def _registry() -> SyncAdapterRegistry:
+    return SyncAdapterRegistry(
+        [StaticSyncAdapter(domain=domain, supported_adapter_versions={1}) for domain in M1_SYNC_DOMAINS]
+    )
+
+
+class _EndpointOutcomeMaterializer:
+    domain = "notes.note"
+
+    def apply(self, envelope, *, store: SyncV2Store) -> MaterializationResult:
+        if envelope.object_id == "note-fail":
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="failed",
+                apply_error_code="projection_failed",
+                apply_error_message="projection is replayable",
+            )
+            return MaterializationResult(
+                status="failed",
+                error_code="projection_failed",
+                message="projection is replayable",
+            )
+        store.upsert_object_state(
+            SyncObjectState(
+                dataset_id=envelope.dataset_id,
+                domain=envelope.domain,
+                object_id=envelope.object_id,
+                object_revision=envelope.object_revision or 1,
+                object_hash=envelope.payload_hash or "",
+                latest_server_cursor=envelope.server_cursor,
+                deleted=False,
+            )
+        )
+        store.mark_envelope_apply_status(envelope.server_cursor, apply_status="applied")
+        return MaterializationResult(status="applied")
+
+
+def _build_service(
+    tmp_path: Path,
+    *,
+    encryption=None,
+    materializers=None,
+    supports_attachments: bool = False,
+) -> SyncV2Service:
     return SyncV2Service(
         store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_v2_endpoints.db")),
-        adapters=registry,
+        adapters=_registry(),
+        materializers=materializers,
         clock=_clock,
         id_factory=lambda prefix: f"{prefix}-generated",
-        settings=SyncV2Settings(max_pull_page_size=2),
+        blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs") if supports_attachments else None,
+        settings=SyncV2Settings(
+            supports_attachments=supports_attachments,
+            max_attachment_bytes=64,
+            max_blob_bytes=128,
+            max_chunk_bytes=8,
+            user_blob_quota_bytes=256,
+            server_trusted_encryption=encryption or _ready_encryption(),
+            restore_manifest_scan_limit=100,
+        ),
     )
+
+
+def _client_for_service(service: SyncV2Service) -> TestClient:
+    app = FastAPI()
+    app.include_router(sync_endpoint.router, prefix="/api/v1/sync")
+    app.dependency_overrides[get_request_user] = _test_user
+    app.dependency_overrides[sync_endpoint.get_sync_v2_service] = lambda: service
+    if hasattr(sync_endpoint, "get_sync_v2_profile_service"):
+        app.dependency_overrides[sync_endpoint.get_sync_v2_profile_service] = lambda: service
+    return TestClient(app)
+
+
+@pytest.fixture()
+def sync_service(tmp_path: Path) -> SyncV2Service:
+    return _build_service(tmp_path)
 
 
 @pytest.fixture()
 def client(sync_service: SyncV2Service) -> TestClient:
-    app = FastAPI()
-    app.include_router(sync_endpoint.router, prefix="/api/v1/sync")
-    app.dependency_overrides[get_request_user] = _test_user
-    if hasattr(sync_endpoint, "get_sync_v2_service"):
-        app.dependency_overrides[sync_endpoint.get_sync_v2_service] = lambda: sync_service
-    return TestClient(app)
+    return _client_for_service(sync_service)
 
 
-def _envelope(**overrides: Any) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "client_envelope_id": "env-1",
-        "dataset_id": "dataset-1",
-        "domain": "notes",
-        "entity_id": "note-1",
-        "operation": "upsert",
-        "adapter_version": 1,
-        "device_id": "device-1",
-        "stable_key": "note:note-1",
-        "client_timestamp": "2026-05-10T00:00:00+00:00",
-        "routing_metadata": {"entity_kind": "note"},
-        "payload_ciphertext": "ciphertext:opaque",
-        "payload_clear": {"status": "active"},
-        "payload_hash": "sha256:note-1",
-        "payload_size_bytes": 24,
-    }
-    payload.update(overrides)
-    return payload
-
-
-def _register_device(client: TestClient, device_id: str = "device-1") -> dict[str, Any]:
-    response = client.post(
-        "/api/v1/sync/devices/register",
-        json={
-            "device_id": device_id,
-            "display_name": "Laptop",
-            "client_type": "chatbook",
-            "client_version": "0.1.0",
-            "capabilities": {"domains": ["notes", "chat"]},
-        },
-    )
-    assert response.status_code == 200
-    return response.json()
-
-
-def _enroll_dataset(
+def test_capabilities_endpoint_reports_supported_domains_and_encryption_posture(
     client: TestClient,
-    *,
-    dataset_id: str = "dataset-1",
-    domains: list[str] | None = None,
-    encryption_policy: str = "client_private_v1",
-) -> dict[str, Any]:
-    response = client.post(
-        "/api/v1/sync/datasets/enroll",
-        json={
-            "dataset_id": dataset_id,
-            "device_id": "device-1",
-            "scope_type": "personal",
-            "domains": domains or ["notes", "chat", "source_cache"],
-            "encryption_policy": encryption_policy,
-            "metadata": {"label": "private label"},
-        },
-    )
-    assert response.status_code == 200
-    return response.json()
-
-
-def _push(client: TestClient, envelopes: list[dict[str, Any]], *, device_id: str = "device-1"):
-    return client.post(
-        "/api/v1/sync/push",
-        json={"dataset_id": "dataset-1", "device_id": device_id, "envelopes": envelopes},
-    )
-
-
-def test_capabilities_endpoint_returns_sync_v2_contract(client: TestClient):
+) -> None:
     response = client.get("/api/v1/sync/capabilities")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["protocol_version"] == 2
-    assert body["min_supported_protocol_version"] == 2
-    assert body["supported_domains"] == ["chat", "notes", "source_cache"]
-    assert body["supports_restore_manifest"] is True
-    assert body["supports_conflicts"] is True
-    assert body["supports_attachments"] is True
-    assert body["server_time"] == _clock()
+    assert body["protocol_version"] == "sync-v2-m1"
+    assert body["min_supported_protocol_version"] == "sync-v2-m1"
+    assert body["domains"] == list(SYNC_V2_SUPPORTED_DOMAINS)
+    assert body["encryption"]["policy"] == "server_trusted_v1"
+    assert body["encryption"]["ready"] is True
+    assert body["encryption"]["attestation"]["mode"] == "managed_storage"
+    assert body["encryption_policies"] == ["server_trusted_v1"]
+    assert body["blob_transfer"] == {"supported": False}
+    assert body["warnings"] == []
 
 
-def test_devices_register_endpoint_registers_and_refreshes(client: TestClient):
-    created = _register_device(client)
-    refreshed = _register_device(client)
-
-    assert created["device_id"] == "device-1"
-    assert refreshed["device_id"] == "device-1"
-    assert refreshed["server_capabilities"]["protocol_version"] == 2
-    assert refreshed["last_seen_at"] >= created["last_seen_at"]
-
-
-def test_datasets_enroll_endpoint_returns_dataset_cursors(client: TestClient):
-    _register_device(client)
-
-    body = _enroll_dataset(client, domains=["notes", "chat"])
-
-    assert body["dataset_id"] == "dataset-1"
-    assert body["scope_type"] == "personal"
-    assert body["encryption_policy"] == "client_private_v1"
-    assert body["domains"] == ["notes", "chat"]
-    assert body["cursors"] == {"notes": "0", "chat": "0"}
-    assert body["key_setup_required"] is True
-
-
-def test_restore_manifest_endpoint_applies_dataset_and_domain_filters(client: TestClient):
-    _register_device(client)
-    _enroll_dataset(client, dataset_id="dataset-1", domains=["notes", "chat"])
-    _enroll_dataset(client, dataset_id="dataset-2", domains=["source_cache"])
-    assert _push(client, [_envelope()]).status_code == 200
-    assert _push(
-        client,
-        [
-            _envelope(
-                client_envelope_id="env-chat",
-                domain="chat",
-                entity_id="conversation-1",
-                stable_key="chat:conversation-1",
-                payload_hash="sha256:chat-1",
-            )
-        ],
-    ).status_code == 200
-
-    response = client.get(
-        "/api/v1/sync/restore-manifest",
-        params=[("dataset_id", "dataset-1"), ("domain", "notes")],
-    )
+def test_profile_endpoint_is_read_only_when_no_dataset_exists(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    response = client.get("/api/v1/sync/profile", params={"device_id": "device-1"})
 
     assert response.status_code == 200
     body = response.json()
-    assert [dataset["dataset_id"] for dataset in body["datasets"]] == ["dataset-1"]
-    assert body["datasets"][0]["domains"] == ["notes"]
-    assert body["datasets"][0]["approximate_counts"] == {"notes": 1}
-    assert body["filters_applied"] == {"dataset_ids": ["dataset-1"], "domains": ["notes"]}
-    assert "private label" not in str(body)
-    assert "ciphertext:opaque" not in str(body)
+    assert body["profile_bootstrapped"] is False
+    assert body["active_dataset_id"] is None
+    assert body["dataset"] is None
+    assert body["server_cursor"] == 0
+    assert body["device"]["registered"] is False
+    assert body["domain_status"] == []
+    assert sync_service.store.list_datasets_for_user("user-1") == []
+    assert sync_service.store.list_devices_for_user("user-1") == []
 
 
-def test_push_endpoint_is_idempotent_and_rejects_unsupported_adapter_versions(
+def test_device_lifecycle_endpoints_authorize_acknowledge_and_revoke(
     client: TestClient,
-):
-    _register_device(client)
-    _enroll_dataset(client, domains=["notes"])
-
-    first = _push(
-        client,
-        [
-            _envelope(client_envelope_id="env-idempotent"),
-            _envelope(
-                client_envelope_id="env-unsupported",
-                entity_id="note-unsupported",
-                stable_key="note:unsupported",
-                payload_hash="sha256:unsupported",
-                adapter_version=99,
-            ),
-        ],
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.store.upsert_device(
+        SyncDeviceUpsert(
+            device_id="device-1",
+            user_id="user-1",
+            display_name="Trusted laptop",
+            client_type="chatbook",
+        )
     )
-    second = _push(client, [_envelope(client_envelope_id="env-idempotent")])
+    sync_service.store.upsert_device(
+        SyncDeviceUpsert(
+            device_id="device-2",
+            user_id="user-1",
+            display_name="New laptop",
+            client_type="chatbook",
+            status="pending_authorization",
+            user_label="untrusted",
+        )
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "attachment.ref"],
+    )
+
+    renamed = client.patch(
+        "/api/v1/sync/devices/device-2",
+        json={"user_label": "travel laptop"},
+    )
+    requested = client.post(
+        "/api/v1/sync/device-authorizations",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-2",
+            "authorization_method": "existing_device",
+            "idempotency_key": "authorize-device-2",
+        },
+    )
+    retry = client.post(
+        "/api/v1/sync/device-authorizations",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-2",
+            "authorization_method": "existing_device",
+            "idempotency_key": "authorize-device-2",
+        },
+    )
+    authorization_id = requested.json().get("authorization_id", "missing")
+    approved = client.post(
+        f"/api/v1/sync/device-authorizations/{authorization_id}/approve",
+        json={
+            "dataset_id": "dataset-1",
+            "approving_device_id": "device-1",
+            "idempotency_key": "approve-device-2",
+        },
+    )
+    paused = client.post("/api/v1/sync/devices/device-2/pause")
+    paused_ack = client.post(
+        "/api/v1/sync/device-acknowledgments",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-2",
+            "domain_acks": [
+                {
+                    "domain": "notes.note",
+                    "through_server_sequence": 4,
+                    "applied_at": "2026-05-23T18:29:00+00:00",
+                }
+            ],
+        },
+    )
+    resumed = client.post("/api/v1/sync/devices/device-2/resume")
+    acknowledged = client.post(
+        "/api/v1/sync/device-acknowledgments",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-2",
+            "domain_acks": [
+                {
+                    "domain": "notes.note",
+                    "through_server_sequence": 5,
+                    "applied_at": "2026-05-23T18:30:00+00:00",
+                    "idempotency_key": "notes-ack-5",
+                }
+            ],
+            "blob_acks": [
+                {
+                    "attachment_id": "attachment-1",
+                    "payload_hash": _sha256(b"attachment-1"),
+                    "verified_at": "2026-05-23T18:31:00+00:00",
+                    "idempotency_key": "blob-ack-1",
+                }
+            ],
+        },
+    )
+    revoked = client.post(
+        "/api/v1/sync/devices/device-2/revoke",
+        json={"reason": "lost_device", "revoke_key_records": True},
+    )
+    revoked_restore_manifest = client.get(
+        "/api/v1/sync/restore-manifest",
+        params={"device_id": "device-2", "dataset_id": "dataset-1"},
+    )
+    revoked_restore_preview = client.post(
+        "/api/v1/sync/restore/preview",
+        json={"device_id": "device-2", "dataset_ids": ["dataset-1"]},
+    )
+    revoked_repair = client.post(
+        "/api/v1/sync/repair",
+        json={"dataset_id": "dataset-1", "device_id": "device-2"},
+    )
+    visible = client.get("/api/v1/sync/devices")
+    auditable = client.get("/api/v1/sync/devices", params={"include_revoked": "true"})
+
+    assert renamed.status_code == 200
+    assert renamed.json()["user_label"] == "travel laptop"
+    assert requested.status_code == 200
+    assert retry.status_code == 200
+    assert retry.json()["authorization_id"] == requested.json()["authorization_id"]
+    assert requested.json()["status"] == "pending"
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["approving_device_id"] == "device-1"
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "paused"
+    assert paused_ack.status_code == 404
+    assert resumed.status_code == 200
+    assert resumed.json()["status"] == "active"
+    assert acknowledged.status_code == 200
+    assert acknowledged.json()["domain_acks"]["notes.note"]["through_server_sequence"] == 5
+    assert acknowledged.json()["blob_acks"][0]["attachment_id"] == "attachment-1"
+    assert revoked.status_code == 200
+    assert revoked.json()["status"] == "revoked"
+    assert revoked.json()["revoked_reason"] == "lost_device"
+    assert revoked_restore_manifest.status_code == 404
+    assert revoked_restore_preview.status_code == 404
+    assert revoked_repair.status_code == 404
+    assert [device["device_id"] for device in visible.json()] == ["device-1"]
+    assert {
+        device["device_id"]: device["status"]
+        for device in auditable.json()
+    } == {"device-1": "active", "device-2": "revoked"}
+
+
+def test_background_sync_policy_lease_and_status_endpoints(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.store.upsert_device(
+        SyncDeviceUpsert(
+            device_id="device-1",
+            user_id="user-1",
+            display_name="Trusted laptop",
+            client_type="chatbook",
+        )
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "attachment.ref"],
+    )
+
+    default_policy = client.get(
+        "/api/v1/sync/background-policy",
+        params={"dataset_id": "dataset-1", "device_id": "device-1"},
+    )
+    patched_policy = client.patch(
+        "/api/v1/sync/background-policy",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "enabled": False,
+            "paused_reason": "user_paused",
+            "pending_local_changes": True,
+        },
+    )
+    lease = client.post(
+        "/api/v1/sync/background-leases",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "lease_id": "lease-1",
+            "ttl_seconds": 120,
+        },
+    )
+    held = client.post(
+        "/api/v1/sync/background-leases",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "lease_id": "lease-2",
+            "ttl_seconds": 120,
+        },
+    )
+    status = client.get(
+        "/api/v1/sync/background-status",
+        params={"dataset_id": "dataset-1", "device_id": "device-1"},
+    )
+
+    assert default_policy.status_code == 200
+    assert default_policy.json()["enabled"] is True
+    assert patched_policy.status_code == 200
+    assert patched_policy.json()["enabled"] is False
+    assert patched_policy.json()["paused_reason"] == "user_paused"
+    assert patched_policy.json()["pending_local_changes"] is True
+    assert lease.status_code == 200
+    assert lease.json()["status"] == "acquired"
+    assert lease.json()["acquired"] is True
+    assert held.status_code == 200
+    assert held.json()["status"] == "held_by_other"
+    assert held.json()["lease_id"] == "lease-1"
+    assert status.status_code == 200
+    assert status.json()["policy"]["enabled"] is False
+    assert status.json()["lease"]["lease_id"] == "lease-1"
+    assert {item["domain"] for item in status.json()["domains"]} == {
+        "notes.note",
+        "attachment.ref",
+    }
+
+
+def test_profile_endpoint_for_fresh_user_does_not_create_sync_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sync_db_path = tmp_path / "fresh_sync_v2.db"
+    monkeypatch.setenv("SYNC_V2_SQLITE_PATH", str(sync_db_path))
+    monkeypatch.setenv("SYNC_V2_AT_REST_ENCRYPTION_MODE", "managed_storage")
+    monkeypatch.setenv("SYNC_V2_SERVER_TRUSTED_ENABLED", "true")
+    app = FastAPI()
+    app.include_router(sync_endpoint.router, prefix="/api/v1/sync")
+    app.dependency_overrides[get_request_user] = _test_user
+    client = TestClient(app)
+
+    response = client.get("/api/v1/sync/profile", params={"device_id": "device-1"})
+
+    assert response.status_code == 200
+    assert response.json()["profile_bootstrapped"] is False
+    assert response.json()["dataset"] is None
+    assert response.json()["device"]["registered"] is False
+    assert not sync_db_path.exists()
+
+
+def test_profile_bootstrap_endpoint_idempotently_creates_dataset_and_device(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    payload = {
+        "client_family": "chatbook",
+        "mode": "offline_sync",
+        "device_id": "device-1",
+        "device_name": "Laptop",
+        "client_profile_id": "profile-1",
+        "client_instance": {"app_version": "0.4.0", "platform": "macos"},
+        "requested_domains": list(M1_SYNC_DOMAINS),
+    }
+
+    first = client.post("/api/v1/sync/profile/bootstrap", json=payload)
+    second = client.post("/api/v1/sync/profile/bootstrap", json=payload)
+    profile = client.get("/api/v1/sync/profile", params={"device_id": "device-1"})
 
     assert first.status_code == 200
     assert second.status_code == 200
     first_body = first.json()
     second_body = second.json()
-    assert first_body["accepted"][0]["client_envelope_id"] == "env-idempotent"
-    assert second_body["accepted"][0]["server_sequence"] == first_body["accepted"][0]["server_sequence"]
-    assert first_body["rejected"][0]["client_envelope_id"] == "env-unsupported"
-    assert first_body["rejected"][0]["error_code"] == "unsupported_adapter_version"
+    assert first_body["created"] is True
+    assert second_body["created"] is False
+    assert first_body["profile_bootstrapped"] is True
+    assert first_body["device"]["device_id"] == "device-1"
+    assert first_body["device"]["registered"] is True
+    assert first_body["device"]["client_profile_id"] == "profile-1"
+    assert first_body["dataset"]["default_personal"] is True
+    assert first_body["dataset"]["client_family"] == "chatbook"
+    assert first_body["dataset"]["domains"] == list(M1_SYNC_DOMAINS)
+    assert first_body["active_dataset_id"] == first_body["dataset"]["dataset_id"]
+    assert second_body["dataset"]["dataset_id"] == first_body["dataset"]["dataset_id"]
+    assert profile.json()["dataset"]["dataset_id"] == first_body["dataset"]["dataset_id"]
+    assert {item["domain"] for item in profile.json()["domain_status"]} == set(M1_SYNC_DOMAINS)
+    assert len(sync_service.store.list_datasets_for_user("user-1")) == 1
+    assert len(sync_service.store.list_devices_for_user("user-1")) == 1
 
 
-def test_push_endpoint_requires_top_level_device_id(client: TestClient):
-    _register_device(client)
-    _enroll_dataset(client, domains=["notes"])
+def test_profile_bootstrap_endpoint_reuses_omitted_device_by_client_profile_id(
+    tmp_path: Path,
+) -> None:
+    issued: list[str] = []
 
-    response = client.post(
-        "/api/v1/sync/push",
-        json={"dataset_id": "dataset-1", "envelopes": [_envelope()]},
+    def _id_factory(prefix: str) -> str:
+        value = f"{prefix}-{len(issued) + 1}"
+        issued.append(value)
+        return value
+
+    service = SyncV2Service(
+        store=SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync_v2_endpoints.db")),
+        adapters=_registry(),
+        clock=_clock,
+        id_factory=_id_factory,
+        settings=SyncV2Settings(
+            server_trusted_encryption=_ready_encryption(),
+            restore_manifest_scan_limit=100,
+        ),
     )
-
-    assert response.status_code == 422
-
-
-def test_pull_endpoint_filters_domains_excludes_echo_and_pages(client: TestClient):
-    _register_device(client, "device-1")
-    _register_device(client, "device-2")
-    _enroll_dataset(client, domains=["notes", "chat"])
-    assert _push(client, [_envelope(client_envelope_id="own-env")], device_id="device-1").status_code == 200
-    assert _push(
-        client,
-        [
-            _envelope(
-                client_envelope_id="remote-note-1",
-                device_id="device-2",
-                entity_id="note-2",
-                stable_key="note:2",
-                payload_hash="sha256:note-2",
-            ),
-            _envelope(
-                client_envelope_id="remote-chat",
-                device_id="device-2",
-                domain="chat",
-                entity_id="conversation-1",
-                stable_key="chat:1",
-                payload_hash="sha256:chat-1",
-            ),
-            _envelope(
-                client_envelope_id="remote-note-2",
-                device_id="device-2",
-                entity_id="note-3",
-                stable_key="note:3",
-                payload_hash="sha256:note-3",
-            ),
-        ],
-        device_id="device-2",
-    ).status_code == 200
-
-    first = client.get(
-        "/api/v1/sync/pull",
-        params={
-            "dataset_id": "dataset-1",
-            "device_id": "device-1",
-            "cursor": "0",
-            "domain": "notes",
-            "page_size": "1",
-        },
-    )
-    second = client.get(
-        "/api/v1/sync/pull",
-        params=[
-            ("dataset_id", "dataset-1"),
-            ("device_id", "device-1"),
-            ("cursor", first.json()["next_cursor"]),
-            ("domain", "notes"),
-            ("page_size", "1"),
-        ],
-    )
-
-    assert first.status_code == 200
-    assert [item["client_envelope_id"] for item in first.json()["envelopes"]] == ["remote-note-1"]
-    assert first.json()["has_more"] is True
-    assert [item["client_envelope_id"] for item in second.json()["envelopes"]] == ["remote-note-2"]
-    assert second.json()["has_more"] is False
-
-
-def test_sync_store_errors_without_not_found_marker_return_server_error(
-    client: TestClient,
-    sync_service: SyncV2Service,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    def _raise_store_error(**_kwargs):
-        raise SyncStoreError("cursor write failed")
-
-    monkeypatch.setattr(sync_service, "pull", _raise_store_error)
-
-    response = client.get(
-        "/api/v1/sync/pull",
-        params={"dataset_id": "dataset-1", "device_id": "device-1", "cursor": "0"},
-    )
-
-    assert response.status_code == 500
-    assert response.json()["detail"] == {
-        "error_code": "sync_store_error",
-        "message": "Internal sync storage error while processing request.",
+    client = _client_for_service(service)
+    payload = {
+        "client_family": "chatbook",
+        "mode": "offline_sync",
+        "device_name": "Laptop",
+        "client_profile_id": "profile-1",
     }
 
+    first = client.post("/api/v1/sync/profile/bootstrap", json=payload)
+    second = client.post("/api/v1/sync/profile/bootstrap", json=payload)
 
-def test_pull_endpoint_preserves_dataset_encryption_policy(client: TestClient):
-    _register_device(client, "device-1")
-    _register_device(client, "device-2")
-    _enroll_dataset(client, domains=["notes"], encryption_policy="server_trusted")
-    pushed = _push(
-        client,
-        [
-            _envelope(
-                client_envelope_id="server-trusted-note",
-                device_id="device-2",
-                payload_ciphertext=None,
-                payload_clear={"body": "clear server-managed content"},
-                payload_hash="sha256:server-trusted-note",
-                encryption_policy="server_trusted",
-            )
-        ],
-        device_id="device-2",
-    )
-
-    pulled = client.get(
-        "/api/v1/sync/pull",
-        params={"dataset_id": "dataset-1", "device_id": "device-1", "cursor": "0"},
-    )
-
-    assert pushed.status_code == 200
-    assert pulled.status_code == 200
-    envelope = pulled.json()["envelopes"][0]
-    assert envelope["client_envelope_id"] == "server-trusted-note"
-    assert envelope["encryption_policy"] == "server_trusted"
-    assert envelope["payload_clear"]["body"] == "clear server-managed content"
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["device"]["device_id"] == first.json()["device"]["device_id"]
+    assert [device.device_id for device in service.store.list_devices_for_user("user-1")] == [
+        first.json()["device"]["device_id"]
+    ]
 
 
-def test_conflicts_list_and_resolve_endpoints(client: TestClient):
-    _register_device(client)
-    _enroll_dataset(client, domains=["chat"])
-    conflict_push = _push(
-        client,
-        [
-            _envelope(
-                client_envelope_id="env-conflict",
-                domain="chat",
-                entity_id="conversation-1",
-                stable_key="chat:conversation-1",
-                payload_hash="sha256:conflict",
-            )
-        ],
-    )
-    conflict_id = conflict_push.json()["conflicts"][0]["conflict_id"]
-
-    listed = client.get("/api/v1/sync/conflicts", params={"dataset_id": "dataset-1"})
-    resolved = client.post(
-        f"/api/v1/sync/conflicts/{conflict_id}/resolve",
-        json={"action": "dismiss", "resolved_by_device_id": "device-1", "notes": "duplicate"},
-    )
-
-    assert listed.status_code == 200
-    assert listed.json()[0]["conflict_id"] == conflict_id
-    assert listed.json()[0]["status"] == "unresolved"
-    assert resolved.status_code == 200
-    assert resolved.json()["conflict_id"] == conflict_id
-    assert resolved.json()["status"] == "dismissed"
-    assert resolved.json()["resolved_at"] is not None
-
-
-def test_conflict_resolve_endpoint_persists_resolution_envelope(client: TestClient):
-    _register_device(client, "device-1")
-    _register_device(client, "device-2")
-    _enroll_dataset(client, domains=["chat"])
-    conflict_push = _push(
-        client,
-        [
-            _envelope(
-                client_envelope_id="env-conflict",
-                domain="chat",
-                entity_id="conversation-1",
-                stable_key="chat:conversation-1",
-                payload_hash="sha256:conflict",
-            )
-        ],
-    )
-    conflict_id = conflict_push.json()["conflicts"][0]["conflict_id"]
-
-    resolved = client.post(
-        f"/api/v1/sync/conflicts/{conflict_id}/resolve",
-        json={
-            "action": "merge",
-            "resolved_by_device_id": "device-1",
-            "resolution_envelope": _envelope(
-                client_envelope_id="env-resolution",
-                domain="chat",
-                entity_id="conversation-1",
-                operation="resolve_conflict",
-                stable_key="chat:conversation-1",
-                payload_hash="sha256:resolution",
-            ),
-        },
-    )
-    pulled = client.get(
-        "/api/v1/sync/pull",
-        params={"dataset_id": "dataset-1", "device_id": "device-2", "domain": "chat", "cursor": "0"},
-    )
-
-    assert resolved.status_code == 200
-    assert resolved.json()["status"] == "resolved"
-    assert resolved.json()["resolved_by_envelope_id"] == "env-resolution"
-    assert pulled.status_code == 200
-    assert [item["client_envelope_id"] for item in pulled.json()["envelopes"]] == ["env-resolution"]
-
-
-def test_conflict_resolve_endpoint_returns_client_error_for_invalid_private_resolution(
+def test_profile_bootstrap_endpoint_without_device_or_profile_generates_device(
     client: TestClient,
-):
-    _register_device(client)
-    _enroll_dataset(client, domains=["chat"])
-    conflict_push = _push(
-        client,
-        [
-            _envelope(
-                client_envelope_id="env-conflict",
-                domain="chat",
-                entity_id="conversation-1",
-                stable_key="chat:conversation-1",
-                payload_hash="sha256:conflict",
-            )
-        ],
-    )
-    conflict_id = conflict_push.json()["conflicts"][0]["conflict_id"]
-
+    sync_service: SyncV2Service,
+) -> None:
     response = client.post(
-        f"/api/v1/sync/conflicts/{conflict_id}/resolve",
+        "/api/v1/sync/profile/bootstrap",
         json={
-            "action": "merge",
-            "resolved_by_device_id": "device-1",
-            "resolution_envelope": _envelope(
-                client_envelope_id="env-invalid-resolution",
-                domain="chat",
-                entity_id="conversation-1",
-                operation="resolve_conflict",
-                stable_key="chat:conversation-1",
-                payload_ciphertext=None,
-                payload_clear={"body": "known plaintext"},
-                payload_hash="sha256:invalid-resolution",
-                encryption_policy="server_trusted",
-            ),
-        },
-    )
-
-    assert response.status_code == 400
-    assert response.json()["detail"]["error_code"] == "sync_validation_failed"
-    assert "known plaintext" not in str(response.json())
-
-
-def test_attachments_endpoint_stores_and_deduplicates_ciphertext(client: TestClient):
-    _register_device(client)
-    _enroll_dataset(client, domains=["notes"])
-
-    response = client.post(
-        "/api/v1/sync/attachments",
-        json={
-            "dataset_id": "dataset-1",
-            "domain": "notes",
-            "entity_id": "note-1",
-            "attachment_id": "attachment-1",
-            "content_type": "application/octet-stream",
-            "size_bytes": 12,
-            "payload_ciphertext": "ciphertext:attachment-secret",
-            "payload_hash": "sha256:attachment",
-        },
-    )
-    duplicate = client.post(
-        "/api/v1/sync/attachments",
-        json={
-            "dataset_id": "dataset-1",
-            "domain": "notes",
-            "entity_id": "note-1",
-            "attachment_id": "attachment-1",
-            "content_type": "application/octet-stream",
-            "size_bytes": 12,
-            "payload_ciphertext": "ciphertext:attachment-secret",
-            "payload_hash": "sha256:attachment",
-        },
-    )
-    manifest = client.get("/api/v1/sync/restore-manifest")
-
-    assert response.status_code == 200
-    assert duplicate.status_code == 200
-    assert response.json()["stored"] is True
-    assert duplicate.json()["stored"] is False
-    assert response.json()["payload_hash"] == "sha256:attachment"
-    assert manifest.json()["datasets"][0]["attachment_availability"] == {"available": 1}
-    assert manifest.json()["datasets"][0]["attachment_size_classes"] == {"small": 1}
-    assert "attachment-secret" not in str(response.json())
-    assert "attachment-secret" not in str(duplicate.json())
-    assert "attachment-secret" not in str(manifest.json())
-
-
-def test_attachments_endpoint_validates_request_and_hides_ciphertext(client: TestClient):
-    response = client.post(
-        "/api/v1/sync/attachments",
-        json={"payload_ciphertext": "ciphertext:attachment-secret"},
-    )
-
-    assert response.status_code == 422
-    assert "attachment-secret" not in str(response.json())
-
-
-def test_attachments_endpoint_rejects_oversize_and_inaccessible_dataset(
-    client: TestClient,
-):
-    _register_device(client)
-    _enroll_dataset(client, domains=["notes"])
-
-    oversize = client.post(
-        "/api/v1/sync/attachments",
-        json={
-            "dataset_id": "dataset-1",
-            "domain": "notes",
-            "entity_id": "note-1",
-            "attachment_id": "attachment-large",
-            "content_type": "application/octet-stream",
-            "size_bytes": 1_048_577,
-            "payload_ciphertext": "ciphertext:large-secret",
-            "payload_hash": "sha256:large",
-        },
-    )
-    missing = client.post(
-        "/api/v1/sync/attachments",
-        json={
-            "dataset_id": "missing-dataset",
-            "domain": "notes",
-            "entity_id": "note-1",
-            "attachment_id": "attachment-missing",
-            "content_type": "application/octet-stream",
-            "size_bytes": 12,
-            "payload_ciphertext": "ciphertext:missing-secret",
-            "payload_hash": "sha256:missing",
-        },
-    )
-
-    assert oversize.status_code == 413
-    assert oversize.json()["detail"]["error_code"] == "sync_attachment_too_large"
-    assert missing.status_code == 404
-    assert missing.json()["detail"]["error_code"] == "sync_resource_not_found"
-    assert "large-secret" not in str(oversize.json())
-    assert "missing-secret" not in str(missing.json())
-
-
-def test_key_recovery_bundle_endpoint_stores_safe_metadata(client: TestClient):
-    _register_device(client)
-    _enroll_dataset(client, domains=["notes"])
-
-    response = client.post(
-        "/api/v1/sync/keys/recovery-bundle",
-        json={
-            "dataset_id": "dataset-1",
-            "device_id": "device-1",
-            "key_purpose": "dataset_recovery",
-            "wrapped_key_blob": "wrapped:very-secret-key",
-            "kdf_metadata": {"algorithm": "argon2id"},
-            "recovery_hint": "laptop",
+            "client_family": "chatbook",
+            "mode": "offline_sync",
+            "device_name": "Laptop",
         },
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["key_record_id"] == "key-generated"
-    assert body["dataset_id"] == "dataset-1"
-    assert body["device_id"] == "device-1"
-    assert body["key_purpose"] == "dataset_recovery"
-    assert body["recovery_hint"] == "laptop"
-    assert "wrapped_key_blob" not in body
-    assert "very-secret-key" not in str(body)
+    assert body["profile_bootstrapped"] is True
+    assert body["active_dataset_id"] is not None
+    assert body["device"]["device_id"] == "device-generated"
+    assert body["device"]["registered"] is True
+    assert body["device"]["client_profile_id"] is None
+    devices = sync_service.store.list_devices_for_user("user-1")
+    assert len(devices) == 1
+    assert devices[0].device_id == "device-generated"
+    assert devices[0].capabilities["client_profile_id"] is None
+    assert len(sync_service.store.list_datasets_for_user("user-1")) == 1
 
 
-def test_key_recovery_bundle_endpoint_lists_opaque_material_without_manifest_leakage(
-    client: TestClient,
-):
-    _register_device(client)
-    _enroll_dataset(client, domains=["notes"])
-    stored = client.post(
-        "/api/v1/sync/keys/recovery-bundle",
+def test_profile_bootstrap_endpoint_fails_closed_when_encryption_is_not_ready(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, encryption=_not_ready_encryption())
+    client = _client_for_service(service)
+
+    failed = client.post(
+        "/api/v1/sync/profile/bootstrap",
         json={
-            "dataset_id": "dataset-1",
+            "client_family": "chatbook",
+            "mode": "offline_sync",
             "device_id": "device-1",
-            "key_purpose": "dataset_recovery",
-            "wrapped_key_blob": "wrapped:very-secret-key",
-            "kdf_metadata": {"algorithm": "scrypt", "salt": "opaque-salt"},
-            "recovery_hint": "laptop",
+            "device_name": "Laptop",
         },
     )
+    profile = client.get("/api/v1/sync/profile", params={"device_id": "device-1"})
 
-    response = client.get(
-        "/api/v1/sync/keys/recovery-bundle",
-        params={
-            "dataset_id": "dataset-1",
-            "device_id": "device-1",
-            "key_purpose": "dataset_recovery",
-        },
-    )
-    manifest = client.get("/api/v1/sync/restore-manifest", params={"dataset_id": "dataset-1"})
-
-    assert stored.status_code == 200
-    assert response.status_code == 200
-    body = response.json()
-    assert body["dataset_id"] == "dataset-1"
-    assert len(body["key_records"]) == 1
-    assert body["key_records"][0]["key_record_id"] == "key-generated"
-    assert body["key_records"][0]["wrapped_key_blob"] == "wrapped:very-secret-key"
-    assert body["key_records"][0]["kdf_metadata"] == {"algorithm": "scrypt", "salt": "opaque-salt"}
-    assert body["key_records"][0]["recovery_hint"] == "laptop"
-    assert body["key_records"][0]["revoked_at"] is None
-    assert manifest.status_code == 200
-    assert manifest.json()["datasets"][0]["key_recovery_available"] is True
-    assert "wrapped:very-secret-key" not in str(manifest.json())
-    assert "opaque-salt" not in str(manifest.json())
+    assert failed.status_code == 412
+    assert failed.json()["detail"]["error_code"] == "sync_encryption_attestation_required"
+    assert profile.status_code == 200
+    assert profile.json()["capabilities"]["encryption"]["ready"] is False
+    assert profile.json()["warnings"][0]["code"] == "sync_encryption_attestation_required"
+    assert service.store.list_datasets_for_user("user-1") == []
+    assert service.store.list_devices_for_user("user-1") == []
 
 
-def test_key_recovery_bundle_endpoint_rejects_inaccessible_dataset_without_leakage(
-    client: TestClient,
-):
-    response = client.get(
-        "/api/v1/sync/keys/recovery-bundle",
-        params={
-            "dataset_id": "missing-dataset",
-            "key_purpose": "dataset_recovery",
-        },
-    )
-
-    assert response.status_code == 404
-    assert response.json()["detail"]["error_code"] == "sync_resource_not_found"
-    assert "wrapped_key_blob" not in str(response.json())
-    assert "kdf_metadata" not in str(response.json())
-
-
-def test_sync_v2_errors_and_logs_do_not_expose_sensitive_material(client: TestClient):
-    log_messages: list[str] = []
-    sink_id = logger.add(
-        lambda message: log_messages.append(str(message)),
-        format="{message} | {extra}",
-    )
-    try:
-        key_response = client.post(
-            "/api/v1/sync/keys/recovery-bundle",
-            json={
-                "dataset_id": "missing-dataset",
-                "device_id": "device-1",
-                "key_purpose": "dataset_recovery",
-                "wrapped_key_blob": "wrapped:leak-me",
-                "kdf_metadata": {"known_plaintext": "do-not-leak"},
+def test_profile_endpoint_normalizes_unknown_lower_level_device_mode(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.store.upsert_device(
+        SyncDeviceUpsert(
+            device_id="device-legacy",
+            user_id="user-1",
+            display_name="Legacy",
+            client_type="chatbook",
+            capabilities={
+                "client_profile_id": "profile-legacy",
+                "sync_mode": "legacy_internal_mode",
             },
         )
-        conflict_response = client.post(
-            "/api/v1/sync/conflicts/missing-conflict/resolve",
+    )
+    app = FastAPI()
+    app.include_router(sync_endpoint.router, prefix="/api/v1/sync")
+    app.dependency_overrides[get_request_user] = _test_user
+    app.dependency_overrides[sync_endpoint.get_sync_v2_service] = lambda: sync_service
+    app.dependency_overrides[sync_endpoint.get_sync_v2_profile_service] = lambda: sync_service
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.get("/api/v1/sync/profile", params={"device_id": "device-legacy"})
+
+    assert response.status_code == 200
+    assert response.json()["device"]["registered"] is True
+    assert response.json()["device"]["mode"] is None
+
+
+def test_lower_level_register_and_enroll_routes_remain_available_for_internal_callers(
+    client: TestClient,
+) -> None:
+    registered = client.post(
+        "/api/v1/sync/devices/register",
+        json={
+            "device_id": "device-1",
+            "display_name": "Laptop",
+            "client_type": "chatbook",
+            "client_version": "0.4.0",
+            "capabilities": {"domains": list(M1_SYNC_DOMAINS)},
+        },
+    )
+    enrolled = client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "scope_type": "personal",
+            "domains": list(M1_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+            "metadata": {"default_personal": True, "client_family": "chatbook"},
+        },
+    )
+
+    assert registered.status_code == 200
+    assert registered.json()["device_id"] == "device-1"
+    assert registered.json()["server_capabilities"]["domains"] == list(SYNC_V2_SUPPORTED_DOMAINS)
+    assert registered.json()["server_capabilities"]["encryption_policies"] == ["server_trusted_v1"]
+    assert enrolled.status_code == 200
+    assert enrolled.json()["dataset_id"] == "dataset-1"
+    assert enrolled.json()["encryption_policy"] == "server_trusted_v1"
+    assert enrolled.json()["domains"] == list(M1_SYNC_DOMAINS)
+    assert enrolled.json()["key_setup_required"] is False
+
+
+def test_key_recovery_bundle_validation_error_does_not_expose_wrapped_material(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+    )
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    secret = "wrapped:super-secret-key-material"
+    log_messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: log_messages.append(str(message)),
+        format="{message} {extra}",
+        level="WARNING",
+    )
+    try:
+        response = client.post(
+            "/api/v1/sync/keys/recovery-bundle",
             json={
-                "action": "merge",
-                "resolved_by_device_id": "device-1",
-                "resolution_envelope": _envelope(
-                    client_envelope_id="resolution-secret",
-                    payload_ciphertext="ciphertext:payload-secret",
-                    payload_clear={"status": "clear-secret"},
-                    payload_hash="sha256:resolution-secret",
-                ),
+                "dataset_id": "dataset-1",
+                "device_id": "device-1",
+                "key_purpose": "workspace_share",
+                "wrapped_key_blob": secret,
+                "kdf_metadata": {"algorithm": "scrypt", "salt": "secret-salt"},
             },
         )
     finally:
-        logger.remove(sink_id)
+        logger.remove(handler_id)
 
-    response_text = f"{key_response.json()}\n{conflict_response.json()}"
-    log_output = "\n".join(log_messages)
-
-    assert key_response.status_code == 404
-    assert conflict_response.status_code == 404
-    assert "Sync v2 request failed" in log_output
-    for secret in ("leak-me", "do-not-leak", "payload-secret", "clear-secret"):
-        assert secret not in response_text
-        assert secret not in log_output
+    assert response.status_code == 400
+    assert response.json()["detail"]["error_code"] == "sync_validation_failed"
+    assert secret not in response.text
+    assert "secret-salt" not in response.text
+    rendered_logs = "\n".join(log_messages)
+    assert secret not in rendered_logs
+    assert "secret-salt" not in rendered_logs
 
 
-def test_legacy_send_and_get_routes_preserve_existing_policy(
+def test_key_rotation_preview_and_commit_endpoints_are_redacted(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+    )
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    recovery_key = sync_service.store_key_recovery_bundle(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        key_purpose="dataset_recovery",
+        wrapped_key_blob="wrapped:current-secret",
+        kdf_metadata={"algorithm": "scrypt", "salt": "current-secret-salt"},
+    )
+    secret = "wrapped:new-secret-key-material"
+    salt = "new-secret-salt"
+
+    preview = client.post(
+        "/api/v1/sync/key-rotation/preview",
+        json={
+            "dataset_id": "dataset-1",
+            "target_encryption_policy": "passphrase_wrapped_v1",
+            "source_key_record_ids": [recovery_key.key_record_id],
+        },
+    )
+    commit = client.post(
+        "/api/v1/sync/key-rotation/commit",
+        json={
+            "dataset_id": "dataset-1",
+            "rotation_id": "rotation-1",
+            "target_encryption_policy": "passphrase_wrapped_v1",
+            "wrapped_key_blob": secret,
+            "kdf_metadata": {"algorithm": "scrypt", "salt": salt},
+            "source_key_record_ids": [recovery_key.key_record_id],
+            "wrapped_for": "passphrase",
+        },
+    )
+
+    assert preview.status_code == 200
+    assert preview.json()["can_commit"] is True
+    assert preview.json()["next_key_epoch"] == 2
+    assert preview.json()["affected_key_records"][0]["key_record_id"] == recovery_key.key_record_id
+    assert commit.status_code == 200
+    assert commit.json()["committed"] is True
+    assert commit.json()["new_key_record"]["key_epoch"] == 2
+    assert commit.json()["affected_key_records"][0]["superseded_at"] == _clock()
+    assert secret not in preview.text
+    assert salt not in preview.text
+    assert secret not in commit.text
+    assert salt not in commit.text
+
+
+def test_key_rotation_commit_endpoint_validation_error_is_redacted(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+    )
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    secret = "wrapped:new-secret-key-material"
+    salt = "new-secret-salt"
+    log_messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: log_messages.append(str(message)),
+        format="{message} {extra}",
+        level="WARNING",
+    )
+    try:
+        response = client.post(
+            "/api/v1/sync/key-rotation/commit",
+            json={
+                "dataset_id": "dataset-1",
+                "rotation_id": "rotation-1",
+                "target_encryption_policy": "passphrase_wrapped_v1",
+                "wrapped_key_blob": secret,
+                "kdf_metadata": {"algorithm": "scrypt", "salt": salt},
+                "source_key_record_ids": ["missing-key"],
+                "wrapped_for": "passphrase",
+            },
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error_code"] == "sync_validation_failed"
+    assert secret not in response.text
+    assert salt not in response.text
+    rendered_logs = "\n".join(log_messages)
+    assert secret not in rendered_logs
+    assert salt not in rendered_logs
+
+
+def test_key_rotation_commit_endpoint_422_validation_error_is_redacted(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+    )
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    secret = "wrapped:new-secret-key-material"
+    salt = "new-secret-salt"
+    log_messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: log_messages.append(str(message)),
+        format="{message} {extra}",
+        level="WARNING",
+    )
+    try:
+        response = client.post(
+            "/api/v1/sync/key-rotation/commit",
+            json={
+                "dataset_id": "dataset-1",
+                "rotation_id": "rotation-1",
+                "target_encryption_policy": "passphrase_wrapped_v1",
+                "wrapped_key_blob": secret,
+                "kdf_metadata": f"salt={salt}",
+                "source_key_record_ids": ["missing-key"],
+                "wrapped_for": "passphrase",
+            },
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error_code"] == "sync_validation_failed"
+    assert secret not in response.text
+    assert salt not in response.text
+    rendered_logs = "\n".join(log_messages)
+    assert secret not in rendered_logs
+    assert salt not in rendered_logs
+
+
+def test_datasets_enroll_endpoint_fails_closed_when_encryption_is_not_ready(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, encryption=_not_ready_encryption())
+    client = _client_for_service(service)
+
+    response = client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "scope_type": "personal",
+            "domains": list(M1_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+            "metadata": {"default_personal": True, "client_family": "chatbook"},
+        },
+    )
+
+    assert response.status_code == 412
+    assert response.json()["detail"]["error_code"] == "sync_encryption_attestation_required"
+    assert service.store.list_datasets_for_user("user-1") == []
+
+
+def _note_envelope_json(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "client_envelope_id": "env-note",
+        "dataset_id": "dataset-1",
+        "device_id": "device-1",
+        "client_sequence": 1,
+        "domain": "notes.note",
+        "operation": "upsert",
+        "object_id": "note-1",
+        "object_revision": 1,
+        "schema_version": 1,
+        "payload": {"title": "Research note", "content": "Body"},
+        "payload_hash": "sha256:note-1",
+        "created_at_client": "2026-05-23T18:12:44+00:00",
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_push_and_pull_endpoint_expose_apply_outcomes_for_replayable_failures(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(
+        tmp_path,
+        materializers={"notes.note": _EndpointOutcomeMaterializer()},
+    )
+    client = _client_for_service(service)
+    client.post(
+        "/api/v1/sync/devices/register",
+        json={"device_id": "device-1", "display_name": "Laptop", "client_type": "chatbook"},
+    )
+    client.post(
+        "/api/v1/sync/devices/register",
+        json={"device_id": "device-2", "display_name": "Phone", "client_type": "chatbook"},
+    )
+    client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-1",
+            "domains": list(M1_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+        },
+    )
+
+    pushed = client.post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                _note_envelope_json(),
+                _note_envelope_json(
+                    client_envelope_id="env-failed",
+                    object_id="note-fail",
+                    client_sequence=2,
+                    payload_hash="sha256:failed",
+                ),
+            ],
+        },
+    )
+    pulled = client.get(
+        "/api/v1/sync/pull",
+        params={
+            "dataset_id": "dataset-1",
+            "device_id": "device-2",
+            "cursor": "0",
+            "domain": "notes.note",
+            "include_own_changes": "true",
+        },
+    )
+
+    assert pushed.status_code == 200
+    accepted = pushed.json()["accepted"]
+    assert [
+        (item["client_envelope_id"], item["server_cursor"], item["object_revision"], item["apply_status"])
+        for item in accepted
+    ] == [
+        ("env-note", 1, 1, "applied"),
+        ("env-failed", 2, None, "failed"),
+    ]
+    assert accepted[1]["apply_error_code"] == "projection_failed"
+    assert "replayable" in accepted[1]["apply_error_message"]
+    assert pulled.status_code == 200
+    failed = pulled.json()["envelopes"][1]
+    assert failed["client_envelope_id"] == "env-failed"
+    assert failed["apply_status"] == "failed"
+    assert failed["apply_error_code"] == "projection_failed"
+    assert "replayable" in failed["apply_error_message"]
+
+
+def test_push_endpoint_reports_dataset_mismatch_per_envelope_in_mixed_batch(
+    client: TestClient,
+) -> None:
+    client.post(
+        "/api/v1/sync/devices/register",
+        json={"device_id": "device-1", "display_name": "Laptop", "client_type": "chatbook"},
+    )
+    client.post(
+        "/api/v1/sync/datasets/enroll",
+        json={
+            "dataset_id": "dataset-1",
+            "domains": list(M1_SYNC_DOMAINS),
+            "encryption_policy": "server_trusted_v1",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/sync/push",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                _note_envelope_json(),
+                _note_envelope_json(
+                    client_envelope_id="env-wrong-dataset",
+                    dataset_id="dataset-other",
+                    object_id="note-other",
+                    client_sequence=2,
+                    payload_hash="sha256:wrong-dataset",
+                ),
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["client_envelope_id"] for item in body["accepted"]] == ["env-note"]
+    assert body["rejected"][0]["client_envelope_id"] == "env-wrong-dataset"
+    assert body["rejected"][0]["error_code"] == "dataset_mismatch"
+
+
+def test_legacy_send_and_get_routes_return_replaced_gone(
     sync_service: SyncV2Service,
 ) -> None:
     app = FastAPI()
     app.include_router(sync_endpoint.router, prefix="/api/v1/sync")
     app.dependency_overrides[get_request_user] = _test_user
-    if hasattr(sync_endpoint, "get_sync_v2_service"):
-        app.dependency_overrides[sync_endpoint.get_sync_v2_service] = lambda: sync_service
-
-    class _Cursor:
-        def __init__(self, rows):
-            self._rows = rows
-
-        def fetchall(self):
-            return self._rows
-
-        def fetchone(self):
-            return self._rows[0] if self._rows else None
-
-    class _LegacyDb:
-        db_path_str = "/tmp/legacy-media.db"
-
-        def execute_query(self, query, params=()):
-            if "MAX(change_id)" in query:
-                return _Cursor([(7,)])
-            if "FROM sync_log" in query:
-                assert params[1] == "legacy-client"
-                return _Cursor([])
-            raise AssertionError(query)
-
-    app.dependency_overrides[get_media_db_for_user] = lambda: _LegacyDb()
+    app.dependency_overrides[sync_endpoint.get_sync_v2_service] = lambda: sync_service
     legacy_client = TestClient(app)
 
     send = legacy_client.post("/api/v1/sync/send", json={"client_id": "legacy-client", "changes": []})
+    invalid_send = legacy_client.post("/api/v1/sync/send", json={"not": "a legacy media sync payload"})
     get = legacy_client.get(
         "/api/v1/sync/get",
         params={"client_id": "legacy-client", "since_change_id": 0},
     )
+    invalid_get = legacy_client.get(
+        "/api/v1/sync/get",
+        params={"client_id": "legacy-client", "since_change_id": "not-an-int"},
+    )
 
-    assert send.status_code == 200
-    assert send.json() == {"status": "success", "message": "No changes received."}
-    assert get.status_code == 200
-    assert get.json() == {"changes": [], "latest_change_id": 7}
+    assert send.status_code == 410
+    assert send.json()["detail"]["error_code"] == "sync_legacy_endpoint_replaced"
+    assert send.json()["detail"]["replacement"] == "/api/v1/sync/push"
+    assert invalid_send.status_code == 410
+    assert invalid_send.json()["detail"]["error_code"] == "sync_legacy_endpoint_replaced"
+    assert invalid_send.json()["detail"]["replacement"] == "/api/v1/sync/push"
+    assert get.status_code == 410
+    assert get.json()["detail"]["error_code"] == "sync_legacy_endpoint_replaced"
+    assert get.json()["detail"]["replacement"] == "/api/v1/sync/pull"
+    assert invalid_get.status_code == 410
+    assert invalid_get.json()["detail"]["error_code"] == "sync_legacy_endpoint_replaced"
+    assert invalid_get.json()["detail"]["replacement"] == "/api/v1/sync/pull"
+
+
+def test_resumable_blob_upload_endpoints_accept_raw_chunks_and_complete(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    client = _client_for_service(service)
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    payload = b"hello world"
+
+    create_response = client.post(
+        "/api/v1/sync/blob-uploads",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "domain": "notes.note",
+            "object_id": "note-1",
+            "attachment_id": "attachment-1",
+            "content_type": "application/octet-stream",
+            "size_bytes": len(payload),
+            "payload_hash": _sha256(payload),
+            "chunk_size": 6,
+            "chunk_count": 2,
+            "idempotency_key": "upload-key-1",
+        },
+    )
+    assert create_response.status_code == 200
+    upload_id = create_response.json()["upload_id"]
+
+    first_response = client.put(
+        f"/api/v1/sync/blob-uploads/{upload_id}/chunks/0",
+        params={
+            "dataset_id": "dataset-1",
+            "offset_bytes": 0,
+            "chunk_hash": _sha256(payload[:6]),
+        },
+        content=payload[:6],
+        headers={"content-type": "application/octet-stream"},
+    )
+    second_response = client.put(
+        f"/api/v1/sync/blob-uploads/{upload_id}/chunks/1",
+        params={
+            "dataset_id": "dataset-1",
+            "offset_bytes": 6,
+            "chunk_hash": _sha256(payload[6:]),
+        },
+        content=payload[6:],
+        headers={"content-type": "application/octet-stream"},
+    )
+    complete_response = client.post(
+        f"/api/v1/sync/blob-uploads/{upload_id}/complete",
+        params={"dataset_id": "dataset-1"},
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.json()["missing_chunks"] == [1]
+    assert second_response.status_code == 200
+    assert second_response.json()["missing_chunks"] == []
+    assert complete_response.status_code == 200
+    body = complete_response.json()
+    assert body["attachment_id"] == "attachment-1"
+    assert body["status"] == "available"
+    assert body["stored"] is True
+    assert body["payload_hash"] == _sha256(payload)
+    assert body["quota"]["used_blob_bytes"] == len(payload)
+
+
+def test_blob_upload_endpoint_maps_validation_errors_to_safe_statuses(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    client = _client_for_service(service)
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+
+    bad_hash_response = client.put(
+        "/api/v1/sync/blob-uploads/upload-missing/chunks/0",
+        params={
+            "dataset_id": "dataset-1",
+            "offset_bytes": 0,
+            "chunk_hash": "sha256:" + "0" * 64,
+        },
+        content=b"bad",
+        headers={"content-type": "application/octet-stream"},
+    )
+    quota_response = client.post(
+        "/api/v1/sync/blob-uploads",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "domain": "notes.note",
+            "object_id": "note-1",
+            "attachment_id": "attachment-1",
+            "content_type": "application/octet-stream",
+            "size_bytes": 512,
+            "payload_hash": _sha256(b"x" * 512),
+            "chunk_size": 8,
+            "chunk_count": 64,
+        },
+    )
+
+    assert bad_hash_response.status_code == 404
+    assert bad_hash_response.json()["detail"]["error_code"] == "sync_resource_not_found"
+    assert quota_response.status_code == 413
+    assert quota_response.json()["detail"]["error_code"] == "sync_attachment_too_large"
+
+
+def test_small_attachment_endpoint_uses_blob_commit_path(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    client = _client_for_service(service)
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    payload = b"small encrypted payload"
+
+    response = client.post(
+        "/api/v1/sync/attachments",
+        json={
+            "dataset_id": "dataset-1",
+            "domain": "notes.note",
+            "object_id": "note-1",
+            "attachment_id": "attachment-small",
+            "content_type": "application/octet-stream",
+            "size_bytes": len(payload),
+            "payload_ciphertext": payload.decode("utf-8"),
+            "payload_hash": _sha256(payload),
+        },
+    )
+    quota = service.store.summarize_blob_quota("user-1", dataset_id="dataset-1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["attachment_id"] == "attachment-small"
+    assert body["stored"] is True
+    assert body["payload_hash"] == _sha256(payload)
+    assert quota.used_blob_bytes == len(payload)
+
+
+def test_attachment_download_manifest_and_byte_serving_are_dataset_scoped(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path, supports_attachments=True)
+    id_counter = {"value": 0}
+
+    def next_id(prefix: str) -> str:
+        id_counter["value"] += 1
+        return f"{prefix}-{id_counter['value']}"
+
+    service.id_factory = next_id
+    client = _client_for_service(service)
+    service.register_device(
+        user_id="user-1",
+        device_id="device-1",
+        display_name="Laptop",
+        client_type="chatbook",
+    )
+    service.register_device(
+        user_id="user-2",
+        device_id="device-2",
+        display_name="Other",
+        client_type="chatbook",
+    )
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    service.enroll_dataset(user_id="user-2", dataset_id="dataset-2", domains=["notes.note", "attachment.ref"])
+    payload = b"downloadable payload"
+    service.store_attachment(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domain="notes.note",
+        entity_id="note-1",
+        attachment_id="attachment-download",
+        content_type="application/octet-stream",
+        size_bytes=len(payload),
+        payload_ciphertext=payload.decode("utf-8"),
+        payload_hash=_sha256(payload),
+    )
+    private_payload = b"private payload"
+    service.store_attachment(
+        user_id="user-2",
+        dataset_id="dataset-2",
+        domain="notes.note",
+        entity_id="note-2",
+        attachment_id="attachment-private",
+        content_type="application/octet-stream",
+        size_bytes=len(private_payload),
+        payload_ciphertext=private_payload.decode("utf-8"),
+        payload_hash=_sha256(private_payload),
+    )
+    assert service.blob_store is not None
+
+    def fail_read_blob(_storage_key: str) -> bytes:
+        raise AssertionError("download endpoints should stream blob content")
+
+    service.blob_store.read_blob = fail_read_blob  # type: ignore[method-assign]
+
+    manifest_response = client.get(
+        "/api/v1/sync/attachments/attachment-download/manifest",
+        params={"dataset_id": "dataset-1", "chunk_size": 8},
+    )
+    bytes_response = client.get(
+        "/api/v1/sync/attachments/attachment-download",
+        params={"dataset_id": "dataset-1", "offset": 5, "size": 8},
+    )
+    forbidden_response = client.get(
+        "/api/v1/sync/attachments/attachment-private",
+        params={"dataset_id": "dataset-2"},
+    )
+
+    assert manifest_response.status_code == 200
+    manifest = manifest_response.json()
+    assert manifest["availability"] == "available"
+    assert manifest["payload_hash"] == _sha256(payload)
+    assert [chunk["chunk_index"] for chunk in manifest["chunks"]] == [0, 1, 2]
+    assert manifest["chunks"][0]["chunk_hash"] == _sha256(payload[:8])
+    assert bytes_response.status_code == 200
+    assert bytes_response.content == payload[5:13]
+    assert bytes_response.headers["content-type"] == "application/octet-stream"
+    assert forbidden_response.status_code == 404
