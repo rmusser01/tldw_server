@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-24T00:00:00-07:00",
+  "title": "Design System: tldw",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Command Blue",
+        "canonical": "#2f6fed",
+        "tonalRamp": ["#eaf0ff", "#b8cdfd", "#2f6fed", "#2456c7"]
+      },
+      "accent": {
+        "role": "secondary",
+        "displayName": "Source Teal",
+        "canonical": "#1fb59f",
+        "tonalRamp": ["#e6f8f5", "#a9e7dc", "#1fb59f", "#0d8677"]
+      },
+      "success": {
+        "role": "state",
+        "displayName": "Ready Green",
+        "canonical": "#22a07b",
+        "tonalRamp": ["#e7f7f1", "#a8e2cf", "#22a07b", "#15735a"]
+      },
+      "warn": {
+        "role": "state",
+        "displayName": "Setup Amber",
+        "canonical": "#d97706",
+        "tonalRamp": ["#fff3d8", "#ffd28a", "#d97706", "#8a4b04"]
+      },
+      "danger": {
+        "role": "state",
+        "displayName": "Review Rose",
+        "canonical": "#e0586d",
+        "tonalRamp": ["#fdecef", "#f7bac5", "#e0586d", "#9f263d"]
+      },
+      "bg-light": {
+        "role": "neutral",
+        "displayName": "Paper Field",
+        "canonical": "#f4f2ee",
+        "tonalRamp": ["#ffffff", "#fbfaf7", "#f4f2ee", "#e2ddd3"]
+      },
+      "bg-dark": {
+        "role": "neutral",
+        "displayName": "Night Field",
+        "canonical": "#0f1113",
+        "tonalRamp": ["#0f1113", "#171a1f", "#1d2128", "#232832"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Rare identity and top-level workspace moments."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page and pane hierarchy."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default product copy and dense interface text."
+      },
+      "message": {
+        "displayName": "Message",
+        "purpose": "Chat, generated answers, notes, and source-reading surfaces."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Diagnostics, IDs, code, endpoint paths, and copyable values."
+      }
+    },
+    "shadows": [
+      {
+        "name": "low-shadow-light",
+        "value": "0 1px 3px rgba(0,0,0,0.12)",
+        "purpose": "Small surface separation in light mode."
+      },
+      {
+        "name": "panel-shadow-light",
+        "value": "0 6px 18px rgba(0,0,0,0.08)",
+        "purpose": "Cards and elevated panels in light mode."
+      },
+      {
+        "name": "low-shadow-dark",
+        "value": "0 1px 2px rgba(0,0,0,0.3)",
+        "purpose": "Small surface separation in dark mode."
+      },
+      {
+        "name": "panel-shadow-dark",
+        "value": "0 4px 12px rgba(0,0,0,0.25)",
+        "purpose": "Cards and elevated panels in dark mode."
+      },
+      {
+        "name": "modal-shadow",
+        "value": "0 10px 30px rgba(0,0,0,0.28)",
+        "purpose": "Blocking overlays and high-priority dialogs."
+      },
+      {
+        "name": "focus-ring",
+        "value": "0 0 0 2px rgb(var(--color-focus) / 0.4)",
+        "purpose": "Keyboard and form focus."
+      }
+    ],
+    "motion": [
+      {
+        "name": "duration-base",
+        "value": "150ms",
+        "purpose": "Default color, shadow, and small control transitions."
+      },
+      {
+        "name": "duration-subtle",
+        "value": "75ms",
+        "purpose": "User-selected subtle animation mode."
+      },
+      {
+        "name": "duration-none",
+        "value": "0ms",
+        "purpose": "User-selected no-animation mode."
+      },
+      {
+        "name": "ease-out",
+        "value": "ease-out",
+        "purpose": "Default transition easing for controls and panels."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "content-max",
+        "value": "960px"
+      },
+      {
+        "name": "sidebar",
+        "value": "260px"
+      },
+      {
+        "name": "sidebar-collapsed",
+        "value": "64px"
+      }
+    ],
+    "rules": [
+      "Source trust before model spectacle.",
+      "Show system state plainly.",
+      "Keep expert workflows fast.",
+      "Teach through the workflow.",
+      "Preserve user control."
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main action button for product workflows.",
+      "html": "<button class=\"tldw-btn ds-btn-primary\">Continue</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem; min-height: 36px; padding: 6px 14px; border-radius: 6px; background: #2f6fed; color: #ffffff; font-weight: 500; transition: background-color 150ms ease-out; } .ds-btn-primary:focus-visible { outline: 2px solid #1fb59f; outline-offset: 2px; }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge-status",
+      "description": "Compact readable status label, optionally with a dot.",
+      "html": "<span class=\"ds-badge-status\"><span aria-hidden=\"true\"></span>Ready</span>",
+      "css": ".ds-badge-status { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; background: rgba(34,160,123,0.1); color: #22a07b; font-size: 12px; font-weight: 500; } .ds-badge-status span { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; }"
+    },
+    {
+      "name": "Recovery Callout",
+      "kind": "custom",
+      "refersTo": "alert-info",
+      "description": "State panel for unavailable, retrying, blocked, degraded, setup, auth, permission, and error states.",
+      "html": "<section class=\"ds-recovery-callout\"><span>Setup required</span><h2>Connect a provider</h2><p>Add at least one model provider before chat can answer.</p><button>Open settings</button></section>",
+      "css": ".ds-recovery-callout { border: 1px solid rgba(217,119,6,0.3); background: rgba(217,119,6,0.1); color: #1f2328; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); } .ds-recovery-callout span { display: inline-flex; width: fit-content; border-radius: 9999px; border: 1px solid rgba(217,119,6,0.3); padding: 2px 8px; color: #d97706; font-size: 12px; font-weight: 600; } .ds-recovery-callout h2 { margin: 10px 0 4px; font-size: 16px; font-weight: 600; } .ds-recovery-callout p { margin: 0 0 12px; color: #5b6472; font-size: 14px; }"
+    },
+    {
+      "name": "Panel Card",
+      "kind": "card",
+      "refersTo": "panel-card",
+      "description": "Contained work surface for tools, settings, and compact product sections.",
+      "html": "<section class=\"ds-panel-card\"><h2>Sources</h2><p>3 ready, 1 processing</p></section>",
+      "css": ".ds-panel-card { border: 1px solid #e2ddd3; background: #ffffff; color: #1f2328; border-radius: 12px; padding: 16px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); } .ds-panel-card h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; } .ds-panel-card p { margin: 0; color: #5b6472; font-size: 14px; }"
+    },
+    {
+      "name": "Panel Input",
+      "kind": "input",
+      "refersTo": "input-default",
+      "description": "Quiet input well for settings, search, filters, and forms.",
+      "html": "<input class=\"ds-panel-input\" placeholder=\"Search sources\" />",
+      "css": ".ds-panel-input { width: 100%; border: 1px solid #e2ddd3; background: #f0ede7; color: #1f2328; border-radius: 6px; padding: 8px 12px; font-size: 14px; outline: none; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; } .ds-panel-input:focus { border-color: #2f6fed; box-shadow: 0 0 0 2px rgba(31,181,159,0.4); }"
+    }
+  ]
+}
