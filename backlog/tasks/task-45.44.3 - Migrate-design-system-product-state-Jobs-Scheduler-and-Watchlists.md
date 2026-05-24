@@ -20,6 +20,7 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/2016
 - https://github.com/rmusser01/tldw_server/pull/2029
 - https://github.com/rmusser01/tldw_server/pull/2037
+- https://github.com/rmusser01/tldw_server/pull/2039
 documentation:
   - |-
     TASK-45.44.3.6 / PR #2012 migrated OutputsTab delivery-issues Alert to the design-system Alert primitive.
@@ -63,6 +64,13 @@ documentation:
       - Jobs/Scheduler/Watchlists exceptions: 18 -> 16
       - TemplateEditor target rows: 2 -> 0
     Verification recorded in TASK-45.44.3.11.
+  - |-
+    TASK-45.44.3.12 / PR #2039 migrated WatchlistSetupWizard collection-scope guidance and validation error callouts to the design-system Alert primitive.
+    Baseline evidence:
+      - total product-state exceptions: 249 -> 247
+      - Jobs/Scheduler/Watchlists exceptions: 16 -> 14
+      - WatchlistSetupWizard target rows: 2 -> 0
+    Verification recorded in TASK-45.44.3.12.
 parent_task_id: TASK-45.44
 priority: medium
 ---

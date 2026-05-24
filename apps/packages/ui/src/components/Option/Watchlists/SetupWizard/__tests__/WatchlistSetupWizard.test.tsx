@@ -168,6 +168,18 @@ describe("WatchlistSetupWizard", () => {
       target: { value: "Healthcare ransomware" }
     })
     clickNext()
+
+    expect(
+      screen
+        .getByText("Collection scope first")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Content-match alerts come later. This setup defines the Watchlist and its initial collection scope."
+      )
+    ).toBeInTheDocument()
+
     clickNext()
 
     expect(screen.getByText("Review Watchlist setup")).toBeInTheDocument()
@@ -290,6 +302,11 @@ describe("WatchlistSetupWizard", () => {
     clickNext()
 
     expect(screen.getByText("Add a Watchlist name.")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Add a Watchlist name.")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
     expect(callbacks.onCreateWatchlist).not.toHaveBeenCalled()
   })
 })
