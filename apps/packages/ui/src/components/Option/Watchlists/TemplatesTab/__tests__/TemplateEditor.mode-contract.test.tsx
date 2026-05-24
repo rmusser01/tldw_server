@@ -390,6 +390,7 @@ describe("TemplateEditor authoring mode contract", () => {
       )
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Repair layout" })).toBeInTheDocument()
+    expect(screen.getByTestId("template-editor-repair-visual-layout")).toBeInTheDocument()
   })
 
   it("applies recipe defaults and autofills name/description in basic create mode", async () => {

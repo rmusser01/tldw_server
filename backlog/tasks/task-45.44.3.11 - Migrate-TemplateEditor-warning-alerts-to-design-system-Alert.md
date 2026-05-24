@@ -3,7 +3,7 @@ id: TASK-45.44.3.11
 title: Migrate TemplateEditor warning alerts to design-system Alert
 status: Done
 assignee: []
-created_date: ''
+created_date: 2026-05-24 02:15
 updated_date: 2026-05-24 02:15
 labels:
 - design-system
@@ -18,6 +18,7 @@ references:
 modified_files:
 - apps/packages/ui/src/components/Option/Watchlists/TemplatesTab/TemplateEditor.tsx
 - apps/packages/ui/src/components/Option/Watchlists/TemplatesTab/__tests__/TemplateEditor.mode-contract.test.tsx
+- apps/packages/ui/src/components/ui/primitives/Alert.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
 ---
 
@@ -57,6 +58,12 @@ Continue TASK-45.44.3 by replacing Watchlists TemplateEditor AntD Alert warning 
 - TypeScript: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` exits 2 with 347 existing diagnostics; no diagnostics mention TemplateEditor, its mode-contract test, the product-state baseline, or this task.
 - Bandit skipped: UI-only TypeScript/JSON/backlog changes; no Python touched.
 - PR: https://github.com/rmusser01/tldw_server/pull/2037
+- Review follow-up: restored the `template-editor-repair-visual-layout` test id by allowing design-system Alert primary actions to forward `data-testid`.
+- Review follow-up: set the Backlog task `created_date` to `2026-05-24 02:15`.
+- Follow-up verification: `bunx vitest run src/components/Option/Watchlists/TemplatesTab/__tests__/TemplateEditor.mode-contract.test.tsx --reporter=dot` passed 13 tests.
+- Follow-up verification: `bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot` passed 54 tests.
+- Follow-up verification: `bun run verify:design-system-state` passed with 249 total exceptions and 16 Jobs/Scheduler/Watchlists exceptions.
+- Follow-up TypeScript: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still exits 2 with 347 existing diagnostics; no diagnostics mention TemplateEditor, the mode-contract test, Alert.tsx, the baseline, or this task.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

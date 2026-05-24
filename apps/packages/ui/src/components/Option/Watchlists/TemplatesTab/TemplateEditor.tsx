@@ -893,7 +893,8 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
             )}
             action={{
               label: t("watchlists:templates.repairVisualLayout", "Repair layout"),
-              onClick: handleRepairVisualLayout
+              onClick: handleRepairVisualLayout,
+              "data-testid": "template-editor-repair-visual-layout"
             }}
           >
             {t(
