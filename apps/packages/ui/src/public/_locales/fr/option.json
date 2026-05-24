@@ -2612,8 +2612,8 @@
   "moderationPlayground_subtitle": {
     "message": "Contrôles de sécurité familiale et garde-fous du serveur au même endroit."
   },
-  "header_workspacePlayground": {
-    "message": "Model Playground"
+  "header_researchWorkspace": {
+    "message": "Research Workspace"
   },
   "omniSearch_searchError": {
     "message": "La recherche a échoué. Veuillez réessayer."
@@ -2667,7 +2667,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Workspace Playground"
+    "message": "Model Playground"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"

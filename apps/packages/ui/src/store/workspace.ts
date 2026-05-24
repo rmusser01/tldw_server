@@ -66,7 +66,7 @@ import {
   createWorkspaceOrganizationIndex,
   deriveEffectiveSelectedSourceIds
 } from "@/store/workspace-organization"
-import { trackWorkspacePlaygroundTelemetry } from "@/utils/workspace-playground-telemetry"
+import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
 import { createSourcesSlice } from "./workspace-slices/sources-slice"
 import { createStudioSlice } from "./workspace-slices/studio-slice"
 import { createUISlice } from "./workspace-slices/ui-slice"
@@ -3710,7 +3710,7 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
           ).length
           state.generatedArtifacts = reviveArtifacts(persistedArtifacts)
           if (interruptedArtifactCount > 0) {
-            void trackWorkspacePlaygroundTelemetry({
+            void trackResearchWorkspaceTelemetry({
               type: "artifact_rehydrated_failed",
               workspace_id: state.workspaceId || null,
               interrupted_count: interruptedArtifactCount

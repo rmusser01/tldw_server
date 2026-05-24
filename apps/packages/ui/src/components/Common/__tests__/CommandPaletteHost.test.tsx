@@ -44,9 +44,9 @@ describe("CommandPaletteHost", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
   })
 
-  it("blocks the Cmd/Ctrl+K opener on the workspace playground route while still honoring the event API", async () => {
+  it("blocks the Cmd/Ctrl+K opener on the research workspace route while still honoring the event API", async () => {
     render(
-      <MemoryRouter initialEntries={["/workspace-playground"]}>
+      <MemoryRouter initialEntries={["/research-workspace"]}>
         <CommandPaletteHost />
       </MemoryRouter>
     )

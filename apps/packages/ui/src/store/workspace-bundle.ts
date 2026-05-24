@@ -11,7 +11,9 @@ import type {
   WorkspaceSource
 } from "@/types/workspace"
 
-export const WORKSPACE_EXPORT_BUNDLE_FORMAT = "tldw.workspace-playground.bundle"
+export const WORKSPACE_EXPORT_BUNDLE_FORMAT = "tldw.research-workspace.bundle"
+export const LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT =
+  "tldw.workspace-playground.bundle"
 export const WORKSPACE_EXPORT_BUNDLE_SCHEMA_VERSION = 1
 export const WORKSPACE_EXPORT_BUNDLE_PAYLOAD_FILE = "workspace.json"
 export const WORKSPACE_EXPORT_BUNDLE_MANIFEST_FILE = "manifest.json"
@@ -46,8 +48,12 @@ export interface WorkspaceBundleChatSession {
   serverChatId: string | null
 }
 
+type WorkspaceExportBundleFormat =
+  | typeof WORKSPACE_EXPORT_BUNDLE_FORMAT
+  | typeof LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT
+
 export interface WorkspaceExportBundle {
-  format: typeof WORKSPACE_EXPORT_BUNDLE_FORMAT
+  format: WorkspaceExportBundleFormat
   schemaVersion: typeof WORKSPACE_EXPORT_BUNDLE_SCHEMA_VERSION
   exportedAt: string
   workspace: {
@@ -62,7 +68,7 @@ export interface WorkspaceExportBundle {
 }
 
 interface WorkspaceExportZipManifest {
-  format: typeof WORKSPACE_EXPORT_BUNDLE_FORMAT
+  format: WorkspaceExportBundleFormat
   schemaVersion: typeof WORKSPACE_EXPORT_BUNDLE_SCHEMA_VERSION
   exportedAt: string
   workspace: {
@@ -80,7 +86,12 @@ export const isWorkspaceExportBundle = (
   value: unknown
 ): value is WorkspaceExportBundle => {
   if (!isRecord(value)) return false
-  if (value.format !== WORKSPACE_EXPORT_BUNDLE_FORMAT) return false
+  if (
+    value.format !== WORKSPACE_EXPORT_BUNDLE_FORMAT &&
+    value.format !== LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT
+  ) {
+    return false
+  }
   if (value.schemaVersion !== WORKSPACE_EXPORT_BUNDLE_SCHEMA_VERSION) return false
   if (typeof value.exportedAt !== "string") return false
   if (!isRecord(value.workspace)) return false
@@ -147,7 +158,12 @@ const isValidZipManifest = (
   manifest: unknown
 ): manifest is WorkspaceExportZipManifest => {
   if (!isRecord(manifest)) return false
-  if (manifest.format !== WORKSPACE_EXPORT_BUNDLE_FORMAT) return false
+  if (
+    manifest.format !== WORKSPACE_EXPORT_BUNDLE_FORMAT &&
+    manifest.format !== LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT
+  ) {
+    return false
+  }
   if (manifest.schemaVersion !== WORKSPACE_EXPORT_BUNDLE_SCHEMA_VERSION) return false
   if (manifest.payloadFile !== WORKSPACE_EXPORT_BUNDLE_PAYLOAD_FILE) return false
   if (typeof manifest.exportedAt !== "string") return false

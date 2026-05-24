@@ -33,12 +33,12 @@ describe("route-paths lorebook debug entrypoint", () => {
   })
 
   it("targets a registered route for workspace diagnostics links", () => {
-    const href = buildChatLorebookDebugPath({ from: "workspace-playground" })
+    const href = buildChatLorebookDebugPath({ from: "research-workspace" })
     const parsed = new URL(href, "https://example.local")
 
     expect(routeRegistrySource).toContain(`path: "${parsed.pathname}"`)
     expect(parsed.pathname).toBe(CHAT_PATH)
     expect(parsed.searchParams.get("focus")).toBe(LOREBOOK_DEBUG_FOCUS)
-    expect(parsed.searchParams.get("from")).toBe("workspace-playground")
+    expect(parsed.searchParams.get("from")).toBe("research-workspace")
   })
 })

@@ -1369,6 +1369,7 @@ else:
     from tldw_Server_API.app.api.v1.endpoints.character_messages import router as character_messages_router
 
     # Workspace Endpoints
+    from tldw_Server_API.app.api.v1.endpoints.workspace_migrations import router as workspace_migrations_router
     from tldw_Server_API.app.api.v1.endpoints.workspaces import router as workspaces_router
 
     # Character Endpoints
@@ -1645,6 +1646,7 @@ elif _MINIMAL_TEST_APP:
     from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import router as character_chat_sessions_router
     from tldw_Server_API.app.api.v1.endpoints.character_memory import router as character_memory_router
     from tldw_Server_API.app.api.v1.endpoints.character_messages import router as character_messages_router
+    from tldw_Server_API.app.api.v1.endpoints.workspace_migrations import router as workspace_migrations_router
     from tldw_Server_API.app.api.v1.endpoints.workspaces import router as workspaces_router
     from tldw_Server_API.app.api.v1.endpoints.characters_endpoint import router as character_router
     from tldw_Server_API.app.api.v1.endpoints.chat import (
@@ -6693,6 +6695,7 @@ elif _MINIMAL_TEST_APP:
         app, character_chat_sessions_router, prefix=f"{API_V1_PREFIX}/chats", tags=["character-chat-sessions"]
     )
     include_router_idempotent(app, character_messages_router, prefix=f"{API_V1_PREFIX}", tags=["character-messages"])
+    include_router_idempotent(app, workspace_migrations_router, prefix=f"{API_V1_PREFIX}/workspaces", tags=["workspaces"])
     include_router_idempotent(app, workspaces_router, prefix=f"{API_V1_PREFIX}/workspaces", tags=["workspaces"])
     # Include audio endpoints (REST + WebSocket) only when enabled by route policy.
     # In pytest + MINIMAL_TEST_APP, default to skipping audio router imports unless
@@ -7528,6 +7531,13 @@ else:
             "character-memory", character_memory_router, prefix=f"{API_V1_PREFIX}/characters", tags=["character-memory"]
         )
     if "workspaces_router" in locals():
+        if "workspace_migrations_router" in locals():
+            _include_if_enabled(
+                "workspaces",
+                workspace_migrations_router,
+                prefix=f"{API_V1_PREFIX}/workspaces",
+                tags=["workspaces"],
+            )
         _include_if_enabled(
             "workspaces", workspaces_router, prefix=f"{API_V1_PREFIX}/workspaces", tags=["workspaces"]
         )

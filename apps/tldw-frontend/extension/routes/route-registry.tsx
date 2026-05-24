@@ -194,8 +194,8 @@ const OptionGuardianSettings = createSettingsRoute(
   () => import("~/components/Option/Settings/GuardianSettings"),
   "GuardianSettings"
 )
-const OptionWorkspacePlayground = lazy(
-  () => import("./option-workspace-playground")
+const OptionResearchWorkspace = lazy(
+  () => import("./option-research-workspace")
 )
 const OptionAdminSources = lazy(() => import("./option-admin-sources"))
 
@@ -476,11 +476,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   { kind: "options", path: "/review", element: <OptionMediaMulti /> },
   {
     kind: "options",
-    path: "/workspace-playground",
-    element: <OptionWorkspacePlayground />,
+    path: "/research-workspace",
+    element: <OptionResearchWorkspace />,
     nav: {
       group: "workspace",
-      labelToken: "settings:researchStudioNav",
+      labelToken: "settings:researchWorkspaceNav",
       icon: FlaskConical,
       order: 0,
       beta: true

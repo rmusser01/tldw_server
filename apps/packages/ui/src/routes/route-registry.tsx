@@ -3,7 +3,11 @@ import type { ReactElement } from "react"
 import { ALL_TARGETS, type PlatformTarget } from "@/config/platform"
 import { createSettingsRoute } from "./settings-route"
 import { Navigate } from "react-router-dom"
-import { DOCUMENT_WORKSPACE_PATH, REPO2TXT_PATH } from "@/routes/route-paths"
+import {
+  DOCUMENT_WORKSPACE_PATH,
+  RESEARCH_WORKSPACE_PATH,
+  REPO2TXT_PATH
+} from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { isHostedVisibleOptionPath } from "./option-route-visibility"
 
@@ -167,7 +171,7 @@ const OptionSkills = lazy(() => import("./option-skills"))
 const OptionRepo2Txt = lazy(() => import("./option-repo2txt"))
 const OptionSetup = lazy(() => import("./option-setup"))
 const OptionOnboardingTest = lazy(() => import("./option-onboarding-test"))
-const OptionWorkspacePlayground = lazy(() => import("./option-workspace-playground"))
+const OptionResearchWorkspace = lazy(() => import("./option-research-workspace"))
 const OptionSharedWithMe = lazy(() => import("./option-shared-with-me"))
 const OptionPublicShare = lazy(() => import("./option-public-share"))
 
@@ -457,8 +461,8 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
-    path: "/workspace-playground",
-    element: <OptionWorkspacePlayground />,
+    path: RESEARCH_WORKSPACE_PATH,
+    element: <OptionResearchWorkspace />,
   },
   {
     kind: "options",

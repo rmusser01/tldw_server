@@ -86,7 +86,7 @@
     "acpPlayground": "ACP Playground",
     "skills": "Skills",
     "modelPlayground": "Model Playground",
-    "workspacePlayground": "Research Studio",
+    "researchWorkspace": "Research Workspace",
     "modeKanban": "Kanban Playground",
     "modeShortcutHint": "{{shortcut}} to switch",
     "quickIngest": "Quick Ingest",

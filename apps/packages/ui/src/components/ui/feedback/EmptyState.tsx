@@ -184,11 +184,16 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
             {title}
           </h2>
 
-          {description && (
-            <p className={cn("text-text-muted", sizeStyles.description)}>
-              {description}
-            </p>
-          )}
+          {description &&
+            (typeof description === "string" || typeof description === "number" ? (
+              <p className={cn("text-text-muted", sizeStyles.description)}>
+                {description}
+              </p>
+            ) : (
+              <div className={cn("text-text-muted", sizeStyles.description)}>
+                {description}
+              </div>
+            ))}
 
           {examples && examples.length > 0 && (
             <div className="text-left">

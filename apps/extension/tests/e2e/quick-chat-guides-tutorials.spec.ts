@@ -11,7 +11,7 @@ const seedTutorialLocalStorage = (completedTutorials: string[] = []) => ({
   "tldw-tutorials": JSON.stringify({
     state: {
       completedTutorials,
-      seenPromptPages: ["/chat", "/workspace-playground"]
+      seenPromptPages: ["/chat", "/research-workspace"]
     },
     version: 0
   })
@@ -131,7 +131,7 @@ async function openQuickChatBrowseGuides(page: Page, label: string): Promise<Loc
 }
 
 test.describe("Quick Chat Browse Guides tutorials validation", () => {
-  test("shows workspace tutorial cards on /workspace-playground route", async () => {
+  test("shows workspace tutorial cards on /research-workspace route", async () => {
     const { context, page, optionsUrl } = await launchWithBuiltExtension({
       seedConfig: DEFAULT_SERVER_CONFIG,
       seedLocalStorage: seedTutorialLocalStorage()
@@ -145,16 +145,16 @@ test.describe("Quick Chat Browse Guides tutorials validation", () => {
         "quick-chat-guides-workspace"
       )
 
-      await page.goto(`${optionsUrl}#/workspace-playground`)
+      await page.goto(`${optionsUrl}#/research-workspace`)
       await page.waitForLoadState("networkidle")
       await dismissWelcomeOverlayIfPresent(page)
 
-      const modal = await openQuickChatBrowseGuides(page, "workspace-playground")
+      const modal = await openQuickChatBrowseGuides(page, "research-workspace")
       await expect(
-        modal.getByTestId("quick-chat-guides-tutorial-workspace-playground-basics")
+        modal.getByTestId("quick-chat-guides-tutorial-research-workspace-basics")
       ).toBeVisible()
       await expect(
-        modal.getByTestId("quick-chat-guides-tutorial-action-workspace-playground-basics")
+        modal.getByTestId("quick-chat-guides-tutorial-action-research-workspace-basics")
       ).toHaveText(/Start/i)
       await expect(
         modal.getByTestId("quick-chat-guides-workflow-section")

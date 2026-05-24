@@ -177,7 +177,7 @@ export const PAGES: PageEntry[] = [
   { path: "/presentation-studio", name: "Presentation Studio", category: "workspace" },
   { path: "/repo2txt", name: "Repo2Txt", category: "workspace" },
   { path: "/workflow-editor", name: "Workflow Editor", category: "workspace" },
-  { path: "/workspace-playground", name: "Workspace Playground", category: "workspace" },
+  { path: "/research-workspace", name: "Research Workspace", category: "workspace" },
   { path: "/writing-playground", name: "Writing Playground", category: "workspace" },
   { path: "/sources", name: "Sources", category: "workspace" },
 

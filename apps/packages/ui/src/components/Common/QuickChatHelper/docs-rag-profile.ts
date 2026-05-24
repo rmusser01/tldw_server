@@ -80,7 +80,7 @@ export const toQuickChatDocsMediaIdsInputValue = (value: unknown): string => {
 }
 
 const ROUTE_LABELS: Record<string, string> = {
-  "/workspace-playground": "Workspace Playground",
+  "/research-workspace": "Research Workspace",
   "/media": "Media",
   "/knowledge": "Knowledge",
   "/characters": "Characters",
