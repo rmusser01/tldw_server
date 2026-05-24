@@ -49,9 +49,7 @@ from tldw_Server_API.app.core.Workspaces.status_projection import (
 router = APIRouter()
 
 WORKSPACE_SOURCE_JOB_DOMAIN = "media_ingest"
-WORKSPACE_SOURCE_JOB_QUEUE = "default"
-WORKSPACE_SOURCE_JOB_TYPE = "workspace_source_ingest"
-WORKSPACE_SOURCE_JOB_STAGES = ["ingestion", "extraction", "chunking", "indexing"]
+MEDIA_INGEST_ITEM_JOB_TYPE = "media_ingest_item"
 
 
 def _ws_to_response(ws: dict) -> WorkspaceResponse:
@@ -190,26 +188,6 @@ def try_get_workspace_job_manager() -> JobManager | None:
         return None
 
 
-def _dedupe_jobs_by_identity(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    deduped: list[dict[str, Any]] = []
-    seen: set[Any] = set()
-    for job in jobs:
-        key = job.get("id") or job.get("uuid")
-        if key is None:
-            key = (
-                job.get("domain"),
-                job.get("queue"),
-                job.get("job_type"),
-                job.get("created_at"),
-                str(job.get("payload") or ""),
-            )
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(job)
-    return deduped
-
-
 def _safe_list_jobs(jm: JobManager, **kwargs: Any) -> list[dict[str, Any]]:
     try:
         return jm.list_jobs(**kwargs)
@@ -221,66 +199,15 @@ def _list_recent_media_ingest_jobs(jm: JobManager | None, current_user: User) ->
     """Return recent media-ingest Jobs for status projection, failing open."""
     if jm is None:
         return []
-    workspace_source_jobs = _safe_list_jobs(
+    return _safe_list_jobs(
         jm,
         domain=WORKSPACE_SOURCE_JOB_DOMAIN,
-        queue=WORKSPACE_SOURCE_JOB_QUEUE,
         owner_user_id=str(current_user.id),
-        job_type=WORKSPACE_SOURCE_JOB_TYPE,
+        job_type=MEDIA_INGEST_ITEM_JOB_TYPE,
         limit=500,
         sort_by="created_at",
         sort_order="desc",
     )
-    legacy_media_jobs = _safe_list_jobs(
-        jm,
-        domain=WORKSPACE_SOURCE_JOB_DOMAIN,
-        owner_user_id=str(current_user.id),
-        limit=500,
-        sort_by="created_at",
-        sort_order="desc",
-    )
-    return _dedupe_jobs_by_identity(workspace_source_jobs + legacy_media_jobs)
-
-
-def _enqueue_workspace_source_ingest_job(
-    *,
-    jm: JobManager | None,
-    current_user: User,
-    workspace_id: str,
-    src: dict[str, Any],
-) -> None:
-    """Submit a source lifecycle job after the workspace source row exists."""
-    if jm is None:
-        return
-    source_id = str(src["id"])
-    media_id = int(src["media_id"])
-    payload = {
-        "workspace_id": workspace_id,
-        "workspace_source_id": source_id,
-        "source_id": source_id,
-        "media_id": media_id,
-        "source_type": str(src["source_type"]),
-        "title": str(src["title"]),
-        "url": src.get("url"),
-        "requested_stages": WORKSPACE_SOURCE_JOB_STAGES,
-    }
-    try:
-        jm.create_job(
-            domain=WORKSPACE_SOURCE_JOB_DOMAIN,
-            queue=WORKSPACE_SOURCE_JOB_QUEUE,
-            job_type=WORKSPACE_SOURCE_JOB_TYPE,
-            payload=payload,
-            owner_user_id=str(current_user.id),
-            idempotency_key=f"workspace-source:{workspace_id}:{source_id}:{media_id}",
-            max_retries=3,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Workspace source ingest job enqueue failed for workspace={} source={}: {}",
-            workspace_id,
-            source_id,
-            exc,
-        )
 
 
 # ── Workspace CRUD ──────────────────────────────────────────────
@@ -488,21 +415,15 @@ async def add_source(
     workspace_id: str,
     body: WorkspaceSourceCreateRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    jm: JobManager | None = Depends(try_get_workspace_job_manager),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceSourceResponse:
     """Add a media source to a workspace."""
+    _ = current_user
     _require_workspace(db, workspace_id)
     try:
         src = db.add_workspace_source(workspace_id, body.model_dump())
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to add workspace source") from exc
-    _enqueue_workspace_source_ingest_job(
-        jm=jm,
-        current_user=current_user,
-        workspace_id=workspace_id,
-        src=src,
-    )
     return _src_to_response(src)
 
 
