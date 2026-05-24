@@ -74,6 +74,54 @@ def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path) ->
         migrated.close_connection()
 
 
+def test_migration_v44_to_v45_creates_persona_visual_tables(
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify the exact v44 -> v45 update path is registered and runnable."""
+    seeded = CharactersRAGDB(db_path, "persona-visuals-v45-seed")
+    seeded.close_connection()
+
+    CharactersRAGDB._prepare_sqlite_schema_drift_fixture(
+        db_path,
+        version=44,
+        drop_tables=(
+            "persona_visual_candidates",
+            "persona_visual_assets",
+            "persona_visual_packs",
+        ),
+    )
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 45)
+
+    migrated = CharactersRAGDB(db_path, "persona-visuals-v45-migration")
+    try:
+        conn = migrated.get_connection()
+
+        version = migrated._get_db_version(conn)
+        assert version == 45
+
+        tables = migrated._sqlite_table_names(conn)
+        assert {
+            "persona_visual_packs",
+            "persona_visual_assets",
+            "persona_visual_candidates",
+        }.issubset(tables)
+    finally:
+        migrated.close_connection()
+
+
+def test_sqlite_linear_migration_registry_maps_v44_to_v45(db_path: Path) -> None:
+    """Verify the dispatcher advertises the v44 -> v45 migration path."""
+    db = CharactersRAGDB(db_path, "persona-visuals-registry")
+    try:
+        migration_steps = db._sqlite_linear_migration_steps()
+
+        assert 44 in migration_steps
+        assert migration_steps[44].__name__ == "_migrate_from_v44_to_v45"
+    finally:
+        db.close_connection()
+
+
 def test_migration_v44_to_latest_repairs_missing_persona_tables(db_path: Path) -> None:
     """Verify drifted v44 databases repair missing persona schema artifacts."""
     seeded = CharactersRAGDB(db_path, "persona-visuals-missing-persona-seed")
