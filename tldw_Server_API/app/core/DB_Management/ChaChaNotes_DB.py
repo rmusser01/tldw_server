@@ -645,6 +645,26 @@ class CharactersRAGDB:
         "rejected",
         "failed",
     )
+    _SQLITE_MIGRATION_FIXTURE_DROP_STATEMENTS: dict[str, str] = {
+        "persona_profiles": "DROP TABLE IF EXISTS persona_profiles",
+        "persona_scope_rules": "DROP TABLE IF EXISTS persona_scope_rules",
+        "persona_policy_rules": "DROP TABLE IF EXISTS persona_policy_rules",
+        "persona_sessions": "DROP TABLE IF EXISTS persona_sessions",
+        "persona_memory_entries": "DROP TABLE IF EXISTS persona_memory_entries",
+        "persona_visual_packs": "DROP TABLE IF EXISTS persona_visual_packs",
+        "persona_visual_assets": "DROP TABLE IF EXISTS persona_visual_assets",
+        "persona_visual_candidates": "DROP TABLE IF EXISTS persona_visual_candidates",
+    }
+    _SQLITE_SCHEMA_TABLE_INFO_STATEMENTS: dict[str, str] = {
+        "persona_profiles": "PRAGMA table_info('persona_profiles')",
+        "persona_memory_entries": "PRAGMA table_info('persona_memory_entries')",
+    }
+    _SQLITE_SCHEMA_INDEX_LIST_STATEMENTS: dict[str, str] = {
+        "persona_profiles": "PRAGMA index_list('persona_profiles')",
+        "persona_memory_entries": "PRAGMA index_list('persona_memory_entries')",
+        "persona_visual_packs": "PRAGMA index_list('persona_visual_packs')",
+        "persona_visual_assets": "PRAGMA index_list('persona_visual_assets')",
+    }
     _ALLOWED_WORKSPACE_ARTIFACT_REVIEW_STATES: tuple[str, ...] = (
         "draft",
         "reviewing",
@@ -6224,6 +6244,56 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return BackendManagedTransaction(self)
 
     # --- Schema Initialization and Migration ---
+    @classmethod
+    def _prepare_sqlite_schema_drift_fixture(
+        cls,
+        db_path: Path | str,
+        *,
+        version: int,
+        drop_tables: tuple[str, ...],
+    ) -> None:
+        """Prepare a controlled SQLite schema drift fixture for migration regression tests."""
+        if version < 0 or version > cls._CURRENT_SCHEMA_VERSION:
+            raise ValueError(f"Unsupported schema fixture version: {version}")
+
+        unsupported_tables = set(drop_tables) - set(cls._SQLITE_MIGRATION_FIXTURE_DROP_STATEMENTS)
+        if unsupported_tables:
+            raise ValueError(f"Unsupported schema fixture table drops: {sorted(unsupported_tables)}")
+
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute(
+                "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
+                (version, cls._SCHEMA_NAME),
+            )
+            for table_name in drop_tables:
+                conn.execute(cls._SQLITE_MIGRATION_FIXTURE_DROP_STATEMENTS[table_name])
+            conn.commit()
+
+    @staticmethod
+    def _sqlite_table_names(conn: sqlite3.Connection) -> set[str]:
+        """Return the SQLite table names visible to a migration connection."""
+        return {
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        }
+
+    @classmethod
+    def _sqlite_column_names(cls, conn: sqlite3.Connection, table_name: str) -> set[str]:
+        """Return column names for controlled SQLite schema introspection."""
+        query = cls._SQLITE_SCHEMA_TABLE_INFO_STATEMENTS.get(table_name)
+        if query is None:
+            raise ValueError(f"Unsupported SQLite table introspection: {table_name}")
+        return {str(row[1]) for row in conn.execute(query).fetchall()}
+
+    @classmethod
+    def _sqlite_index_names(cls, conn: sqlite3.Connection, table_name: str) -> set[str]:
+        """Return index names for controlled SQLite schema introspection."""
+        query = cls._SQLITE_SCHEMA_INDEX_LIST_STATEMENTS.get(table_name)
+        if query is None:
+            raise ValueError(f"Unsupported SQLite index introspection: {table_name}")
+        return {str(row[1]) for row in conn.execute(query).fetchall()}
+
     def _get_db_version(self, conn: sqlite3.Connection) -> int:
         """
         Retrieves the current schema version from the `db_schema_version` table
@@ -7418,6 +7488,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Migrate schema from V44 to V45 (persona visual packs)."""
         logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V44 to V45 for DB: {self.db_path_str}...")
         try:
+            self._ensure_persona_persistence_schema_sqlite(conn)
             conn.executescript(self._MIGRATION_SQL_V44_TO_V45)
             final_version = self._get_db_version(conn)
             if final_version != 45:
@@ -7487,9 +7558,54 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V46->V47: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V47 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Repair persona persistence tables for databases with collided schema versions."""
+        required_tables = {
+            "persona_profiles",
+            "persona_scope_rules",
+            "persona_policy_rules",
+            "persona_sessions",
+            "persona_memory_entries",
+        }
+        existing_tables = self._sqlite_table_names(conn)
+        missing_tables = required_tables - existing_tables
+        if missing_tables:
+            logger.warning(
+                "[{}] Persona persistence tables missing despite current schema marker: {}. Reapplying base schema.",
+                self._SCHEMA_NAME,
+                ", ".join(sorted(missing_tables)),
+            )
+            conn.executescript(self._MIGRATION_SQL_V25_TO_V26)
+
+        profile_cols = self._sqlite_column_names(conn, "persona_profiles")
+        if "use_persona_state_context_default" not in profile_cols:
+            conn.execute(
+                "ALTER TABLE persona_profiles "
+                "ADD COLUMN use_persona_state_context_default BOOLEAN NOT NULL DEFAULT 1"
+            )
+
+        memory_cols = self._sqlite_column_names(conn, "persona_memory_entries")
+        if "scope_snapshot_id" not in memory_cols:
+            conn.execute("ALTER TABLE persona_memory_entries ADD COLUMN scope_snapshot_id TEXT")
+        if "session_id" not in memory_cols:
+            conn.execute("ALTER TABLE persona_memory_entries ADD COLUMN session_id TEXT")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_persona_memory_scope
+              ON persona_memory_entries(user_id, persona_id, scope_snapshot_id, archived, deleted)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_persona_memory_session
+              ON persona_memory_entries(user_id, persona_id, session_id, archived, deleted)
+            """
+        )
+
     def _ensure_recent_persona_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Backfill recent persona schema columns after version-number collisions."""
-        profile_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_profiles')").fetchall()}
+        self._ensure_persona_persistence_schema_sqlite(conn)
+        profile_cols = self._sqlite_column_names(conn, "persona_profiles")
         if "voice_defaults_json" not in profile_cols:
             conn.execute("ALTER TABLE persona_profiles ADD COLUMN voice_defaults_json TEXT")
         if "setup_json" not in profile_cols:
