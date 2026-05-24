@@ -268,22 +268,13 @@ def test_workspace_sources_status_uses_active_media_ingest_job_progress(
     assert source["job"]["progress_message"] == "vector indexing"
 
 
-def test_recent_media_ingest_jobs_prioritizes_workspace_source_jobs() -> None:
-    class _PrioritizedJobManager:
+def test_recent_media_ingest_jobs_filters_to_supported_media_ingest_jobs() -> None:
+    class _MediaIngestJobManager:
         def __init__(self) -> None:
             self.calls: list[dict[str, Any]] = []
 
         def list_jobs(self, **kwargs: Any) -> list[dict[str, Any]]:
             self.calls.append(kwargs)
-            if kwargs.get("job_type") == "workspace_source_ingest":
-                return [
-                    {
-                        "id": 1,
-                        "domain": "media_ingest",
-                        "queue": "default",
-                        "job_type": "workspace_source_ingest",
-                    }
-                ]
             return [
                 {
                     "id": 2,
@@ -291,23 +282,14 @@ def test_recent_media_ingest_jobs_prioritizes_workspace_source_jobs() -> None:
                     "queue": "default",
                     "job_type": "media_ingest_item",
                 },
-                {
-                    "id": 1,
-                    "domain": "media_ingest",
-                    "queue": "default",
-                    "job_type": "workspace_source_ingest",
-                },
             ]
 
-    jm = _PrioritizedJobManager()
+    jm = _MediaIngestJobManager()
     jobs = workspaces_endpoint._list_recent_media_ingest_jobs(jm, SimpleNamespace(id=1))
 
-    assert [job["id"] for job in jobs] == [1, 2]
+    assert [job["id"] for job in jobs] == [2]
     assert jm.calls[0]["domain"] == "media_ingest"
-    assert jm.calls[0]["queue"] == "default"
-    assert jm.calls[0]["job_type"] == "workspace_source_ingest"
-    assert jm.calls[1]["domain"] == "media_ingest"
-    assert "job_type" not in jm.calls[1]
+    assert jm.calls[0]["job_type"] == "media_ingest_item"
 
 
 def test_workspace_job_manager_resolver_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
