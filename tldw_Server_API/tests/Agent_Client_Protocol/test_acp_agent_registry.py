@@ -467,7 +467,10 @@ agents:
 
 
 class TestDynamicRegistration:
+    """Tests for database-backed dynamic ACP agent registrations."""
+
     def test_register_agent(self, db_registry):
+        """Registering an agent should add it to the active registry."""
         entry = db_registry.register_agent(
             type="my_agent", name="My Agent", command="my-agent-cli",
         )
@@ -475,26 +478,31 @@ class TestDynamicRegistration:
         assert db_registry.get_entry("my_agent") is not None
 
     def test_deregister_agent(self, db_registry):
+        """Deregistering a dynamic agent should remove it from lookups."""
         db_registry.register_agent(type="tmp", name="Tmp", command="tmp")
         assert db_registry.deregister_agent("tmp") is True
         assert db_registry.get_entry("tmp") is None
 
     def test_deregister_nonexistent(self, db_registry):
+        """Deregistering an unknown dynamic agent should report no-op."""
         assert db_registry.deregister_agent("nonexistent") is False
 
     def test_yaml_entries_preserved_after_register(self, db_registry):
+        """Registering dynamic agents should not remove YAML-defined entries."""
         assert db_registry.get_entry("claude_code") is not None
         db_registry.register_agent(type="new", name="New", command="new")
         assert db_registry.get_entry("claude_code") is not None
         assert db_registry.get_entry("new") is not None
 
     def test_api_overrides_yaml_same_type(self, db_registry):
+        """A dynamic registration should override a YAML entry with the same type."""
         db_registry.register_agent(type="claude_code", name="Custom Claude", command="my-claude")
         entry = db_registry.get_entry("claude_code")
         assert entry.name == "Custom Claude"
         assert entry.command == "my-claude"
 
     def test_update_agent(self, db_registry):
+        """Updating a dynamic agent should persist changed fields in the registry."""
         db_registry.register_agent(type="my_agent", name="My Agent", command="cmd")
         updated = db_registry.update_agent("my_agent", name="Updated Agent", description="new desc")
         assert updated is not None
@@ -502,6 +510,7 @@ class TestDynamicRegistration:
         assert updated.description == "new desc"
 
     def test_update_nonexistent(self, db_registry):
+        """Updating an unknown dynamic agent should return None."""
         assert db_registry.update_agent("nonexistent", name="foo") is None
 
     def test_persistence_across_reload(self, db_registry):

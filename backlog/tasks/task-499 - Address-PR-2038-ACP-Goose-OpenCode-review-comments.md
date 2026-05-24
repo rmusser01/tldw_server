@@ -65,6 +65,8 @@ Resolved the PR #2038 review feedback by exporting TLDW_ACP_HOST_HOME for absolu
 
 Addressed the subsequent CodeRabbit comments by adding a top-level heading plus MD022 spacing to the Goose live-E2E plan and narrowing registered-agent env expansion so only `${NAME}` placeholders in the value side of `KEY=VALUE` entries are expanded; literal `$NAME`, keys, and no-equals entries are preserved.
 
+Addressed the remaining Gemini cleanup thread by routing ACP env override clearing through the shared `_ACP_ENV_KEYS` constant, and added docstrings to the touched ACP config helpers/classes and dynamic registry tests to reduce docstring coverage warnings on the PR surface.
+
 Verification: `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_config_cwd.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_agent_registry.py -q` passed 47 tests; `go test ./internal/acp -count=1` passed; `tools/tldw-agent/scripts/verify-local-build.sh` passed; `python -m bandit -r ... -s B101 -f json` reported zero findings; `git diff --check` passed.
 
 Known caveats remain the documented ACP support caveats: sandbox behavior, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior require separate certification before those capabilities are claimed.

@@ -26,6 +26,12 @@ _ACP_ENV_KEYS = (
 _ACP_HOST_HOME_ENV_KEY = "TLDW_ACP_HOST_HOME"
 
 
+def _clear_acp_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove ACP runner-related environment variables from a test process."""
+    for key in _ACP_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
 class TestResolveCwd:
     """Unit tests for _resolve_cwd helper."""
 
@@ -78,8 +84,7 @@ class TestLoadAcpRunnerConfigCwd:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The default config should point at the bundled tldw-agent runner."""
-        for key in _ACP_ENV_KEYS:
-            monkeypatch.delenv(key, raising=False)
+        _clear_acp_env(monkeypatch)
 
         cfg = load_acp_runner_config()
 
@@ -188,8 +193,8 @@ class TestLoadAcpRunnerConfigEnv:
             "runner_command": "node",
             "runner_env": "HOME=./acp_runner_home,PYTHONUNBUFFERED=1",
         }
+        _clear_acp_env(monkeypatch)
         monkeypatch.setenv("HOME", "/Users/operator")
-        monkeypatch.delenv(_ACP_HOST_HOME_ENV_KEY, raising=False)
 
         with patch(
             "tldw_Server_API.app.core.Agent_Client_Protocol.config.get_config_section",
@@ -198,16 +203,6 @@ class TestLoadAcpRunnerConfigEnv:
             "tldw_Server_API.app.core.Agent_Client_Protocol.config._get_config_file_dir",
             return_value=fake_config_dir,
         ):
-            for key in (
-                "ACP_RUNNER_CWD",
-                "ACP_RUNNER_COMMAND",
-                "ACP_RUNNER_ARGS",
-                "ACP_RUNNER_ENV",
-                "ACP_RUNNER_BINARY_PATH",
-                "ACP_RUNNER_STARTUP_TIMEOUT_MS",
-            ):
-                monkeypatch.delenv(key, raising=False)
-
             cfg = load_acp_runner_config()
 
         assert cfg.env["HOME"] == os.path.normpath(os.path.join(fake_config_dir, "./acp_runner_home"))
