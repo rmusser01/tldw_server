@@ -81,6 +81,48 @@ def test_local_blob_store_streams_commit_and_read_without_read_bytes(
     assert b"".join(store.iter_blob(final_key, chunk_size=3)) == first + second
 
 
+def test_local_blob_store_uses_unique_commit_temp_paths_for_same_payload_hash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    payload = b"same shared payload"
+    payload_hash = _sha256(payload)
+    for upload_id in ("upload-1", "upload-2"):
+        store.write_upload_chunk(
+            upload_id=upload_id,
+            chunk_index=0,
+            payload=payload,
+            expected_hash=payload_hash,
+        )
+
+    original_open = Path.open
+    commit_write_paths: list[Path] = []
+
+    def track_commit_write_path(self: Path, *args, **kwargs):
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if "w" in mode and self.name.endswith(".tmp"):
+            commit_write_paths.append(self)
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", track_commit_write_path)
+
+    first_key = store.commit_upload(
+        upload_id="upload-1",
+        payload_hash=payload_hash,
+        chunk_indexes=[0],
+    )
+    second_key = store.commit_upload(
+        upload_id="upload-2",
+        payload_hash=payload_hash,
+        chunk_indexes=[0],
+    )
+
+    assert first_key == second_key
+    assert len(commit_write_paths) == 2
+    assert len(set(commit_write_paths)) == 2
+
+
 def test_local_blob_store_commit_cleanup_failure_is_nonfatal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
