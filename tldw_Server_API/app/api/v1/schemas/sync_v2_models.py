@@ -1758,6 +1758,7 @@ __all__ = [
     "SyncPullResponse",
     "SyncPushAcceptedEnvelope",
     "SyncPushConflictEnvelope",
+    "SyncPushOptions",
     "SyncPushRejectedEnvelope",
     "SyncPushRequest",
     "SyncPushResponse",

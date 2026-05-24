@@ -598,6 +598,10 @@ def test_push_request_accepts_locked_contract_cursor_and_options():
     assert request.options.stop_on_conflict is True
 
 
+def test_sync_v2_models_exports_push_options_for_star_imports():
+    assert "SyncPushOptions" in api_sync_models.__all__
+
+
 def test_whole_object_tombstone_requires_base_metadata():
     with pytest.raises(ValidationError):
         SyncV2Envelope.model_validate(

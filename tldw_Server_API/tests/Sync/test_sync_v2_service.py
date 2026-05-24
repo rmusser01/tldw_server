@@ -4513,6 +4513,67 @@ def test_blob_upload_session_chunk_and_complete_flow_commits_blob(
     assert quota.active_upload_count == 0
 
 
+def test_blob_upload_completion_returns_committed_blob_when_cleanup_fails(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    blob_store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=blob_store,
+        settings=SyncV2Settings(
+            supports_attachments=True,
+            max_blob_bytes=64,
+            max_chunk_bytes=16,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note", "attachment.ref"])
+    payload = b"cleanup failure"
+    session = service.create_blob_upload_session(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        domain="notes.note",
+        entity_id="note-1",
+        attachment_id="attachment-1",
+        content_type="application/octet-stream",
+        size_bytes=len(payload),
+        payload_hash=_sha256(payload),
+        chunk_size=len(payload),
+        chunk_count=1,
+    )
+    service.upload_blob_chunk(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        upload_id=session.upload_id,
+        chunk_index=0,
+        offset_bytes=0,
+        chunk_payload=payload,
+        chunk_hash=_sha256(payload),
+    )
+
+    def fail_discard(_upload_id: str) -> None:
+        raise OSError("cleanup blocked")
+
+    monkeypatch.setattr(blob_store, "discard_upload", fail_discard)
+
+    blob = service.complete_blob_upload(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        upload_id=session.upload_id,
+    )
+
+    assert blob.status == "available"
+    assert blob_store.read_blob(blob.storage_key) == payload
+
+
 def test_blob_upload_rejects_bad_hash_domain_and_quota(
     sync_store: SyncV2Store,
     registry: SyncAdapterRegistry,

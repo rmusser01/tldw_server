@@ -22,6 +22,10 @@ Fix the PR #2043 review finding where LocalSyncBlobStore.commit_upload uses a de
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- Same-payload commits from distinct upload IDs use distinct temporary paths under the final blob directory.
+- The final blob key remains content-addressed and identical for identical payloads, and committed bytes read back unchanged.
+- Unique temporary files are atomically replaced into the final location and cleanup keeps the existing error handling behavior.
+- The focused regression test, blob-store test file, full Sync suite, `git diff --check`, and Bandit verification are recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -42,15 +46,15 @@ Fix the PR #2043 review finding where LocalSyncBlobStore.commit_upload uses a de
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Resolved the PR #2043 Qodo reliability finding by changing LocalSyncBlobStore.commit_upload to use a unique temporary file per upload attempt in the final blob directory before atomic replace. Added a regression test proving same-payload uploads use distinct commit temp paths. Verification: targeted regression first failed on the old deterministic path, then passed after the fix; `python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_blob_store.py` => 5 passed; `python -m pytest tldw_Server_API/tests/Sync` => 425 passed, 6 warnings; `git diff --check` => clean; Bandit on blob_store.py => 0 findings at `/tmp/bandit_sync_v2_blob_store_pr2043.json`.
+Resolved the PR #2043 Qodo reliability finding by changing LocalSyncBlobStore.commit_upload to use a unique temporary file per upload attempt in the final blob directory before atomic replace. Added a regression test proving same-payload uploads use distinct commit temp paths. Verification: targeted regression first failed on the old deterministic path, then passed after the fix; `python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_blob_store.py` => 5 passed; `python -m pytest tldw_Server_API/tests/Sync` => 425 passed, 6 warnings; `git diff --check` => clean; Bandit on `tldw_Server_API/app/core/Sync/v2/blob_store.py` => 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

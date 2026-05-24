@@ -37,6 +37,11 @@ Track fixes for the requested code review on PR #2030 after rebase onto latest d
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- Restore preview scans all accepted envelopes needed for selected datasets/domains rather than stopping at the default pull window.
+- Sync v2 push/pull accepts the locked API contract aliases for `limit`, `include_same_device_echoes`, `base_server_cursor`, and `options.stop_on_conflict` while compatibility-only aliases stay hidden from generated schemas.
+- M2 blob transfer can be enabled by environment configuration, chunk reads enforce configured limits before buffering, and blob completion preserves staged chunks when database completion fails.
+- Workspace blob storage is dataset-scoped, retention compaction refuses unsafe workspace compaction until acknowledgment scope is explicit, and workspace blob access requires sync authorization.
+- Focused regression tests, the full Sync test suite, `git diff --check`, and Bandit are recorded for the touched production scope.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -57,15 +62,15 @@ Track fixes for the requested code review on PR #2030 after rebase onto latest d
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed requested PR #2030 code review findings and added regression coverage. Follow-up draft PR: https://github.com/rmusser01/tldw_server/pull/2043. Verification passed after rebase: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Sync` => 424 passed, 6 warnings; `git diff --check` => clean; Bandit on touched production Sync/API paths => 0 findings, results at `/tmp/bandit_sync_v2_review_fixes_pr2030.json`.
+Addressed requested PR #2030 code review findings and added regression coverage. Follow-up draft PR: https://github.com/rmusser01/tldw_server/pull/2043. Verification passed after rebase: `python -m pytest tldw_Server_API/tests/Sync` => 424 passed, 6 warnings; `git diff --check` => clean; Bandit on touched production Sync/API paths => 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

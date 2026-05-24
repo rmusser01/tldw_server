@@ -141,22 +141,24 @@ def _sync_v2_positive_int_env(name: str, *, default: int) -> int:
     value = os.getenv(name)
     if value is None or not value.strip():
         return default
-    try:
-        parsed = int(value)
-    except ValueError:
-        return default
-    return parsed if parsed > 0 else default
+    return _sync_v2_parse_positive_int_env(name, value)
 
 
 def _sync_v2_optional_positive_int_env(name: str) -> int | None:
     value = os.getenv(name)
     if value is None or not value.strip():
         return None
+    return _sync_v2_parse_positive_int_env(name, value)
+
+
+def _sync_v2_parse_positive_int_env(name: str, value: str) -> int:
     try:
-        parsed = int(value)
+        parsed = int(value.strip())
     except ValueError:
-        return None
-    return parsed if parsed > 0 else None
+        raise ValueError(f"{name} must be a positive integer") from None
+    if parsed <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return parsed
 
 
 def _workspace_access_checker(user_id: str, workspace_id: str, permission: str) -> bool:

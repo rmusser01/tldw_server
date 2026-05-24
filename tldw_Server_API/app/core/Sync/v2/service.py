@@ -10,6 +10,8 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from loguru import logger
+
 from .adapters import (
     ATTACHMENT_REF_SERVER_AVAILABILITY,
     AdapterAccepted,
