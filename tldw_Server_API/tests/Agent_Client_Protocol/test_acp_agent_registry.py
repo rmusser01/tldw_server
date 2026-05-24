@@ -363,6 +363,55 @@ def test_default_agents_yaml_includes_goose_backend_live_e2e_metadata():
     assert "backend live E2E" in entry.compatibility_notes
 
 
+def test_default_agents_yaml_includes_opencode_backend_live_e2e_metadata():
+    """OpenCode is shipped as a native ACP profile with backend live-E2E evidence."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    real_yaml = os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "agents.yaml",
+    )
+    real_yaml = os.path.abspath(real_yaml)
+    registry = AgentRegistry(yaml_path=real_yaml)
+
+    entry = registry.get_entry("opencode")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "native_acp"
+    assert entry.command == "opencode"
+    assert entry.acp_command == "opencode"
+    assert entry.acp_args == ["acp"]
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "live_e2e_tested"
+    assert "backend live E2E" in entry.compatibility_notes
+    assert "local llama.cpp" in entry.compatibility_notes
+
+
+def test_default_agents_yaml_keeps_aider_blocked_without_acp_entrypoint():
+    """Aider can be locally configured while remaining blocked for ACP certification."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    real_yaml = os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "agents.yaml",
+    )
+    real_yaml = os.path.abspath(real_yaml)
+    registry = AgentRegistry(yaml_path=real_yaml)
+
+    entry = registry.get_entry("aider")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "documented_candidate"
+    assert entry.command == "aider"
+    assert entry.acp_command == ""
+    assert entry.acp_args == []
+    assert entry.support_state == "documented_unverified"
+    assert entry.verification_level == "documented_only"
+    assert entry.certification_blocker == "entrypoint_strategy_missing"
+    assert "local llama.cpp" in entry.compatibility_notes
+    assert "no ACP-compatible" in entry.compatibility_notes
+
+
 def test_default_runner_home_config_exposes_goose_backend_profile():
     """The bundled runner config should know the same Goose profile used by the API registry."""
     runner_config = os.path.abspath(os.path.join(
