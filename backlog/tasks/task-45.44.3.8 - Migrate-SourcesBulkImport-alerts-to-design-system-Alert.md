@@ -19,6 +19,7 @@ references:
   - >-
     apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourcesBulkImport.preflight-commit.test.tsx
   - apps/packages/ui/scripts/design-system-product-state-baseline.json
+  - 'https://github.com/rmusser01/tldw_server/pull/2016'
 parent_task_id: TASK-45.44.3
 priority: medium
 ---
