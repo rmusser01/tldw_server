@@ -43,6 +43,44 @@ func TestExpandAgentEnvResolvesHostPlaceholders(t *testing.T) {
 	}
 }
 
+func TestRunnerDefaultAgentSkipsEmptyConfiguredDefault(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agents.Default = "custom"
+	cfg.Agents.Agents = []config.RegisteredAgent{
+		{
+			Type:    "custom",
+			Name:    "Custom",
+			Command: "",
+		},
+		{
+			Type:    "goose",
+			Name:    "Goose",
+			Command: "goose",
+			Args:    []string{"acp"},
+		},
+	}
+	runner := NewRunner(cfg)
+
+	entry, err := runner.resolveAgentEntry("")
+	if err != nil {
+		t.Fatalf("default agent resolution failed: %v", err)
+	}
+	if entry.Type != "goose" {
+		t.Fatalf("default agent type = %q, want goose", entry.Type)
+	}
+	if entry.Command != "goose" {
+		t.Fatalf("default agent command = %q, want goose", entry.Command)
+	}
+
+	explicit, err := runner.resolveAgentEntry("custom")
+	if err != nil {
+		t.Fatalf("explicit custom agent resolution failed: %v", err)
+	}
+	if explicit.Type != "custom" || explicit.Command != "" {
+		t.Fatalf("explicit custom should not fall back to goose: %#v", explicit)
+	}
+}
+
 func newStubAgent(conn *Conn, sessionID string, caps map[string]interface{}) *stubAgent {
 	agent := &stubAgent{
 		conn:         conn,

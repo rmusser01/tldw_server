@@ -327,13 +327,7 @@ func (r *Runner) handleSessionClose(msg *RPCMessage) (*RPCResponse, error) {
 func (r *Runner) getAgentEntries() ([]config.RegisteredAgent, string) {
 	registry := r.cfg.Agents.Agents
 	if len(registry) > 0 {
-		defaultType := r.cfg.Agents.Default
-		if defaultType == "" {
-			defaultType = registry[0].Type
-		} else if !agentTypeExists(registry, defaultType) {
-			defaultType = registry[0].Type
-		}
-		return registry, defaultType
+		return registry, defaultAgentType(registry, r.cfg.Agents.Default)
 	}
 
 	legacy := config.RegisteredAgent{
@@ -345,6 +339,28 @@ func (r *Runner) getAgentEntries() ([]config.RegisteredAgent, string) {
 		Env:         r.cfg.Agent.Env,
 	}
 	return []config.RegisteredAgent{legacy}, legacy.Type
+}
+
+func defaultAgentType(entries []config.RegisteredAgent, configuredDefault string) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	if configuredDefault != "" && agentTypeExists(entries, configuredDefault) {
+		for _, entry := range entries {
+			if entry.Type == configuredDefault && strings.TrimSpace(entry.Command) != "" {
+				return configuredDefault
+			}
+		}
+	}
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Command) != "" {
+			return entry.Type
+		}
+	}
+	if configuredDefault != "" && agentTypeExists(entries, configuredDefault) {
+		return configuredDefault
+	}
+	return entries[0].Type
 }
 
 func (r *Runner) resolveAgentEntry(agentType string) (config.RegisteredAgent, error) {

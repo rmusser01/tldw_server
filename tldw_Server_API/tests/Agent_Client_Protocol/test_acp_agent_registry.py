@@ -317,7 +317,7 @@ def test_registry_loads_new_agent_types():
     assert "claude_code" in types
 
 
-def test_default_agents_yaml_includes_hermes_native_acp_entrypoint():
+def test_default_agents_yaml_includes_hermes_native_acp_entrypoint() -> None:
     """Hermes is shipped as a native ACP profile with its accept-hooks stdio entrypoint."""
     from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
 
@@ -340,7 +340,7 @@ def test_default_agents_yaml_includes_hermes_native_acp_entrypoint():
     assert entry.verification_level == "live_e2e_tested"
 
 
-def test_default_agents_yaml_includes_goose_backend_live_e2e_metadata():
+def test_default_agents_yaml_includes_goose_backend_live_e2e_metadata() -> None:
     """Goose is shipped as a native ACP profile with backend live-E2E evidence."""
     from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
 
@@ -361,9 +361,10 @@ def test_default_agents_yaml_includes_goose_backend_live_e2e_metadata():
     assert entry.support_state == "supported_with_caveats"
     assert entry.verification_level == "live_e2e_tested"
     assert "backend live E2E" in entry.compatibility_notes
+    assert "commit f9ff03f88" in entry.compatibility_notes
 
 
-def test_default_agents_yaml_includes_opencode_backend_live_e2e_metadata():
+def test_default_agents_yaml_includes_opencode_backend_live_e2e_metadata() -> None:
     """OpenCode is shipped as a native ACP profile with backend live-E2E evidence."""
     from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
 
@@ -385,9 +386,10 @@ def test_default_agents_yaml_includes_opencode_backend_live_e2e_metadata():
     assert entry.verification_level == "live_e2e_tested"
     assert "backend live E2E" in entry.compatibility_notes
     assert "local llama.cpp" in entry.compatibility_notes
+    assert "commit 53c018269" in entry.compatibility_notes
 
 
-def test_default_agents_yaml_keeps_aider_blocked_without_acp_entrypoint():
+def test_default_agents_yaml_keeps_aider_blocked_without_acp_entrypoint() -> None:
     """Aider can be locally configured while remaining blocked for ACP certification."""
     from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
 
@@ -412,7 +414,7 @@ def test_default_agents_yaml_keeps_aider_blocked_without_acp_entrypoint():
     assert "no ACP-compatible" in entry.compatibility_notes
 
 
-def test_default_runner_home_config_exposes_goose_backend_profile():
+def test_default_runner_home_config_exposes_goose_backend_profile() -> None:
     """The bundled runner config should know the same Goose profile used by the API registry."""
     runner_config = os.path.abspath(os.path.join(
         os.path.dirname(__file__),

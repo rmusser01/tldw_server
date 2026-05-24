@@ -74,7 +74,7 @@ agents:
     docs_url: "https://aider.chat"
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Aider v0.86.2 was installed and configured May 23, 2026 to use a local llama.cpp OpenAI-compatible server at 127.0.0.1:9099; direct Aider prompting succeeded. ACP certification remains blocked because the installed Aider CLI exposes no ACP-compatible stdio server entrypoint."
+    compatibility_notes: "Aider v0.86.2 was installed and configured May 23, 2026 on branch codex/acp-opencode-aider-llamacpp-certification commit 53c018269 to use a local llama.cpp OpenAI-compatible server at 127.0.0.1:9099; direct Aider prompting succeeded. ACP certification remains blocked because the installed Aider CLI exposes no ACP-compatible stdio server entrypoint."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: documented_candidate
     acp_command: ""
@@ -92,7 +92,7 @@ agents:
     docs_url: "https://github.com/block/goose"
     support_state: supported_with_caveats
     verification_level: live_e2e_tested
-    compatibility_notes: "Goose native ACP completed May 23, 2026 backend live E2E through the macOS host runner: health/setup-guide, session-new, prompt, redacted support views, diagnostics endpoint, cancel, and close passed. Sandbox, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior remain unverified."
+    compatibility_notes: "Goose native ACP completed May 23, 2026 backend live E2E through the macOS host runner on branch codex/acp-goose-backend-live-e2e commit f9ff03f88 with tldw-agent runner 0.1.0: health/setup-guide, session-new, prompt, redacted support views, diagnostics endpoint, cancel, and close passed. Sandbox, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior remain unverified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: native_acp
     acp_command: goose
@@ -112,7 +112,7 @@ agents:
     default: false
     support_state: supported_with_caveats
     verification_level: live_e2e_tested
-    compatibility_notes: "Hermes native ACP completed May 23, 2026 backend live E2E through the macOS host runner: health/setup-guide, session-new, prompt, redacted support views, diagnostics endpoint, cancel, and close passed. Sandbox, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior remain unverified."
+    compatibility_notes: "Hermes native ACP completed May 23, 2026 backend live E2E through the macOS host runner on branch codex/acp-hermes-live-e2e-certification commit 5e6672f8f with tldw-agent runner 0.1.0: health/setup-guide, session-new, prompt, redacted support views, diagnostics endpoint, cancel, and close passed. Sandbox, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior remain unverified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: native_acp
     acp_command: hermes
@@ -151,7 +151,7 @@ agents:
     default: false
     support_state: supported_with_caveats
     verification_level: live_e2e_tested
-    compatibility_notes: "OpenCode v1.15.7 native ACP completed May 23, 2026 backend live E2E through the macOS host runner using a local llama.cpp OpenAI-compatible server at 127.0.0.1:9099: health/setup-guide, session-new, prompt, redacted support views, diagnostics endpoint, cancel, and close passed. Sandbox, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior remain unverified."
+    compatibility_notes: "OpenCode v1.15.7 native ACP completed May 23, 2026 backend live E2E through the macOS host runner on branch codex/acp-opencode-aider-llamacpp-certification commit 53c018269 with tldw-agent runner 0.1.0 using a local llama.cpp OpenAI-compatible server at 127.0.0.1:9099: health/setup-guide, session-new, prompt, redacted support views, diagnostics endpoint, cancel, and close passed. Sandbox, non-empty MCP injection, artifact-producing workflows, and reviewer-loop behavior remain unverified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: native_acp
     acp_command: opencode

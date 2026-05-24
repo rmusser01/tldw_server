@@ -154,11 +154,12 @@ transport such as `codex mcp-server` is not automatically an ACP entrypoint.
 
 | Profile | Initial strategy | Intended ACP entrypoint | Current support state |
 | --- | --- | --- | --- |
-| OpenCode | `native_acp` | `opencode acp` | `documented_unverified` until installed and tested |
-| Goose | `native_acp` | `goose acp` | `documented_unverified` until installed and tested |
+| OpenCode | `native_acp` | `opencode acp` | `supported_with_caveats` after May 23, 2026 macOS host backend live E2E; sandbox, MCP injection, artifact workflows, and reviewer loops remain unverified |
+| Goose | `native_acp` | `goose acp` | `supported_with_caveats` after May 23, 2026 macOS host backend live E2E; sandbox, MCP injection, artifact workflows, and reviewer loops remain unverified |
+| Hermes | `native_acp` | `hermes acp --accept-hooks` | `supported_with_caveats` after May 23, 2026 macOS host backend live E2E; sandbox, MCP injection, artifact workflows, and reviewer loops remain unverified |
 | Codex CLI | `documented_candidate` | none seeded until an exact adapter command is selected | `documented_unverified` |
 | Claude Code | `documented_candidate` | none seeded until an exact adapter command is selected | `documented_unverified` |
-| Aider | `documented_candidate` | none known in repo evidence | `documented_unverified` |
+| Aider | `documented_candidate` | none known in repo evidence | `documented_unverified`; direct local llama.cpp prompting works, but no ACP-compatible stdio server entrypoint is available |
 | Continue | `documented_candidate` | none known in repo evidence | `documented_unverified` |
 | Custom | `custom_template` | operator supplied | `documented_unverified` |
 
