@@ -162,6 +162,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SyncServerOriginIdempotencyConflictError,
     SyncServerOriginMaterializationError,
+    SyncServerOriginMutationNotSupportedError,
     capture_server_origin_mutation,
     get_active_server_origin_sync_service_for_user,
     server_origin_object_id,
@@ -328,6 +329,16 @@ def _chat_sync_http_error(exc: Exception) -> HTTPException:
                 "apply_status": envelope.apply_status,
                 "apply_error_code": envelope.apply_error_code,
                 "apply_error_message": envelope.apply_error_message,
+            },
+        )
+    if isinstance(exc, SyncServerOriginMutationNotSupportedError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": exc.error_code,
+                "message": str(exc),
+                "dataset_id": exc.dataset.dataset_id,
+                "domain": exc.domain,
             },
         )
     if isinstance(exc, SyncStoreError):

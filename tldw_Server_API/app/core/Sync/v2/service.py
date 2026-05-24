@@ -78,6 +78,7 @@ from .models import (
     SyncRestoreBlobCompleteness,
     SyncRestoreCompletenessStatus,
     SyncRestoreDomainCompleteness,
+    client_private_server_frontend_limitation_warning,
 )
 from .profile import SyncProfileStatus, SyncV2ProfileManager
 from .replay import SyncReplayRepairer, SyncReplayRepairResult
@@ -179,6 +180,7 @@ class SyncV2Capabilities:
     supports_restore_manifest: bool = True
     supports_conflicts: bool = True
     supports_attachments: bool = True
+    compatibility_flags: dict[str, bool] = field(default_factory=dict)
     server_time: str | None = None
     warnings: list[dict[str, str]] = field(default_factory=list)
 
@@ -442,6 +444,14 @@ class SyncV2Service:
                 "reserved_blob_bytes": self.settings.reserved_blob_bytes,
                 "used_blob_bytes": self.settings.used_blob_bytes,
             }
+        warnings = list(self.settings.server_trusted_encryption.warnings)
+        compatibility_flags: dict[str, bool] = {}
+        if "client_private_v1" in self.settings.encryption_policies:
+            compatibility_flags["server_frontend_client_private_mutation"] = False
+            warnings = _append_warning_once(
+                warnings,
+                client_private_server_frontend_limitation_warning(),
+            )
         return SyncV2Capabilities(
             protocol_version=self.settings.protocol_version,
             min_supported_protocol_version=self.settings.min_supported_protocol_version,
@@ -455,8 +465,9 @@ class SyncV2Service:
             max_attachment_bytes=self.settings.max_attachment_bytes,
             quota=quota,
             supports_attachments=self.settings.supports_attachments,
+            compatibility_flags=compatibility_flags,
             server_time=self.clock() or None,
-            warnings=self.settings.server_trusted_encryption.warnings,
+            warnings=warnings,
         )
 
     def register_device(
@@ -3147,6 +3158,16 @@ def _restore_status_from_domain_details(
     if required_blob_count > 0 and verified_blob_count >= required_blob_count:
         return "verified_complete"
     return "content_complete"
+
+
+def _append_warning_once(
+    warnings: list[dict[str, str]],
+    warning: dict[str, str],
+) -> list[dict[str, str]]:
+    code = warning.get("code")
+    if code and any(item.get("code") == code for item in warnings):
+        return warnings
+    return [*warnings, warning]
 
 
 def _call_adapter_evaluate(

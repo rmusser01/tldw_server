@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -26,9 +27,11 @@ from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
+    CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
     SERVER_ORIGIN_DEVICE_ID,
     SyncServerOriginIdempotencyConflictError,
     SyncServerOriginMaterializationError,
+    SyncServerOriginMutationNotSupportedError,
     capture_server_origin_mutation,
     server_origin_object_id,
 )
@@ -254,6 +257,49 @@ def test_note_create_appends_server_origin_envelope_before_projection_and_pulls(
     assert [item.client_envelope_id for item in pulled.envelopes] == [
         result.envelope.client_envelope_id
     ]
+
+
+def test_server_origin_capture_rejects_client_private_dataset_before_append(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    dataset = sync_service.store.list_datasets_for_user("user-1")[0]
+    private_dataset = replace(dataset, encryption_policy="client_private_v1")
+    monkeypatch.setattr(
+        sync_service.store,
+        "list_datasets_for_user",
+        lambda user_id: [private_dataset] if user_id == "user-1" else [],
+    )
+
+    def fail_insert(envelope):
+        raise AssertionError("client-private server-origin mutation must not append")
+
+    monkeypatch.setattr(sync_service.store, "insert_envelope", fail_insert)
+
+    with pytest.raises(SyncServerOriginMutationNotSupportedError) as exc_info:
+        capture_server_origin_mutation(
+            sync_service,
+            user_id="user-1",
+            domain="notes.note",
+            operation="upsert",
+            object_id="note-client-private",
+            payload={
+                "title": "Private",
+                "content": "The server cannot re-encrypt this opaque field.",
+            },
+            source="server_frontend",
+        )
+
+    assert exc_info.value.dataset.dataset_id == dataset.dataset_id
+    assert exc_info.value.error_code == CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE
+    assert chacha_db.get_note_by_id("note-client-private") is None
+    assert sync_service.store.list_envelopes_after(
+        dataset.dataset_id,
+        0,
+        domains=["notes.note"],
+        limit=10,
+    ) == []
 
 
 def test_chat_conversation_and_message_server_origin_envelopes_are_materialized(
@@ -583,6 +629,40 @@ def test_normal_notes_create_api_routes_personal_write_through_sync_when_active(
         ("notes.note", "note-api-1", SERVER_ORIGIN_DEVICE_ID, "applied"),
         ("notes.note", "note-api-1", SERVER_ORIGIN_DEVICE_ID, "applied"),
     ]
+
+
+def test_normal_notes_create_api_reports_client_private_server_frontend_limitation(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    dataset = sync_service.store.list_datasets_for_user("user-1")[0]
+    private_dataset = replace(dataset, encryption_policy="client_private_v1")
+    monkeypatch.setattr(
+        sync_service.store,
+        "list_datasets_for_user",
+        lambda user_id: [private_dataset] if user_id == "user-1" else [],
+    )
+    client = _notes_app(monkeypatch, chacha_db=chacha_db, sync_service=sync_service)
+
+    response = client.post(
+        "/api/v1/notes/",
+        json={
+            "id": "note-api-client-private",
+            "title": "API private",
+            "content": "This cannot be accepted through server-origin capture.",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error_code"] == CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE
+    assert chacha_db.get_note_by_id("note-api-client-private") is None
+    assert sync_service.store.list_envelopes_after(
+        dataset.dataset_id,
+        0,
+        domains=["notes.note"],
+        limit=10,
+    ) == []
 
 
 def test_active_sync_note_keywords_are_rejected_without_direct_mutation(

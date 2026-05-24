@@ -15,6 +15,9 @@ from .models import (
     SyncDeviceUpsert,
     SyncDomain,
     SyncEnvelope,
+    client_private_server_frontend_limitation_warning,
+    server_frontend_mutation_blockers_for_policy,
+    server_frontend_mutation_enabled_for_policy,
 )
 from .store import SyncV2Store
 
@@ -48,6 +51,8 @@ class SyncProfileDatasetStatus:
     created_at: str | None = None
     updated_at: str | None = None
     encryption_policy: str = DEFAULT_M1_ENCRYPTION_POLICY
+    server_frontend_mutation_enabled: bool = True
+    server_frontend_mutation_blockers: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +69,8 @@ class SyncProfileDomainStatus:
     last_apply_status: str | None = None
     last_apply_result: dict[str, Any] = field(default_factory=dict)
     repair_status: dict[str, Any] = field(default_factory=dict)
+    server_frontend_mutation_enabled: bool = True
+    server_frontend_mutation_blockers: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +221,14 @@ class SyncV2ProfileManager:
             (item.last_server_cursor for item in domain_status),
             default=0,
         )
+        warnings = list(getattr(capabilities, "warnings", []))
+        if dataset is not None and not server_frontend_mutation_enabled_for_policy(
+            dataset.encryption_policy
+        ):
+            _append_warning_once(
+                warnings,
+                client_private_server_frontend_limitation_warning(),
+            )
         return SyncProfileStatus(
             protocol_version=SYNC_V2_M1_PROTOCOL_VERSION,
             min_supported_protocol_version=SYNC_V2_M1_PROTOCOL_VERSION,
@@ -225,7 +240,7 @@ class SyncV2ProfileManager:
             server_cursor=server_cursor,
             capabilities=capabilities,
             domain_status=domain_status,
-            warnings=list(getattr(capabilities, "warnings", [])),
+            warnings=warnings,
             created=created,
         )
 
@@ -322,6 +337,12 @@ class SyncV2ProfileManager:
             last_apply_status=last.apply_status if last is not None else None,
             last_apply_result=last_apply_result,
             repair_status=_repair_status(envelopes, failed_apply_count),
+            server_frontend_mutation_enabled=server_frontend_mutation_enabled_for_policy(
+                dataset.encryption_policy
+            ),
+            server_frontend_mutation_blockers=server_frontend_mutation_blockers_for_policy(
+                dataset.encryption_policy
+            ),
         )
 
     def _all_domain_envelopes(
@@ -380,7 +401,23 @@ def _dataset_status(dataset: SyncDataset) -> SyncProfileDatasetStatus:
         created_at=dataset.created_at,
         updated_at=dataset.updated_at,
         encryption_policy=dataset.encryption_policy,
+        server_frontend_mutation_enabled=server_frontend_mutation_enabled_for_policy(
+            dataset.encryption_policy
+        ),
+        server_frontend_mutation_blockers=server_frontend_mutation_blockers_for_policy(
+            dataset.encryption_policy
+        ),
     )
+
+
+def _append_warning_once(
+    warnings: list[dict[str, str]],
+    warning: dict[str, str],
+) -> None:
+    code = warning.get("code")
+    if code and any(item.get("code") == code for item in warnings):
+        return
+    warnings.append(warning)
 
 
 def _last_envelope(envelopes: Sequence[SyncEnvelope]) -> SyncEnvelope | None:

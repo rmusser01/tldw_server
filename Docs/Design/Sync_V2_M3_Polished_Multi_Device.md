@@ -251,6 +251,9 @@ Key rotation requirements:
 
 Client-only encryption is incompatible with dumb server-front-end editing for
 opaque fields. The API must advertise this tradeoff directly.
+In M3, server-origin Notes/Chat writes are rejected before envelope append for
+`client_private_v1`, and profile/capability responses expose the
+`sync_server_frontend_client_private_disabled` blocker.
 
 ## Workstream 7: Retention, Compaction, And Garbage Collection
 

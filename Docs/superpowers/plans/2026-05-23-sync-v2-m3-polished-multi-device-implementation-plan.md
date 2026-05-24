@@ -33,7 +33,7 @@
 
 **Tests:** `git diff --check`; stale-placeholder scan over new docs; Bandit skipped as docs-only.
 
-**Status:** In Progress
+**Status:** Complete
 
 - [x] **Step 1: Create TASK-490.13.1**
 
@@ -227,11 +227,11 @@
 
   Implement idempotent rotation flows with safe error mapping and redaction.
 
-- [ ] **Step 4: Gate server-front-end limitations**
+- [x] **Step 4: Gate server-front-end limitations**
 
   Prevent server-side mutation of opaque client-private fields.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
   Run targeted tests, security/redaction tests, Ruff, Bandit, and `git diff --check`.
 

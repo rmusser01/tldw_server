@@ -151,6 +151,13 @@ bootstrap. `passphrase_wrapped_v1`, `device_wrapped_v1`, and
 until an existing active device, passphrase unlock, or recovery method approves
 it.
 
+Profile and status responses expose server-front-end write compatibility at the
+dataset level and per-domain level through `server_frontend_mutation_enabled`
+and `server_frontend_mutation_blockers`. When a server advertises
+`client_private_v1`, `/api/v1/sync/capabilities` sets
+`compatibility_flags.server_frontend_client_private_mutation=false` and returns
+the `sync_server_frontend_client_private_disabled` warning.
+
 ### `POST /api/v1/sync/device-authorizations/{authorization_id}/approve`
 
 Approves a pending device authorization:
@@ -381,8 +388,10 @@ blockers.
 Creates a new key epoch and records rewrap status. It must be idempotent and
 must not expose key material in responses or logs.
 
-Client-only encrypted datasets may disable server-front-end mutation for opaque
-fields because the server cannot materialize content it cannot inspect.
+Client-only encrypted datasets disable server-front-end mutation for opaque
+fields because the server cannot materialize content it cannot inspect. Normal
+Notes/Chat API writes routed through server-origin Sync return `409` with
+`sync_server_frontend_client_private_disabled` before appending an envelope.
 
 ## Retention And Diagnostics
 

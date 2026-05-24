@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.models import (
+    CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
     M1_SYNC_DOMAINS,
     SyncConflictCreate,
     SyncEnvelopeCreate,
@@ -156,6 +158,50 @@ def test_bootstrap_supports_server_frontend_with_generated_device_id(tmp_path: P
     assert profile.device.device_id == "device-generated"
     assert profile.device.registered is True
     assert profile.device.mode == "server_frontend"
+
+
+def test_profile_advertises_client_private_server_frontend_limitation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    profile = service.bootstrap_profile(
+        user_id="user-1",
+        mode="server_frontend",
+        device_id="frontend-device",
+        device_name="Browser session",
+    )
+    dataset = store.get_dataset(profile.active_dataset_id or "")
+    assert dataset is not None
+    private_dataset = replace(dataset, encryption_policy="client_private_v1")
+    monkeypatch.setattr(
+        store,
+        "list_datasets_for_user",
+        lambda user_id: [private_dataset] if user_id == "user-1" else [],
+    )
+
+    status = service.profile(user_id="user-1", device_id="frontend-device")
+
+    assert status.dataset is not None
+    assert status.dataset.server_frontend_mutation_enabled is False
+    assert status.dataset.server_frontend_mutation_blockers == [
+        CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE
+    ]
+    assert {
+        item.domain: item.server_frontend_mutation_enabled
+        for item in status.domain_status
+    } == dict.fromkeys(M1_SYNC_DOMAINS, False)
+    assert {
+        item.domain: item.server_frontend_mutation_blockers
+        for item in status.domain_status
+    } == dict.fromkeys(
+        M1_SYNC_DOMAINS,
+        [CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE],
+    )
+    assert any(
+        warning.get("code") == CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE
+        for warning in status.warnings
+    )
 
 
 def test_bootstrap_without_device_id_and_profile_id_generates_device(

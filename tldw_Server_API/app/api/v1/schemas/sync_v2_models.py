@@ -591,6 +591,8 @@ class SyncProfileDatasetStatusResponse(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
+    server_frontend_mutation_enabled: bool = True
+    server_frontend_mutation_blockers: list[str] = Field(default_factory=list)
 
 
 class SyncProfileDomainStatusResponse(BaseModel):
@@ -606,6 +608,8 @@ class SyncProfileDomainStatusResponse(BaseModel):
     last_apply_status: str | None = None
     last_apply_result: dict[str, Any] = Field(default_factory=dict)
     repair_status: dict[str, Any] = Field(default_factory=dict)
+    server_frontend_mutation_enabled: bool = True
+    server_frontend_mutation_blockers: list[str] = Field(default_factory=list)
 
 
 class SyncProfileResponse(BaseModel):

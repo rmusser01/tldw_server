@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
 )
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
+    CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
     SyncConflictCreate,
     SyncDataset,
     SyncDeviceCursor,
@@ -362,6 +363,29 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
     assert capabilities.max_attachment_bytes == 4096
     assert capabilities.encryption_policies == ["server_trusted_v1"]
     assert capabilities.supports_attachments is False
+
+
+def test_capabilities_warn_when_client_private_policy_is_advertised(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+) -> None:
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(
+            encryption_policies=["server_trusted_v1", "client_private_v1"],
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+
+    capabilities = service.capabilities()
+
+    assert capabilities.compatibility_flags["server_frontend_client_private_mutation"] is False
+    assert any(
+        warning.get("code") == CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE
+        for warning in capabilities.warnings
+    )
 
 
 def test_capabilities_can_advertise_m2_resumable_blob_transfer(

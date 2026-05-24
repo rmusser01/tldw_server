@@ -115,6 +115,11 @@ STRICT_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
     "device_wrapped_v1",
     "client_private_v1",
 ]
+CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE = "sync_server_frontend_client_private_disabled"
+CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE = (
+    "Server-front-end mutation is disabled for client_private_v1 datasets "
+    "because opaque fields cannot be inspected or re-encrypted by the server."
+)
 SYNC_KEY_WRAPPED_FOR_VALUES: list[SyncKeyWrappedFor] = [
     "server",
     "passphrase",
@@ -128,6 +133,29 @@ SYNC_KEY_REWRAP_STATUSES: list[SyncKeyRewrapStatus] = [
     "failed",
     "blocked",
 ]
+
+
+def server_frontend_mutation_enabled_for_policy(policy: EncryptionPolicy | str) -> bool:
+    """Return whether server-origin writes can safely materialize this policy."""
+
+    return policy != "client_private_v1"
+
+
+def server_frontend_mutation_blockers_for_policy(policy: EncryptionPolicy | str) -> list[str]:
+    """Return stable blocker codes for server-front-end mutation under a policy."""
+
+    if server_frontend_mutation_enabled_for_policy(policy):
+        return []
+    return [CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE]
+
+
+def client_private_server_frontend_limitation_warning() -> dict[str, str]:
+    """Return the public warning for client-private server-front-end limitations."""
+
+    return {
+        "code": CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
+        "message": CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -1091,6 +1119,8 @@ class SyncRestoreManifestStats:
 
 
 __all__ = [
+    "CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE",
+    "CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE",
     "ConflictStatus",
     "DEFAULT_M1_ENCRYPTION_POLICY",
     "DatasetScopeType",
@@ -1153,4 +1183,7 @@ __all__ = [
     "SyncRestoreManifestStats",
     "WORKSPACE_SYNC_DOMAINS",
     "WORKSPACE_SYNC_OPERATIONS",
+    "client_private_server_frontend_limitation_warning",
+    "server_frontend_mutation_blockers_for_policy",
+    "server_frontend_mutation_enabled_for_policy",
 ]

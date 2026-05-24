@@ -10,12 +10,15 @@ from uuid import uuid4
 from .adapters import AdapterAccepted, AdapterConflict, AdapterDeferred, AdapterRejected
 from .errors import SyncStoreError
 from .models import (
+    CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
+    CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE,
     DEFAULT_M1_ENCRYPTION_POLICY,
     SyncDataset,
     SyncDomain,
     SyncEnvelope,
     SyncEnvelopeCreate,
     SyncOperation,
+    server_frontend_mutation_enabled_for_policy,
 )
 from .service import SyncV2Service
 
@@ -36,6 +39,16 @@ class SyncServerOriginIdempotencyConflictError(SyncStoreError):
     def __init__(self, envelope: SyncEnvelope) -> None:
         super().__init__("sync_server_origin_idempotency_conflict")
         self.envelope = envelope
+
+
+class SyncServerOriginMutationNotSupportedError(SyncStoreError):
+    """Raised when a dataset policy cannot support trusted server-origin writes."""
+
+    def __init__(self, dataset: SyncDataset, domain: SyncDomain) -> None:
+        super().__init__(CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE)
+        self.dataset = dataset
+        self.domain = domain
+        self.error_code = CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +76,8 @@ def capture_server_origin_mutation(
     dataset = _active_default_personal_dataset(service, user_id)
     if domain not in dataset.domains:
         raise SyncStoreError(f"Sync domain is not enrolled for this dataset: {domain}")
+    if not server_frontend_mutation_enabled_for_policy(dataset.encryption_policy):
+        raise SyncServerOriginMutationNotSupportedError(dataset, domain)
 
     payload_hash, payload_size = canonical_payload_hash(payload)
     if stable_key:
@@ -165,7 +180,7 @@ def server_origin_object_id(domain: SyncDomain, idempotency_key: str | None) -> 
     normalized = idempotency_key.strip()
     if not normalized:
         return None
-    digest = hashlib.sha256(f"{domain}:{normalized}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{domain}:{normalized}".encode()).hexdigest()
     return f"{domain.replace('.', '-')}-{digest[:32]}"
 
 
@@ -176,7 +191,7 @@ def stable_server_origin_envelope_id(
 ) -> str:
     """Return a deterministic client envelope id for active-Sync API retries."""
 
-    digest = hashlib.sha256(f"{dataset_id}:{domain}:{stable_key}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{dataset_id}:{domain}:{stable_key}".encode()).hexdigest()
     return f"server-origin-{digest[:32]}"
 
 
@@ -235,7 +250,9 @@ def _active_default_personal_dataset(service: SyncV2Service, user_id: str) -> Sy
 __all__ = [
     "SERVER_ORIGIN_DEVICE_ID",
     "ServerOriginCaptureResult",
+    "CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE",
     "SyncServerOriginMaterializationError",
+    "SyncServerOriginMutationNotSupportedError",
     "canonical_payload_hash",
     "capture_server_origin_mutation",
     "get_active_server_origin_sync_service_for_user",
