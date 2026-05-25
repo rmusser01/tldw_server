@@ -44,10 +44,10 @@ const parseInitialFlashcardsTab = (locationLike: { search?: string; hash?: strin
  * FlashcardsManager contains all the tabs and core flashcard logic.
  * Connection state is handled by FlashcardsWorkspace.
  *
- * Structure: Study | Manage | Import / Export
+ * Structure: Study | Manage | Create & Import
  * - Study: Spaced repetition review and cram loops
  * - Manage: Browse, filter, create, edit, bulk operations
- * - Import / Export: CSV/APKG import and export workflows
+ * - Create & Import: manual setup, generation, CSV/APKG import, and export workflows
  * - Scheduler: Deck-level scheduler policy editing and queue visibility
  */
 export const FlashcardsManager: React.FC = () => {
@@ -73,17 +73,8 @@ export const FlashcardsManager: React.FC = () => {
   const { data: initialDecks } = useDecksQuery({
     includeWorkspaceItems: currentStudyIntent?.forceShowWorkspaceItems ?? false
   })
-  const showSchedulerTab = !(initialDecks !== undefined && initialDecks.length === 0)
-  const hasCheckedInitialTab = React.useRef(false)
-  React.useEffect(() => {
-    if (!hasCheckedInitialTab.current && initialDecks !== undefined && !currentTab) {
-      hasCheckedInitialTab.current = true
-      if (initialDecks.length === 0) {
-        setActiveTab("importExport")
-      }
-    }
-  }, [initialDecks, currentTab])
-  // Reset activeTab if Scheduler tab is hidden (e.g., arrived via ?tab=scheduler with zero decks)
+  const schedulerDisabled = initialDecks !== undefined && initialDecks.length === 0
+  // Reset activeTab if Scheduler tab is unavailable for editing (e.g., arrived via ?tab=scheduler with zero decks)
   React.useEffect(() => {
     if (activeTab === "scheduler" && initialDecks !== undefined && initialDecks.length === 0) {
       setActiveTab("review")
@@ -133,10 +124,10 @@ export const FlashcardsManager: React.FC = () => {
   }, [currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
 
   React.useEffect(() => {
-    if (!showSchedulerTab && activeTab === "scheduler") {
-      setActiveTab("importExport")
+    if (schedulerDisabled && activeTab === "scheduler") {
+      setActiveTab("review")
     }
-  }, [activeTab, showSchedulerTab])
+  }, [activeTab, schedulerDisabled])
 
   const handleReviewCard = React.useCallback(
     (card: Flashcard) => {
@@ -162,6 +153,18 @@ export const FlashcardsManager: React.FC = () => {
       forceShowWorkspaceItems: currentStudyIntent?.forceShowWorkspaceItems ?? false
     })
   }, [currentStudyIntent?.attemptId, currentStudyIntent?.deckId, currentStudyIntent?.forceShowWorkspaceItems, currentStudyIntent?.quizId, reviewDeckId])
+  const canOpenQuizCta = currentStudyIntent?.quizId !== undefined
+  const schedulerTabLabel = schedulerDisabled ? (
+    <Tooltip
+      title={t("option:flashcards.schedulerNeedsDeck", {
+        defaultValue: "Create or import a deck to configure scheduling."
+      })}
+    >
+      <span>{t("option:flashcards.tabScheduler", { defaultValue: "Scheduler" })}</span>
+    </Tooltip>
+  ) : (
+    t("option:flashcards.tabScheduler", { defaultValue: "Scheduler" })
+  )
 
   const handleTabChange = React.useCallback(
     (nextTab: string) => {
@@ -189,15 +192,31 @@ export const FlashcardsManager: React.FC = () => {
         onChange={handleTabChange}
         tabBarExtraContent={(
           <Space size={4}>
-            <Button
-              size="small"
-              data-testid="flashcards-to-quiz-cta"
-              onClick={() => navigate(quizCtaRoute)}
+            <Tooltip
+              title={
+                canOpenQuizCta
+                  ? undefined
+                  : t("option:flashcards.quizCtaNeedsContext", {
+                      defaultValue: "Open a Quiz-linked flashcard session before testing with Quiz."
+                    })
+              }
             >
-              {t("option:flashcards.testWithQuiz", {
-                defaultValue: "Test with Quiz"
-              })}
-            </Button>
+              <span>
+                <Button
+                  size="small"
+                  data-testid="flashcards-to-quiz-cta"
+                  disabled={!canOpenQuizCta}
+                  onClick={() => {
+                    if (!canOpenQuizCta) return
+                    navigate(quizCtaRoute)
+                  }}
+                >
+                  {t("option:flashcards.testWithQuiz", {
+                    defaultValue: "Test with Quiz"
+                  })}
+                </Button>
+              </span>
+            </Tooltip>
             <Tooltip
               title={t("option:flashcards.keyboardShortcutsHelp", {
                 defaultValue: "Press ? to show shortcuts"
@@ -250,18 +269,7 @@ export const FlashcardsManager: React.FC = () => {
           },
           {
             key: "importExport",
-            label: (
-              <span className="inline-flex items-center gap-1.5">
-                {t("option:flashcards.tabImportExport", { defaultValue: "Import / Export" })}
-                <Tooltip title={t("option:flashcards.llmBadgeTooltip", {
-                  defaultValue: "Some features in this tab require an LLM provider"
-                })}>
-                  <span className="rounded bg-surface2 px-1 py-px text-[10px] font-medium text-text-muted">
-                    LLM
-                  </span>
-                </Tooltip>
-              </span>
-            ),
+            label: t("option:flashcards.tabCreateImport", { defaultValue: "Create & Import" }),
             children: (
               <ImportExportTab
                 generateIntent={currentGenerateIntent}
@@ -274,24 +282,18 @@ export const FlashcardsManager: React.FC = () => {
             label: t("option:flashcards.tabTemplates", { defaultValue: "Templates" }),
             children: <TemplatesTab />
           },
-          // Hide Scheduler tab when there are zero decks
-          ...(showSchedulerTab
-            ? [
-                {
-                  key: "scheduler",
-                  label: t("option:flashcards.tabScheduler", {
-                    defaultValue: "Scheduler"
-                  }),
-                  children: (
-                    <SchedulerTab
-                      isActive={activeTab === "scheduler"}
-                      onDirtyChange={setSchedulerDirty}
-                      discardSignal={schedulerDiscardSignal}
-                    />
-                  )
-                }
-              ]
-            : [])
+          {
+            key: "scheduler",
+            label: schedulerTabLabel,
+            disabled: schedulerDisabled,
+            children: schedulerDisabled ? null : (
+              <SchedulerTab
+                isActive={activeTab === "scheduler"}
+                onDirtyChange={setSchedulerDirty}
+                discardSignal={schedulerDiscardSignal}
+              />
+            )
+          }
         ]}
       />
 

@@ -87,7 +87,7 @@ export class FlashcardsPage extends BasePage {
   }
 
   get transferTab(): Locator {
-    return this.page.getByRole('tab', { name: /import\s*\/\s*export/i });
+    return this.page.getByRole('tab', { name: /create\s*&\s*import|import\s*\/\s*export/i });
   }
 
   // -- Locators: Tab bar extra content ---------------------------------------

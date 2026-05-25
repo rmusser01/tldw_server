@@ -561,6 +561,14 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const allOnPageSelected = pageCount > 0 && selectedOnPageCount === pageCount
   const someOnPageSelected = selectedOnPageCount > 0 && selectedOnPageCount < pageCount
   const selectAllAcrossDisabled = isDocumentMode && documentQuery.isTruncated
+  const isNoCardFirstRun =
+    viewMode === "cards" &&
+    !isDocumentMode &&
+    manageQuery.data !== undefined &&
+    !manageQuery.isFetching &&
+    !hasActiveFilters &&
+    totalCount === 0 &&
+    pageItems.length === 0
 
   const updateMutation = useUpdateFlashcardMutation()
   const bulkUpdateMutation = useUpdateFlashcardsBulkMutation()
@@ -1558,7 +1566,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               ]}
             />
             {/* Keyboard shortcut hint */}
-            {viewMode === "cards" && (
+            {viewMode === "cards" && !isNoCardFirstRun && (
               <div
                 className="hidden md:flex items-center gap-1.5"
                 data-testid="flashcards-manage-shortcut-chips"
@@ -1631,7 +1639,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         )}
 
         {/* Simplified Filter UI */}
-        {viewMode === "cards" && (
+        {viewMode === "cards" && !isNoCardFirstRun && (
         <div className="mb-3 space-y-3">
           {/* Primary filters: Search + Deck (always visible) */}
           <div className="flex items-center gap-2 flex-wrap">
@@ -1897,7 +1905,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         )}
 
         {/* Selection Summary Bar - simplified to two modes */}
-        {viewMode === "cards" && (
+        {viewMode === "cards" && !isNoCardFirstRun && (
         <div
           className="mb-2 flex items-center gap-3"
           data-testid="flashcards-manage-selection-summary"
@@ -2026,14 +2034,29 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                         </Button>
                       ) : (
                         <>
-                          <Button type="primary" onClick={() => setCreateOpen(true)}>
+                          <Button
+                            type="primary"
+                            onClick={() => setCreateOpen(true)}
+                            data-testid="flashcards-manage-empty-create-cta"
+                          >
                             {t("option:flashcards.noCardsCreateCta", {
                               defaultValue: "Create card"
                             })}
                           </Button>
-                          <Button onClick={onNavigateToImport}>
+                          <Button
+                            onClick={onNavigateToImport}
+                            data-testid="flashcards-manage-empty-import-cta"
+                          >
                             {t("option:flashcards.noCardsImportCta", {
                               defaultValue: "Import flashcards"
+                            })}
+                          </Button>
+                          <Button
+                            onClick={onNavigateToImport}
+                            data-testid="flashcards-manage-empty-generate-cta"
+                          >
+                            {t("option:flashcards.noCardsGenerateCta", {
+                              defaultValue: "Generate from text"
                             })}
                           </Button>
                         </>
