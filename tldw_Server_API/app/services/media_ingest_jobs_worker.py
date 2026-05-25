@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
+from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database, get_media_by_id
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
@@ -31,9 +31,11 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
+from tldw_Server_API.app.core.Workspaces.status_projection import derive_workspace_source_media_status
 
 _MEDIA_DOMAIN = "media_ingest"
 _MEDIA_JOB_TYPE = "media_ingest_item"
+_WORKSPACE_SOURCE_JOB_TYPE = "workspace_source_ingest"
 _SECRET_QUERY_RE = re.compile(r"(?i)([?&](?:token|apikey|api_key|access_key|signature|sig|password|key)=)[^&\s,;]+")
 _SECRET_ASSIGNMENT_RE = re.compile(
     r"(?i)\b((?:bearer|token|api[_-]?key|access[_-]?key|password|secret)\s*[:=]\s*)[^\s,;]+"
@@ -144,6 +146,23 @@ def _coerce_positive_int(value: Any) -> int | None:
 
 def _planned_collection_item_id(payload: dict[str, Any]) -> int | None:
     return _coerce_positive_int(payload.get("planned_item_id") or payload.get("media_collection_item_id"))
+
+
+def _workspace_source_job_fields(payload: dict[str, Any]) -> tuple[str, str, int]:
+    workspace_id = str(payload.get("workspace_id") or "").strip()
+    source_id = str(payload.get("workspace_source_id") or payload.get("source_id") or "").strip()
+    media_id = _coerce_positive_int(payload.get("media_id"))
+    if not workspace_id or not source_id or media_id is None:
+        raise MediaIngestJobError("workspace source job missing required identifiers", retryable=False)
+    return workspace_id, source_id, media_id
+
+
+def _workspace_result_status(state: str) -> str:
+    if state == "queryable":
+        return "ready"
+    if state == "partially_queryable":
+        return "partial"
+    return "processing"
 
 
 def _truncate_collection_error(value: Any) -> str | None:
@@ -349,11 +368,74 @@ async def _schedule_embeddings(
         logger.warning("Embedding generation failed for media {}: {}", media_id, exc)
 
 
+async def _handle_workspace_source_job(job: dict[str, Any], jm: JobManager, progress: _ProgressState) -> dict[str, Any]:
+    job_id = int(job.get("id"))
+    payload = _normalize_payload(job.get("payload"))
+    user_id = _resolve_user_id(job, payload)
+    workspace_id, source_id, media_id = _workspace_source_job_fields(payload)
+
+    db = None
+    try:
+        if _should_cancel(jm, job_id):
+            jm.finalize_cancelled(job_id, reason="cancel requested before start")
+            return {}
+
+        progress.percent = 10.0
+        progress.message = "validate source"
+        jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
+        db = _create_db(user_id)
+
+        progress.percent = 35.0
+        progress.message = "inspect media"
+        jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
+        media = get_media_by_id(db, media_id)
+        if media is None:
+            raise MediaIngestJobError("workspace source media item not found", retryable=False)
+
+        progress.percent = 55.0
+        progress.message = "check extraction"
+        jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
+        progress.percent = 70.0
+        progress.message = "check chunking"
+        jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
+        progress.percent = 90.0
+        progress.message = "check indexing"
+        jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
+        source_status = derive_workspace_source_media_status(media, media_db=db, media_id=media_id)
+        state = str(source_status["state"])
+        readiness = dict(source_status["readiness"])
+
+        progress.percent = 100.0
+        progress.message = "completed"
+        jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
+        return {
+            "status": _workspace_result_status(state),
+            "workspace_id": workspace_id,
+            "workspace_source_id": source_id,
+            "media_id": media_id,
+            "state": state,
+            "readiness": readiness,
+        }
+    finally:
+        if db is not None:
+            with contextlib.suppress(Exception):
+                db.close_connection()
+
+
 async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressState) -> dict[str, Any]:
     job_id = int(job.get("id"))
     latest_job_id = str(job_id)
     payload = _normalize_payload(job.get("payload"))
-    if str(job.get("job_type") or "").lower() != _MEDIA_JOB_TYPE:
+    job_type = str(job.get("job_type") or "").lower()
+    if job_type == _WORKSPACE_SOURCE_JOB_TYPE:
+        return await _handle_workspace_source_job(job, jm, progress)
+    if job_type != _MEDIA_JOB_TYPE:
         raise MediaIngestJobError("unsupported job_type", retryable=False)
 
     user_id = _resolve_user_id(job, payload)

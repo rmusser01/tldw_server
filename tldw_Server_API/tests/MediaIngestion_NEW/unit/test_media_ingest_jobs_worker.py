@@ -321,6 +321,92 @@ async def test_media_ingest_worker_marks_missing_media_id_failed(monkeypatch, tm
 
 
 @pytest.mark.asyncio
+async def test_workspace_source_ingest_job_reports_existing_media_readiness(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    class _WorkspaceMediaDB:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def get_media_by_id(
+            self,
+            media_id: int,
+            *,
+            include_deleted: bool = False,
+            include_trash: bool = False,
+        ):
+            _ = (include_deleted, include_trash)
+            assert media_id == 123
+            return {
+                "id": 123,
+                "title": "Ready workspace source",
+                "content": "Evidence text",
+                "chunking_status": "completed",
+                "vector_processing": 1,
+                "summary": "Short summary",
+            }
+
+        def close_connection(self) -> None:
+            self.closed = True
+
+    media_db = _WorkspaceMediaDB()
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: media_db, raising=True)
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("workspace source readiness jobs must not re-ingest media")
+
+    monkeypatch.setattr(worker, "process_batch_media", _boom, raising=True)
+    monkeypatch.setattr(worker, "process_document_like_item", _boom, raising=True)
+
+    jm = JobManager()
+    row = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="workspace_source_ingest",
+        payload={
+            "workspace_id": "ws-ready",
+            "workspace_source_id": "src-ready",
+            "source_id": "src-ready",
+            "media_id": 123,
+            "source_type": "pdf",
+            "title": "Ready workspace source",
+            "requested_stages": ["ingestion", "extraction", "chunking", "indexing"],
+        },
+        owner_user_id="1",
+    )
+
+    job = jm.get_job(int(row.get("id")))
+    progress = worker._ProgressState()
+    result = await worker._handle_job(job, jm, progress)
+
+    assert result == {
+        "status": "ready",
+        "workspace_id": "ws-ready",
+        "workspace_source_id": "src-ready",
+        "media_id": 123,
+        "state": "queryable",
+        "readiness": {
+            "metadata_ready": True,
+            "text_extracted": True,
+            "fts_ready": True,
+            "vector_ready": True,
+            "citation_ready": True,
+            "summary_ready": True,
+            "tool_accessible": True,
+        },
+    }
+    updated = jm.get_job(int(row.get("id")))
+    assert updated is not None
+    assert updated.get("progress_message") == "completed"
+    assert float(updated.get("progress_percent") or 0.0) == 100.0
+    assert media_db.closed is True
+
+
+@pytest.mark.asyncio
 async def test_media_ingest_worker_marks_planned_collection_item_failed_on_exception(monkeypatch, tmp_path):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
