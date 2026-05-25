@@ -1607,14 +1607,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   return (
     <header
       data-testid="workspace-header"
-      className="flex items-center justify-between border-b border-border/70 bg-[linear-gradient(90deg,var(--surface)_0%,var(--surface-2)_100%)] px-4 py-3.5"
+      className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-[linear-gradient(90deg,var(--surface)_0%,var(--surface-2)_100%)] px-4 py-3.5"
     >
       {messageContextHolder}
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
           <FlaskConical className="h-4 w-4 text-primary" />
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {isEditing ? (
             <div className="flex items-center gap-1">
               <Input
@@ -1647,8 +1647,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold text-text">
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="truncate text-lg font-semibold text-text">
                 {workspaceName || t("playground:workspace.title", "Research Workspace")}
               </h1>
               <Tooltip title={t("playground:workspace.rename", "Rename workspace")}>
@@ -1668,7 +1668,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
       <div
         data-testid="workspace-header-actions"
-        className="flex items-center gap-2"
+        className="flex min-w-0 max-w-full flex-1 flex-wrap items-center justify-end gap-2 overflow-hidden"
       >
         {/* Left pane expand button (only shown when collapsed) */}
         {!hideToggles && !leftPaneOpen && (
@@ -1725,9 +1725,11 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           <button
             type="button"
             data-testid="workspace-workspaces-button"
-            className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text transition hover:bg-surface2"
+            className="flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text transition hover:bg-surface2"
           >
-            <span>{t("playground:workspace.workspaces", "Workspaces")}</span>
+            <span className="truncate">
+              {t("playground:workspace.workspaces", "Workspaces")}
+            </span>
             <ChevronDown className="h-4 w-4 text-text-muted" />
           </button>
         </Dropdown>
@@ -1737,7 +1739,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           <button
             type="button"
             data-testid="workspace-share-button"
-            className="flex items-center justify-center rounded-lg border border-border bg-surface p-1.5 text-text-muted transition hover:bg-surface2 hover:text-text"
+            className="flex shrink-0 items-center justify-center rounded-lg border border-border bg-surface p-1.5 text-text-muted transition hover:bg-surface2 hover:text-text"
             aria-label={t("playground:workspace.share", "Share workspace")}
             onClick={() => setShareDialogOpen(true)}
           >
@@ -1751,7 +1753,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             type="button"
             data-testid="workspace-help-tour-button"
             onClick={() => startTutorial("research-workspace-basics")}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text"
             aria-label={t("playground:workspace.takeTour", "Take a tour of the workspace")}
           >
             <CircleHelp className="h-4 w-4" />
@@ -1768,7 +1770,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             <button
               type="button"
               data-testid="workspace-settings-button"
-              className="flex items-center justify-center rounded-lg border border-border bg-surface p-1.5 text-text-muted transition hover:bg-surface2 hover:text-text"
+              className="flex shrink-0 items-center justify-center rounded-lg border border-border bg-surface p-1.5 text-text-muted transition hover:bg-surface2 hover:text-text"
               aria-label={t("playground:workspace.workspaceSettings", "Workspace settings")}
             >
               <MoreHorizontal className="h-4 w-4" />

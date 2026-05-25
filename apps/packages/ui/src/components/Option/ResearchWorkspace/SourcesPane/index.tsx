@@ -1560,10 +1560,13 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      data-testid="workspace-sources-pane-root"
+      className="flex h-full min-h-0 flex-col overflow-hidden"
+    >
       {messageContextHolder}
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <h2 className="text-sm font-semibold text-text">
             {t("playground:sources.title", "Sources")}
@@ -1614,7 +1617,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       </div>
 
       {/* Quick URL paste */}
-      <div className="border-b border-border px-4 py-1.5">
+      <div className="shrink-0 border-b border-border px-4 py-1.5">
         <Input
           data-testid="quick-url-input"
           placeholder={t(
@@ -1649,120 +1652,125 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
         />
       </div>
 
-      {/* Search and select controls */}
-      {sources.length > 0 && (
-        <div className="border-b border-border px-4 py-2">
-          <Input
-            prefix={<Search className="h-4 w-4 text-text-muted" />}
-            placeholder={t("playground:sources.searchPlaceholder", "Search sources...")}
-            value={sourceSearchQuery}
-            onChange={(e) => setSourceSearchQuery(e.target.value)}
-            size="small"
-            allowClear
-          />
-          <SourceAdvancedControls
-            viewState={sourceListViewState}
-            summary={sourceFilterSummary}
-            hasFileSizeSources={hasFileSizeSources}
-            hasDurationSources={hasDurationSources}
-            hasPageCountSources={hasPageCountSources}
-            onPatchViewState={patchSourceListViewState}
-            onResetAdvancedFilters={resetAdvancedSourceFilters}
-          />
-          {isTemporarySortActive && (
-            <p className="mt-2 text-[11px] text-text-subtle">
-              {t(
-                "playground:sources.reorderDisabledHint",
-                "Temporary sort is active. Switch back to manual order to reorder sources."
-              )}
-            </p>
-          )}
-          <div className="mt-2 flex items-center justify-between text-xs">
-            <Checkbox
-              aria-label={selectionCheckboxLabel}
-              checked={selectionCheckboxChecked}
-              indeterminate={selectionCheckboxIndeterminate}
-              onChange={handleSelectAllToggle}
-              className="[@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11"
-            >
-              <span className="text-text-muted">
-                {effectiveSelectedCount > 0
-                  ? t("playground:sources.selectedCount", "{{count}} selected", {
-                      count: effectiveSelectedCount
-                    })
-                  : selectionCheckboxLabel}
-              </span>
-            </Checkbox>
-            {effectiveSelectedCount > 0 && (
-              <button
-                type="button"
-                onClick={clearEffectiveSelection}
-                className="text-primary hover:underline"
+      <div
+        data-testid="sources-management-controls"
+        className="custom-scrollbar shrink-0 overflow-y-auto border-b border-border"
+        style={sources.length > 0 ? { maxHeight: "min(55%, 30rem)" } : undefined}
+      >
+        {/* Search and select controls */}
+        {sources.length > 0 && (
+          <div className="px-4 py-2">
+            <Input
+              prefix={<Search className="h-4 w-4 text-text-muted" />}
+              placeholder={t("playground:sources.searchPlaceholder", "Search sources...")}
+              value={sourceSearchQuery}
+              onChange={(e) => setSourceSearchQuery(e.target.value)}
+              size="small"
+              allowClear
+            />
+            <SourceAdvancedControls
+              viewState={sourceListViewState}
+              summary={sourceFilterSummary}
+              hasFileSizeSources={hasFileSizeSources}
+              hasDurationSources={hasDurationSources}
+              hasPageCountSources={hasPageCountSources}
+              onPatchViewState={patchSourceListViewState}
+              onResetAdvancedFilters={resetAdvancedSourceFilters}
+            />
+            {isTemporarySortActive && (
+              <p className="mt-2 text-[11px] text-text-subtle">
+                {t(
+                  "playground:sources.reorderDisabledHint",
+                  "Temporary sort is active. Switch back to manual order to reorder sources."
+                )}
+              </p>
+            )}
+            <div className="mt-2 flex items-center justify-between text-xs">
+              <Checkbox
+                aria-label={selectionCheckboxLabel}
+                checked={selectionCheckboxChecked}
+                indeterminate={selectionCheckboxIndeterminate}
+                onChange={handleSelectAllToggle}
+                className="[@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11"
               >
-                {t("common:clear", "Clear")}
-              </button>
+                <span className="text-text-muted">
+                  {effectiveSelectedCount > 0
+                    ? t("playground:sources.selectedCount", "{{count}} selected", {
+                        count: effectiveSelectedCount
+                      })
+                    : selectionCheckboxLabel}
+                </span>
+              </Checkbox>
+              {effectiveSelectedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={clearEffectiveSelection}
+                  className="text-primary hover:underline"
+                >
+                  {t("common:clear", "Clear")}
+                </button>
+              )}
+            </div>
+            {effectiveSelectedCount > 0 && (
+              <div
+                data-testid="sources-selected-actions"
+                className="mt-2 flex flex-wrap items-center gap-2"
+              >
+                <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                  {t(
+                    "playground:sources.selectedForChat",
+                    "{{count}} selected for grounded chat",
+                    { count: effectiveSelectedCount }
+                  )}
+                </span>
+                {eligibleSelectedSourceIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleOpenTransferSources}
+                    className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-surface2 hover:text-text"
+                  >
+                    {t("playground:sources.transferSelected", "Move / Copy")}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!singleSelectedSource) return
+                    handleOpenPreview(singleSelectedSource.id)
+                  }}
+                  disabled={!singleSelectedSource}
+                  className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-surface2 hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t("playground:sources.previewSelected", "Preview selected")}
+                </button>
+                <Popconfirm
+                  title={t(
+                    "playground:sources.batchRemoveConfirm",
+                    "Remove {{count}} selected sources?",
+                    { count: effectiveSelectedCount }
+                  )}
+                  description={batchRemoveDescription}
+                  onConfirm={handleBatchRemoveSelected}
+                  okText={t("common:remove", "Remove")}
+                  cancelText={t("common:cancel", "Cancel")}
+                  okButtonProps={{ danger: true }}
+                >
+                  <button
+                    type="button"
+                    data-testid="batch-remove-sources"
+                    className="rounded border border-error/30 bg-error/10 px-2 py-0.5 text-[11px] font-medium text-error transition hover:bg-error/20"
+                  >
+                    {t("playground:sources.removeCount", "Remove ({{count}})", {
+                      count: effectiveSelectedCount
+                    })}
+                  </button>
+                </Popconfirm>
+              </div>
             )}
           </div>
-          {effectiveSelectedCount > 0 && (
-            <div
-              data-testid="sources-selected-actions"
-              className="mt-2 flex flex-wrap items-center gap-2"
-            >
-              <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-                {t(
-                  "playground:sources.selectedForChat",
-                  "{{count}} selected for grounded chat",
-                  { count: effectiveSelectedCount }
-                )}
-              </span>
-              {eligibleSelectedSourceIds.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleOpenTransferSources}
-                  className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-surface2 hover:text-text"
-                >
-                  {t("playground:sources.transferSelected", "Move / Copy")}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  if (!singleSelectedSource) return
-                  handleOpenPreview(singleSelectedSource.id)
-                }}
-                disabled={!singleSelectedSource}
-                className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-surface2 hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {t("playground:sources.previewSelected", "Preview selected")}
-              </button>
-              <Popconfirm
-                title={t(
-                  "playground:sources.batchRemoveConfirm",
-                  "Remove {{count}} selected sources?",
-                  { count: effectiveSelectedCount }
-                )}
-                description={batchRemoveDescription}
-                onConfirm={handleBatchRemoveSelected}
-                okText={t("common:remove", "Remove")}
-                cancelText={t("common:cancel", "Cancel")}
-                okButtonProps={{ danger: true }}
-              >
-                <button
-                  type="button"
-                  data-testid="batch-remove-sources"
-                  className="rounded border border-error/30 bg-error/10 px-2 py-0.5 text-[11px] font-medium text-error transition hover:bg-error/20"
-                >
-                  {t("playground:sources.removeCount", "Remove ({{count}})", {
-                    count: effectiveSelectedCount
-                  })}
-                </button>
-              </Popconfirm>
-            </div>
-          )}
-        </div>
-      )}
+        )}
 
-      <div className="border-b border-border px-4 py-2">
+        <div className="px-4 py-2">
         <SourceFolderTree
           nodes={folderTreeNodes}
           activeFolderId={activeFolderId}
@@ -1772,15 +1780,17 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           onFocusFolder={setActiveFolder}
           onToggleFolderSelection={toggleSourceFolderSelection}
         />
+        </div>
       </div>
 
       {/* Source list */}
       <div
+        data-testid="sources-list-region"
         ref={sourceListContainerRef}
         onScroll={(event) =>
           setSourceListScrollTop(event.currentTarget.scrollTop)
         }
-        className="custom-scrollbar flex-1 overflow-y-auto"
+        className="custom-scrollbar min-h-0 flex-1 overflow-y-auto"
       >
         {filteredSources.length === 0 ? (
           <div className="flex h-full items-center justify-center p-4">
@@ -1844,7 +1854,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
 
       {/* Footer with source count */}
       {sources.length > 0 && (
-        <div className="border-t border-border px-4 py-2 text-xs text-text-muted">
+        <div className="shrink-0 border-t border-border px-4 py-2 text-xs text-text-muted">
           {t("playground:sources.totalCount", "{{count}} source(s)", {
             count: sources.length
           })}

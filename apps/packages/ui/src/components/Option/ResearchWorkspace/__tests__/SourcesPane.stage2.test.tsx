@@ -196,6 +196,47 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     ).toBeInTheDocument()
   })
 
+  it("keeps advanced controls scrollable without replacing the source list region", () => {
+    render(
+      <SourcesPane
+        sourceListViewState={{
+          sort: "manual",
+          dateField: "addedAt",
+          dateFrom: null,
+          dateTo: null,
+          statusFilters: [],
+          typeFilters: [],
+          requireUrl: false,
+          requireFileSize: false,
+          requireDuration: false,
+          requirePageCount: false,
+          fileSizeMin: null,
+          fileSizeMax: null,
+          durationMin: null,
+          durationMax: null,
+          pageCountMin: null,
+          pageCountMax: null,
+          expanded: true
+        }}
+      />
+    )
+
+    expect(screen.getByTestId("workspace-sources-pane-root")).toHaveClass(
+      "min-h-0",
+      "overflow-hidden"
+    )
+    expect(screen.getByTestId("sources-management-controls")).toHaveClass(
+      "shrink-0",
+      "overflow-y-auto"
+    )
+    expect(screen.getByTestId("sources-list-region")).toHaveClass(
+      "min-h-0",
+      "flex-1",
+      "overflow-y-auto"
+    )
+    expect(screen.getByText("2 source(s)")).toBeInTheDocument()
+  })
+
   it("scrolls to and highlights a focused source target", () => {
     vi.useFakeTimers()
     const scrollSpy = vi.fn()

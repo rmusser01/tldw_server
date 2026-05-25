@@ -498,6 +498,35 @@ describe("WorkspaceHeader workspace browser modal", () => {
     vi.stubGlobal("fetch", fetchMockState.fetch)
   })
 
+  it("keeps mobile header actions within a shrinkable wrapping row", () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+        hideToggles
+      />
+    )
+
+    expect(screen.getByTestId("workspace-header")).toHaveClass(
+      "min-w-0",
+      "flex-wrap"
+    )
+    expect(screen.getByRole("heading", { name: "Alpha Research" })).toHaveClass(
+      "truncate"
+    )
+    expect(screen.getByTestId("workspace-header-actions")).toHaveClass(
+      "min-w-0",
+      "flex-wrap",
+      "overflow-hidden"
+    )
+    expect(screen.getByTestId("workspace-workspaces-button")).toHaveClass(
+      "min-w-0",
+      "max-w-full"
+    )
+  })
+
   it("opens view-all modal and filters workspaces by search query", async () => {
     render(
       <WorkspaceHeader
