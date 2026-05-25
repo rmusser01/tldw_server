@@ -185,26 +185,36 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-manage-show-workspace")).toHaveTextContent("true")
   })
 
-  it("uses Study/Manage/Transfer/Scheduler tab labels", () => {
+  it("uses Study/Manage/Create & Import/Scheduler tab labels", () => {
     window.history.replaceState({}, "", "/flashcards")
     render(<FlashcardsManager />)
 
     expect(screen.getByText("Study")).toBeInTheDocument()
     expect(screen.getByText("Manage")).toBeInTheDocument()
-    expect(screen.getByText("Import / Export")).toBeInTheDocument()
+    expect(screen.getByText("Create & Import")).toBeInTheDocument()
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.getByText("Scheduler")).toBeInTheDocument()
   })
 
-  it("defaults to Import / Export and hides Scheduler when no decks are available", () => {
+  it("defaults to Study and keeps Scheduler discoverable when no decks are available", () => {
     mocks.decks = []
     window.history.replaceState({}, "", "/flashcards")
 
     render(<FlashcardsManager />)
 
-    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
+    expect(screen.queryByTestId("mock-transfer-tab")).not.toBeInTheDocument()
     expect(screen.getByText("Templates")).toBeInTheDocument()
-    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
+    const schedulerTab = screen.getByRole("tab", { name: /scheduler/i })
+    const schedulerLabel = screen.getByText("Scheduler")
+    expect(schedulerTab).not.toHaveAttribute("aria-disabled", "true")
+    expect(schedulerLabel).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+    fireEvent.click(schedulerTab)
+    expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
+    expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
 
   it("routes template deep-links to the Templates tab", () => {
@@ -224,7 +234,14 @@ describe("FlashcardsManager consistency standards", () => {
 
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.getByTestId("mock-templates-tab")).toBeInTheDocument()
-    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /scheduler/i })).not.toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+    expect(screen.getByText("Scheduler")).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
   })
 
   it("requests workspace decks when study links include workspace items", () => {
@@ -243,13 +260,22 @@ describe("FlashcardsManager consistency standards", () => {
     )
   })
 
-  it("clamps scheduler deep-links to Import / Export when Scheduler is hidden", () => {
+  it("clamps scheduler deep-links to Study when Scheduler is disabled", () => {
     mocks.decks = []
     window.history.replaceState({}, "", "/flashcards?tab=scheduler&deck_id=9")
 
     render(<FlashcardsManager />)
 
-    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
+    expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
+    const schedulerTab = screen.getByRole("tab", { name: /scheduler/i })
+    expect(schedulerTab).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByText("Scheduler")).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+    fireEvent.click(schedulerTab)
+    expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
     expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
 
@@ -262,7 +288,7 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-open-create-signal")).toHaveTextContent("1")
   })
 
-  it("keeps quiz CTA usable when handoff IDs are invalid", () => {
+  it("disables quiz CTA when handoff IDs are invalid", () => {
     window.history.replaceState(
       {},
       "",
@@ -270,9 +296,18 @@ describe("FlashcardsManager consistency standards", () => {
     )
     render(<FlashcardsManager />)
 
-    fireEvent.click(screen.getByTestId("flashcards-to-quiz-cta"))
+    const quizButton = screen.getByTestId("flashcards-to-quiz-cta")
+    expect(quizButton).toBeDisabled()
+    fireEvent.click(quizButton)
 
-    expect(mocks.navigate).toHaveBeenCalledWith("/quiz?tab=take&source=flashcards")
+    expect(mocks.navigate).not.toHaveBeenCalled()
+  })
+
+  it("disables quiz CTA without a valid quiz handoff context", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("flashcards-to-quiz-cta")).toBeDisabled()
   })
 
   it("prompts before leaving the Scheduler tab when its draft is dirty", () => {

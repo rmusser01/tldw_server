@@ -877,8 +877,9 @@ describe("ImportExportTab import result details", () => {
   it("renders transfer summary cards for formats, limits, and last action", () => {
     vi.mocked(useImportLimitsQuery).mockReturnValue({
       data: {
-        max_cards_per_import: 500,
-        max_content_size_bytes: 1048576
+        max_lines: 500,
+        max_line_length: 32768,
+        max_field_length: 1048576
       }
     } as any)
 
@@ -888,9 +889,10 @@ describe("ImportExportTab import result details", () => {
     expect(screen.getByTestId("flashcards-transfer-summary-formats")).toHaveTextContent(
       "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
     )
-    expect(screen.getByTestId("flashcards-transfer-summary-limits")).toHaveTextContent(
-      "500 cards · 1048576 bytes"
-    )
+    const limits = screen.getByTestId("flashcards-transfer-summary-limits")
+    expect(limits).toHaveTextContent(`${(500).toLocaleString()} lines`)
+    expect(limits).toHaveTextContent(`${(32768).toLocaleString()} bytes per line`)
+    expect(limits).toHaveTextContent(`${(1048576).toLocaleString()} bytes per field`)
     expect(screen.getByTestId("flashcards-transfer-summary-last-action")).toHaveTextContent(
       "No transfer actions yet in this session."
     )

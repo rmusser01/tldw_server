@@ -58,6 +58,12 @@ export interface TransferActionSummary extends TransferActionSummaryInput {
   at: string
 }
 
+export interface NormalizedImportLimits {
+  maxLines: number
+  maxLineLengthBytes: number
+  maxFieldLengthBytes: number
+}
+
 export interface TransferActionReporterProps {
   onTransferAction?: (summary: TransferActionSummaryInput) => void
 }
@@ -76,6 +82,27 @@ export const IMPORT_HELP_ANCHORS = {
   cloze: "flashcards-import-help-cloze",
   json: "flashcards-import-help-json"
 } as const
+
+const positiveNumberOrNull = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null
+
+export const normalizeImportLimits = (value: unknown): NormalizedImportLimits | null => {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  const maxLines = positiveNumberOrNull(record.max_lines)
+  const maxLineLengthBytes = positiveNumberOrNull(record.max_line_length)
+  const maxFieldLengthBytes = positiveNumberOrNull(record.max_field_length)
+
+  if (maxLines === null || maxLineLengthBytes === null || maxFieldLengthBytes === null) {
+    return null
+  }
+
+  return {
+    maxLines,
+    maxLineLengthBytes,
+    maxFieldLengthBytes
+  }
+}
 
 export const detectJsonImportFormat = (rawContent: string): "json" | "jsonl" | "unknown" => {
   const trimmed = rawContent.trim()

@@ -13,6 +13,7 @@ import { GeneratePanel } from "./ImportExport/GeneratePanel"
 import { ImportPanel } from "./ImportExport/ImportPanel"
 import { StudyPackPanel } from "./ImportExport/StudyPackPanel"
 import {
+  normalizeImportLimits,
   type TransferActionSummary,
   type TransferActionSummaryInput
 } from "./ImportExport/shared"
@@ -36,6 +37,17 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
   const [lastTransferAction, setLastTransferAction] =
     React.useState<TransferActionSummary | null>(null)
   const [studyPackDrawerOpen, setStudyPackDrawerOpen] = React.useState(false)
+  const importLimitsText = React.useMemo(() => {
+    const importLimits = normalizeImportLimits(limitsQuery.data)
+    if (!importLimits) return null
+    return t("option:flashcards.transferSummaryLimitsValue", {
+      defaultValue:
+        "{{lines}} lines / {{lineBytes}} bytes per line / {{fieldBytes}} bytes per field",
+      lines: importLimits.maxLines.toLocaleString(),
+      lineBytes: importLimits.maxLineLengthBytes.toLocaleString(),
+      fieldBytes: importLimits.maxFieldLengthBytes.toLocaleString()
+    })
+  }, [limitsQuery.data, t])
 
   React.useEffect(() => {
     if (studyPackIntent) {
@@ -115,12 +127,8 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
               })}
             </Text>
             <Text type="secondary">
-              {limitsQuery.data
-                ? t("option:flashcards.transferSummaryLimitsValue", {
-                    defaultValue: "{{cards}} cards · {{bytes}} bytes",
-                    cards: limitsQuery.data.max_cards_per_import,
-                    bytes: limitsQuery.data.max_content_size_bytes
-                  })
+              {importLimitsText
+                ? importLimitsText
                 : t("option:flashcards.transferSummaryLimitsUnknown", {
                     defaultValue: "Limits unavailable"
                   })}

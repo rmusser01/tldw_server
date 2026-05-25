@@ -137,6 +137,25 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
   })
 }
 
+if (typeof window !== "undefined" && !window.localStorage) {
+  const storage = new Map<string, string>()
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value)
+      },
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      clear: () => {
+        storage.clear()
+      }
+    }
+  })
+}
+
 const sampleCard: Flashcard = {
   uuid: "card-meta-1",
   deck_id: 1,
@@ -258,6 +277,34 @@ describe("ManageTab scheduling metadata visibility", () => {
     expect(screen.getByTestId("flashcards-manage-shortcut-chips")).toBeInTheDocument()
     expect(screen.getByText("Sort: Due date")).toBeInTheDocument()
   }, 15000)
+
+  it("prioritizes first-run actions and hides expert card filters when no cards exist", () => {
+    vi.mocked(useManageQuery).mockReturnValue({
+      data: {
+        items: [],
+        count: 0,
+        total: 0
+      },
+      isFetching: false
+    } as any)
+
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive
+      />
+    )
+
+    expect(screen.getByText("No flashcards yet")).toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-manage-shortcut-chips")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-manage-search")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-manage-deck-select")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-manage-selection-summary")).not.toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-empty-create-cta")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-empty-import-cta")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-empty-generate-cta")).toBeInTheDocument()
+  })
 
   it("uses the markdown renderer for compact flashcard snippets", () => {
     const markdownFront = "**Important** concept"
