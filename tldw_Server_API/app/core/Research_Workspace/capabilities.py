@@ -5,15 +5,15 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Mapping
 
-from tldw_Server_API.app.api.v1.schemas.research_studio_capabilities import (
-    ResearchStudioCapabilitiesResponse,
-    ResearchStudioCapability,
-    ResearchStudioCapabilityMode,
-    ResearchStudioCapabilityStatus,
-    ResearchStudioOverallStatus,
+from tldw_Server_API.app.api.v1.schemas.research_workspace_capabilities import (
+    ResearchWorkspaceCapabilitiesResponse,
+    ResearchWorkspaceCapability,
+    ResearchWorkspaceCapabilityMode,
+    ResearchWorkspaceCapabilityStatus,
+    ResearchWorkspaceOverallStatus,
 )
 
-RESEARCH_STUDIO_CAPABILITY_IDS = (
+RESEARCH_WORKSPACE_CAPABILITY_IDS = (
     "source_browse",
     "chat",
     "artifact_text_generation",
@@ -36,7 +36,7 @@ _UNAVAILABLE_STATUSES = {
 }
 
 
-def build_research_studio_capabilities(
+def build_research_workspace_capabilities(
     *,
     aggregate_health: Mapping[str, Any] | None = None,
     rag_health: Mapping[str, Any] | None = None,
@@ -45,8 +45,8 @@ def build_research_studio_capabilities(
     tts_health: Mapping[str, Any] | None = None,
     timestamp: datetime | None = None,
     ttl_seconds: int = 30,
-) -> ResearchStudioCapabilitiesResponse:
-    """Build a sanitized Research Studio capability response from health snapshots."""
+) -> ResearchWorkspaceCapabilitiesResponse:
+    """Build a sanitized Research Workspace capability response from health snapshots."""
     source = _source_browse_capability(aggregate_health)
     rag = _dependency_capability(rag_health, dependency="rag", degraded_reason="rag_degraded")
     llm = _llm_capability(llm_health)
@@ -81,7 +81,7 @@ def build_research_studio_capabilities(
         "sync_share": _cap("unknown", "warn", ["sync"], "sync_health_unknown"),
     }
 
-    return ResearchStudioCapabilitiesResponse(
+    return ResearchWorkspaceCapabilitiesResponse(
         status=_overall_status(capabilities),
         ttl_seconds=max(1, ttl_seconds),
         capabilities=capabilities,
@@ -89,18 +89,18 @@ def build_research_studio_capabilities(
     )
 
 
-async def collect_research_studio_capabilities(
+async def collect_research_workspace_capabilities(
     *,
     user_id: int | str | None = None,
-) -> ResearchStudioCapabilitiesResponse:
-    """Collect lightweight local health snapshots for the Research Studio contract."""
+) -> ResearchWorkspaceCapabilitiesResponse:
+    """Collect lightweight local health snapshots for the Research Workspace contract."""
     aggregate = await _collect_aggregate_health()
     rag = await _collect_rag_health()
     llm = await _collect_llm_health()
     slides = _collect_slides_health(user_id=user_id)
     tts = await _collect_tts_health()
 
-    return build_research_studio_capabilities(
+    return build_research_workspace_capabilities(
         aggregate_health=aggregate,
         rag_health=rag,
         llm_health=llm,
@@ -109,7 +109,7 @@ async def collect_research_studio_capabilities(
     )
 
 
-def _source_browse_capability(aggregate_health: Mapping[str, Any] | None) -> ResearchStudioCapability:
+def _source_browse_capability(aggregate_health: Mapping[str, Any] | None) -> ResearchWorkspaceCapability:
     checks = _mapping_value(aggregate_health, "checks")
     database = _mapping_value(checks, "database")
     chacha = _mapping_value(checks, "chacha_notes")
@@ -126,7 +126,7 @@ def _source_browse_capability(aggregate_health: Mapping[str, Any] | None) -> Res
     return _cap("unknown", "warn", ["database", "chacha_notes"], "source_health_unknown")
 
 
-def _llm_capability(llm_health: Mapping[str, Any] | None) -> ResearchStudioCapability:
+def _llm_capability(llm_health: Mapping[str, Any] | None) -> ResearchWorkspaceCapability:
     providers = _mapping_value(_mapping_value(llm_health, "components"), "providers")
     initialized = providers.get("initialized") if isinstance(providers, Mapping) else None
     count = providers.get("count") if isinstance(providers, Mapping) else None
@@ -141,7 +141,7 @@ def _llm_capability(llm_health: Mapping[str, Any] | None) -> ResearchStudioCapab
     return _cap("unknown", "warn", ["llm"], "llm_health_unknown")
 
 
-def _tts_capability(tts_health: Mapping[str, Any] | None) -> ResearchStudioCapability:
+def _tts_capability(tts_health: Mapping[str, Any] | None) -> ResearchWorkspaceCapability:
     providers = _mapping_value(tts_health, "providers")
     available = providers.get("available") if isinstance(providers, Mapping) else None
     status = _status(tts_health)
@@ -161,7 +161,7 @@ def _dependency_capability(
     dependency: str,
     unavailable_reason: str | None = None,
     degraded_reason: str | None = None,
-) -> ResearchStudioCapability:
+) -> ResearchWorkspaceCapability:
     status = _status(health)
     if status == "ready":
         return _cap("ready", "allow", [dependency])
@@ -175,9 +175,9 @@ def _dependency_capability(
 def _compose_capability(
     *,
     dependencies: list[str],
-    required: list[ResearchStudioCapability],
-    warning: list[ResearchStudioCapability] | None = None,
-) -> ResearchStudioCapability:
+    required: list[ResearchWorkspaceCapability],
+    warning: list[ResearchWorkspaceCapability] | None = None,
+) -> ResearchWorkspaceCapability:
     evaluated_dependencies = [*required, *(warning or [])]
     for dependency in evaluated_dependencies:
         if dependency.mode == "block":
@@ -192,7 +192,7 @@ def _compose_capability(
     return _cap("ready", "allow", dependencies)
 
 
-def _overall_status(capabilities: Mapping[str, ResearchStudioCapability]) -> ResearchStudioOverallStatus:
+def _overall_status(capabilities: Mapping[str, ResearchWorkspaceCapability]) -> ResearchWorkspaceOverallStatus:
     source = capabilities.get("source_browse")
     if source and source.mode == "block":
         return "unavailable"
@@ -202,12 +202,12 @@ def _overall_status(capabilities: Mapping[str, ResearchStudioCapability]) -> Res
 
 
 def _cap(
-    status: ResearchStudioCapabilityStatus,
-    mode: ResearchStudioCapabilityMode,
+    status: ResearchWorkspaceCapabilityStatus,
+    mode: ResearchWorkspaceCapabilityMode,
     dependencies: list[str],
     reason_code: str | None = None,
-) -> ResearchStudioCapability:
-    return ResearchStudioCapability(
+) -> ResearchWorkspaceCapability:
+    return ResearchWorkspaceCapability(
         status=status,
         mode=mode,
         dependencies=dependencies,
@@ -215,7 +215,7 @@ def _cap(
     )
 
 
-def _status(payload: Mapping[str, Any] | None) -> ResearchStudioCapabilityStatus:
+def _status(payload: Mapping[str, Any] | None) -> ResearchWorkspaceCapabilityStatus:
     if not isinstance(payload, Mapping):
         return "unknown"
     raw = payload.get("status")

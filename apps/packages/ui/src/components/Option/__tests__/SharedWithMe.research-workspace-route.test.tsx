@@ -18,7 +18,7 @@ vi.mock("react-router-dom", () => ({
   useNavigate: () => sharingMocks.navigate
 }))
 
-describe("SharedWithMe Research Studio route", () => {
+describe("SharedWithMe Research Workspace route", () => {
   beforeEach(() => {
     sharingMocks.navigate.mockReset()
     sharingMocks.useSharedWithMe.mockReturnValue({
@@ -43,11 +43,11 @@ describe("SharedWithMe Research Studio route", () => {
     })
   })
 
-  it("opens shared workspaces through client-side Research Studio navigation", () => {
+  it("opens shared workspaces through client-side Research Workspace navigation", () => {
     render(<SharedWithMe />)
 
     fireEvent.click(screen.getByRole("button", { name: "Open shared workspace" }))
 
-    expect(sharingMocks.navigate).toHaveBeenCalledWith("/research-studio?shared=7")
+    expect(sharingMocks.navigate).toHaveBeenCalledWith("/research-workspace?shared=7")
   })
 })

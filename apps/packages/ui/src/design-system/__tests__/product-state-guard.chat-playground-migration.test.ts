@@ -47,7 +47,7 @@ describe("Chat and Playground product-state migration guard", () => {
 
   it("keeps Workspace ACP history load errors on canonical recovery UI", () => {
     const findings = analyzeLiveSource(
-      "src/components/Option/WorkspacePlayground/WorkspaceACPHistoryModal.tsx"
+      "src/components/Option/ResearchWorkspace/WorkspaceACPHistoryModal.tsx"
     )
 
     expect(findings).not.toContainEqual(

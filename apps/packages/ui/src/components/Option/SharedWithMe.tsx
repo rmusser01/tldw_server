@@ -87,7 +87,9 @@ export const SharedWithMe: React.FC = () => {
                 <Button
                   key="open"
                   type="link"
-                  onClick={() => navigate(`/research-studio?shared=${share.share_id}`)}
+                  onClick={() =>
+                    navigate(`/research-workspace?shared=${share.share_id}`)
+                  }
                   aria-label="Open shared workspace"
                   icon={<ExportOutlined />}
                 >

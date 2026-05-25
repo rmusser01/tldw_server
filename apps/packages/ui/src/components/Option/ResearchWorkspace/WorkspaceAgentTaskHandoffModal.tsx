@@ -15,6 +15,7 @@ const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
 const CANONICAL_BRIDGE_PATH =
   `${AGENT_ORCHESTRATION_BASE_PATH}/workspaces/canonical-bridge`
 const PROJECTS_PATH = `${AGENT_ORCHESTRATION_BASE_PATH}/projects`
+const CANONICAL_WORKSPACE_SOURCE = "research_workspace"
 
 type CanonicalBridgeResponse = {
   id?: number
@@ -252,9 +253,9 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
     setCreatedTask(null)
 
     const baseMetadata = {
-      created_from: "workspace_playground",
+      created_from: CANONICAL_WORKSPACE_SOURCE,
       canonical_workspace_id: canonicalWorkspaceId,
-      canonical_workspace_source: "workspace_playground",
+      canonical_workspace_source: CANONICAL_WORKSPACE_SOURCE,
       workspace_name: workspaceName?.trim() || null,
       workspace_tag: workspaceTag?.trim() || null
     }
@@ -266,7 +267,7 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
         CANONICAL_BRIDGE_PATH,
         {
           canonical_workspace_id: canonicalWorkspaceId,
-          canonical_workspace_source: "workspace_playground",
+          canonical_workspace_source: CANONICAL_WORKSPACE_SOURCE,
           root_path: trimmedRootPath,
           name: `${workspaceDisplayName} execution`,
           description: `ACP execution workspace linked from ${workspaceDisplayName}.`,

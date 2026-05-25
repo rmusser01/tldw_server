@@ -1,22 +1,22 @@
 import { describe, expect, it } from "vitest"
 import {
-  RESEARCH_STUDIO_CAPABILITY_IDS,
-  buildUnknownResearchStudioCapabilities,
+  RESEARCH_WORKSPACE_CAPABILITY_IDS,
+  buildUnknownResearchWorkspaceCapabilities,
   getArtifactCapabilityId,
   getCapability,
-  isResearchStudioCapabilitiesStale,
-  normalizeResearchStudioCapabilities
-} from "../research-studio-capabilities"
+  isResearchWorkspaceCapabilitiesStale,
+  normalizeResearchWorkspaceCapabilities
+} from "../research-workspace-capabilities"
 import type { ArtifactType } from "@/types/workspace"
 
-describe("Research Studio capabilities", () => {
+describe("Research Workspace capabilities", () => {
   it("builds an unknown warning fallback for every capability", () => {
-    const fallback = buildUnknownResearchStudioCapabilities("network_error")
+    const fallback = buildUnknownResearchWorkspaceCapabilities("network_error")
 
     expect(Object.keys(fallback.capabilities)).toEqual([
-      ...RESEARCH_STUDIO_CAPABILITY_IDS
+      ...RESEARCH_WORKSPACE_CAPABILITY_IDS
     ])
-    for (const id of RESEARCH_STUDIO_CAPABILITY_IDS) {
+    for (const id of RESEARCH_WORKSPACE_CAPABILITY_IDS) {
       expect(fallback.capabilities[id]).toMatchObject({
         status: "unknown",
         mode: "warn",
@@ -26,7 +26,7 @@ describe("Research Studio capabilities", () => {
   })
 
   it("normalizes malformed and partial payloads without trusting missing keys", () => {
-    const normalized = normalizeResearchStudioCapabilities({
+    const normalized = normalizeResearchWorkspaceCapabilities({
       status: "ready",
       ttl_seconds: 60,
       capabilities: {
@@ -59,7 +59,7 @@ describe("Research Studio capabilities", () => {
   })
 
   it("treats invalid payloads as unknown warning payloads", () => {
-    const normalized = normalizeResearchStudioCapabilities({
+    const normalized = normalizeResearchWorkspaceCapabilities({
       status: "banana",
       capabilities: {
         chat: { status: "ready", mode: "banana", dependencies: [] }
@@ -72,14 +72,14 @@ describe("Research Studio capabilities", () => {
   })
 
   it("detects stale payloads from ttl seconds and fetch time", () => {
-    const payload = normalizeResearchStudioCapabilities({
+    const payload = normalizeResearchWorkspaceCapabilities({
       status: "ready",
       ttl_seconds: 30,
       capabilities: {}
     })
 
-    expect(isResearchStudioCapabilitiesStale(payload, 1_000, 30_999)).toBe(false)
-    expect(isResearchStudioCapabilitiesStale(payload, 1_000, 31_001)).toBe(true)
+    expect(isResearchWorkspaceCapabilitiesStale(payload, 1_000, 30_999)).toBe(false)
+    expect(isResearchWorkspaceCapabilitiesStale(payload, 1_000, 31_001)).toBe(true)
   })
 
   it("maps artifact types to their capability boundary", () => {
@@ -102,7 +102,7 @@ describe("Research Studio capabilities", () => {
   })
 
   it("returns a capability by id without applying unrelated blocks", () => {
-    const normalized = normalizeResearchStudioCapabilities({
+    const normalized = normalizeResearchWorkspaceCapabilities({
       status: "degraded",
       capabilities: {
         artifact_text_generation: {

@@ -75,19 +75,19 @@ import {
   type WorkspaceGlobalSearchResult
 } from "./workspace-global-search"
 import {
-  getResearchStudioTabFromSearch,
-  parseResearchStudioTab,
-  RESEARCH_STUDIO_DEFAULT_TAB,
-  readResearchStudioLastMobileTab,
-  writeResearchStudioLastMobileTab,
-  type ResearchStudioTab
-} from "./research-studio-route-state"
+  getResearchWorkspaceTabFromSearch,
+  parseResearchWorkspaceTab,
+  RESEARCH_WORKSPACE_DEFAULT_TAB,
+  readResearchWorkspaceLastMobileTab,
+  writeResearchWorkspaceLastMobileTab,
+  type ResearchWorkspaceTab
+} from "./research-workspace-route-state"
 import {
-  buildUnknownResearchStudioCapabilities,
-  isResearchStudioCapabilitiesStale,
-  normalizeResearchStudioCapabilities,
-  type ResearchStudioCapabilitiesResponse
-} from "./research-studio-capabilities"
+  buildUnknownResearchWorkspaceCapabilities,
+  isResearchWorkspaceCapabilitiesStale,
+  normalizeResearchWorkspaceCapabilities,
+  type ResearchWorkspaceCapabilitiesResponse
+} from "./research-workspace-capabilities"
 import {
   collectDescendantSourceIds,
   createWorkspaceOrganizationIndex
@@ -170,7 +170,7 @@ const normalizeVectorProcessingStatus = (
   return null
 }
 
-type WorkspaceTabKey = ResearchStudioTab
+type WorkspaceTabKey = ResearchWorkspaceTab
 
 type WorkspaceNoteKeywordLike =
   | string
@@ -887,20 +887,20 @@ const ResearchWorkspaceBody: React.FC = () => {
   const isMobile = useMobile()
   const [messageApi, messageContextHolder] = message.useMessage()
   const [provenanceFlagEnabled] = useFeatureFlag(
-    FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1
+    FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1
   )
   const [statusGuardrailsFlagEnabled] = useFeatureFlag(
-    FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1
+    FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1
   )
   const provenanceEnabled = provenanceFlagEnabled !== false
   const statusGuardrailsEnabled = statusGuardrailsFlagEnabled !== false
-  const [researchStudioCapabilities, setResearchStudioCapabilities] =
-    React.useState<ResearchStudioCapabilitiesResponse>(() =>
-      buildUnknownResearchStudioCapabilities("capabilities_not_loaded")
+  const [researchWorkspaceCapabilities, setResearchWorkspaceCapabilities] =
+    React.useState<ResearchWorkspaceCapabilitiesResponse>(() =>
+      buildUnknownResearchWorkspaceCapabilities("capabilities_not_loaded")
     )
   const [
-    researchStudioCapabilitiesFetchedAt,
-    setResearchStudioCapabilitiesFetchedAt
+    researchWorkspaceCapabilitiesFetchedAt,
+    setResearchWorkspaceCapabilitiesFetchedAt
   ] = React.useState<number | null>(null)
 
   // Mobile drawer state
@@ -908,12 +908,12 @@ const ResearchWorkspaceBody: React.FC = () => {
   const [rightDrawerOpen, setRightDrawerOpen] = React.useState(false)
 
   const initialRouteTabRef = React.useRef<WorkspaceTabKey | null>(
-    getResearchStudioTabFromSearch(
+    getResearchWorkspaceTabFromSearch(
       typeof window === "undefined" ? "" : window.location.search
     )
   )
   const initialStoredMobileTabRef = React.useRef<WorkspaceTabKey | null>(
-    initialRouteTabRef.current ? null : readResearchStudioLastMobileTab()
+    initialRouteTabRef.current ? null : readResearchWorkspaceLastMobileTab()
   )
   const initialRouteTabAppliedRef = React.useRef(false)
 
@@ -922,12 +922,12 @@ const ResearchWorkspaceBody: React.FC = () => {
     () =>
       initialRouteTabRef.current ??
       initialStoredMobileTabRef.current ??
-      RESEARCH_STUDIO_DEFAULT_TAB
+      RESEARCH_WORKSPACE_DEFAULT_TAB
   )
   const setActiveMobileTab = React.useCallback(
     (tab: WorkspaceTabKey) => {
       setActiveTab(tab)
-      writeResearchStudioLastMobileTab(tab)
+      writeResearchWorkspaceLastMobileTab(tab)
     },
     []
   )
@@ -1587,37 +1587,37 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
   }, [])
 
-  const refreshResearchStudioCapabilities = React.useCallback(async () => {
+  const refreshResearchWorkspaceCapabilities = React.useCallback(async () => {
     try {
-      const raw = await tldwClient.getResearchStudioCapabilities()
-      const normalized = normalizeResearchStudioCapabilities(raw)
-      setResearchStudioCapabilities(normalized)
-      setResearchStudioCapabilitiesFetchedAt(Date.now())
+      const raw = await tldwClient.getResearchWorkspaceCapabilities()
+      const normalized = normalizeResearchWorkspaceCapabilities(raw)
+      setResearchWorkspaceCapabilities(normalized)
+      setResearchWorkspaceCapabilitiesFetchedAt(Date.now())
       return normalized
     } catch {
-      const fallback = buildUnknownResearchStudioCapabilities(
+      const fallback = buildUnknownResearchWorkspaceCapabilities(
         "capability_fetch_failed"
       )
-      setResearchStudioCapabilities(fallback)
-      setResearchStudioCapabilitiesFetchedAt(Date.now())
+      setResearchWorkspaceCapabilities(fallback)
+      setResearchWorkspaceCapabilitiesFetchedAt(Date.now())
       return fallback
     }
   }, [])
 
-  const refreshResearchStudioCapabilitiesIfStale = React.useCallback(async () => {
+  const refreshResearchWorkspaceCapabilitiesIfStale = React.useCallback(async () => {
     if (
-      !isResearchStudioCapabilitiesStale(
-        researchStudioCapabilities,
-        researchStudioCapabilitiesFetchedAt
+      !isResearchWorkspaceCapabilitiesStale(
+        researchWorkspaceCapabilities,
+        researchWorkspaceCapabilitiesFetchedAt
       )
     ) {
-      return researchStudioCapabilities
+      return researchWorkspaceCapabilities
     }
-    return refreshResearchStudioCapabilities()
+    return refreshResearchWorkspaceCapabilities()
   }, [
-    refreshResearchStudioCapabilities,
-    researchStudioCapabilities,
-    researchStudioCapabilitiesFetchedAt
+    refreshResearchWorkspaceCapabilities,
+    researchWorkspaceCapabilities,
+    researchWorkspaceCapabilitiesFetchedAt
   ])
 
   const closeGlobalSearch = React.useCallback(() => {
@@ -2019,8 +2019,8 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   useEffect(() => {
     if (!isStoreHydrated) return
-    void refreshResearchStudioCapabilities()
-  }, [isStoreHydrated, refreshResearchStudioCapabilities])
+    void refreshResearchWorkspaceCapabilities()
+  }, [isStoreHydrated, refreshResearchWorkspaceCapabilities])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -2597,13 +2597,13 @@ const ResearchWorkspaceBody: React.FC = () => {
           provenanceEnabled={provenanceEnabled}
           statusGuardrailsEnabled={statusGuardrailsEnabled}
           contentWidthMode="full"
-          researchStudioCapabilities={researchStudioCapabilities}
-          researchStudioCapabilitiesStale={isResearchStudioCapabilitiesStale(
-            researchStudioCapabilities,
-            researchStudioCapabilitiesFetchedAt
+          researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+          researchWorkspaceCapabilitiesStale={isResearchWorkspaceCapabilitiesStale(
+            researchWorkspaceCapabilities,
+            researchWorkspaceCapabilitiesFetchedAt
           )}
-          onRefreshResearchStudioCapabilities={
-            refreshResearchStudioCapabilitiesIfStale
+          onRefreshResearchWorkspaceCapabilities={
+            refreshResearchWorkspaceCapabilitiesIfStale
           }
         />
       )
@@ -2650,9 +2650,9 @@ const ResearchWorkspaceBody: React.FC = () => {
         <StudioPane
           onHide={options?.onHide}
           onRequestSources={() => focusWorkspacePane("sources")}
-          researchStudioCapabilities={researchStudioCapabilities}
-          onRefreshResearchStudioCapabilities={
-            refreshResearchStudioCapabilitiesIfStale
+          researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+          onRefreshResearchWorkspaceCapabilities={
+            refreshResearchWorkspaceCapabilitiesIfStale
           }
         />
       </Suspense>
@@ -2895,7 +2895,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           <Tabs
             activeKey={activeTab}
             onChange={(key) => {
-              const nextTab = parseResearchStudioTab(key)
+              const nextTab = parseResearchWorkspaceTab(key)
               if (nextTab) {
                 setActiveMobileTab(nextTab)
               }
@@ -3001,13 +3001,13 @@ const ResearchWorkspaceBody: React.FC = () => {
                 provenanceEnabled={provenanceEnabled}
                 statusGuardrailsEnabled={statusGuardrailsEnabled}
                 contentWidthMode={desktopChatContentWidthMode}
-                researchStudioCapabilities={researchStudioCapabilities}
-                researchStudioCapabilitiesStale={isResearchStudioCapabilitiesStale(
-                  researchStudioCapabilities,
-                  researchStudioCapabilitiesFetchedAt
+                researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+                researchWorkspaceCapabilitiesStale={isResearchWorkspaceCapabilitiesStale(
+                  researchWorkspaceCapabilities,
+                  researchWorkspaceCapabilitiesFetchedAt
                 )}
-                onRefreshResearchStudioCapabilities={
-                  refreshResearchStudioCapabilitiesIfStale
+                onRefreshResearchWorkspaceCapabilities={
+                  refreshResearchWorkspaceCapabilitiesIfStale
                 }
               />
             </main>

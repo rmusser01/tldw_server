@@ -198,7 +198,7 @@ const EXTRA_PAGES: PageEntry[] = [
   { path: "/reading", name: "Reading", category: "workspace" },
   { path: "/items", name: "Items", category: "workspace" },
   { path: "/chunking-playground", name: "Chunking Playground", category: "workspace" },
-  { path: "/workspace-playground", name: "Workspace Playground", category: "workspace" },
+  { path: "/research-workspace", name: "Research Workspace", category: "workspace" },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Knowledge

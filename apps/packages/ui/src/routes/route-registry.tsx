@@ -477,16 +477,6 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
-    path: WORKSPACE_PLAYGROUND_PATH,
-    element: <RouteAliasNavigate to={RESEARCH_STUDIO_PATH} />,
-  },
-  {
-    kind: "options",
-    path: WORKSPACE_STUDIO_PATH,
-    element: <RouteAliasNavigate to={RESEARCH_STUDIO_PATH} />,
-  },
-  {
-    kind: "options",
     path: CHAT_WORKSPACE_PATH,
     element: <OptionChatWorkspace />,
   },

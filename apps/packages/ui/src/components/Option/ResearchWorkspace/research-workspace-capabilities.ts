@@ -1,6 +1,6 @@
 import type { ArtifactType } from "@/types/workspace"
 
-export const RESEARCH_STUDIO_CAPABILITY_IDS = [
+export const RESEARCH_WORKSPACE_CAPABILITY_IDS = [
   "source_browse",
   "chat",
   "artifact_text_generation",
@@ -10,37 +10,37 @@ export const RESEARCH_STUDIO_CAPABILITY_IDS = [
   "sync_share"
 ] as const
 
-export type ResearchStudioCapabilityId =
-  (typeof RESEARCH_STUDIO_CAPABILITY_IDS)[number]
-export type ResearchStudioCapabilityStatus =
+export type ResearchWorkspaceCapabilityId =
+  (typeof RESEARCH_WORKSPACE_CAPABILITY_IDS)[number]
+export type ResearchWorkspaceCapabilityStatus =
   | "ready"
   | "degraded"
   | "unavailable"
   | "unknown"
-export type ResearchStudioCapabilityMode = "allow" | "warn" | "block"
+export type ResearchWorkspaceCapabilityMode = "allow" | "warn" | "block"
 
-export type ResearchStudioCapability = {
-  status: ResearchStudioCapabilityStatus
-  mode: ResearchStudioCapabilityMode
+export type ResearchWorkspaceCapability = {
+  status: ResearchWorkspaceCapabilityStatus
+  mode: ResearchWorkspaceCapabilityMode
   dependencies: string[]
   reason_code?: string | null
 }
 
-export type ResearchStudioCapabilitiesResponse = {
-  status: ResearchStudioCapabilityStatus
+export type ResearchWorkspaceCapabilitiesResponse = {
+  status: ResearchWorkspaceCapabilityStatus
   ttl_seconds: number
-  capabilities: Record<ResearchStudioCapabilityId, ResearchStudioCapability>
+  capabilities: Record<ResearchWorkspaceCapabilityId, ResearchWorkspaceCapability>
   timestamp: string
 }
 
-const VALID_STATUSES = new Set<ResearchStudioCapabilityStatus>([
+const VALID_STATUSES = new Set<ResearchWorkspaceCapabilityStatus>([
   "ready",
   "degraded",
   "unavailable",
   "unknown"
 ])
 
-const VALID_MODES = new Set<ResearchStudioCapabilityMode>([
+const VALID_MODES = new Set<ResearchWorkspaceCapabilityMode>([
   "allow",
   "warn",
   "block"
@@ -48,15 +48,15 @@ const VALID_MODES = new Set<ResearchStudioCapabilityMode>([
 
 const DEFAULT_TTL_SECONDS = 30
 
-export function buildUnknownResearchStudioCapabilities(
+export function buildUnknownResearchWorkspaceCapabilities(
   reasonCode = "capability_health_unknown"
-): ResearchStudioCapabilitiesResponse {
+): ResearchWorkspaceCapabilitiesResponse {
   const capabilities = Object.fromEntries(
-    RESEARCH_STUDIO_CAPABILITY_IDS.map((id) => [
+    RESEARCH_WORKSPACE_CAPABILITY_IDS.map((id) => [
       id,
       buildUnknownCapability(reasonCode)
     ])
-  ) as Record<ResearchStudioCapabilityId, ResearchStudioCapability>
+  ) as Record<ResearchWorkspaceCapabilityId, ResearchWorkspaceCapability>
 
   return {
     status: "unknown",
@@ -66,17 +66,17 @@ export function buildUnknownResearchStudioCapabilities(
   }
 }
 
-export function normalizeResearchStudioCapabilities(
+export function normalizeResearchWorkspaceCapabilities(
   raw: unknown
-): ResearchStudioCapabilitiesResponse {
+): ResearchWorkspaceCapabilitiesResponse {
   const record = isRecord(raw) ? raw : {}
   const rawCapabilities = isRecord(record.capabilities)
     ? record.capabilities
     : {}
-  const fallback = buildUnknownResearchStudioCapabilities()
+  const fallback = buildUnknownResearchWorkspaceCapabilities()
   const capabilities = { ...fallback.capabilities }
 
-  for (const id of RESEARCH_STUDIO_CAPABILITY_IDS) {
+  for (const id of RESEARCH_WORKSPACE_CAPABILITY_IDS) {
     capabilities[id] = normalizeCapability(rawCapabilities[id])
   }
 
@@ -91,8 +91,8 @@ export function normalizeResearchStudioCapabilities(
   }
 }
 
-export function isResearchStudioCapabilitiesStale(
-  payload: Pick<ResearchStudioCapabilitiesResponse, "ttl_seconds"> | null | undefined,
+export function isResearchWorkspaceCapabilitiesStale(
+  payload: Pick<ResearchWorkspaceCapabilitiesResponse, "ttl_seconds"> | null | undefined,
   fetchedAtMs: number | null | undefined,
   nowMs = Date.now()
 ): boolean {
@@ -103,22 +103,22 @@ export function isResearchStudioCapabilitiesStale(
 }
 
 export function getCapability(
-  payload: ResearchStudioCapabilitiesResponse | null | undefined,
-  id: ResearchStudioCapabilityId
-): ResearchStudioCapability {
+  payload: ResearchWorkspaceCapabilitiesResponse | null | undefined,
+  id: ResearchWorkspaceCapabilityId
+): ResearchWorkspaceCapability {
   return payload?.capabilities[id] ?? buildUnknownCapability()
 }
 
 export function getArtifactCapabilityId(
   type: ArtifactType
-): ResearchStudioCapabilityId {
+): ResearchWorkspaceCapabilityId {
   if (type === "slides") return "slides_generation"
   if (type === "audio_overview") return "audio_summary"
   return "artifact_text_generation"
 }
 
 export function getCapabilityCopy(
-  capability: ResearchStudioCapability,
+  capability: ResearchWorkspaceCapability,
   actionLabel: string
 ): string | null {
   if (capability.mode === "allow") return null
@@ -129,7 +129,7 @@ export function getCapabilityCopy(
   return `${label} may be degraded. You can still try it.`
 }
 
-function normalizeCapability(raw: unknown): ResearchStudioCapability {
+function normalizeCapability(raw: unknown): ResearchWorkspaceCapability {
   if (!isRecord(raw)) return buildUnknownCapability()
   const status = isCapabilityStatus(raw.status) ? raw.status : "unknown"
   const mode = isCapabilityMode(raw.mode) ? raw.mode : "warn"
@@ -155,7 +155,7 @@ function normalizeCapability(raw: unknown): ResearchStudioCapability {
 
 function buildUnknownCapability(
   reasonCode = "capability_health_unknown"
-): ResearchStudioCapability {
+): ResearchWorkspaceCapability {
   return {
     status: "unknown",
     mode: "warn",
@@ -170,12 +170,12 @@ function normalizeTtl(value: unknown): number {
     : DEFAULT_TTL_SECONDS
 }
 
-function isCapabilityStatus(value: unknown): value is ResearchStudioCapabilityStatus {
-  return typeof value === "string" && VALID_STATUSES.has(value as ResearchStudioCapabilityStatus)
+function isCapabilityStatus(value: unknown): value is ResearchWorkspaceCapabilityStatus {
+  return typeof value === "string" && VALID_STATUSES.has(value as ResearchWorkspaceCapabilityStatus)
 }
 
-function isCapabilityMode(value: unknown): value is ResearchStudioCapabilityMode {
-  return typeof value === "string" && VALID_MODES.has(value as ResearchStudioCapabilityMode)
+function isCapabilityMode(value: unknown): value is ResearchWorkspaceCapabilityMode {
+  return typeof value === "string" && VALID_MODES.has(value as ResearchWorkspaceCapabilityMode)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

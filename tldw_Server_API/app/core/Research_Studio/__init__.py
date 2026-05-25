@@ -1,1 +1,0 @@
-"""Research Studio backend helpers."""

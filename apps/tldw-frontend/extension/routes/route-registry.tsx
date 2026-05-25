@@ -34,7 +34,7 @@ import {
   ShieldCheck,
   SquareTerminal
 } from "lucide-react"
-import { Navigate, useLocation } from "react-router-dom"
+import { Navigate } from "react-router-dom"
 import { ALL_TARGETS, type PlatformTarget } from "@/config/platform"
 import { createSettingsRoute } from "./settings-route"
 import {
@@ -61,30 +61,6 @@ export type RouteDefinition = {
   element: ReactElement
   targets?: PlatformTarget[]
   nav?: RouteNav
-}
-
-type RouteAliasLocation = {
-  search?: string
-  hash?: string
-}
-
-export const resolveRouteAliasDestination = (
-  to: string,
-  location: RouteAliasLocation
-) => {
-  if (to.includes("?") || to.includes("#")) return to
-  return `${to}${location.search || ""}${location.hash || ""}`
-}
-
-const RouteAliasNavigate = ({ to }: { to: string }) => {
-  const location = useLocation()
-
-  return (
-    <Navigate
-      to={resolveRouteAliasDestination(to, location)}
-      replace
-    />
-  )
 }
 
 const OptionIndex = lazy(() => import("./option-index"))
@@ -519,16 +495,6 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       order: 0,
       beta: true
     }
-  },
-  {
-    kind: "options",
-    path: "/workspace-playground",
-    element: <RouteAliasNavigate to="/research-studio" />
-  },
-  {
-    kind: "options",
-    path: "/workspace-studio",
-    element: <RouteAliasNavigate to="/research-studio" />
   },
   {
     kind: "options",

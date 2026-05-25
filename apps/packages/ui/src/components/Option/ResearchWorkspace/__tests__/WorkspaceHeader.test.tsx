@@ -153,6 +153,28 @@ const mockConnectionStoreState: { state: ConnectionState } = {
   }
 }
 
+const connectionConfigState: {
+  loading: boolean
+  config: {
+    serverUrl: string
+    authMode: "single-user"
+    apiKey: string
+    accessToken: string
+  } | null
+} = {
+  loading: false,
+  config: null
+}
+
+const registryStateOverrides = {
+  missingDegraded: false,
+  degradedLabel: "Degraded"
+}
+
+const fetchMockState = {
+  fetch: vi.fn()
+}
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -273,6 +295,8 @@ describe("WorkspaceHeader workspace browser modal", () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     clearWorkspaceUndoActionsForTests()
+    registryStateOverrides.missingDegraded = false
+    registryStateOverrides.degradedLabel = "Degraded"
     connectionConfigState.loading = false
     connectionConfigState.config = {
       serverUrl: "http://127.0.0.1:8000",
@@ -1057,7 +1081,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     )
 
     await waitFor(() => {
-      expect(mockTrackWorkspacePlaygroundTelemetry).toHaveBeenCalledWith(
+      expect(mockTrackResearchWorkspaceTelemetry).toHaveBeenCalledWith(
         expect.objectContaining({
           type: "connectivity_state_changed",
           to: "degraded"
@@ -1089,7 +1113,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     }).not.toThrow()
 
     await waitFor(() => {
-      expect(mockTrackWorkspacePlaygroundTelemetry).toHaveBeenCalledWith(
+      expect(mockTrackResearchWorkspaceTelemetry).toHaveBeenCalledWith(
         expect.objectContaining({
           type: "connectivity_state_changed",
           to: "degraded"
@@ -1104,12 +1128,12 @@ describe("WorkspaceHeader workspace browser modal", () => {
       "subject-ops-42"
     )
     window.localStorage.setItem(
-      FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_studio_provenance_v1,
+      FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_workspace_provenance_v1,
       "10"
     )
     window.localStorage.setItem(
       FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS
-        .research_studio_status_guardrails_v1,
+        .research_workspace_status_guardrails_v1,
       "50"
     )
 
@@ -1133,12 +1157,12 @@ describe("WorkspaceHeader workspace browser modal", () => {
     ).toHaveTextContent("subject-ops-42")
     expect(
       within(telemetryModal).getByTestId(
-        "workspace-rollout-percentage-research_studio_provenance_v1"
+        "workspace-rollout-percentage-research_workspace_provenance_v1"
       )
     ).toHaveTextContent("10%")
     expect(
       within(telemetryModal).getByTestId(
-        "workspace-rollout-percentage-research_studio_status_guardrails_v1"
+        "workspace-rollout-percentage-research_workspace_status_guardrails_v1"
       )
     ).toHaveTextContent("50%")
   })
@@ -1160,20 +1184,20 @@ describe("WorkspaceHeader workspace browser modal", () => {
       name: "Telemetry summary"
     })
     const provenanceControl = within(telemetryModal).getByTestId(
-      "workspace-rollout-control-research_studio_provenance_v1"
+      "workspace-rollout-control-research_workspace_provenance_v1"
     )
     fireEvent.click(within(provenanceControl).getByRole("button", { name: "10%" }))
 
     await waitFor(() => {
       expect(
         window.localStorage.getItem(
-          FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_studio_provenance_v1
+          FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_workspace_provenance_v1
         )
       ).toBe("10")
     })
     expect(
       within(provenanceControl).getByTestId(
-        "workspace-rollout-percentage-research_studio_provenance_v1"
+        "workspace-rollout-percentage-research_workspace_provenance_v1"
       )
     ).toHaveTextContent("10%")
   })
@@ -1213,10 +1237,10 @@ describe("WorkspaceHeader workspace browser modal", () => {
           )
           expect(body).toMatchObject({
             canonical_workspace_id: "workspace-alpha",
-            canonical_workspace_source: "workspace_playground",
+            canonical_workspace_source: "research_workspace",
             root_path: "/Users/macbook-dev/src/alpha",
             metadata: {
-              created_from: "workspace_playground",
+              created_from: "research_workspace",
               canonical_workspace_id: "workspace-alpha"
             }
           })
@@ -1229,7 +1253,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
               canonical_workspace: {
                 acp_workspace_id: 33,
                 canonical_workspace_id: "workspace-alpha",
-                canonical_workspace_source: "workspace_playground",
+                canonical_workspace_source: "research_workspace",
                 link_status: "linked"
               }
             })
@@ -1245,7 +1269,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
             name: "Alpha Research agent work",
             workspace_id: 33,
             metadata: {
-              created_from: "workspace_playground",
+              created_from: "research_workspace",
               canonical_workspace_id: "workspace-alpha",
               acp_workspace_id: 33
             }
@@ -1270,7 +1294,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
             description: "Review the current sources and identify blockers.",
             agent_type: "codex",
             metadata: {
-              created_from: "workspace_playground",
+              created_from: "research_workspace",
               canonical_workspace_id: "workspace-alpha",
               acp_workspace_id: 33
             }

@@ -98,8 +98,8 @@ import {
   getArtifactCapabilityId,
   getCapability,
   getCapabilityCopy,
-  type ResearchStudioCapabilitiesResponse
-} from "../research-studio-capabilities"
+  type ResearchWorkspaceCapabilitiesResponse
+} from "../research-workspace-capabilities"
 
 // Re-export for external consumers
 export { estimateGenerationSeconds, estimateGenerationTokens, estimateGenerationCostUsd } from "./hooks/useArtifactGeneration"
@@ -655,10 +655,10 @@ interface StudioPaneProps {
   onHide?: () => void
   /** Callback to focus or open the workspace Sources pane/tab */
   onRequestSources?: () => void
-  /** Backend-owned Research Studio capability health contract */
-  researchStudioCapabilities?: ResearchStudioCapabilitiesResponse
+  /** Backend-owned Research Workspace capability health contract */
+  researchWorkspaceCapabilities?: ResearchWorkspaceCapabilitiesResponse
   /** Refresh capability health before expensive generation actions */
-  onRefreshResearchStudioCapabilities?: () => Promise<ResearchStudioCapabilitiesResponse>
+  onRefreshResearchWorkspaceCapabilities?: () => Promise<ResearchWorkspaceCapabilitiesResponse>
 }
 
 /**
@@ -667,8 +667,8 @@ interface StudioPaneProps {
 export const StudioPane: React.FC<StudioPaneProps> = ({
   onHide,
   onRequestSources,
-  researchStudioCapabilities,
-  onRefreshResearchStudioCapabilities
+  researchWorkspaceCapabilities,
+  onRefreshResearchWorkspaceCapabilities
 }) => {
   const { t } = useTranslation(["playground", "common"])
   const isMobile = useMobile()
@@ -971,26 +971,26 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   const getOutputCapability = React.useCallback(
     (
       type: ArtifactType,
-      payload: ResearchStudioCapabilitiesResponse | undefined =
-        researchStudioCapabilities
+      payload: ResearchWorkspaceCapabilitiesResponse | undefined =
+        researchWorkspaceCapabilities
     ) => {
       if (!payload) return null
       return getCapability(payload, getArtifactCapabilityId(type))
     },
-    [researchStudioCapabilities]
+    [researchWorkspaceCapabilities]
   )
 
   const getOutputCapabilityCopy = React.useCallback(
     (
       type: ArtifactType,
       label: string,
-      payload: ResearchStudioCapabilitiesResponse | undefined =
-        researchStudioCapabilities
+      payload: ResearchWorkspaceCapabilitiesResponse | undefined =
+        researchWorkspaceCapabilities
     ) => {
       const capability = getOutputCapability(type, payload)
       return capability ? getCapabilityCopy(capability, label) : null
     },
-    [getOutputCapability, researchStudioCapabilities]
+    [getOutputCapability, researchWorkspaceCapabilities]
   )
 
   const handleCapabilityAwareGenerateOutput = React.useCallback(
@@ -1001,13 +1001,13 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         messageApi.warning(generationPrerequisiteMessage)
         return
       }
-      let capabilityPayload = researchStudioCapabilities
+      let capabilityPayload = researchWorkspaceCapabilities
 
-      if (onRefreshResearchStudioCapabilities) {
+      if (onRefreshResearchWorkspaceCapabilities) {
         try {
-          capabilityPayload = await onRefreshResearchStudioCapabilities()
+          capabilityPayload = await onRefreshResearchWorkspaceCapabilities()
         } catch {
-          capabilityPayload = researchStudioCapabilities
+          capabilityPayload = researchWorkspaceCapabilities
         }
       }
 
@@ -1034,8 +1034,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
       getOutputCapability,
       handleGenerateOutput,
       messageApi,
-      onRefreshResearchStudioCapabilities,
-      researchStudioCapabilities,
+      onRefreshResearchWorkspaceCapabilities,
+      researchWorkspaceCapabilities,
       setShowTtsSettings,
       t
     ]

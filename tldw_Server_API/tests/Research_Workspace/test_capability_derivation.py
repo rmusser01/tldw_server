@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.Research_Studio import capabilities
-from tldw_Server_API.app.core.Research_Studio.capabilities import (
-    RESEARCH_STUDIO_CAPABILITY_IDS,
-    build_research_studio_capabilities,
+from tldw_Server_API.app.core.Research_Workspace import capabilities
+from tldw_Server_API.app.core.Research_Workspace.capabilities import (
+    RESEARCH_WORKSPACE_CAPABILITY_IDS,
+    build_research_workspace_capabilities,
 )
 
 
@@ -38,10 +38,10 @@ def _health_inputs(**overrides):
     return inputs
 
 
-def test_ready_dependencies_allow_core_research_studio_actions():
-    response = build_research_studio_capabilities(**_health_inputs())
+def test_ready_dependencies_allow_core_research_workspace_actions():
+    response = build_research_workspace_capabilities(**_health_inputs())
 
-    assert set(response.capabilities) == set(RESEARCH_STUDIO_CAPABILITY_IDS)
+    assert set(response.capabilities) == set(RESEARCH_WORKSPACE_CAPABILITY_IDS)
     assert response.capabilities["source_browse"].mode == "allow"
     assert response.capabilities["chat"].mode == "allow"
     assert response.capabilities["artifact_text_generation"].mode == "allow"
@@ -55,7 +55,7 @@ def test_ready_dependencies_allow_core_research_studio_actions():
 
 
 def test_unknown_source_health_warns_instead_of_overclaiming_or_blocking():
-    response = build_research_studio_capabilities(
+    response = build_research_workspace_capabilities(
         **_health_inputs(
             aggregate_health={
                 "status": "ok",
@@ -74,7 +74,7 @@ def test_unknown_source_health_warns_instead_of_overclaiming_or_blocking():
 
 
 def test_known_source_unavailable_blocks_source_dependent_actions():
-    response = build_research_studio_capabilities(
+    response = build_research_workspace_capabilities(
         **_health_inputs(
             aggregate_health={
                 "status": "degraded",
@@ -96,7 +96,7 @@ def test_known_source_unavailable_blocks_source_dependent_actions():
 
 
 def test_database_unavailable_blocks_source_dependent_actions():
-    response = build_research_studio_capabilities(
+    response = build_research_workspace_capabilities(
         **_health_inputs(
             aggregate_health={
                 "status": "degraded",
@@ -116,7 +116,7 @@ def test_database_unavailable_blocks_source_dependent_actions():
 
 
 def test_database_degraded_warns_source_dependent_actions():
-    response = build_research_studio_capabilities(
+    response = build_research_workspace_capabilities(
         **_health_inputs(
             aggregate_health={
                 "status": "degraded",
@@ -136,7 +136,7 @@ def test_database_degraded_warns_source_dependent_actions():
 
 
 def test_llm_unavailable_blocks_generation_but_not_read_only_browsing():
-    response = build_research_studio_capabilities(
+    response = build_research_workspace_capabilities(
         **_health_inputs(
             llm_health={
                 "status": "unhealthy",
@@ -155,7 +155,7 @@ def test_llm_unavailable_blocks_generation_but_not_read_only_browsing():
 
 
 def test_rag_degraded_warns_chat_without_blocking_text_artifacts():
-    response = build_research_studio_capabilities(
+    response = build_research_workspace_capabilities(
         **_health_inputs(rag_health={"status": "degraded"})
     )
 
@@ -166,7 +166,7 @@ def test_rag_degraded_warns_chat_without_blocking_text_artifacts():
 
 
 def test_rag_unavailable_blocks_chat_as_dependency_failure():
-    response = build_research_studio_capabilities(
+    response = build_research_workspace_capabilities(
         **_health_inputs(rag_health={"status": "unhealthy"})
     )
 
@@ -177,7 +177,7 @@ def test_rag_unavailable_blocks_chat_as_dependency_failure():
 
 
 def test_slides_and_tts_health_only_gate_their_artifact_types():
-    response = build_research_studio_capabilities(
+    response = build_research_workspace_capabilities(
         **_health_inputs(
             slides_health={"status": "unhealthy"},
             tts_health={"status": "error", "providers": {"available": 0}},
@@ -193,7 +193,7 @@ def test_slides_and_tts_health_only_gate_their_artifact_types():
 
 
 def test_capability_payload_does_not_leak_raw_errors_paths_or_secrets():
-    response = build_research_studio_capabilities(
+    response = build_research_workspace_capabilities(
         **_health_inputs(
             aggregate_health={
                 "status": "unhealthy",
@@ -240,7 +240,7 @@ async def test_tts_health_collection_uses_config_without_provider_initialization
             return ["openai"]
 
     async def forbidden_setup_health():
-        raise AssertionError("Research Studio capability collection must not initialize TTS providers")
+        raise AssertionError("Research Workspace capability collection must not initialize TTS providers")
 
     monkeypatch.setattr(
         "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",

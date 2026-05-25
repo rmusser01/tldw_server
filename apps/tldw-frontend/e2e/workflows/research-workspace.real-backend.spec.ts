@@ -670,7 +670,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
 
-    const fixtureId = generateTestId("research-studio-scope")
+    const fixtureId = generateTestId("research-workspace-scope")
     const leftSource = await seedLiveWorkspaceDocument(
       `WS ${fixtureId} Left`,
       `Left comparison source. Token ${fixtureId}-left. Claim: alpha baseline improved by 11 percent.`

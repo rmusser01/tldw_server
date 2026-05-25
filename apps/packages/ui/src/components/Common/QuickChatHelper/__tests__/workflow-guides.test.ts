@@ -29,8 +29,8 @@ describe("quick chat workflow guides", () => {
   })
 
   it("normalizes options/hash routes for recommendation routing", () => {
-    expect(normalizeQuickChatRoutePath("#/workspace-playground?tab=chat")).toBe(
-      "/research-studio"
+    expect(normalizeQuickChatRoutePath("#/research-workspace?tab=chat")).toBe(
+      "/research-workspace"
     )
     expect(
       normalizeQuickChatRoutePath(
@@ -42,9 +42,9 @@ describe("quick chat workflow guides", () => {
   it("recommends matching workflow pages with route awareness", () => {
     const recommendations = recommendQuickChatWorkflowGuides({
       query:
-        "I am in research studio. How do I benchmark model quality and compare providers?",
+        "I am in research workspace. How do I benchmark model quality and compare providers?",
       answer: "Use evaluations to compare metrics.",
-      currentRoute: "/workspace-playground",
+      currentRoute: "/research-workspace",
       maxResults: 8
     })
     expect(recommendations.length).toBeGreaterThan(0)
@@ -54,7 +54,7 @@ describe("quick chat workflow guides", () => {
     expect(
       recommendations.some(
         (item) =>
-          item.route === "/research-studio" && item.isCurrentRoute === true
+          item.route === "/research-workspace" && item.isCurrentRoute === true
       )
     ).toBe(true)
   })
@@ -66,9 +66,9 @@ describe("quick chat workflow guides", () => {
           id: "custom-guide",
           title: "Custom Guide",
           question: "How do I start?",
-          answer: "Use Research Studio.",
-          route: "workspace-playground",
-          routeLabel: "Research Studio",
+          answer: "Use Research Workspace.",
+          route: "research-workspace",
+          routeLabel: "Research Workspace",
           tags: ["custom", "workflow"]
         }
       ])
@@ -80,9 +80,9 @@ describe("quick chat workflow guides", () => {
         id: "custom-guide",
         title: "Custom Guide",
         question: "How do I start?",
-        answer: "Use Research Studio.",
-        route: "/research-studio",
-        routeLabel: "Research Studio",
+        answer: "Use Research Workspace.",
+        route: "/research-workspace",
+        routeLabel: "Research Workspace",
         tags: ["custom", "workflow"]
       }
     ])
@@ -96,7 +96,7 @@ describe("quick chat workflow guides", () => {
           title: "Custom Guide",
           question: "Where do I go?",
           answer: "Open workspace.",
-          route: "/workspace-playground",
+          route: "/research-workspace",
           tags: ["workflow"]
         }
       ])
@@ -109,8 +109,8 @@ describe("quick chat workflow guides", () => {
         title: "Custom Guide",
         question: "Where do I go?",
         answer: "Open workspace.",
-        route: "/research-studio",
-        routeLabel: "Research Studio",
+        route: "/research-workspace",
+        routeLabel: "Research Workspace",
         tags: ["workflow"]
       }
     ])

@@ -2594,9 +2594,9 @@ export class TldwApiClientBase {
   }
 
   // RAG Methods
-  async getResearchStudioCapabilities(): Promise<unknown> {
+  async getResearchWorkspaceCapabilities(): Promise<unknown> {
     return await this.request<unknown>({
-      path: '/api/v1/research-studio/capabilities',
+      path: '/api/v1/research-workspace/capabilities',
       method: 'GET'
     })
   }

@@ -2,9 +2,12 @@
 
 ## Decision
 
-`ResearchWorkspace` is the canonical shell for the roadmap first slice.
+`ResearchWorkspace` is the canonical shell for the roadmap first slice at
+`/research-workspace`.
 `ChatWorkspace` and `DocumentWorkspace` remain separate routes during this slice
 and are treated as specialized entry points/modes, not deleted or fully merged.
+The cross-domain ownership contract is defined in
+`Research_Workspace_Shared_Workspace_Model_Contract_2026_05.md`.
 
 ## Current Entry Points
 

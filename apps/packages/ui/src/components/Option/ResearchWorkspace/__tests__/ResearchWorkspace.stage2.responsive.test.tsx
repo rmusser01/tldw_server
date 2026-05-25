@@ -1,13 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchWorkspace } from "../index"
+import { RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY } from "../research-workspace-route-state"
 
 const ONBOARDING_KEY = "tldw:research-workspace:onboarding-dismissed:v1"
 const {
   onboardingStorageState,
   mockWorkspaceStorageGetItem,
   mockWorkspaceStorageSetItem,
-  mockGetResearchStudioCapabilities,
+  mockGetResearchWorkspaceCapabilities,
   mockChatPaneProps,
   mockStudioPaneProps
 } = vi.hoisted(() => ({
@@ -16,7 +17,7 @@ const {
   },
   mockWorkspaceStorageGetItem: vi.fn(async (_key: string) => null as string | null),
   mockWorkspaceStorageSetItem: vi.fn(async (_key: string, _value: string) => undefined),
-  mockGetResearchStudioCapabilities: vi.fn(async () => ({
+  mockGetResearchWorkspaceCapabilities: vi.fn(async () => ({
     status: "degraded",
     ttl_seconds: 30,
     timestamp: "2026-05-13T00:00:00.000Z",
@@ -123,7 +124,7 @@ vi.mock("@/store/workspace", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getMediaDetails: vi.fn().mockResolvedValue({}),
-    getResearchStudioCapabilities: mockGetResearchStudioCapabilities
+    getResearchWorkspaceCapabilities: mockGetResearchWorkspaceCapabilities
   }
 }))
 
@@ -232,11 +233,11 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     testState.createNewWorkspace = vi.fn()
     testState.clearCurrentNote = vi.fn()
     testState.loadNote = vi.fn()
-    mockGetResearchStudioCapabilities.mockClear()
+    mockGetResearchWorkspaceCapabilities.mockClear()
     mockChatPaneProps.length = 0
     mockStudioPaneProps.length = 0
-    window.localStorage.removeItem(RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY)
-    window.history.replaceState(null, "", "/research-studio")
+    window.localStorage.removeItem(RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY)
+    window.history.replaceState(null, "", "/research-workspace")
   })
 
   it("uses non-masked tablet drawers so chat remains visible", () => {
@@ -253,26 +254,26 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
   })
 
   it("loads capability health and passes it to Chat and Studio panes", async () => {
-    render(<WorkspacePlayground />)
+    render(<ResearchWorkspace />)
 
     await waitFor(() => {
-      expect(mockGetResearchStudioCapabilities).toHaveBeenCalledTimes(1)
+      expect(mockGetResearchWorkspaceCapabilities).toHaveBeenCalledTimes(1)
       expect(
-        mockChatPaneProps.at(-1)?.researchStudioCapabilities?.capabilities.chat
+        mockChatPaneProps.at(-1)?.researchWorkspaceCapabilities?.capabilities.chat
       ).toMatchObject({
         status: "degraded",
         mode: "warn",
         reason_code: "llm_health_degraded"
       })
       expect(
-        mockStudioPaneProps.at(-1)?.researchStudioCapabilities?.capabilities.chat
+        mockStudioPaneProps.at(-1)?.researchWorkspaceCapabilities?.capabilities.chat
       ).toMatchObject({
         status: "degraded",
         mode: "warn",
         reason_code: "llm_health_degraded"
       })
       expect(
-        typeof mockStudioPaneProps.at(-1)?.onRefreshResearchStudioCapabilities
+        typeof mockStudioPaneProps.at(-1)?.onRefreshResearchWorkspaceCapabilities
       ).toBe("function")
     })
   })
@@ -305,9 +306,9 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
 
   it("opens Studio from the mobile ?tab=studio route state", () => {
     testState.isMobile = true
-    window.history.replaceState(null, "", "/research-studio?tab=studio")
+    window.history.replaceState(null, "", "/research-workspace?tab=studio")
 
-    render(<WorkspacePlayground />)
+    render(<ResearchWorkspace />)
 
     expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
       "data-active-key",
@@ -319,9 +320,9 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
 
   it("falls back to Chat for invalid mobile tab route state", () => {
     testState.isMobile = true
-    window.history.replaceState(null, "", "/research-studio?tab=banana")
+    window.history.replaceState(null, "", "/research-workspace?tab=banana")
 
-    render(<WorkspacePlayground />)
+    render(<ResearchWorkspace />)
 
     expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
       "data-active-key",
@@ -334,11 +335,11 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
   it("opens the persisted mobile tab when no URL tab is present", () => {
     testState.isMobile = true
     window.localStorage.setItem(
-      RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY,
+      RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY,
       "studio"
     )
 
-    render(<WorkspacePlayground />)
+    render(<ResearchWorkspace />)
 
     expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
       "data-active-key",
@@ -350,12 +351,12 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
   it("lets URL tab state override the persisted mobile tab", () => {
     testState.isMobile = true
     window.localStorage.setItem(
-      RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY,
+      RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY,
       "sources"
     )
-    window.history.replaceState(null, "", "/research-studio?tab=studio")
+    window.history.replaceState(null, "", "/research-workspace?tab=studio")
 
-    render(<WorkspacePlayground />)
+    render(<ResearchWorkspace />)
 
     expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
       "data-active-key",
@@ -367,11 +368,11 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
   it("falls back to Chat when persisted mobile tab state is invalid", () => {
     testState.isMobile = true
     window.localStorage.setItem(
-      RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY,
+      RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY,
       "banana"
     )
 
-    render(<WorkspacePlayground />)
+    render(<ResearchWorkspace />)
 
     expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
       "data-active-key",
@@ -383,7 +384,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
   it("persists mobile tab changes", () => {
     testState.isMobile = true
 
-    render(<WorkspacePlayground />)
+    render(<ResearchWorkspace />)
 
     fireEvent.click(screen.getByTestId("tab-label-studio"))
 
@@ -391,19 +392,19 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       "data-active-key",
       "studio"
     )
-    expect(window.localStorage.getItem(RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY))
+    expect(window.localStorage.getItem(RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY))
       .toBe("studio")
   })
 
   it("persists later mobile tab changes after initial URL tab state", () => {
     testState.isMobile = true
     window.localStorage.setItem(
-      RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY,
+      RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY,
       "sources"
     )
-    window.history.replaceState(null, "", "/research-studio?tab=chat")
+    window.history.replaceState(null, "", "/research-workspace?tab=chat")
 
-    render(<WorkspacePlayground />)
+    render(<ResearchWorkspace />)
 
     fireEvent.click(screen.getByTestId("tab-label-studio"))
 
@@ -411,7 +412,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       "data-active-key",
       "studio"
     )
-    expect(window.localStorage.getItem(RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY))
+    expect(window.localStorage.getItem(RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY))
       .toBe("studio")
   })
 
@@ -420,10 +421,10 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     window.history.replaceState(
       null,
       "",
-      "/research-studio?shared=abc&tab=studio"
+      "/research-workspace?shared=abc&tab=studio"
     )
 
-    render(<WorkspacePlayground />)
+    render(<ResearchWorkspace />)
 
     expect(window.location.search).toBe("?shared=abc&tab=studio")
     expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
@@ -434,9 +435,9 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
 
   it("opens Sources from the mobile Studio source-readiness CTA", async () => {
     testState.isMobile = true
-    window.history.replaceState(null, "", "/research-studio?tab=studio")
+    window.history.replaceState(null, "", "/research-workspace?tab=studio")
 
-    render(<WorkspacePlayground />)
+    render(<ResearchWorkspace />)
 
     fireEvent.click(
       await screen.findByRole("button", { name: /open sources tab/i })
@@ -451,9 +452,9 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
   })
 
   it("focuses the requested Studio pane on desktop without switching layouts", async () => {
-    window.history.replaceState(null, "", "/research-studio?tab=studio")
+    window.history.replaceState(null, "", "/research-workspace?tab=studio")
 
-    render(<WorkspacePlayground />)
+    render(<ResearchWorkspace />)
 
     await waitFor(() => {
       expect(testState.setRightPaneCollapsed).toHaveBeenCalledWith(false)

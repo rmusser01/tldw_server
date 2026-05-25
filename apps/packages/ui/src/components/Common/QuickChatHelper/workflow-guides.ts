@@ -25,12 +25,9 @@ export type QuickChatWorkflowRecommendation = {
 export const QUICK_CHAT_WORKFLOW_GUIDES_STORAGE_KEY =
   "quickChatWorkflowGuidesV1"
 
-const RESEARCH_STUDIO_ROUTE = "/research-studio"
+const RESEARCH_WORKSPACE_ROUTE = "/research-workspace"
 
-const QUICK_CHAT_ROUTE_ALIASES: Record<string, string> = {
-  "/workspace-playground": RESEARCH_STUDIO_ROUTE,
-  "/workspace-studio": RESEARCH_STUDIO_ROUTE
-}
+const QUICK_CHAT_ROUTE_ALIASES: Record<string, string> = {}
 
 const canonicalizeQuickChatRoute = (route: string): string =>
   QUICK_CHAT_ROUTE_ALIASES[route] ?? route
@@ -51,9 +48,9 @@ export const QUICK_CHAT_WORKFLOW_GUIDES: QuickChatWorkflowGuide[] = [
     title: "Find which page fits my goal",
     question: "I know my goal, but not which page has the right tools. Where should I start?",
     answer:
-      "Start in Research Studio for guided multi-tool workflows, then open the specialized page it suggests (Media, Knowledge, Characters, or Evaluations).",
-    route: RESEARCH_STUDIO_ROUTE,
-    routeLabel: "Research Studio",
+      "Start in Research Workspace for guided multi-tool workflows, then open the specialized page it suggests (Media, Knowledge, Characters, or Evaluations).",
+    route: RESEARCH_WORKSPACE_ROUTE,
+    routeLabel: "Research Workspace",
     tags: ["workflow", "onboarding", "discovery", "navigation"]
   },
   {

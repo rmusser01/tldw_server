@@ -269,8 +269,8 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 
 vi.mock("@/hooks/useFeatureFlags", () => ({
   FEATURE_FLAGS: {
-    RESEARCH_STUDIO_PROVENANCE_V1: "research-studio-provenance-v1",
-    RESEARCH_STUDIO_STATUS_GUARDRAILS_V1: "research-studio-status-guardrails-v1"
+    RESEARCH_WORKSPACE_PROVENANCE_V1: "research-workspace-provenance-v1",
+    RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1: "research-workspace-status-guardrails-v1"
   },
   useFeatureFlag: () => [true]
 }))

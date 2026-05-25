@@ -32,7 +32,7 @@ def _build_context(tmp_path):
         root_path=str(tmp_path / "workspace"),
         metadata={
             CANONICAL_WORKSPACE_ID_METADATA_KEY: "workspace-alpha",
-            CANONICAL_WORKSPACE_SOURCE_METADATA_KEY: "workspace_playground",
+            CANONICAL_WORKSPACE_SOURCE_METADATA_KEY: "research_workspace",
             CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY: CANONICAL_WORKSPACE_LINKED_STATUS,
         },
     )

@@ -141,8 +141,8 @@ type WorkspaceRolloutControlKey =
   keyof typeof FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS
 
 const WORKSPACE_ROLLOUT_CONTROL_ORDER: WorkspaceRolloutControlKey[] = [
-  "research_studio_provenance_v1",
-  "research_studio_status_guardrails_v1"
+  "research_workspace_provenance_v1",
+  "research_workspace_status_guardrails_v1"
 ]
 const WORKSPACE_ROLLOUT_PRESET_PERCENTAGES = [0, 10, 50, 100] as const
 
@@ -188,8 +188,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const [rolloutPercentages, setRolloutPercentages] = React.useState<
     Record<WorkspaceRolloutControlKey, number>
   >({
-    research_studio_provenance_v1: 100,
-    research_studio_status_guardrails_v1: 100,
+    research_workspace_provenance_v1: 100,
+    research_workspace_status_guardrails_v1: 100,
     watchlists_ia_reduced_nav_v1: 100
   })
   const [workspaceSearchQuery, setWorkspaceSearchQuery] = React.useState("")
@@ -763,16 +763,16 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       )
       setRolloutSubjectId(storedSubjectId?.trim() || "")
       setRolloutPercentages({
-        research_studio_provenance_v1: normalizeRolloutPercentage(
+        research_workspace_provenance_v1: normalizeRolloutPercentage(
           window.localStorage.getItem(
-            FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_studio_provenance_v1
+            FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_workspace_provenance_v1
           ),
           100
         ),
-        research_studio_status_guardrails_v1: normalizeRolloutPercentage(
+        research_workspace_status_guardrails_v1: normalizeRolloutPercentage(
           window.localStorage.getItem(
             FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS
-              .research_studio_status_guardrails_v1
+              .research_workspace_status_guardrails_v1
           ),
           100
         ),
@@ -786,8 +786,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     } catch {
       setRolloutSubjectId("")
       setRolloutPercentages({
-        research_studio_provenance_v1: 100,
-        research_studio_status_guardrails_v1: 100,
+        research_workspace_provenance_v1: 100,
+        research_workspace_status_guardrails_v1: 100,
         watchlists_ia_reduced_nav_v1: 100
       })
     }
@@ -909,8 +909,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const handleResetRolloutControls = React.useCallback(() => {
     const resetValue = 100
     setRolloutPercentages({
-      research_studio_provenance_v1: resetValue,
-      research_studio_status_guardrails_v1: resetValue,
+      research_workspace_provenance_v1: resetValue,
+      research_workspace_status_guardrails_v1: resetValue,
       watchlists_ia_reduced_nav_v1: resetValue
     })
     if (typeof window === "undefined") return
@@ -2369,11 +2369,11 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
                     {WORKSPACE_ROLLOUT_CONTROL_ORDER.map((flag) => {
                       const currentPercentage = rolloutPercentages[flag] ?? 100
                       const isSurfaceEnabled =
-                        flag === "research_studio_provenance_v1"
+                        flag === "research_workspace_provenance_v1"
                           ? provenanceEnabled
                           : statusGuardrailsEnabled
                       const label =
-                        flag === "research_studio_provenance_v1"
+                        flag === "research_workspace_provenance_v1"
                           ? t(
                               "playground:workspace.rolloutProvenanceLabel",
                               "Provenance indicators"

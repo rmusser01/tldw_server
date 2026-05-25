@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fetchTldwVoiceCatalog } from "@/services/tldw/audio-voices"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
 import { StudioPane, estimateGenerationSeconds } from "../StudioPane"
-import { buildUnknownResearchStudioCapabilities } from "../research-studio-capabilities"
+import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 
 const {
   mockRagSearch,
@@ -586,7 +586,7 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
   })
 
   it("disables blocked artifact outputs from capability health", () => {
-    const capabilities = buildUnknownResearchStudioCapabilities()
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
     capabilities.capabilities.slides_generation = {
       status: "unavailable",
       mode: "block",
@@ -594,7 +594,7 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
       reason_code: "slides_unavailable"
     }
 
-    renderExpandedStudioPane({ researchStudioCapabilities: capabilities })
+    renderExpandedStudioPane({ researchWorkspaceCapabilities: capabilities })
     fireEvent.click(screen.getByRole("button", { name: /More outputs/i }))
 
     expect(
@@ -605,14 +605,14 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
   })
 
   it("refresh-checks capability health before generation and blocks stale actions", async () => {
-    const initialCapabilities = buildUnknownResearchStudioCapabilities()
+    const initialCapabilities = buildUnknownResearchWorkspaceCapabilities()
     initialCapabilities.capabilities.artifact_text_generation = {
       status: "ready",
       mode: "allow",
       dependencies: ["llm"],
       reason_code: null
     }
-    const refreshedCapabilities = buildUnknownResearchStudioCapabilities()
+    const refreshedCapabilities = buildUnknownResearchWorkspaceCapabilities()
     refreshedCapabilities.capabilities.artifact_text_generation = {
       status: "unavailable",
       mode: "block",
@@ -622,8 +622,8 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     const refreshCapabilities = vi.fn(async () => refreshedCapabilities)
 
     renderExpandedStudioPane({
-      researchStudioCapabilities: initialCapabilities,
-      onRefreshResearchStudioCapabilities: refreshCapabilities
+      researchWorkspaceCapabilities: initialCapabilities,
+      onRefreshResearchWorkspaceCapabilities: refreshCapabilities
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Summary" }))

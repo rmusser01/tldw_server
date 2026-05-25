@@ -696,7 +696,7 @@ test.describe("Research Workspace Workflow", () => {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            source: { title: "Research Studio Summary Source" },
+            source: { title: "Research Workspace Summary Source" },
             content: { text: SUMMARY_SOURCE_TEXT }
           })
         })
@@ -713,7 +713,7 @@ test.describe("Research Workspace Workflow", () => {
     await workspacePage.seedSources([
       {
         mediaId: 8_844_001,
-        title: "Research Studio Summary Source",
+        title: "Research Workspace Summary Source",
         type: "document",
         status: "ready"
       }
@@ -773,7 +773,7 @@ test.describe("Research Workspace Workflow", () => {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            source: { title: "Research Studio Reload Source" },
+            source: { title: "Research Workspace Reload Source" },
             content: { text: SUMMARY_SOURCE_TEXT }
           })
         })
@@ -790,7 +790,7 @@ test.describe("Research Workspace Workflow", () => {
     await workspacePage.seedSources([
       {
         mediaId: 8_844_002,
-        title: "Research Studio Reload Source",
+        title: "Research Workspace Reload Source",
         type: "document",
         status: "ready"
       }

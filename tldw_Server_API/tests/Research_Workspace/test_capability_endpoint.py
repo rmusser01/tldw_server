@@ -7,7 +7,7 @@ import pytest
 
 from tldw_Server_API.app.api.v1.router_groups.content import API_V1_PREFIX, iter_content_router_specs
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
-from tldw_Server_API.app.core.Research_Studio.capabilities import build_research_studio_capabilities
+from tldw_Server_API.app.core.Research_Workspace.capabilities import build_research_workspace_capabilities
 
 
 def _closure_values(callable_obj: Any) -> list[Any]:
@@ -15,23 +15,23 @@ def _closure_values(callable_obj: Any) -> list[Any]:
     return [cell.cell_contents for cell in closure]
 
 
-def test_content_router_specs_include_research_studio_capabilities_router():
+def test_content_router_specs_include_research_workspace_capabilities_router():
     specs = list(iter_content_router_specs())
 
-    matching = [spec for spec in specs if spec.route_key == "research-studio"]
+    matching = [spec for spec in specs if spec.route_key == "research-workspace"]
 
     assert len(matching) == 1
     assert matching[0].prefix == API_V1_PREFIX
-    assert matching[0].tags == ("research-studio",)
+    assert matching[0].tags == ("research-workspace",)
 
 
-def test_research_studio_capabilities_route_is_permission_gated_and_rate_limited():
-    from tldw_Server_API.app.api.v1.endpoints import research_studio
+def test_research_workspace_capabilities_route_is_permission_gated_and_rate_limited():
+    from tldw_Server_API.app.api.v1.endpoints import research_workspace
 
     route = next(
         route
-        for route in research_studio.router.routes
-        if getattr(route, "path", None) == "/research-studio/capabilities"
+        for route in research_workspace.router.routes
+        if getattr(route, "path", None) == "/research-workspace/capabilities"
     )
     dependency_calls = [dependency.call for dependency in route.dependant.dependencies]
 
@@ -42,20 +42,21 @@ def test_research_studio_capabilities_route_is_permission_gated_and_rate_limited
         if isinstance(value, list)
     )
     assert any(
-        getattr(call, "_tldw_rate_limit_resource", None) == "research_studio.capabilities"
+        getattr(call, "_tldw_rate_limit_resource", None)
+        == "research_workspace.capabilities"
         for call in dependency_calls
     )
 
 
 @pytest.mark.asyncio
-async def test_research_studio_capabilities_endpoint_returns_user_scoped_payload(monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import research_studio
+async def test_research_workspace_capabilities_endpoint_returns_user_scoped_payload(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import research_workspace
 
     seen: dict[str, Any] = {}
 
-    async def fake_collect_research_studio_capabilities(*, user_id: int | str | None = None):
+    async def fake_collect_research_workspace_capabilities(*, user_id: int | str | None = None):
         seen["user_id"] = user_id
-        return build_research_studio_capabilities(
+        return build_research_workspace_capabilities(
             aggregate_health={
                 "status": "ok",
                 "checks": {"database": {"status": "healthy"}, "chacha_notes": {"status": "healthy"}},
@@ -67,12 +68,12 @@ async def test_research_studio_capabilities_endpoint_returns_user_scoped_payload
         )
 
     monkeypatch.setattr(
-        research_studio,
-        "collect_research_studio_capabilities",
-        fake_collect_research_studio_capabilities,
+        research_workspace,
+        "collect_research_workspace_capabilities",
+        fake_collect_research_workspace_capabilities,
     )
 
-    result = await research_studio.research_studio_capabilities(current_user=SimpleNamespace(id=42))
+    result = await research_workspace.research_workspace_capabilities(current_user=SimpleNamespace(id=42))
 
     assert seen == {"user_id": 42}
     assert result.capabilities["chat"].mode == "warn"
@@ -80,9 +81,10 @@ async def test_research_studio_capabilities_endpoint_returns_user_scoped_payload
     assert "api_key" not in result.model_dump_json()
 
 
-def test_openapi_contains_research_studio_capabilities_path():
+def test_openapi_contains_research_workspace_capabilities_path():
     from tldw_Server_API.app.main import app
 
     schema = app.openapi()
 
-    assert "/api/v1/research-studio/capabilities" in schema["paths"]
+    assert "/api/v1/research-workspace/capabilities" in schema["paths"]
+    assert "/api/v1/research-studio/capabilities" not in schema["paths"]

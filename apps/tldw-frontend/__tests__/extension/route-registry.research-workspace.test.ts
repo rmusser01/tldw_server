@@ -27,6 +27,12 @@ describe("extension route registry research-workspace parity", () => {
     expect(extensionRouteRegistrySource).not.toMatch(
       /path:\s*"\/workspace-playground"/
     )
+    expect(extensionRouteRegistrySource).not.toMatch(
+      /path:\s*"\/workspace-studio"/
+    )
+    expect(extensionRouteRegistrySource).not.toMatch(
+      /path:\s*"\/research-studio"/
+    )
   })
 
   it("exposes research workspace navigation metadata", () => {

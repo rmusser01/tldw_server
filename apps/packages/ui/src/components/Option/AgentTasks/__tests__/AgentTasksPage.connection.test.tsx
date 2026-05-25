@@ -626,7 +626,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
               canonical_workspace: {
                 acp_workspace_id: 33,
                 canonical_workspace_id: "workspace-alpha",
-                canonical_workspace_source: "workspace_playground",
+                canonical_workspace_source: "research_workspace",
                 link_status: "linked"
               },
               task_summary: {
@@ -644,7 +644,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
               canonical_workspace: {
                 acp_workspace_id: 34,
                 canonical_workspace_id: "workspace-beta",
-                canonical_workspace_source: "workspace_playground",
+                canonical_workspace_source: "research_workspace",
                 link_status: "linked"
               },
               task_summary: {
@@ -758,10 +758,10 @@ describe("AgentTasksPage connection and payload normalization", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Create an agent task from WorkspacePlayground so the execution root, environment, and MCP readiness can be validated before dispatch."
+        "Create an agent task from Research Workspace so the execution root, environment, and MCP readiness can be validated before dispatch."
       )
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /open workspaceplayground/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /open research workspace/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open acp playground/i })).toBeInTheDocument()
   })
 
@@ -845,7 +845,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
               canonical_workspace: {
                 acp_workspace_id: 33,
                 canonical_workspace_id: "workspace-alpha",
-                canonical_workspace_source: "workspace_playground",
+                canonical_workspace_source: "research_workspace",
                 link_status: "linked"
               }
             },
@@ -857,7 +857,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
               canonical_workspace: {
                 acp_workspace_id: 34,
                 canonical_workspace_id: "workspace-alpha",
-                canonical_workspace_source: "workspace_playground",
+                canonical_workspace_source: "research_workspace",
                 link_status: "conflict"
               }
             }

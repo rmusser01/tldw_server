@@ -65,8 +65,8 @@ import { getWorkspaceChatSearchMessageId } from "../workspace-global-search"
 import {
   getCapability,
   getCapabilityCopy,
-  type ResearchStudioCapabilitiesResponse
-} from "../research-studio-capabilities"
+  type ResearchWorkspaceCapabilitiesResponse
+} from "../research-workspace-capabilities"
 
 const { TextArea } = Input
 const VISIBLE_SOURCE_TAG_COUNT = 5
@@ -1251,18 +1251,18 @@ interface ChatPaneProps {
   provenanceEnabled?: boolean
   statusGuardrailsEnabled?: boolean
   contentWidthMode?: ChatPaneContentWidthMode
-  researchStudioCapabilities?: ResearchStudioCapabilitiesResponse
-  researchStudioCapabilitiesStale?: boolean
-  onRefreshResearchStudioCapabilities?: () => Promise<ResearchStudioCapabilitiesResponse>
+  researchWorkspaceCapabilities?: ResearchWorkspaceCapabilitiesResponse
+  researchWorkspaceCapabilitiesStale?: boolean
+  onRefreshResearchWorkspaceCapabilities?: () => Promise<ResearchWorkspaceCapabilitiesResponse>
 }
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
   provenanceEnabled = true,
   statusGuardrailsEnabled = true,
   contentWidthMode = "comfortable",
-  researchStudioCapabilities,
-  researchStudioCapabilitiesStale = false,
-  onRefreshResearchStudioCapabilities
+  researchWorkspaceCapabilities,
+  researchWorkspaceCapabilitiesStale = false,
+  onRefreshResearchWorkspaceCapabilities
 }) => {
   const { t } = useTranslation(["playground", "common"])
   const translate = React.useCallback(
@@ -1942,12 +1942,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     let actionChatCapability = chatCapability
     if (
       statusGuardrailsEnabled &&
-      onRefreshResearchStudioCapabilities &&
-      (researchStudioCapabilitiesStale || !actionChatCapability)
+      onRefreshResearchWorkspaceCapabilities &&
+      (researchWorkspaceCapabilitiesStale || !actionChatCapability)
     ) {
       try {
         actionChatCapability = getCapability(
-          await onRefreshResearchStudioCapabilities(),
+          await onRefreshResearchWorkspaceCapabilities(),
           "chat"
         )
       } catch {
@@ -2668,8 +2668,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const hasConnectionFailure =
     connectionState.phase === ConnectionPhase.ERROR &&
     !connectionState.isChecking
-  const chatCapability = researchStudioCapabilities
-    ? getCapability(researchStudioCapabilities, "chat")
+  const chatCapability = researchWorkspaceCapabilities
+    ? getCapability(researchWorkspaceCapabilities, "chat")
     : null
   const chatCapabilityMessage = statusGuardrailsEnabled
     ? chatCapability
@@ -2678,8 +2678,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     : null
   const isChatCapabilityRefreshable =
     statusGuardrailsEnabled &&
-    researchStudioCapabilitiesStale &&
-    Boolean(onRefreshResearchStudioCapabilities)
+    researchWorkspaceCapabilitiesStale &&
+    Boolean(onRefreshResearchWorkspaceCapabilities)
   const isChatCapabilityBlocked =
     statusGuardrailsEnabled &&
     chatCapability?.mode === "block" &&

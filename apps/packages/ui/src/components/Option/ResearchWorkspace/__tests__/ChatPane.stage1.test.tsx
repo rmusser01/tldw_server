@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom"
 import { ConnectionPhase } from "@/types/connection"
 import { CHAT_PATH, LOREBOOK_DEBUG_FOCUS } from "@/routes/route-paths"
 import { ChatPane } from "../ChatPane"
-import { buildUnknownResearchStudioCapabilities } from "../research-studio-capabilities"
+import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 
 const mockCheckConnectionOnce = vi.fn()
 const mockSaveWorkspaceChatSession = vi.fn()
@@ -687,7 +687,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
   })
 
   it("blocks chat from capability health without showing a connection failure", () => {
-    const capabilities = buildUnknownResearchStudioCapabilities()
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
     capabilities.capabilities.chat = {
       status: "unavailable",
       mode: "block",
@@ -695,7 +695,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       reason_code: "llm_unavailable"
     }
 
-    renderChatPane({ researchStudioCapabilities: capabilities })
+    renderChatPane({ researchWorkspaceCapabilities: capabilities })
 
     expect(screen.queryByText(/Unable to reach server/)).not.toBeInTheDocument()
     expect(
@@ -708,13 +708,13 @@ describe("ChatPane Stage 1 reliability and controls", () => {
   })
 
   it("refreshes stale capability health before blocking a chat submit", async () => {
-    const staleCapabilities = buildUnknownResearchStudioCapabilities()
+    const staleCapabilities = buildUnknownResearchWorkspaceCapabilities()
     staleCapabilities.capabilities.chat = {
       status: "ready",
       mode: "allow",
       dependencies: ["llm"]
     }
-    const refreshedCapabilities = buildUnknownResearchStudioCapabilities()
+    const refreshedCapabilities = buildUnknownResearchWorkspaceCapabilities()
     refreshedCapabilities.capabilities.chat = {
       status: "unavailable",
       mode: "block",
@@ -724,9 +724,9 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     const refreshCapabilities = vi.fn(async () => refreshedCapabilities)
 
     renderChatPane({
-      researchStudioCapabilities: staleCapabilities,
-      researchStudioCapabilitiesStale: true,
-      onRefreshResearchStudioCapabilities: refreshCapabilities
+      researchWorkspaceCapabilities: staleCapabilities,
+      researchWorkspaceCapabilitiesStale: true,
+      onRefreshResearchWorkspaceCapabilities: refreshCapabilities
     })
 
     const textarea = screen.getByPlaceholderText("Type a message...")
@@ -740,14 +740,14 @@ describe("ChatPane Stage 1 reliability and controls", () => {
   })
 
   it("lets a stale blocked snapshot refresh before allowing chat submit", async () => {
-    const staleCapabilities = buildUnknownResearchStudioCapabilities()
+    const staleCapabilities = buildUnknownResearchWorkspaceCapabilities()
     staleCapabilities.capabilities.chat = {
       status: "unavailable",
       mode: "block",
       dependencies: ["llm"],
       reason_code: "llm_unavailable"
     }
-    const refreshedCapabilities = buildUnknownResearchStudioCapabilities()
+    const refreshedCapabilities = buildUnknownResearchWorkspaceCapabilities()
     refreshedCapabilities.capabilities.chat = {
       status: "ready",
       mode: "allow",
@@ -756,9 +756,9 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     const refreshCapabilities = vi.fn(async () => refreshedCapabilities)
 
     renderChatPane({
-      researchStudioCapabilities: staleCapabilities,
-      researchStudioCapabilitiesStale: true,
-      onRefreshResearchStudioCapabilities: refreshCapabilities
+      researchWorkspaceCapabilities: staleCapabilities,
+      researchWorkspaceCapabilitiesStale: true,
+      onRefreshResearchWorkspaceCapabilities: refreshCapabilities
     })
 
     const textarea = screen.getByPlaceholderText("Type a message...")

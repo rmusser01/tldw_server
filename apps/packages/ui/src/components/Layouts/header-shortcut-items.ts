@@ -175,7 +175,7 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         labelKey: "settings:researchWorkspaceNav",
         labelDefault: "Research Workspace",
         shortcutIndex: 7,
-        descriptionKey: "settings:researchStudioDesc",
+        descriptionKey: "settings:researchWorkspaceDesc",
         descriptionDefault: "Three-pane workspace: sources, chat, and generated outputs"
       },
       {
