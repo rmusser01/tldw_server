@@ -603,6 +603,38 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     expect(screen.getByText("Open model settings")).toBeInTheDocument()
   })
 
+  it("retries chat model loading when the selector opens after an empty startup load", async () => {
+    hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
+    hoistedMocks.fetchChatModels
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          model: "tldw:openai/gpt-4o",
+          name: "tldw:openai/gpt-4o",
+          nickname: "GPT-4o",
+          provider: "openai"
+        }
+      ])
+
+    renderChatPane()
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true
+      })
+    })
+
+    fireEvent.click(await screen.findByTestId("model-selector"))
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true,
+        forceRefresh: true
+      })
+    })
+    expect(await screen.findByText("GPT-4o")).toBeInTheDocument()
+  })
+
   it("handles partial retrieval metadata by inferring diagnostics from sources", () => {
     messageOptionState.messages = [
       {
