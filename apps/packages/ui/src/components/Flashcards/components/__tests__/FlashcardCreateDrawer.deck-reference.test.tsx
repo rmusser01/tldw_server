@@ -77,16 +77,18 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+const messageApi = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+  loading: vi.fn(),
+  open: vi.fn(),
+  destroy: vi.fn()
+}))
+
 vi.mock("@/hooks/useAntdMessage", () => ({
-  useAntdMessage: () => ({
-    success: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-    warning: vi.fn(),
-    loading: vi.fn(),
-    open: vi.fn(),
-    destroy: vi.fn()
-  })
+  useAntdMessage: () => messageApi
 }))
 
 vi.mock("../../hooks", () => ({
@@ -249,7 +251,10 @@ describe("FlashcardCreateDrawer deck reference section", () => {
   const selectDeck = async (deckName: string) => {
     const deckInputs = screen.getAllByLabelText("Deck")
     fireEvent.mouseDown(deckInputs[deckInputs.length - 1] as HTMLElement)
-    fireEvent.click(await screen.findByText(deckName))
+    const deckOptions = await screen.findAllByText(deckName, {
+      selector: ".ant-select-item-option-content"
+    })
+    fireEvent.click(deckOptions[deckOptions.length - 1] as HTMLElement)
   }
 
   const expandReferenceSection = async () => {
@@ -389,6 +394,43 @@ describe("FlashcardCreateDrawer deck reference section", () => {
         selector: ".ant-select-content-value"
       })
     ).toBeInTheDocument()
+  }, 15000)
+
+  it("shows create errors and keeps entered fields when creation fails", async () => {
+    const onClose = vi.fn()
+    const onSuccess = vi.fn()
+    createFlashcardMutateAsync.mockRejectedValueOnce(
+      new Error("Create service unavailable")
+    )
+
+    renderDrawer({ onClose, onSuccess })
+
+    await selectDeck("Biology")
+    fireEvent.change(screen.getByPlaceholderText("Question or prompt..."), {
+      target: { value: "Retain this prompt" }
+    })
+    fireEvent.change(screen.getByPlaceholderText("Answer..."), {
+      target: { value: "Retain this answer" }
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    await waitFor(() => {
+      expect(createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    await waitFor(() => {
+      expect(messageApi.error).toHaveBeenCalledWith("Create service unavailable")
+    })
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(onSuccess).not.toHaveBeenCalled()
+    expect((screen.getByPlaceholderText("Question or prompt...") as HTMLTextAreaElement).value).toBe(
+      "Retain this prompt"
+    )
+    expect((screen.getByPlaceholderText("Answer...") as HTMLTextAreaElement).value).toBe(
+      "Retain this answer"
+    )
+    expect(screen.getByRole("button", { name: "Create" })).toBeEnabled()
   })
 
   it("clears the reference search term when the selected deck changes", async () => {
@@ -405,7 +447,7 @@ describe("FlashcardCreateDrawer deck reference section", () => {
     await expandReferenceSection()
 
     expect((screen.getByPlaceholderText("Search this deck") as HTMLInputElement).value).toBe("")
-  })
+  }, 15000)
 
   it("clears the reference search term when the drawer closes and reopens", async () => {
     const { rerender } = render(

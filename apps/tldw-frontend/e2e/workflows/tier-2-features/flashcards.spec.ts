@@ -248,6 +248,70 @@ test.describe('Flashcards', () => {
 
       await assertNoCriticalErrors(diagnostics);
     });
+
+    test('should review a seeded card using only keyboard shortcuts', async ({
+      authedPage,
+      serverInfo,
+      diagnostics,
+    }) => {
+      skipIfServerUnavailable(serverInfo);
+
+      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const deck = await createFlashcardDeck(`E2E Keyboard Review ${runId}`);
+      const front = `Keyboard front ${runId}`;
+      const back = `Keyboard back ${runId}`;
+
+      await createFlashcardCard({
+        deckId: deck.id,
+        front,
+        back,
+      });
+
+      flashcards = new FlashcardsPage(authedPage);
+      await flashcards.gotoPath(`/flashcards?tab=review&deck_id=${deck.id}`);
+      await flashcards.assertPageReady();
+
+      expect(await flashcards.isOnline()).toBe(true);
+      await expect(flashcards.reviewActiveCard).toBeVisible({ timeout: 10_000 });
+      await expect(flashcards.reviewActiveCard.getByText(front, { exact: true })).toBeVisible({
+        timeout: 10_000,
+      });
+      await expect(flashcards.reviewShowAnswerButton).toBeVisible({ timeout: 10_000 });
+
+      await authedPage.keyboard.press('Space');
+
+      await expect(flashcards.reviewGoodButton).toBeVisible({ timeout: 10_000 });
+      await expect(flashcards.reviewActiveCard.getByText(back, { exact: true })).toBeVisible({
+        timeout: 10_000,
+      });
+
+      const reviewResponsePromise = authedPage.waitForResponse((response) => {
+        return (
+          response.request().method() === 'POST' &&
+          /\/api\/v1\/flashcards\/review$/.test(response.url())
+        );
+      });
+
+      await authedPage.keyboard.press('3');
+
+      const reviewResponse = await reviewResponsePromise;
+      expect(reviewResponse.status()).toBeLessThan(400);
+
+      await expect
+        .poll(
+          async () => {
+            const completionVisible = await flashcards.reviewCompletionState
+              .isVisible()
+              .catch(() => false);
+            const activeCardVisible = await flashcards.reviewActiveCard.isVisible().catch(() => false);
+            return completionVisible || activeCardVisible;
+          },
+          { timeout: 20_000 }
+        )
+        .toBe(true);
+
+      await assertNoCriticalErrors(diagnostics);
+    });
   });
 
   // =========================================================================
@@ -369,6 +433,53 @@ test.describe('Flashcards', () => {
       } catch {
         // Search may debounce; acceptable if no immediate call
       }
+
+      await assertNoCriticalErrors(diagnostics);
+    });
+
+    test('creates a flashcard from the drawer and shows it in Manage', async ({
+      authedPage,
+      serverInfo,
+      diagnostics,
+    }) => {
+      skipIfServerUnavailable(serverInfo);
+
+      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const front = `Drawer-created front ${runId}`;
+      const back = `Drawer-created back ${runId}`;
+
+      flashcards = new FlashcardsPage(authedPage);
+      await flashcards.gotoPath('/flashcards?tab=manage');
+      await flashcards.assertPageReady();
+
+      expect(await flashcards.isOnline()).toBe(true);
+      await flashcards.switchToTab('manage');
+      await expect(flashcards.manageTopBar).toBeVisible({ timeout: 10_000 });
+
+      await flashcards.fabCreateButton.click();
+      await expect(flashcards.createDrawer).toBeVisible({ timeout: 10_000 });
+      await flashcards.createFrontTextarea.fill(front);
+      await flashcards.createBackTextarea.fill(back);
+
+      const createResponsePromise = authedPage.waitForResponse((response) => {
+        return (
+          response.request().method() === 'POST' &&
+          /\/api\/v1\/flashcards$/.test(response.url())
+        );
+      });
+
+      await flashcards.createSubmitButton.click();
+
+      const createResponse = await createResponsePromise;
+      expect(createResponse.status()).toBeLessThan(400);
+      const createdCard = (await createResponse.json()) as SeededCard;
+      expect(createdCard.uuid).toBeTruthy();
+
+      await expect(flashcards.createDrawer).toBeHidden({ timeout: 10_000 });
+      await expect(flashcards.getManageFlashcardRow(createdCard.uuid)).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(flashcards.getManageFlashcardRow(createdCard.uuid)).toContainText(front);
 
       await assertNoCriticalErrors(diagnostics);
     });
