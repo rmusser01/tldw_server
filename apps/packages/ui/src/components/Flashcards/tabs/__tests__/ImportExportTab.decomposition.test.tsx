@@ -73,6 +73,26 @@ describe("ImportExportTab decomposition", () => {
   it("renders concrete import limits instead of unresolved interpolation placeholders", () => {
     mocks.useImportLimitsQuery.mockReturnValue({
       data: {
+        max_lines: 2500,
+        max_line_length: 32768,
+        max_field_length: 1048576
+      }
+    })
+
+    render(<ImportExportTab />)
+
+    const limits = screen.getByTestId("flashcards-transfer-summary-limits")
+    expect(limits).not.toHaveTextContent("{{lines}}")
+    expect(limits).not.toHaveTextContent("{{lineBytes}}")
+    expect(limits).not.toHaveTextContent("{{fieldBytes}}")
+    expect(limits).toHaveTextContent(`${(2500).toLocaleString()} lines`)
+    expect(limits).toHaveTextContent(`${(32768).toLocaleString()} bytes per line`)
+    expect(limits).toHaveTextContent(`${(1048576).toLocaleString()} bytes per field`)
+  })
+
+  it("shows the unavailable fallback for malformed import limits", () => {
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: {
         max_cards_per_import: 2500,
         max_content_size_bytes: 1048576
       }
@@ -81,9 +101,6 @@ describe("ImportExportTab decomposition", () => {
     render(<ImportExportTab />)
 
     const limits = screen.getByTestId("flashcards-transfer-summary-limits")
-    expect(limits).not.toHaveTextContent("{{cards}}")
-    expect(limits).not.toHaveTextContent("{{bytes}}")
-    expect(limits).toHaveTextContent("2,500 cards")
-    expect(limits).toHaveTextContent("1,048,576 bytes")
+    expect(limits).toHaveTextContent("Limits unavailable")
   })
 })

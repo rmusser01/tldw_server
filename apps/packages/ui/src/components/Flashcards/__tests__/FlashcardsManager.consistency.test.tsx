@@ -205,10 +205,16 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
     expect(screen.queryByTestId("mock-transfer-tab")).not.toBeInTheDocument()
     expect(screen.getByText("Templates")).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /scheduler/i })).toHaveAttribute(
+    const schedulerTab = screen.getByRole("tab", { name: /scheduler/i })
+    const schedulerLabel = screen.getByText("Scheduler")
+    expect(schedulerTab).not.toHaveAttribute("aria-disabled", "true")
+    expect(schedulerLabel).toHaveAttribute(
       "aria-disabled",
       "true"
     )
+    fireEvent.click(schedulerTab)
+    expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
+    expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
 
   it("routes template deep-links to the Templates tab", () => {
@@ -228,7 +234,11 @@ describe("FlashcardsManager consistency standards", () => {
 
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.getByTestId("mock-templates-tab")).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /scheduler/i })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: /scheduler/i })).not.toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+    expect(screen.getByText("Scheduler")).toHaveAttribute(
       "aria-disabled",
       "true"
     )
@@ -258,10 +268,15 @@ describe("FlashcardsManager consistency standards", () => {
 
     expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
     expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /scheduler/i })).toHaveAttribute(
+    const schedulerTab = screen.getByRole("tab", { name: /scheduler/i })
+    expect(schedulerTab).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByText("Scheduler")).toHaveAttribute(
       "aria-disabled",
       "true"
     )
+    fireEvent.click(schedulerTab)
+    expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
+    expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
 
   it("routes secondary create CTA to the Manage tab create entry point", () => {

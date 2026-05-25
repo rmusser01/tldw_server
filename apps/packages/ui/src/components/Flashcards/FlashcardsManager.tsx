@@ -123,12 +123,6 @@ export const FlashcardsManager: React.FC = () => {
     }
   }, [currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
 
-  React.useEffect(() => {
-    if (schedulerDisabled && activeTab === "scheduler") {
-      setActiveTab("review")
-    }
-  }, [activeTab, schedulerDisabled])
-
   const handleReviewCard = React.useCallback(
     (card: Flashcard) => {
       setReviewDeckId(card.deck_id ?? undefined)
@@ -154,13 +148,20 @@ export const FlashcardsManager: React.FC = () => {
     })
   }, [currentStudyIntent?.attemptId, currentStudyIntent?.deckId, currentStudyIntent?.forceShowWorkspaceItems, currentStudyIntent?.quizId, reviewDeckId])
   const canOpenQuizCta = currentStudyIntent?.quizId !== undefined
+  const effectiveActiveTab =
+    schedulerDisabled && activeTab === "scheduler" ? "review" : activeTab
   const schedulerTabLabel = schedulerDisabled ? (
     <Tooltip
       title={t("option:flashcards.schedulerNeedsDeck", {
         defaultValue: "Create or import a deck to configure scheduling."
       })}
     >
-      <span>{t("option:flashcards.tabScheduler", { defaultValue: "Scheduler" })}</span>
+      <span
+        aria-disabled="true"
+        className="cursor-not-allowed text-text-muted"
+      >
+        {t("option:flashcards.tabScheduler", { defaultValue: "Scheduler" })}
+      </span>
     </Tooltip>
   ) : (
     t("option:flashcards.tabScheduler", { defaultValue: "Scheduler" })
@@ -168,6 +169,8 @@ export const FlashcardsManager: React.FC = () => {
 
   const handleTabChange = React.useCallback(
     (nextTab: string) => {
+      if (nextTab === "scheduler" && schedulerDisabled) return
+
       if (activeTab === "scheduler" && nextTab !== "scheduler" && schedulerDirty) {
         const shouldDiscard = window.confirm(
           t("option:flashcards.schedulerDiscardChangesPrompt", {
@@ -181,14 +184,14 @@ export const FlashcardsManager: React.FC = () => {
 
       setActiveTab(nextTab)
     },
-    [activeTab, schedulerDirty, t]
+    [activeTab, schedulerDirty, schedulerDisabled, t]
   )
 
   return (
     <div className="mx-auto max-w-6xl p-4">
       <Tabs
         data-testid="flashcards-tabs"
-        activeKey={activeTab}
+        activeKey={effectiveActiveTab}
         onChange={handleTabChange}
         tabBarExtraContent={(
           <Space size={4}>
@@ -246,7 +249,7 @@ export const FlashcardsManager: React.FC = () => {
                 onReviewDeckChange={setReviewDeckId}
                 reviewOverrideCard={reviewOverrideCard}
                 onClearOverride={() => setReviewOverrideCard(null)}
-                isActive={activeTab === "review"}
+                isActive={effectiveActiveTab === "review"}
                 forceShowWorkspaceItems={currentStudyIntent?.forceShowWorkspaceItems ?? false}
               />
             )
@@ -259,7 +262,7 @@ export const FlashcardsManager: React.FC = () => {
                 onNavigateToImport={() => setActiveTab("importExport")}
                 onReviewCard={handleReviewCard}
                 openCreateSignal={openCreateSignal}
-                isActive={activeTab === "cards"}
+                isActive={effectiveActiveTab === "cards"}
                 initialDeckId={currentTab === "cards" ? currentStudyIntent?.deckId : undefined}
                 initialShowWorkspaceDecks={
                   currentTab === "cards" ? (currentStudyIntent?.forceShowWorkspaceItems ?? false) : false
@@ -285,10 +288,9 @@ export const FlashcardsManager: React.FC = () => {
           {
             key: "scheduler",
             label: schedulerTabLabel,
-            disabled: schedulerDisabled,
             children: schedulerDisabled ? null : (
               <SchedulerTab
-                isActive={activeTab === "scheduler"}
+                isActive={effectiveActiveTab === "scheduler"}
                 onDirtyChange={setSchedulerDirty}
                 discardSignal={schedulerDiscardSignal}
               />
@@ -301,13 +303,13 @@ export const FlashcardsManager: React.FC = () => {
         open={shortcutsModalOpen}
         onClose={() => setShortcutsModalOpen(false)}
         activeTab={
-          activeTab === "importExport"
+          effectiveActiveTab === "importExport"
             ? "import"
-            : activeTab === "scheduler"
+            : effectiveActiveTab === "scheduler"
               ? "scheduler"
-              : activeTab === "templates"
+              : effectiveActiveTab === "templates"
                 ? "templates"
-              : (activeTab as "review" | "cards")
+                : (effectiveActiveTab as "review" | "cards")
         }
       />
     </div>

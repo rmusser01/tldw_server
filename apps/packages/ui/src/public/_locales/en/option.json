@@ -1775,6 +1775,9 @@
   "flashcards_transferSummaryFormatsValue": {
     "message": "Import: CSV, TSV, JSON, JSONL, APKG · Export: TSV, CSV, APKG"
   },
+  "flashcards_transferSummaryLimitsValue": {
+    "message": "{{lines}} lines / {{lineBytes}} bytes per line / {{fieldBytes}} bytes per field"
+  },
   "flashcards_pasteContent": {
     "message": "Paste content here..."
   },
@@ -1801,6 +1804,9 @@
   },
   "flashcards_importLimits": {
     "message": "Import Limits"
+  },
+  "flashcards_importLimitsValue": {
+    "message": "Limits: max {{maxLines}} lines, {{maxLineBytes}} bytes per line, {{maxFieldBytes}} bytes per field"
   },
   "flashcards_csv": {
     "message": "CSV/TSV"

@@ -912,8 +912,18 @@ export async function regenerateStudyPackJob(
 export const regenerateStudyPack = regenerateStudyPackJob
 
 // Import
-export async function getFlashcardsImportLimits(): Promise<any> {
-  return await bgRequest<any, AllowedPath, "GET">({
+export interface FlashcardsImportLimitsResponse {
+  max_lines: number
+  max_line_length: number
+  max_field_length: number
+  overrides?: {
+    query_params?: string[]
+    note?: string
+  }
+}
+
+export async function getFlashcardsImportLimits(): Promise<FlashcardsImportLimitsResponse> {
+  return await bgRequest<FlashcardsImportLimitsResponse, AllowedPath, "GET">({
     path: "/api/v1/config/flashcards-import-limits",
     method: "GET"
   })

@@ -60,6 +60,7 @@ import {
   estimateJsonItemCount,
   getImportErrorGuidance,
   normalizeHeaderToken,
+  normalizeImportLimits,
   normalizeImportErrors,
   normalizeImportedItems,
   normalizeStructuredDrafts,
@@ -112,6 +113,10 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
     "columns"
   ])
   const structuredSchedulerDraft = useDeckSchedulerDraft()
+  const importLimits = React.useMemo(
+    () => normalizeImportLimits(limitsQuery.data),
+    [limitsQuery.data]
+  )
   const structuredSelectedDeck = React.useMemo(
     () =>
       typeof structuredTargetDeckId === "number"
@@ -1079,13 +1084,14 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
           </Text>
         </div>
       )}
-      {limitsQuery.data && (
+      {importLimits && (
         <Text type="secondary" className="text-xs">
-          {t("option:flashcards.importLimits", {
+          {t("option:flashcards.importLimitsValue", {
             defaultValue:
-              "Limits: max {{maxCards}} cards, {{maxSize}} bytes per import",
-            maxCards: limitsQuery.data.max_cards_per_import,
-            maxSize: limitsQuery.data.max_content_size_bytes
+              "Limits: max {{maxLines}} lines, {{maxLineBytes}} bytes per line, {{maxFieldBytes}} bytes per field",
+            maxLines: importLimits.maxLines.toLocaleString(),
+            maxLineBytes: importLimits.maxLineLengthBytes.toLocaleString(),
+            maxFieldBytes: importLimits.maxFieldLengthBytes.toLocaleString()
           })}
         </Text>
       )}
