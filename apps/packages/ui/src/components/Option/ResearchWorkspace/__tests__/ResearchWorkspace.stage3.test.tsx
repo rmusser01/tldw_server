@@ -8,6 +8,7 @@ const {
   mockUpsertWorkspace,
   mockGetWorkspaceSources,
   mockAddWorkspaceSource,
+  mockUpdateWorkspaceSourceSelection,
   mockGetWorkspaceSourcesStatus,
   mockGetWorkspaceCapabilities,
   mockBgRequest
@@ -16,6 +17,7 @@ const {
   mockUpsertWorkspace: vi.fn(),
   mockGetWorkspaceSources: vi.fn(),
   mockAddWorkspaceSource: vi.fn(),
+  mockUpdateWorkspaceSourceSelection: vi.fn(),
   mockGetWorkspaceSourcesStatus: vi.fn(),
   mockGetWorkspaceCapabilities: vi.fn(),
   mockBgRequest: vi.fn()
@@ -110,6 +112,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     upsertWorkspace: mockUpsertWorkspace,
     getWorkspaceSources: mockGetWorkspaceSources,
     addWorkspaceSource: mockAddWorkspaceSource,
+    updateWorkspaceSourceSelection: mockUpdateWorkspaceSourceSelection,
     getWorkspaceSourcesStatus: mockGetWorkspaceSourcesStatus,
     getWorkspaceCapabilities: mockGetWorkspaceCapabilities
   }
@@ -314,6 +317,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
         version: 1
       })
     )
+    mockUpdateWorkspaceSourceSelection.mockResolvedValue(undefined)
     mockGetWorkspaceSourcesStatus.mockResolvedValue({
       workspace_id: "workspace-1",
       sources: [],
@@ -1002,8 +1006,12 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       source_type: "pdf",
       url: "https://example.test/ready.pdf",
       position: 0,
-      selected: true
+      selected: false
     })
+    expect(mockUpdateWorkspaceSourceSelection).toHaveBeenCalledWith(
+      "workspace-1",
+      []
+    )
 
     expect(
       mockUpsertWorkspace.mock.invocationCallOrder[0]
@@ -1017,6 +1025,60 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     expect(
       mockAddWorkspaceSource.mock.invocationCallOrder[0]
     ).toBeLessThan(mockGetWorkspaceCapabilities.mock.invocationCallOrder[0])
+  })
+
+  it("persists the canonical local source selection during server bootstrap", async () => {
+    testState.sources = [
+      {
+        id: "source-unselected",
+        mediaId: 111,
+        title: "Unselected Source",
+        type: "pdf",
+        status: "ready",
+        addedAt: new Date("2026-05-23T12:00:00.000Z")
+      },
+      {
+        id: "source-selected",
+        mediaId: 222,
+        title: "Selected Source",
+        type: "website",
+        status: "ready",
+        addedAt: new Date("2026-05-23T12:01:00.000Z")
+      }
+    ]
+    testState.selectedSourceIds = ["source-selected"]
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledWith("workspace-1")
+    })
+
+    expect(mockAddWorkspaceSource).toHaveBeenNthCalledWith(1, "workspace-1", {
+      id: "source-unselected",
+      media_id: 111,
+      title: "Unselected Source",
+      source_type: "pdf",
+      url: null,
+      position: 0,
+      selected: false
+    })
+    expect(mockAddWorkspaceSource).toHaveBeenNthCalledWith(2, "workspace-1", {
+      id: "source-selected",
+      media_id: 222,
+      title: "Selected Source",
+      source_type: "website",
+      url: null,
+      position: 1,
+      selected: true
+    })
+    expect(mockUpdateWorkspaceSourceSelection).toHaveBeenCalledWith(
+      "workspace-1",
+      ["source-selected"]
+    )
+    expect(
+      mockUpdateWorkspaceSourceSelection.mock.invocationCallOrder[0]
+    ).toBeLessThan(mockGetWorkspaceSourcesStatus.mock.invocationCallOrder[0])
   })
 
   it("continues source status projection when server bootstrap fails", async () => {

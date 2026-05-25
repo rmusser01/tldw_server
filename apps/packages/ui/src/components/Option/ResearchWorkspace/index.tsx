@@ -1119,6 +1119,10 @@ const ResearchWorkspaceBody: React.FC = () => {
     () => buildResearchWorkspaceServerSourceSignature(sources),
     [sources]
   )
+  const workspaceServerSelectedSourceSignature = React.useMemo(
+    () => (selectedSourceIds || []).join("|"),
+    [selectedSourceIds]
+  )
   const workspaceServerSourcesRef = React.useRef(sources)
   React.useEffect(() => {
     workspaceServerSourcesRef.current = sources
@@ -1378,7 +1382,8 @@ const ResearchWorkspaceBody: React.FC = () => {
         const reconcileSignature = [
           activeWorkspaceId,
           workspaceName,
-          workspaceServerSourceSignature
+          workspaceServerSourceSignature,
+          workspaceServerSelectedSourceSignature
         ].join("::")
 
         if (
@@ -1389,7 +1394,8 @@ const ResearchWorkspaceBody: React.FC = () => {
             client: tldwClient,
             workspaceId: activeWorkspaceId,
             workspaceName,
-            sources: workspaceServerSourcesRef.current
+            sources: workspaceServerSourcesRef.current,
+            selectedSourceIds
           })
           if (cancelled || requestSeq !== workspaceStatusRequestSeqRef.current) {
             return
@@ -1497,8 +1503,10 @@ const ResearchWorkspaceBody: React.FC = () => {
     isStoreHydrated,
     setSourceStatusByMediaId,
     statusGuardrailsEnabled,
+    selectedSourceIds,
     workspaceId,
     workspaceName,
+    workspaceServerSelectedSourceSignature,
     workspaceServerSourceSignature
   ])
 
