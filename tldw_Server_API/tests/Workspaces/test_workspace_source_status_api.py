@@ -147,7 +147,7 @@ def test_workspace_sources_status_reports_readiness_and_missing_media(
                 "vector_processing": 0,
             },
         },
-        unvectorized={2},
+        unvectorized={1, 2},
     )
     _install_overrides(workspace_status_app, workspace_status_db, media_db)
     try:
