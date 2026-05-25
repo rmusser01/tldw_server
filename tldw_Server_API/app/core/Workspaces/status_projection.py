@@ -153,14 +153,13 @@ def _status_from_media(
     chunking_status = str(media.get("chunking_status") or "").strip().lower()
     vector_processing = media.get("vector_processing")
     vector_ready = _is_vector_ready(vector_processing)
-    unvectorized_chunks = _has_unvectorized_chunks(media_db, media_id)
     vector_failed = _is_vector_failed(vector_processing) or _is_failure_status(chunking_status)
 
     readiness = {
         "metadata_ready": True,
         "text_extracted": text_ready,
         "fts_ready": text_ready,
-        "vector_ready": vector_ready and not unvectorized_chunks,
+        "vector_ready": vector_ready,
         "citation_ready": text_ready,
         "summary_ready": bool(media.get("summary") or media.get("analysis") or media.get("analysis_content")),
         "tool_accessible": True,
@@ -314,15 +313,6 @@ def _get_media(media_db: Any | None, media_id: int) -> dict[str, Any] | None:
         return media_db_api.get_media_by_id(media_db, media_id)
     except (AttributeError, DatabaseError, RuntimeError, TypeError, ValueError):
         return None
-
-
-def _has_unvectorized_chunks(media_db: Any | None, media_id: int) -> bool:
-    if media_db is None:
-        return False
-    try:
-        return media_db_api.has_unvectorized_chunks(media_db, media_id)
-    except (AttributeError, DatabaseError, RuntimeError, TypeError, ValueError):
-        return False
 
 
 def _is_vector_ready(value: Any) -> bool:
