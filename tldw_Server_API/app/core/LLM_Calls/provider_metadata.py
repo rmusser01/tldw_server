@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from tldw_Server_API.app.core.custom_openai_providers import iter_custom_openai_provider_names
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 
 PROVIDER_REQUIRES_KEY: dict[str, bool] = {
     "openai": True,
@@ -31,11 +30,9 @@ PROVIDER_REQUIRES_KEY: dict[str, bool] = {
     "ollama": False,
     "aphrodite": False,
     "mlx": False,
-    "custom-openai-api": False,
-    "custom-openai-api-2": False,
 }
 PROVIDER_REQUIRES_KEY.update(
-    {provider_name: False for provider_name in iter_custom_openai_provider_names(start=3)}
+    {provider_name: False for provider_name in iter_custom_openai_provider_names()}
 )
 
 DEFAULT_BYOK_ALLOWED_FIELDS: set[str] = {"org_id", "project_id"}
@@ -46,13 +43,11 @@ BYOK_CREDENTIAL_FIELDS: dict[str, dict[str, set[str]]] = {
     "novita": {"allowed": {"org_id", "project_id"}, "required": set()},
     "poe": {"allowed": {"org_id", "project_id"}, "required": set()},
     "together": {"allowed": {"org_id", "project_id"}, "required": set()},
-    "custom-openai-api": {"allowed": {"org_id", "project_id"}, "required": set()},
-    "custom-openai-api-2": {"allowed": {"org_id", "project_id"}, "required": set()},
 }
 BYOK_CREDENTIAL_FIELDS.update(
     {
         provider_name: {"allowed": {"org_id", "project_id"}, "required": set()}
-        for provider_name in iter_custom_openai_provider_names(start=3)
+        for provider_name in iter_custom_openai_provider_names()
     }
 )
 
@@ -246,4 +241,6 @@ PROVIDER_CAPABILITIES.update(
 
 
 def list_registered_providers() -> list[str]:
+    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+
     return get_registry().list_providers()

@@ -62,7 +62,6 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_section_name,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
-from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
@@ -1189,7 +1188,12 @@ def process_videos(
         else:
             resolved_api_key = _resolve_eval_api_key(api_name)
             api_provider_key = api_name.lower().strip()
-            provider_requires_key = provider_requires_api_key(api_provider_key)
+            try:
+                from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+
+                provider_requires_key = provider_requires_api_key(api_provider_key)
+            except _VIDEO_NONCRITICAL_EXCEPTIONS:
+                provider_requires_key = True
             if provider_requires_key and not resolved_api_key:
                 warning_msg = f"Confabulation check skipped: missing API key for provider '{api_name}'."
                 logging.warning(warning_msg)

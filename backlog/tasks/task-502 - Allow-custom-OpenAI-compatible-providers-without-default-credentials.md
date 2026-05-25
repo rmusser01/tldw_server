@@ -9,9 +9,11 @@ labels:
 priority: High
 modified_files:
 - tldw_Server_API/app/core/LLM_Calls/provider_metadata.py
+- tldw_Server_API/app/core/Evaluations/ms_g_eval.py
 - tldw_Server_API/app/core/Ingestion_Media_Processing/Video/Video_DL_Ingestion_Lib.py
 - tldw_Server_API/tests/Chat_NEW/unit/test_provider_keys_map.py
 - tldw_Server_API/tests/Config/test_config_providers_endpoints.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_ingestion.py
 - tldw_Server_API/tests/Chat/integration/test_chat_endpoint.py
 ---
@@ -38,21 +40,21 @@ Fix custom-openai-api provider metadata so local/self-hosted OpenAI-compatible e
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Review follow-up: G-Eval validation also used its own provider key list, so custom OpenAI-compatible providers still failed no-key confabulation checks after video ingestion reached run_geval. G-Eval now uses provider_requires_api_key, provider metadata initializes all custom OpenAI-compatible provider names from the shared iterator, and video ingestion lazily imports the provider policy inside the optional confabulation branch.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Changed custom OpenAI-compatible providers to be keyless by default in shared provider metadata, aligned video confabulation checks with the shared provider policy, and added regressions for metadata, config provider status, video confabulation, and chat completion credential gating. Verification: focused regression suite passed (6 passed), custom OpenAI adapter/provider map tests passed (7 passed), py_compile passed for touched production files, and Bandit reported 0 findings for touched production files.
+Changed custom OpenAI-compatible providers to be keyless by default in shared provider metadata, aligned video confabulation and G-Eval validation with the shared provider policy, and added regressions for metadata, config provider status, video confabulation, G-Eval validation, and chat completion credential gating. Verification: focused regression suite passed (21 passed), custom OpenAI adapter/provider map tests passed (7 passed), py_compile passed for touched production files, and Bandit reported 0 findings for touched production files.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
 - [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
