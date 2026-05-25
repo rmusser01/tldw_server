@@ -1,7 +1,7 @@
 ---
 id: TASK-478.3
 title: 'Gate B: implement first-class workspace ingestion and indexing status'
-status: In Progress
+status: Done
 labels:
 - research-workspace
 - uat
@@ -13,6 +13,13 @@ labels:
 priority: High
 milestone: Research Workspace UAT Remediation
 parent_task_id: TASK-478
+modified_files:
+- tldw_Server_API/app/api/v1/endpoints/workspaces.py
+- tldw_Server_API/app/core/Workspaces/status_projection.py
+- tldw_Server_API/app/services/media_ingest_jobs_worker.py
+- tldw_Server_API/tests/Workspaces/test_workspaces_api.py
+- tldw_Server_API/tests/Workspaces/test_workspace_source_status_api.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py
 ---
 
 ## Description
@@ -58,7 +65,9 @@ Parallelization: backend/API work can proceed while Gate A frontend model fixes 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented first-class workspace source lifecycle Jobs on source creation. `POST /workspaces/{workspace_id}/sources` now enqueues an idempotent `media_ingest/default/workspace_source_ingest` job with workspace/source/media identifiers and requested stages, and `/sources/status` now includes those workspace-source jobs before legacy media ingest jobs. Added worker support for `workspace_source_ingest` so existing media readiness is inspected without re-ingesting, with progress updates and structured readiness/state result data. Also fixed the artifact schema/export import regressions that blocked broader workspace API verification.
 
+Verification: focused red/green tests for source job enqueue, status job inclusion, and worker readiness completed; broader workspace/source/status/artifact/worker slice passed (`66 passed`); `git diff --check` passed; Bandit on touched production files reported zero findings. Live backend validation on `127.0.0.1:18002` created a workspace, added the same source twice, confirmed one idempotent `workspace_source_ingest` job in `/api/v1/jobs/list`, and confirmed `/api/v1/workspaces/{id}/sources/status` exposed queued job identity then a visible failed state with progress/error details when the referenced media row was missing.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

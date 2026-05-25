@@ -275,6 +275,15 @@ def test_recent_media_ingest_jobs_filters_to_supported_media_ingest_jobs() -> No
 
         def list_jobs(self, **kwargs: Any) -> list[dict[str, Any]]:
             self.calls.append(kwargs)
+            if kwargs.get("job_type") == "workspace_source_ingest":
+                return [
+                    {
+                        "id": 1,
+                        "domain": "media_ingest",
+                        "queue": "default",
+                        "job_type": "workspace_source_ingest",
+                    },
+                ]
             return [
                 {
                     "id": 2,
@@ -287,9 +296,12 @@ def test_recent_media_ingest_jobs_filters_to_supported_media_ingest_jobs() -> No
     jm = _MediaIngestJobManager()
     jobs = workspaces_endpoint._list_recent_media_ingest_jobs(jm, SimpleNamespace(id=1))
 
-    assert [job["id"] for job in jobs] == [2]
+    assert [job["id"] for job in jobs] == [1, 2]
     assert jm.calls[0]["domain"] == "media_ingest"
-    assert jm.calls[0]["job_type"] == "media_ingest_item"
+    assert jm.calls[0]["queue"] == "default"
+    assert jm.calls[0]["job_type"] == "workspace_source_ingest"
+    assert jm.calls[1]["domain"] == "media_ingest"
+    assert "job_type" not in jm.calls[1]
 
 
 def test_workspace_job_manager_resolver_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:

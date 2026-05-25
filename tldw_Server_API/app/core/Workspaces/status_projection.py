@@ -40,6 +40,32 @@ def build_source_status_projection(
     }
 
 
+def derive_workspace_source_media_status(
+    media: dict[str, Any],
+    *,
+    media_db: Any | None = None,
+    media_id: int | None = None,
+) -> dict[str, Any]:
+    """Derive source lifecycle state from an already-ingested media row."""
+    resolved_media_id = media_id if media_id is not None else _coerce_int(media.get("id"))
+    source = {
+        "id": str(media.get("uuid") or resolved_media_id or ""),
+        "workspace_id": "",
+        "media_id": resolved_media_id,
+        "title": str(media.get("title") or ""),
+        "source_type": str(media.get("type") or media.get("media_type") or ""),
+        "url": media.get("url"),
+        "selected": True,
+        "added_at": "",
+    }
+    return _status_from_media(
+        source,
+        media,
+        media_db=media_db,
+        media_id=int(resolved_media_id or 0),
+    )
+
+
 def build_workspace_capability_projection(
     *,
     workspace: dict[str, Any],
