@@ -280,6 +280,15 @@ const hasActiveExistingMediaFilters = (filters: ExistingMediaFilters): boolean =
   parseKeywordFilterInput(filters.keywords).length > 0 ||
   filters.sortBy !== "relevance"
 
+const isValidSourceUrl = (rawUrl: string): boolean => {
+  try {
+    const parsed = new URL(rawUrl)
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
 const buildMediaSearchPayload = (filters: ExistingMediaFilters) => {
   const payload: {
     query?: string
@@ -711,6 +720,9 @@ const UrlTab: React.FC<{
   const [inputMode, setInputMode] = React.useState<"single" | "batch">("single")
   const [url, setUrl] = React.useState("")
   const [batchUrls, setBatchUrls] = React.useState("")
+  const [urlValidationError, setUrlValidationError] = React.useState<
+    string | null
+  >(null)
   const [batchResults, setBatchResults] = React.useState<
     Array<{
       url: string
@@ -754,15 +766,27 @@ const UrlTab: React.FC<{
     []
   )
 
+  const invalidUrlMessage = t(
+    "playground:sources.invalidUrl",
+    "Enter a valid URL starting with http:// or https://."
+  )
+
   const handleAddUrl = async () => {
     const singleUrl = url.trim()
     const batchUrlList = parseBatchUrls(batchUrls)
     if (inputMode === "single" && !singleUrl) return
     if (inputMode === "batch" && batchUrlList.length === 0) return
 
-    setProcessing(true)
     setError(null)
+    setUrlValidationError(null)
     setBatchResults([])
+
+    if (inputMode === "single" && !isValidSourceUrl(singleUrl)) {
+      setUrlValidationError(invalidUrlMessage)
+      return
+    }
+
+    setProcessing(true)
 
     try {
       if (inputMode === "single") {
@@ -791,6 +815,16 @@ const UrlTab: React.FC<{
       }> = []
 
       for (const rawUrl of batchUrlList) {
+        if (!isValidSourceUrl(rawUrl)) {
+          setUrlValidationError(invalidUrlMessage)
+          results.push({
+            url: rawUrl,
+            status: "error",
+            message: invalidUrlMessage
+          })
+          continue
+        }
+
         try {
           const response = await tldwClient.addMedia(rawUrl, {
             ...WORKSPACE_RAG_INGEST_FIELDS
@@ -891,14 +925,30 @@ const UrlTab: React.FC<{
             <Input
               prefix={<Link className="h-4 w-4 text-text-muted" />}
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => {
+                setUrl(e.target.value)
+                setUrlValidationError(null)
+              }}
               onPressEnter={handleAddUrl}
               placeholder={t(
                 "playground:sources.urlPlaceholder",
                 "https://example.com/article or YouTube URL"
               )}
               size="large"
+              status={urlValidationError ? "error" : undefined}
+              aria-describedby={
+                urlValidationError ? "workspace-url-validation-error" : undefined
+              }
+              aria-invalid={Boolean(urlValidationError)}
             />
+            {urlValidationError && (
+              <p
+                id="workspace-url-validation-error"
+                className="mt-1 text-xs text-error"
+              >
+                {urlValidationError}
+              </p>
+            )}
           </>
         ) : (
           <>
@@ -907,13 +957,29 @@ const UrlTab: React.FC<{
             </label>
             <TextArea
               value={batchUrls}
-              onChange={(event) => setBatchUrls(event.target.value)}
+              onChange={(event) => {
+                setBatchUrls(event.target.value)
+                setUrlValidationError(null)
+              }}
               rows={7}
               placeholder={t(
                 "playground:sources.urlBatchPlaceholder",
                 "https://example.com/article-1\nhttps://example.com/article-2"
               )}
+              status={urlValidationError ? "error" : undefined}
+              aria-describedby={
+                urlValidationError ? "workspace-url-validation-error" : undefined
+              }
+              aria-invalid={Boolean(urlValidationError)}
             />
+            {urlValidationError && (
+              <p
+                id="workspace-url-validation-error"
+                className="mt-1 text-xs text-error"
+              >
+                {urlValidationError}
+              </p>
+            )}
           </>
         )}
       </div>
@@ -1568,6 +1634,22 @@ const ExistingTab: React.FC<{
       : availableMedia.length
   const allVisibleMediaAlreadyAdded =
     media.length > 0 && availableMedia.length === 0
+  const alreadyAddedVisibleCount = Math.max(
+    0,
+    media.length - availableMedia.length
+  )
+  const allVisibleMediaAlreadyAddedDescription = filtersActive
+    ? t(
+        "playground:sources.matchingMediaAlreadyAdded",
+        alreadyAddedVisibleCount === 1
+          ? "{{count}} matching media item is already in this workspace"
+          : "{{count}} matching media items are already in this workspace",
+        { count: alreadyAddedVisibleCount }
+      )
+    : t(
+        "playground:sources.allVisibleMediaAlreadyAdded",
+        "All visible media are already in this workspace"
+      )
 
   return (
     <div className="space-y-4">
@@ -1652,10 +1734,7 @@ const ExistingTab: React.FC<{
       ) : allVisibleMediaAlreadyAdded ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={t(
-            "playground:sources.allVisibleMediaAlreadyAdded",
-            "All visible media are already in this workspace"
-          )}
+          description={allVisibleMediaAlreadyAddedDescription}
         />
       ) : availableMedia.length === 0 ? (
         <Empty

@@ -47,7 +47,8 @@ Parallelization: backend/API work can proceed while Gate A frontend model fixes 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-['Live UAT upload `research-workspace-uat-source.md` reached `partially_queryable` and stayed there after a 10s wait: text_extracted=true, fts_ready=true, vector_ready=false, status_reason=`vector_index_pending`, progress_percent=75, job=null. This confirms the first-class status/job ownership gap remains visible.']
+- Live UAT upload `research-workspace-uat-source.md` reached `partially_queryable` and stayed there after a 10s wait: text_extracted=true, fts_ready=true, vector_ready=false, status_reason=`vector_index_pending`, progress_percent=75, job=null. This confirms the first-class status/job ownership gap remains visible.
+- During Gate D live paste smoke, `Gate D Paste Smoke` appeared in the UI source list as `Ready`, but `GET /api/v1/workspaces/14b47308-f515-4173-95d2-28d63297e6d5/sources/status` still returned `partially_queryable`, `vector_index_pending`, `vector_ready=false`, `progress_percent=75`, `job=null` for both the uploaded file and pasted text. This confirms the UI/API status mismatch applies to pasted text as well as file upload.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
