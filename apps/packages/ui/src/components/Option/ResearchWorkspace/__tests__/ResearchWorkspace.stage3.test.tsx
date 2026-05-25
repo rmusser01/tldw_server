@@ -700,6 +700,15 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
   })
 
   it("does not let media-detail fallback override a partial workspace status projection", async () => {
+    const partialReadiness = {
+      metadata_ready: true,
+      text_extracted: true,
+      fts_ready: true,
+      vector_ready: false,
+      citation_ready: true,
+      summary_ready: false,
+      tool_accessible: true
+    }
     testState.sources = [
       {
         id: "source-partial",
@@ -719,15 +728,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
             title: "Partially queryable source",
             state: "partially_queryable",
             status_reason: "vector_index_pending",
-            readiness: {
-              metadata_ready: true,
-              text_extracted: true,
-              fts_ready: true,
-              vector_ready: false,
-              citation_ready: true,
-              summary_ready: false,
-              tool_accessible: true
-            },
+            readiness: partialReadiness,
             progress_percent: 75,
             progress_message:
               "Text search is available while vector indexing continues."
@@ -756,7 +757,8 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
         808,
         "processing",
-        "Text search is available while vector indexing continues."
+        "Text search is available while vector indexing continues.",
+        partialReadiness
       )
     })
     await waitFor(() => {
@@ -942,17 +944,29 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
         101,
         "ready",
-        "Ready for grounded questions."
+        "Ready for grounded questions.",
+        expect.objectContaining({
+          text_extracted: true,
+          vector_ready: true
+        })
       )
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
         102,
         "processing",
-        "Indexing"
+        "Indexing",
+        expect.objectContaining({
+          text_extracted: true,
+          vector_ready: false
+        })
       )
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
         103,
         "error",
-        "Media item is missing."
+        "Media item is missing.",
+        expect.objectContaining({
+          text_extracted: false,
+          tool_accessible: false
+        })
       )
     })
   })
@@ -969,7 +983,11 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
         101,
         "ready",
-        "Ready for grounded questions."
+        "Ready for grounded questions.",
+        expect.objectContaining({
+          text_extracted: true,
+          vector_ready: true
+        })
       )
     })
   })
@@ -1166,7 +1184,11 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
         302,
         "error",
-        "unrecognized_lifecycle_state"
+        "unrecognized_lifecycle_state",
+        expect.objectContaining({
+          text_extracted: true,
+          vector_ready: true
+        })
       )
     })
     expect(testState.setSourceStatusByMediaId).not.toHaveBeenCalledWith(

@@ -19,6 +19,16 @@ export type WorkspaceSourceType =
 
 export type WorkspaceSourceStatus = "processing" | "ready" | "error"
 
+export interface WorkspaceSourceReadiness {
+  metadata_ready: boolean
+  text_extracted: boolean
+  fts_ready: boolean
+  vector_ready: boolean
+  citation_ready: boolean
+  summary_ready: boolean
+  tool_accessible: boolean
+}
+
 export interface WorkspaceSource {
   id: string
   mediaId: number // Server-side media ID
@@ -26,6 +36,7 @@ export interface WorkspaceSource {
   type: WorkspaceSourceType
   status?: WorkspaceSourceStatus
   statusMessage?: string
+  readiness?: WorkspaceSourceReadiness
   thumbnailUrl?: string
   addedAt: Date
   sourceCreatedAt?: Date

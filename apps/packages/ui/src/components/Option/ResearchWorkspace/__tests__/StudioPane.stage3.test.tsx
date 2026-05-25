@@ -76,13 +76,32 @@ const {
   const setTopP = vi.fn()
   const setNumPredict = vi.fn()
   const updateModelSetting = vi.fn()
+  const defaultSources = [
+    {
+      id: "source-1",
+      mediaId: 101,
+      title: "DSPy Prompting Talk",
+      type: "video",
+      status: "ready",
+      addedAt: new Date("2026-02-18T00:00:00.000Z")
+    }
+  ]
 
   const state = {
     selectedSourceIds: ["source-1"],
-    sources: [] as Array<any>,
+    selectedSourceFolderIds: [] as string[],
+    sources: defaultSources as Array<any>,
     workspaceId: "workspace-a",
     workspaceName: "Workspace A",
     getSelectedMediaIds: () => [101],
+    getEffectiveSelectedSources: () =>
+      state.sources.filter((source: { id: string }) =>
+        state.selectedSourceIds.includes(source.id)
+      ),
+    getEffectiveSelectedMediaIds: () =>
+      state
+        .getEffectiveSelectedSources()
+        .map((source: { mediaId: number }) => source.mediaId),
     generatedArtifacts: [] as Array<any>,
     isGeneratingOutput: false,
     generatingOutputType: null as any,
@@ -375,6 +394,17 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     localStorage.removeItem("tldw:research-workspace:recent-output-types:v1")
     isMobile = false
     workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.selectedSourceFolderIds = []
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "DSPy Prompting Talk",
+        type: "video",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
     workspaceStoreState.getSelectedMediaIds = () => [101]
     workspaceStoreState.generatedArtifacts = []
     workspaceStoreState.isGeneratingOutput = false

@@ -1435,7 +1435,8 @@ const ResearchWorkspaceBody: React.FC = () => {
               setSourceStatusByMediaId(
                 source.media_id,
                 mappedStatus,
-                getWorkspaceSourceStatusMessage(source)
+                getWorkspaceSourceStatusMessage(source),
+                source.readiness
               )
             }
             workspaceProjectedSourceStatusByMediaIdRef.current = {

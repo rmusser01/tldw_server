@@ -47,6 +47,7 @@ import type {
   WorkspaceConfig,
   WorkspaceNote,
   WorkspaceSource,
+  WorkspaceSourceReadiness,
   WorkspaceSourceTransferConflictResolution,
   WorkspaceSourceTransferEmptyFolderPolicy,
   WorkspaceSourceTransferMode,
@@ -2035,12 +2036,14 @@ interface SourcesActions {
   setSourceStatusById: (
     sourceId: string,
     status: WorkspaceSourceStatus,
-    statusMessage?: string
+    statusMessage?: string,
+    readiness?: WorkspaceSourceReadiness
   ) => void
   setSourceStatusByMediaId: (
     mediaId: number,
     status: WorkspaceSourceStatus,
-    statusMessage?: string
+    statusMessage?: string,
+    readiness?: WorkspaceSourceReadiness
   ) => void
   focusSourceById: (id: string) => boolean
   focusSourceByMediaId: (mediaId: number) => boolean

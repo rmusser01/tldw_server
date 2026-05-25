@@ -1233,7 +1233,7 @@ describe("StudioPane Stage 2 workflows", () => {
     expect(mockCreateFlashcard).not.toHaveBeenCalled()
   }, 15000)
 
-  it("falls back to the first available chat model for flashcards when no model is selected", async () => {
+  it("gates flashcards when no chat model is selected", () => {
     messageOptionStoreState.selectedModel = null
     mockGetChatModels.mockResolvedValue([
       {
@@ -1251,17 +1251,16 @@ describe("StudioPane Stage 2 workflows", () => {
 
     renderStudioPane()
 
+    expect(screen.getByTestId("studio-prerequisite-warning")).toHaveTextContent(
+      "Select a chat model before generating Studio outputs."
+    )
+    expect(screen.getByRole("button", { name: "Flashcards" })).toBeDisabled()
+
     fireEvent.click(screen.getByRole("button", { name: "Flashcards" }))
 
-    await waitFor(() => {
-      expect(mockGenerateFlashcardsService).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: "gpt-4o-mini",
-          provider: "openai"
-        })
-      )
-    })
-  }, 15000)
+    expect(mockGenerateFlashcardsService).not.toHaveBeenCalled()
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+  })
 
   it("disables compare sources generation when fewer than two sources are selected", () => {
     workspaceStoreState.selectedSourceIds = ["source-1"]
@@ -1465,7 +1464,7 @@ describe("StudioPane Stage 2 workflows", () => {
     })
   }, 15000)
 
-  it("falls back to the first available chat model for mind maps when no model is selected", async () => {
+  it("gates mind maps when no chat model is selected", () => {
     messageOptionStoreState.selectedModel = null
     mockGetChatModels.mockResolvedValue([
       {
@@ -1508,19 +1507,13 @@ describe("StudioPane Stage 2 workflows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
 
-    await waitFor(() => {
-      expect(mockCreateChatCompletion).toHaveBeenCalled()
-    })
-
-    expect(mockCreateChatCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "gpt-4o-mini"
-      }),
-      expect.objectContaining({
-        signal: expect.any(AbortSignal)
-      })
+    expect(screen.getByTestId("studio-prerequisite-warning")).toHaveTextContent(
+      "Select a chat model before generating Studio outputs."
     )
-  }, 15000)
+    expect(screen.getByRole("button", { name: "Mind Map" })).toBeDisabled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+  })
 
   it("marks mind map generation failed when completion is not Mermaid syntax", async () => {
     mockGetMediaDetails.mockResolvedValue({
@@ -1665,7 +1658,7 @@ describe("StudioPane Stage 2 workflows", () => {
     })
   }, 15000)
 
-  it("falls back to the first available chat model for data tables when no model is selected", async () => {
+  it("gates data tables when no chat model is selected", () => {
     messageOptionStoreState.selectedModel = null
     mockGetChatModels.mockResolvedValue([
       {
@@ -1709,16 +1702,13 @@ describe("StudioPane Stage 2 workflows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
 
-    await waitFor(() => {
-      expect(mockCreateChatCompletion).toHaveBeenCalled()
-    })
-
-    expect(mockCreateChatCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "gpt-4o-mini"
-      })
+    expect(screen.getByTestId("studio-prerequisite-warning")).toHaveTextContent(
+      "Select a chat model before generating Studio outputs."
     )
-  }, 15000)
+    expect(screen.getByRole("button", { name: "Data Table" })).toBeDisabled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+  })
 
   it("renders cumulative workspace usage and per-artifact usage", async () => {
     Modal.destroyAll()

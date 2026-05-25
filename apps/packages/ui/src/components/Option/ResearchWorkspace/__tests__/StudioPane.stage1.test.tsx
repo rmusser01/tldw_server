@@ -338,6 +338,14 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
         addedAt: new Date("2026-02-18T00:00:00.000Z")
       }
     ]
+    workspaceStoreState.getEffectiveSelectedSources = () =>
+      workspaceStoreState.sources.filter((source: { id: string }) =>
+        workspaceStoreState.selectedSourceIds.includes(source.id)
+      )
+    workspaceStoreState.getEffectiveSelectedMediaIds = () =>
+      workspaceStoreState
+        .getEffectiveSelectedSources()
+        .map((source: { mediaId: number }) => source.mediaId)
     workspaceStoreState.getSelectedMediaIds = () => [101]
     workspaceStoreState.generatedArtifacts = []
     workspaceStoreState.isGeneratingOutput = false
@@ -641,6 +649,227 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("shows an indexing prerequisite when selected sources are not queryable yet", () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "DSPy Prompting Talk",
+        type: "video",
+        status: "processing",
+        statusMessage: "Extracting transcript",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+
+    renderStudioPane()
+
+    expect(
+      screen.getByText(/selected source is still indexing/i)
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Summary" })).toBeDisabled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it("updates Studio enablement when a selected source finishes indexing", () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "DSPy Prompting Talk",
+        type: "video",
+        status: "processing",
+        statusMessage: "Extracting transcript",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+
+    const { rerender } = renderStudioPane()
+
+    expect(screen.getByRole("button", { name: "Summary" })).toBeDisabled()
+    expect(screen.getByText(/selected source is still indexing/i)).toBeInTheDocument()
+
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "DSPy Prompting Talk",
+        type: "video",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+
+    rerender(<StudioPane />)
+
+    expect(
+      screen.queryByText(/selected source is still indexing/i)
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Summary" })).toBeEnabled()
+  })
+
+  it("disables generation before creating an artifact when no chat model is selected", () => {
+    messageOptionStoreState.selectedModel = null
+
+    renderStudioPane()
+
+    expect(screen.getByText(/select a chat model/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Summary" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it("uses only ready selected source content while selected sources are still indexing", async () => {
+    workspaceStoreState.selectedSourceIds = ["source-1", "source-2"]
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "Ready DSPy Talk",
+        type: "video",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "source-2",
+        mediaId: 202,
+        title: "Indexing Interview",
+        type: "audio",
+        status: "processing",
+        statusMessage: "Embedding source",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    mockGetMediaDetails.mockImplementation(async (mediaId: number) => ({
+      source: {
+        title: mediaId === 101 ? "Ready DSPy Talk" : "Indexing Interview"
+      },
+      content: {
+        text:
+          mediaId === 101
+            ? "Ready source content about DSPy optimization."
+            : "Processing source content that should not be sent yet."
+      }
+    }))
+
+    renderStudioPane()
+
+    expect(
+      screen.getByText(/1 selected source is still indexing/i)
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Summary" })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+
+    await waitFor(() => {
+      expect(mockCreateChatCompletion).toHaveBeenCalled()
+    })
+
+    expect(mockGetMediaDetails).toHaveBeenCalledWith(
+      101,
+      expect.any(Object)
+    )
+    expect(mockGetMediaDetails).not.toHaveBeenCalledWith(
+      202,
+      expect.any(Object)
+    )
+    const summaryRequest = mockCreateChatCompletion.mock.calls[0]?.[0]
+    expect(summaryRequest.messages?.[1]?.content).toContain(
+      "Ready source content about DSPy optimization."
+    )
+    expect(summaryRequest.messages?.[1]?.content).not.toContain(
+      "Processing source content that should not be sent yet."
+    )
+  })
+
+  it("uses extracted text from selected sources while indexing continues", async () => {
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "Text Ready Interview",
+        type: "audio",
+        status: "processing",
+        statusMessage: "Text search is available while vector indexing continues.",
+        readiness: {
+          metadata_ready: true,
+          text_extracted: true,
+          fts_ready: true,
+          vector_ready: false,
+          citation_ready: true,
+          summary_ready: false,
+          tool_accessible: true
+        },
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    mockGetMediaDetails.mockResolvedValue({
+      source: { title: "Text Ready Interview" },
+      content: {
+        text: "Extracted text is ready before vector indexing finishes."
+      }
+    })
+
+    renderStudioPane()
+
+    expect(
+      screen.getByText(/studio can use extracted text/i)
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Summary" })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+
+    await waitFor(() => {
+      expect(mockCreateChatCompletion).toHaveBeenCalled()
+    })
+
+    expect(mockGetMediaDetails).toHaveBeenCalledWith(
+      101,
+      expect.any(Object)
+    )
+    const summaryRequest = mockCreateChatCompletion.mock.calls[0]?.[0]
+    expect(summaryRequest.messages?.[1]?.content).toContain(
+      "Extracted text is ready before vector indexing finishes."
+    )
+  })
+
+  it("does not depend on the RAG-ready effective selection helper for text-ready Studio sources", () => {
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "Text Ready Interview",
+        type: "audio",
+        status: "processing",
+        statusMessage: "Text search is available while vector indexing continues.",
+        readiness: {
+          metadata_ready: true,
+          text_extracted: true,
+          fts_ready: true,
+          vector_ready: false,
+          citation_ready: true,
+          summary_ready: false,
+          tool_accessible: true
+        },
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    workspaceStoreState.getEffectiveSelectedSources = () => []
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => []
+
+    renderStudioPane()
+
+    expect(screen.getByRole("button", { name: "Summary" })).toBeEnabled()
+    expect(
+      screen.getByText(/studio can use extracted text/i)
+    ).toBeInTheDocument()
+  })
+
   it("generates executive brief artifacts with template review metadata", async () => {
     mockGetMediaDetails.mockResolvedValue({
       source: { title: "DSPy Prompting Talk" },
@@ -852,6 +1081,30 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(mockRagSearch).not.toHaveBeenCalled()
   })
 
+  it("canonicalizes custom OpenAI provider ids before summary generation", async () => {
+    chatModelSettingsStoreState.apiProvider = "custom_openai_api"
+    mockGetMediaDetails.mockResolvedValue({
+      source: { title: "DSPy Prompting Talk" },
+      content: {
+        text: "Custom OpenAI compatible providers should use backend provider ids."
+      }
+    })
+
+    renderStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+
+    await waitFor(() => {
+      expect(mockCreateChatCompletion).toHaveBeenCalled()
+    })
+
+    const summaryRequest = mockCreateChatCompletion.mock.calls[0]?.[0]
+    expect(summaryRequest).toMatchObject({
+      model: "gpt-4o-mini",
+      api_provider: "custom-openai-api"
+    })
+  })
+
   it("uses selected source content directly for report generation", async () => {
     mockGetMediaDetails.mockResolvedValue({
       source: { title: "DSPy Prompting Talk" },
@@ -1042,26 +1295,17 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(mockRagSearch).not.toHaveBeenCalled()
   })
 
-  it("fails summary generation when no model is available", async () => {
+  it("keeps summary generation gated when no model is available", async () => {
     messageOptionStoreState.selectedModel = null
     mockGetChatModels.mockResolvedValue([])
 
     renderStudioPane()
 
+    expect(screen.getByRole("button", { name: "Summary" })).toBeDisabled()
     fireEvent.click(screen.getByRole("button", { name: "Summary" }))
 
-    await waitFor(() => {
-      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
-        "artifact-1",
-        "failed",
-        expect.objectContaining({
-          errorMessage: expect.stringContaining(
-            "No model available for summary generation"
-          )
-        })
-      )
-    })
-
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
     expect(mockCreateChatCompletion).not.toHaveBeenCalled()
   })
 

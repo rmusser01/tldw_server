@@ -72,6 +72,39 @@ const ESTIMATED_COST_PER_1K_TOKENS_USD = 0.003
 
 const DEFAULT_SLIDES_VISUAL_STYLE_ID = "minimal-academic"
 
+const normalizeStudioApiProviderForRequest = (
+  provider: string | undefined
+): string | undefined => {
+  const rawProvider = String(provider || "").trim().toLowerCase()
+  if (!rawProvider || rawProvider === "__auto__") return undefined
+
+  const compactProvider = rawProvider.replace(/\s+/g, "")
+  const normalizedProvider = compactProvider.replace(/_/g, "-")
+  if (
+    normalizedProvider === "custom-openai-api" ||
+    normalizedProvider === "custom-openai" ||
+    normalizedProvider === "openai-compatible" ||
+    normalizedProvider === "customopenai"
+  ) {
+    return "custom-openai-api"
+  }
+
+  const numberedCustomProvider =
+    normalizedProvider.match(/^custom-openai-api-(\d{1,2})$/) ||
+    normalizedProvider.match(/^custom-openai-(\d{1,2})$/) ||
+    normalizedProvider.match(/^openai-compatible-(\d{1,2})$/) ||
+    compactProvider.match(/^custom_openai_api_?(\d{1,2})$/) ||
+    compactProvider.match(/^custom_openai(\d{1,2})_api$/) ||
+    compactProvider.match(/^customopenaiapi(\d{1,2})$/) ||
+    compactProvider.match(/^customopenai(\d{1,2})$/)
+
+  if (numberedCustomProvider) {
+    return `custom-openai-api-${numberedCustomProvider[1]}`
+  }
+
+  return rawProvider
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2031,7 +2064,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   const resolveStudioChatRuntime = React.useCallback(async () => {
     const normalizeProviderValue = (value: unknown) =>
       typeof value === "string" && value.trim().length > 0
-        ? value.trim().toLowerCase()
+        ? normalizeStudioApiProviderForRequest(value)
         : undefined
 
     const pickRuntime = (models: ModelInfo[]) => {
@@ -2056,7 +2089,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           model: selectedModelId,
           provider:
             normalizedApiProvider !== "__auto__"
-              ? normalizedApiProvider
+              ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
               : normalizeProviderValue(matchedModel?.provider)
         }
       }
@@ -2072,7 +2105,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
         model: fallbackModel?.id?.trim() || undefined,
         provider:
           normalizeProviderValue(fallbackModel?.provider) ||
-          (normalizedApiProvider !== "__auto__" ? normalizedApiProvider : undefined)
+          (normalizedApiProvider !== "__auto__"
+            ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
+            : undefined)
       }
     }
 
@@ -2426,7 +2461,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               selectedSources,
               model: await resolveStudioChatModel(),
               apiProvider:
-                normalizedApiProvider !== "__auto__" ? normalizedApiProvider : undefined,
+                normalizedApiProvider !== "__auto__"
+                  ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
+                  : undefined,
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
@@ -2439,7 +2476,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               selectedSources,
               model: await resolveStudioChatModel(),
               apiProvider:
-                normalizedApiProvider !== "__auto__" ? normalizedApiProvider : undefined,
+                normalizedApiProvider !== "__auto__"
+                  ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
+                  : undefined,
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
@@ -2478,7 +2517,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               selectedSources,
               model: await resolveStudioChatModel(),
               apiProvider:
-                normalizedApiProvider !== "__auto__" ? normalizedApiProvider : undefined,
+                normalizedApiProvider !== "__auto__"
+                  ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
+                  : undefined,
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,

@@ -374,14 +374,15 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
 
   setSourceSearchQuery: (query) => set({ sourceSearchQuery: query }),
 
-  setSourceStatusById: (sourceId, status, statusMessage) =>
+  setSourceStatusById: (sourceId, status, statusMessage, readiness) =>
     set((state) => {
       const nextSources = state.sources.map((source) =>
         source.id === sourceId
           ? {
               ...source,
               status,
-              statusMessage: statusMessage || undefined
+              statusMessage: statusMessage || undefined,
+              readiness: readiness ?? source.readiness
             }
           : source
       )
@@ -394,7 +395,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       }
     }),
 
-  setSourceStatusByMediaId: (mediaId, status, statusMessage) =>
+  setSourceStatusByMediaId: (mediaId, status, statusMessage, readiness) =>
     set((state) => {
       const targetSource = state.sources.find(
         (source) => source.mediaId === mediaId
@@ -406,7 +407,8 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
           ? {
               ...source,
               status,
-              statusMessage: statusMessage || undefined
+              statusMessage: statusMessage || undefined,
+              readiness: readiness ?? source.readiness
             }
           : source
       )

@@ -12,6 +12,7 @@ type WorkProductTemplateChooserProps = {
   selectedSourceCount: number
   onSelectTemplate: (templateId: WorkProductTemplateId) => void
   disabled?: boolean
+  disabledReason?: string
 }
 
 export const isActionableWorkProductTemplate = (template: WorkProductTemplate) =>
@@ -23,7 +24,8 @@ export const WorkProductTemplateChooser: React.FC<
   selectedTemplateId,
   selectedSourceCount,
   onSelectTemplate,
-  disabled = false
+  disabled = false,
+  disabledReason
 }) => {
   const visibleTemplates = WORK_PRODUCT_TEMPLATES.filter(
     isActionableWorkProductTemplate
@@ -47,7 +49,7 @@ export const WorkProductTemplateChooser: React.FC<
           const selected = selectedTemplateId === template.id
           let unavailableReason = template.description
           if (disabled) {
-            unavailableReason = "Generating..."
+            unavailableReason = disabledReason || "Generating..."
           } else if (!sourceRequirementMet) {
             unavailableReason = `Requires ${template.minSelectedSources} selected source${
               template.minSelectedSources === 1 ? "" : "s"

@@ -45,7 +45,10 @@ import type { AudioTtsProvider } from "@/types/workspace"
 import { OUTPUT_TYPES } from "@/types/workspace"
 import type {
   ArtifactType,
-  GeneratedArtifact
+  GeneratedArtifact,
+  WorkspaceSource,
+  WorkspaceSourceFolder,
+  WorkspaceSourceFolderMembership
 } from "@/types/workspace"
 import type { WorkProductTemplateId } from "@/workspace-templates/types"
 import {
@@ -233,6 +236,216 @@ const OUTPUT_GROUPS: Array<{
 
 // Primary output types shown by default; remaining are collapsed behind an expander
 const PRIMARY_OUTPUT_TYPES = new Set<ArtifactType>(["summary", "flashcards", "quiz", "report"])
+
+const getStudioWorkspaceSourceStatus = (source: WorkspaceSource) =>
+  source.status || "ready"
+
+const hasStudioUsableExtractedText = (source: WorkspaceSource) => {
+  const readiness = source.readiness
+  return Boolean(
+    readiness?.text_extracted &&
+      (readiness.fts_ready || readiness.citation_ready)
+  )
+}
+
+const isStudioWorkspaceSourceUsable = (source: WorkspaceSource) => {
+  const status = getStudioWorkspaceSourceStatus(source)
+  if (status === "ready") return true
+  if (status !== "processing") return false
+  return hasStudioUsableExtractedText(source)
+}
+
+const isStudioTextReadyProcessingSource = (source: WorkspaceSource) =>
+  getStudioWorkspaceSourceStatus(source) === "processing" &&
+  hasStudioUsableExtractedText(source)
+
+const getStudioEffectiveSelectedSources = (input: {
+  sources: WorkspaceSource[]
+  selectedSourceIds: string[]
+  selectedSourceFolderIds: string[]
+  sourceFolders: WorkspaceSourceFolder[]
+  sourceFolderMemberships: WorkspaceSourceFolderMembership[]
+}): WorkspaceSource[] => {
+  const {
+    sources,
+    selectedSourceIds,
+    selectedSourceFolderIds,
+    sourceFolders,
+    sourceFolderMemberships
+  } = input
+  const selectedIds = new Set(selectedSourceIds)
+  if (selectedSourceFolderIds.length > 0) {
+    const childrenByParentId = new Map<string | null, string[]>()
+    for (const folder of sourceFolders) {
+      const siblings = childrenByParentId.get(folder.parentFolderId) || []
+      siblings.push(folder.id)
+      childrenByParentId.set(folder.parentFolderId, siblings)
+    }
+
+    const sourceIdsByFolderId = new Map<string, string[]>()
+    for (const membership of sourceFolderMemberships) {
+      const sourceIds = sourceIdsByFolderId.get(membership.folderId) || []
+      sourceIds.push(membership.sourceId)
+      sourceIdsByFolderId.set(membership.folderId, sourceIds)
+    }
+
+    const visitedFolderIds = new Set<string>()
+    const visitFolder = (folderId: string) => {
+      if (visitedFolderIds.has(folderId)) return
+      visitedFolderIds.add(folderId)
+      for (const sourceId of sourceIdsByFolderId.get(folderId) || []) {
+        selectedIds.add(sourceId)
+      }
+      for (const childFolderId of childrenByParentId.get(folderId) || []) {
+        visitFolder(childFolderId)
+      }
+    }
+
+    for (const folderId of selectedSourceFolderIds) {
+      visitFolder(folderId)
+    }
+  }
+
+  return sources.filter((source) => selectedIds.has(source.id))
+}
+
+const buildSelectedSourceReadinessNotice = (input: {
+  readyCount: number
+  textReadyProcessingCount: number
+  blockingProcessingCount: number
+  errorCount: number
+}): { title: string; description: string; blocking: boolean } | null => {
+  const {
+    readyCount,
+    textReadyProcessingCount,
+    blockingProcessingCount,
+    errorCount
+  } = input
+  const usableCount = readyCount + textReadyProcessingCount
+  if (
+    textReadyProcessingCount === 0 &&
+    blockingProcessingCount === 0 &&
+    errorCount === 0
+  ) {
+    return null
+  }
+
+  const blocking = usableCount === 0
+  if (blocking && blockingProcessingCount > 0 && errorCount === 0) {
+    return {
+      title: "Selected sources are still indexing",
+      description:
+        blockingProcessingCount === 1
+          ? "1 selected source is still indexing. Studio outputs will enable when extraction and indexing finish."
+          : `${blockingProcessingCount} selected sources are still indexing. Studio outputs will enable when extraction and indexing finish.`,
+      blocking
+    }
+  }
+
+  if (blocking && errorCount > 0 && blockingProcessingCount === 0) {
+    return {
+      title: "Selected sources need attention",
+      description:
+        errorCount === 1
+          ? "1 selected source failed ingestion. Retry it from Sources or select another ready source."
+          : `${errorCount} selected sources failed ingestion. Retry them from Sources or select another ready source.`,
+      blocking
+    }
+  }
+
+  if (blocking) {
+    return {
+      title: "Selected sources are not ready",
+      description: `${blockingProcessingCount} selected source${
+        blockingProcessingCount === 1 ? "" : "s"
+      } still indexing and ${errorCount} selected source${
+        errorCount === 1 ? "" : "s"
+      } failed. Studio outputs need at least one source with extracted text.`,
+      blocking
+    }
+  }
+
+  if (
+    textReadyProcessingCount > 0 &&
+    blockingProcessingCount === 0 &&
+    errorCount === 0 &&
+    readyCount === 0
+  ) {
+    return {
+      title: "Source text is ready",
+      description:
+        textReadyProcessingCount === 1
+          ? "Studio can use extracted text while chunking or vector indexing continues."
+          : "Studio can use extracted text from selected sources while chunking or vector indexing continues.",
+      blocking
+    }
+  }
+
+  if (blockingProcessingCount > 0 && errorCount > 0) {
+    return {
+      title: "Some selected sources are not ready",
+      description: `${blockingProcessingCount} selected source${
+        blockingProcessingCount === 1 ? "" : "s"
+      } still indexing and ${errorCount} selected source${
+        errorCount === 1 ? "" : "s"
+      } failed. Studio will use the ${usableCount} source${
+        usableCount === 1 ? "" : "s"
+      } with extracted text for now.`,
+      blocking
+    }
+  }
+
+  if (textReadyProcessingCount > 0 && errorCount > 0) {
+    return {
+      title: "Some selected sources are not ready",
+      description: `${errorCount} selected source${
+        errorCount === 1 ? "" : "s"
+      } failed. Studio can use extracted text from ${usableCount} selected source${
+        usableCount === 1 ? "" : "s"
+      } for now.`,
+      blocking
+    }
+  }
+
+  if (blockingProcessingCount > 0) {
+    return {
+      title: "Some selected sources are still indexing",
+      description:
+        blockingProcessingCount === 1
+          ? `1 selected source is still indexing. Studio will use the ${usableCount} source${
+              usableCount === 1 ? "" : "s"
+            } with extracted text for now.`
+          : `${blockingProcessingCount} selected sources are still indexing. Studio will use the ${usableCount} source${
+              usableCount === 1 ? "" : "s"
+            } with extracted text for now.`,
+      blocking
+    }
+  }
+
+  if (textReadyProcessingCount > 0) {
+    return {
+      title: "Indexing is still running",
+      description:
+        textReadyProcessingCount === 1
+          ? "Studio can use extracted text from 1 selected source while indexing continues."
+          : `Studio can use extracted text from ${textReadyProcessingCount} selected sources while indexing continues.`,
+      blocking
+    }
+  }
+
+  return {
+    title: "Some selected sources failed",
+    description:
+      errorCount === 1
+        ? `1 selected source failed. Studio will use the ${usableCount} source${
+            usableCount === 1 ? "" : "s"
+          } with extracted text for now.`
+        : `${errorCount} selected sources failed. Studio will use the ${usableCount} source${
+            usableCount === 1 ? "" : "s"
+          } with extracted text for now.`,
+    blocking
+  }
+}
 
 // Status icons for artifacts
 const STATUS_ICONS: Record<
@@ -466,13 +679,11 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   const selectedSourceFolderIds = useWorkspaceStore(
     (s) => s.selectedSourceFolderIds
   ) || []
-  const getSelectedMediaIds = useWorkspaceStore((s) => s.getSelectedMediaIds)
-  const getEffectiveSelectedMediaIds = useWorkspaceStore(
-    (s) => s.getEffectiveSelectedMediaIds
-  )
-  const getEffectiveSelectedSources = useWorkspaceStore(
-    (s) => s.getEffectiveSelectedSources
-  )
+  const workspaceSources = useWorkspaceStore((s) => s.sources) || []
+  const sourceFolders = useWorkspaceStore((s) => s.sourceFolders) || []
+  const sourceFolderMemberships = useWorkspaceStore(
+    (s) => s.sourceFolderMemberships
+  ) || []
   const generatedArtifacts = useWorkspaceStore((s) => s.generatedArtifacts)
   const isGeneratingOutput = useWorkspaceStore((s) => s.isGeneratingOutput)
   const generatingOutputType = useWorkspaceStore((s) => s.generatingOutputType)
@@ -536,34 +747,74 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
   // ── Derived values ──
 
-  const selectedMediaIds = React.useMemo(
+  const effectiveSelectedSources = React.useMemo(
     () =>
-      typeof getEffectiveSelectedMediaIds === "function"
-        ? getEffectiveSelectedMediaIds()
-        : getSelectedMediaIds(),
+      getStudioEffectiveSelectedSources({
+        sources: workspaceSources,
+        selectedSourceIds,
+        selectedSourceFolderIds,
+        sourceFolders,
+        sourceFolderMemberships
+      }),
     [
-      getEffectiveSelectedMediaIds,
-      getSelectedMediaIds,
+      sourceFolderMemberships,
+      sourceFolders,
       selectedSourceFolderIds,
-      selectedSourceIds
+      selectedSourceIds,
+      workspaceSources
     ]
   )
-  const selectedSources = React.useMemo(
+  const usableSelectedSources = React.useMemo(
     () =>
-      typeof getEffectiveSelectedSources === "function"
-        ? getEffectiveSelectedSources().filter((source) =>
-            selectedMediaIds.includes(source.mediaId)
-          )
-        : [],
-    [
-      getEffectiveSelectedSources,
-      selectedMediaIds,
-      selectedSourceFolderIds,
-      selectedSourceIds
-    ]
+      effectiveSelectedSources.filter(
+        (source) => isStudioWorkspaceSourceUsable(source)
+      ),
+    [effectiveSelectedSources]
+  )
+  const selectedMediaIds = React.useMemo(
+    () => usableSelectedSources.map((source) => source.mediaId),
+    [usableSelectedSources]
+  )
+  const selectedSources = usableSelectedSources.filter((source) =>
+    selectedMediaIds.includes(source.mediaId)
   )
   const hasSelectedSources = selectedMediaIds.length > 0
+  const hasSelectedSourceIntent = effectiveSelectedSources.length > 0
   const selectedMediaCount = selectedMediaIds.length
+  const selectedReadySourceCount = effectiveSelectedSources.filter(
+    (source) => getStudioWorkspaceSourceStatus(source) === "ready"
+  ).length
+  const selectedTextReadyProcessingSourceCount = effectiveSelectedSources.filter(
+    isStudioTextReadyProcessingSource
+  ).length
+  const selectedBlockingProcessingSourceCount = effectiveSelectedSources.filter(
+    (source) =>
+      getStudioWorkspaceSourceStatus(source) === "processing" &&
+      !isStudioTextReadyProcessingSource(source)
+  ).length
+  const selectedErrorSourceCount = effectiveSelectedSources.filter(
+    (source) => getStudioWorkspaceSourceStatus(source) === "error"
+  ).length
+  const selectedSourceReadinessNotice = buildSelectedSourceReadinessNotice({
+    readyCount: selectedReadySourceCount,
+    textReadyProcessingCount: selectedTextReadyProcessingSourceCount,
+    blockingProcessingCount: selectedBlockingProcessingSourceCount,
+    errorCount: selectedErrorSourceCount
+  })
+  const hasSelectedModel =
+    typeof selectedModel === "string" && selectedModel.trim().length > 0
+  const modelPrerequisiteMessage = hasSelectedModel
+    ? null
+    : t(
+        "playground:studio.selectModelFirst",
+        "Select a chat model before generating Studio outputs."
+      )
+  const sourcePrerequisiteMessage =
+    selectedSourceReadinessNotice?.blocking
+      ? selectedSourceReadinessNotice.description
+      : null
+  const generationPrerequisiteMessage =
+    sourcePrerequisiteMessage || modelPrerequisiteMessage
   const normalizedApiProvider =
     typeof apiProvider === "string" && apiProvider.trim().length > 0
       ? apiProvider.trim().toLowerCase()
@@ -746,6 +997,10 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     async (type: ArtifactType, options?: ArtifactGenerationOptions) => {
       const button = OUTPUT_BUTTONS.find((entry) => entry.type === type)
       const label = button?.label ?? type.replace(/_/g, " ")
+      if (generationPrerequisiteMessage) {
+        messageApi.warning(generationPrerequisiteMessage)
+        return
+      }
       let capabilityPayload = researchStudioCapabilities
 
       if (onRefreshResearchStudioCapabilities) {
@@ -775,6 +1030,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
       await handleGenerateOutput(type, options)
     },
     [
+      generationPrerequisiteMessage,
       getOutputCapability,
       handleGenerateOutput,
       messageApi,
@@ -1440,24 +1696,32 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
               : null
             const isDisabled =
               !hasSelectedSources ||
+              !hasSelectedModel ||
               isGeneratingOutput ||
               requiresMultipleSources ||
               capabilityBlocked
             const artifactStatus = artifactStatusForType(type)
+            const disabledMessage =
+              !hasSelectedSources
+                ? generationPrerequisiteMessage ||
+                  t(
+                    "playground:studio.selectSourcesFirst",
+                    "Select sources first"
+                  )
+                : !hasSelectedModel && modelPrerequisiteMessage
+                ? modelPrerequisiteMessage
+                : null
 
             return (
               <Tooltip
                 key={type}
                 title={
-                  requiresMultipleSources
+                  disabledMessage
+                    ? disabledMessage
+                    : requiresMultipleSources
                     ? t(
                         "playground:studio.compareRequiresMultipleSourcesHint",
-                        "Compare Sources requires at least two selected sources."
-                      )
-                    : !hasSelectedSources
-                    ? t(
-                        "playground:studio.selectSourcesFirst",
-                        "Select sources first"
+                        "Compare Sources requires at least two ready selected sources."
                       )
                     : capabilityBlocked && capabilityMessage
                     ? capabilityMessage
@@ -1522,7 +1786,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             )
           }
 
-          if (!hasSelectedSources) {
+          if (!hasSelectedSourceIntent) {
             return (
               <div
                 data-testid="studio-source-readiness"
@@ -1599,6 +1863,24 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
           return (
             <div className="space-y-2">
+              {(selectedSourceReadinessNotice || modelPrerequisiteMessage) && (
+                <div
+                  data-testid="studio-prerequisite-warning"
+                  className="space-y-1 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
+                >
+                  {selectedSourceReadinessNotice && (
+                    <div>
+                      <p className="font-semibold">
+                        {selectedSourceReadinessNotice.title}
+                      </p>
+                      <p>{selectedSourceReadinessNotice.description}</p>
+                    </div>
+                  )}
+                  {modelPrerequisiteMessage && (
+                    <p>{modelPrerequisiteMessage}</p>
+                  )}
+                </div>
+              )}
               {capabilityNotices.length > 0 && (
                 <div
                   data-testid="studio-capability-warning"
@@ -1612,14 +1894,19 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
               <WorkProductTemplateChooser
                 selectedTemplateId={selectedWorkProductTemplateId}
                 selectedSourceCount={selectedMediaCount}
-                disabled={isGeneratingOutput}
+                disabled={Boolean(generationPrerequisiteMessage) || isGeneratingOutput}
+                disabledReason={
+                  generationPrerequisiteMessage ||
+                  (isGeneratingOutput ? "Generating..." : undefined)
+                }
                 onSelectTemplate={(templateId) => {
                   const template = getWorkProductTemplate(templateId)
                   setSelectedWorkProductTemplateId(templateId)
                   if (
                     template.id !== "executive_brief" ||
                     selectedMediaCount < template.minSelectedSources ||
-                    isGeneratingOutput
+                    isGeneratingOutput ||
+                    generationPrerequisiteMessage
                   ) {
                     return
                   }
