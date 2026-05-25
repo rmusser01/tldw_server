@@ -509,6 +509,28 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     await page.setViewportSize(DESKTOP_VIEWPORT)
   })
 
+  test("keeps research-workspace canonical and workspace-playground removed", async ({
+    page,
+    serverInfo,
+    diagnostics
+  }) => {
+    skipIfServerUnavailable(serverInfo)
+
+    const legacyResponse = await page.goto("/workspace-playground", {
+      waitUntil: "domcontentloaded"
+    })
+    expect(legacyResponse?.status()).toBe(404)
+    expect(new URL(page.url()).pathname).toBe("/workspace-playground")
+    expect(page.url()).not.toContain("/research-workspace")
+
+    const workspacePage = new ResearchWorkspacePage(page)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await ensureNoServerReachabilityDialog(page)
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
   test("boots cleanly and keeps chat bootstrap endpoints healthy", async ({
     authedPage,
     serverInfo,
