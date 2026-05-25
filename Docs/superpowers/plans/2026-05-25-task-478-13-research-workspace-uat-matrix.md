@@ -77,6 +77,6 @@ Run Markdown/static checks if available and any focused Playwright or Vitest reg
 
 Record touched files, live validation results, known blocked rows, and Bandit applicability.
 
-- [ ] **Step 3: Commit scoped changes**
+- [x] **Step 3: Commit scoped changes**
 
 Stage only TASK-478.13 files and commit with a TASK-478.13 message. Leave unrelated dirty files unstaged.
