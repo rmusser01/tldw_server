@@ -175,7 +175,8 @@ def test_confabulation_requires_keys_for_commercial_providers(mock_single, mock_
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib._resolve_eval_api_key", return_value=None)
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.run_geval")
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.process_single_video")
-def test_confabulation_allows_keyless_provider(mock_single, mock_geval, _mock_resolve_key, tmp_path):
+@pytest.mark.parametrize("api_name", ["llama.cpp", "custom-openai-api", "custom-openai-api-99"])
+def test_confabulation_allows_keyless_provider(mock_single, mock_geval, _mock_resolve_key, api_name, tmp_path):
     transcript_text = "local transcript"
     summary_text = "summary via local model"
 
@@ -213,7 +214,7 @@ def test_confabulation_allows_keyless_provider(mock_single, mock_geval, _mock_re
         use_multi_level_chunking=False,
         chunk_language=None,
         summarize_recursively=False,
-        api_name="llama.cpp",
+        api_name=api_name,
         use_cookies=False,
         cookies=None,
         timestamp_option=False,
@@ -227,7 +228,7 @@ def test_confabulation_allows_keyless_provider(mock_single, mock_geval, _mock_re
     mock_geval.assert_called_once()
     args, kwargs = mock_geval.call_args
     assert args[:3] == (transcript_text, summary_text, None)
-    assert args[3] == "llama.cpp"
+    assert args[3] == api_name
     assert kwargs.get("user_identifier") == "42"
     assert result["processed_count"] == 1
     assert result["confabulation_results"].startswith("Confabulation checks completed")

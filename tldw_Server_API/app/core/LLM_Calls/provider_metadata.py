@@ -31,11 +31,11 @@ PROVIDER_REQUIRES_KEY: dict[str, bool] = {
     "ollama": False,
     "aphrodite": False,
     "mlx": False,
-    "custom-openai-api": True,
-    "custom-openai-api-2": True,
+    "custom-openai-api": False,
+    "custom-openai-api-2": False,
 }
 PROVIDER_REQUIRES_KEY.update(
-    {provider_name: True for provider_name in iter_custom_openai_provider_names(start=3)}
+    {provider_name: False for provider_name in iter_custom_openai_provider_names(start=3)}
 )
 
 DEFAULT_BYOK_ALLOWED_FIELDS: set[str] = {"org_id", "project_id"}

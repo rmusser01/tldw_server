@@ -16,12 +16,23 @@ def test_provider_requires_key_map_basic():
         "novita",
         "poe",
         "together",
-        "custom-openai-api-99",
     ]:
         assert provider_requires_api_key(prov) is True
 
-    # Local providers typically do not require keys
-    for prov in ["llama.cpp", "kobold", "ooba", "tabbyapi", "vllm", "local-llm", "ollama", "aphrodite"]:
+    # Local and user-configured OpenAI-compatible providers typically do not require keys.
+    for prov in [
+        "llama.cpp",
+        "kobold",
+        "ooba",
+        "tabbyapi",
+        "vllm",
+        "local-llm",
+        "ollama",
+        "aphrodite",
+        "custom-openai-api",
+        "custom-openai-api-2",
+        "custom-openai-api-99",
+    ]:
         assert provider_requires_api_key(prov) is False
 
     # Unknown providers default to requiring keys

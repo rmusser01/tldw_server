@@ -255,6 +255,24 @@ class TestListConfiguredProviders:
         assert ollama.key_hint is None
 
     @pytest.mark.asyncio
+    async def test_custom_openai_providers_do_not_require_keys_by_default(self, monkeypatch):
+        monkeypatch.delenv("CUSTOM_OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("CUSTOM_OPENAI2_API_KEY", raising=False)
+        monkeypatch.delenv("CUSTOM_OPENAI_API_KEY_99", raising=False)
+
+        with patch(
+            "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys",
+            return_value={},
+        ):
+            response = await list_configured_providers()
+
+        for provider_name in ("custom-openai-api", "custom-openai-api-2", "custom-openai-api-99"):
+            provider = next(p for p in response.providers if p.name == provider_name)
+            assert provider.configured is True
+            assert provider.requires_api_key is False
+            assert provider.key_hint is None
+
+    @pytest.mark.asyncio
     async def test_no_cloud_providers_configured(self, monkeypatch):
         # Remove all env vars
         for env_var in [
