@@ -47,7 +47,7 @@ Parallelization: backend/API work can proceed while Gate A frontend model fixes 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+['Live UAT upload `research-workspace-uat-source.md` reached `partially_queryable` and stayed there after a 10s wait: text_extracted=true, fts_ready=true, vector_ready=false, status_reason=`vector_index_pending`, progress_percent=75, job=null. This confirms the first-class status/job ownership gap remains visible.']
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

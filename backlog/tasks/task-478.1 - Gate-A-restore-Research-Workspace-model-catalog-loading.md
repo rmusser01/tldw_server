@@ -12,11 +12,9 @@ priority: Critical
 milestone: Research Workspace UAT Remediation
 parent_task_id: TASK-478
 modified_files:
-- apps/packages/ui/src/services/tldw/TldwModels.ts
-- apps/packages/ui/src/services/tldw/__tests__/TldwModels.test.ts
-- apps/packages/ui/src/services/tldw-server.ts
-- apps/packages/ui/src/services/__tests__/tldw-server.fetch-chat-models.test.ts
-- apps/packages/ui/src/components/Option/ResearchWorkspace/ChatPane/index.tsx
+- apps/packages/ui/src/hooks/playground/modelSelectorUtils.ts
+- apps/packages/ui/src/hooks/playground/useModelSelector.tsx
+- apps/packages/ui/src/hooks/playground/__tests__/modelSelectorUtils.test.ts
 - apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage2.test.tsx
 ---
 
@@ -60,16 +58,7 @@ Parallelization: backend ingestion-status investigation may run in parallel, but
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed Gate A model catalog remediation.
-
-Verification:
-- `bunx vitest run src/services/tldw/__tests__/TldwModels.test.ts src/services/__tests__/tldw-server.fetch-chat-models.test.ts src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage2.test.tsx --maxWorkers=1 --no-file-parallelism` passed: 3 files, 31 tests.
-- Live WebUI/CDP validation at `http://127.0.0.1:3000/research-workspace?fresh_after_selector_retry=1`: model selector loaded configured backend models, including OpenAI/Anthropic/Cohere/DeepSeek/Google/OpenRouter/Custom groups; selecting `OpenAI / codex-mini-latest` updated the selector state.
-- CDP console check after load and selection reported 0 errors; the previous `this.isSelectableChatModel is not a function` error did not recur.
-
-Bandit: skipped because this task only touched frontend TypeScript/TSX test and UI files.
-
-Known follow-up: `/openapi.json` 404 and send-time failure/null assistant behavior remain scoped to `TASK-478.2`, not this model-catalog task.
+Completed current Gate A model selector compatibility cleanup in this worktree. Verification: `bunx vitest run src/components/Option/ResearchWorkspace/__tests__/AddSourceModal.stage2.intake.test.tsx src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage2.test.tsx src/hooks/playground/__tests__/modelSelectorUtils.test.ts --maxWorkers=1 --no-file-parallelism` passed: 3 files, 38 tests. Live CDP UAT selected a configured model (`Ollama / gemma3:1b`) successfully and a fresh `/research-workspace` tab reported 0 console errors after Add Sources -> My Media. Bandit is not applicable to frontend-only model-selector files.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

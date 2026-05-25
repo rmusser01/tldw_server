@@ -36,6 +36,20 @@ describe("model selector utilities", () => {
     expect(getCanonicalModelKey(model)).toBe("openai:gpt-4o-mini")
   })
 
+  it("treats legacy tldw-prefixed favorite keys as favorites after provider-key migration", () => {
+    const models = [
+      configuredModel("anthropic", "claude-3-5-sonnet"),
+      configuredModel("openai", "gpt-4o")
+    ]
+
+    expect(
+      sortModelsForSelector(models, {
+        favoriteKeys: new Set(["tldw:gpt-4o"]),
+        sortMode: "provider"
+      }).map(getCanonicalModelKey)
+    ).toEqual(["openai:gpt-4o", "anthropic:claude-3-5-sonnet"])
+  })
+
   it("normalizes provider and model identifiers from common server payload shapes", () => {
     const model = {
       id: "claude-3-5-haiku",

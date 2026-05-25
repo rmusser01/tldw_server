@@ -11,9 +11,7 @@ import {
   Sparkles,
   Search,
   Command,
-  Loader2,
-  PanelLeftOpen,
-  PanelRightOpen
+  Loader2
 } from "lucide-react"
 import { createWorkspaceStorage, useWorkspaceStore } from "@/store/workspace"
 import { useTutorialStore } from "@/store/tutorials"

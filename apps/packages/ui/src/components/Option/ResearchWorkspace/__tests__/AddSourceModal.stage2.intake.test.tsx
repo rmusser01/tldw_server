@@ -199,6 +199,29 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     expect(screen.getByText("Showing 1 of 1")).toBeInTheDocument()
   })
 
+  it("renders an empty My Media state for an empty paginated media response", async () => {
+    workspaceStoreState.addSourceModalTab = "existing"
+    mockListMedia.mockResolvedValueOnce({
+      items: [],
+      pagination: {
+        mode: "page",
+        page: 1,
+        per_page: 50,
+        total: 0,
+        total_pages: 0,
+        has_more: false,
+        results_per_page: 50,
+        total_items: 0
+      },
+      keywords_available: true
+    })
+
+    render(<AddSourceModal />)
+
+    expect(await screen.findByText("No available media found")).toBeInTheDocument()
+    expect(screen.queryByText(/unable to load media/i)).not.toBeInTheDocument()
+  })
+
   it("uses backend pagination.total_items so large media libraries can load more", async () => {
     workspaceStoreState.addSourceModalTab = "existing"
     mockListMedia.mockResolvedValueOnce({

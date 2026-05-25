@@ -122,6 +122,30 @@ export function getCanonicalModelKey(
   return id ? `${provider}:${id}` : provider
 }
 
+export const getFavoriteModelKeyCandidates = (
+  model: ModelSelectorDescriptor | null | undefined
+): string[] => {
+  if (!model) return []
+  const id = getModelId(model)
+  const rawModel = nonEmptyString(model.model)
+  return Array.from(
+    new Set(
+      [
+        getCanonicalModelKey(model),
+        id,
+        id ? `tldw:${id}` : null,
+        rawModel
+      ].filter((value): value is string => Boolean(value))
+    )
+  )
+}
+
+export const hasFavoriteModelKey = (
+  model: ModelSelectorDescriptor | null | undefined,
+  favoriteKeys: Set<string>
+): boolean =>
+  getFavoriteModelKeyCandidates(model).some((key) => favoriteKeys.has(key))
+
 export const isCatalogOnlyModel = (
   model: ModelSelectorDescriptor | null | undefined
 ): boolean => {
@@ -299,10 +323,8 @@ export const sortModelsForSelector = (
       if (usageComparison !== 0) return usageComparison
     }
 
-    const aFavorite =
-      favoriteKeys.has(getCanonicalModelKey(a)) || favoriteKeys.has(getModelId(a))
-    const bFavorite =
-      favoriteKeys.has(getCanonicalModelKey(b)) || favoriteKeys.has(getModelId(b))
+    const aFavorite = hasFavoriteModelKey(a, favoriteKeys)
+    const bFavorite = hasFavoriteModelKey(b, favoriteKeys)
     if (aFavorite !== bFavorite) return aFavorite ? -1 : 1
 
     if (sortMode === "localFirst") {

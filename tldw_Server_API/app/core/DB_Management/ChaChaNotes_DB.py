@@ -7633,6 +7633,57 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V46->V47: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V47 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure persona persistence tables and columns exist for drifted SQLite schemas."""
+        try:
+            conn.executescript(self._MIGRATION_SQL_V25_TO_V26)
+            conn.executescript(self._MIGRATION_SQL_V32_TO_V33)
+            conn.executescript(self._MIGRATION_SQL_V39_TO_V40)
+
+            profile_cols = self._sqlite_column_names(conn, "persona_profiles")
+            profile_col_ddls = {
+                "use_persona_state_context_default": (
+                    "ALTER TABLE persona_profiles "
+                    "ADD COLUMN use_persona_state_context_default BOOLEAN NOT NULL DEFAULT 1"
+                ),
+                "origin_character_id": "ALTER TABLE persona_profiles ADD COLUMN origin_character_id INTEGER",
+                "origin_character_name": "ALTER TABLE persona_profiles ADD COLUMN origin_character_name TEXT",
+                "origin_character_snapshot_at": (
+                    "ALTER TABLE persona_profiles ADD COLUMN origin_character_snapshot_at TEXT"
+                ),
+                "voice_defaults_json": "ALTER TABLE persona_profiles ADD COLUMN voice_defaults_json TEXT",
+                "setup_json": "ALTER TABLE persona_profiles ADD COLUMN setup_json TEXT",
+            }
+            for col_name, ddl in profile_col_ddls.items():
+                if col_name not in profile_cols:
+                    conn.execute(ddl)
+
+            memory_cols = self._sqlite_column_names(conn, "persona_memory_entries")
+            if "scope_snapshot_id" not in memory_cols:
+                conn.execute("ALTER TABLE persona_memory_entries ADD COLUMN scope_snapshot_id TEXT")
+            if "session_id" not in memory_cols:
+                conn.execute("ALTER TABLE persona_memory_entries ADD COLUMN session_id TEXT")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_persona_memory_scope "
+                "ON persona_memory_entries(user_id, persona_id, scope_snapshot_id, archived, deleted)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_persona_memory_session "
+                "ON persona_memory_entries(user_id, persona_id, session_id, archived, deleted)"
+            )
+
+            session_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_sessions')").fetchall()}
+            if "activity_surface" not in session_cols:
+                conn.execute(
+                    "ALTER TABLE persona_sessions ADD COLUMN activity_surface TEXT NOT NULL DEFAULT 'api.persona'"
+                )
+            if "preferences_json" not in session_cols:
+                conn.execute(
+                    "ALTER TABLE persona_sessions ADD COLUMN preferences_json TEXT NOT NULL DEFAULT '{}'"
+                )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite persona persistence schema: {exc}") from exc  # noqa: TRY003
+
     def _ensure_recent_persona_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Backfill recent persona schema columns after version-number collisions."""
         self._ensure_persona_persistence_schema_sqlite(conn)
