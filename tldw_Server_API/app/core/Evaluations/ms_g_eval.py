@@ -498,25 +498,9 @@ def validate_inputs(document: str, summary: str, api_name: str | None, api_key: 
         raise ValueError(f"Unsupported API: {api_name}")
 
     # Check if API key is required for the given API
-    commercial_apis = {
-        "openai",
-        "anthropic",
-        "cohere",
-        "groq",
-        "openrouter",
-        "deepseek",
-        "huggingface",
-        "mistral",
-        "google",
-        "qwen",
-        "custom-openai-api",
-        "custom-openai-api-2",
-        "aphrodite",
-    }
-    if (
-        api_provider_key in commercial_apis
-        or custom_openai_provider_number(api_provider_key) is not None
-    ) and not api_key:
+    from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+
+    if provider_requires_api_key(api_provider_key) and not api_key:
         raise ValueError(f"API key is required for {api_name}. Please provide a valid API key.")
 
 

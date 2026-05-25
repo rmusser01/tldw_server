@@ -134,22 +134,6 @@ _PROVIDER_ENV_MAP: dict[str, str] = {
     "aphrodite": "APHRODITE_API_KEY",
 }
 
-_PROVIDERS_REQUIRING_KEYS = {
-    "openai",
-    "anthropic",
-    "cohere",
-    "groq",
-    "openrouter",
-    "deepseek",
-    "huggingface",
-    "mistral",
-    "google",
-    "qwen",
-    "custom-openai-api",
-    "custom-openai-api-2",
-    "aphrodite",
-}
-
 media_config = loaded_config_data.get('media_processing', {}) if loaded_config_data else {}
 DEFAULT_MAX_VIDEO_FILE_SIZE_MB = media_config.get('max_video_file_size_mb', 1000)
 DEFAULT_MAX_VIDEO_FILE_SIZE_BYTES = DEFAULT_MAX_VIDEO_FILE_SIZE_MB * 1024 * 1024
@@ -1204,10 +1188,12 @@ def process_videos(
         else:
             resolved_api_key = _resolve_eval_api_key(api_name)
             api_provider_key = api_name.lower().strip()
-            provider_requires_key = (
-                api_provider_key in _PROVIDERS_REQUIRING_KEYS
-                or custom_openai_provider_number(api_provider_key) is not None
-            )
+            try:
+                from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+
+                provider_requires_key = provider_requires_api_key(api_provider_key)
+            except _VIDEO_NONCRITICAL_EXCEPTIONS:
+                provider_requires_key = True
             if provider_requires_key and not resolved_api_key:
                 warning_msg = f"Confabulation check skipped: missing API key for provider '{api_name}'."
                 logging.warning(warning_msg)
