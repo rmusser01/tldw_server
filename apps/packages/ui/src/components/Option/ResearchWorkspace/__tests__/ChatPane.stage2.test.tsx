@@ -101,6 +101,10 @@ const messageOptionState = {
   setServerChatId: mockSetServerChatId
 }
 
+const messageOptionStoreState = {
+  selectedModel: "ollama:gemma3:1b" as string | null
+}
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -165,7 +169,7 @@ vi.mock("@/store/option", () => ({
       ragAdvancedOptions: {},
       setRagAdvancedOptions: vi.fn(),
       setSelectedModel: hoistedMocks.setSelectedModel,
-      selectedModel: null
+      selectedModel: messageOptionStoreState.selectedModel
     })
 }))
 
@@ -335,6 +339,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     workspaceStoreState.getSelectedMediaIds = deriveSelectedMediaIds
     workspaceStoreState.chatFocusTarget = null
 
+    messageOptionStoreState.selectedModel = "ollama:gemma3:1b"
     mockFocusSourceById.mockReturnValue(true)
     mockFocusSourceByMediaId.mockReturnValue(true)
     mockSetSelectedSourceIds.mockReset()

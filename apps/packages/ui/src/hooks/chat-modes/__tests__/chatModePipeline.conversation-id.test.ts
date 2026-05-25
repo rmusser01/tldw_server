@@ -40,6 +40,7 @@ vi.mock("@/store/option", () => ({
 }))
 
 import { runChatPipeline, type ChatModeDefinition } from "../chatModePipeline"
+import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 
 describe("runChatPipeline conversation id handoff", () => {
   beforeEach(() => {
@@ -98,5 +99,80 @@ describe("runChatPipeline conversation id handoff", () => {
         conversationId: "server-chat-1"
       })
     )
+  })
+
+  it("treats empty model streams as failed recoverable assistant turns", async () => {
+    mocks.pageAssistModel.mockResolvedValue({
+      conversationId: "server-chat-1",
+      saveToDb: true,
+      stream: async function* () {}
+    })
+    let localMessages: any[] = [
+      {
+        id: "assistant-empty",
+        isBot: true,
+        name: "Assistant",
+        message: "",
+        sources: []
+      }
+    ]
+    mocks.setMessages.mockImplementation((next: any[] | ((prev: any[]) => any[])) => {
+      localMessages =
+        typeof next === "function"
+          ? next(localMessages)
+          : next
+    })
+
+    const mode: ChatModeDefinition<any> = {
+      id: "normal",
+      setupMessages: () => ({
+        targetMessageId: "assistant-empty"
+      }),
+      preparePrompt: async () => ({
+        chatHistory: [{ role: "system", content: "system context" }],
+        humanMessage: { role: "user", content: "Hello" },
+        sources: []
+      })
+    }
+
+    const result = await runChatPipeline(
+      mode,
+      "Hello",
+      "",
+      false,
+      localMessages,
+      [],
+      new AbortController().signal,
+      {
+        selectedModel: "openai/gpt-4.1-mini",
+        useOCR: false,
+        toolChoice: "none",
+        setMessages: mocks.setMessages,
+        saveMessageOnSuccess: mocks.saveMessageOnSuccess,
+        saveMessageOnError: mocks.saveMessageOnError,
+        setHistory: mocks.setHistory,
+        setIsProcessing: mocks.setIsProcessing,
+        setStreaming: mocks.setStreaming,
+        setAbortController: mocks.setAbortController,
+        historyId: "history-1",
+        setHistoryId: mocks.setHistoryId,
+        conversationId: "server-chat-1"
+      }
+    )
+
+    expect(result).toEqual({
+      status: "failed",
+      errorMessage: "No response text was returned."
+    })
+    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+    expect(mocks.saveMessageOnError).toHaveBeenCalledTimes(1)
+    expect(localMessages[0].message).toContain("__tldw_error__:")
+    expect(decodeChatErrorPayload(localMessages[0].message)?.detail).toBe(
+      "No response text was returned."
+    )
+    expect(localMessages[0].generationInfo).toMatchObject({
+      interrupted: true,
+      interruptionReason: "No response text was returned."
+    })
   })
 })

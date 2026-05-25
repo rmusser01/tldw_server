@@ -1,16 +1,19 @@
 ---
 id: TASK-478.2
 title: 'Gate A: harden Research Workspace chat send and failed-response states'
-status: To Do
+status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-05-25 07:49'
 labels:
-- research-workspace
-- uat
-- gate-a
-- frontend
-- chat
-- rag
-priority: Critical
+  - research-workspace
+  - uat
+  - gate-a
+  - frontend
+  - chat
+  - rag
 milestone: Research Workspace UAT Remediation
+dependencies: []
 parent_task_id: TASK-478
 ---
 
@@ -45,22 +48,27 @@ Parallelization: can be implemented immediately after model catalog behavior is 
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-["Live UAT after selecting `Ollama / gemma3:1b`: General chat sent `POST /api/v1/chat/completions` with `stream:true`, `api_provider:'ollama'`, `model:'gemma3:1b'` and received HTTP 200, but the UI rendered `No response text was returned` with retry/switch/fallback actions. RAG was disabled because selected-source UI state remained empty even though the backend status API reported selected=true."]
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:BEGIN -->
+- Historical UAT finding before this task: `Ollama / gemma3:1b` returned HTTP 200 with an empty stream and the UI displayed `No response text was returned`.
+- Implemented missing-model preflight blocking, recoverable failed-submit draft restoration, and empty-stream conversion into a friendly chat error payload.
+- Live CDP validation against backend `http://127.0.0.1:8000` and WebUI `http://localhost:3000/research-workspace`: missing-model send sent zero chat completion requests and preserved the draft; invalid provider returned 503 and rendered a recoverable error card with draft restored; intercepted empty stream rendered `No response was returned.` and restored the draft.
+- OpenAPI warning audit: active client path uses configured-origin absolute `/openapi.json` through request normalization; focused request-core and connection-sync tests cover this path. No `/workspace-playground` alias or redirect added.
+- Verification: focused Vitest suite passed, `git diff --check` passed, full UI typecheck remains blocked by pre-existing Watchlists JSX syntax errors in `WatchlistsPlaygroundPage.tsx`.
+- Bandit: not applicable because TASK-478.2 touched frontend TypeScript/tests and Backlog metadata only; no Python files changed.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Hardened Research Workspace chat send and failure handling. The composer now blocks missing-model sends before API mutation, preserves draft text through recoverable failures, keeps source/RAG context intact in the tested paths, and turns empty model streams into explicit recoverable error cards instead of blank/null assistant responses. Added focused tests for missing model, selected-source preservation, failed submit recovery, optimistic pending behavior, empty stream failure conversion, and OpenAPI path normalization coverage.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

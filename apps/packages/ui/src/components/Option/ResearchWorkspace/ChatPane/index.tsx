@@ -957,13 +957,16 @@ const WorkspaceChatEmpty: React.FC<{
  * SimpleChatInput - A simple chat input component with slash command autocomplete (UX-006)
  */
 const SimpleChatInput: React.FC<{
-  onSubmit: (message: string) => void
+  onSubmit: (message: string) => unknown | Promise<unknown>
   onStop: () => void
   isLoading: boolean
   isPreparingContext?: boolean
   isChatUnavailable?: boolean
   isChatUnavailableReason?: "connection" | "capability"
   chatUnavailableMessage?: string | null
+  isSendBlocked?: boolean
+  sendBlockedMessage?: string | null
+  sendBlockedAriaLabel?: string | null
   placeholder?: string
   seededValue?: string | null
   onSeedConsumed?: () => void
@@ -976,6 +979,9 @@ const SimpleChatInput: React.FC<{
   isChatUnavailable = false,
   isChatUnavailableReason = "connection",
   chatUnavailableMessage,
+  isSendBlocked = false,
+  sendBlockedMessage,
+  sendBlockedAriaLabel,
   placeholder,
   seededValue,
   onSeedConsumed,
@@ -1011,13 +1017,38 @@ const SimpleChatInput: React.FC<{
     setShowSlashMenu(false)
   }
 
-  const handleSubmit = (e?: React.FormEvent) => {
+  const shouldClearSubmittedDraft = (result: unknown): boolean => {
+    if (result === false) return false
+    if (result && typeof result === "object" && "status" in result) {
+      return (result as { status?: unknown }).status === "submitted"
+    }
+    return true
+  }
+
+  const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault()
-    const trimmed = value.trim()
-    if (!trimmed || isLoading || isPreparingContext || isChatUnavailable) return
-    onSubmit(trimmed)
+    const submittedValue = value
+    const trimmed = submittedValue.trim()
+    if (
+      !trimmed ||
+      isLoading ||
+      isPreparingContext ||
+      isChatUnavailable ||
+      isSendBlocked
+    ) {
+      return
+    }
     setValue("")
     setShowSlashMenu(false)
+    try {
+      const result = await onSubmit(trimmed)
+      if (!shouldClearSubmittedDraft(result)) {
+        setValue(submittedValue)
+      }
+    } catch (error) {
+      setValue(submittedValue)
+      throw error
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1047,13 +1078,13 @@ const SimpleChatInput: React.FC<{
 
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
-      handleSubmit()
+      void handleSubmit()
       return
     }
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
-      handleSubmit()
+      void handleSubmit()
     }
   }
 
@@ -1069,6 +1100,12 @@ const SimpleChatInput: React.FC<{
                 "Can't reach the server. Check your connection or server status."
               )}
           </span>
+        </div>
+      )}
+      {!isChatUnavailable && isSendBlocked && sendBlockedMessage && (
+        <div className="px-3 py-2 text-xs text-warning bg-warning/10 border-b border-warning/20 flex items-center gap-2 rounded-t-md">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>{sendBlockedMessage}</span>
         </div>
       )}
       <form onSubmit={handleSubmit} className="flex items-end gap-1.5">
@@ -1134,7 +1171,12 @@ const SimpleChatInput: React.FC<{
         ) : (
           <button
             type="submit"
-            disabled={!value.trim() || isPreparingContext || isChatUnavailable}
+            disabled={
+              !value.trim() ||
+              isPreparingContext ||
+              isChatUnavailable ||
+              isSendBlocked
+            }
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-white transition hover:bg-primaryStrong disabled:cursor-not-allowed disabled:opacity-50"
             aria-label={
               isChatUnavailable
@@ -1146,6 +1188,8 @@ const SimpleChatInput: React.FC<{
                     "playground:chat.preparingSourceContext",
                     "Preparing source context"
                   )
+                : isSendBlocked
+                ? sendBlockedAriaLabel || sendBlockedMessage || t("common:send", "Send")
                 : t("common:send", "Send")
             }
           >
@@ -1880,8 +1924,21 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     [includeFullSourceContents, messageApi, selectedSources, t]
   )
 
-  const handleSubmit = async (message: string) => {
-    if (preparingSourceContext) return
+  const handleSubmit = async (message: string): Promise<boolean> => {
+    if (preparingSourceContext) return false
+    if (
+      typeof selectedModel !== "string" ||
+      selectedModel.trim().length === 0
+    ) {
+      messageApi.warning(
+        t(
+          "playground:chat.selectModelBeforeSending",
+          "Select a chat model before sending."
+        )
+      )
+      return false
+    }
+
     let actionChatCapability = chatCapability
     if (
       statusGuardrailsEnabled &&
@@ -1903,7 +1960,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       if (capabilityMessage) {
         messageApi.warning(capabilityMessage)
       }
-      return
+      return false
     }
 
     const normalizedMessage = message.trim().replace(/\s+/g, " ").toLowerCase()
@@ -1945,7 +2002,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setSubmitError(null)
     try {
       const preparedMessage = await buildFullSourceContextPrompt(message)
-      await onSubmit({ message: preparedMessage, image: "" })
+      const submitResult = await onSubmit({ message: preparedMessage, image: "" })
+      if (
+        submitResult &&
+        typeof submitResult === "object" &&
+        "status" in submitResult &&
+        (submitResult as { status?: unknown }).status !== "submitted"
+      ) {
+        return false
+      }
       const activeScope = temporarySourceScopeRef.current
       if (activeScope) {
         const selectedIds = selectedSourceIdsRef.current
@@ -1955,6 +2020,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           restoreTemporaryScope("auto", activeScope)
         }
       }
+      return true
     } catch {
       setSubmitError(
         t(
@@ -1962,6 +2028,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           "Unable to reach server. Please check your connection and retry."
         )
       )
+      return false
     }
   }
 
@@ -2624,6 +2691,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     (submitError !== null || hasConnectionFailure)
   const isChatUnavailable =
     isConnectionUnavailable || isChatCapabilityBlocked
+  const isModelSelectionMissing =
+    typeof selectedModel !== "string" || selectedModel.trim().length === 0
+  const isSendBlocked = !isChatUnavailable && isModelSelectionMissing
+  const sendBlockedMessage = isModelSelectionMissing
+    ? t(
+        "playground:chat.selectModelBeforeSending",
+        "Select a chat model before sending."
+      )
+    : null
   const showConnectionBanner = isConnectionUnavailable
   const connectionDescription =
     submitError ||
@@ -3190,6 +3266,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             chatUnavailableMessage={
               isChatCapabilityBlocked && !isConnectionUnavailable
                 ? chatCapabilityMessage
+                : null
+            }
+            isSendBlocked={isSendBlocked}
+            sendBlockedMessage={sendBlockedMessage}
+            sendBlockedAriaLabel={
+              isModelSelectionMissing
+                ? t(
+                    "playground:chat.selectModelAction",
+                    "Select a chat model"
+                  )
                 : null
             }
             seededValue={seededPrompt}

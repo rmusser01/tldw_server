@@ -22,6 +22,10 @@ const mockSetStreaming = vi.fn()
 const mockSetIsProcessing = vi.fn()
 const mockStopStreamingRequest = vi.fn()
 const mockOnSubmit = vi.fn()
+const mockSetRagMediaIds = vi.fn()
+const mockSetChatMode = vi.fn()
+const mockSetFileRetrievalEnabled = vi.fn()
+const mockSetSelectedModel = vi.fn()
 const mockRegenerateLastMessage = vi.fn()
 const mockDeleteMessage = vi.fn()
 const mockEditMessage = vi.fn()
@@ -57,6 +61,7 @@ const workspaceStoreState = {
   selectedSourceIds: [] as string[],
   getSelectedSources: () => [] as Array<{ id: string; title: string }>,
   getSelectedMediaIds: () => [] as number[],
+  getEffectiveSelectedMediaIds: () => [] as number[],
   setSelectedSourceIds: vi.fn(),
   focusSourceById: mockFocusSourceById,
   focusSourceByMediaId: mockFocusSourceByMediaId,
@@ -93,6 +98,10 @@ const messageOptionState = {
   setHistoryId: mockSetHistoryId,
   serverChatId: null as string | null,
   setServerChatId: mockSetServerChatId
+}
+
+const messageOptionStoreState = {
+  selectedModel: "ollama:gemma3:1b" as string | null
 }
 
 vi.mock("react-i18next", () => ({
@@ -147,17 +156,19 @@ vi.mock("@/store/option", () => ({
       ragAdvancedOptions: Record<string, unknown>
       setRagAdvancedOptions: (opts: Record<string, unknown>) => void
       selectedModel: string | null
+      setSelectedModel: (model: string | null) => void
     }) => unknown
   ) =>
     selector({
-      setRagMediaIds: vi.fn(),
-      setChatMode: vi.fn(),
-      setFileRetrievalEnabled: vi.fn(),
+      setRagMediaIds: mockSetRagMediaIds,
+      setChatMode: mockSetChatMode,
+      setFileRetrievalEnabled: mockSetFileRetrievalEnabled,
       ragTopK: 8,
       setRagTopK: vi.fn(),
       ragAdvancedOptions: {},
       setRagAdvancedOptions: vi.fn(),
-      selectedModel: null
+      selectedModel: messageOptionStoreState.selectedModel,
+      setSelectedModel: mockSetSelectedModel
     })
 }))
 
@@ -226,6 +237,17 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: vi.fn(async () => [
+    {
+      api_provider: "ollama",
+      id: "ollama:gemma3:1b",
+      label: "gemma3:1b",
+      value: "ollama:gemma3:1b"
+    }
+  ])
+}))
+
 function renderChatPane(props: Record<string, unknown> = {}) {
   return render(
     <MemoryRouter>
@@ -261,10 +283,12 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     workspaceStoreState.selectedSourceIds = []
     workspaceStoreState.getSelectedSources = () => []
     workspaceStoreState.getSelectedMediaIds = () => []
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => []
     mockFocusSourceById.mockReset()
     mockFocusSourceByMediaId.mockReset()
     workspaceStoreState.chatFocusTarget = null
 
+    messageOptionStoreState.selectedModel = "ollama:gemma3:1b"
     messageOptionState.messages = []
     messageOptionState.history = []
     messageOptionState.historyId = null
@@ -273,6 +297,10 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     messageOptionState.isProcessing = false
     mockOnSubmit.mockResolvedValue(undefined)
     mockUseMessageOption.mockReset()
+    mockSetRagMediaIds.mockReset()
+    mockSetChatMode.mockReset()
+    mockSetFileRetrievalEnabled.mockReset()
+    mockSetSelectedModel.mockReset()
 
     mockGetWorkspaceChatSession.mockImplementation((workspaceId: string) => {
       return workspaceSessions.get(workspaceId) ?? null
@@ -303,6 +331,119 @@ describe("ChatPane Stage 1 reliability and controls", () => {
         image: ""
       })
     })
+  })
+
+  it("blocks send without a selected model while preserving the draft", () => {
+    messageOptionStoreState.selectedModel = null
+
+    renderChatPane()
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    fireEvent.change(textarea, { target: { value: "Summarize this source" } })
+
+    expect(textarea).not.toBeDisabled()
+    expect(
+      screen.getByText("Select a chat model before sending.")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Select a chat model" })
+    ).toBeDisabled()
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+    expect(textarea).toHaveValue("Summarize this source")
+  })
+
+  it("keeps selected-source RAG context intact when model selection blocks send", () => {
+    messageOptionStoreState.selectedModel = null
+    workspaceStoreState.sources = [
+      { id: "source-1", mediaId: 42, title: "NotebookLM export", type: "pdf" }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-1", title: "NotebookLM export" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+
+    renderChatPane()
+
+    expect(screen.getByRole("button", { name: "RAG mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith([42])
+
+    const textarea = screen.getByPlaceholderText("Ask about your sources...")
+    fireEvent.change(textarea, { target: { value: "What evidence supports this?" } })
+
+    expect(
+      screen.getByRole("button", { name: "Select a chat model" })
+    ).toBeDisabled()
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+    expect(mockSetRagMediaIds).not.toHaveBeenLastCalledWith(null)
+    expect(textarea).toHaveValue("What evidence supports this?")
+  })
+
+  it("keeps the draft and selected-source RAG context after a recoverable chat failure", async () => {
+    mockOnSubmit.mockResolvedValueOnce({
+      status: "failed",
+      errorMessage: "no_provider_configured"
+    })
+    workspaceStoreState.sources = [
+      { id: "source-1", mediaId: 42, title: "NotebookLM export", type: "pdf" }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-1", title: "NotebookLM export" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+
+    renderChatPane()
+
+    const textarea = screen.getByPlaceholderText("Ask about your sources...")
+    const draft = "  What evidence supports this?\n"
+    fireEvent.change(textarea, {
+      target: { value: draft }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => {
+      expect(mockOnSubmit).toHaveBeenCalledWith({
+        message: "What evidence supports this?",
+        image: ""
+      })
+    })
+
+    expect(textarea).toHaveValue(draft)
+    expect(screen.getByRole("button", { name: "RAG mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(mockSetRagMediaIds).not.toHaveBeenLastCalledWith(null)
+    expect(screen.queryByText(/Unable to reach server/)).not.toBeInTheDocument()
+  })
+
+  it("clears an accepted draft optimistically while the chat request is pending", async () => {
+    let resolveSubmit: (value: { status: "submitted" }) => void = () => {}
+    mockOnSubmit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve as (value: { status: "submitted" }) => void
+        })
+    )
+
+    renderChatPane()
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    fireEvent.change(textarea, { target: { value: "Run the long request" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => {
+      expect(mockOnSubmit).toHaveBeenCalledTimes(1)
+    })
+    expect(textarea).toHaveValue("")
+
+    resolveSubmit({ status: "submitted" })
   })
 
   it("passes workspace scope into the shared chat hook", () => {

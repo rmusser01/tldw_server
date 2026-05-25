@@ -45,6 +45,7 @@ import {
 import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup"
 
 const STREAMING_UPDATE_INTERVAL_MS = 80
+const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
 let didLogPipelineSetHistoryMissing = false
 
 export type ChatModeParamsBase = {
@@ -601,6 +602,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     const toolCalls = extractToolCalls(generationInfo)
+    if (
+      fullText.trim().length === 0 &&
+      (!Array.isArray(toolCalls) || toolCalls.length === 0) &&
+      !isImageGenerationTurn
+    ) {
+      throw new Error(EMPTY_RESPONSE_ERROR_MESSAGE)
+    }
     applyMcpModuleDisclosureFromToolCalls(toolCalls)
     const finalGenerationInfo = streamTransportInterrupted
       ? {
