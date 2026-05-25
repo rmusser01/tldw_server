@@ -218,6 +218,104 @@ class WorkspaceCapabilitiesResponse(BaseModel):
     allowed_actions: dict[str, WorkspaceAllowedAction]
 
 
+class WorkspaceSourcePreviewSummary(BaseModel):
+    available: bool = False
+    detail_href: str | None = None
+    snippet_count: int | None = None
+    total_chars: int | None = None
+    unavailable_reason: str | None = None
+
+
+class WorkspaceContextSource(BaseModel):
+    id: str
+    workspace_id: str
+    media_id: int | None = None
+    title: str
+    source_type: str
+    url: str | None = None
+    position: int = 0
+    selected: bool = True
+    added_at: str
+    version: int
+    state: WorkspaceSourceLifecycleState
+    status_reason: str
+    readiness: WorkspaceSourceReadiness
+    progress_percent: float | None = None
+    progress_message: str | None = None
+    job: WorkspaceSourceJobStatus | None = None
+    updated_at: str = ""
+    preview: WorkspaceSourcePreviewSummary
+
+
+class WorkspaceContextSources(BaseModel):
+    items: list[WorkspaceContextSource]
+    summary: WorkspaceSourceStatusSummary
+
+
+class WorkspaceContextPartialError(BaseModel):
+    scope: str
+    code: str
+    message: str
+
+
+class WorkspaceContextResponse(BaseModel):
+    workspace_id: str
+    workspace_kind: Literal["research_workspace"]
+    schema_version: int = 1
+    generated_at: str
+    workspace: WorkspaceResponse
+    sources: WorkspaceContextSources
+    capabilities: WorkspaceCapabilitiesResponse
+    services: dict[str, WorkspaceCapabilityService]
+    allowed_actions: dict[str, WorkspaceAllowedAction]
+    active_jobs: list[WorkspaceSourceJobStatus] = Field(default_factory=list)
+    partial_errors: list[WorkspaceContextPartialError] = Field(default_factory=list)
+
+
+WorkspaceSourcePreviewMode = Literal[
+    "available",
+    "pending",
+    "failed",
+    "missing_media",
+    "empty",
+]
+
+WorkspaceSourcePreviewSnippetKind = Literal["content_excerpt", "chunk"]
+
+
+class WorkspaceSourcePreviewSnippet(BaseModel):
+    id: str
+    source_id: str
+    media_id: int | None = None
+    kind: WorkspaceSourcePreviewSnippetKind
+    text: str
+    start_char: int | None = None
+    end_char: int | None = None
+    chunk_index: int | None = None
+    chunk_uuid: str | None = None
+    chunk_type: str | None = None
+
+
+class WorkspaceSourcePreviewResponse(BaseModel):
+    workspace_id: str
+    source_id: str
+    media_id: int | None = None
+    title: str
+    source_type: str
+    url: str | None = None
+    state: WorkspaceSourceLifecycleState
+    status_reason: str
+    readiness: WorkspaceSourceReadiness
+    content_available: bool
+    preview_mode: WorkspaceSourcePreviewMode
+    unavailable_reason: str | None = None
+    text_preview: str | None = None
+    text_total_chars: int | None = None
+    text_truncated: bool = False
+    snippets: list[WorkspaceSourcePreviewSnippet] = Field(default_factory=list)
+    generated_at: str
+
+
 class StatusResponse(BaseModel):
     ok: bool = True
 

@@ -268,6 +268,69 @@ def test_workspace_sources_status_uses_active_media_ingest_job_progress(
     assert source["job"]["progress_message"] == "vector indexing"
 
 
+@pytest.mark.integration
+def test_workspace_sources_status_prefers_extracted_media_over_workspace_lifecycle_job(
+    workspace_status_app,
+    tmp_path,
+):
+    db = CharactersRAGDB(db_path=str(tmp_path / "workspace-job-chacha.db"), client_id="user-1")
+    db.upsert_workspace("ws-workspace-job", "Workspace Job")
+    db.add_workspace_source(
+        "ws-workspace-job",
+        {
+            "id": "src-extracted",
+            "media_id": 8,
+            "title": "Extracted upload",
+            "source_type": "document",
+            "position": 0,
+            "selected": True,
+        },
+    )
+    jobs = [
+        {
+            "id": 84,
+            "uuid": "job-84",
+            "domain": "media_ingest",
+            "job_type": "workspace_source_ingest",
+            "status": "processing",
+            "payload": {
+                "workspace_id": "ws-workspace-job",
+                "workspace_source_id": "src-extracted",
+                "media_id": 8,
+            },
+            "result": None,
+            "progress_percent": 10,
+            "progress_message": "validate source",
+            "created_at": "2026-05-23T12:00:00Z",
+        },
+    ]
+    media_db = _MediaStatusDB(
+        {
+            8: {
+                "id": 8,
+                "title": "Extracted upload",
+                "type": "document",
+                "content": "Extracted source text is already available.",
+                "chunking_status": "completed",
+                "vector_processing": 0,
+            }
+        }
+    )
+    _install_overrides(workspace_status_app, db, media_db, jobs=jobs)
+    try:
+        with TestClient(workspace_status_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-workspace-job/sources/status")
+    finally:
+        _clear_overrides(workspace_status_app)
+
+    assert response.status_code == 200, response.text
+    source = response.json()["sources"][0]
+    assert source["state"] == "partially_queryable"
+    assert source["status_reason"] == "vector_index_pending"
+    assert source["readiness"]["text_extracted"] is True
+    assert source["job"] is None
+
+
 def test_recent_media_ingest_jobs_filters_to_supported_media_ingest_jobs() -> None:
     class _MediaIngestJobManager:
         def __init__(self) -> None:

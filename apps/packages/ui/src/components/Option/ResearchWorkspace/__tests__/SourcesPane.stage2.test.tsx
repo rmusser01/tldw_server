@@ -10,6 +10,11 @@ const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
   })
 )
 
+const { mockAddMedia, mockGetWorkspaceSourcePreview } = vi.hoisted(() => ({
+  mockAddMedia: vi.fn(),
+  mockGetWorkspaceSourcePreview: vi.fn()
+}))
+
 const mockToggleSourceSelection = vi.fn()
 const mockSelectAllSources = vi.fn()
 const mockDeselectAllSources = vi.fn()
@@ -40,6 +45,7 @@ const defaultSources: WorkspaceSource[] = [
 ]
 
 const workspaceStoreState = {
+  workspaceId: "workspace-1",
   sources: [...defaultSources] as WorkspaceSource[],
   selectedSourceIds: [] as string[],
   sourceSearchQuery: "",
@@ -63,10 +69,26 @@ vi.mock("react-i18next", () => ({
         | string
         | {
             defaultValue?: string
-          }
+            [key: string]: unknown
+          },
+      options?: Record<string, unknown>
     ) => {
-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
-      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+      const interpolationValues = {
+        ...(typeof defaultValueOrOptions === "object" ? defaultValueOrOptions : {}),
+        ...(options || {})
+      }
+      const interpolate = (value: string) =>
+        value.replace(/\{\{(\w+)\}\}/g, (_match, key) =>
+          interpolationValues[key] !== undefined
+            ? String(interpolationValues[key])
+            : `{{${key}}}`
+        )
+      if (typeof defaultValueOrOptions === "string") {
+        return interpolate(defaultValueOrOptions)
+      }
+      if (defaultValueOrOptions?.defaultValue) {
+        return interpolate(defaultValueOrOptions.defaultValue)
+      }
       return _key
     }
   })
@@ -76,6 +98,13 @@ vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: (
     selector: (state: typeof workspaceStoreState) => unknown
   ) => selector(workspaceStoreState)
+}))
+
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    addMedia: mockAddMedia,
+    getWorkspaceSourcePreview: mockGetWorkspaceSourcePreview
+  }
 }))
 
 vi.mock("../SourcesPane/AddSourceModal", () => ({
@@ -91,6 +120,34 @@ vi.mock("../undo-manager", () => ({
 describe("SourcesPane Stage 2 source highlighting", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
+    mockGetWorkspaceSourcePreview.mockResolvedValue({
+      workspace_id: "workspace-1",
+      source_id: "s1",
+      media_id: 1,
+      title: "Source One",
+      source_type: "pdf",
+      url: null,
+      state: "queryable",
+      status_reason: "source_queryable",
+      readiness: {
+        metadata_ready: true,
+        text_extracted: true,
+        fts_ready: true,
+        vector_ready: true,
+        citation_ready: true,
+        summary_ready: false,
+        tool_accessible: true
+      },
+      content_available: true,
+      preview_mode: "available",
+      unavailable_reason: null,
+      text_preview: "Default captured source preview text.",
+      text_total_chars: 37,
+      text_truncated: false,
+      snippets: [],
+      generated_at: "2026-05-25T00:00:00Z"
+    })
     mockUndoWorkspaceAction.mockReturnValue(true)
     mockScheduleWorkspaceUndoAction.mockImplementation(
       ({
@@ -129,6 +186,14 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add Sources" }))
 
     expect(mockOpenAddSourceModal).toHaveBeenCalledWith("existing")
+  })
+
+  it("surfaces partial workspace context errors as a compact source warning", () => {
+    render(<SourcesPane statusProjectionError="Jobs service unavailable" />)
+
+    expect(
+      screen.getByRole("button", { name: "Source status warning" })
+    ).toBeInTheDocument()
   })
 
   it("scrolls to and highlights a focused source target", () => {
@@ -387,8 +452,8 @@ describe("SourcesPane Stage 2 source highlighting", () => {
 
     render(<SourcesPane />)
 
-    expect(screen.getByText("Created {{date}}")).toBeInTheDocument()
-    expect(screen.queryByText("Added {{date}}")).not.toBeInTheDocument()
+    expect(screen.getByText(/^Created /)).toBeInTheDocument()
+    expect(screen.queryByText(/^Added /)).not.toBeInTheDocument()
   })
 
   it("supports source preview annotations create, edit, and delete with undo parity", async () => {
@@ -423,7 +488,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }))
     await waitFor(() => {
-      expect(screen.getByText("No annotations yet.")).toBeInTheDocument()
+      expect(screen.getByText("No local annotations yet.")).toBeInTheDocument()
     })
 
     expect(mockScheduleWorkspaceUndoAction).toHaveBeenCalledTimes(1)
@@ -436,6 +501,172 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     await waitFor(() => {
       expect(screen.getByText("Edited annotation")).toBeInTheDocument()
     })
+  }, 10000)
+
+  it("loads captured source content and evidence snippets in the source preview", async () => {
+    mockGetWorkspaceSourcePreview.mockResolvedValueOnce({
+      workspace_id: "workspace-1",
+      source_id: "s1",
+      media_id: 1,
+      title: "Source One",
+      source_type: "pdf",
+      url: null,
+      state: "queryable",
+      status_reason: "source_queryable",
+      readiness: {
+        metadata_ready: true,
+        text_extracted: true,
+        fts_ready: true,
+        vector_ready: true,
+        citation_ready: true,
+        summary_ready: false,
+        tool_accessible: true
+      },
+      content_available: true,
+      preview_mode: "available",
+      unavailable_reason: null,
+      text_preview: "Captured source text that the user can inspect.",
+      text_total_chars: 2400,
+      text_truncated: true,
+      snippets: [
+        {
+          id: "chunk-0",
+          source_id: "s1",
+          media_id: 1,
+          kind: "chunk",
+          text: "Chunk evidence used for citations.",
+          start_char: 0,
+          end_char: 34,
+          chunk_index: 0,
+          chunk_uuid: "chunk-0",
+          chunk_type: "text"
+        }
+      ],
+      generated_at: "2026-05-25T00:00:00Z"
+    })
+
+    render(<SourcesPane />)
+
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
+
+    expect(await screen.findByText("Captured content")).toBeInTheDocument()
+    expect(
+      screen.getByText("Captured source text that the user can inspect.")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Evidence snippets")).toBeInTheDocument()
+    expect(screen.getByText("Chunk evidence used for citations.")).toBeInTheDocument()
+    expect(
+      screen.getByText("Showing first 47 of 2,400 characters.")
+    ).toBeInTheDocument()
+    expect(mockGetWorkspaceSourcePreview).toHaveBeenCalledWith("workspace-1", "s1", {
+      max_chars: 3000,
+      chunk_limit: 3
+    })
+  })
+
+  it("explains when captured content is pending instead of replacing inspection with annotations", async () => {
+    mockGetWorkspaceSourcePreview.mockResolvedValueOnce({
+      workspace_id: "workspace-1",
+      source_id: "s2",
+      media_id: 2,
+      title: "Source Two",
+      source_type: "video",
+      url: null,
+      state: "extracting",
+      status_reason: "extraction_pending",
+      readiness: {
+        metadata_ready: true,
+        text_extracted: false,
+        fts_ready: false,
+        vector_ready: false,
+        citation_ready: false,
+        summary_ready: false,
+        tool_accessible: true
+      },
+      content_available: false,
+      preview_mode: "pending",
+      unavailable_reason: "extraction_pending",
+      text_preview: null,
+      text_total_chars: null,
+      text_truncated: false,
+      snippets: [],
+      generated_at: "2026-05-25T00:00:00Z"
+    })
+
+    render(<SourcesPane />)
+
+    fireEvent.click(screen.getByTestId("preview-source-s2"))
+
+    expect(await screen.findByText("Captured content")).toBeInTheDocument()
+    expect(
+      screen.getByText("Text extraction has not completed yet.")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Local highlights & annotations")).toBeInTheDocument()
+    expect(
+      screen.getByText("Saved in this browser for this workspace.")
+    ).toBeInTheDocument()
+  })
+
+  it("shows source preview failure details and supports retry", async () => {
+    mockGetWorkspaceSourcePreview
+      .mockRejectedValueOnce(new Error("Preview endpoint returned 503"))
+      .mockResolvedValueOnce({
+        workspace_id: "workspace-1",
+        source_id: "s1",
+        media_id: 1,
+        title: "Source One",
+        source_type: "pdf",
+        url: null,
+        state: "queryable",
+        status_reason: "source_queryable",
+        readiness: {
+          metadata_ready: true,
+          text_extracted: true,
+          fts_ready: true,
+          vector_ready: true,
+          citation_ready: true,
+          summary_ready: false,
+          tool_accessible: true
+        },
+        content_available: true,
+        preview_mode: "available",
+        unavailable_reason: null,
+        text_preview: "Retry loaded captured text.",
+        text_total_chars: 27,
+        text_truncated: false,
+        snippets: [],
+        generated_at: "2026-05-25T00:00:00Z"
+      })
+
+    render(<SourcesPane />)
+
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
+
+    expect(await screen.findByText("Source preview could not load.")).toBeInTheDocument()
+    expect(screen.getByText("Preview endpoint returned 503")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry preview" }))
+
+    expect(await screen.findByText("Retry loaded captured text.")).toBeInTheDocument()
+    expect(mockGetWorkspaceSourcePreview).toHaveBeenCalledTimes(2)
+  })
+
+  it("persists source annotations across modal remounts", async () => {
+    const { unmount } = render(<SourcesPane />)
+
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
+    await screen.findByText("Source preview and annotations")
+    fireEvent.change(screen.getByPlaceholderText("Annotation note"), {
+      target: { value: "Persistent annotation" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }))
+    expect(await screen.findByText("Persistent annotation")).toBeInTheDocument()
+
+    unmount()
+    render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
+
+    expect(await screen.findByText("Persistent annotation")).toBeInTheDocument()
   })
 
   it("shows selected-source action strip and previews single selected source", async () => {

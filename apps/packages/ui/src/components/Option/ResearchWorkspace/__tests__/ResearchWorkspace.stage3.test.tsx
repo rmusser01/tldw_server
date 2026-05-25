@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import axe from "axe-core"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { ResearchWorkspace } from "../index"
 
 const {
@@ -9,6 +10,7 @@ const {
   mockGetWorkspaceSources,
   mockAddWorkspaceSource,
   mockUpdateWorkspaceSourceSelection,
+  mockGetWorkspaceContext,
   mockGetWorkspaceSourcesStatus,
   mockGetWorkspaceCapabilities,
   mockBgRequest
@@ -18,6 +20,7 @@ const {
   mockGetWorkspaceSources: vi.fn(),
   mockAddWorkspaceSource: vi.fn(),
   mockUpdateWorkspaceSourceSelection: vi.fn(),
+  mockGetWorkspaceContext: vi.fn(),
   mockGetWorkspaceSourcesStatus: vi.fn(),
   mockGetWorkspaceCapabilities: vi.fn(),
   mockBgRequest: vi.fn()
@@ -113,6 +116,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     getWorkspaceSources: mockGetWorkspaceSources,
     addWorkspaceSource: mockAddWorkspaceSource,
     updateWorkspaceSourceSelection: mockUpdateWorkspaceSourceSelection,
+    getWorkspaceContext: undefined,
     getWorkspaceSourcesStatus: mockGetWorkspaceSourcesStatus,
     getWorkspaceCapabilities: mockGetWorkspaceCapabilities
   }
@@ -223,6 +227,40 @@ const makeCapabilitiesPayload = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 })
 
+const makeContextPayload = (overrides: Record<string, unknown> = {}) => ({
+  workspace_id: "workspace-1",
+  workspace_kind: "research_workspace",
+  schema_version: 1,
+  generated_at: "2026-05-25T00:00:00Z",
+  workspace: {
+    id: "workspace-1",
+    name: "New Research",
+    archived: false,
+    study_materials_policy: "workspace",
+    deleted: false,
+    banner_title: null,
+    banner_subtitle: null,
+    banner_color: null,
+    audio_provider: null,
+    audio_model: null,
+    audio_voice: null,
+    audio_speed: null,
+    created_at: "2026-05-23T12:00:00Z",
+    last_modified: "2026-05-23T12:00:00Z",
+    version: 1
+  },
+  sources: {
+    items: [makeStatusSource()],
+    summary: sourceStatusSummary
+  },
+  capabilities: makeCapabilitiesPayload(),
+  services: {},
+  allowed_actions: {},
+  active_jobs: [],
+  partial_errors: [],
+  ...overrides
+})
+
 const createDeferred = <T,>() => {
   let resolve!: (value: T | PromiseLike<T>) => void
   let reject!: (reason?: unknown) => void
@@ -261,6 +299,8 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    ;(tldwClient as unknown as { getWorkspaceContext?: unknown }).getWorkspaceContext =
+      undefined
     mockUndoWorkspaceAction.mockReturnValue(true)
     mockScheduleWorkspaceUndoAction.mockImplementation(
       (config: { apply?: () => void }) => {
@@ -990,6 +1030,48 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
         })
       )
     })
+  })
+
+  it("uses the canonical workspace context envelope when available", async () => {
+    ;(tldwClient as unknown as { getWorkspaceContext: typeof mockGetWorkspaceContext }).getWorkspaceContext =
+      mockGetWorkspaceContext
+    mockGetWorkspaceContext.mockResolvedValueOnce(
+      makeContextPayload({
+        sources: {
+          items: [
+            makeStatusSource({
+              media_id: 404,
+              progress_message: "Context source ready"
+            })
+          ],
+          summary: sourceStatusSummary
+        },
+        partial_errors: [
+          {
+            scope: "jobs",
+            code: "jobs_unavailable",
+            message: "Jobs status is temporarily unavailable."
+          }
+        ]
+      })
+    )
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(mockGetWorkspaceContext).toHaveBeenCalledWith("workspace-1")
+    })
+    expect(mockGetWorkspaceSourcesStatus).not.toHaveBeenCalled()
+    expect(mockGetWorkspaceCapabilities).not.toHaveBeenCalled()
+    expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
+      404,
+      "ready",
+      "Context source ready",
+      expect.objectContaining({
+        text_extracted: true,
+        vector_ready: true
+      })
+    )
   })
 
   it("bootstraps the server workspace and source rows before status projection calls", async () => {

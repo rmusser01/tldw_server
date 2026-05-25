@@ -971,7 +971,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   const [, setWorkspaceCapabilities] =
     React.useState<WorkspaceCapabilitiesResponse | null>(null)
   const [, setWorkspaceStatusProjectionLoading] = React.useState(false)
-  const [, setWorkspaceStatusProjectionError] =
+  const [workspaceStatusProjectionError, setWorkspaceStatusProjectionError] =
     React.useState<string | null>(null)
   const [
     workspaceStatusProjectionReadyVersion,
@@ -1329,10 +1329,12 @@ const ResearchWorkspaceBody: React.FC = () => {
       setWorkspaceStatusProjectionLoading(false)
       return
     }
-    if (
-      typeof tldwClient.getWorkspaceSourcesStatus !== "function" ||
-      typeof tldwClient.getWorkspaceCapabilities !== "function"
-    ) {
+    const hasWorkspaceContextApi =
+      typeof tldwClient.getWorkspaceContext === "function"
+    const hasLegacyWorkspaceStatusApis =
+      typeof tldwClient.getWorkspaceSourcesStatus === "function" &&
+      typeof tldwClient.getWorkspaceCapabilities === "function"
+    if (!hasWorkspaceContextApi && !hasLegacyWorkspaceStatusApis) {
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
       workspaceServerReconcileSignatureRef.current = null
@@ -1367,6 +1369,43 @@ const ResearchWorkspaceBody: React.FC = () => {
     setWorkspaceCapabilities(null)
     setWorkspaceStatusProjectionError(null)
     setWorkspaceStatusProjectionLoading(true)
+
+    const applySourceStatusProjection = (
+      sourceStatus: WorkspaceSourceStatusListResponse,
+      statusProjectionErrors: string[]
+    ) => {
+      if (sourceStatus.workspace_id === activeWorkspaceId) {
+        setWorkspaceSourceStatus(sourceStatus)
+        const projectedStatusesByMediaId: Record<number, WorkspaceSourceStatus> = {}
+
+        for (const source of sourceStatus.sources || []) {
+          if (
+            typeof source.media_id !== "number" ||
+            !Number.isFinite(source.media_id)
+          ) {
+            continue
+          }
+          const mappedStatus = mapWorkspaceLifecycleToLocalSourceStatus(
+            source.state
+          )
+          projectedStatusesByMediaId[source.media_id] = mappedStatus
+          setSourceStatusByMediaId(
+            source.media_id,
+            mappedStatus,
+            getWorkspaceSourceStatusMessage(source),
+            source.readiness
+          )
+        }
+        workspaceProjectedSourceStatusByMediaIdRef.current = {
+          workspaceId: activeWorkspaceId,
+          fallbackReady: true,
+          statuses: projectedStatusesByMediaId
+        }
+        setWorkspaceStatusProjectionReadyVersion((version) => version + 1)
+        return
+      }
+      statusProjectionErrors.push("Source status response did not match active workspace")
+    }
 
     const refreshWorkspaceStatusProjection = async () => {
       if (workspaceStatusInFlightRef.current) return
@@ -1407,6 +1446,52 @@ const ResearchWorkspaceBody: React.FC = () => {
           }
         }
 
+        if (hasWorkspaceContextApi) {
+          const workspaceContext = await tldwClient.getWorkspaceContext(
+            activeWorkspaceId
+          )
+          if (cancelled || requestSeq !== workspaceStatusRequestSeqRef.current) {
+            return
+          }
+          if (workspaceContext.workspace_id === activeWorkspaceId) {
+            applySourceStatusProjection(
+              {
+                workspace_id: workspaceContext.workspace_id,
+                sources: workspaceContext.sources?.items || [],
+                summary:
+                  workspaceContext.sources?.summary || {
+                    total: 0,
+                    selected: 0,
+                    queryable: 0,
+                    partially_queryable: 0,
+                    processing: 0,
+                    failed: 0,
+                    missing: 0
+                  }
+              },
+              statusProjectionErrors
+            )
+            if (workspaceContext.capabilities?.workspace_id === activeWorkspaceId) {
+              setWorkspaceCapabilities(workspaceContext.capabilities)
+            } else {
+              statusProjectionErrors.push(
+                "Capabilities response did not match active workspace"
+              )
+            }
+            for (const partialError of workspaceContext.partial_errors || []) {
+              if (partialError?.message) {
+                statusProjectionErrors.push(partialError.message)
+              }
+            }
+          } else {
+            statusProjectionErrors.push("Workspace context response did not match active workspace")
+          }
+          setWorkspaceStatusProjectionError(
+            statusProjectionErrors.length > 0 ? statusProjectionErrors.join("; ") : null
+          )
+          return
+        }
+
         const [sourceStatusResult, capabilitiesResult] = await Promise.allSettled([
           tldwClient.getWorkspaceSourcesStatus(activeWorkspaceId),
           tldwClient.getWorkspaceCapabilities(activeWorkspaceId)
@@ -1417,37 +1502,7 @@ const ResearchWorkspaceBody: React.FC = () => {
 
         if (sourceStatusResult.status === "fulfilled") {
           const sourceStatus = sourceStatusResult.value
-          if (sourceStatus.workspace_id === activeWorkspaceId) {
-            setWorkspaceSourceStatus(sourceStatus)
-            const projectedStatusesByMediaId: Record<number, WorkspaceSourceStatus> = {}
-
-            for (const source of sourceStatus.sources || []) {
-              if (
-                typeof source.media_id !== "number" ||
-                !Number.isFinite(source.media_id)
-              ) {
-                continue
-              }
-              const mappedStatus = mapWorkspaceLifecycleToLocalSourceStatus(
-                source.state
-              )
-              projectedStatusesByMediaId[source.media_id] = mappedStatus
-              setSourceStatusByMediaId(
-                source.media_id,
-                mappedStatus,
-                getWorkspaceSourceStatusMessage(source),
-                source.readiness
-              )
-            }
-            workspaceProjectedSourceStatusByMediaIdRef.current = {
-              workspaceId: activeWorkspaceId,
-              fallbackReady: true,
-              statuses: projectedStatusesByMediaId
-            }
-            setWorkspaceStatusProjectionReadyVersion((version) => version + 1)
-          } else {
-            statusProjectionErrors.push("Source status response did not match active workspace")
-          }
+          applySourceStatusProjection(sourceStatus, statusProjectionErrors)
         } else {
           if (
             workspaceProjectedSourceStatusByMediaIdRef.current.workspaceId ===
@@ -2637,6 +2692,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           onPatchSourceListViewState={patchSourceListViewState}
           onResetAdvancedSourceFilters={resetAdvancedSourceFilters}
           statusGuardrailsEnabled={statusGuardrailsEnabled}
+          statusProjectionError={workspaceStatusProjectionError}
         />
       </Suspense>
     )

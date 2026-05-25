@@ -13,6 +13,7 @@ _ACTIVE_JOB_STATUSES = frozenset({"queued", "processing", "running", "retrying"}
 _FAILED_JOB_STATUSES = frozenset({"failed", "cancelled", "quarantined"})
 _PROCESSING_STATES = frozenset({"queued", "ingesting", "extracting", "chunking", "indexing", "retrying"})
 _PENDING_REASONS = frozenset({"vector_index_pending", "chunking_pending", "extraction_pending"})
+_WORKSPACE_SOURCE_JOB_TYPE = "workspace_source_ingest"
 
 
 def build_source_status_projection(
@@ -138,13 +139,22 @@ def _build_source_status(
     job_index: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     matched_job = _match_job_for_source(source, job_index)
+    media_id = _coerce_int(source.get("media_id"))
+    media = _get_media(media_db, media_id) if media_id is not None and media_id > 0 else None
+    media_status = (
+        _status_from_media(source, media, media_db=media_db, media_id=media_id)
+        if media is not None and media_id is not None
+        else None
+    )
+    if media_status is not None and _should_prefer_media_status_over_job(matched_job, media_status):
+        return media_status
+
     if matched_job and _is_active_job(matched_job):
         return _status_from_active_job(source, matched_job)
 
     if matched_job and _is_failed_job(matched_job):
         return _status_from_failed_job(source, matched_job)
 
-    media_id = _coerce_int(source.get("media_id"))
     if media_id is None or media_id <= 0:
         return _base_status(
             source,
@@ -154,7 +164,6 @@ def _build_source_status(
             progress_message="Workspace source does not have a media item yet.",
         )
 
-    media = _get_media(media_db, media_id)
     if media is None:
         return _base_status(
             source,
@@ -164,7 +173,7 @@ def _build_source_status(
             progress_message="Media item is missing or unavailable.",
         )
 
-    return _status_from_media(source, media, media_db=media_db, media_id=media_id)
+    return media_status or _status_from_media(source, media, media_db=media_db, media_id=media_id)
 
 
 def _status_from_media(
@@ -439,6 +448,24 @@ def _is_active_job(job: dict[str, Any]) -> bool:
 
 def _is_failed_job(job: dict[str, Any]) -> bool:
     return str(job.get("status") or "").strip().lower() in _FAILED_JOB_STATUSES
+
+
+def _is_workspace_source_job(job: dict[str, Any] | None) -> bool:
+    return str((job or {}).get("job_type") or "").strip().lower() == _WORKSPACE_SOURCE_JOB_TYPE
+
+
+def _should_prefer_media_status_over_job(
+    job: dict[str, Any] | None,
+    media_status: dict[str, Any],
+) -> bool:
+    if job is None:
+        return True
+    if not _is_active_job(job):
+        return False
+    if str(media_status.get("state") or "") == "queryable":
+        return True
+    readiness = media_status.get("readiness") or {}
+    return _is_workspace_source_job(job) and bool(readiness.get("text_extracted"))
 
 
 def _state_from_job(job: dict[str, Any]) -> str:

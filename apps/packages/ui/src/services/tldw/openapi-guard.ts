@@ -45,6 +45,8 @@ export type ClientPath =
   | "/api/v1/web-clipper/{clip_id}"
   | "/api/v1/web-clipper/{clip_id}/enrichments"
   | "/api/v1/research-workspace/capabilities"
+  | "/api/v1/workspaces/{workspace_id}/context"
+  | "/api/v1/workspaces/{workspace_id}/sources/{source_id}/preview"
   | "/api/v1/rag/health"
   | "/api/v1/rag/search"
   | "/api/v1/rag/search/stream"
