@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react"
 import { Button, Card, Col, Row, Skeleton, Space, Tag, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
+import { useNavigate } from "react-router-dom"
 import {
   RecoveryCallout,
   buildCapabilityState,
@@ -58,6 +60,10 @@ const WORKSPACE_DISCORD_POLICY_PATH = "/api/v1/integrations/workspace/discord/po
 const WORKSPACE_TELEGRAM_BOT_PATH = "/api/v1/integrations/workspace/telegram/bot"
 const WORKSPACE_TELEGRAM_LINKED_ACTORS_PATH =
   "/api/v1/integrations/workspace/telegram/linked-actors"
+const PERSONAL_INTEGRATIONS_UNSUPPORTED_TITLE =
+  "Personal integrations are unavailable on this server"
+const PERSONAL_INTEGRATIONS_UNSUPPORTED_DESCRIPTION =
+  "The connected server does not advertise personal integration management. Workspace integrations may still be available."
 
 const isUnsupportedOverviewError = (scope: IntegrationScope, error: unknown): boolean => {
   if (scope !== "personal" || !error || typeof error !== "object") {
@@ -100,6 +106,10 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
   const [personalIntegrationsSupported, setPersonalIntegrationsSupported] = useState<boolean | null>(
     scope === "workspace" ? true : null
   )
+  const isWorkspace = scope === "workspace"
+  const featureName = isWorkspace
+    ? t("integrations:workspace.title", "Workspace integrations")
+    : t("integrations:personal.title", "Personal integrations")
 
   React.useEffect(() => {
     setActiveOrgId(typeof connectionConfig?.orgId === "number" ? connectionConfig.orgId : null)
@@ -253,7 +263,6 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
     ])
   }
 
-  const isWorkspace = scope === "workspace"
   const personalIntegrationsUnsupported =
     scope === "personal" &&
     (personalIntegrationsSupported === false || isUnsupportedOverviewError(scope, overviewQuery.error))

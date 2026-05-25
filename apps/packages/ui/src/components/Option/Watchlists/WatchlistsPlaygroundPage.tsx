@@ -2265,84 +2265,29 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
 
       {renderWatchlistContainerShell()}
 
-      <div
-        className="mb-4 flex flex-wrap items-center gap-2 text-sm"
-        data-testid="watchlists-repeat-actions"
-      >
-        <span className="text-text-muted">
-          {t("watchlists:quickActions.repeatLabel", "Jump to")}
-        </span>
-        {repeatUserShortcuts.map((shortcut) => (
-          <Button
-            key={shortcut.key}
-            size="small"
-            type={activeTab === shortcut.key ? "primary" : "default"}
-            onClick={() => navigateToTab(shortcut.key)}
-            data-testid={`watchlists-repeat-open-${shortcut.key}`}
-          >
-            {shortcut.label}
-          </Button>
-        ))}
-        <Button
-          size="small"
-          type="default"
-          icon={<Command className="h-3.5 w-3.5" />}
-          onClick={() => setCommandPaletteOpen(true)}
-          data-testid="watchlists-open-command-palette"
-        >
-          {t("watchlists:commandPalette.open", "Command palette")}
-        </Button>
-      </div>
+      {watchlistViewsAvailable && (
+        <>
+          {/* Persistent health bar - replaces Overview tab in progressive layout */}
+          <WatchlistsHealthBar onOpenSettings={() => setSettingsDrawerOpen(true)} onNavigate={navigateToTab} />
 
-      {orientationDismissed ? (
-        <div className="mb-4">
-          <Button
-            size="small"
-            type="link"
-            data-testid="watchlists-orientation-restore"
-            onClick={restoreOrientationForActiveTab}
+          <div
+            className="mb-4 flex flex-wrap items-center gap-2 text-sm"
+            data-testid="watchlists-repeat-actions"
           >
-            {t("watchlists:orientation.showTabGuidance", "Show tab guidance")}
-          </Button>
-        </div>
-      ) : (
-        <Alert
-          type="info"
-          showIcon
-          className="mb-4"
-          data-testid="watchlists-orientation-alert"
-          title={<span data-testid="watchlists-orientation-title">{activeTabOrientation.title}</span>}
-          description={(
-            <div className="space-y-3">
-              <span data-testid="watchlists-orientation-description">{activeTabOrientation.description}</span>
-              <div className="flex flex-wrap gap-2">
-                {activeTabOrientation.actions.map((action) => (
-                  <Button
-                    key={action.key}
-                    size="small"
-                    data-testid={`watchlists-orientation-action-${action.key}`}
-                    onClick={() => navigateToTab(action.target)}
-                  >
-                    {action.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
-          closable
-          onClose={dismissOrientationForActiveTab}
-        />
-      )}
-
-      {activeTeachPoint && (
-        <Alert
-          type="info"
-          showIcon
-          className="mb-4"
-          data-testid="watchlists-teach-point-alert"
-          title={<span data-testid="watchlists-teach-point-title">{activeTeachPoint.title}</span>}
-          description={<span data-testid="watchlists-teach-point-description">{activeTeachPoint.description}</span>}
-          action={(
+            <span className="text-text-muted">
+              {t("watchlists:quickActions.repeatLabel", "Jump to")}
+            </span>
+            {repeatUserShortcuts.map((shortcut) => (
+              <Button
+                key={shortcut.key}
+                size="small"
+                type={activeTab === shortcut.key ? "primary" : "default"}
+                onClick={() => navigateToTab(shortcut.key)}
+                data-testid={`watchlists-repeat-open-${shortcut.key}`}
+              >
+                {shortcut.label}
+              </Button>
+            ))}
             <Button
               size="small"
               type="default"

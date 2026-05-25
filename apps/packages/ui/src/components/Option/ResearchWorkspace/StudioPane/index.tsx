@@ -98,6 +98,8 @@ import {
   getArtifactCapabilityId,
   getCapability,
   getCapabilityCopy,
+  type ResearchWorkspaceCapabilityId,
+  type ResearchWorkspaceCapabilityMode,
   type ResearchWorkspaceCapabilitiesResponse
 } from "../research-workspace-capabilities"
 
@@ -1846,9 +1848,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
               (
                 item
               ): item is {
-                key: string
+                key: ResearchWorkspaceCapabilityId
                 message: string
-                mode: "warn" | "block"
+                mode: Extract<ResearchWorkspaceCapabilityMode, "warn" | "block">
               } =>
                 Boolean(item.message) &&
                 (item.mode === "warn" || item.mode === "block")

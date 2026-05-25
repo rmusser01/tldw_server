@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import { Spin, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
@@ -20,6 +21,7 @@ const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
 
 export const ScheduledTasksPage: React.FC = () => {
   const navigate = useNavigate()
+  const { t } = useTranslation(["scheduledTasks", "common"])
   const { config: connectionConfig, loading: connectionConfigLoading } =
     useCanonicalConnectionConfig()
   const [editorOpen, setEditorOpen] = useState(false)
@@ -163,6 +165,7 @@ export const ScheduledTasksPage: React.FC = () => {
         partialErrors
       })
     : null
+  const scheduledTasksFeatureName = t("scheduledTasks:title", "Scheduled tasks")
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">

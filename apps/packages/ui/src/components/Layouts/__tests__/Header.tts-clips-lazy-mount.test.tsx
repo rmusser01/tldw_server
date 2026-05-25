@@ -64,7 +64,8 @@ vi.mock("../ChatHeader", () => ({
 }))
 
 vi.mock("@/components/Sidepanel/Chat/TtsClipsDrawer", () => ({
-  TtsClipsDrawer: (...args: unknown[]) => ttsClipsDrawerMock(...args)
+  TtsClipsDrawer: (props: unknown) =>
+    (ttsClipsDrawerMock as (props: unknown) => null)(props)
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({

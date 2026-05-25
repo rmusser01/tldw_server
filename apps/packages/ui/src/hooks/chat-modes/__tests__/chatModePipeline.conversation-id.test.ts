@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   pageAssistModel: vi.fn(),
-  getModelNicknameByID: vi.fn(async () => null),
+  getModelNicknameByID: vi.fn(async (_modelId?: unknown) => null),
   saveMessageOnSuccess: vi.fn(async () => "history-1"),
   saveMessageOnError: vi.fn(async () => "history-1"),
   setMessages: vi.fn(),
@@ -23,8 +23,8 @@ vi.mock("@/db/dexie/helpers", () => ({
 }))
 
 vi.mock("@/db/dexie/nickname", () => ({
-  getModelNicknameByID: (...args: unknown[]) =>
-    mocks.getModelNicknameByID(...args)
+  getModelNicknameByID: (modelId: unknown) =>
+    mocks.getModelNicknameByID(modelId)
 }))
 
 vi.mock("@/utils/mcp-disclosure", () => ({

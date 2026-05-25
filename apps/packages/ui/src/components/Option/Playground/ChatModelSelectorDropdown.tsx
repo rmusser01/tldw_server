@@ -10,17 +10,20 @@ type ChatModelSelectorDropdownProps = {
   apiModelLabel: string
   connectionStatusLabel: string
   connectionStatusWarning?: boolean
+  modelUsabilityLabel?: string
+  modelUsabilityTitle?: string
+  modelUsabilityWarning?: boolean
   modelDropdownMenuItems: any[]
   modelDropdownOpen: boolean
-  modelSearchQuery: string
+  modelSearchQuery?: string
   modelSelectorWarning?: boolean
-  modelSortMode: ModelSortMode
+  modelSortMode?: ModelSortMode
   placement?: "topLeft" | "bottomLeft"
   resolvedProviderKey: string
-  selectedModel: string | null | undefined
+  selectedModel?: string | null | undefined
   setModelDropdownOpen: (open: boolean) => void
   setModelSearchQuery: (query: string) => void
-  setModelSortMode: (mode: ModelSortMode) => void
+  setModelSortMode?: (mode: ModelSortMode) => void
 }
 
 export const ChatModelSelectorDropdown = React.memo(
@@ -28,19 +31,26 @@ export const ChatModelSelectorDropdown = React.memo(
     apiModelLabel,
     connectionStatusLabel,
     connectionStatusWarning = false,
+    modelUsabilityLabel,
+    modelUsabilityTitle,
+    modelUsabilityWarning = false,
     modelDropdownMenuItems,
     modelDropdownOpen,
-    modelSearchQuery,
+    modelSearchQuery = "",
     modelSelectorWarning = false,
-    modelSortMode,
+    modelSortMode = "favorites",
     placement = "topLeft",
     resolvedProviderKey,
     selectedModel,
     setModelDropdownOpen,
     setModelSearchQuery,
-    setModelSortMode
+    setModelSortMode = () => undefined
   }: ChatModelSelectorDropdownProps) {
     const { t } = useTranslation(["playground", "common"])
+    const statusLabel = modelUsabilityLabel ?? connectionStatusLabel
+    const statusTitle = modelUsabilityTitle ?? apiModelLabel
+    const statusWarning =
+      modelUsabilityWarning || connectionStatusWarning || modelSelectorWarning
 
     return (
       <Dropdown
@@ -129,19 +139,17 @@ export const ChatModelSelectorDropdown = React.memo(
       >
         <Tooltip
           title={
-            modelSelectorWarning
-              ? t(
-                  "playground:composer.selectModelTooltip",
-                  "Click to select a model"
-                )
-              : apiModelLabel
+            statusTitle ||
+            (modelSelectorWarning
+              ? t("playground:composer.selectModelTooltip", "Click to select a model")
+              : apiModelLabel)
           }
           placement="top"
         >
           <button
             type="button"
-            title={apiModelLabel}
-            aria-label={apiModelLabel}
+            title={statusTitle}
+            aria-label={statusTitle}
             aria-haspopup="listbox"
             aria-expanded={modelDropdownOpen}
             data-testid="model-selector"
@@ -154,13 +162,13 @@ export const ChatModelSelectorDropdown = React.memo(
             <ProviderIcons
               provider={resolvedProviderKey}
               className={`h-3 w-3 ${
-                modelSelectorWarning ? "text-warn" : "text-text-subtle"
+                statusWarning ? "text-warn" : "text-text-subtle"
               }`}
             />
             <span className="max-w-[120px] truncate">{apiModelLabel}</span>
             <span
               className={`rounded-full px-1.5 py-0.5 text-[9px] ${
-                connectionStatusWarning
+                statusWarning
                   ? "bg-warn/10 text-warn"
                   : "bg-success/10 text-success"
               }`}
@@ -171,7 +179,7 @@ export const ChatModelSelectorDropdown = React.memo(
                 ) as string
               }
             >
-              {connectionStatusLabel}
+              {statusLabel}
             </span>
           </button>
         </Tooltip>

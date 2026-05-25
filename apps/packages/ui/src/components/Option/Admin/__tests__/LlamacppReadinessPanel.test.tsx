@@ -12,7 +12,8 @@ describe("LlamacppReadinessPanel", () => {
             enabled: false,
             models_dir: "/srv/models",
             allowed_paths: [],
-            registered_model_paths: []
+            registered_model_paths: [],
+            imported_asset_folders: []
           },
           active_config: {
             handler_configured: false

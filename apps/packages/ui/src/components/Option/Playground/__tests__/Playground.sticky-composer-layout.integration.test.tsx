@@ -78,8 +78,10 @@ const storageState = vi.hoisted(() => ({
 }));
 
 const chatSettingsState = vi.hoisted(() => ({
-  syncChatSettingsForServerChat: vi.fn(async () => null),
-  applyChatSettingsPatch: vi.fn(async () => null),
+  syncChatSettingsForServerChat: vi.fn(async (_options?: unknown) => null),
+  applyChatSettingsPatch: vi.fn(
+    async (_serverChatId?: unknown, _patch?: unknown) => null
+  ),
 }));
 
 const researchClientMocks = vi.hoisted(() => ({
@@ -175,10 +177,10 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 }));
 
 vi.mock("@/services/chat-settings", () => ({
-  syncChatSettingsForServerChat: (...args: unknown[]) =>
-    chatSettingsState.syncChatSettingsForServerChat(...args),
-  applyChatSettingsPatch: (...args: unknown[]) =>
-    chatSettingsState.applyChatSettingsPatch(...args),
+  syncChatSettingsForServerChat: (options: unknown) =>
+    chatSettingsState.syncChatSettingsForServerChat(options),
+  applyChatSettingsPatch: (serverChatId: unknown, patch: unknown) =>
+    chatSettingsState.applyChatSettingsPatch(serverChatId, patch),
 }));
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({

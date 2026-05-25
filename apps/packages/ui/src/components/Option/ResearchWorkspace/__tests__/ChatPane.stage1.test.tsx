@@ -201,7 +201,7 @@ vi.mock("@/components/Common/Playground/Message", () => ({
         <button
           type="button"
           aria-label={`delete-message-${currentMessageIndex ?? -1}`}
-          onClick={() => void onDeleteMessage(currentMessageIndex ?? -1)}
+          onClick={() => void onDeleteMessage()}
         >
           Delete
         </button>

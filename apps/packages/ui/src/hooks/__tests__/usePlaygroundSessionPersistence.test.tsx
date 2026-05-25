@@ -84,7 +84,15 @@ describe("usePlaygroundSessionPersistence", () => {
     useStoreMessageOption.setState({
       historyId: "stale-local-history",
       history: [{ role: "user", content: "stale local message" }],
-      messages: [{ sender: "user", content: "stale local message" }]
+      messages: [
+        {
+          isBot: false,
+          name: "User",
+          role: "user",
+          message: "stale local message",
+          sources: []
+        }
+      ]
     })
     usePlaygroundSessionStore.getState().saveSession({
       historyId: null,

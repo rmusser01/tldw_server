@@ -121,6 +121,7 @@ type ExistingMediaCache = {
   cachedAt: number
 }
 
+const EXISTING_MEDIA_CACHE_TTL_MS = 60_000
 let existingMediaCache: ExistingMediaCache | null = null
 
 const DEFAULT_EXISTING_MEDIA_FILTERS: ExistingMediaFilters = {
@@ -1594,10 +1595,10 @@ const ExistingTab: React.FC<{
       )
     })
 
-    const newSources = selectedItems.map((m) => ({
+    const newSources: AddSourceCandidate[] = selectedItems.map((m) => ({
       mediaId: Number(m.media_id ?? m.id),
-      title: m.title || m.name || "Untitled",
-      type: getSourceTypeFromMediaType(m.type || m.media_type) as WorkspaceSourceType,
+      title: getMediaLibraryTitle(m),
+      type: getSourceTypeFromMediaType(getMediaLibraryTypeLabel(m)) as WorkspaceSourceType,
       status: "ready" as const,
       url: toOptionalString(m.url) || toOptionalString(m.source_url),
       fileSize: toOptionalNumber(m.file_size ?? m.filesize ?? m.size),

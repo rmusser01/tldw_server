@@ -343,13 +343,13 @@ describe("Persona Garden scope and policy editors", () => {
     })
 
     const { rerender } = render(
-      <PoliciesPanel selectedPersonaId="persona-1" selectedPersonaName="Research Persona" />
+      <PoliciesPanel selectedPersonaId="persona-1" hasPendingPlan={false} />
     )
 
     expect(await screen.findByDisplayValue("summarize")).toBeInTheDocument()
 
     rerender(
-      <PoliciesPanel selectedPersonaId="persona-2" selectedPersonaName="Ops Persona" />
+      <PoliciesPanel selectedPersonaId="persona-2" hasPendingPlan={false} />
     )
 
     expect(await screen.findByText("Loading...")).toBeInTheDocument()

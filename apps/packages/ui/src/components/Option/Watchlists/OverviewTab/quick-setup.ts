@@ -68,6 +68,11 @@ const normalizeCadenceIntervalUnit = (
   return unit === "minute" || unit === "minutes" ? "minutes" : "hours"
 }
 
+const isWatchlistCadenceDraft = (
+  value: QuickSetupSchedulePreset | WatchlistCadenceDraft | null | undefined
+): value is WatchlistCadenceDraft =>
+  Boolean(value) && typeof value === "object" && "kind" in value
+
 const clampInteger = (value: unknown, min: number, max: number): number => {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return min
@@ -161,7 +166,7 @@ export const formatQuickSetupCadenceLabel = (
     advanced: (cron: string) => string
   }>
 ): string => {
-  const cadence = typeof draft === "object" && draft != null
+  const cadence = isWatchlistCadenceDraft(draft)
     ? draft
     : legacyPresetToQuickSetupCadenceDraft(draft)
   if (cadence.kind === "manual") return copy?.manual || "Manual only"
@@ -197,7 +202,7 @@ export const getLocalTimezone = (): string => {
 export const resolveQuickSetupSchedule = (
   schedule: QuickSetupSchedulePreset | WatchlistCadenceDraft
 ): { schedule_expr?: string; timezone?: string } => {
-  if (typeof schedule === "object" && schedule != null) {
+  if (isWatchlistCadenceDraft(schedule)) {
     if (schedule.kind === "manual") return {}
     if (schedule.kind === "advanced") {
       const cron = String(schedule.cron || "").trim()

@@ -1231,7 +1231,7 @@ describe("PromptBody server search and pagination", () => {
       }
     ]
     mocks.getAllPrompts.mockResolvedValue(state.prompts)
-    mocks.pushToStudio.mockResolvedValue({ success: true, syncStatus: "synced" })
+    mocks.pushToStudio.mockResolvedValue({ success: true })
 
     renderPromptBody()
     await waitFor(() => {
@@ -1276,7 +1276,7 @@ describe("PromptBody server search and pagination", () => {
     mocks.pushToStudio.mockImplementation(
       () =>
         new Promise((resolve) => {
-          resolvePush = () => resolve({ success: true, syncStatus: "synced" })
+          resolvePush = () => resolve({ success: true })
         })
     )
 
@@ -1462,7 +1462,7 @@ describe("PromptBody server search and pagination", () => {
   })
 
   it("copies a share link from custom prompt actions for synced prompts", async () => {
-    const writeText = vi.fn(async () => undefined)
+    const writeText = vi.fn(async (_text: string) => undefined)
     Object.defineProperty(window.navigator, "clipboard", {
       configurable: true,
       value: { writeText }
@@ -1479,7 +1479,7 @@ describe("PromptBody server search and pagination", () => {
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledTimes(1)
     })
-    const copiedUrl = writeText.mock.calls[0]?.[0] as string
+    const copiedUrl = String(writeText.mock.calls[0]?.[0] ?? "")
     expect(copiedUrl).toContain("prompt=101")
     expect(copiedUrl).toContain("source=studio")
   })

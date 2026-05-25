@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { ItemsTab } from "../ItemsTab"
 import { useWatchlistsStore } from "@/store/watchlists"
+import type { ScrapedItem } from "@/types/watchlists"
 import {
   ITEMS_PAGE_SIZE_STORAGE_KEY,
   ITEMS_SORT_MODE_STORAGE_KEY,
@@ -101,7 +102,7 @@ vi.mock("@/services/watchlists", () => ({
   updateScrapedItem: (...args: unknown[]) => serviceMocks.updateScrapedItem(...args)
 }))
 
-const makeItems = () => ([
+const makeItems = (): ScrapedItem[] => ([
   {
     id: 101,
     run_id: 1,
@@ -1196,7 +1197,7 @@ describe("ItemsTab batch throughput controls", () => {
   })
 
   it("marks all filtered items as reviewed with scoped confirmation messaging", async () => {
-    const largeUnreadSet = Array.from({ length: 45 }, (_value, index) => ({
+    const largeUnreadSet: ScrapedItem[] = Array.from({ length: 45 }, (_value, index) => ({
       id: 500 + index,
       run_id: 9,
       job_id: 3,
@@ -1424,7 +1425,7 @@ describe("ItemsTab batch throughput controls", () => {
   })
 
   it("handles high-volume all-filtered review operations", async () => {
-    const largeUnreadSet = Array.from({ length: 240 }, (_value, index) => ({
+    const largeUnreadSet: ScrapedItem[] = Array.from({ length: 240 }, (_value, index) => ({
       id: 800 + index,
       run_id: 9,
       job_id: 3,
@@ -1484,7 +1485,7 @@ describe("ItemsTab batch throughput controls", () => {
   })
 
   it("surfaces in-progress batch status and completion summary for high-volume operations", async () => {
-    const largeUnreadSet = Array.from({ length: 45 }, (_value, index) => ({
+    const largeUnreadSet: ScrapedItem[] = Array.from({ length: 45 }, (_value, index) => ({
       id: 900 + index,
       run_id: 9,
       job_id: 3,

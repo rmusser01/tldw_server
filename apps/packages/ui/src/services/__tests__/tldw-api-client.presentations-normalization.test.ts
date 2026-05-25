@@ -52,7 +52,7 @@ describe("TldwApiClient presentations normalization", () => {
           }
         ],
         total_count: 1
-      })),
+      })) as unknown as TldwApiClientCore["request"],
       resolveApiPath: vi.fn(),
       fillPathParams: vi.fn()
     }

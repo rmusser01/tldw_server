@@ -240,22 +240,24 @@ vi.mock("react-i18next", () => ({
         workspaceName?: string
       }
     ) => {
+      const options =
+        typeof defaultValueOrOptions === "string" ? null : defaultValueOrOptions
       const template =
         typeof defaultValueOrOptions === "string"
           ? defaultValueOrOptions
-          : defaultValueOrOptions?.defaultValue || key
+          : options?.defaultValue || key
       return template
         .replace(
           "{{count}}",
           String(
-            interpolationValues?.count ?? defaultValueOrOptions?.count ?? ""
+            interpolationValues?.count ?? options?.count ?? ""
           )
         )
         .replace(
           "{{workspaceName}}",
           String(
             interpolationValues?.workspaceName ??
-              defaultValueOrOptions?.workspaceName ??
+              options?.workspaceName ??
               ""
           )
         )

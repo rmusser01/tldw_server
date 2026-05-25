@@ -20,10 +20,9 @@ const buildJob = (): WatchlistJob => ({
   retry_policy: { max_attempts: 2, backoff_seconds: 60 },
   job_filters: {
     filters: [
-      { filter_type: "keyword", action: "include", value: "sanctions", case_sensitive: false },
-      { filter_type: "regex", action: "exclude", value: "sports", case_sensitive: false }
-    ],
-    default_action: "include"
+      { type: "keyword", action: "include", value: { query: "sanctions", case_sensitive: false } },
+      { type: "regex", action: "exclude", value: { pattern: "sports", case_sensitive: false } }
+    ]
   },
   output_prefs: {
     auto_output: { enabled: true, format: "md" },

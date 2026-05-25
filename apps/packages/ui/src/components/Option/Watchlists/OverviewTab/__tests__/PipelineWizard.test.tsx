@@ -44,6 +44,7 @@ const renderWizard = (overrides: Partial<React.ComponentProps<typeof PipelineWiz
       sources={sources}
       sourcesLoading={false}
       submitting={false}
+      submitError={null}
       previewLoading={false}
       previewError={null}
       previewRendered={null}

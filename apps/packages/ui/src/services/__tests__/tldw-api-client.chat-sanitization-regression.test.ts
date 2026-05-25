@@ -24,13 +24,16 @@ vi.mock("@/utils/safe-storage", () => ({
   }
 }))
 
-import { TldwApiClient } from "@/services/tldw/TldwApiClient"
+import {
+  TldwApiClient,
+  type ChatCompletionRequest
+} from "@/services/tldw/TldwApiClient"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 
-const request = {
+const request: ChatCompletionRequest = {
   model: "auto",
   messages: [{ role: "user", content: "hello" }]
-} as const
+}
 
 describe("chat completion response sanitization regressions", () => {
   beforeEach(() => {

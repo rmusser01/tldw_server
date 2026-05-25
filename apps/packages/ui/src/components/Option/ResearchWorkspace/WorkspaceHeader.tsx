@@ -139,6 +139,10 @@ const TELEMETRY_EVENT_ORDER: ResearchWorkspaceTelemetryEventType[] = [
 
 type WorkspaceRolloutControlKey =
   keyof typeof FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS
+type WorkspaceHeaderConnectionTelemetryStatus =
+  | "connected"
+  | "degraded"
+  | "disconnected"
 
 const WORKSPACE_ROLLOUT_CONTROL_ORDER: WorkspaceRolloutControlKey[] = [
   "research_workspace_provenance_v1",

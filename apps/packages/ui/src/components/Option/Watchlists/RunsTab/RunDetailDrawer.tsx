@@ -106,6 +106,16 @@ const getRecoveryStateForSeverity = (
   return "degraded"
 }
 
+const formatRunStatCount = (value: RunDetailResponse["stats"] extends infer Stats
+  ? Stats extends Record<string, infer StatValue>
+    ? StatValue
+    : unknown
+  : unknown): React.ReactNode => {
+  if (typeof value === "number" || typeof value === "string") return value
+  if (typeof value === "boolean") return value ? "Yes" : "No"
+  return 0
+}
+
 export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   runId,
   open,
@@ -1331,16 +1341,16 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                 {data.finished_at ? formatRelativeTime(data.finished_at, t) : "-"}
               </Descriptions.Item>
               <Descriptions.Item label={t("watchlists:runs.detail.statsLabels.itemsFound", "Items Found")}>
-                {data.stats?.items_found ?? 0}
+                {formatRunStatCount(data.stats?.items_found)}
               </Descriptions.Item>
               <Descriptions.Item label={t("watchlists:runs.detail.statsLabels.itemsIngested", "Items Ingested")}>
-                {data.stats?.items_ingested ?? 0}
+                {formatRunStatCount(data.stats?.items_ingested)}
               </Descriptions.Item>
               <Descriptions.Item label={t("watchlists:runs.detail.statsLabels.itemsFiltered", "Items Filtered")}>
-                {data.stats?.items_filtered ?? 0}
+                {formatRunStatCount(data.stats?.items_filtered)}
               </Descriptions.Item>
               <Descriptions.Item label={t("watchlists:runs.detail.statsLabels.errors", "Errors")}>
-                {data.stats?.items_errored ?? 0}
+                {formatRunStatCount(data.stats?.items_errored)}
               </Descriptions.Item>
               <Descriptions.Item label={t("watchlists:runs.detail.statsLabels.monitor", "Monitor")}>
                 <Button size="small" type="link" className="px-0" onClick={handleEditMonitor}>

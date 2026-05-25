@@ -117,12 +117,14 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
         ? formatRelativeTime(data.fetchedAt, t)
         : null
   const unreadUpdates = data?.items.unread ?? 0
+  const sourceErrorRuns = data?.runs.sourceErrors ?? 0
+  const zeroItemSourceErrorRuns = data?.runs.zeroItemSourceErrors ?? 0
   const attentionTotal = overviewHealth?.attention?.total ?? 0
   const hasAttention = attentionTotal > 0
   const hasOperationalData =
     feedsCount +
       monitorsTotal +
-      unreadArticles +
+      unreadUpdates +
       runningRuns +
       pendingRuns +
       failedRuns +

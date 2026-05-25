@@ -137,7 +137,7 @@ describe("ElevenLabs fetch service", () => {
             )
           })
         })
-      } as Response)
+      } as unknown as Response)
     )
     vi.stubGlobal("fetch", fetchMock)
 
@@ -209,7 +209,7 @@ describe("ElevenLabs fetch service", () => {
             )
           })
         })
-      } as Response)
+      } as unknown as Response)
     )
     vi.stubGlobal("fetch", fetchMock)
 

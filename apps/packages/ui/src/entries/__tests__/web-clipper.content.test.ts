@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   addListener: vi.fn(),
   listener: undefined as
-    | ((message: { type?: string; requestedType?: string }) => unknown)
+    | ((message: {
+        type?: string
+        requestedType?: "bookmark" | "article" | "full_page" | "selection" | "screenshot"
+        selectionText?: string
+      }) => unknown)
     | undefined
 }))
 

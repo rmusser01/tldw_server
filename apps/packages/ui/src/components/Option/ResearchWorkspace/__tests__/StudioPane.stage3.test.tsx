@@ -811,7 +811,7 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     }
 
     const builtSnapshot = workspaceModule.buildWorkspaceSnapshot(
-      snapshotState as Parameters<typeof workspaceModule.buildWorkspaceSnapshot>[0]
+      snapshotState as unknown as Parameters<typeof workspaceModule.buildWorkspaceSnapshot>[0]
     )
     expect(builtSnapshot.studyMaterialsPolicy).toBe("workspace")
 

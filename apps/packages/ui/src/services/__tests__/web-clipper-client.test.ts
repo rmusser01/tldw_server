@@ -179,6 +179,9 @@ describe("web clipper client and runtime helpers", () => {
       clip_id: "clip-123",
       note_id: "clip-123",
       status: "saved_with_warnings",
+      note: null,
+      workspace_placement: null,
+      attachments: [],
       workspace_placement_saved: true,
       workspace_placement_count: 1,
       warnings: ["Attachment upload failed for slot page-screenshot"]

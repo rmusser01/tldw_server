@@ -579,7 +579,7 @@ describe("VisualPackEditor", () => {
     await waitFor(() => expect(header).toHaveTextContent("Activation is blocked"))
     fireEvent.click(screen.getByTestId("persona-visual-management-attention-action"))
     expect(screen.getByTestId("persona-visual-section-validation-activation")).toContainElement(
-      document.activeElement
+      document.activeElement as HTMLElement
     )
   })
 

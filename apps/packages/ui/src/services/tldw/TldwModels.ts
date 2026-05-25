@@ -89,9 +89,6 @@ export interface ModelInfo {
     input?: string[]
     output?: string[]
   }
-  isConfigured?: boolean
-  providerEnabled?: boolean
-  availability?: string
 }
 
 export class TldwModelsService {

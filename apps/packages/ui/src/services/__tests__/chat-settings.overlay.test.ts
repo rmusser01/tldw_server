@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { ChatAssistantOverlay } from "@/types/chat-session-settings"
 
 const storageState = vi.hoisted(() => {
   const store = new Map<string, unknown>()
@@ -27,10 +28,14 @@ vi.mock("@/utils/safe-storage", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    initialize: (...args: unknown[]) => storageState.initialize(...args),
-    getChatSettings: (...args: unknown[]) => storageState.getChatSettings(...args),
-    updateChatSettings: (...args: unknown[]) =>
-      storageState.updateChatSettings(...args)
+    initialize: (requireAuth?: boolean) =>
+      (storageState.initialize as (requireAuth?: boolean) => unknown)(
+        requireAuth
+      ),
+    getChatSettings: (serverChatId: unknown) =>
+      storageState.getChatSettings(serverChatId),
+    updateChatSettings: (serverChatId: unknown, payload: unknown) =>
+      storageState.updateChatSettings(serverChatId, payload)
   }
 }))
 
@@ -42,7 +47,9 @@ import {
   syncChatSettingsForServerChat
 } from "@/services/chat-settings"
 
-const buildOverlay = (overrides: Record<string, unknown> = {}) => ({
+const buildOverlay = (
+  overrides: Record<string, unknown> = {}
+): ChatAssistantOverlay => ({
   kind: "persona",
   id: "persona-7",
   name: "Planner",
@@ -50,7 +57,7 @@ const buildOverlay = (overrides: Record<string, unknown> = {}) => ({
   system_prompt_snapshot: "You are concise and structured.",
   updatedAt: "2026-05-22T18:00:00.000Z",
   ...overrides
-})
+} as ChatAssistantOverlay)
 
 describe("chat settings assistant overlay", () => {
   beforeEach(() => {

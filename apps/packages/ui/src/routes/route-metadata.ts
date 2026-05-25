@@ -1,3 +1,5 @@
+import { HOSTED_VISIBLE_OPTION_PATHS } from "./route-hosted-visibility"
+
 export type RouteSurface =
   | "default_self_hosted"
   | "advanced_self_hosted"
@@ -34,6 +36,7 @@ export type RouteAvailability =
 export type RouteSmokePolicy = "include" | "exclude" | "manual"
 
 export type RouteNavPolicy = "primary" | "secondary" | "hidden"
+export type HostedOptionVisibility = "visible" | "hidden"
 
 export type RouteMetadata = {
   path: string
@@ -47,6 +50,7 @@ export type RouteMetadata = {
   smoke: RouteSmokePolicy
   commandPalette: "show" | "hide" | "alias_only"
   nav: RouteNavPolicy
+  hostedOptionVisibility: HostedOptionVisibility
   requiresAuth?: boolean
   requiresBackend?: boolean
   rationale: string
@@ -54,7 +58,12 @@ export type RouteMetadata = {
 
 type RouteMetadataInput = Omit<
   RouteMetadata,
-  "canonicalPath" | "availability" | "smoke" | "commandPalette" | "nav"
+  | "canonicalPath"
+  | "availability"
+  | "smoke"
+  | "commandPalette"
+  | "nav"
+  | "hostedOptionVisibility"
 > &
   Partial<
     Pick<RouteMetadata, "canonicalPath" | "smoke" | "commandPalette" | "nav">
@@ -79,7 +88,10 @@ const defineRoute = ({
   availability: [...availability],
   smoke,
   commandPalette,
-  nav
+  nav,
+  hostedOptionVisibility: HOSTED_VISIBLE_OPTION_PATHS.has(metadata.path)
+    ? "visible"
+    : "hidden"
 })
 
 export const AUDITED_ROOT_ROUTE_PATHS = [
@@ -924,7 +936,7 @@ export const ROUTE_METADATA = [
   })
 ] as const satisfies readonly RouteMetadata[]
 
-const normalizeRoutePath = (path: string): string => {
+export const normalizeRoutePath = (path: string): string => {
   const [pathname] = path.split("?")
   if (!pathname || pathname === "/") {
     return "/"
@@ -965,6 +977,14 @@ export function getCommandPaletteRoutes(): RouteMetadata[] {
 
 export function getCommandPaletteTarget(path: string): string {
   return getRouteMetadata(path)?.canonicalPath ?? path
+}
+
+export function getRouteCommandPaletteLabel(
+  route: RouteMetadata | string
+): string {
+  return typeof route === "string"
+    ? getRouteMetadata(route)?.label ?? route
+    : route.label
 }
 
 export function isAuditedRootRoute(path: string): boolean {

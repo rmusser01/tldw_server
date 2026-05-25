@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Alert, Button, Checkbox, Input, Segmented, Space, Tag, Typography } from "antd"
+import { Alert, Button, Checkbox, Input, Segmented, Space, Tag, Typography, type InputRef } from "antd"
+import type { TextAreaRef } from "antd/es/input/TextArea"
 import {
   ArrowRight,
   FileText,
@@ -103,10 +104,8 @@ export function WritingActionBar({
   const [toneDirection, setToneDirection] = useState("")
   const [confirmed, setConfirmed] = useState(false)
   const [confirmationWarning, setConfirmationWarning] = useState(false)
-  const customInputRef = useRef<{
-    resizableTextArea?: { textArea?: HTMLTextAreaElement | null }
-  } | null>(null)
-  const toneInputRef = useRef<{ input?: HTMLInputElement | null } | null>(null)
+  const customInputRef = useRef<TextAreaRef | null>(null)
+  const toneInputRef = useRef<InputRef | null>(null)
 
   const activePresetId = selectedPresetId ?? internalPresetId
   const selectedPreset = useMemo(

@@ -454,7 +454,7 @@ describe("background proxy fallback safety", () => {
         body: {
           getReader: () => reader
         }
-      } as Response
+      } as unknown as Response
     })
     vi.stubGlobal("fetch", fetchSpy as any)
 
@@ -799,7 +799,10 @@ describe("background proxy fallback safety", () => {
     }
 
     expect(fetchSpy).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchSpy.mock.calls[0] as [RequestInfo | URL, RequestInit?]
+    const [url, init] = fetchSpy.mock.calls[0] as unknown as [
+      RequestInfo | URL,
+      RequestInit?
+    ]
     const requestHeaders = new Headers(init?.headers)
     expect(url).toBe("/api/proxy/chat/completions")
     expect(requestHeaders.get("Authorization")).toBeNull()

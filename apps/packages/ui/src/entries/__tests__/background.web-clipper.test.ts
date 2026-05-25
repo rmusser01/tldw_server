@@ -28,14 +28,16 @@ vi.hoisted(() => {
 
 vi.mock("@/services/background-helpers", () => ({
   ensureSidepanelOpen: (...args: unknown[]) =>
-    mocks.ensureSidepanelOpen(...args),
-  notify: (...args: unknown[]) => mocks.notify(...args)
+    (mocks.ensureSidepanelOpen as (...args: unknown[]) => unknown)(...args),
+  notify: (...args: unknown[]) =>
+    (mocks.notify as (...args: unknown[]) => unknown)(...args)
 }))
 
 vi.mock("wxt/browser", () => ({
   browser: {
     runtime: {
-      sendMessage: (...args: unknown[]) => mocks.sendMessage(...args),
+      sendMessage: (...args: unknown[]) =>
+        (mocks.sendMessage as (...args: unknown[]) => unknown)(...args),
       onMessage: {
         addListener: (listener: (message: unknown) => void) => {
           runtimeListeners.add(listener as never)
@@ -257,7 +259,6 @@ describe("web clipper background launcher", () => {
     await launchWebClipperFromContextMenu(
       {
         pageUrl: "https://example.com/story",
-        pageTitle: "Story",
         selectionText: "Selected excerpt"
       },
       { id: 8, url: "https://example.com/story", title: "Story" }
@@ -317,8 +318,7 @@ describe("web clipper background launcher", () => {
   it("fails restricted pages with a user-visible explanation instead of sending a silent message", async () => {
     await launchWebClipperFromContextMenu(
       {
-        pageUrl: "chrome://extensions",
-        pageTitle: "Extensions"
+        pageUrl: "chrome://extensions"
       },
       { id: 14, url: "chrome://extensions", title: "Extensions" }
     )

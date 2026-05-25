@@ -628,9 +628,21 @@ describe("Playground cockpit shell", () => {
     };
     messageOptionState.value.selectedModel = "openai:gpt-4.1-mini";
     let resolveInitialModels:
-      | ((models: Array<Record<string, unknown>>) => void)
+      | ((models: Array<{
+          model: string
+          provider: string
+          is_configured: boolean
+          provider_is_configured: boolean
+        }>) => void)
       | null = null;
-    const initialModels = new Promise<Array<Record<string, unknown>>>(
+    const initialModels = new Promise<
+      Array<{
+        model: string
+        provider: string
+        is_configured: boolean
+        provider_is_configured: boolean
+      }>
+    >(
       (resolve) => {
         resolveInitialModels = resolve;
       },

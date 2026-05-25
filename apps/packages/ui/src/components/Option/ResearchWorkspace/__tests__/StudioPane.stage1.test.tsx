@@ -2,7 +2,7 @@ import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
-import type { AudioGenerationSettings } from "@/types/workspace"
+import type { AudioGenerationSettings, WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
 
 const {
@@ -55,7 +55,7 @@ const {
     speed: 1,
     format: "mp3"
   }
-  const defaultSources = [
+  const defaultSources: WorkspaceSource[] = [
     {
       id: "source-1",
       mediaId: 101,

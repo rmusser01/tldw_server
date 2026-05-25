@@ -149,7 +149,7 @@ describe("research-chat-context", () => {
       verification_summary: { unsupported_claim_count: 0 },
       source_trust_summary: { high_trust_count: 2 },
       research_url: "/research?run=run_123"
-    } as const
+    }
 
     const edited = applyAttachedResearchContextEdits(active, {
       question: "  Edited question  ",
@@ -193,7 +193,7 @@ describe("research-chat-context", () => {
       verification_summary: { unsupported_claim_count: 0 },
       source_trust_summary: { high_trust_count: 2 },
       research_url: "/research?run=run_123"
-    } as const
+    }
 
     expect(
       sanitizeAttachedResearchContext({

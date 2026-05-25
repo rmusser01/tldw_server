@@ -4,7 +4,11 @@ import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 
 import { PageShell } from "@/components/Common/PageShell"
-import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
+import {
+  RecoveryCallout,
+  StatePanel,
+  buildCapabilityState
+} from "@/components/ui/state"
 import { useIngestionSourcesQuery } from "@/hooks/use-ingestion-sources"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { SourcesAvailabilityGate } from "./SourcesAvailabilityGate"
@@ -34,6 +38,18 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
         error: sourcesQuery.error
       })
     : null
+  const emptyState = {
+    state: "empty" as const,
+    title: t("sources:states.empty.title", "No sources yet"),
+    message: t(
+      "sources:states.empty.message",
+      "Create a source to sync local folders or archive snapshots into tldw."
+    ),
+    primaryAction: {
+      label: t("sources:actions.new", "New source"),
+      onClick: () => navigate("/sources/new")
+    }
+  }
 
   return (
     <SourcesAvailabilityGate capabilityState={capabilityState}>

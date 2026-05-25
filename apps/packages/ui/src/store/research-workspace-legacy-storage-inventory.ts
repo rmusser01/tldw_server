@@ -330,7 +330,7 @@ const findExactLocalStorageItem = (
   key: string
 ): ResearchWorkspaceLegacyStorageInventoryItem | undefined =>
   inventory.find(
-    (item) => item.kind === "local_storage" && item.key === key
+    (item) => item.kind === "local_storage" && "key" in item && item.key === key
   )
 
 const classifySplitWorkspaceKey = (

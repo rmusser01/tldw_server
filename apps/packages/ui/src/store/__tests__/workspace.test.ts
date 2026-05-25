@@ -95,6 +95,7 @@ type WorkspaceTransferExecutionResult = {
   originWorkspaceId: string
   destinationWorkspaceId: string
   transferredDestinationSourceIds: string[]
+  newlyEmptiedOriginFolderIds: string[]
 }
 
 const getWorkspaceTransferAction = () =>

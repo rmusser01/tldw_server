@@ -65,7 +65,7 @@ const chooseFocusedSessionId = (payload: PersonaLiveSessionList): string | null 
 
 const isTextSendableSession = (
   session: PersonaLiveSessionSummary | null | undefined
-): session is PersonaLiveSessionSummary => {
+): boolean => {
   if (!session) return false
   if (!session.capabilities.text) return false
   if (terminalLifecycles.has(session.lifecycle)) return false

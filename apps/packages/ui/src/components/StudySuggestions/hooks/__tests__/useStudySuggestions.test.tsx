@@ -8,7 +8,8 @@ import { useStudySuggestions } from "../useStudySuggestions"
 import {
   getStudySuggestionAnchorStatus,
   getStudySuggestionSnapshot,
-  refreshStudySuggestionSnapshot
+  refreshStudySuggestionSnapshot,
+  type StudySuggestionSnapshotResponse
 } from "@/services/studySuggestions"
 
 vi.mock("@/hooks/useServerOnline", () => ({
@@ -28,7 +29,10 @@ const buildWrapper = (queryClient: QueryClient) => {
   )
 }
 
-const buildSnapshot = (id: number, label: string) => ({
+const buildSnapshot = (
+  id: number,
+  label: string
+): StudySuggestionSnapshotResponse => ({
   snapshot: {
     id,
     service: "quiz",
@@ -69,7 +73,7 @@ const buildSnapshot = (id: number, label: string) => ({
   }
 })
 
-const buildSnapshotV2 = (id: number) => ({
+const buildSnapshotV2 = (id: number): StudySuggestionSnapshotResponse => ({
   snapshot: {
     id,
     service: "quiz",

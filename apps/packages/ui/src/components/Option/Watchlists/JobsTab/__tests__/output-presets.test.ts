@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { applyOutputPresetToPrefs } from "../output-presets"
+import type { JobOutputPrefs } from "@/types/watchlists"
 
 describe("applyOutputPresetToPrefs", () => {
   it("replaces known output, delivery, and audio fields while preserving unknown advanced prefs", () => {
@@ -60,7 +61,7 @@ describe("applyOutputPresetToPrefs", () => {
         template: "legacy-template-name",
         deliveries: "legacy-delivery-target",
         raw_advanced: { preserve: true }
-      },
+      } as unknown as JobOutputPrefs,
       presetOutputPrefs: {
         generate_audio: true,
         audio_voice: "nova"
