@@ -112,6 +112,10 @@ export class FlashcardsPage extends BasePage {
     return this.page.locator('[data-testid="flashcards-review-mode-toggle"]');
   }
 
+  get reviewModeCramOption(): Locator {
+    return this.reviewModeToggle.getByText('Cram', { exact: true });
+  }
+
   get reviewPromptSideToggle(): Locator {
     return this.page.locator('[data-testid="flashcards-review-prompt-side-toggle"]');
   }
@@ -132,8 +136,22 @@ export class FlashcardsPage extends BasePage {
     return this.page.locator('[data-testid="flashcards-review-show-answer"]');
   }
 
+  get reviewGoodButton(): Locator {
+    return this.page.locator('[data-testid="flashcards-review-rate-3"]');
+  }
+
+  get reviewEasyButton(): Locator {
+    return this.page.locator('[data-testid="flashcards-review-rate-4"]');
+  }
+
   get reviewEmptyCard(): Locator {
     return this.page.locator('[data-testid="flashcards-review-empty-card"]');
+  }
+
+  get reviewCompletionState(): Locator {
+    return this.reviewEmptyCard.filter({
+      hasText: /cards reviewed this session|no cards are due|all caught up|cram complete/i,
+    });
   }
 
   get reviewAnalyticsSummary(): Locator {
@@ -187,15 +205,39 @@ export class FlashcardsPage extends BasePage {
   }
 
   get createDrawer(): Locator {
-    return this.page.locator('.ant-drawer-content').filter({ hasText: 'Create Flashcard' }).last();
+    return this.page.getByRole('dialog', { name: 'Create Flashcard' }).last();
   }
 
   get createDrawerDeckSelect(): Locator {
     return this.createDrawer.locator('.ant-select').first();
   }
 
+  get createFrontTextarea(): Locator {
+    return this.createDrawer.getByPlaceholder('Question or prompt...');
+  }
+
+  get createBackTextarea(): Locator {
+    return this.createDrawer.getByPlaceholder('Answer...');
+  }
+
+  get createSubmitButton(): Locator {
+    return this.createDrawer.getByRole('button', { name: 'Create', exact: true });
+  }
+
+  get createAndAddAnotherButton(): Locator {
+    return this.createDrawer.getByRole('button', { name: 'Create & Add Another', exact: true });
+  }
+
+  get createSuccessMessage(): Locator {
+    return this.page.locator('.ant-message-notice-success').filter({ hasText: /created/i });
+  }
+
+  get createErrorMessage(): Locator {
+    return this.page.locator('.ant-message-notice-error');
+  }
+
   get editDrawer(): Locator {
-    return this.page.locator('.ant-drawer-content').filter({ hasText: 'Edit Flashcard' }).last();
+    return this.page.getByRole('dialog', { name: 'Edit Flashcard' }).last();
   }
 
   get editDrawerAdditionalFieldsToggle(): Locator {

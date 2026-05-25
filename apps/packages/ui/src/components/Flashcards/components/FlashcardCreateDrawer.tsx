@@ -413,6 +413,7 @@ export const FlashcardCreateDrawer: React.FC<
             <Button
               onClick={handleCreateAndAddAnother}
               loading={createMutation.isPending}
+              disabled={createMutation.isPending}
             >
               {t("option:flashcards.createAndAddAnother", {
                 defaultValue: "Create & Add Another"
@@ -422,6 +423,7 @@ export const FlashcardCreateDrawer: React.FC<
               type="primary"
               onClick={handleCreate}
               loading={createMutation.isPending}
+              disabled={createMutation.isPending}
             >
               {t("common:create", { defaultValue: "Create" })}
             </Button>
