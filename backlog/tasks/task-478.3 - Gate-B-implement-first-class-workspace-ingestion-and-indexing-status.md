@@ -1,7 +1,7 @@
 ---
 id: TASK-478.3
 title: 'Gate B: implement first-class workspace ingestion and indexing status'
-status: To Do
+status: In Progress
 labels:
 - research-workspace
 - uat
@@ -48,7 +48,8 @@ Parallelization: backend/API work can proceed while Gate A frontend model fixes 
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Live UAT upload `research-workspace-uat-source.md` reached `partially_queryable` and stayed there after a 10s wait: text_extracted=true, fts_ready=true, vector_ready=false, status_reason=`vector_index_pending`, progress_percent=75, job=null. This confirms the first-class status/job ownership gap remains visible.
-- During Gate D live paste smoke, `Gate D Paste Smoke` appeared in the UI source list as `Ready`, but `GET /api/v1/workspaces/14b47308-f515-4173-95d2-28d63297e6d5/sources/status` still returned `partially_queryable`, `vector_index_pending`, `vector_ready=false`, `progress_percent=75`, `job=null` for both the uploaded file and pasted text. This confirms the UI/API status mismatch applies to pasted text as well as file upload.
+- During Gate D live paste smoke, `Gate D Paste Smoke` appeared in the UI source list as `Ready`, but `GET /api/v1/workspaces/14b47308-f515-4173-95d2-28d63297e6d5/sources/status` still returned `partially_queryable`, `vector_index_pending`, `vector_ready=false`, `progress_percent=75`, `job=null` for both the uploaded file and pasted text. This confirmed the UI/API status mismatch applied to pasted text as well as file upload.
+- Checkpoint: fixed the WebUI source-card mismatch where the legacy media-detail polling fallback could promote a source to `Ready` even after the workspace status API reported `partially_queryable`/`vector_index_pending`. Added a regression test proving the fallback does not override an authoritative partial projection, and live CDP validation now shows the source card as `Processing` with the vector indexing message after the backend still reports `partially_queryable`. Remaining Gate B work: backend/job ownership still needs to move sources from vector_index_pending to stable queryable state or visible failure/retry state.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -695,6 +695,81 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     )
   })
 
+  it("does not let media-detail fallback override a partial workspace status projection", async () => {
+    testState.sources = [
+      {
+        id: "source-partial",
+        mediaId: 808,
+        title: "Partially queryable source",
+        type: "pdf",
+        status: "processing",
+        addedAt: new Date("2026-02-18T12:00:00.000Z")
+      }
+    ]
+    mockGetWorkspaceSourcesStatus.mockResolvedValueOnce(
+      makeStatusPayload({
+        sources: [
+          makeStatusSource({
+            id: "source-partial",
+            media_id: 808,
+            title: "Partially queryable source",
+            state: "partially_queryable",
+            status_reason: "vector_index_pending",
+            readiness: {
+              metadata_ready: true,
+              text_extracted: true,
+              fts_ready: true,
+              vector_ready: false,
+              citation_ready: true,
+              summary_ready: false,
+              tool_accessible: true
+            },
+            progress_percent: 75,
+            progress_message:
+              "Text search is available while vector indexing continues."
+          })
+        ],
+        summary: {
+          total: 1,
+          selected: 1,
+          queryable: 0,
+          partially_queryable: 1,
+          processing: 1,
+          failed: 0,
+          missing: 0
+        }
+      })
+    )
+    mockGetMediaDetails.mockResolvedValue({
+      content: {
+        text: "Extracted source text exists before vector indexing finishes."
+      }
+    })
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
+        808,
+        "processing",
+        "Text search is available while vector indexing continues."
+      )
+    })
+    await waitFor(() => {
+      expect(mockGetMediaDetails).toHaveBeenCalledWith(
+        808,
+        expect.objectContaining({
+          include_content: true
+        })
+      )
+    })
+
+    expect(testState.setSourceStatusByMediaId).not.toHaveBeenCalledWith(
+      808,
+      "ready"
+    )
+  })
+
   it("renders backend status projection and reconciles source statuses fail-closed", async () => {
     testState.sources = [
       {

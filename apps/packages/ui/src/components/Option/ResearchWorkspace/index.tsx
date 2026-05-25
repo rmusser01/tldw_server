@@ -973,6 +973,10 @@ const ResearchWorkspaceBody: React.FC = () => {
   const [, setWorkspaceStatusProjectionLoading] = React.useState(false)
   const [, setWorkspaceStatusProjectionError] =
     React.useState<string | null>(null)
+  const [
+    workspaceStatusProjectionReadyVersion,
+    setWorkspaceStatusProjectionReadyVersion
+  ] = React.useState(0)
   const storageUsagePercent = React.useMemo(() => {
     if (
       workspaceStorageUsage.quotaBytes <= 0 ||
@@ -1087,6 +1091,15 @@ const ResearchWorkspaceBody: React.FC = () => {
   const workspaceStatusRequestSeqRef = React.useRef(0)
   const workspaceStatusInFlightRef = React.useRef(false)
   const workspaceServerReconcileSignatureRef = React.useRef<string | null>(null)
+  const workspaceProjectedSourceStatusByMediaIdRef = React.useRef<{
+    workspaceId: string | null
+    fallbackReady: boolean
+    statuses: Record<number, WorkspaceSourceStatus>
+  }>({
+    workspaceId: null,
+    fallbackReady: false,
+    statuses: {}
+  })
   const lastStatusViewSignatureRef = React.useRef<string | null>(null)
   const {
     sourceListViewState,
@@ -1286,6 +1299,11 @@ const ResearchWorkspaceBody: React.FC = () => {
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
       workspaceServerReconcileSignatureRef.current = null
+      workspaceProjectedSourceStatusByMediaIdRef.current = {
+        workspaceId: null,
+        fallbackReady: false,
+        statuses: {}
+      }
       setWorkspaceSourceStatus(null)
       setWorkspaceCapabilities(null)
       setWorkspaceStatusProjectionError(null)
@@ -1296,6 +1314,11 @@ const ResearchWorkspaceBody: React.FC = () => {
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
       workspaceServerReconcileSignatureRef.current = null
+      workspaceProjectedSourceStatusByMediaIdRef.current = {
+        workspaceId: null,
+        fallbackReady: false,
+        statuses: {}
+      }
       setWorkspaceSourceStatus(null)
       setWorkspaceCapabilities(null)
       setWorkspaceStatusProjectionError(null)
@@ -1309,6 +1332,12 @@ const ResearchWorkspaceBody: React.FC = () => {
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
       workspaceServerReconcileSignatureRef.current = null
+      workspaceProjectedSourceStatusByMediaIdRef.current = {
+        workspaceId,
+        fallbackReady: true,
+        statuses: {}
+      }
+      setWorkspaceStatusProjectionReadyVersion((version) => version + 1)
       setWorkspaceSourceStatus(null)
       setWorkspaceCapabilities(null)
       setWorkspaceStatusProjectionError("Status API unavailable")
@@ -1318,6 +1347,16 @@ const ResearchWorkspaceBody: React.FC = () => {
 
     let cancelled = false
     const activeWorkspaceId = workspaceId
+    if (
+      workspaceProjectedSourceStatusByMediaIdRef.current.workspaceId !==
+      activeWorkspaceId
+    ) {
+      workspaceProjectedSourceStatusByMediaIdRef.current = {
+        workspaceId: activeWorkspaceId,
+        fallbackReady: false,
+        statuses: {}
+      }
+    }
     workspaceStatusRequestSeqRef.current += 1
     workspaceStatusInFlightRef.current = false
     setWorkspaceSourceStatus(null)
@@ -1374,6 +1413,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           const sourceStatus = sourceStatusResult.value
           if (sourceStatus.workspace_id === activeWorkspaceId) {
             setWorkspaceSourceStatus(sourceStatus)
+            const projectedStatusesByMediaId: Record<number, WorkspaceSourceStatus> = {}
 
             for (const source of sourceStatus.sources || []) {
               if (
@@ -1382,16 +1422,36 @@ const ResearchWorkspaceBody: React.FC = () => {
               ) {
                 continue
               }
+              const mappedStatus = mapWorkspaceLifecycleToLocalSourceStatus(
+                source.state
+              )
+              projectedStatusesByMediaId[source.media_id] = mappedStatus
               setSourceStatusByMediaId(
                 source.media_id,
-                mapWorkspaceLifecycleToLocalSourceStatus(source.state),
+                mappedStatus,
                 getWorkspaceSourceStatusMessage(source)
               )
             }
+            workspaceProjectedSourceStatusByMediaIdRef.current = {
+              workspaceId: activeWorkspaceId,
+              fallbackReady: true,
+              statuses: projectedStatusesByMediaId
+            }
+            setWorkspaceStatusProjectionReadyVersion((version) => version + 1)
           } else {
             statusProjectionErrors.push("Source status response did not match active workspace")
           }
         } else {
+          if (
+            workspaceProjectedSourceStatusByMediaIdRef.current.workspaceId ===
+            activeWorkspaceId
+          ) {
+            workspaceProjectedSourceStatusByMediaIdRef.current = {
+              ...workspaceProjectedSourceStatusByMediaIdRef.current,
+              fallbackReady: true
+            }
+            setWorkspaceStatusProjectionReadyVersion((version) => version + 1)
+          }
           statusProjectionErrors.push(describeWorkspaceStatusProjectionError(sourceStatusResult.reason))
         }
 
@@ -2335,6 +2395,15 @@ const ResearchWorkspaceBody: React.FC = () => {
       })
       await Promise.all(
         processingMediaIds.map(async (mediaId) => {
+          const initialProjectedSourceSnapshot =
+            workspaceProjectedSourceStatusByMediaIdRef.current
+          if (
+            initialProjectedSourceSnapshot.workspaceId === workspaceId &&
+            !initialProjectedSourceSnapshot.fallbackReady
+          ) {
+            return
+          }
+
           try {
             const detail = await tldwClient.getMediaDetails(mediaId, {
               include_content: true,
@@ -2344,6 +2413,21 @@ const ResearchWorkspaceBody: React.FC = () => {
             if (cancelled) return
 
             if (isMediaLikelyReadyForRag(detail)) {
+              const projectedSourceSnapshot =
+                workspaceProjectedSourceStatusByMediaIdRef.current
+              if (
+                projectedSourceSnapshot.workspaceId === workspaceId &&
+                !projectedSourceSnapshot.fallbackReady
+              ) {
+                return
+              }
+              const projectedSourceStatus =
+                projectedSourceSnapshot.workspaceId === workspaceId
+                  ? projectedSourceSnapshot.statuses[mediaId]
+                  : undefined
+              if (projectedSourceStatus && projectedSourceStatus !== "ready") {
+                return
+              }
               setSourceStatusByMediaId(mediaId, "ready")
               delete sourceStatusFailureRef.current[mediaId]
               void trackResearchWorkspaceTelemetry({
@@ -2383,6 +2467,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     processingMediaIds,
     setSourceStatusByMediaId,
     statusGuardrailsEnabled,
+    workspaceStatusProjectionReadyVersion,
     workspaceId
   ])
 
