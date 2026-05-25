@@ -525,7 +525,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     fireEvent.click(await screen.findByText("Claude 3.5 Sonnet"))
 
     expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(
-      "tldw:anthropic/claude-3-5-sonnet"
+      "anthropic:anthropic/claude-3-5-sonnet"
     )
   })
 
@@ -577,7 +577,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
 
     fireEvent.click(screen.getByText("Claude 3.5 Sonnet"))
     expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(
-      "tldw:anthropic/claude-3-5-sonnet"
+      "anthropic:anthropic/claude-3-5-sonnet"
     )
   })
 

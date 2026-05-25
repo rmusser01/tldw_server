@@ -46,7 +46,7 @@ Parallelization: can be implemented immediately after model catalog behavior is 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+["Live UAT after selecting `Ollama / gemma3:1b`: General chat sent `POST /api/v1/chat/completions` with `stream:true`, `api_provider:'ollama'`, `model:'gemma3:1b'` and received HTTP 200, but the UI rendered `No response text was returned` with retry/switch/fallback actions. RAG was disabled because selected-source UI state remained empty even though the backend status API reported selected=true."]
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

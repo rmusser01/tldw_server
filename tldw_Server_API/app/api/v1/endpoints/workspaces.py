@@ -11,6 +11,11 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
+    WORKSPACES_DELETE_RATE_LIMIT,
+    WORKSPACES_READ_RATE_LIMIT,
+    WORKSPACES_WRITE_RATE_LIMIT,
+)
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     StatusResponse,
     WorkspaceArtifactCreateRequest,
@@ -33,7 +38,6 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceSourceUpdateRequest,
     WorkspaceUpsertRequest,
 )
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,

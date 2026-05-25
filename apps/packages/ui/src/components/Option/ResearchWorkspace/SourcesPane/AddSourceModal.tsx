@@ -115,6 +115,13 @@ type ExistingMediaFilters = {
 }
 
 type MediaLibraryItem = Record<string, unknown>
+type ExistingMediaCache = {
+  items: MediaLibraryItem[]
+  totalCount: number
+  cachedAt: number
+}
+
+let existingMediaCache: ExistingMediaCache | null = null
 
 const DEFAULT_EXISTING_MEDIA_FILTERS: ExistingMediaFilters = {
   query: "",
@@ -1432,7 +1439,7 @@ const ExistingTab: React.FC<{
         setCurrentPage(page)
         setHasMore(dedupedItems.length < normalizedTotal)
 
-        if (!trimmedQuery && page === 1) {
+        if (!hasActiveExistingMediaFilters(filters) && page === 1) {
           existingMediaCache = {
             items: dedupedItems,
             totalCount: normalizedTotal,
@@ -1451,9 +1458,8 @@ const ExistingTab: React.FC<{
   )
 
   const loadMedia = React.useCallback(
-    async (query?: string) => {
-      const trimmedQuery = query?.trim()
-      if (!trimmedQuery && existingMediaCache) {
+    async (filters: ExistingMediaFilters = DEFAULT_EXISTING_MEDIA_FILTERS) => {
+      if (!hasActiveExistingMediaFilters(filters) && existingMediaCache) {
         const cacheIsFresh =
           Date.now() - existingMediaCache.cachedAt < EXISTING_MEDIA_CACHE_TTL_MS
         if (cacheIsFresh) {
@@ -1464,9 +1470,10 @@ const ExistingTab: React.FC<{
           setHasMore(existingMediaCache.items.length < existingMediaCache.totalCount)
           return
         }
+      }
       setCurrentPage(1)
       setSelectedMediaKeys(new Set())
-      await fetchMediaFromServer(trimmedQuery, { page: 1 })
+      await fetchMediaFromServer(filters, { page: 1 })
     },
     [fetchMediaFromServer, setMediaList]
   )
@@ -1677,7 +1684,8 @@ const ExistingTab: React.FC<{
             {availableMedia.map((item) => {
                 const key = getMediaLibraryItemKey(item)
                 if (key == null) return null
-                const title = item.title || item.name || "Untitled"
+                const title = getMediaLibraryTitle(item)
+                const keywords = getMediaLibraryKeywords(item)
                 return (
                   <div
                     key={key}

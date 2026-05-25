@@ -48,6 +48,8 @@ const SECONDARY_WARM_PREFETCH_ROUTES = [
   "/document-workspace"
 ] as const
 
+const DEGRADED_READINESS_ROUTES = new Set(["/chat", "/research-workspace"])
+
 const PREFETCH_STEP_DELAY_MS = 250
 const PREFETCH_IDLE_TIMEOUT_MS = 2000
 const PREFETCH_FALLBACK_DELAY_MS = 1200
@@ -296,7 +298,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
   const hideShellNav = !authResolved || !isAuthenticated
   const shouldBypassGates = isPublicAuthRoute || isSettingsRoute || isSetupRoute
-  const shouldAllowDegradedReadiness = routePath === "/chat"
+  const shouldAllowDegradedReadiness = DEGRADED_READINESS_ROUTES.has(routePath)
   const firstRunSetupRoute = React.useMemo(
     () => buildFirstRunSetupRoute(router.asPath || routePath || "/"),
     [routePath, router.asPath]

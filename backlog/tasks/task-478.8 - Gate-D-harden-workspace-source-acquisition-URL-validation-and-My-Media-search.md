@@ -2,7 +2,7 @@
 id: TASK-478.8
 title: 'Gate D: harden workspace source acquisition, URL validation, and My Media
   search'
-status: To Do
+status: In Progress
 labels:
 - research-workspace
 - uat
@@ -46,7 +46,12 @@ Parallelization: can run in parallel with layout/source-inspection/onboarding ta
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+- Live UAT found the My Media tab showed `Unable to load media` even though `GET /api/v1/media/?page=1&results_per_page=50&include_keywords=true` returned 200 with an empty `{items: [], pagination: ...}` response.
+- Console showed `ReferenceError: existingMediaCache is not defined` from `ExistingTab.loadMedia`; the AddSourceModal focused suite was red in library rendering/pagination paths.
+- Current checkpoint restored the module-level My Media cache declaration, added coverage for the live empty media response shape, and repaired nearby item title/keyword rendering.
+- Verification for this checkpoint: `bunx vitest run src/components/Option/ResearchWorkspace/__tests__/AddSourceModal.stage2.intake.test.tsx --maxWorkers=1 --no-file-parallelism` passed as part of the broader Research Workspace focused frontend run.
+- Live CDP smoke after the fix opened Add Sources -> My Media and showed an empty-state (`All visible media are already in this workspace`) with 0 console errors in a fresh tab.
+- Remaining scope: invalid URL feedback, exact-title server media search behavior, duplicate import handling, and broader source-create partial-success flows.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

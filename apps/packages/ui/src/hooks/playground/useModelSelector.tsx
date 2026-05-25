@@ -10,9 +10,11 @@ import { useStoreChatModelSettings } from "@/store/model"
 import {
   LOCAL_PROVIDERS,
   filterModelsForScope,
+  getFavoriteModelKeyCandidates,
   getCanonicalModelKey,
   getModelId,
   getModelProvider,
+  hasFavoriteModelKey,
   modelMatchesSearch,
   sortModelsForSelector,
   type ModelListScope,
@@ -202,11 +204,7 @@ export function useModelSelector({
   )
 
   const isFavoriteModel = React.useCallback(
-    (model: ModelSelectorDescriptor) => {
-      const key = getCanonicalModelKey(model)
-      const id = getModelId(model)
-      return favoriteModelSet.has(key) || favoriteModelSet.has(id)
-    },
+    (model: ModelSelectorDescriptor) => hasFavoriteModelKey(model, favoriteModelSet),
     [favoriteModelSet]
   )
 
@@ -214,14 +212,15 @@ export function useModelSelector({
     (modelOrKey: ModelSelectorDescriptor | string) => {
       const canonicalKey =
         typeof modelOrKey === "string" ? modelOrKey : getCanonicalModelKey(modelOrKey)
-      const legacyModelId =
-        typeof modelOrKey === "string" ? modelOrKey : getModelId(modelOrKey)
+      const keyCandidates =
+        typeof modelOrKey === "string"
+          ? [modelOrKey]
+          : getFavoriteModelKeyCandidates(modelOrKey)
       void setFavoriteModels((prev) => {
         const list = Array.isArray(prev) ? prev.map(String) : []
         const next = new Set(list)
-        if (next.has(canonicalKey) || next.has(legacyModelId)) {
-          next.delete(canonicalKey)
-          next.delete(legacyModelId)
+        if (keyCandidates.some((key) => next.has(key))) {
+          keyCandidates.forEach((key) => next.delete(key))
         } else {
           next.add(canonicalKey)
         }
