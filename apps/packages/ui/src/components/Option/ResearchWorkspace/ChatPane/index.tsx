@@ -2542,6 +2542,25 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   })
 
   React.useEffect(() => {
+    if (!modelDropdownOpen || composerModels.length > 0) return
+
+    let isMounted = true
+    void fetchChatModels({ returnEmpty: true, forceRefresh: true })
+      .then((models) => {
+        if (!isMounted) return
+        setComposerModels(Array.isArray(models) ? models : [])
+      })
+      .catch(() => {
+        if (!isMounted) return
+        setComposerModels([])
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [composerModels.length, modelDropdownOpen])
+
+  React.useEffect(() => {
     const nextModel = resolveStartupSelectedModel({
       currentModel: selectedModel,
       models: composerModels,
