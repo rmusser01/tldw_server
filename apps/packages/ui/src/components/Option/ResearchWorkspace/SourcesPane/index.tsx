@@ -1805,7 +1805,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                     <p className="mt-1 text-xs text-text-subtle">
                       {t(
                         "playground:sources.emptyHint",
-                        "Add PDFs, videos, or websites to start researching"
+                        "Add PDFs, web pages, videos, audio, or notes. tldw stores them in your configured local or self-hosted server and shows processing status here."
                       )}
                     </p>
                   </div>

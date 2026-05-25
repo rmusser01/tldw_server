@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  getWorkspaceChatSourcesExplainer,
   getWorkspaceChatNoSourcesHint,
   getWorkspaceSourcesLocationLabel,
   getWorkspaceStudioNoSourcesHint
@@ -28,5 +29,13 @@ describe("workspace source location copy", () => {
     expect(getWorkspaceStudioNoSourcesHint(true).toLowerCase()).not.toContain(
       "left pane"
     )
+    expect(getWorkspaceChatSourcesExplainer(false).toLowerCase()).not.toContain(
+      "left panel"
+    )
+  })
+
+  it("explains source setup with contextual pane or tab wording", () => {
+    expect(getWorkspaceChatSourcesExplainer(false)).toContain("Sources pane")
+    expect(getWorkspaceChatSourcesExplainer(true)).toContain("Sources tab")
   })
 })

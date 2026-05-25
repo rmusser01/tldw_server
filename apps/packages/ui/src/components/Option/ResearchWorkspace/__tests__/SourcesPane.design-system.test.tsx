@@ -136,4 +136,12 @@ describe("SourcesPane design-system state labels", () => {
     expect(within(sourceRow).getByText(registryLabels.ready)).toBeInTheDocument()
     expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("ready")
   })
+
+  it("explains empty source storage without adding a persistent trust banner", () => {
+    workspaceStoreState.sources = []
+
+    render(<SourcesPane />)
+
+    expect(screen.getByText(/configured local or self-hosted server/i)).toBeInTheDocument()
+  })
 })

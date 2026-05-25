@@ -72,6 +72,12 @@ const KeyboardShortcutsModal = lazy(() =>
     default: m.KeyboardShortcutsModal,
   }))
 );
+
+const TutorialRunner = lazy(() =>
+  import('@/components/Common/TutorialRunner').then((m) => ({
+    default: m.TutorialRunner,
+  }))
+);
 import { useConfirmDanger } from '@/components/Common/confirm-danger';
 import { DemoModeProvider, useDemoMode } from '@/context/demo-mode';
 
@@ -570,6 +576,13 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 
           {/* Command Palette - global keyboard shortcut ⌘K */}
           {!hideHeader && <CommandPalette {...commandPaletteProps} />}
+
+          {/* Shared walkthrough runner for route-level tour controls */}
+          {!hideHeader && (
+            <Suspense fallback={null}>
+              <TutorialRunner />
+            </Suspense>
+          )}
 
           {/* Keyboard Shortcuts Help Modal - triggered by ? */}
           {!hideHeader && (

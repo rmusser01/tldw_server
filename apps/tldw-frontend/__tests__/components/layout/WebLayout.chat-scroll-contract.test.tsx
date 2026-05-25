@@ -161,6 +161,7 @@ vi.mock('@/hooks/keyboard/useKeyboardShortcuts', () => ({
   useChatShortcuts: () => undefined,
   useSidebarShortcuts: () => undefined,
   useQuickChatShortcuts: () => undefined,
+  useModeNavigationShortcuts: () => undefined,
 }));
 
 vi.mock('@/store/quick-chat', () => ({
@@ -304,6 +305,10 @@ vi.mock('@/components/Common/CommandPalette', () => ({
   CommandPalette: () => null,
 }));
 
+vi.mock('@/components/Common/TutorialRunner', () => ({
+  TutorialRunner: () => <div data-testid="tutorial-runner" />,
+}));
+
 vi.mock('@/hooks/useConnectionState', () => ({
   useConnectionActions: () => ({ checkOnce: connectionState.value.checkOnce }),
   useConnectionState: () => ({
@@ -332,6 +337,7 @@ vi.mock('@/context/demo-mode', () => ({
 
 describe('WebLayout /chat scroll contract', () => {
   beforeEach(() => {
+    delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
     vi.clearAllMocks();
     routerState.location.pathname = '/chat';
     routerState.location.search = '';
@@ -343,6 +349,7 @@ describe('WebLayout /chat scroll contract', () => {
 
   afterEach(() => {
     cleanup();
+    delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
   });
 
   it('marks the /chat route shell as transcript-owned when sticky chat input is active', () => {
@@ -404,5 +411,15 @@ describe('WebLayout /chat scroll contract', () => {
 
     expect(screen.queryByTestId('drawer')).toBeNull();
     expect(chatSidebarMockState.props).toHaveLength(0);
+  });
+
+  it('mounts the shared tutorial runner in the web shell so page tour controls can render overlays', async () => {
+    render(
+      <OptionLayout>
+        <div data-testid="route-content">Research workspace route</div>
+      </OptionLayout>
+    );
+
+    expect(await screen.findByTestId('tutorial-runner')).toBeInTheDocument();
   });
 });

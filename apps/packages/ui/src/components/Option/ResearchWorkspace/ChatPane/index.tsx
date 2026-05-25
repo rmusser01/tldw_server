@@ -60,7 +60,10 @@ import {
   scheduleWorkspaceUndoAction,
   undoWorkspaceAction
 } from "../undo-manager"
-import { getWorkspaceChatNoSourcesHint } from "../source-location-copy"
+import {
+  getWorkspaceChatNoSourcesHint,
+  getWorkspaceChatSourcesExplainer
+} from "../source-location-copy"
 import { getWorkspaceChatSearchMessageId } from "../workspace-global-search"
 import {
   getCapability,
@@ -101,6 +104,7 @@ const LOREBOOK_DEBUG_ENTRYPOINT_HREF = buildChatLorebookDebugPath({
   from: "research-workspace"
 })
 const EMPTY_STRING_ARRAY: string[] = []
+type ChatComposerModel = Awaited<ReturnType<typeof fetchChatModels>>[number]
 
 const useEffectiveSelectedSources = (): WorkspaceSource[] => {
   const selectedSourceIds = useWorkspaceStore((s) => s.selectedSourceIds)
@@ -908,7 +912,7 @@ const WorkspaceChatEmpty: React.FC<{
           <p className="text-center text-xs text-text-muted" data-testid="workspace-chat-sources-explainer">
             {t(
               "playground:chat.sourcesExplainer",
-              "Sources are documents, PDFs, web pages, or other content you upload. Add sources in the left panel to start asking questions about them."
+              getWorkspaceChatSourcesExplainer(isMobile)
             )}
           </p>
           {onAddSource && (
