@@ -1,7 +1,7 @@
 ---
 id: TASK-478.4
 title: 'Gate B: fix workspace source selection contract'
-status: To Do
+status: Done
 labels:
 - research-workspace
 - uat
@@ -12,6 +12,19 @@ labels:
 priority: High
 milestone: Research Workspace UAT Remediation
 parent_task_id: TASK-478
+documentation:
+- Docs/superpowers/plans/2026-05-24-research-workspace-source-selection-contract.md
+modified_files:
+- Docs/superpowers/plans/2026-05-24-research-workspace-source-selection-contract.md
+- apps/packages/ui/src/components/Option/ResearchWorkspace/workspace-server-reconcile.ts
+- apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/workspace-server-reconcile.test.ts
+- apps/packages/ui/src/components/Option/ResearchWorkspace/index.tsx
+- apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx
+- apps/packages/ui/src/services/tldw/domains/workspace-api.ts
+- apps/packages/ui/src/store/workspace-api.ts
+- apps/packages/ui/src/store/workspace-slices/sources-slice.ts
+- apps/packages/ui/src/store/__tests__/workspace-api-first.test.ts
+- apps/packages/ui/src/store/__tests__/workspace.test.ts
 ---
 
 ## Description
@@ -45,21 +58,28 @@ Parallelization: can proceed in parallel with source acquisition/layout tasks af
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+- Implemented selected-source state as local optimistic `selectedSourceIds` synchronized to the backend batch selection endpoint.
+- Reconciliation now creates missing workspace source rows with selected bits from local state and updates existing rows through `/api/v1/workspaces/{workspace_id}/sources/selection`.
+- Server hydration now maps selected backend workspace source rows back into local state.
+- Live CDP validation found a follow-on issue: source status projection could mark fresh media as queued/processing, clear local selection, and sync an empty backend selection. The store now preserves selected intent for processing sources while `getSelectedMediaIds()` remains ready-only and terminal errors still clear selection.
+- Fixed the workspace quota warning test mock to patch the concrete `localStorage.setItem` used in the current Vitest runtime.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+- Fixed the Research Workspace selected-source contract so individual checkbox selection, backend workspace source rows, status APIs, and RAG request construction agree on the selected source set.
+- Verified with focused Vitest coverage and a live backend/WebUI CDP pass. The CDP pass seeded two real media documents, selected one source, confirmed `/sources/selection` received the selected source id, confirmed `/sources/status` reported only that row as selected, and confirmed `/api/v1/rag/search` used only the selected media id.
+- Known non-blocker: the chat completion after RAG returned `503 no_provider_configured` in the live test environment; the source-selection/RAG request contract under this task passed before that provider-layer failure.
+- Bandit skipped because this task touched frontend TypeScript/tests/docs/backlog only, with no Python/backend code changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

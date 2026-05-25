@@ -1115,7 +1115,6 @@ describe("workspace store snapshot persistence", () => {
 
   it("dispatches a quota warning event when localStorage is full", async () => {
     const storage = createWorkspaceStorage()
-    const originalSetItem = Storage.prototype.setItem
     const quotaError =
       typeof DOMException !== "undefined"
         ? new DOMException("Quota exceeded", "QuotaExceededError")
@@ -1131,9 +1130,9 @@ describe("workspace store snapshot persistence", () => {
       )
     }
 
-    Storage.prototype.setItem = () => {
+    const setItemSpy = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
       throw quotaError
-    }
+    })
     window.addEventListener(
       WORKSPACE_STORAGE_QUOTA_EVENT,
       onQuotaExceeded as EventListener
@@ -1150,7 +1149,7 @@ describe("workspace store snapshot persistence", () => {
       WORKSPACE_STORAGE_QUOTA_EVENT,
       onQuotaExceeded as EventListener
     )
-    Storage.prototype.setItem = originalSetItem
+    setItemSpy.mockRestore()
   })
 
   it("duplicates workspace data with new derived IDs and isolated snapshot state", () => {
@@ -1869,6 +1868,36 @@ describe("workspace store snapshot persistence", () => {
     useWorkspaceStore.getState().selectAllSources()
     state = useWorkspaceStore.getState()
     expect(state.selectedSourceIds).toEqual([readySource.id])
+  })
+
+  it("preserves selected source intent while a selected source is processing", () => {
+    useWorkspaceStore.getState().initializeWorkspace("Processing Selection Workspace")
+
+    const source = useWorkspaceStore
+      .getState()
+      .addSource({
+        mediaId: 333,
+        title: "Temporarily Processing Source",
+        type: "pdf",
+        status: "ready"
+      })
+
+    useWorkspaceStore.getState().setSelectedSourceIds([source.id])
+    expect(useWorkspaceStore.getState().selectedSourceIds).toEqual([source.id])
+    expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([333])
+
+    useWorkspaceStore
+      .getState()
+      .setSourceStatusByMediaId(333, "processing", "Indexing")
+    let state = useWorkspaceStore.getState()
+    expect(state.selectedSourceIds).toEqual([source.id])
+    expect(state.getSelectedMediaIds()).toEqual([])
+    expect(state.getEffectiveSelectedMediaIds()).toEqual([])
+
+    useWorkspaceStore.getState().setSourceStatusByMediaId(333, "error", "Failed")
+    state = useWorkspaceStore.getState()
+    expect(state.selectedSourceIds).toEqual([])
+    expect(state.getSelectedMediaIds()).toEqual([])
   })
 
   it("creates, renames, moves, and deletes source folders safely", () => {

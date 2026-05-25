@@ -30,7 +30,8 @@ const makeClient = (existingSources: Array<Record<string, unknown>> = []) => ({
       added_at: "2026-05-23T12:00:00Z",
       version: 1
     })
-  )
+  ),
+  updateWorkspaceSourceSelection: vi.fn().mockResolvedValue(undefined)
 })
 
 describe("research workspace server reconciliation", () => {
@@ -57,7 +58,8 @@ describe("research workspace server reconciliation", () => {
       client,
       workspaceId: "workspace-1",
       workspaceName: "Notebook import",
-      sources
+      sources,
+      selectedSourceIds: ["source-web"]
     })
 
     expect(client.upsertWorkspace).toHaveBeenCalledWith("workspace-1", {
@@ -72,7 +74,7 @@ describe("research workspace server reconciliation", () => {
       source_type: "pdf",
       url: "https://example.test/ready.pdf",
       position: 0,
-      selected: true
+      selected: false
     })
     expect(client.addWorkspaceSource).toHaveBeenNthCalledWith(2, "workspace-1", {
       id: "source-web",
@@ -83,6 +85,10 @@ describe("research workspace server reconciliation", () => {
       position: 1,
       selected: true
     })
+    expect(client.updateWorkspaceSourceSelection).toHaveBeenCalledWith(
+      "workspace-1",
+      ["source-web"]
+    )
     expect(result).toMatchObject({
       workspaceReady: true,
       sourceRowsChecked: true,
@@ -134,6 +140,39 @@ describe("research workspace server reconciliation", () => {
       "source-negative-media",
       "source-nan-media"
     ])
+    expect(result.errors).toEqual([])
+  })
+
+  it("reconciles existing backend rows to the canonical local selected source ids", async () => {
+    const client = makeClient([
+      {
+        id: "source-existing-a",
+        media_id: 501,
+        selected: true
+      },
+      {
+        id: "source-existing-b",
+        media_id: 502,
+        selected: false
+      }
+    ])
+
+    const result = await reconcileResearchWorkspaceServerState({
+      client,
+      workspaceId: "workspace-1",
+      workspaceName: "Notebook import",
+      sources: [
+        makeSource({ id: "source-existing-a", mediaId: 501 }),
+        makeSource({ id: "source-existing-b", mediaId: 502 })
+      ],
+      selectedSourceIds: ["source-existing-b"]
+    })
+
+    expect(client.addWorkspaceSource).not.toHaveBeenCalled()
+    expect(client.updateWorkspaceSourceSelection).toHaveBeenCalledWith(
+      "workspace-1",
+      ["source-existing-b"]
+    )
     expect(result.errors).toEqual([])
   })
 

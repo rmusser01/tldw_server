@@ -78,6 +78,7 @@ describe("workspace store API-first mutations", () => {
       type: "document",
       status: "ready"
     })
+    expect(state.selectedSourceIds).toEqual(["src-1"])
     expect(state.artifacts[0]).toMatchObject({
       id: "art-1",
       type: "report",

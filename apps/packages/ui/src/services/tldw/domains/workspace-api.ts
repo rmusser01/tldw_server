@@ -501,6 +501,18 @@ export const workspaceApiMethods = {
     })
   },
 
+  async updateWorkspaceSourceSelection(
+    workspaceId: string,
+    selectedSourceIds: string[]
+  ): Promise<void> {
+    await bgRequest<unknown>({
+      path: `/api/v1/workspaces/${workspaceId}/sources/selection` as AllowedPath,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: { selected_ids: selectedSourceIds }
+    })
+  },
+
   async deleteWorkspaceSource(workspaceId: string, sourceId: string): Promise<void> {
     await bgRequest<unknown>({
       path: `/api/v1/workspaces/${workspaceId}/sources/${sourceId}`,

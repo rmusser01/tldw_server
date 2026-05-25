@@ -388,9 +388,9 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       return {
         sources: nextSources,
         selectedSourceIds:
-          status === "ready"
-            ? state.selectedSourceIds
-            : state.selectedSourceIds.filter((id) => id !== sourceId)
+          status === "error"
+            ? state.selectedSourceIds.filter((id) => id !== sourceId)
+            : state.selectedSourceIds
       }
     }),
 
@@ -413,9 +413,9 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       return {
         sources: nextSources,
         selectedSourceIds:
-          status === "ready"
-            ? state.selectedSourceIds
-            : state.selectedSourceIds.filter((id) => id !== targetSource.id)
+          status === "error"
+            ? state.selectedSourceIds.filter((id) => id !== targetSource.id)
+            : state.selectedSourceIds
       }
     }),
 
