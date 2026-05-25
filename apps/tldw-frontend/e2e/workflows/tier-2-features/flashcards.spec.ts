@@ -297,18 +297,7 @@ test.describe('Flashcards', () => {
       const reviewResponse = await reviewResponsePromise;
       expect(reviewResponse.status()).toBeLessThan(400);
 
-      await expect
-        .poll(
-          async () => {
-            const completionVisible = await flashcards.reviewCompletionState
-              .isVisible()
-              .catch(() => false);
-            const activeCardVisible = await flashcards.reviewActiveCard.isVisible().catch(() => false);
-            return completionVisible || activeCardVisible;
-          },
-          { timeout: 20_000 }
-        )
-        .toBe(true);
+      await expect(flashcards.reviewCompletionState).toBeVisible({ timeout: 20_000 });
 
       await assertNoCriticalErrors(diagnostics);
     });
