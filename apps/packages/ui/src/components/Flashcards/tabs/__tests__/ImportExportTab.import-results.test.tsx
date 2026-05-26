@@ -1349,6 +1349,60 @@ describe("ImportExportTab import result details", () => {
     )
   })
 
+  it("preserves manual source attribution for selected-page generate handoffs", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [
+        {
+          front: "Captured front",
+          back: "Captured back",
+          tags: ["page"],
+          model_type: "basic"
+        }
+      ],
+      count: 1
+    })
+    const createCardMutateAsync = vi.fn().mockResolvedValue({})
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      mutateAsync: createCardMutateAsync,
+      isPending: false
+    } as any)
+
+    render(
+      <ImportExportTab
+        generateIntent={{
+          text: "Highlighted page passage",
+          sourceType: "manual",
+          sourceId: "https://example.test/source",
+          sourceTitle: "Captured Page"
+        }}
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-generate-source-context")).toHaveTextContent(
+      "Captured Page"
+    )
+
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+    await waitFor(() => {
+      expect(generateMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
+
+    await waitFor(() => {
+      expect(createCardMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(createCardMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_ref_type: "manual",
+        source_ref_id: "https://example.test/source"
+      })
+    )
+  })
+
   it("offers undo rollback for the latest import batch", async () => {
     const mutateAsync = vi.fn().mockResolvedValue({
       imported: 2,

@@ -1,8 +1,8 @@
 # Flashcards Study Guide
 
-_Last updated: 2026-03-13_
+_Last updated: 2026-05-26_
 
-This guide explains the Flashcards flow in `Study`, `Manage`, `Transfer`, and `Scheduler`, including scheduling basics, queue states, cloze syntax, and import/export formats.
+This guide explains the Flashcards flow in `Study`, `Manage`, `Create & Import`, `Templates`, and `Scheduler`, including extension selected-text capture, scheduling basics, queue states, cloze syntax, and import/export formats.
 
 ## Card Images
 
@@ -23,12 +23,31 @@ Why the 8 KB field limit did not increase:
 
 ## Daily Study Workflow
 
-1. Add cards through `Manage` (manual create), `Transfer` import, `Transfer` generate, or `Transfer` image occlusion.
+1. Add cards through `Manage` manual creation, `Create & Import` import/generate/structured Q&A/image occlusion, or the extension selected-text handoff.
 2. Open `Scheduler` when you want to tune a deck's spaced-repetition policy.
 3. Open `Study` and review due cards.
 4. Reveal the answer, then rate recall (`Again`, `Hard`, `Good`, `Easy`).
 5. Use `Manage` when you want to inspect queue state on expanded cards or document rows while cleaning up a deck.
 6. Repeat daily. The scheduler adjusts next due dates from your ratings.
+
+## Extension Selected-Text Handoff
+
+Use this path when you find a useful passage while browsing and want it to become editable flashcard drafts.
+
+Workflow:
+
+1. Select text on the source page.
+2. Open the extension sidepanel and choose `Flashcards`.
+3. Choose `Generate from page selection`.
+4. The Web UI opens Flashcards on `Create & Import` with the selected text prefilled in the generate workflow.
+5. Generate cards, edit the drafts, choose an existing deck or create a new one, then save.
+
+Important behavior:
+
+- The sidepanel Flashcards route is a bridge. Use `Open full Flashcards` for study/manage work, or `Generate from page selection` to turn the current page selection into drafts.
+- The browser context menu path still works: choose `tldw` -> `Save` -> `Save to Notes`, review the selection in the sidepanel dialog, then choose `Generate flashcards`.
+- Neither sidepanel path creates flashcards automatically. Cards are only saved after you review and save generated drafts in `Create & Import`.
+- If the sidepanel cannot open on the current site, use full Web UI `/flashcards` and paste text into `Create & Import` -> `Generate`.
 
 ## Study Assistant Conflict Recovery
 
@@ -96,9 +115,9 @@ You can now set scheduler policy at deck-creation time instead of creating the d
 Flashcards creation flows:
 
 - `Manage` manual card creation
-- `Transfer` structured Q&A preview save
-- `Transfer` generated flashcards save
-- `Transfer` image occlusion save
+- `Create & Import` structured Q&A preview save
+- `Create & Import` generated flashcards save
+- `Create & Import` image occlusion save
 
 How it works:
 
@@ -194,7 +213,7 @@ Notes:
 
 - Without headers, default column order is `Deck, Front, Back, Tags, Notes`.
 - `Tags` can be comma-separated or space-separated.
-- If imports fail by row, use row-level errors in `Transfer` and jump to inline format help.
+- If imports fail by row, use row-level errors in `Create & Import` and jump to inline format help.
 
 ### JSON / JSONL
 
@@ -214,7 +233,7 @@ Accepted payload forms:
 
 ### Structured Q And A Preview
 
-Use `Transfer` → `Structured Q&A` when you already wrote your own questions and answers and only want the app to convert them into flashcards without LLM rewriting.
+Use `Create & Import` -> `Structured Q&A` when you already wrote your own questions and answers and only want the app to convert them into flashcards without LLM rewriting.
 
 Accepted label pairs:
 
@@ -231,7 +250,7 @@ Preview rules:
 
 ### Image Occlusion Authoring
 
-Use `Transfer` → `Image Occlusion` when you want to turn one labeled screenshot, diagram, or slide into several image-backed cards.
+Use `Create & Import` -> `Image Occlusion` when you want to turn one labeled screenshot, diagram, or slide into several image-backed cards.
 
 Workflow:
 
@@ -261,7 +280,7 @@ Current limits:
 
 ### APKG Export
 
-APKG export is available from `Transfer` and preserves scheduling metadata for Anki import.
+APKG export is available from `Create & Import` and preserves scheduling metadata for Anki import.
 
 Image-backed cards:
 

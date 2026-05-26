@@ -74,16 +74,22 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   const sourceContext = React.useMemo<GenerateSourceContext | null>(() => {
     if (!initialIntent) return null
     if (
+      initialIntent.sourceType !== "manual" &&
       initialIntent.sourceType !== "media" &&
       initialIntent.sourceType !== "note" &&
       initialIntent.sourceType !== "message"
     ) {
       return null
     }
+    const sourceId = initialIntent.sourceId?.trim() || null
+    const sourceTitle = initialIntent.sourceTitle?.trim() || null
+    if (initialIntent.sourceType === "manual" && !sourceId && !sourceTitle) {
+      return null
+    }
     return {
       sourceType: initialIntent.sourceType,
-      sourceId: initialIntent.sourceId?.trim() || null,
-      sourceTitle: initialIntent.sourceTitle?.trim() || null
+      sourceId: sourceId || (initialIntent.sourceType === "manual" ? sourceTitle : null),
+      sourceTitle
     }
   }, [initialIntent])
 
@@ -425,8 +431,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
               "Cards saved from this draft will be linked to {{sourceType}} {{sourceId}}.",
             sourceType: sourceContext.sourceType,
             sourceId:
-              sourceContext.sourceId ||
               sourceContext.sourceTitle ||
+              sourceContext.sourceId ||
               t("option:flashcards.unknownSource", {
                 defaultValue: "unknown source"
               })
