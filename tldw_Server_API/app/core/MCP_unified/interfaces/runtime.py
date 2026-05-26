@@ -18,9 +18,9 @@ class ModuleRegistry(Protocol):
     async def register_module(
         self,
         module_id: str,
-        module_class: Any,
-        config: Any | None = None,
-    ) -> Any: ...
+        module_type: type[Any],
+        config: Any,
+    ) -> None: ...
 
     async def get_module(self, module_id: str) -> Any | None: ...
 

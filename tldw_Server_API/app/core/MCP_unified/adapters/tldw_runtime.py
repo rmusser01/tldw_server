@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
@@ -57,12 +58,24 @@ class TldwApiKeyScopeNormalizer:
     def _manual_normalize(raw_scopes: Any) -> set[str]:
         if isinstance(raw_scopes, str):
             stripped = raw_scopes.strip()
+            if stripped.startswith("["):
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    if isinstance(parsed, list):
+                        return {
+                            item.strip().lower()
+                            for item in parsed
+                            if isinstance(item, str) and item.strip()
+                        }
             return {stripped.lower()} if stripped else set()
-        if isinstance(raw_scopes, list):
+        if isinstance(raw_scopes, (list, tuple, set)):
             return {
-                str(item).strip().lower()
+                item.strip().lower()
                 for item in raw_scopes
-                if str(item).strip()
+                if isinstance(item, str) and item.strip()
             }
         return set()
 
