@@ -1,5 +1,7 @@
 # Flashcards UX Fixes Implementation Plan
 
+Source audit and fix list: [Flashcards-UX-Fix-List.md](../../../Flashcards-UX-Fix-List.md)
+
 ## Stage 3B: Deck Study Dashboard
 **Goal**: Prove existing client/API data supports a deck-level study dashboard, then add a compact deck-first launch surface on `/flashcards` Study without broad backend work.
 
