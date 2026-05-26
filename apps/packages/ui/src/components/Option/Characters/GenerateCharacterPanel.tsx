@@ -3,7 +3,7 @@
  */
 
 import React from "react"
-import { Button, Input, Alert, Dropdown, Spin, Modal, Progress } from "antd"
+import { Button, Input, Dropdown, Spin, Modal, Progress } from "antd"
 import type { MenuProps } from "antd"
 import { Sparkles, ChevronDown, X, Check, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -14,6 +14,7 @@ import { useStorage } from "@plasmohq/storage/hook"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { resolveStartupSelectedModel } from "@/utils/model-startup-selection"
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
+import { Alert } from "@/components/ui/primitives/Alert"
 import type { GeneratedCharacter } from "@/services/character-generation"
 
 type ChatModel = {
@@ -320,26 +321,24 @@ export const GenerateCharacterPanel: React.FC<GenerateCharacterPanelProps> = ({
   if (!hasModels) {
     return (
       <Alert
-        type="info"
-        showIcon
+        variant="info"
         title={t("settings:manageCharacters.generate.noModelsTitle", {
           defaultValue: "No AI generation model available"
         })}
-        description={
-          <span>
-            {t("settings:manageCharacters.generate.noModelsDesc", {
-              defaultValue:
-                "AI character generation needs a configured LLM model. Saved characters remain available for browsing, editing, and chat once a chat model is configured."
-            })}{" "}
-            <Link to="/settings/model" className="text-primary hover:underline">
-              {t("settings:manageCharacters.generate.goToSettings", {
-                defaultValue: "Go to model settings"
-              })}
-            </Link>
-          </span>
-        }
         className="mb-4"
-      />
+      >
+        <span>
+          {t("settings:manageCharacters.generate.noModelsDesc", {
+            defaultValue:
+              "AI character generation needs a configured LLM model. Saved characters remain available for browsing, editing, and chat once a chat model is configured."
+          })}{" "}
+          <Link to="/settings/model" className="text-primary hover:underline">
+            {t("settings:manageCharacters.generate.goToSettings", {
+              defaultValue: "Go to model settings"
+            })}
+          </Link>
+        </span>
+      </Alert>
     )
   }
 
@@ -361,24 +360,23 @@ export const GenerateCharacterPanel: React.FC<GenerateCharacterPanelProps> = ({
       {/* Error display with actionable guidance */}
       {parsedError && (
         <Alert
-          type="error"
-          showIcon
+          variant="error"
           title={parsedError.message}
-          description={
-            <div className="flex items-center justify-between gap-2 mt-1">
-              <span className="text-sm">{parsedError.action}</span>
-              <Button
-                size="small"
-                icon={<RefreshCw className="w-3 h-3" />}
-                onClick={handleRetry}>
-                {t("common:tryAgain", { defaultValue: "Try again" })}
-              </Button>
-            </div>
-          }
-          closable
-          onClose={onClearError}
+          dismissible
+          dismissLabel={t("common:close", { defaultValue: "Close" })}
+          onDismiss={onClearError}
           className="mb-2"
-        />
+        >
+          <div className="flex items-center justify-between gap-2 mt-1">
+            <span className="text-sm">{parsedError.action}</span>
+            <Button
+              size="small"
+              icon={<RefreshCw className="w-3 h-3" />}
+              onClick={handleRetry}>
+              {t("common:tryAgain", { defaultValue: "Try again" })}
+            </Button>
+          </div>
+        </Alert>
       )}
 
       {/* Generation progress indicator */}
