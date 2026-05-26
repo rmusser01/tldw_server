@@ -1,9 +1,10 @@
 import React from "react"
 import { Link } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Alert, Button, Card, Form, Input, Select, Space, Tooltip, Typography } from "antd"
+import { Button, Card, Form, Input, Select, Space, Tooltip, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 
+import { Alert, type AlertVariant } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { getLlmProviders } from "@/services/prompt-studio"
 import type { DeckReviewPromptSide } from "@/services/flashcards"
@@ -28,6 +29,13 @@ import {
 } from "./shared"
 
 const { Text } = Typography
+
+type GeneratedSaveStatus = {
+  variant: AlertVariant
+  title: string
+  detail: string
+  retryable: boolean
+}
 
 /**
  * Generate panel for LLM-assisted card generation from free text.
@@ -95,6 +103,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   const [reviewPromptSide, setReviewPromptSide] = React.useState<DeckReviewPromptSide>("front")
   const [generatedCards, setGeneratedCards] = React.useState<GeneratedCardDraft[]>([])
   const [generationError, setGenerationError] = React.useState<string | null>(null)
+  const [saveStatus, setSaveStatus] = React.useState<GeneratedSaveStatus | null>(null)
   const [isSaving, setIsSaving] = React.useState(false)
   const generatedDeckSchedulerDraft = useDeckSchedulerDraft()
   const selectedDeck = React.useMemo(
@@ -126,22 +135,29 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
     setTargetDeckId(NEW_DECK_OPTION_VALUE)
   }, [decks, targetDeckId])
 
+  const clearRetryableSaveStatus = React.useCallback(() => {
+    setSaveStatus((current) => (current?.retryable ? null : current))
+  }, [])
+
   const updateGeneratedCard = React.useCallback(
     (id: string, patch: Partial<GeneratedCardDraft>) => {
+      clearRetryableSaveStatus()
       setGeneratedCards((prev) =>
         prev.map((card) => (card.id === id ? { ...card, ...patch } : card))
       )
     },
-    []
+    [clearRetryableSaveStatus]
   )
 
   const removeGeneratedCard = React.useCallback((id: string) => {
+    clearRetryableSaveStatus()
     setGeneratedCards((prev) => prev.filter((card) => card.id !== id))
-  }, [])
+  }, [clearRetryableSaveStatus])
 
   const handleGenerate = React.useCallback(async () => {
     try {
       setGenerationError(null)
+      setSaveStatus(null)
       const result = await generateMutation.mutateAsync({
         text: sourceText,
         numCards,
@@ -247,6 +263,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   const handleSaveGeneratedCards = React.useCallback(async () => {
     if (generatedCards.length === 0) return
     setIsSaving(true)
+    setSaveStatus(null)
     try {
       const deckId = await resolveTargetDeckId()
       let created = 0
@@ -287,6 +304,14 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
           count: created
         })
         message.success(successCopy)
+        setSaveStatus({
+          variant: "success",
+          title: successCopy,
+          detail: t("option:flashcards.generateSaveSuccessDetail", {
+            defaultValue: "All generated drafts were saved to the selected deck."
+          }),
+          retryable: false
+        })
         onTransferAction?.({
           area: "generate",
           status: "success",
@@ -303,6 +328,15 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
           failed
         })
         message.warning(warningCopy)
+        setSaveStatus({
+          variant: "warning",
+          title: warningCopy,
+          detail: t("option:flashcards.generateSavePartialDetail", {
+            defaultValue:
+              "Only failed drafts remain below. Review them, then retry saving."
+          }),
+          retryable: true
+        })
         onTransferAction?.({
           area: "generate",
           status: "warning",
@@ -318,6 +352,37 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         defaultValue: "Failed to save generated cards."
       })
       message.error(errorCopy)
+      setSaveStatus({
+        variant: "error",
+        title: errorCopy,
+        detail: t("option:flashcards.generateSaveFailedDetail", {
+          defaultValue:
+            "All generated drafts are still available. Check the deck and draft content, then retry saving."
+        }),
+        retryable: true
+      })
+      onTransferAction?.({
+        area: "generate",
+        status: "error",
+        message: errorCopy
+      })
+    } catch (e: unknown) {
+      const errorCopy =
+        e instanceof Error && e.message
+          ? e.message
+          : t("option:flashcards.generateSaveFailed", {
+              defaultValue: "Failed to save generated cards."
+            })
+      message.error(errorCopy)
+      setSaveStatus({
+        variant: "error",
+        title: errorCopy,
+        detail: t("option:flashcards.generateSaveFatalDetail", {
+          defaultValue:
+            "Generated drafts are still available. Check the deck settings and draft content, then retry saving."
+        }),
+        retryable: generatedCards.length > 0
+      })
       onTransferAction?.({
         area: "generate",
         status: "error",
@@ -337,6 +402,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
     t
   ])
 
+  const saveInProgress = isSaving || createMutation.isPending || createDeckMutation.isPending
+
   return (
     <div className="flex flex-col gap-3">
       <Text type="secondary">
@@ -347,13 +414,13 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
       </Text>
       {sourceContext && (
         <Alert
-          type="info"
-          showIcon
+          variant="info"
           data-testid="flashcards-generate-source-context"
           title={t("option:flashcards.generateSourceContextTitle", {
             defaultValue: "Source context attached"
           })}
-          description={t("option:flashcards.generateSourceContextDescription", {
+        >
+          {t("option:flashcards.generateSourceContextDescription", {
             defaultValue:
               "Cards saved from this draft will be linked to {{sourceType}} {{sourceId}}.",
             sourceType: sourceContext.sourceType,
@@ -364,7 +431,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
                 defaultValue: "unknown source"
               })
           })}
-        />
+        </Alert>
       )}
       <Input.TextArea
         rows={6}
@@ -468,15 +535,15 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         ) : null}
         {!hasLlmProviders && (
           <Alert
-            type="info"
-            showIcon
+            variant="info"
             className="mb-3 md:col-span-2"
             data-testid="flashcards-generate-no-llm-banner"
-            message={t("option:flashcards.generateNoLlmBanner", {
+          >
+            {t("option:flashcards.generateNoLlmBanner", {
               defaultValue:
                 "Flashcard generation requires an LLM provider. Configure one in Settings \u2192 LLM Providers."
             })}
-          />
+          </Alert>
         )}
         <Form.Item
           label={t("option:flashcards.generateProvider", {
@@ -520,23 +587,21 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
       </Form.Item>
       {generationError && (
         <Alert
-          type="error"
-          showIcon
+          variant="error"
           title={generationError}
-          description={
-            <span className="text-xs">
-              {t("option:flashcards.generateProviderKeyHint", {
-                defaultValue: "If this is a provider or API key issue, "
+        >
+          <span className="text-xs">
+            {t("option:flashcards.generateProviderKeyHint", {
+              defaultValue: "If this is a provider or API key issue, "
+            })}
+            <Link to="/settings/provider-keys" className="text-primary hover:text-primaryStrong underline">
+              {t("option:flashcards.generateProviderKeyLink", {
+                defaultValue: "configure provider keys in Settings"
               })}
-              <Link to="/settings/provider-keys" className="text-primary hover:text-primaryStrong underline">
-                {t("option:flashcards.generateProviderKeyLink", {
-                  defaultValue: "configure provider keys in Settings"
-                })}
-              </Link>
-              .
-            </span>
-          }
-        />
+            </Link>
+            .
+          </span>
+        </Alert>
       )}
       <Tooltip
         title={
@@ -559,6 +624,29 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
           </Button>
         </span>
       </Tooltip>
+
+      {saveStatus && (
+        <Alert
+          variant={saveStatus.variant}
+          title={saveStatus.title}
+          action={
+            saveStatus.retryable
+              ? {
+                  label: t("option:flashcards.generateSaveRetry", {
+                    defaultValue: "Retry saving remaining drafts"
+                  }),
+                  onClick: handleSaveGeneratedCards,
+                  loading: saveInProgress,
+                  disabled: generatedCards.length === 0 || saveInProgress,
+                  "data-testid": "flashcards-generate-save-retry"
+                }
+              : undefined
+          }
+          data-testid="flashcards-generate-save-status"
+        >
+          {saveStatus.detail}
+        </Alert>
+      )}
 
       {generatedCards.length > 0 && (
         <div className="space-y-2">
@@ -621,7 +709,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
           <Button
             type="primary"
             onClick={handleSaveGeneratedCards}
-            loading={isSaving || createMutation.isPending || createDeckMutation.isPending}
+            loading={saveInProgress}
             data-testid="flashcards-generate-save-button"
           >
             {t("option:flashcards.generateSaveButton", {
