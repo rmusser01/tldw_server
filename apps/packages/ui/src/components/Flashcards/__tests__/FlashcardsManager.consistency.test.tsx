@@ -77,6 +77,7 @@ vi.mock("../tabs", () => ({
   ImportExportTab: () => <div data-testid="mock-transfer-tab">Import / Export panel</div>,
   TemplatesTab: () => <div data-testid="mock-templates-tab">Templates panel</div>,
   SchedulerTab: (props: {
+    initialDeckId?: number | null
     onDirtyChange?: (dirty: boolean) => void
     discardSignal?: number
   }) => {
@@ -90,6 +91,7 @@ vi.mock("../tabs", () => ({
     return (
       <div data-testid="mock-scheduler-tab">
         Scheduler panel
+        <span data-testid="mock-scheduler-initial-deck-id">{String(props.initialDeckId ?? "")}</span>
         <span data-testid="mock-scheduler-draft-state">{draftState}</span>
         <button
           onClick={() => {
@@ -183,6 +185,15 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
     expect(screen.getByTestId("mock-manage-initial-deck-id")).toHaveTextContent("9")
     expect(screen.getByTestId("mock-manage-show-workspace")).toHaveTextContent("true")
+  })
+
+  it("opens Scheduler with the deck id from direct-link params", () => {
+    window.history.replaceState({}, "", "/flashcards?tab=scheduler&deck_id=9")
+
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-scheduler-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("9")
   })
 
   it("uses Study/Manage/Create & Import/Scheduler tab labels", () => {

@@ -87,8 +87,8 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
                       onClick={() => onOpenSession(session.id)}
                     >
                       {isSelected
-                        ? "Viewing snapshot"
-                        : `Reopen snapshot for session ${session.id}`}
+                        ? "Viewing completed session"
+                        : "View completed session"}
                     </Button>
                   </div>
                 </Space>

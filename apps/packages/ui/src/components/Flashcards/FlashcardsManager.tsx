@@ -291,6 +291,7 @@ export const FlashcardsManager: React.FC = () => {
             children: schedulerDisabled ? null : (
               <SchedulerTab
                 isActive={effectiveActiveTab === "scheduler"}
+                initialDeckId={reviewDeckId ?? currentStudyIntent?.deckId ?? null}
                 onDirtyChange={setSchedulerDirty}
                 discardSignal={schedulerDiscardSignal}
               />

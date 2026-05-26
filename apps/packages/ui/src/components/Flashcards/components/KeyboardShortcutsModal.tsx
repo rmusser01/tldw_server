@@ -32,15 +32,21 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
     shortcuts: [
       {
         keys: ["Space"],
-        description: t("option:flashcards.shortcutSpace", { defaultValue: "Flip card" })
+        description: t("option:flashcards.shortcutShowAnswer", {
+          defaultValue: "Show answer"
+        })
       },
       {
         keys: ["1", "2", "3", "4"],
-        description: t("option:flashcards.shortcutRateKeys", { defaultValue: "Rate card" })
+        description: t("option:flashcards.shortcutRateVisibleControls", {
+          defaultValue: "Rate with Again, Hard, Good, or Easy"
+        })
       },
       {
         keys: ["Ctrl+Z", "⌘Z"],
-        description: t("option:flashcards.shortcutUndo", { defaultValue: "Undo last rating" })
+        description: t("option:flashcards.shortcutUndoVisibleControl", {
+          defaultValue: "Re-rate last card while the undo button is visible"
+        })
       }
     ]
   }

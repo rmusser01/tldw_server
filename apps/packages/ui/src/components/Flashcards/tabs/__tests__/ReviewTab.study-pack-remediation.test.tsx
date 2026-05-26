@@ -317,6 +317,8 @@ describe("ReviewTab study-pack remediation", () => {
       />
     )
 
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
+
     expect(
       screen.getByText(/Cells rely on ATP to power active transport\./)
     ).toBeInTheDocument()

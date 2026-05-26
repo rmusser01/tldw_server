@@ -20,6 +20,7 @@ type EditorStatus = "idle" | "dirty" | "saving" | "saved" | "conflict"
 
 export interface SchedulerTabProps {
   isActive?: boolean
+  initialDeckId?: number | null
   onDirtyChange?: (dirty: boolean) => void
   discardSignal?: number
 }
@@ -46,6 +47,7 @@ const cloneDraft = (draft: SchedulerSettingsDraft): SchedulerSettingsDraft => ({
 
 export const SchedulerTab: React.FC<SchedulerTabProps> = ({
   isActive = false,
+  initialDeckId = null,
   onDirtyChange,
   discardSignal = 0
 }) => {
@@ -69,6 +71,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
   const [conflictReviewPromptSide, setConflictReviewPromptSide] =
     React.useState<Deck["review_prompt_side"] | null>(null)
   const [saveError, setSaveError] = React.useState<string | null>(null)
+  const appliedInitialDeckIdRef = React.useRef<number | null>(null)
 
   const allDecks = decksQuery.data ?? []
   const visibleDecks = React.useMemo(
@@ -82,11 +85,21 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
       return
     }
 
+    if (
+      initialDeckId != null &&
+      appliedInitialDeckIdRef.current !== initialDeckId &&
+      allDecks.some((deck) => deck.id === initialDeckId)
+    ) {
+      appliedInitialDeckIdRef.current = initialDeckId
+      setSelectedDeckId(initialDeckId)
+      return
+    }
+
     const stillExists = selectedDeckId != null && allDecks.some((deck) => deck.id === selectedDeckId)
     if (!stillExists) {
       setSelectedDeckId(visibleDecks[0]?.id ?? allDecks[0]?.id ?? null)
     }
-  }, [allDecks, selectedDeckId, visibleDecks])
+  }, [allDecks, initialDeckId, selectedDeckId, visibleDecks])
 
   const activeDeck = React.useMemo(
     () => allDecks.find((deck) => deck.id === selectedDeckId) ?? null,

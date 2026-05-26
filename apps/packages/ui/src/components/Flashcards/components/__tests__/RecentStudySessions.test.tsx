@@ -89,11 +89,24 @@ describe("RecentStudySessions", () => {
     )
     expect(screen.getByText("Recent study sessions")).toBeInTheDocument()
     expect(screen.getByText("Completed")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Reopen snapshot for session 81/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View completed session" })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: /Reopen snapshot for session 81/i }))
+    fireEvent.click(screen.getByRole("button", { name: "View completed session" }))
 
     expect(sessionsMock).toHaveBeenCalledWith(81)
+  })
+
+  it("labels the selected row as a completed session snapshot", () => {
+    render(
+      <RecentStudySessions
+        deckId={12}
+        selectedSessionId={81}
+        onOpenSession={sessionsMock}
+        isActive
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Viewing completed session" })).toBeInTheDocument()
   })
 
   it("shows a retryable error state when loading fails", () => {

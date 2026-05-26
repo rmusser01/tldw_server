@@ -146,6 +146,17 @@ describe("SchedulerTab editor", () => {
     } as any)
   })
 
+  it("selects the requested deck from a scheduler handoff", async () => {
+    render(<SchedulerTab isActive initialDeckId={2} />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("2, 20")
+    })
+    expect(screen.getByTestId("deck-study-defaults-review-prompt-side")).toHaveTextContent(
+      "Back first"
+    )
+  })
+
   it("applies presets, copies another deck, and resets to defaults", async () => {
     updateDeckMock
       .mockResolvedValueOnce({

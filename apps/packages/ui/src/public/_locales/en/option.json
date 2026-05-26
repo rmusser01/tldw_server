@@ -3206,6 +3206,12 @@
   "flashcards_cardsRemaining": {
     "message": "cards remaining"
   },
+  "flashcards_availableNowCount": {
+    "message": "Available now: {{count}}"
+  },
+  "flashcards_scheduledDueCount": {
+    "message": "Scheduled due: {{count}}"
+  },
   "flashcards_reviewed": {
     "message": "reviewed"
   },
@@ -3221,8 +3227,35 @@
   "flashcards_undoRating": {
     "message": "Re-rate last card"
   },
+  "flashcards_practiceAgain": {
+    "message": "Practice again"
+  },
+  "flashcards_openScheduler": {
+    "message": "Open scheduler"
+  },
   "flashcards_undoReviewHint": {
     "message": "Rate this card again to update your response"
+  },
+  "flashcards_shortcutShowAnswer": {
+    "message": "Show answer"
+  },
+  "flashcards_shortcutRateVisibleControls": {
+    "message": "Rate with Again, Hard, Good, or Easy"
+  },
+  "flashcards_shortcutUndoVisibleControl": {
+    "message": "Re-rate last card while the undo button is visible"
+  },
+  "flashcards_studyAssistantExpand": {
+    "message": "Open assistant"
+  },
+  "flashcards_studyAssistantCollapse": {
+    "message": "Hide assistant"
+  },
+  "flashcards_studyAssistantCollapsedPrompt": {
+    "message": "Need help understanding this card?"
+  },
+  "flashcards_studyAssistantCollapsedDescription": {
+    "message": "Open the assistant when you want an explanation, mnemonic, or fact-check without leaving review."
   },
   "flashcards_shortcutDown": {
     "message": "Move down"

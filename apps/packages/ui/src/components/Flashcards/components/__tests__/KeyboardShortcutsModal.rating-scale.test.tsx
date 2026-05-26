@@ -65,4 +65,18 @@ describe("KeyboardShortcutsModal rating scale guidance", () => {
     expect(screen.getByText("Good = 3 (normal recall, default step)")).toBeInTheDocument()
     expect(screen.getByText("Easy = 5 (effortless recall, longest jump)")).toBeInTheDocument()
   })
+
+  it("maps review shortcuts to visible review controls", () => {
+    render(
+      <KeyboardShortcutsModal
+        open
+        onClose={vi.fn()}
+        activeTab="review"
+      />
+    )
+
+    expect(screen.getByText("Show answer")).toBeInTheDocument()
+    expect(screen.getByText("Rate with Again, Hard, Good, or Easy")).toBeInTheDocument()
+    expect(screen.getByText("Re-rate last card while the undo button is visible")).toBeInTheDocument()
+  })
 })

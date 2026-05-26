@@ -11,6 +11,8 @@ import {
   useCramQueueQuery,
   useReviewQuery,
   useReviewFlashcardMutation,
+  useEndFlashcardReviewSessionMutation,
+  useRecentFlashcardReviewSessionsQuery,
   useFlashcardAssistantQuery,
   useFlashcardAssistantRespondMutation,
   useUpdateFlashcardMutation,
@@ -180,6 +182,16 @@ describe("ReviewTab edit-in-review workflow", () => {
     } as any)
     vi.mocked(useReviewFlashcardMutation).mockReturnValue({
       mutateAsync: vi.fn()
+    } as any)
+    vi.mocked(useEndFlashcardReviewSessionMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false
+    } as any)
+    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false
     } as any)
     vi.mocked(useFlashcardAssistantQuery).mockReturnValue({
       data: null,

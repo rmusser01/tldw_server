@@ -304,10 +304,16 @@ describe("ReviewTab study assistant panel", () => {
       />
     )
 
-  it("renders assistant quick actions and existing history on the active card", () => {
+  it("keeps assistant actions collapsed before answer reveal and expands on demand", () => {
     renderReviewTab()
 
     expect(screen.getByTestId("flashcards-review-study-assistant")).toBeInTheDocument()
+    expect(screen.getByText("Need help understanding this card?")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Explain" })).not.toBeInTheDocument()
+    expect(screen.queryByText("Earlier explanation")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
+
     expect(screen.getByRole("button", { name: "Explain" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Fact-check me" })).toBeInTheDocument()
     expect(screen.getByText("Earlier explanation")).toBeInTheDocument()
@@ -320,6 +326,7 @@ describe("ReviewTab study assistant panel", () => {
     })
     renderReviewTab()
 
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {
@@ -336,6 +343,7 @@ describe("ReviewTab study assistant panel", () => {
     })
     renderReviewTab()
 
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
     fireEvent.click(screen.getByRole("button", { name: "Fact-check me" }))
     expect(assistantMutateAsync).not.toHaveBeenCalled()
     expect(screen.getByText("Confirm transcript")).toBeInTheDocument()
@@ -360,6 +368,7 @@ describe("ReviewTab study assistant panel", () => {
   it("plays back assistant replies on demand", async () => {
     renderReviewTab()
 
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
     fireEvent.click(screen.getByRole("button", { name: "Play reply" }))
 
     await waitFor(() => {
@@ -373,6 +382,7 @@ describe("ReviewTab study assistant panel", () => {
     assistantMutateAsync.mockRejectedValue(new Error("assistant failed"))
     renderReviewTab()
 
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {
@@ -398,6 +408,7 @@ describe("ReviewTab study assistant panel", () => {
       })
     renderReviewTab()
 
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {
@@ -423,6 +434,7 @@ describe("ReviewTab study assistant panel", () => {
     )
     renderReviewTab()
 
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {
@@ -446,6 +458,7 @@ describe("ReviewTab study assistant panel", () => {
       })
     renderReviewTab()
 
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
     fireEvent.click(screen.getByRole("button", { name: "Fact-check me" }))
     fireEvent.change(screen.getByLabelText("Transcript"), {
       target: { value: "I think the glomerulus filters blood." }
@@ -543,6 +556,7 @@ describe("ReviewTab study assistant panel", () => {
     })
     renderReviewTab()
 
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {
