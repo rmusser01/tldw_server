@@ -40,7 +40,7 @@
 - Modify: `apps/packages/ui/src/services/tldw/domains/workspace-api.ts`
 - Test: `apps/packages/ui/src/services/tldw/domains/__tests__/workspace-api.status-capabilities.test.ts`
 
-- [ ] **Step 1: Write failing API client tests**
+- [x] **Step 1: Write failing API client tests**
 
 Add tests proving:
 
@@ -82,7 +82,7 @@ Expected request paths:
 - `GET /api/v1/workspaces/migrations/mig-1`
 - `POST /api/v1/workspaces/migrations/mig-1/client-delete-ack`
 
-- [ ] **Step 2: Run the failing API client tests**
+- [x] **Step 2: Run the failing API client tests**
 
 Run:
 
@@ -93,7 +93,7 @@ bunx vitest run src/services/tldw/domains/__tests__/workspace-api.status-capabil
 
 Expected: FAIL because migration methods are missing.
 
-- [ ] **Step 3: Add request/response types and methods**
+- [x] **Step 3: Add request/response types and methods**
 
 Add interfaces mirroring backend schemas:
 
@@ -107,7 +107,7 @@ Add interfaces mirroring backend schemas:
 
 Add methods to `workspaceApiMethods` using `bgRequest` and `encodeURIComponent` for path parameters.
 
-- [ ] **Step 4: Run API client tests again**
+- [x] **Step 4: Run API client tests again**
 
 Expected: PASS.
 
@@ -119,11 +119,11 @@ Expected: PASS.
 - Modify: `apps/packages/ui/src/store/research-workspace-legacy-storage-inventory.ts`
 - Modify: `apps/packages/ui/src/store/__tests__/research-workspace-legacy-storage-inventory.test.ts`
 
-- [ ] **Step 1: Write failing tests for unsafe legacy behavior**
+- [x] **Step 1: Write failing tests for unsafe legacy behavior**
 
 Assert that the old `workspace_migrated` flag does not skip true migration and that no function writes `workspace_migrated=true` as proof of migration.
 
-- [ ] **Step 2: Write failing tests for manifest building**
+- [x] **Step 2: Write failing tests for manifest building**
 
 Use injected discovery/read dependencies so tests do not depend on real browser storage:
 
@@ -150,7 +150,7 @@ Expected plan fields:
 - local deletion eligibility computed from the inventory
 - no local deletion side effects
 
-- [ ] **Step 3: Implement pure helpers**
+- [x] **Step 3: Implement pure helpers**
 
 Keep helpers deterministic and side-effect-free except injected reads:
 
@@ -163,11 +163,11 @@ Keep helpers deterministic and side-effect-free except injected reads:
 
 Use Web Crypto in browser and test-compatible fallback where existing project patterns allow it.
 
-- [ ] **Step 4: Preserve inventory safety**
+- [x] **Step 4: Preserve inventory safety**
 
 Extend inventory tests if needed so content-bearing surfaces are deletion-blocking unless covered, UI-only surfaces are retained, and unknown surfaces block.
 
-- [ ] **Step 5: Run focused store tests**
+- [x] **Step 5: Run focused store tests**
 
 Run:
 
