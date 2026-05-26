@@ -184,7 +184,7 @@ Expected: PASS.
 - Modify: `apps/packages/ui/src/store/workspace-migration.ts`
 - Modify: `apps/packages/ui/src/store/__tests__/workspace-migration.test.ts`
 
-- [ ] **Step 1: Write failing orchestration tests**
+- [x] **Step 1: Write failing orchestration tests**
 
 Cover:
 
@@ -196,7 +196,7 @@ Cover:
 - writes tombstone and sends delete ack only when server eligibility and local inventory eligibility are both true
 - returns recoverable conflict/error states without throwing away local content
 
-- [ ] **Step 2: Implement `runResearchWorkspaceMigration`**
+- [x] **Step 2: Implement `runResearchWorkspaceMigration`**
 
 Input dependencies:
 
@@ -215,11 +215,11 @@ Return a structured result:
 - `deletedSurfaceIds`
 - `message`
 
-- [ ] **Step 3: Ensure destructive operations are dependency-injected**
+- [x] **Step 3: Ensure destructive operations are dependency-injected**
 
 The default export must not delete anything unless the caller passes delete dependencies and the server response is eligible. Tests should prove deletes are not called on backend-ineligible finalize.
 
-- [ ] **Step 4: Run focused migration tests**
+- [x] **Step 4: Run focused migration tests**
 
 Run the same workspace migration test command as Task 2.
 

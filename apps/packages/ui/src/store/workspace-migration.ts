@@ -78,6 +78,78 @@ export interface ResearchWorkspaceMigrationTombstone
   contentRetained: false
 }
 
+export interface ResearchWorkspaceMigrationSessionResponse {
+  id: string
+  status: string
+  client_delete_eligible: boolean
+  chunks?: unknown[]
+}
+
+export interface ResearchWorkspaceMigrationApi {
+  createWorkspaceMigration: (body: {
+    id: string
+    idempotency_key: string
+    target_workspace_id: string
+    target_workspace_name: string
+    source_product: string
+    manifest_hash: string
+    declared_chunks: ResearchWorkspaceMigrationChunkDeclaration[]
+    manifest: ResearchWorkspaceMigrationManifest
+    diagnostics: Record<string, unknown>
+  }) => Promise<ResearchWorkspaceMigrationSessionResponse>
+  putWorkspaceMigrationChunk: (
+    migrationId: string,
+    chunkId: string,
+    body: {
+      sha256: string
+      byte_count: number
+      chunk_kind: string
+      metadata: Record<string, unknown>
+    }
+  ) => Promise<unknown>
+  finalizeWorkspaceMigration: (
+    migrationId: string,
+    body: { manifest_hash: string }
+  ) => Promise<ResearchWorkspaceMigrationSessionResponse>
+  getWorkspaceMigration: (
+    migrationId: string
+  ) => Promise<ResearchWorkspaceMigrationSessionResponse>
+  ackWorkspaceMigrationClientDelete: (
+    migrationId: string,
+    body: { acknowledged_manifest_hash: string }
+  ) => Promise<unknown>
+}
+
+export type ResearchWorkspaceMigrationRunStatus =
+  | "not_needed"
+  | "blocked"
+  | "finalized_not_delete_eligible"
+  | "deleted"
+  | "failed"
+
+export interface ResearchWorkspaceMigrationRunInput
+  extends ResearchWorkspaceMigrationPlanInput {
+  api: ResearchWorkspaceMigrationApi
+  legacyWorkspaceId?: string
+  deleteLocalStorageValue?: (key: string) => Promise<void> | void
+  writeLocalStorageValue?: (key: string, value: string) => Promise<void> | void
+  deleteIndexedDbStorePayload?: (
+    store: ResearchWorkspaceIndexedDbStoreRef
+  ) => Promise<void> | void
+  now?: () => string
+}
+
+export interface ResearchWorkspaceMigrationRunResult {
+  status: ResearchWorkspaceMigrationRunStatus
+  migrationId: string | null
+  manifestHash: string | null
+  serverMigration: ResearchWorkspaceMigrationSessionResponse | null
+  localDeletionEligibility: ResearchWorkspaceLegacyDeletionEligibility | null
+  deletedSurfaceIds: string[]
+  message: string
+  error?: unknown
+}
+
 const textEncoder = new TextEncoder()
 
 const bytesToHex = (bytes: ArrayBuffer): string =>
@@ -279,3 +351,183 @@ export const buildResearchWorkspaceMigrationTombstone = (
   ...input,
   contentRetained: false
 })
+
+const buildChunkMetadata = (
+  chunk: ResearchWorkspaceMigrationChunkPlan
+): Record<string, unknown> => ({
+  surface_id: chunk.surfaceId,
+  storage_kind: chunk.storageKind,
+  key: chunk.key,
+  database_name: chunk.databaseName,
+  store_name: chunk.storeName
+})
+
+const deleteCoveredLocalPayloads = async ({
+  chunks,
+  deleteLocalStorageValue,
+  deleteIndexedDbStorePayload
+}: {
+  chunks: ResearchWorkspaceMigrationChunkPlan[]
+  deleteLocalStorageValue?: (key: string) => Promise<void> | void
+  deleteIndexedDbStorePayload?: (
+    store: ResearchWorkspaceIndexedDbStoreRef
+  ) => Promise<void> | void
+}): Promise<string[] | null> => {
+  const deletedSurfaceIds: string[] = []
+
+  for (const chunk of chunks) {
+    if (chunk.storageKind === "local_storage") {
+      if (!chunk.key || !deleteLocalStorageValue) return null
+      await deleteLocalStorageValue(chunk.key)
+      deletedSurfaceIds.push(chunk.surfaceId)
+      continue
+    }
+
+    if (
+      chunk.storageKind === "indexeddb_store" &&
+      chunk.databaseName &&
+      chunk.storeName
+    ) {
+      if (!deleteIndexedDbStorePayload) return null
+      await deleteIndexedDbStorePayload({
+        databaseName: chunk.databaseName,
+        storeName: chunk.storeName
+      })
+      deletedSurfaceIds.push(chunk.surfaceId)
+    }
+  }
+
+  return deletedSurfaceIds
+}
+
+export const runResearchWorkspaceMigration = async ({
+  api,
+  legacyWorkspaceId,
+  deleteLocalStorageValue,
+  writeLocalStorageValue,
+  deleteIndexedDbStorePayload,
+  now = () => new Date().toISOString(),
+  ...planInput
+}: ResearchWorkspaceMigrationRunInput): Promise<ResearchWorkspaceMigrationRunResult> => {
+  try {
+    const plan = await buildResearchWorkspaceMigrationPlan(planInput)
+
+    if (plan.chunks.length === 0) {
+      return {
+        status: plan.localDeletionEligibility.eligible ? "not_needed" : "blocked",
+        migrationId: null,
+        manifestHash: plan.manifestHash,
+        serverMigration: null,
+        localDeletionEligibility: plan.localDeletionEligibility,
+        deletedSurfaceIds: [],
+        message: plan.localDeletionEligibility.eligible
+          ? "No legacy Research Workspace content was discovered."
+          : "Legacy Research Workspace storage includes unknown or uncovered content."
+      }
+    }
+
+    await api.createWorkspaceMigration({
+      id: plan.migrationId,
+      idempotency_key: plan.idempotencyKey,
+      target_workspace_id: planInput.targetWorkspaceId,
+      target_workspace_name: planInput.targetWorkspaceName,
+      source_product:
+        planInput.sourceProduct || RESEARCH_WORKSPACE_MIGRATION_SOURCE_PRODUCT,
+      manifest_hash: plan.manifestHash,
+      declared_chunks: plan.declaredChunks,
+      manifest: plan.manifest,
+      diagnostics: {}
+    })
+
+    for (const chunk of plan.chunks) {
+      await api.putWorkspaceMigrationChunk(plan.migrationId, chunk.id, {
+        sha256: chunk.sha256,
+        byte_count: chunk.byte_count,
+        chunk_kind: chunk.chunk_kind,
+        metadata: buildChunkMetadata(chunk)
+      })
+    }
+
+    await api.finalizeWorkspaceMigration(plan.migrationId, {
+      manifest_hash: plan.manifestHash
+    })
+    const serverMigration = await api.getWorkspaceMigration(plan.migrationId)
+
+    if (!plan.localDeletionEligibility.eligible) {
+      return {
+        status: "blocked",
+        migrationId: plan.migrationId,
+        manifestHash: plan.manifestHash,
+        serverMigration,
+        localDeletionEligibility: plan.localDeletionEligibility,
+        deletedSurfaceIds: [],
+        message: "Server receipt was saved, but local deletion is blocked by the legacy inventory gate."
+      }
+    }
+
+    if (!serverMigration.client_delete_eligible) {
+      return {
+        status: "finalized_not_delete_eligible",
+        migrationId: plan.migrationId,
+        manifestHash: plan.manifestHash,
+        serverMigration,
+        localDeletionEligibility: plan.localDeletionEligibility,
+        deletedSurfaceIds: [],
+        message: "Server receipt was saved. Local data is retained until server deletion eligibility is available."
+      }
+    }
+
+    const deletedSurfaceIds = await deleteCoveredLocalPayloads({
+      chunks: plan.chunks,
+      deleteLocalStorageValue,
+      deleteIndexedDbStorePayload
+    })
+
+    if (!deletedSurfaceIds || !writeLocalStorageValue) {
+      return {
+        status: "blocked",
+        migrationId: plan.migrationId,
+        manifestHash: plan.manifestHash,
+        serverMigration,
+        localDeletionEligibility: plan.localDeletionEligibility,
+        deletedSurfaceIds: deletedSurfaceIds || [],
+        message: "Server deletion eligibility is available, but local deletion dependencies are not configured."
+      }
+    }
+
+    const tombstone = buildResearchWorkspaceMigrationTombstone({
+      legacyWorkspaceId: legacyWorkspaceId || planInput.targetWorkspaceId,
+      serverWorkspaceId: planInput.targetWorkspaceId,
+      migrationId: plan.migrationId,
+      deletedAt: now()
+    })
+    await writeLocalStorageValue(
+      buildResearchWorkspaceMigrationTombstoneKey(tombstone.legacyWorkspaceId),
+      JSON.stringify(tombstone)
+    )
+    await api.ackWorkspaceMigrationClientDelete(plan.migrationId, {
+      acknowledged_manifest_hash: plan.manifestHash
+    })
+
+    return {
+      status: "deleted",
+      migrationId: plan.migrationId,
+      manifestHash: plan.manifestHash,
+      serverMigration,
+      localDeletionEligibility: plan.localDeletionEligibility,
+      deletedSurfaceIds,
+      message: "Legacy Research Workspace content was migrated and local content payloads were deleted."
+    }
+  } catch (error) {
+    return {
+      status: "failed",
+      migrationId: null,
+      manifestHash: null,
+      serverMigration: null,
+      localDeletionEligibility: null,
+      deletedSurfaceIds: [],
+      message: "Research Workspace migration failed before local deletion.",
+      error
+    }
+  }
+}
