@@ -61,7 +61,7 @@ Actual flow after Phase 0-5 remediation:
 | Phase 3B: Deck dashboard | TASK-510, TASK-511 | F11 | Completed. Existing analytics data supports a deck-first dashboard with direct actions. Review fixes preserved session close behavior and dashboard switching. |
 | Phase 4: Import/generate recovery | TASK-512 | F01 support, F06 support | Completed for generated-card save recovery. Broader task-first IA splitting remains deferred because the plan intentionally preserved the existing tab model. |
 | Phase 5: Extension capture and docs | TASK-513 | F12 support, F13 | Completed as an extension bridge and WebUI generate handoff. A fully native extension deck-picker/save flow remains deferred. |
-| Closeout source restoration | TASK-514 | Planning traceability | In progress in this change. Restores this tracked source file on `dev`. |
+| Closeout source restoration | TASK-514 | Planning traceability | Completed. Restores this tracked source file on `dev`. |
 
 ## Severity-Ranked Findings
 
