@@ -46,6 +46,29 @@ const isBenignRequestFailure = (url: string, errorText: string): boolean => {
 const normalizeServerUrl = (value: string) =>
   value.match(/^https?:\/\//) ? value.replace(/\/$/, "") : `http://${value}`
 
+const apiFetch = async (
+  serverUrl: string,
+  apiKey: string,
+  path: string,
+  init: RequestInit = {}
+) => {
+  const headers = new Headers(init.headers)
+  headers.set("X-API-Key", apiKey)
+  if (init.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json")
+  }
+  const response = await fetch(`${serverUrl}${path}`, {
+    ...init,
+    headers
+  })
+  if (!response.ok) {
+    throw new Error(
+      `${init.method || "GET"} ${path} returned ${response.status}: ${await response.text()}`
+    )
+  }
+  return response
+}
+
 const recoverOptionsErrorStateIfNeeded = async (page: Page): Promise<void> => {
   const reloadButton = page.getByRole("button", { name: /Reload Options/i }).first()
   if (await reloadButton.isVisible().catch(() => false)) {
@@ -139,6 +162,137 @@ test.describe("Research Workspace parity (extension real backend)", () => {
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
       expect(requestFailures).toEqual([])
+    } finally {
+      await context.close()
+    }
+  })
+
+  test("saves a Web Clipper workspace clip and opens canonical Research Workspace", async () => {
+    const { serverUrl, apiKey } = requireRealServerConfig(test)
+    const normalizedServerUrl = normalizeServerUrl(serverUrl)
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const workspaceId = `task-47812-webclip-${suffix}`
+    const clipId = `clip-${suffix}`
+    const uniqueBody = `TASK-47812-WEBCLIP-HANDOFF-${suffix}`
+
+    await apiFetch(
+      normalizedServerUrl,
+      apiKey,
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          name: "TASK-478.12 Web Clipper Handoff",
+          study_materials_policy: "workspace"
+        })
+      }
+    )
+
+    const { context, openSidepanel } = await launchWithBuiltExtensionOrSkip(
+      test,
+      {
+        seedConfig: {
+          __tldw_first_run_complete: true,
+          tldwConfig: {
+            serverUrl: normalizedServerUrl,
+            authMode: "single-user",
+            apiKey
+          }
+        },
+        seedLocalStorage
+      }
+    )
+
+    try {
+      const sidepanel = await openSidepanel("/clipper")
+      await waitForConnectionStore(sidepanel, "workspace-clipper-extension-real")
+      await waitForConnected(sidepanel, "workspace-clipper-extension-real")
+      await sidepanel.evaluate(
+        ({ draft }) => {
+          window.sessionStorage.setItem(
+            "tldw:web-clipper:pendingDraft",
+            JSON.stringify(draft)
+          )
+          window.dispatchEvent(
+            new CustomEvent("tldw:web-clipper-pending-draft", {
+              detail: draft
+            })
+          )
+        },
+        {
+          draft: {
+            clipId,
+            requestedType: "article",
+            clipType: "article",
+            pageUrl: `https://example.com/task-47812/${suffix}`,
+            pageTitle: "TASK-478.12 Web Clipper Handoff",
+            visibleBody: uniqueBody,
+            fullExtract: `${uniqueBody}\n\nFull extracted article body.`,
+            selectionText: uniqueBody,
+            captureMetadata: {
+              clipType: "article",
+              actualType: "article",
+              fallbackPath: ["article"]
+            },
+            capturedAt: new Date().toISOString()
+          }
+        }
+      )
+
+      await expect(
+        sidepanel.getByRole("radio", { name: "Workspace" })
+      ).toBeVisible()
+      await sidepanel.getByRole("radio", { name: "Workspace" }).check({ force: true })
+      await expect(sidepanel.getByLabel("Workspace ID")).toBeVisible()
+      await sidepanel.getByLabel("Workspace ID").fill(workspaceId)
+
+      const openedPagePromise = context.waitForEvent("page")
+      await sidepanel.getByRole("button", { name: "Save and open" }).click()
+      const openedPage = await openedPagePromise
+      await openedPage.waitForLoadState("domcontentloaded")
+
+      expect(openedPage.url()).toContain("#/research-workspace")
+      expect(openedPage.url()).not.toContain("document-workspace")
+      await expect(sidepanel.getByText("Clip saved")).toBeVisible()
+
+      const clipStatusResponse = await apiFetch(
+        normalizedServerUrl,
+        apiKey,
+        `/api/v1/web-clipper/${encodeURIComponent(clipId)}`
+      )
+      const clipStatus = await clipStatusResponse.json()
+      expect(clipStatus.workspace_placements).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            workspace_id: workspaceId,
+            source_note_id: clipId
+          })
+        ])
+      )
+
+      const notesResponse = await apiFetch(
+        normalizedServerUrl,
+        apiKey,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/notes`
+      )
+      const notes = await notesResponse.json()
+      expect(notes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            title: "TASK-478.12 Web Clipper Handoff",
+            content: expect.stringContaining(uniqueBody)
+          })
+        ])
+      )
+
+      const sourceStatusResponse = await apiFetch(
+        normalizedServerUrl,
+        apiKey,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/sources/status`
+      )
+      const sourceStatus = await sourceStatusResponse.json()
+      expect(sourceStatus.workspace_id).toBe(workspaceId)
+      expect(Array.isArray(sourceStatus.sources)).toBe(true)
     } finally {
       await context.close()
     }

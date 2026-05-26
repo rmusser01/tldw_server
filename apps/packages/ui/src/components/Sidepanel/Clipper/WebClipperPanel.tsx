@@ -93,7 +93,7 @@ const createOpenTargetUrl = (
   }
 
   if (destinationMode === "workspace" && response.workspace_placement) {
-    return chromeApi.runtime.getURL("options.html#/document-workspace")
+    return chromeApi.runtime.getURL("options.html#/research-workspace")
   }
 
   return chromeApi.runtime.getURL("options.html#/notes")

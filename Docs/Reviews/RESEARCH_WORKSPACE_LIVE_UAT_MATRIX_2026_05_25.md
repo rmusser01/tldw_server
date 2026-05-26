@@ -13,7 +13,8 @@ rows marked `Current run` were rechecked during TASK-478.13.
 - Static code review can justify `Not covered` or `Gap`; it cannot justify `Pass`.
 - `/research-workspace` is the only active WebUI route. `/workspace-playground`
   must remain removed with no alias and no redirect.
-- Extension handoff remains blocked until a current extension build is available.
+- Extension handoff requires a current Chrome MV3 build plus live CDP validation
+  against the backend.
 - MCP, ACP, and Sandbox are part of the canonical workspace model. If a behavior
   is only documented as a handoff contract and not yet exposed as a working UI/API
   flow, it must be marked `Partial` or `Gap`.
@@ -55,14 +56,15 @@ rows marked `Current run` were rechecked during TASK-478.13.
 | RW-UAT-021 | MCP Hub Shared Workspaces is included in the workspace model | TASK-478.7 | MCP hub | Partial | Contract marks MCP Hub Shared Workspaces as canonical path/tool trust registry. Prior May 24 matrix saw hub route availability, but no end-to-end Research Workspace -> MCP workspace set binding was validated. | Backend MCP/capability tests from TASK-478.7. | Add a live workspace-set binding test when MCP UI/API fixture is stable. |
 | RW-UAT-022 | ACP canonical bridge uses Research Workspace IDs/source labels | TASK-478.7 | ACP | Partial | Contract defines `/api/v1/agent-orchestration/workspaces/canonical-bridge` with `canonical_workspace_source: research_workspace`; focused ACP canonical tests passed. | Agent orchestration canonical/workspace DB/artifact promotion tests. | Add live ACP run history/filter UAT keyed by canonical workspace ID. |
 | RW-UAT-023 | Sandbox diagnostics/admission are part of workspace handoff model | TASK-478.7 | Sandbox | Gap | Contract defines sandbox ownership and deferred diagnostics filters; no live Research Workspace -> sandbox admission/diagnostics flow is exposed yet. | None specific to a live Research Workspace flow. | Create a sandbox handoff task before claiming agent/tool workspace completeness. |
-| RW-UAT-024 | Browser extension capture targets canonical workspace/source IDs | TASK-478.12 | Browser extension, WebUI | Blocked | TASK-478.12 is To Do and depends on a current extension build. No current extension CDP handoff run is available. | Existing extension route tests were updated in TASK-478.7, but live capture is not verified. | Resume TASK-478.12 when extension build issue is resolved. |
+| RW-UAT-024 | Browser extension capture targets canonical workspace/source IDs | TASK-478.12 | Browser extension, WebUI | Partial | TASK-478.12 live Chrome MV3/CDP run saved a Web Clipper workspace clip against `http://127.0.0.1:18002`, opened canonical `#/research-workspace`, verified `GET /api/v1/web-clipper/{clip_id}` workspace placement, verified the clipped body through `GET /api/v1/workspaces/{workspace_id}/notes`, and verified `GET /api/v1/workspaces/{workspace_id}/sources/status` is reachable. | `apps/extension/tests/e2e/research-workspace.real-backend.spec.ts` now covers canonical route handoff plus persisted workspace note placement; focused Web Clipper route/unit tests cover `#/research-workspace`. | Browser clips currently land as workspace notes/placements, not first-class workspace sources with ingestion/indexing/RAG source status. Create a follow-up if extension captures must enter the first-class workspace source pipeline. |
 | RW-UAT-025 | Migration/import/export recovery is clear and resumable | TASK-478.3, migration API work | Migration APIs/UI | Partial | Migration API idempotency and conflict handling were fixed in prior PR review cycles; current WebUI migration wizard/recovery walkthrough is not part of this live pass. | Backend migration tests from earlier workspace migration work. | Add a dedicated migration recovery UAT row/task if migration UI is in release scope. |
 | RW-UAT-026 | Maintained matrix and regression gate exist | TASK-478.13 | Docs, E2E | Pass | Current matrix exists in this document. Live probe passed route, empty-state copy, rejected-copy absence, tour overlay, and critical console/page-error checks. Focused Playwright route regression passed: `1 passed (2.4s)`. | `research-workspace.real-backend.spec.ts` route contract test. | TASK-478.12 still owns extension handoff once the extension build is available. |
 
 ## Current High-Risk Remainders
 
-1. Browser extension handoff is still blocked by build availability and must not
-   be represented as working until TASK-478.12 runs CDP validation.
+1. Browser extension handoff now has live capture/open validation, but remains
+   `Partial` because Web Clipper captures are persisted as workspace notes rather
+   than first-class indexed workspace sources.
 2. MCP/ACP/Sandbox are correctly part of the workspace model, but several live
    user flows are still `Partial` or `Gap`; the current contract is not the same
    as full workflow completion.

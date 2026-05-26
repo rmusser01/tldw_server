@@ -13,6 +13,8 @@ export interface TldwWebClipperApiClientCore {
   fillPathParams(template: AllowedPath, values: string | string[]): AllowedPath
 }
 
+const WEB_CLIPPER_SAVE_TIMEOUT_MS = 5_000
+
 export const webClipperMethods = {
   async saveWebClip(
     this: TldwWebClipperApiClientCore,
@@ -26,7 +28,8 @@ export const webClipperMethods = {
       path,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      timeoutMs: WEB_CLIPPER_SAVE_TIMEOUT_MS
     })
   },
 

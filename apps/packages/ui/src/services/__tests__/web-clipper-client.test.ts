@@ -63,6 +63,7 @@ describe("web clipper client and runtime helpers", () => {
         path: "/api/v1/web-clipper/save",
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        timeoutMs: 5000,
         body: expect.objectContaining({
           clip_id: "clip-123",
           source_url: "https://example.com/story"
