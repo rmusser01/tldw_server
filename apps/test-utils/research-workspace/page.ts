@@ -37,6 +37,15 @@ export class ResearchWorkspaceParityPage {
 
   private async disablePortalPointerInterception(): Promise<void> {
     await this.page.evaluate(() => {
+      const styleId = "tldw-e2e-disable-nextjs-portal-pointer-events"
+      if (!document.getElementById(styleId)) {
+        const style = document.createElement("style")
+        style.id = styleId
+        style.textContent =
+          "nextjs-portal, nextjs-portal * { pointer-events: none !important; }"
+        document.head.appendChild(style)
+      }
+
       const portals = document.querySelectorAll("nextjs-portal")
       portals.forEach((portal) => {
         ;(portal as HTMLElement).style.pointerEvents = "none"

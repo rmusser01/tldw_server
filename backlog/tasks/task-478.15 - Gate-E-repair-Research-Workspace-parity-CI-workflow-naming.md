@@ -12,6 +12,8 @@ modified_files:
 - .github/workflows/ui-research-workspace-nightly.yml
 - .github/workflows/ui-workspace-playground-parity.yml
 - .github/workflows/ui-workspace-playground-nightly.yml
+- apps/test-utils/research-workspace/page.ts
+- apps/tldw-frontend/e2e/utils/page-objects/ResearchWorkspacePage.ts
 - tldw_Server_API/tests/CI/test_research_workspace_workflow_contracts.py
 ---
 
@@ -34,12 +36,14 @@ Fix the active GitHub Actions parity workflow after the Research Workspace route
 Root cause: PR #2055 CI was still invoking the removed WebUI script `bun run e2e:workspace-playground:parity` from the active workspace parity workflow. Replaced the active parity/nightly workflow files with Research Workspace-named workflow files, updated path filters/job ids/check names/artifact names/concurrency/server labels, and pointed WebUI parity/nightly jobs at existing `e2e:research-workspace:*` package scripts.
 
 Added `tldw_Server_API/tests/CI/test_research_workspace_workflow_contracts.py` to prevent stale `workspace-playground` workflow names, paths, and commands from returning in these active workflows.
+
+Follow-up CI evidence showed the renamed WebUI parity job progressed into the spec and then timed out because a Next dev `nextjs-portal` intercepted pointer events. Updated the shared Research Workspace Playwright page objects to install a persistent CSS rule disabling pointer events on `nextjs-portal` and descendants, so portals inserted after initial page load cannot block parity interactions.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed the failing WebUI parity CI gate caused by stale workspace-playground workflow metadata and command names. Verified the new Research Workspace workflow contract test, existing required workflow contracts, and the actual WebUI parity script locally. Bandit was run on the new CI test with pytest assert rule B101 skipped; no remaining findings.
+Fixed the failing WebUI parity CI gate caused by stale workspace-playground workflow metadata and command names, then fixed the runtime WebUI parity failure caused by Next dev portal click interception. Verified the new Research Workspace workflow contract test, existing required workflow contracts, and the actual WebUI parity script locally. Bandit was run on the new CI test with pytest assert rule B101 skipped; no remaining findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
