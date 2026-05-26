@@ -20,6 +20,8 @@ import {
 const STORAGE_KEY = WORKSPACE_STORAGE_KEY
 const STORAGE_SPLIT_FLAG_KEY = WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY
 const STORAGE_INDEXEDDB_FLAG_KEY = WORKSPACE_STORAGE_INDEXEDDB_FLAG_STORAGE_KEY
+const MIGRATION_TOMBSTONE_PREFIX =
+  "tldw:research-workspace:migration:tombstone:"
 const snapshotKey = (workspaceId: string) =>
   `${STORAGE_KEY}:workspace:${encodeURIComponent(workspaceId)}:snapshot`
 const chatKey = (workspaceId: string) =>
@@ -29,6 +31,12 @@ const resetWorkspaceStore = () => {
   localStorage.removeItem(STORAGE_KEY)
   localStorage.removeItem(STORAGE_SPLIT_FLAG_KEY)
   localStorage.removeItem(STORAGE_INDEXEDDB_FLAG_KEY)
+  for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+    const key = localStorage.key(index)
+    if (key?.startsWith(MIGRATION_TOMBSTONE_PREFIX)) {
+      localStorage.removeItem(key)
+    }
+  }
   delete window.__tldwWorkspacePersistenceMetrics
   useWorkspaceStore.setState({
     workspaceId: "",
@@ -673,6 +681,80 @@ describe("workspace store snapshot persistence", () => {
 
     expect(indexedDbAdapter.putChatRecord).not.toHaveBeenCalled()
     expect(indexedDbAdapter.putArtifactPayloadRecord).not.toHaveBeenCalled()
+  })
+
+  it("does not re-persist covered workspace content after a migration tombstone exists", async () => {
+    localStorage.setItem(STORAGE_SPLIT_FLAG_KEY, "1")
+    localStorage.setItem(STORAGE_INDEXEDDB_FLAG_KEY, "0")
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-tombstoned",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-tombstoned",
+        serverWorkspaceId: "workspace-tombstoned",
+        migrationId: "research-workspace-workspace-tombstoned-abc123",
+        deletedAt: "2026-05-26T00:00:00.000Z",
+        contentRetained: false
+      })
+    )
+
+    const storage = createWorkspaceStorage()
+    const payload = JSON.stringify({
+      state: {
+        workspaceId: "workspace-tombstoned",
+        workspaceName: "Tombstoned Workspace",
+        workspaceTag: "workspace:tombstoned",
+        workspaceCreatedAt: "2026-05-26T00:00:00.000Z",
+        workspaceChatReferenceId: "workspace-tombstoned",
+        savedWorkspaces: [],
+        archivedWorkspaces: [],
+        workspaceSnapshots: {
+          "workspace-tombstoned": {
+            workspaceId: "workspace-tombstoned",
+            workspaceName: "Tombstoned Workspace",
+            workspaceTag: "workspace:tombstoned",
+            workspaceCreatedAt: "2026-05-26T00:00:00.000Z",
+            workspaceChatReferenceId: "workspace-tombstoned",
+            sources: [
+              {
+                id: "source-tombstoned",
+                mediaId: 42,
+                title: "Tombstoned Source",
+                type: "note",
+                addedAt: "2026-05-26T00:01:00.000Z"
+              }
+            ],
+            selectedSourceIds: ["source-tombstoned"],
+            generatedArtifacts: [],
+            notes: "Tombstoned notes",
+            currentNote: { ...DEFAULT_WORKSPACE_NOTE },
+            leftPaneCollapsed: false,
+            rightPaneCollapsed: false,
+            audioSettings: { ...DEFAULT_AUDIO_SETTINGS }
+          }
+        },
+        workspaceChatSessions: {
+          "workspace-tombstoned": {
+            messages: [
+              {
+                isBot: false,
+                name: "You",
+                message: "Tombstoned chat message",
+                sources: []
+              }
+            ],
+            historyId: "tombstoned-history",
+            serverChatId: null
+          }
+        }
+      },
+      version: 1
+    })
+
+    await storage.setItem(STORAGE_KEY, payload)
+
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+    expect(localStorage.getItem(snapshotKey("workspace-tombstoned"))).toBeNull()
+    expect(localStorage.getItem(chatKey("workspace-tombstoned"))).toBeNull()
   })
 
   it("estimates persistence payload section sizes", () => {
