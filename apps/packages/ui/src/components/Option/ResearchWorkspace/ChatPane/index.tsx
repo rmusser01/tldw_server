@@ -1413,7 +1413,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [slashCommands, setSlashCommands] = React.useState<
     Array<{ name: string; description: string }>
   >([])
-  const [composerModels, setComposerModels] = React.useState<any[]>([])
+  const [composerModels, setComposerModels] =
+    React.useState<ChatComposerModel[]>([])
   const slashCommandsFetchedRef = React.useRef(false)
   const modelsFetchedRef = React.useRef(false)
   const workspaceSessionRef = React.useRef<string | null>(null)

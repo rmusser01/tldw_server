@@ -8,6 +8,8 @@ const shouldSkipHostPermission =
   process.env.TLDW_E2E_SKIP_HOST_PERMISSION !== "0" &&
   process.env.TLDW_E2E_SKIP_HOST_PERMISSION !== "false"
 
+const API_FETCH_TIMEOUT_MS = 30_000
+
 const BENIGN_PAGE_ERROR_PATTERNS = [
   /AbortError/i
 ]
@@ -46,6 +48,21 @@ const isBenignRequestFailure = (url: string, errorText: string): boolean => {
 const normalizeServerUrl = (value: string) =>
   value.match(/^https?:\/\//) ? value.replace(/\/$/, "") : `http://${value}`
 
+interface ConnectionStoreSnapshot {
+  state?: {
+    isConnected?: boolean
+    phase?: string
+  }
+}
+
+interface ConnectionStoreHook {
+  getState?: () => ConnectionStoreSnapshot
+}
+
+type ConnectionStoreWindow = Window & {
+  __tldw_useConnectionStore?: ConnectionStoreHook
+}
+
 const apiFetch = async (
   serverUrl: string,
   apiKey: string,
@@ -57,16 +74,40 @@ const apiFetch = async (
   if (init.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json")
   }
-  const response = await fetch(`${serverUrl}${path}`, {
-    ...init,
-    headers
-  })
-  if (!response.ok) {
-    throw new Error(
-      `${init.method || "GET"} ${path} returned ${response.status}: ${await response.text()}`
-    )
+  const timeoutController = new AbortController()
+  const timeoutId = setTimeout(
+    () => timeoutController.abort(),
+    API_FETCH_TIMEOUT_MS
+  )
+  let removeAbortListener: (() => void) | undefined
+
+  if (init.signal) {
+    const abortFromCaller = () => timeoutController.abort()
+    if (init.signal.aborted) {
+      abortFromCaller()
+    } else {
+      init.signal.addEventListener("abort", abortFromCaller, { once: true })
+      removeAbortListener = () =>
+        init.signal?.removeEventListener("abort", abortFromCaller)
+    }
   }
-  return response
+
+  try {
+    const response = await fetch(`${serverUrl}${path}`, {
+      ...init,
+      headers,
+      signal: timeoutController.signal
+    })
+    if (!response.ok) {
+      throw new Error(
+        `${init.method || "GET"} ${path} returned ${response.status}: ${await response.text()}`
+      )
+    }
+    return response
+  } finally {
+    clearTimeout(timeoutId)
+    removeAbortListener?.()
+  }
 }
 
 const recoverOptionsErrorStateIfNeeded = async (page: Page): Promise<void> => {
@@ -81,7 +122,7 @@ const waitForConnected = async (page: Page, label: string): Promise<void> => {
   try {
     await page.waitForFunction(
       () => {
-        const store = (window as any).__tldw_useConnectionStore
+        const store = (window as ConnectionStoreWindow).__tldw_useConnectionStore
         const state = store?.getState?.().state
         return state?.isConnected === true && state?.phase === "connected"
       },
@@ -122,6 +163,7 @@ test.describe("Research Workspace parity (extension real backend)", () => {
       const origin = new URL(normalizedServerUrl).origin + "/*"
       const granted = await grantHostPermission(context, extensionId, origin)
       if (!granted) {
+        await context.close()
         test.skip(
           true,
           "Host permission not granted for real-server origin; allow it in chrome://extensions and re-run."
