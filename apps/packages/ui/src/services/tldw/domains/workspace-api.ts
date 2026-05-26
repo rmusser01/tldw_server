@@ -127,6 +127,7 @@ export type WorkspaceCapabilityServiceState =
   | "unknown"
   | "blocked"
   | "degraded"
+  | "external_provider_warning"
 
 export interface WorkspaceCapabilityService {
   state: WorkspaceCapabilityServiceState

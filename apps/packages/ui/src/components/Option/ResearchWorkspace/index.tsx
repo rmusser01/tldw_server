@@ -968,7 +968,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   })
   const [, setWorkspaceSourceStatus] =
     React.useState<WorkspaceSourceStatusListResponse | null>(null)
-  const [, setWorkspaceCapabilities] =
+  const [workspaceCapabilities, setWorkspaceCapabilities] =
     React.useState<WorkspaceCapabilitiesResponse | null>(null)
   const [, setWorkspaceStatusProjectionLoading] = React.useState(false)
   const [workspaceStatusProjectionError, setWorkspaceStatusProjectionError] =
@@ -2653,6 +2653,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           statusGuardrailsEnabled={statusGuardrailsEnabled}
           contentWidthMode="full"
           researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+          workspaceCapabilities={workspaceCapabilities}
           researchWorkspaceCapabilitiesStale={isResearchWorkspaceCapabilitiesStale(
             researchWorkspaceCapabilities,
             researchWorkspaceCapabilitiesFetchedAt
@@ -3058,6 +3059,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                 statusGuardrailsEnabled={statusGuardrailsEnabled}
                 contentWidthMode={desktopChatContentWidthMode}
                 researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+                workspaceCapabilities={workspaceCapabilities}
                 researchWorkspaceCapabilitiesStale={isResearchWorkspaceCapabilitiesStale(
                   researchWorkspaceCapabilities,
                   researchWorkspaceCapabilitiesFetchedAt

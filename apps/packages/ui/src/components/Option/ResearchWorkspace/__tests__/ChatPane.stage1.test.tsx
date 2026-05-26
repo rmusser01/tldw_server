@@ -222,7 +222,9 @@ vi.mock("../undo-manager", () => ({
 
 vi.mock("../source-location-copy", () => ({
   getWorkspaceChatNoSourcesHint: () =>
-    "Select sources from the Sources pane, then ask questions."
+    "Select sources from the Sources pane, then ask questions.",
+  getWorkspaceChatSourcesExplainer: () =>
+    "Selected sources keep answers grounded in this workspace."
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -705,6 +707,47 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(
       screen.getByRole("button", { name: /Chat unavailable/i })
     ).toBeDisabled()
+  })
+
+  it("surfaces workspace service remediation inside the composer", () => {
+    renderChatPane({
+      workspaceCapabilities: {
+        workspace_id: "workspace-a",
+        workspace_kind: "research_workspace",
+        access_level: "owner",
+        source_summary: {
+          total: 1,
+          selected: 1,
+          queryable: 1,
+          partially_queryable: 0,
+          processing: 0,
+          failed: 0,
+          missing: 0
+        },
+        workspace_services: {
+          mcp: {
+            state: "needs_approval",
+            reason_code: "mcp_approval_required",
+            management_surface: "mcp_hub"
+          },
+          provider: {
+            state: "degraded",
+            reason_code: "external_provider_only",
+            management_surface: "model_settings"
+          }
+        },
+        allowed_actions: {}
+      }
+    })
+
+    expect(screen.getByTestId("workspace-capability-remediation")).toHaveTextContent(
+      "Workspace readiness"
+    )
+    expect(screen.getByText("Approve workspace tool use before running MCP actions.")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open MCP Hub" })).toHaveAttribute(
+      "href",
+      "/mcp-hub"
+    )
   })
 
   it("refreshes stale capability health before blocking a chat submit", async () => {

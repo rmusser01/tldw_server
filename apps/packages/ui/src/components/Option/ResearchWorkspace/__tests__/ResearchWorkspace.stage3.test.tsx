@@ -13,6 +13,7 @@ const {
   mockGetWorkspaceContext,
   mockGetWorkspaceSourcesStatus,
   mockGetWorkspaceCapabilities,
+  mockChatPaneProps,
   mockBgRequest
 } = vi.hoisted(() => ({
   mockGetMediaDetails: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockGetWorkspaceContext: vi.fn(),
   mockGetWorkspaceSourcesStatus: vi.fn(),
   mockGetWorkspaceCapabilities: vi.fn(),
+  mockChatPaneProps: [] as any[],
   mockBgRequest: vi.fn()
 }))
 
@@ -146,7 +148,10 @@ vi.mock("../SourcesPane", () => ({
 }))
 
 vi.mock("../ChatPane", () => ({
-  ChatPane: () => <div data-testid="workspace-chat-pane">Chat</div>
+  ChatPane: (props: any) => {
+    mockChatPaneProps.push(props)
+    return <div data-testid="workspace-chat-pane">Chat</div>
+  }
 }))
 
 vi.mock("../StudioPane", () => ({
@@ -322,6 +327,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     testState.sources = []
     testState.setSourceStatusByMediaId = vi.fn()
     testState.workspaceChatSessions = {}
+    mockChatPaneProps.length = 0
     testState.currentNote = {
       id: 7,
       title: "",
@@ -978,6 +984,27 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     await waitFor(() => {
       expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledWith("workspace-1")
       expect(mockGetWorkspaceCapabilities).toHaveBeenCalledWith("workspace-1")
+      expect(mockChatPaneProps.at(-1)?.workspaceCapabilities).toMatchObject({
+        workspace_id: "workspace-1",
+        workspace_services: expect.objectContaining({
+          mcp: expect.objectContaining({
+            state: "not_configured",
+            management_surface: "mcp_hub"
+          }),
+          acp: expect.objectContaining({
+            state: "not_configured",
+            management_surface: "acp_workspace"
+          }),
+          sandbox: expect.objectContaining({
+            state: "not_configured",
+            management_surface: "sandbox_settings"
+          }),
+          provider: expect.objectContaining({
+            state: "unknown",
+            management_surface: "model_settings"
+          })
+        })
+      })
     })
 
     await waitFor(() => {

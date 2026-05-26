@@ -24,6 +24,7 @@ import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key
 import { useWorkspaceStore } from "@/store/workspace"
 import { useStoreMessageOption } from "@/store/option"
 import type { Message } from "@/store/option"
+import type { WorkspaceCapabilitiesResponse } from "@/services/tldw/domains/workspace-api"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
 import { useMobile } from "@/hooks/useMediaQuery"
@@ -65,6 +66,7 @@ import {
   getWorkspaceChatSourcesExplainer
 } from "../source-location-copy"
 import { getWorkspaceChatSearchMessageId } from "../workspace-global-search"
+import { WorkspaceCapabilityRemediation } from "../WorkspaceCapabilityRemediation"
 import {
   getCapability,
   getCapabilityCopy,
@@ -1256,6 +1258,7 @@ interface ChatPaneProps {
   statusGuardrailsEnabled?: boolean
   contentWidthMode?: ChatPaneContentWidthMode
   researchWorkspaceCapabilities?: ResearchWorkspaceCapabilitiesResponse
+  workspaceCapabilities?: WorkspaceCapabilitiesResponse | null
   researchWorkspaceCapabilitiesStale?: boolean
   onRefreshResearchWorkspaceCapabilities?: () => Promise<ResearchWorkspaceCapabilitiesResponse>
 }
@@ -1265,6 +1268,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   statusGuardrailsEnabled = true,
   contentWidthMode = "comfortable",
   researchWorkspaceCapabilities,
+  workspaceCapabilities = null,
   researchWorkspaceCapabilitiesStale = false,
   onRefreshResearchWorkspaceCapabilities
 }) => {
@@ -3256,6 +3260,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             >
               {chatCapabilityMessage}
             </div>
+          )}
+          {statusGuardrailsEnabled && (
+            <WorkspaceCapabilityRemediation capabilities={workspaceCapabilities} />
           )}
           <SimpleChatInput
             onSubmit={handleSubmit}
