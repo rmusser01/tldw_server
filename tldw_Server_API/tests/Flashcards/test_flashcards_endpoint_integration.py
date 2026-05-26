@@ -2085,6 +2085,40 @@ def test_list_review_sessions_returns_sessions(
     assert [item["id"] for item in payload] == [session["id"]]
     assert payload[0]["status"] == "active"
     assert payload[0]["deck_id"] == deck_id
+    assert payload[0]["cards_reviewed"] == 0
+
+
+def test_list_review_sessions_defaults_null_cards_reviewed_to_zero(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+):
+    deck_id = flashcards_db.add_deck("Legacy Session Deck")
+    session = flashcards_db.get_or_create_flashcard_review_session(
+        deck_id=deck_id,
+        review_mode="due",
+        tag_filter=None,
+        scope_key=f"due:deck:{deck_id}",
+    )
+    flashcards_db.execute_query(
+        """
+        UPDATE flashcard_review_sessions
+           SET cards_reviewed = NULL
+         WHERE id = ?
+        """,
+        (session["id"],),
+        commit=True,
+    )
+
+    response = client_with_flashcards_db.get(
+        "/api/v1/flashcards/review-sessions",
+        params={"deck_id": deck_id},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["id"] for item in payload] == [session["id"]]
+    assert payload[0]["cards_reviewed"] == 0
 
 
 def test_list_review_sessions_returns_400_for_input_error(
@@ -2141,6 +2175,39 @@ def test_end_review_session_marks_session_completed(
     payload = response.json()
     assert payload["id"] == session["id"]
     assert payload["status"] == "completed"
+
+
+def test_end_review_session_defaults_null_cards_reviewed_to_zero(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+):
+    deck_id = flashcards_db.add_deck("Legacy End Session Deck")
+    session = flashcards_db.get_or_create_flashcard_review_session(
+        deck_id=deck_id,
+        review_mode="due",
+        tag_filter=None,
+        scope_key=f"due:deck:{deck_id}",
+    )
+    flashcards_db.execute_query(
+        """
+        UPDATE flashcard_review_sessions
+           SET cards_reviewed = NULL
+         WHERE id = ?
+        """,
+        (session["id"],),
+        commit=True,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/review-sessions/end",
+        json={"review_session_id": session["id"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == session["id"]
+    assert payload["cards_reviewed"] == 0
 
 
 def test_end_review_session_returns_404_for_conflict_error(

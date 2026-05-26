@@ -1821,6 +1821,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
       <div className="mt-4">
         <RecentStudySessions
           deckId={reviewDeckId ?? null}
+          decks={availableDecks}
           selectedSessionId={selectedStudySessionId}
           onOpenSession={(sessionId) => {
             setSelectedStudySessionId(sessionId)

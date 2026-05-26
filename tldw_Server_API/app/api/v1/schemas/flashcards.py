@@ -2,7 +2,7 @@ import json
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
@@ -416,6 +416,8 @@ class FlashcardReviewResponse(BaseModel):
 
 
 class FlashcardReviewSessionSummary(BaseModel):
+    """Public summary of a flashcard review session returned by history endpoints."""
+
     id: int
     deck_id: Optional[int] = None
     review_mode: str
@@ -425,7 +427,14 @@ class FlashcardReviewSessionSummary(BaseModel):
     started_at: Optional[str] = None
     last_activity_at: Optional[str] = None
     completed_at: Optional[str] = None
+    cards_reviewed: int = 0
     client_id: str
+
+    @field_validator("cards_reviewed", mode="before")
+    @classmethod
+    def _default_null_cards_reviewed(cls, value: Any) -> Any:
+        """Treat legacy NULL aggregate values as an empty completed-review count."""
+        return 0 if value is None else value
 
 
 class FlashcardNextReviewResponse(BaseModel):
