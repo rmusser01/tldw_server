@@ -134,6 +134,23 @@ async def _user() -> SimpleNamespace:
     return SimpleNamespace(id=1, username="testuser", email="test@example.com", roles=["admin"], is_admin=True)
 
 
+async def _provider_ready_service_capabilities(
+    *,
+    workspace_id: str,
+    user_id: int | str | None,
+) -> dict[str, Any]:
+    _ = (workspace_id, user_id)
+    return {
+        "workspace_services": {
+            "provider": {
+                "state": "available",
+                "reason_code": None,
+                "management_surface": "model_settings",
+            }
+        }
+    }
+
+
 def _install_overrides(
     app: Any,
     db: CharactersRAGDB,
@@ -210,7 +227,14 @@ def _media_db() -> _MediaPreviewDB:
 def test_workspace_context_combines_sources_readiness_capabilities_and_preview_refs(
     workspace_preview_app,
     workspace_preview_db,
+    monkeypatch,
 ):
+    monkeypatch.setattr(
+        workspaces_endpoint,
+        "collect_workspace_service_capabilities",
+        _provider_ready_service_capabilities,
+        raising=False,
+    )
     _install_overrides(workspace_preview_app, workspace_preview_db, _media_db())
     try:
         with TestClient(workspace_preview_app, raise_server_exceptions=False) as client:

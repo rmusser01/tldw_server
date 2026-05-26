@@ -117,6 +117,15 @@ async def _user() -> SimpleNamespace:
     return SimpleNamespace(id=1, username="testuser", email="test@example.com", roles=["admin"], is_admin=True)
 
 
+async def _empty_service_capabilities(
+    *,
+    workspace_id: str,
+    user_id: int | str | None,
+) -> dict[str, Any]:
+    _ = (workspace_id, user_id)
+    return {}
+
+
 def _install_overrides(
     app: Any,
     db: CharactersRAGDB,
@@ -208,9 +217,16 @@ def test_workspace_sources_status_reports_readiness_and_missing_media(
 def test_workspace_capabilities_fail_closed_without_queryable_sources(
     workspace_status_app,
     tmp_path,
+    monkeypatch,
 ):
     db = CharactersRAGDB(db_path=str(tmp_path / "empty-chacha.db"), client_id="user-1")
     db.upsert_workspace("ws-empty", "Empty Workspace")
+    monkeypatch.setattr(
+        workspaces_endpoint,
+        "collect_workspace_service_capabilities",
+        _empty_service_capabilities,
+        raising=False,
+    )
     _install_overrides(workspace_status_app, db, _MediaStatusDB({}))
     try:
         with TestClient(workspace_status_app, raise_server_exceptions=False) as client:
@@ -236,6 +252,118 @@ def test_workspace_capabilities_fail_closed_without_queryable_sources(
     assert payload["workspace_services"]["mcp"]["management_surface"] == "mcp_hub"
     assert payload["workspace_services"]["acp"]["state"] == "not_configured"
     assert payload["workspace_services"]["sandbox"]["state"] == "not_configured"
+
+
+@pytest.mark.integration
+def test_workspace_capabilities_reflect_service_capability_projection(
+    workspace_status_app,
+    workspace_status_db,
+    monkeypatch,
+):
+    media_db = _MediaStatusDB(
+        {
+            1: {
+                "id": 1,
+                "title": "Ready paper",
+                "type": "pdf",
+                "content": "Grounded evidence text.",
+                "chunking_status": "completed",
+                "vector_processing": 1,
+            },
+            2: {
+                "id": 2,
+                "title": "Indexing article",
+                "type": "web",
+                "content": "Extracted but still being indexed.",
+                "chunking_status": "completed",
+                "vector_processing": 0,
+            },
+        },
+        unvectorized={1, 2},
+    )
+
+    async def _service_capabilities(*, workspace_id: str, user_id: int | str | None) -> dict[str, Any]:
+        assert workspace_id == "ws-status"
+        assert user_id == 1
+        return {
+            "workspace_services": {
+                "mcp": {
+                    "state": "available",
+                    "reason_code": None,
+                    "management_surface": "mcp_hub",
+                },
+                "acp": {
+                    "state": "needs_approval",
+                    "reason_code": "acp_approval_required",
+                    "management_surface": "acp_workspace",
+                },
+                "sandbox": {
+                    "state": "blocked",
+                    "reason_code": "sandbox_runtime_unavailable",
+                    "management_surface": "sandbox_settings",
+                },
+                "provider": {
+                    "state": "degraded",
+                    "reason_code": "external_provider_only",
+                    "management_surface": "model_settings",
+                },
+            },
+            "allowed_actions": {
+                "run_mcp_tools": {"allowed": True, "reason_code": None},
+                "use_acp_agents": {
+                    "allowed": False,
+                    "reason_code": "acp_approval_required",
+                },
+                "use_sandbox": {
+                    "allowed": False,
+                    "reason_code": "sandbox_runtime_unavailable",
+                },
+            },
+        }
+
+    monkeypatch.setattr(
+        workspaces_endpoint,
+        "collect_workspace_service_capabilities",
+        _service_capabilities,
+        raising=False,
+    )
+    _install_overrides(workspace_status_app, workspace_status_db, media_db)
+    try:
+        with TestClient(workspace_status_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-status/capabilities")
+    finally:
+        _clear_overrides(workspace_status_app)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["workspace_services"]["mcp"] == {
+        "state": "available",
+        "reason_code": None,
+        "management_surface": "mcp_hub",
+    }
+    assert payload["allowed_actions"]["run_mcp_tools"] == {
+        "allowed": True,
+        "reason_code": None,
+    }
+    assert payload["workspace_services"]["acp"] == {
+        "state": "needs_approval",
+        "reason_code": "acp_approval_required",
+        "management_surface": "acp_workspace",
+    }
+    assert payload["allowed_actions"]["use_acp_agents"] == {
+        "allowed": False,
+        "reason_code": "acp_approval_required",
+    }
+    assert payload["workspace_services"]["sandbox"] == {
+        "state": "blocked",
+        "reason_code": "sandbox_runtime_unavailable",
+        "management_surface": "sandbox_settings",
+    }
+    assert payload["workspace_services"]["provider"] == {
+        "state": "degraded",
+        "reason_code": "external_provider_only",
+        "management_surface": "model_settings",
+    }
 
 
 @pytest.mark.integration
