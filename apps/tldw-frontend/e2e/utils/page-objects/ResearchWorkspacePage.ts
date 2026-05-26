@@ -65,7 +65,11 @@ export class ResearchWorkspacePage {
 
       const portals = document.querySelectorAll("nextjs-portal")
       portals.forEach((portal) => {
-        ;(portal as HTMLElement).style.pointerEvents = "none"
+        ;(portal as HTMLElement).style.setProperty(
+          "pointer-events",
+          "none",
+          "important"
+        )
       })
     })
   }
@@ -83,11 +87,30 @@ export class ResearchWorkspacePage {
     await this.disableNextJsPortalPointerInterception()
     try {
       await locator.click({ trial: true, timeout: 3_000 })
-    } catch {
+    } catch (error) {
+      if (String(error).includes("nextjs-portal")) {
+        await this.disableNextJsPortalPointerInterception()
+        await locator.evaluate((node) => {
+          ;(node as HTMLElement).click()
+        })
+        return
+      }
+
       await this.disableNextJsPortalPointerInterception()
       await locator.click({ trial: true, timeout: 3_000 })
     }
-    await locator.click()
+    try {
+      await locator.click({ timeout: 3_000 })
+    } catch (error) {
+      if (!String(error).includes("nextjs-portal")) {
+        throw error
+      }
+
+      await this.disableNextJsPortalPointerInterception()
+      await locator.evaluate((node) => {
+        ;(node as HTMLElement).click()
+      })
+    }
   }
 
   async goto(): Promise<void> {

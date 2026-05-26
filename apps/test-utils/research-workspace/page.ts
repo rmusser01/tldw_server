@@ -48,9 +48,30 @@ export class ResearchWorkspaceParityPage {
 
       const portals = document.querySelectorAll("nextjs-portal")
       portals.forEach((portal) => {
-        ;(portal as HTMLElement).style.pointerEvents = "none"
+        ;(portal as HTMLElement).style.setProperty(
+          "pointer-events",
+          "none",
+          "important"
+        )
       })
     })
+  }
+
+  private async clickControl(locator: Locator): Promise<void> {
+    await expect(locator).toBeVisible({ timeout: 10_000 })
+    await this.disablePortalPointerInterception()
+    try {
+      await locator.click({ timeout: 3_000 })
+    } catch (error) {
+      if (!String(error).includes("nextjs-portal")) {
+        throw error
+      }
+
+      await this.disablePortalPointerInterception()
+      await locator.evaluate((node) => {
+        ;(node as HTMLButtonElement).click()
+      })
+    }
   }
 
   private async dismissAssistantSetupBlockingModal(timeoutMs = 5_000): Promise<void> {
@@ -145,24 +166,21 @@ export class ResearchWorkspaceParityPage {
   async hideSourcesPane(): Promise<void> {
     await this.disablePortalPointerInterception()
     const hideButton = this.sourcesPanel.getByRole("button", { name: /hide sources/i })
-    await expect(hideButton).toBeVisible({ timeout: 10_000 })
-    await hideButton.click()
+    await this.clickControl(hideButton)
     await expect(this.sourcesPanel).toBeHidden({ timeout: 10_000 })
     await expect(this.restoreSourcesButton).toBeVisible({ timeout: 10_000 })
   }
 
   async restoreSourcesPane(): Promise<void> {
     await this.disablePortalPointerInterception()
-    await expect(this.restoreSourcesButton).toBeVisible({ timeout: 10_000 })
-    await this.restoreSourcesButton.click()
+    await this.clickControl(this.restoreSourcesButton)
     await expect(this.sourcesPanel).toBeVisible({ timeout: 10_000 })
   }
 
   async hideStudioPane(): Promise<void> {
     await this.disablePortalPointerInterception()
     const hideButton = this.studioPanel.getByRole("button", { name: /hide studio/i })
-    await expect(hideButton).toBeVisible({ timeout: 10_000 })
-    await hideButton.click()
+    await this.clickControl(hideButton)
     await expect(this.page.locator("#workspace-studio-panel")).toBeHidden({
       timeout: 10_000,
     })
@@ -171,8 +189,7 @@ export class ResearchWorkspaceParityPage {
 
   async restoreStudioPane(): Promise<void> {
     await this.disablePortalPointerInterception()
-    await expect(this.restoreStudioButton).toBeVisible({ timeout: 10_000 })
-    await this.restoreStudioButton.click()
+    await this.clickControl(this.restoreStudioButton)
     await expect(this.studioPanel).toBeVisible({ timeout: 10_000 })
   }
 
