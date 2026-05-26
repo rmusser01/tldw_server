@@ -1039,6 +1039,68 @@ describe("ImportExportTab import result details", () => {
     })
   })
 
+  it("shows an inline retryable recovery state after partial generated-card saves", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [
+        { front: "Card A", back: "Back A", tags: ["a"], model_type: "basic" },
+        { front: "Card B", back: "Back B", tags: ["b"], model_type: "basic" },
+        { front: "Card C", back: "Back C", tags: ["c"], model_type: "basic" }
+      ],
+      count: 3
+    })
+    const createCardMutateAsync = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("save failed"))
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      mutateAsync: createCardMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
+      target: { value: "Interleaved retry case" }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+
+    await waitFor(() => {
+      expect(generateMutateAsync).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
+
+    await waitFor(() => {
+      expect(createCardMutateAsync).toHaveBeenCalledTimes(3)
+    })
+    const status = screen.getByTestId("flashcards-generate-save-status")
+    expect(status).toHaveTextContent("Saved 2 cards; 1 failed.")
+    expect(status).toHaveTextContent(
+      "Only failed drafts remain below. Review them, then retry saving."
+    )
+    expect(status).toHaveAttribute("data-ds-component", "Alert")
+    expect(screen.getByTestId("flashcards-transfer-summary-last-action")).toHaveTextContent(
+      "Generate Flashcards · Saved 2 cards; 1 failed."
+    )
+    expect(screen.getByDisplayValue("Card B")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-retry"))
+
+    await waitFor(() => {
+      expect(createCardMutateAsync).toHaveBeenCalledTimes(4)
+    })
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue("Card B")).not.toBeInTheDocument()
+    })
+  })
+
   it("keeps generated drafts when all generated-card saves fail", async () => {
     const generateMutateAsync = vi.fn().mockResolvedValue({
       flashcards: [
@@ -1081,6 +1143,153 @@ describe("ImportExportTab import result details", () => {
 
     expect(screen.getByDisplayValue("Fail A")).toBeInTheDocument()
     expect(screen.getByDisplayValue("Fail B")).toBeInTheDocument()
+  })
+
+  it("shows an inline retryable recovery state when all generated-card saves fail", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [
+        { front: "Fail A", back: "Back A", tags: ["a"], model_type: "basic" },
+        { front: "Fail B", back: "Back B", tags: ["b"], model_type: "basic" }
+      ],
+      count: 2
+    })
+    const createCardMutateAsync = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("save failed"))
+      .mockRejectedValueOnce(new Error("save failed"))
+
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      mutateAsync: createCardMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
+      target: { value: "All fail retry case" }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+
+    await waitFor(() => {
+      expect(generateMutateAsync).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
+
+    await waitFor(() => {
+      expect(createCardMutateAsync).toHaveBeenCalledTimes(2)
+    })
+    const status = screen.getByTestId("flashcards-generate-save-status")
+    expect(status).toHaveTextContent("Failed to save generated cards.")
+    expect(status).toHaveTextContent(
+      "All generated drafts are still available. Check the deck and draft content, then retry saving."
+    )
+    expect(screen.getByTestId("flashcards-transfer-summary-last-action")).toHaveTextContent(
+      "Generate Flashcards · Failed to save generated cards."
+    )
+    expect(screen.getByTestId("flashcards-generate-save-retry")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("Fail A")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("Fail B")).toBeInTheDocument()
+  })
+
+  it("shows inline recovery when generated-card deck resolution fails", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [
+        { front: "Needs deck", back: "Back", tags: ["deck"], model_type: "basic" }
+      ],
+      count: 1
+    })
+    const createCardMutateAsync = vi.fn()
+
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      mutateAsync: createCardMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
+      target: { value: "Deck validation case" }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+
+    await waitFor(() => {
+      expect(generateMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    fireEvent.change(screen.getByTestId("flashcards-generate-new-deck-name"), {
+      target: { value: " " }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("flashcards-generate-save-status")).toHaveTextContent(
+        "Enter a deck name."
+      )
+    })
+    expect(messageSpies.error).toHaveBeenCalledWith("Enter a deck name.")
+    expect(createCardMutateAsync).not.toHaveBeenCalled()
+    expect(screen.getByTestId("flashcards-transfer-summary-last-action")).toHaveTextContent(
+      "Generate Flashcards · Enter a deck name."
+    )
+    expect(screen.getByDisplayValue("Needs deck")).toBeInTheDocument()
+  })
+
+  it("clears retryable generated-card save status when the remaining draft is removed", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [
+        { front: "Saved draft", back: "Back A", tags: ["a"], model_type: "basic" },
+        { front: "Remaining draft", back: "Back B", tags: ["b"], model_type: "basic" }
+      ],
+      count: 2
+    })
+    const createCardMutateAsync = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("save failed"))
+
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      mutateAsync: createCardMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
+      target: { value: "Remove retry case" }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+
+    await waitFor(() => {
+      expect(generateMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("flashcards-generate-save-status")).toHaveTextContent(
+        "Saved 1 cards; 1 failed."
+      )
+    })
+    expect(screen.getByDisplayValue("Remaining draft")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue("Remaining draft")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("flashcards-generate-save-status")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("flashcards-generate-save-retry")).not.toBeInTheDocument()
+    })
   })
 
   it("attaches source attribution when launched from deep-link intent", async () => {
