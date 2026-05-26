@@ -253,7 +253,9 @@ vi.mock("@/components/Common/FeatureEmptyState", () => ({
 
 vi.mock("../source-location-copy", () => ({
   getWorkspaceChatNoSourcesHint: () =>
-    "Select sources from the Sources pane, then ask questions."
+    "Select sources from the Sources pane, then ask questions.",
+  getWorkspaceChatSourcesExplainer: () =>
+    "Selected sources keep answers grounded in this workspace."
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({

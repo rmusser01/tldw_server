@@ -57,7 +57,17 @@ const workspaceSessions = new Map<
 >()
 
 const workspaceStoreState = {
-  sources: [] as Array<{ id: string; mediaId: number; title: string; type: string }>,
+  sources: [] as Array<{
+    id: string
+    mediaId: number
+    title: string
+    type: string
+    status?: "processing" | "ready" | "error"
+    statusMessage?: string
+  }>,
+  sourceFolders: [] as Array<{ id: string; parentFolderId: string | null }>,
+  sourceFolderMemberships: [] as Array<{ sourceId: string; folderId: string }>,
+  selectedSourceFolderIds: [] as string[],
   selectedSourceIds: [] as string[],
   getSelectedSources: () => [] as Array<{ id: string; title: string }>,
   getSelectedMediaIds: () => [] as number[],
@@ -282,6 +292,9 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     workspaceStoreState.workspaceId = "workspace-a"
     workspaceStoreState.workspaceChatReferenceId = "workspace-a"
     workspaceStoreState.sources = []
+    workspaceStoreState.sourceFolders = []
+    workspaceStoreState.sourceFolderMemberships = []
+    workspaceStoreState.selectedSourceFolderIds = []
     workspaceStoreState.selectedSourceIds = []
     workspaceStoreState.getSelectedSources = () => []
     workspaceStoreState.getSelectedMediaIds = () => []
@@ -383,6 +396,119 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(mockOnSubmit).not.toHaveBeenCalled()
     expect(mockSetRagMediaIds).not.toHaveBeenLastCalledWith(null)
     expect(textarea).toHaveValue("What evidence supports this?")
+  })
+
+  it("keeps selected processing sources visible while grounded mode waits for queryable sources", async () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-processing",
+        mediaId: 52,
+        title: "Processing Notebook Export",
+        type: "pdf",
+        status: "processing",
+        statusMessage: "Indexing"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-processing"]
+    workspaceStoreState.getSelectedSources = () => []
+    workspaceStoreState.getSelectedMediaIds = () => []
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => []
+
+    renderChatPane()
+
+    expect(screen.getByText("Processing Notebook Export")).toBeInTheDocument()
+    expect(screen.getByText("Processing")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Selected sources are not queryable yet. You can keep chatting generally while extraction and indexing finish."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "RAG mode" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "RAG mode" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    )
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith(null)
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    fireEvent.change(textarea, { target: { value: "Can you help me plan questions?" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => {
+      expect(mockOnSubmit).toHaveBeenCalledWith({
+        message: "Can you help me plan questions?",
+        image: ""
+      })
+    })
+  })
+
+  it("uses only queryable selected media ids while showing non-queryable selected sources", () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-ready",
+        mediaId: 42,
+        title: "Queryable Paper",
+        type: "pdf",
+        status: "ready"
+      },
+      {
+        id: "source-processing",
+        mediaId: 52,
+        title: "Processing Notebook Export",
+        type: "pdf",
+        status: "processing"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-ready", "source-processing"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-ready", title: "Queryable Paper" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+
+    renderChatPane()
+
+    expect(screen.getByText("Queryable Paper")).toBeInTheDocument()
+    expect(screen.getByText("Processing Notebook Export")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Grounded chat will use 1 queryable source. 1 selected source is still processing or failed."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "RAG mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith([42])
+  })
+
+  it("keeps selected failed sources visible without enabling grounded mode", () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-failed",
+        mediaId: 64,
+        title: "Failed Notebook Export",
+        type: "pdf",
+        status: "error",
+        statusMessage: "Extraction failed"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-failed"]
+    workspaceStoreState.getSelectedSources = () => []
+    workspaceStoreState.getSelectedMediaIds = () => []
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => []
+
+    renderChatPane()
+
+    expect(screen.getByText("Failed Notebook Export")).toBeInTheDocument()
+    expect(screen.getByText("Failed")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Selected sources are not queryable yet. You can keep chatting generally while extraction and indexing finish."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "RAG mode" })).toBeDisabled()
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith(null)
   })
 
   it("keeps the draft and selected-source RAG context after a recoverable chat failure", async () => {

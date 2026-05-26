@@ -12,7 +12,7 @@ describe("ChatPane input availability guard", () => {
       "disabled={isLoading || isPreparingContext || isChatUnavailable}"
     )
     expect(source).toContain(
-      "disabled={!value.trim() || isPreparingContext || isChatUnavailable}"
+      "isSendBlocked"
     )
   })
 })
