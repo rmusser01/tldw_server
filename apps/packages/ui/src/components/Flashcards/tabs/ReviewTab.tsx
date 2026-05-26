@@ -785,7 +785,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     )
   }, [activeCard?.uuid, lastReviewedCard, reviewedCount, message, t])
 
-  const renderUndoRatingAction = React.useCallback(() => {
+  const renderUndoRatingAction = () => {
     if (!showUndoButton || !lastReviewedCard) return null
     return (
       <div className="mt-3 pt-3 border-t border-border">
@@ -815,7 +815,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         </Button>
       </div>
     )
-  }, [handleUndoReview, lastReviewedCard, showUndoButton, t, undoCountdown])
+  }
 
   // Cleanup timeout and interval on unmount
   React.useEffect(() => {
@@ -1254,6 +1254,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
 
             <div className="relative">
               <FlashcardStudyAssistantPanel
+                key={activeCard.uuid}
                 cardUuid={activeCard.uuid}
                 threadVersion={assistantQuery.data?.thread.version ?? null}
                 messages={assistantQuery.data?.messages ?? []}

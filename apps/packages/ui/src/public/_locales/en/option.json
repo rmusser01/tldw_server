@@ -3302,6 +3302,39 @@
   "flashcards_reviewedThisSession": {
     "message": "{{count}} cards reviewed this session"
   },
+  "flashcards_recentStudySessionsTitle": {
+    "message": "Recent study sessions"
+  },
+  "flashcards_recentStudySessionsLoading": {
+    "message": "Loading recent study sessions..."
+  },
+  "flashcards_recentStudySessionsLoadFailed": {
+    "message": "Failed to load recent study sessions"
+  },
+  "flashcards_recentStudySessionsLoadFailedFallback": {
+    "message": "Failed to load recent study sessions."
+  },
+  "flashcards_recentStudySessionsRetry": {
+    "message": "Retry"
+  },
+  "flashcards_recentStudySessionsEmpty": {
+    "message": "No completed study sessions yet."
+  },
+  "flashcards_recentStudySessionsCompletedTag": {
+    "message": "Completed"
+  },
+  "flashcards_recentStudySessionsSessionNumber": {
+    "message": "Session #{{id}}"
+  },
+  "flashcards_recentStudySessionsDeckNumber": {
+    "message": "Deck {{id}}"
+  },
+  "flashcards_recentStudySessionsViewingCompleted": {
+    "message": "Viewing completed session"
+  },
+  "flashcards_recentStudySessionsViewCompleted": {
+    "message": "View completed session"
+  },
   "flashcards_dueNow": {
     "message": "Due now"
   },

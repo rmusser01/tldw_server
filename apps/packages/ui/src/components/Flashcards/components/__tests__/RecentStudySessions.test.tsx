@@ -6,6 +6,37 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RecentStudySessions } from "../RecentStudySessions"
 import { useRecentFlashcardReviewSessionsQuery } from "../../hooks"
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (
+      key: string,
+      defaultValueOrOptions?:
+        | string
+        | {
+            defaultValue?: string
+            [key: string]: unknown
+          }
+    ) => {
+      const interpolate = (
+        template: string,
+        values?: {
+          [key: string]: unknown
+        }
+      ) =>
+        template.replace(/\{\{\s*([^\s}]+)\s*\}\}/g, (_match, token: string) => {
+          const value = values?.[token]
+          return value == null ? "" : String(value)
+        })
+
+      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
+      if (defaultValueOrOptions?.defaultValue) {
+        return interpolate(defaultValueOrOptions.defaultValue, defaultValueOrOptions)
+      }
+      return key
+    }
+  })
+}))
+
 vi.mock("../../hooks", () => ({
   useRecentFlashcardReviewSessionsQuery: vi.fn()
 }))

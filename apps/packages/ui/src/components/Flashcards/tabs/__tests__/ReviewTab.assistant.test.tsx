@@ -365,6 +365,36 @@ describe("ReviewTab study assistant panel", () => {
     })
   })
 
+  it("stops voice capture and clears the transcript when the assistant is collapsed", () => {
+    const { rerender } = renderReviewTab()
+
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
+    fireEvent.click(screen.getByRole("button", { name: "Fact-check me" }))
+
+    expect(speechRecognitionState.start).toHaveBeenCalledTimes(1)
+    expect(screen.getByText("Confirm transcript")).toBeInTheDocument()
+
+    speechRecognitionState.isListening = true
+    speechRecognitionState.stop.mockClear()
+    speechRecognitionState.resetTranscript.mockClear()
+
+    rerender(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={1}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
+
+    expect(speechRecognitionState.stop).toHaveBeenCalledTimes(1)
+    expect(speechRecognitionState.resetTranscript).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText("Confirm transcript")).not.toBeInTheDocument()
+  })
+
   it("plays back assistant replies on demand", async () => {
     renderReviewTab()
 

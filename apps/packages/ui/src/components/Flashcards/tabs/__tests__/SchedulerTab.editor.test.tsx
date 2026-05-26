@@ -157,6 +157,30 @@ describe("SchedulerTab editor", () => {
     )
   })
 
+  it("reapplies the same requested deck when a new scheduler handoff arrives", async () => {
+    const { rerender } = render(
+      <SchedulerTab isActive initialDeckId={2} initialDeckHandoffKey="handoff-1" />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText("Chemistry Scheduler")).toBeInTheDocument()
+      expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("2, 20")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: /biology/i }))
+    await waitFor(() => {
+      expect(screen.getByText("Biology Scheduler")).toBeInTheDocument()
+      expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("1, 10")
+    })
+
+    rerender(<SchedulerTab isActive initialDeckId={2} initialDeckHandoffKey="handoff-2" />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Chemistry Scheduler")).toBeInTheDocument()
+      expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("2, 20")
+    })
+  })
+
   it("applies presets, copies another deck, and resets to defaults", async () => {
     updateDeckMock
       .mockResolvedValueOnce({

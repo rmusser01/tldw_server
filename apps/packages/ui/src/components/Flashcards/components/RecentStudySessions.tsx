@@ -1,5 +1,6 @@
 import React from "react"
 import { Button, Card, List, Space, Tag, Typography } from "antd"
+import { useTranslation } from "react-i18next"
 
 import { EmptyState } from "@/components/ui/feedback/EmptyState"
 import { LoadingState } from "@/components/ui/feedback/LoadingState"
@@ -23,6 +24,7 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
   onOpenSession,
   isActive
 }) => {
+  const { t } = useTranslation(["option"])
   const recentSessionsQuery = useRecentFlashcardReviewSessionsQuery(
     {
       deckId,
@@ -38,24 +40,37 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
   const errorMessage =
     recentSessionsQuery.error instanceof Error
       ? recentSessionsQuery.error.message
-      : "Failed to load recent study sessions."
+      : t("option:flashcards.recentStudySessionsLoadFailedFallback", {
+          defaultValue: "Failed to load recent study sessions."
+        })
 
   return (
-    <Card size="small" title="Recent study sessions">
+    <Card
+      size="small"
+      title={t("option:flashcards.recentStudySessionsTitle", {
+        defaultValue: "Recent study sessions"
+      })}
+    >
       {recentSessionsQuery.isLoading ? (
         <LoadingState
           mode="spinner"
           size="sm"
-          label="Loading recent study sessions..."
+          label={t("option:flashcards.recentStudySessionsLoading", {
+            defaultValue: "Loading recent study sessions..."
+          })}
         />
       ) : recentSessionsQuery.isError ? (
         <EmptyState
           variant="inline"
           size="sm"
-          title="Failed to load recent study sessions"
+          title={t("option:flashcards.recentStudySessionsLoadFailed", {
+            defaultValue: "Failed to load recent study sessions"
+          })}
           description={errorMessage}
           primaryAction={{
-            label: "Retry",
+            label: t("option:flashcards.recentStudySessionsRetry", {
+              defaultValue: "Retry"
+            }),
             onClick: () => void recentSessionsQuery.refetch()
           }}
         />
@@ -63,7 +78,9 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
         <EmptyState
           variant="inline"
           size="sm"
-          title="No completed study sessions yet."
+          title={t("option:flashcards.recentStudySessionsEmpty", {
+            defaultValue: "No completed study sessions yet."
+          })}
         />
       ) : (
         <List
@@ -74,9 +91,25 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
               <List.Item key={session.id}>
                 <Space direction="vertical" size={6} className="w-full">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Tag color="green">Completed</Tag>
-                    <Tag>Session #{session.id}</Tag>
-                    {session.deck_id != null ? <Tag>Deck {session.deck_id}</Tag> : null}
+                    <Tag color="green">
+                      {t("option:flashcards.recentStudySessionsCompletedTag", {
+                        defaultValue: "Completed"
+                      })}
+                    </Tag>
+                    <Tag>
+                      {t("option:flashcards.recentStudySessionsSessionNumber", {
+                        defaultValue: "Session #{{id}}",
+                        id: session.id
+                      })}
+                    </Tag>
+                    {session.deck_id != null ? (
+                      <Tag>
+                        {t("option:flashcards.recentStudySessionsDeckNumber", {
+                          defaultValue: "Deck {{id}}",
+                          id: session.deck_id
+                        })}
+                      </Tag>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Text type="secondary" className="text-xs">
@@ -87,8 +120,12 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
                       onClick={() => onOpenSession(session.id)}
                     >
                       {isSelected
-                        ? "Viewing completed session"
-                        : "View completed session"}
+                        ? t("option:flashcards.recentStudySessionsViewingCompleted", {
+                            defaultValue: "Viewing completed session"
+                          })
+                        : t("option:flashcards.recentStudySessionsViewCompleted", {
+                            defaultValue: "View completed session"
+                          })}
                     </Button>
                   </div>
                 </Space>

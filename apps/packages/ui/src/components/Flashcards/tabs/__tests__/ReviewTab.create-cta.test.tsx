@@ -37,6 +37,10 @@ const { settingsStore } = vi.hoisted(() => ({
   settingsStore: new Map<string, unknown>()
 }))
 
+const { navigateMock } = vi.hoisted(() => ({
+  navigateMock: vi.fn()
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -64,7 +68,7 @@ vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()
   return {
     ...actual,
-    useNavigate: () => vi.fn()
+    useNavigate: () => navigateMock
   }
 })
 
@@ -180,6 +184,8 @@ describe("ReviewTab create CTA visibility", () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     trackErrorRecoveryTelemetryMock.mockClear()
+    navigateMock.mockReset()
+    settingsStore.clear()
     Object.values(messageSpies).forEach((spy) => spy.mockReset())
     await clearSetting(FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING)
     await clearSetting(FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING)
@@ -608,7 +614,11 @@ describe("ReviewTab create CTA visibility", () => {
 
     fireEvent.click(screen.getByTestId("flashcards-review-practice-again"))
     expect(screen.getByTestId("flashcards-review-cram-tag")).toBeInTheDocument()
-    expect(screen.getByTestId("flashcards-review-open-scheduler")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("flashcards-review-open-scheduler"))
+
+    const schedulerRoute = navigateMock.mock.calls.at(-1)?.[0]
+    expect(schedulerRoute).toEqual(expect.stringContaining("tab=scheduler"))
+    expect(schedulerRoute).toEqual(expect.stringContaining("deck_id=11"))
   })
 
   it("distinguishes scheduled due cards from the available study queue", () => {

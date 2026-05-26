@@ -21,6 +21,7 @@ type EditorStatus = "idle" | "dirty" | "saving" | "saved" | "conflict"
 export interface SchedulerTabProps {
   isActive?: boolean
   initialDeckId?: number | null
+  initialDeckHandoffKey?: string | null
   onDirtyChange?: (dirty: boolean) => void
   discardSignal?: number
 }
@@ -48,6 +49,7 @@ const cloneDraft = (draft: SchedulerSettingsDraft): SchedulerSettingsDraft => ({
 export const SchedulerTab: React.FC<SchedulerTabProps> = ({
   isActive = false,
   initialDeckId = null,
+  initialDeckHandoffKey = null,
   onDirtyChange,
   discardSignal = 0
 }) => {
@@ -71,7 +73,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
   const [conflictReviewPromptSide, setConflictReviewPromptSide] =
     React.useState<Deck["review_prompt_side"] | null>(null)
   const [saveError, setSaveError] = React.useState<string | null>(null)
-  const appliedInitialDeckIdRef = React.useRef<number | null>(null)
+  const appliedInitialDeckHandoffKeyRef = React.useRef<string | null>(null)
 
   const allDecks = decksQuery.data ?? []
   const visibleDecks = React.useMemo(
@@ -85,12 +87,14 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
       return
     }
 
+    const deckHandoffKey =
+      initialDeckId != null ? (initialDeckHandoffKey ?? `initial:${initialDeckId}`) : null
     if (
-      initialDeckId != null &&
-      appliedInitialDeckIdRef.current !== initialDeckId &&
+      deckHandoffKey &&
+      appliedInitialDeckHandoffKeyRef.current !== deckHandoffKey &&
       allDecks.some((deck) => deck.id === initialDeckId)
     ) {
-      appliedInitialDeckIdRef.current = initialDeckId
+      appliedInitialDeckHandoffKeyRef.current = deckHandoffKey
       setSelectedDeckId(initialDeckId)
       return
     }
@@ -99,7 +103,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
     if (!stillExists) {
       setSelectedDeckId(visibleDecks[0]?.id ?? allDecks[0]?.id ?? null)
     }
-  }, [allDecks, initialDeckId, selectedDeckId, visibleDecks])
+  }, [allDecks, initialDeckHandoffKey, initialDeckId, selectedDeckId, visibleDecks])
 
   const activeDeck = React.useMemo(
     () => allDecks.find((deck) => deck.id === selectedDeckId) ?? null,

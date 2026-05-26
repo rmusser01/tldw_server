@@ -83,6 +83,16 @@ export const FlashcardsManager: React.FC = () => {
   const [reviewDeckId, setReviewDeckId] = React.useState<number | null | undefined>(
     currentStudyIntent?.deckId ?? undefined
   )
+  const schedulerHandoffDeckId =
+    currentTab === "scheduler" && currentStudyIntent?.deckId != null
+      ? currentStudyIntent.deckId
+      : (reviewDeckId ?? null)
+  const schedulerHandoffKey =
+    currentTab === "scheduler" && currentStudyIntent?.deckId != null
+      ? (location.key ?? `${location.pathname}:${location.search}:${location.hash}`)
+      : schedulerHandoffDeckId != null
+        ? `review:${schedulerHandoffDeckId}`
+        : null
   const [reviewOverrideCard, setReviewOverrideCard] = React.useState<Flashcard | null>(null)
   const [openCreateSignal, setOpenCreateSignal] = React.useState(0)
   const [shortcutsModalOpen, setShortcutsModalOpen] = React.useState(false)
@@ -291,7 +301,8 @@ export const FlashcardsManager: React.FC = () => {
             children: schedulerDisabled ? null : (
               <SchedulerTab
                 isActive={effectiveActiveTab === "scheduler"}
-                initialDeckId={reviewDeckId ?? currentStudyIntent?.deckId ?? null}
+                initialDeckId={schedulerHandoffDeckId}
+                initialDeckHandoffKey={schedulerHandoffKey}
                 onDirtyChange={setSchedulerDirty}
                 discardSignal={schedulerDiscardSignal}
               />

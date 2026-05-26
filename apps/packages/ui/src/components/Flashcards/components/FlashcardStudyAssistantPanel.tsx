@@ -345,6 +345,15 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
     setFactCheckTranscript(transcript)
   }, [factCheckOpen, isListening, transcript])
 
+  const closeFactCheckFlow = React.useCallback(() => {
+    if (isListening) {
+      stop()
+    }
+    setFactCheckOpen(false)
+    setFactCheckTranscript("")
+    resetTranscript()
+  }, [isListening, resetTranscript, stop])
+
   const reloadLatestContext = React.useCallback(async () => {
     if (!onReloadContext) return true
     setIsConflictRecovering(true)
@@ -427,8 +436,17 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
   }, [autoSubmitRequest, submitRequest])
 
   React.useEffect(() => {
-    setIsExpanded(defaultExpanded)
-  }, [cardUuid, defaultExpanded])
+    if (defaultExpanded) {
+      setIsExpanded(true)
+    }
+  }, [defaultExpanded])
+
+  const handleToggleExpanded = React.useCallback(() => {
+    if (isExpanded) {
+      closeFactCheckFlow()
+    }
+    setIsExpanded((current) => !current)
+  }, [closeFactCheckFlow, isExpanded])
 
   const handleQuickAction = React.useCallback(
     async (action: StudyAssistantAction) => {
@@ -471,22 +489,12 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
       input_modality: "voice_transcript"
     })
     if (outcome !== "success") return
-    if (isListening) {
-      stop()
-    }
-    setFactCheckOpen(false)
-    setFactCheckTranscript("")
-    resetTranscript()
-  }, [factCheckTranscript, isListening, resetTranscript, stop, submitRequest])
+    closeFactCheckFlow()
+  }, [closeFactCheckFlow, factCheckTranscript, submitRequest])
 
   const handleCancelFactCheck = React.useCallback(() => {
-    if (isListening) {
-      stop()
-    }
-    setFactCheckOpen(false)
-    setFactCheckTranscript("")
-    resetTranscript()
-  }, [isListening, resetTranscript, stop])
+    closeFactCheckFlow()
+  }, [closeFactCheckFlow])
 
   const handlePlayReply = React.useCallback(
     (content: string) => {
@@ -533,7 +541,7 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
         <Button
           size="small"
           type={isExpanded ? "default" : "primary"}
-          onClick={() => setIsExpanded((current) => !current)}
+          onClick={handleToggleExpanded}
           aria-expanded={isExpanded}
           data-testid="flashcards-study-assistant-toggle"
         >

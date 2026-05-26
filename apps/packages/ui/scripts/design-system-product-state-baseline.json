@@ -132,7 +132,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Flashcards/tabs/SchedulerTab.tsx:Alert#antd-alert-schedulertab-type-error-line-468-pghbza",
+    "id": "antd-product-state-import:src/components/Flashcards/tabs/SchedulerTab.tsx:Alert#antd-alert-schedulertab-type-error-line-472-1tez9d9",
     "path": "src/components/Flashcards/tabs/SchedulerTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
@@ -143,7 +143,7 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Flashcards/tabs/SchedulerTab.tsx:Alert#antd-alert-schedulertab-type-info-line-472-z2s9c7",
+    "id": "antd-product-state-import:src/components/Flashcards/tabs/SchedulerTab.tsx:Alert#antd-alert-schedulertab-type-info-line-476-xytukb",
     "path": "src/components/Flashcards/tabs/SchedulerTab.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
