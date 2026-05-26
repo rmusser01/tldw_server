@@ -65,13 +65,16 @@ vi.mock("../tabs", () => ({
       <button onClick={() => props.onReviewDeckChange(12)}>Select Deck 12</button>
       <button onClick={() => props.onReviewDeckChange(21)}>Select Deck 21</button>
       <button onClick={() => props.onNavigateToManageDeck?.(12)}>Route Manage Deck 12</button>
+      <button onClick={() => props.onNavigateToManageDeck?.(21)}>Route Manage Deck 21</button>
       <button onClick={() => props.onNavigateToSchedulerDeck?.(12)}>Route Scheduler Deck 12</button>
       <button onClick={() => props.onNavigateToExportDeck?.(12)}>Route Export Deck 12</button>
+      <button onClick={() => props.onNavigateToExportDeck?.(21)}>Route Export Deck 21</button>
       <span data-testid="mock-review-deck-id">{String(props.reviewDeckId ?? "")}</span>
     </div>
   ),
   ManageTab: (props: {
     onNavigateToImport: () => void
+    onReviewCard: (card: { deck_id: number }) => void
     openCreateSignal?: number
     initialDeckId?: number
     initialDeckHandoffKey?: string | null
@@ -79,6 +82,7 @@ vi.mock("../tabs", () => ({
   }) => (
     <div data-testid="mock-manage-tab">
       <button onClick={props.onNavigateToImport}>Route Import</button>
+      <button onClick={() => props.onReviewCard({ deck_id: 21 })}>Review Managed Card 21</button>
       <span data-testid="mock-open-create-signal">{String(props.openCreateSignal ?? 0)}</span>
       <span data-testid="mock-manage-initial-deck-id">{String(props.initialDeckId ?? "")}</span>
       <span data-testid="mock-manage-handoff-key">{String(props.initialDeckHandoffKey ?? "")}</span>
@@ -283,6 +287,76 @@ describe("FlashcardsManager consistency standards", () => {
 
     fireEvent.click(screen.getByText("Study"))
     fireEvent.click(screen.getByText("Select Deck 21"))
+    fireEvent.click(screen.getByText("Scheduler"))
+
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("21")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("review:21")
+  })
+
+  it("clears stale scheduler handoff when dashboard Manage changes the deck", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Route Scheduler Deck 12"))
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("12")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("scheduler:12:")
+
+    fireEvent.click(screen.getByText("Study"))
+    fireEvent.click(screen.getByText("Route Manage Deck 21"))
+    expect(screen.getByTestId("mock-manage-initial-deck-id")).toHaveTextContent("21")
+
+    fireEvent.click(screen.getByText("Scheduler"))
+
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("21")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("review:21")
+  })
+
+  it("clears stale scheduler handoff when Manage starts reviewing another deck", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Route Scheduler Deck 12"))
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("12")
+
+    fireEvent.click(screen.getByText("Manage"))
+    fireEvent.click(screen.getByText("Review Managed Card 21"))
+    expect(screen.getByTestId("mock-review-deck-id")).toHaveTextContent("21")
+
+    fireEvent.click(screen.getByText("Scheduler"))
+
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("21")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("review:21")
+  })
+
+  it("clears stale scheduler handoff when dashboard Export changes the deck", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Route Scheduler Deck 12"))
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("12")
+
+    fireEvent.click(screen.getByText("Study"))
+    fireEvent.click(screen.getByText("Route Export Deck 21"))
+    expect(screen.getByTestId("mock-export-initial-deck-id")).toHaveTextContent("21")
+
+    fireEvent.click(screen.getByText("Scheduler"))
+
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("21")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("review:21")
+  })
+
+  it("clears stale scheduler handoff when route params change the Study deck", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    const { rerender } = render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Route Scheduler Deck 12"))
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("12")
+
+    window.history.replaceState({}, "", "/flashcards?tab=review&deck_id=21")
+    mocks.locationKey = "review-deck-21"
+    rerender(<FlashcardsManager />)
+    expect(screen.getByTestId("mock-review-deck-id")).toHaveTextContent("21")
+
     fireEvent.click(screen.getByText("Scheduler"))
 
     expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("21")

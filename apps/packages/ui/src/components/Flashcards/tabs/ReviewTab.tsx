@@ -235,8 +235,12 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     localOverrideCard ??
     reviewOverrideCard ??
     (reviewMode === "cram" ? cramQueueCard : reviewQuery.data)
+  const isReviewCardLoading =
+    reviewMode === "due" && (reviewQuery.isLoading || reviewQuery.isFetching)
+  const isCramQueueLoading =
+    reviewMode === "cram" && (cramQueueQuery.isLoading || cramQueueQuery.isFetching)
   const deckDashboardAnalyticsQuery = useReviewAnalyticsSummaryQuery(null, {
-    enabled: isActive && !activeCard,
+    enabled: isActive && !activeCard && !isReviewCardLoading && !isCramQueueLoading,
     ...(directPathVisibilityOptions ?? {})
   })
   const assistantQuery = useFlashcardAssistantQuery(activeCard?.uuid, {

@@ -167,4 +167,29 @@ describe("DeckStudyDashboard", () => {
 
     expect(container).toBeEmptyDOMElement()
   })
+
+  it("handles missing deck lists and deck names without crashing", () => {
+    render(
+      <DeckStudyDashboard
+        decks={null as unknown as Deck[]}
+        deckProgress={[
+          {
+            deck_id: 99,
+            deck_name: undefined,
+            total: 4,
+            new: 1,
+            learning: 1,
+            due: 0,
+            mature: 2
+          } as unknown as FlashcardDeckProgress
+        ]}
+        onReviewDeck={() => {}}
+        onCramDeck={() => {}}
+        onManageDeck={() => {}}
+      />
+    )
+
+    expect(screen.getByText("Deck 99")).toBeInTheDocument()
+    expect(screen.getByText("Review 2 ready")).toBeInTheDocument()
+  })
 })

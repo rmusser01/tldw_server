@@ -493,6 +493,34 @@ describe("ReviewTab create CTA visibility", () => {
     expect(onNavigateToExportDeck).toHaveBeenCalledWith(11)
   })
 
+  it("does not fetch dashboard analytics while the review card query is loading", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: null,
+      isLoading: true,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(useReviewAnalyticsSummaryQuery).toHaveBeenCalledWith(11, undefined)
+    expect(useReviewAnalyticsSummaryQuery).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ enabled: false })
+    )
+  })
+
   it("force-shows the addressed workspace deck without widening the visible deck list", () => {
     vi.mocked(useDecksQuery).mockImplementation((params: any) => ({
       data: params?.includeWorkspaceItems

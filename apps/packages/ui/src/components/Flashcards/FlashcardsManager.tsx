@@ -116,6 +116,18 @@ export const FlashcardsManager: React.FC = () => {
     deckHandoffCounterRef.current += 1
     return `${prefix}:${deckId}:${deckHandoffCounterRef.current}`
   }, [])
+  const clearDeckHandoffs = React.useCallback(() => {
+    setManageDeckHandoff(null)
+    setSchedulerDeckHandoff(null)
+    setExportDeckHandoff(null)
+  }, [])
+  const applyReviewDeckChange = React.useCallback(
+    (deckId: number | null | undefined) => {
+      setReviewDeckId(deckId)
+      clearDeckHandoffs()
+    },
+    [clearDeckHandoffs]
+  )
 
   // Listen for "?" key to open keyboard shortcuts modal
   React.useEffect(() => {
@@ -147,32 +159,26 @@ export const FlashcardsManager: React.FC = () => {
       setActiveTab(nextTab)
     }
     if (currentStudyIntent?.deckId !== undefined) {
-      setReviewDeckId(currentStudyIntent.deckId ?? undefined)
+      applyReviewDeckChange(currentStudyIntent.deckId ?? undefined)
     }
-  }, [currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
+  }, [applyReviewDeckChange, currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
 
   const handleReviewCard = React.useCallback(
     (card: Flashcard) => {
-      setReviewDeckId(card.deck_id ?? undefined)
+      applyReviewDeckChange(card.deck_id ?? undefined)
       setReviewOverrideCard(card)
       setActiveTab("review")
     },
-    []
+    [applyReviewDeckChange]
   )
 
   const routeToCreateEntryPoint = React.useCallback(() => {
     setActiveTab("cards")
     setOpenCreateSignal((prev) => prev + 1)
   }, [])
-  const handleReviewDeckChange = React.useCallback((deckId: number | null | undefined) => {
-    setReviewDeckId(deckId)
-    setManageDeckHandoff(null)
-    setSchedulerDeckHandoff(null)
-    setExportDeckHandoff(null)
-  }, [])
   const navigateToManageDeck = React.useCallback(
     (deckId: number) => {
-      setReviewDeckId(deckId)
+      applyReviewDeckChange(deckId)
       setManageDeckHandoff({
         deckId,
         key: nextDeckHandoffKey("manage", deckId),
@@ -180,29 +186,29 @@ export const FlashcardsManager: React.FC = () => {
       })
       setActiveTab("cards")
     },
-    [currentStudyIntent?.forceShowWorkspaceItems, nextDeckHandoffKey]
+    [applyReviewDeckChange, currentStudyIntent?.forceShowWorkspaceItems, nextDeckHandoffKey]
   )
   const navigateToSchedulerDeck = React.useCallback(
     (deckId: number) => {
-      setReviewDeckId(deckId)
+      applyReviewDeckChange(deckId)
       setSchedulerDeckHandoff({
         deckId,
         key: nextDeckHandoffKey("scheduler", deckId)
       })
       setActiveTab("scheduler")
     },
-    [nextDeckHandoffKey]
+    [applyReviewDeckChange, nextDeckHandoffKey]
   )
   const navigateToExportDeck = React.useCallback(
     (deckId: number) => {
-      setReviewDeckId(deckId)
+      applyReviewDeckChange(deckId)
       setExportDeckHandoff({
         deckId,
         key: nextDeckHandoffKey("export", deckId)
       })
       setActiveTab("importExport")
     },
-    [nextDeckHandoffKey]
+    [applyReviewDeckChange, nextDeckHandoffKey]
   )
 
   const quizCtaRoute = React.useMemo(() => {
@@ -317,7 +323,7 @@ export const FlashcardsManager: React.FC = () => {
                 onNavigateToCreate={routeToCreateEntryPoint}
                 onNavigateToImport={() => setActiveTab("importExport")}
                 reviewDeckId={reviewDeckId}
-                onReviewDeckChange={handleReviewDeckChange}
+                onReviewDeckChange={applyReviewDeckChange}
                 reviewOverrideCard={reviewOverrideCard}
                 onClearOverride={() => setReviewOverrideCard(null)}
                 isActive={effectiveActiveTab === "review"}

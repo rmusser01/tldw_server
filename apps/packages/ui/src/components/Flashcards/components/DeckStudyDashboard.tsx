@@ -8,7 +8,7 @@ import type { Deck, FlashcardDeckProgress } from "@/services/flashcards"
 const { Text } = Typography
 
 export type DeckStudyDashboardProps = {
-  decks: Deck[]
+  decks?: Deck[] | null
   deckProgress?: FlashcardDeckProgress[] | null
   selectedDeckId?: number | null
   isLoading?: boolean
@@ -28,22 +28,29 @@ const asCount = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0
 
 const buildRows = (
-  decks: Deck[],
+  decks: Deck[] | null | undefined,
   deckProgress: FlashcardDeckProgress[] | null | undefined
 ): DeckStudyRow[] => {
-  const deckNamesById = new Map(decks.map((deck) => [deck.id, deck.name]))
+  const deckNamesById = new Map((decks ?? []).map((deck) => [deck.id, deck.name]))
   return [...(deckProgress ?? [])]
     .filter((deck) => asCount(deck.total) > 0)
-    .map((deck) => ({
-      ...deck,
-      new: asCount(deck.new),
-      learning: asCount(deck.learning),
-      due: asCount(deck.due),
-      mature: asCount(deck.mature),
-      total: asCount(deck.total),
-      deckName: deckNamesById.get(deck.deck_id) ?? deck.deck_name,
-      readyCount: asCount(deck.due) + asCount(deck.learning) + asCount(deck.new)
-    }))
+    .map((deck) => {
+      const deckName =
+        deckNamesById.get(deck.deck_id) ??
+        (typeof deck.deck_name === "string" && deck.deck_name.trim()
+          ? deck.deck_name
+          : `Deck ${deck.deck_id}`)
+      return {
+        ...deck,
+        new: asCount(deck.new),
+        learning: asCount(deck.learning),
+        due: asCount(deck.due),
+        mature: asCount(deck.mature),
+        total: asCount(deck.total),
+        deckName,
+        readyCount: asCount(deck.due) + asCount(deck.learning) + asCount(deck.new)
+      }
+    })
     .sort((left, right) => {
       if (right.readyCount !== left.readyCount) return right.readyCount - left.readyCount
       if (right.due !== left.due) return right.due - left.due
