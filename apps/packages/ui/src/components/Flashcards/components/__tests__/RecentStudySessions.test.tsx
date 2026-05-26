@@ -6,6 +6,37 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RecentStudySessions } from "../RecentStudySessions"
 import { useRecentFlashcardReviewSessionsQuery } from "../../hooks"
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (
+      key: string,
+      defaultValueOrOptions?:
+        | string
+        | {
+            defaultValue?: string
+            [key: string]: unknown
+          }
+    ) => {
+      const interpolate = (
+        template: string,
+        values?: {
+          [key: string]: unknown
+        }
+      ) =>
+        template.replace(/\{\{\s*([^\s}]+)\s*\}\}/g, (_match, token: string) => {
+          const value = values?.[token]
+          return value == null ? "" : String(value)
+        })
+
+      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
+      if (defaultValueOrOptions?.defaultValue) {
+        return interpolate(defaultValueOrOptions.defaultValue, defaultValueOrOptions)
+      }
+      return key
+    }
+  })
+}))
+
 vi.mock("../../hooks", () => ({
   useRecentFlashcardReviewSessionsQuery: vi.fn()
 }))
@@ -89,11 +120,24 @@ describe("RecentStudySessions", () => {
     )
     expect(screen.getByText("Recent study sessions")).toBeInTheDocument()
     expect(screen.getByText("Completed")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Reopen snapshot for session 81/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View completed session" })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: /Reopen snapshot for session 81/i }))
+    fireEvent.click(screen.getByRole("button", { name: "View completed session" }))
 
     expect(sessionsMock).toHaveBeenCalledWith(81)
+  })
+
+  it("labels the selected row as a completed session snapshot", () => {
+    render(
+      <RecentStudySessions
+        deckId={12}
+        selectedSessionId={81}
+        onOpenSession={sessionsMock}
+        isActive
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Viewing completed session" })).toBeInTheDocument()
   })
 
   it("shows a retryable error state when loading fails", () => {

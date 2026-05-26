@@ -85,6 +85,7 @@ interface FlashcardStudyAssistantPanelProps {
     token: number
     request: StudyAssistantRespondRequest
   } | null
+  defaultExpanded?: boolean
 }
 
 type SubmitOutcome = "success" | "conflict" | "error"
@@ -218,7 +219,8 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
   isResponding = false,
   onReloadContext,
   onRespond,
-  autoSubmitRequest = null
+  autoSubmitRequest = null,
+  defaultExpanded = false
 }) => {
   const { t } = useTranslation(["option", "common"])
   const inRouterContext = useInRouterContext()
@@ -260,6 +262,7 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
   const [followUpText, setFollowUpText] = React.useState("")
   const [factCheckTranscript, setFactCheckTranscript] = React.useState("")
   const [factCheckOpen, setFactCheckOpen] = React.useState(false)
+  const [isExpanded, setIsExpanded] = React.useState(defaultExpanded)
   const lastAutoSubmitTokenRef = React.useRef<number | null>(null)
   const resetTranscriptRef = React.useRef(resetTranscript)
   const assistantWarningMessage = assistantError ?? classifiedQueryError
@@ -342,6 +345,15 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
     setFactCheckTranscript(transcript)
   }, [factCheckOpen, isListening, transcript])
 
+  const closeFactCheckFlow = React.useCallback(() => {
+    if (isListening) {
+      stop()
+    }
+    setFactCheckOpen(false)
+    setFactCheckTranscript("")
+    resetTranscript()
+  }, [isListening, resetTranscript, stop])
+
   const reloadLatestContext = React.useCallback(async () => {
     if (!onReloadContext) return true
     setIsConflictRecovering(true)
@@ -419,8 +431,22 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
     if (!autoSubmitRequest) return
     if (lastAutoSubmitTokenRef.current === autoSubmitRequest.token) return
     lastAutoSubmitTokenRef.current = autoSubmitRequest.token
+    setIsExpanded(true)
     void submitRequest(autoSubmitRequest.request)
   }, [autoSubmitRequest, submitRequest])
+
+  React.useEffect(() => {
+    if (defaultExpanded) {
+      setIsExpanded(true)
+    }
+  }, [defaultExpanded])
+
+  const handleToggleExpanded = React.useCallback(() => {
+    if (isExpanded) {
+      closeFactCheckFlow()
+    }
+    setIsExpanded((current) => !current)
+  }, [closeFactCheckFlow, isExpanded])
 
   const handleQuickAction = React.useCallback(
     async (action: StudyAssistantAction) => {
@@ -463,22 +489,12 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
       input_modality: "voice_transcript"
     })
     if (outcome !== "success") return
-    if (isListening) {
-      stop()
-    }
-    setFactCheckOpen(false)
-    setFactCheckTranscript("")
-    resetTranscript()
-  }, [factCheckTranscript, isListening, resetTranscript, stop, submitRequest])
+    closeFactCheckFlow()
+  }, [closeFactCheckFlow, factCheckTranscript, submitRequest])
 
   const handleCancelFactCheck = React.useCallback(() => {
-    if (isListening) {
-      stop()
-    }
-    setFactCheckOpen(false)
-    setFactCheckTranscript("")
-    resetTranscript()
-  }, [isListening, resetTranscript, stop])
+    closeFactCheckFlow()
+  }, [closeFactCheckFlow])
 
   const handlePlayReply = React.useCallback(
     (content: string) => {
@@ -521,6 +537,23 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
     <Card
       size="small"
       data-testid="flashcards-review-study-assistant"
+      extra={
+        <Button
+          size="small"
+          type={isExpanded ? "default" : "primary"}
+          onClick={handleToggleExpanded}
+          aria-expanded={isExpanded}
+          data-testid="flashcards-study-assistant-toggle"
+        >
+          {isExpanded
+            ? t("option:flashcards.studyAssistantCollapse", {
+                defaultValue: "Hide assistant"
+              })
+            : t("option:flashcards.studyAssistantExpand", {
+                defaultValue: "Open assistant"
+              })}
+        </Button>
+      }
       title={
         <div className="flex items-center gap-2">
           <Sparkles className="size-4 text-primary" aria-hidden="true" />
@@ -532,235 +565,251 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
         </div>
       }
     >
-      <Space orientation="vertical" size={12} className="w-full">
-        {(assistantWarningMessage || isError) && (
-          <Alert
-            variant="warning"
-            title={assistantUnavailableTitle}
-          >
-            {assistantWarningMessage}
-          </Alert>
-        )}
-        {conflictRequest && (
-          <div className="rounded border border-amber-300 bg-amber-50 p-3">
-            <div className="font-medium">
-              {t("option:flashcards.studyAssistantConflictTitle", {
-                defaultValue: "Conversation changed elsewhere."
-              })}
-            </div>
-            <div className="text-sm text-text-muted">
-              {t("option:flashcards.studyAssistantConflictDescription", {
-                defaultValue: "Reload the latest thread or retry your request against the updated conversation."
-              })}
-            </div>
-            <Space className="mt-3">
-              <Button
-                size="small"
-                onClick={() => void handleReloadLatest()}
-                loading={isConflictRecovering}
-              >
-                {t("option:flashcards.studyAssistantReloadLatest", {
-                  defaultValue: "Reload latest"
-                })}
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                onClick={() => void handleRetryConflict()}
-                loading={isResponding}
-              >
-                {retryLabel}
-              </Button>
-            </Space>
-          </div>
-        )}
-        <div className="flex flex-wrap gap-2">
-          {resolvedActions.includes("explain") && (
-            <Button
-              onClick={() => void handleQuickAction("explain")}
-              loading={isResponding || isConflictRecovering}
-              icon={<Lightbulb className="size-4" />}
+      {!isExpanded ? (
+        <Space orientation="vertical" size={8} className="w-full">
+          <Text type="secondary">
+            {t("option:flashcards.studyAssistantCollapsedPrompt", {
+              defaultValue: "Need help understanding this card?"
+            })}
+          </Text>
+          <Text type="secondary" className="text-xs">
+            {t("option:flashcards.studyAssistantCollapsedDescription", {
+              defaultValue:
+                "Open the assistant when you want an explanation, mnemonic, or fact-check without leaving review."
+            })}
+          </Text>
+        </Space>
+      ) : (
+        <Space orientation="vertical" size={12} className="w-full">
+          {(assistantWarningMessage || isError) && (
+            <Alert
+              variant="warning"
+              title={assistantUnavailableTitle}
             >
-              {t("option:flashcards.studyAssistantExplain", {
-                defaultValue: ACTION_LABELS.explain
-              })}
-            </Button>
+              {assistantWarningMessage}
+            </Alert>
           )}
-          {resolvedActions.includes("mnemonic") && (
-            <Button
-              onClick={() => void handleQuickAction("mnemonic")}
-              loading={isResponding || isConflictRecovering}
-            >
-              {t("option:flashcards.studyAssistantMnemonic", {
-                defaultValue: ACTION_LABELS.mnemonic
-              })}
-            </Button>
-          )}
-          {supported && resolvedActions.includes("fact_check") && (
-            <Button
-              onClick={() => void handleQuickAction("fact_check")}
-              loading={isResponding || isConflictRecovering}
-            >
-              {t("option:flashcards.studyAssistantFactCheck", {
-                defaultValue: ACTION_LABELS.fact_check
-              })}
-            </Button>
-          )}
-        </div>
-        {factCheckOpen && (
-          <VoiceTranscriptComposer
-            transcript={factCheckTranscript}
-            isListening={isListening}
-            supported={supported}
-            isSubmitting={isResponding || isConflictRecovering}
-            onTranscriptChange={setFactCheckTranscript}
-            onStartListening={() => start()}
-            onStopListening={stop}
-            onCancel={handleCancelFactCheck}
-            onSubmit={() => void handleSubmitFactCheck()}
-          />
-        )}
-        {resolvedActions.includes("follow_up") || resolvedActions.includes("freeform") ? (
-          <div className="rounded border border-border bg-surface p-3">
-            <Space orientation="vertical" size={8} className="w-full">
-              <Text strong>
-                {t("option:flashcards.studyAssistantChatPrompt", {
-                  defaultValue: "Ask a follow-up"
+          {conflictRequest && (
+            <div className="rounded border border-amber-300 bg-amber-50 p-3">
+              <div className="font-medium">
+                {t("option:flashcards.studyAssistantConflictTitle", {
+                  defaultValue: "Conversation changed elsewhere."
                 })}
-              </Text>
-              <Input.TextArea
-                aria-label={t("option:flashcards.studyAssistantChatInput", {
-                  defaultValue: "Ask the study assistant"
+              </div>
+              <div className="text-sm text-text-muted">
+                {t("option:flashcards.studyAssistantConflictDescription", {
+                  defaultValue: "Reload the latest thread or retry your request against the updated conversation."
                 })}
-                value={followUpText}
-                onChange={(event) => setFollowUpText(event.target.value)}
-                rows={3}
-                placeholder={t("option:flashcards.studyAssistantChatPlaceholder", {
-                  defaultValue: "Ask for clarification, examples, or a simpler explanation."
-                })}
-              />
-              <div className="flex justify-end">
+              </div>
+              <Space className="mt-3">
                 <Button
-                  type="primary"
-                  icon={<MessageSquareText className="size-4" />}
-                  loading={isResponding || isConflictRecovering}
-                  disabled={!followUpText.trim()}
-                  onClick={() => void handleSubmitFollowUp()}
+                  size="small"
+                  onClick={() => void handleReloadLatest()}
+                  loading={isConflictRecovering}
                 >
-                  {t("option:flashcards.studyAssistantChatSend", {
-                    defaultValue: ACTION_LABELS.freeform
+                  {t("option:flashcards.studyAssistantReloadLatest", {
+                    defaultValue: "Reload latest"
                   })}
                 </Button>
-              </div>
-            </Space>
-          </div>
-        ) : null}
-        {(remediationContext.supportingQuote || remediationContext.deepDiveTarget) && (
-          <div
-            className="rounded border border-border bg-surface p-3"
-            data-testid="flashcards-study-assistant-remediation"
-          >
-            <Space orientation="vertical" size={8} className="w-full">
-              <Text strong>{remediationLabel}</Text>
-              {remediationContext.supportingQuote && (
-                <div className="rounded border border-border/70 bg-background p-3">
-                  <Text type="secondary" className="mb-1 block text-xs uppercase tracking-wide">
-                    {t("option:flashcards.studyAssistantSupportingQuote", {
-                      defaultValue: "Supporting quote"
-                    })}
-                  </Text>
-                  <Text className="block text-sm text-text">
-                    “{remediationContext.supportingQuote}”
-                  </Text>
-                </div>
-              )}
-              {remediationContext.deepDiveTarget?.route ? (
-                remediationContext.deepDiveTarget.route.startsWith("/") && inRouterContext ? (
-                  <RouterLink
-                    to={remediationContext.deepDiveTarget.route}
-                    className="text-sm text-primary hover:text-primary/80"
-                  >
-                    {deepDiveLabel}
-                  </RouterLink>
-                ) : (
-                  <Typography.Link
-                    href={remediationContext.deepDiveTarget.route}
-                    className="text-sm"
-                  >
-                    {deepDiveLabel}
-                  </Typography.Link>
-                )
-              ) : null}
-            </Space>
-          </div>
-        )}
-        <div>
-          <Title level={5} className="!mb-2">
-            {t("option:flashcards.studyAssistantHistory", {
-              defaultValue: "Session"
-            })}
-          </Title>
-          {isLoading ? (
-            <Text type="secondary">
-              {t("option:flashcards.studyAssistantLoading", {
-                defaultValue: "Loading assistant history..."
-              })}
-            </Text>
-          ) : displayedMessages.length ? (
-            <div className="flex flex-col gap-3">
-              {displayedMessages.map((message) => (
-                <div
-                  key={message.id}
-                  className="rounded border border-border bg-surface p-3"
+                <Button
+                  size="small"
+                  type="primary"
+                  onClick={() => void handleRetryConflict()}
+                  loading={isResponding}
                 >
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <Space size={8}>
-                      <Tag color={message.role === "assistant" ? "blue" : "default"}>
-                        {message.role === "assistant"
-                          ? t("option:flashcards.studyAssistantRoleAssistant", {
-                              defaultValue: "Assistant"
-                            })
-                          : t("option:flashcards.studyAssistantRoleUser", {
-                              defaultValue: "You"
-                            })}
-                      </Tag>
-                      <Text type="secondary" className="text-xs">
-                        {t(`option:flashcards.studyAssistantAction.${message.action_type}`, {
-                          defaultValue: ACTION_LABELS[message.action_type]
-                        })}
-                      </Text>
-                    </Space>
-                    {message.role === "assistant" && (
-                      <Button
-                        size="small"
-                        icon={<Volume2 className="size-4" />}
-                        loading={isSpeaking}
-                        onClick={() => handlePlayReply(message.content)}
-                      >
-                        {t("option:flashcards.studyAssistantPlayReply", {
-                          defaultValue: "Play reply"
-                        })}
-                      </Button>
-                    )}
-                  </div>
-                  <MarkdownWithBoundary
-                    content={message.content}
-                    size="sm"
-                    className="prose-headings:!text-text prose-p:!text-text prose-li:!text-text prose-strong:!text-text"
-                  />
-                </div>
-              ))}
+                  {retryLabel}
+                </Button>
+              </Space>
             </div>
-          ) : (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={t("option:flashcards.studyAssistantEmpty", {
-                defaultValue: "Use the assistant to explain or check this card without leaving review mode."
-              })}
+          )}
+          <div className="flex flex-wrap gap-2">
+            {resolvedActions.includes("explain") && (
+              <Button
+                onClick={() => void handleQuickAction("explain")}
+                loading={isResponding || isConflictRecovering}
+                icon={<Lightbulb className="size-4" />}
+              >
+                {t("option:flashcards.studyAssistantExplain", {
+                  defaultValue: ACTION_LABELS.explain
+                })}
+              </Button>
+            )}
+            {resolvedActions.includes("mnemonic") && (
+              <Button
+                onClick={() => void handleQuickAction("mnemonic")}
+                loading={isResponding || isConflictRecovering}
+              >
+                {t("option:flashcards.studyAssistantMnemonic", {
+                  defaultValue: ACTION_LABELS.mnemonic
+                })}
+              </Button>
+            )}
+            {supported && resolvedActions.includes("fact_check") && (
+              <Button
+                onClick={() => void handleQuickAction("fact_check")}
+                loading={isResponding || isConflictRecovering}
+              >
+                {t("option:flashcards.studyAssistantFactCheck", {
+                  defaultValue: ACTION_LABELS.fact_check
+                })}
+              </Button>
+            )}
+          </div>
+          {factCheckOpen && (
+            <VoiceTranscriptComposer
+              transcript={factCheckTranscript}
+              isListening={isListening}
+              supported={supported}
+              isSubmitting={isResponding || isConflictRecovering}
+              onTranscriptChange={setFactCheckTranscript}
+              onStartListening={() => start()}
+              onStopListening={stop}
+              onCancel={handleCancelFactCheck}
+              onSubmit={() => void handleSubmitFactCheck()}
             />
           )}
-        </div>
-      </Space>
+          {resolvedActions.includes("follow_up") || resolvedActions.includes("freeform") ? (
+            <div className="rounded border border-border bg-surface p-3">
+              <Space orientation="vertical" size={8} className="w-full">
+                <Text strong>
+                  {t("option:flashcards.studyAssistantChatPrompt", {
+                    defaultValue: "Ask a follow-up"
+                  })}
+                </Text>
+                <Input.TextArea
+                  aria-label={t("option:flashcards.studyAssistantChatInput", {
+                    defaultValue: "Ask the study assistant"
+                  })}
+                  value={followUpText}
+                  onChange={(event) => setFollowUpText(event.target.value)}
+                  rows={3}
+                  placeholder={t("option:flashcards.studyAssistantChatPlaceholder", {
+                    defaultValue: "Ask for clarification, examples, or a simpler explanation."
+                  })}
+                />
+                <div className="flex justify-end">
+                  <Button
+                    type="primary"
+                    icon={<MessageSquareText className="size-4" />}
+                    loading={isResponding || isConflictRecovering}
+                    disabled={!followUpText.trim()}
+                    onClick={() => void handleSubmitFollowUp()}
+                  >
+                    {t("option:flashcards.studyAssistantChatSend", {
+                      defaultValue: ACTION_LABELS.freeform
+                    })}
+                  </Button>
+                </div>
+              </Space>
+            </div>
+          ) : null}
+          {(remediationContext.supportingQuote || remediationContext.deepDiveTarget) && (
+            <div
+              className="rounded border border-border bg-surface p-3"
+              data-testid="flashcards-study-assistant-remediation"
+            >
+              <Space orientation="vertical" size={8} className="w-full">
+                <Text strong>{remediationLabel}</Text>
+                {remediationContext.supportingQuote && (
+                  <div className="rounded border border-border/70 bg-background p-3">
+                    <Text type="secondary" className="mb-1 block text-xs uppercase tracking-wide">
+                      {t("option:flashcards.studyAssistantSupportingQuote", {
+                        defaultValue: "Supporting quote"
+                      })}
+                    </Text>
+                    <Text className="block text-sm text-text">
+                      “{remediationContext.supportingQuote}”
+                    </Text>
+                  </div>
+                )}
+                {remediationContext.deepDiveTarget?.route ? (
+                  remediationContext.deepDiveTarget.route.startsWith("/") && inRouterContext ? (
+                    <RouterLink
+                      to={remediationContext.deepDiveTarget.route}
+                      className="text-sm text-primary hover:text-primary/80"
+                    >
+                      {deepDiveLabel}
+                    </RouterLink>
+                  ) : (
+                    <Typography.Link
+                      href={remediationContext.deepDiveTarget.route}
+                      className="text-sm"
+                    >
+                      {deepDiveLabel}
+                    </Typography.Link>
+                  )
+                ) : null}
+              </Space>
+            </div>
+          )}
+          <div>
+            <Title level={5} className="!mb-2">
+              {t("option:flashcards.studyAssistantHistory", {
+                defaultValue: "Session"
+              })}
+            </Title>
+            {isLoading ? (
+              <Text type="secondary">
+                {t("option:flashcards.studyAssistantLoading", {
+                  defaultValue: "Loading assistant history..."
+                })}
+              </Text>
+            ) : displayedMessages.length ? (
+              <div className="flex flex-col gap-3">
+                {displayedMessages.map((message) => (
+                  <div
+                    key={message.id}
+                    className="rounded border border-border bg-surface p-3"
+                  >
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <Space size={8}>
+                        <Tag color={message.role === "assistant" ? "blue" : "default"}>
+                          {message.role === "assistant"
+                            ? t("option:flashcards.studyAssistantRoleAssistant", {
+                                defaultValue: "Assistant"
+                              })
+                            : t("option:flashcards.studyAssistantRoleUser", {
+                                defaultValue: "You"
+                              })}
+                        </Tag>
+                        <Text type="secondary" className="text-xs">
+                          {t(`option:flashcards.studyAssistantAction.${message.action_type}`, {
+                            defaultValue: ACTION_LABELS[message.action_type]
+                          })}
+                        </Text>
+                      </Space>
+                      {message.role === "assistant" && (
+                        <Button
+                          size="small"
+                          icon={<Volume2 className="size-4" />}
+                          loading={isSpeaking}
+                          onClick={() => handlePlayReply(message.content)}
+                        >
+                          {t("option:flashcards.studyAssistantPlayReply", {
+                            defaultValue: "Play reply"
+                          })}
+                        </Button>
+                      )}
+                    </div>
+                    <MarkdownWithBoundary
+                      content={message.content}
+                      size="sm"
+                      className="prose-headings:!text-text prose-p:!text-text prose-li:!text-text prose-strong:!text-text"
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t("option:flashcards.studyAssistantEmpty", {
+                  defaultValue: "Use the assistant to explain or check this card without leaving review mode."
+                })}
+              />
+            )}
+          </div>
+        </Space>
+      )}
     </Card>
   )
 }

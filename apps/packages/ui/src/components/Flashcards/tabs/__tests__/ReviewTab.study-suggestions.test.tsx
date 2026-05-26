@@ -577,7 +577,7 @@ describe("ReviewTab study suggestions", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /Reopen snapshot for session 81/i }))
+    fireEvent.click(screen.getByRole("button", { name: /View completed session/i }))
 
     await waitFor(() => {
       expect(useStudySuggestions).toHaveBeenCalledWith("flashcard_review_session", 81)

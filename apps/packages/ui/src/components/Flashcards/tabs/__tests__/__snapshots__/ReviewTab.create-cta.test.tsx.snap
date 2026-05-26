@@ -277,6 +277,20 @@ exports[`ReviewTab create CTA visibility > matches baseline snapshot for active 
                   </span>
                 </div>
               </div>
+              <div
+                class="ant-card-extra"
+              >
+                <button
+                  aria-expanded="false"
+                  class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid ant-btn-sm"
+                  data-testid="flashcards-study-assistant-toggle"
+                  type="button"
+                >
+                  <span>
+                    Open assistant
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
           <div
@@ -284,198 +298,25 @@ exports[`ReviewTab create CTA visibility > matches baseline snapshot for active 
           >
             <div
               class="ant-space css-dev-only-do-not-override-3uaqrl ant-space-vertical w-full css-var-root"
-              style="column-gap: 12px; row-gap: 12px;"
+              style="column-gap: 8px; row-gap: 8px;"
             >
               <div
                 class="ant-space-item"
               >
-                <div
-                  class="flex flex-wrap gap-2"
+                <span
+                  class="ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"
                 >
-                  <button
-                    class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"
-                    type="button"
-                  >
-                    <span
-                      class="ant-btn-icon"
-                    >
-                      <svg
-                        aria-hidden="true"
-                        class="lucide lucide-lightbulb size-4"
-                        fill="none"
-                        height="24"
-                        stroke="currentColor"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        viewBox="0 0 24 24"
-                        width="24"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path
-                          d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"
-                        />
-                        <path
-                          d="M9 18h6"
-                        />
-                        <path
-                          d="M10 22h4"
-                        />
-                      </svg>
-                    </span>
-                    <span>
-                      Explain
-                    </span>
-                  </button>
-                  <button
-                    class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"
-                    type="button"
-                  >
-                    <span>
-                      Mnemonic
-                    </span>
-                  </button>
-                </div>
+                  Need help understanding this card?
+                </span>
               </div>
               <div
                 class="ant-space-item"
               >
-                <div
-                  class="rounded border border-border bg-surface p-3"
+                <span
+                  class="ant-typography ant-typography-secondary text-xs css-dev-only-do-not-override-3uaqrl css-var-root"
                 >
-                  <div
-                    class="ant-space css-dev-only-do-not-override-3uaqrl ant-space-vertical w-full css-var-root"
-                    style="column-gap: 8px; row-gap: 8px;"
-                  >
-                    <div
-                      class="ant-space-item"
-                    >
-                      <span
-                        class="ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"
-                      >
-                        <strong>
-                          Ask a follow-up
-                        </strong>
-                      </span>
-                    </div>
-                    <div
-                      class="ant-space-item"
-                    >
-                      <textarea
-                        aria-label="Ask the study assistant"
-                        class="ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"
-                        placeholder="Ask for clarification, examples, or a simpler explanation."
-                        rows="3"
-                      />
-                    </div>
-                    <div
-                      class="ant-space-item"
-                    >
-                      <div
-                        class="flex justify-end"
-                      >
-                        <button
-                          class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"
-                          disabled=""
-                          type="button"
-                        >
-                          <span
-                            class="ant-btn-icon"
-                          >
-                            <svg
-                              aria-hidden="true"
-                              class="lucide lucide-message-square-text size-4"
-                              fill="none"
-                              height="24"
-                              stroke="currentColor"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              viewBox="0 0 24 24"
-                              width="24"
-                              xmlns="http://www.w3.org/2000/svg"
-                            >
-                              <path
-                                d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"
-                              />
-                              <path
-                                d="M7 11h10"
-                              />
-                              <path
-                                d="M7 15h6"
-                              />
-                              <path
-                                d="M7 7h8"
-                              />
-                            </svg>
-                          </span>
-                          <span>
-                            Ask assistant
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div
-                class="ant-space-item"
-              >
-                <div>
-                  <h5
-                    class="ant-typography !mb-2 css-dev-only-do-not-override-3uaqrl css-var-root"
-                  >
-                    Session
-                  </h5>
-                  <div
-                    class="css-dev-only-do-not-override-3uaqrl css-var-root ant-empty ant-empty-normal"
-                  >
-                    <div
-                      class="ant-empty-image"
-                    >
-                      <svg
-                        height="41"
-                        viewBox="0 0 64 41"
-                        width="64"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <title>
-                          No data
-                        </title>
-                        <g
-                          fill="none"
-                          fill-rule="evenodd"
-                          transform="translate(0 1)"
-                        >
-                          <ellipse
-                            cx="32"
-                            cy="33"
-                            fill="#f5f5f5"
-                            rx="32"
-                            ry="7"
-                          />
-                          <g
-                            fill-rule="nonzero"
-                            stroke="#d9d9d9"
-                          >
-                            <path
-                              d="M55 12.76L44.854 1.258C44.367.474 43.656 0 42.907 0H21.093c-.749 0-1.46.474-1.947 1.257L9 12.761V22h46v-9.24z"
-                            />
-                            <path
-                              d="M41.613 15.931c0-1.605.994-2.93 2.227-2.931H55v18.137C55 33.26 53.68 35 52.05 35h-40.1C10.32 35 9 33.259 9 31.137V13h11.16c1.233 0 2.227 1.323 2.227 2.928v.022c0 1.605 1.005 2.901 2.237 2.901h14.752c1.232 0 2.237-1.308 2.237-2.913v-.007z"
-                              fill="#fafafa"
-                            />
-                          </g>
-                        </g>
-                      </svg>
-                    </div>
-                    <div
-                      class="ant-empty-description"
-                    >
-                      Use the assistant to explain or check this card without leaving review mode.
-                    </div>
-                  </div>
-                </div>
+                  Open the assistant when you want an explanation, mnemonic, or fact-check without leaving review.
+                </span>
               </div>
             </div>
           </div>
@@ -892,14 +733,49 @@ exports[`ReviewTab create CTA visibility > matches baseline snapshot for caught-
           <div
             class="ant-space-item"
           >
-            <button
-              class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-link ant-btn-color-link ant-btn-variant-link"
-              type="button"
+            <div
+              class="ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-root"
+              style="flex-wrap: wrap;"
             >
-              <span>
-                Create card
-              </span>
-            </button>
+              <div
+                class="ant-space-item"
+              >
+                <button
+                  class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"
+                  data-testid="flashcards-review-practice-again"
+                  type="button"
+                >
+                  <span>
+                    Practice again
+                  </span>
+                </button>
+              </div>
+              <div
+                class="ant-space-item"
+              >
+                <button
+                  class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"
+                  type="button"
+                >
+                  <span>
+                    Create card
+                  </span>
+                </button>
+              </div>
+              <div
+                class="ant-space-item"
+              >
+                <button
+                  class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"
+                  data-testid="flashcards-review-open-scheduler"
+                  type="button"
+                >
+                  <span>
+                    Open scheduler
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

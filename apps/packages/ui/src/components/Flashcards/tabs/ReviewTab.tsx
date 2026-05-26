@@ -234,6 +234,15 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const assistantRespondMutation = useFlashcardAssistantRespondMutation()
   const reviewProgressTotal =
     reviewMode === "cram" ? cramQueue.length : dueCountsQuery.data?.total ?? 0
+  const scheduledDueCount = reviewMode === "cram" ? undefined : dueCountsQuery.data?.due
+  const availableNowCount =
+    reviewMode === "cram"
+      ? cramQueue.length
+      : dueCountsQuery.data
+        ? (dueCountsQuery.data.due ?? 0) +
+          (dueCountsQuery.data.new ?? 0) +
+          (dueCountsQuery.data.learning ?? 0)
+        : undefined
   const isCramMode = reviewMode === "cram"
   const showTopBarCreateCta = !activeCard
   const reviewScopeKey = React.useMemo(
@@ -776,6 +785,38 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     )
   }, [activeCard?.uuid, lastReviewedCard, reviewedCount, message, t])
 
+  const renderUndoRatingAction = () => {
+    if (!showUndoButton || !lastReviewedCard) return null
+    return (
+      <div className="mt-3 pt-3 border-t border-border">
+        <Button
+          type="text"
+          icon={<Undo2 className="size-4" />}
+          onClick={handleUndoReview}
+          className="text-text-muted hover:text-text min-h-11 focus:ring-2 focus:ring-primary focus:ring-offset-2"
+          aria-label={t("option:flashcards.undoRatingAria", {
+            defaultValue: "Re-rate last card, {{seconds}} seconds remaining",
+            seconds: undoCountdown
+          })}
+          data-testid="flashcards-review-undo-rating"
+        >
+          <span className="flex items-center gap-2">
+            {t("option:flashcards.undoRating", {
+              defaultValue: "Re-rate last card"
+            })}
+            <span
+              className="inline-flex items-center justify-center min-w-6 h-6 px-1.5 rounded-full bg-surface2 text-xs font-medium tabular-nums"
+              role="timer"
+              aria-live="polite"
+            >
+              {undoCountdown}s
+            </span>
+          </span>
+        </Button>
+      </div>
+    )
+  }
+
   // Cleanup timeout and interval on unmount
   React.useEffect(() => {
     return () => {
@@ -1111,6 +1152,8 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           dueCount={reviewProgressTotal}
           reviewedCount={reviewedCount}
           deckName={currentDeckName}
+          availableNowCount={availableNowCount}
+          scheduledDueCount={scheduledDueCount}
         />
       )}
 
@@ -1211,6 +1254,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
 
             <div className="relative">
               <FlashcardStudyAssistantPanel
+                key={activeCard.uuid}
                 cardUuid={activeCard.uuid}
                 threadVersion={assistantQuery.data?.thread.version ?? null}
                 messages={assistantQuery.data?.messages ?? []}
@@ -1222,6 +1266,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                 isResponding={assistantRespondMutation.isPending}
                 onReloadContext={() => assistantQuery.refetch()}
                 onRespond={handleAssistantRespond}
+                defaultExpanded={showAnswer}
               />
               <FeatureHint
                 featureKey="flashcards_study_assistant_discovery"
@@ -1483,34 +1528,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                       </Button>
                     </div>
 
-                    {/* Re-rate button - appears briefly after rating with countdown */}
-                    {showUndoButton && lastReviewedCard && (
-                      <div className="mt-3 pt-3 border-t border-border">
-                        <Button
-                          type="text"
-                          icon={<Undo2 className="size-4" />}
-                          onClick={handleUndoReview}
-                          className="text-text-muted hover:text-text min-h-11 focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                          aria-label={t("option:flashcards.undoRatingAria", {
-                            defaultValue: "Re-rate last card, {{seconds}} seconds remaining",
-                            seconds: undoCountdown
-                          })}
-                        >
-                          <span className="flex items-center gap-2">
-                            {t("option:flashcards.undoRating", {
-                              defaultValue: "Re-rate last card"
-                            })}
-                            <span
-                              className="inline-flex items-center justify-center min-w-6 h-6 px-1.5 rounded-full bg-surface2 text-xs font-medium tabular-nums"
-                              role="timer"
-                              aria-live="polite"
-                            >
-                              {undoCountdown}s
-                            </span>
-                          </span>
-                        </Button>
-                      </div>
-                    )}
+                    {renderUndoRatingAction()}
                   </div>
                 </>
               )}
@@ -1731,11 +1749,46 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                     </div>
                   )}
 
-                  <Button type="link" onClick={onNavigateToCreate}>
-                    {t("option:flashcards.createMoreCards", {
-                      defaultValue: "Create card"
-                    })}
-                  </Button>
+                  {renderUndoRatingAction()}
+                  <Space wrap>
+                    <Button
+                      type="primary"
+                      onClick={() => {
+                        setReviewMode("cram")
+                        setCramQueueIndex(0)
+                        setSelectedStudySessionId(null)
+                      }}
+                      data-testid="flashcards-review-practice-again"
+                    >
+                      {t("option:flashcards.practiceAgain", {
+                        defaultValue: "Practice again"
+                      })}
+                    </Button>
+                    <Button onClick={onNavigateToCreate}>
+                      {t("option:flashcards.createMoreCards", {
+                        defaultValue: "Create card"
+                      })}
+                    </Button>
+                    {reviewDeckId != null && (
+                      <Button
+                        onClick={() => {
+                          const schedulerParams = new URLSearchParams({
+                            tab: "scheduler",
+                            deck_id: String(reviewDeckId)
+                          })
+                          if (forceShowWorkspaceItems) {
+                            schedulerParams.set("include_workspace_items", "1")
+                          }
+                          navigate(`/flashcards?${schedulerParams.toString()}`)
+                        }}
+                        data-testid="flashcards-review-open-scheduler"
+                      >
+                        {t("option:flashcards.openScheduler", {
+                          defaultValue: "Open scheduler"
+                        })}
+                      </Button>
+                    )}
+                  </Space>
                   {activeReviewSessionId != null && (
                     <Button
                       type="default"

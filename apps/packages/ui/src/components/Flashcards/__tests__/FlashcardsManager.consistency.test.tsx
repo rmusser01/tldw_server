@@ -6,7 +6,8 @@ import { FlashcardsManager } from "../FlashcardsManager"
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   useDecksQuery: vi.fn(),
-  decks: [{ id: 1, name: "Biology" }]
+  decks: [{ id: 1, name: "Biology" }],
+  locationKey: "initial-location"
 }))
 
 vi.mock("react-i18next", () => ({
@@ -40,7 +41,8 @@ vi.mock("react-router-dom", async () => {
     useLocation: () => ({
       pathname: window.location.pathname,
       search: window.location.search,
-      hash: window.location.hash
+      hash: window.location.hash,
+      key: mocks.locationKey
     })
   }
 })
@@ -77,6 +79,8 @@ vi.mock("../tabs", () => ({
   ImportExportTab: () => <div data-testid="mock-transfer-tab">Import / Export panel</div>,
   TemplatesTab: () => <div data-testid="mock-templates-tab">Templates panel</div>,
   SchedulerTab: (props: {
+    initialDeckId?: number | null
+    initialDeckHandoffKey?: string | null
     onDirtyChange?: (dirty: boolean) => void
     discardSignal?: number
   }) => {
@@ -90,6 +94,8 @@ vi.mock("../tabs", () => ({
     return (
       <div data-testid="mock-scheduler-tab">
         Scheduler panel
+        <span data-testid="mock-scheduler-initial-deck-id">{String(props.initialDeckId ?? "")}</span>
+        <span data-testid="mock-scheduler-handoff-key">{String(props.initialDeckHandoffKey ?? "")}</span>
         <span data-testid="mock-scheduler-draft-state">{draftState}</span>
         <button
           onClick={() => {
@@ -133,6 +139,7 @@ describe("FlashcardsManager consistency standards", () => {
   beforeEach(() => {
     mocks.navigate.mockReset()
     mocks.decks = [{ id: 1, name: "Biology" }]
+    mocks.locationKey = "initial-location"
     mocks.useDecksQuery.mockClear()
     mocks.useDecksQuery.mockImplementation(() => ({
       data: mocks.decks,
@@ -183,6 +190,47 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
     expect(screen.getByTestId("mock-manage-initial-deck-id")).toHaveTextContent("9")
     expect(screen.getByTestId("mock-manage-show-workspace")).toHaveTextContent("true")
+  })
+
+  it("opens Scheduler with the deck id from direct-link params", () => {
+    window.history.replaceState({}, "", "/flashcards?tab=scheduler&deck_id=9")
+
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-scheduler-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("9")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("initial-location")
+  })
+
+  it("refreshes Scheduler handoff identity when the same deck deep-link is requested again", () => {
+    mocks.locationKey = "scheduler-handoff-1"
+    window.history.replaceState({}, "", "/flashcards?tab=scheduler&deck_id=9")
+
+    const { rerender } = render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("9")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent(
+      "scheduler-handoff-1"
+    )
+
+    mocks.locationKey = "scheduler-handoff-2"
+    rerender(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("9")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent(
+      "scheduler-handoff-2"
+    )
+  })
+
+  it("hands the selected Study deck to Scheduler when opening the tab manually", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Select Deck 12"))
+    fireEvent.click(screen.getByText("Scheduler"))
+
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("12")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("review:12")
   })
 
   it("uses Study/Manage/Create & Import/Scheduler tab labels", () => {
