@@ -7,25 +7,58 @@ import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generat
 
 const { Text, Title } = Typography
 
+export const readSelectedTextFromPage = () => {
+  const activeElement = document.activeElement
+  if (
+    activeElement instanceof HTMLInputElement ||
+    activeElement instanceof HTMLTextAreaElement
+  ) {
+    const { selectionStart, selectionEnd, value } = activeElement
+    if (
+      typeof selectionStart === "number" &&
+      typeof selectionEnd === "number" &&
+      selectionEnd > selectionStart
+    ) {
+      return value.slice(selectionStart, selectionEnd)
+    }
+  }
+
+  return window.getSelection()?.toString() ?? ""
+}
+
 export default function SidepanelFlashcards() {
   const { t } = useTranslation()
   const [captureError, setCaptureError] = React.useState<string | null>(null)
   const [captureLoading, setCaptureLoading] = React.useState(false)
 
-  const openOptionsHashRoute = React.useCallback((route: string) => {
+  const openOptionsHashRoute = React.useCallback(async (route: string) => {
+    setCaptureError(null)
     const normalizedRoute = route.startsWith("/") ? route : `/${route}`
     const url = browser.runtime.getURL(`/options.html#${normalizedRoute}`)
-    if (browser.tabs?.create) {
-      browser.tabs.create({ url }).catch(() => {
-        window.open(url, "_blank")
-      })
-      return
+    const openFailedMessage = t(
+      "sidepanel:flashcards.openFailed",
+      "Could not open Flashcards. Check popup permissions and try again."
+    )
+    const openFallbackWindow = () => {
+      const openedWindow = window.open(url, "_blank")
+      if (openedWindow) return true
+      setCaptureError(openFailedMessage)
+      return false
     }
-    window.open(url, "_blank")
-  }, [])
+
+    if (browser.tabs?.create) {
+      try {
+        await browser.tabs.create({ url })
+        return true
+      } catch {
+        return openFallbackWindow()
+      }
+    }
+    return openFallbackWindow()
+  }, [t])
 
   const openFlashcards = React.useCallback(() => {
-    openOptionsHashRoute("/flashcards")
+    void openOptionsHashRoute("/flashcards")
   }, [openOptionsHashRoute])
 
   const handleGenerateFromPageSelection = React.useCallback(async () => {
@@ -64,16 +97,17 @@ export default function SidepanelFlashcards() {
 
       const results = await browser.scripting.executeScript({
         target: { tabId },
-        func: () => window.getSelection()?.toString() ?? ""
+        func: readSelectedTextFromPage
       })
       const selectedText = String(results?.[0]?.result ?? "").trim()
       if (!selectedText) {
         throw new Error(noSelectionMessage)
       }
 
-      openOptionsHashRoute(
+      await openOptionsHashRoute(
         buildFlashcardsGenerateRoute({
           text: selectedText,
+          sourceType: "manual",
           sourceId: activeTab.url || String(tabId),
           sourceTitle: activeTab.title || activeTab.url || undefined
         })

@@ -26,7 +26,7 @@ Access it from the Web UI header by clicking the Layers icon, or navigate to `/f
 1. Select text on a web page.
 2. Open the extension sidepanel and choose `Flashcards`.
 3. Click `Generate from page selection`.
-4. The full Web UI opens `/flashcards?tab=importExport` with the selected text prefilled in the generation workflow.
+4. The full Web UI opens Flashcards on the `Create & Import` tab with the selected text prefilled in the generation workflow.
 5. Generate, review/edit the drafts, choose a deck or create one, then save the cards.
 
 You can also use the browser context menu path: `tldw` -> `Save` -> `Save to Notes`, then choose `Generate flashcards` from the sidepanel review dialog. The sidepanel Flashcards route does not save cards by itself; the save happens after you review and save generated drafts in the full Flashcards workspace.

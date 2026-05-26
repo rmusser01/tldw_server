@@ -31,10 +31,7 @@ export interface StructuredImportDraft extends StructuredQaImportPreviewDraft {
 
 export type SupportedDelimiter = "\t" | "," | ";" | "|"
 export type ImportMode = "delimited" | "json" | "apkg" | "structured"
-export type GenerateSourceType = Exclude<
-  NonNullable<FlashcardsGenerateIntent["sourceType"]>,
-  "manual"
->
+export type GenerateSourceType = NonNullable<FlashcardsGenerateIntent["sourceType"]>
 
 export interface GenerateSourceContext {
   sourceType: GenerateSourceType

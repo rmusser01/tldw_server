@@ -42,6 +42,28 @@ describe("flashcards generate handoff helpers", () => {
     })
   })
 
+  it("keeps manual source details for selected-page extension captures", () => {
+    const route = buildFlashcardsGenerateRoute({
+      text: "Highlighted page text",
+      sourceType: "manual",
+      sourceId: "https://example.test/source",
+      sourceTitle: "Captured Page"
+    })
+
+    const intent = parseFlashcardsGenerateIntentFromSearch(
+      route.slice(route.indexOf("?"))
+    )
+
+    expect(intent).toEqual({
+      text: "Highlighted page text",
+      sourceType: "manual",
+      sourceId: "https://example.test/source",
+      sourceTitle: "Captured Page",
+      conversationId: undefined,
+      messageId: undefined
+    })
+  })
+
   it("parses generate intent from hash-based routes", () => {
     const intent = parseFlashcardsGenerateIntentFromLocation({
       search: "",
