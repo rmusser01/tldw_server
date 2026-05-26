@@ -4,30 +4,37 @@ title: Flashcards (Experimental)
 
 # Flashcards (Experimental)
 
-The Flashcards page lets you create, review, and manage spaced‑repetition cards backed by your tldw_server. It also supports CSV/TSV import and export (and optional .apkg export where supported by the server).
+The Flashcards page lets you create, review, and manage spaced-repetition cards backed by your tldw_server. It also supports CSV/TSV import and export, plus optional .apkg export where supported by the server.
 
-Access it from the Web UI header by clicking the Layers icon, or navigate to `/flashcards`.
+Access it from the Web UI header by clicking the Layers icon, or navigate to `/flashcards`. In the extension sidepanel, the Flashcards entry opens a compact bridge with actions for the full Flashcards workspace and selected-text generation.
 
 ## Prerequisites
 
-- The extension must be connected to a running tldw_server instance (Options → Settings → tldw Server).
+- The extension must be connected to a running tldw_server instance (Options -> Settings -> tldw Server).
 - You need to be signed in or configured with an API key if your server requires authentication.
 
 ## Tabs
 
-- Review: Fetches the next due card (optionally by deck), reveals the answer, and lets you submit an Anki‑style 0–5 rating. The server schedules the next review via `/api/v1/flashcards/review`.
-- Create: Choose a deck (or create one), set Model Type (`basic`, `basic_reverse`, `cloze`), toggles (Reverse/Cloze), add tags and content, then create via `/api/v1/flashcards`.
-- Manage: Search/filter by deck/tag/due status, paginate, edit cards (PATCH), or delete them (DELETE with expected version).
- - Manage: Search/filter by deck/tag/due status, paginate, select multiple, bulk move/delete/export (CSV/TSV), edit cards (PATCH), or delete them (DELETE with expected version).
-- Import/Export:
-  - Import: Paste TSV/CSV lines with columns `Deck, Front, Back, Tags, Notes`. Choose delimiter and header presence. Uses `/api/v1/flashcards/import`. Limits can be inspected via `/api/v1/config/flashcards-import-limits`.
-  - Export: Filter by deck/tag/query, choose CSV/TSV (and optional .apkg), set options like delimiter, header, and extended columns, then download.
-  - Optional import column mapping lets you re-order your columns to match the server’s expected `Deck, Front, Back, Tags, Notes` shape.
+- Study: Fetches the next due card, optionally by deck, reveals the answer, and lets you submit `Again`, `Hard`, `Good`, or `Easy`. The server schedules the next review via `/api/v1/flashcards/review`.
+- Manage: Search/filter by deck/tag/due status, paginate, select cards, bulk move/delete/export, edit cards, or delete them with expected-version protection.
+- Create & Import: Manually create cards, import delimited/JSON/APKG content, generate draft flashcards from text, run structured Q&A preview, author image occlusion cards, and export decks.
+- Templates: Manage reusable flashcard templates and field presets.
+- Scheduler: Edit deck-level scheduler policy, presets, queue visibility, and conflict recovery.
+
+## Extension Selected-Text Flow
+
+1. Select text on a web page.
+2. Open the extension sidepanel and choose `Flashcards`.
+3. Click `Generate from page selection`.
+4. The full Web UI opens `/flashcards?tab=importExport` with the selected text prefilled in the generation workflow.
+5. Generate, review/edit the drafts, choose a deck or create one, then save the cards.
+
+You can also use the browser context menu path: `tldw` -> `Save` -> `Save to Notes`, then choose `Generate flashcards` from the sidepanel review dialog. The sidepanel Flashcards route does not save cards by itself; the save happens after you review and save generated drafts in the full Flashcards workspace.
 
 ## Tips
 
-- Due cards: Use the Review tab’s “Next due” to step through scheduled cards.
+- Due cards: Use the Study tab’s next-card flow to step through scheduled cards.
 - Cloze cards: Toggle “Is Cloze” and select `cloze` model when creating/editing.
-- Tags: Use the tags input in Create/Edit; tags are stored as a JSON array.
+- Tags: Use the tags input in Create & Import or Manage edit flows; tags are stored as a JSON array.
 
 > Note: Flashcards features are marked Experimental in the server API and may change.

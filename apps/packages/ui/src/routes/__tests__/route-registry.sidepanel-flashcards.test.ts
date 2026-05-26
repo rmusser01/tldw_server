@@ -73,6 +73,7 @@ describe("sidepanel flashcards route registration", () => {
   it("sidepanel-flashcards.tsx opens options page at /flashcards", () => {
     expect(flashcardsComponentPath).toBeDefined()
     const source = readFileSync(flashcardsComponentPath!, "utf8")
-    expect(source).toContain("/options.html#/flashcards")
+    expect(source).toContain("options.html#")
+    expect(source).toContain('openOptionsHashRoute("/flashcards")')
   })
 })
