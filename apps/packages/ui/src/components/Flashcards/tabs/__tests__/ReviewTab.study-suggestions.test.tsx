@@ -586,6 +586,50 @@ describe("ReviewTab study suggestions", () => {
     expect(screen.getByText("Flashcard follow-up")).toBeInTheDocument()
   })
 
+  it("labels recent sessions with direct-path deck names", () => {
+    vi.mocked(useDecksQuery).mockImplementation((options?: { includeWorkspaceItems?: boolean }) => {
+      if (options?.includeWorkspaceItems) {
+        return {
+          data: [{ id: 42, name: "Workspace Biology" }],
+          isLoading: false
+        } as any
+      }
+      return { data: [], isLoading: false } as any
+    })
+    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+      data: [
+        {
+          id: 82,
+          deck_id: 42,
+          review_mode: "due",
+          tag_filter: null,
+          scope_key: "due:deck:42",
+          status: "completed",
+          started_at: "2026-04-05T17:00:00Z",
+          last_activity_at: "2026-04-05T17:10:00Z",
+          completed_at: "2026-04-05T17:12:00Z",
+          client_id: "test"
+        }
+      ],
+      isLoading: false,
+      isFetching: false
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={42}
+        onReviewDeckChange={() => {}}
+        isActive
+        forceShowWorkspaceItems
+      />
+    )
+
+    expect(screen.getAllByText("Workspace Biology").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Deck 42")).not.toBeInTheDocument()
+  })
+
   it("ends the active session when the review scope changes", async () => {
     const { rerender } = render(
       <ReviewTab

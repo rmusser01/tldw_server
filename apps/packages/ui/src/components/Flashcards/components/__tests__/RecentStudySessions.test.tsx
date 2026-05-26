@@ -191,6 +191,40 @@ describe("RecentStudySessions", () => {
     expect(screen.queryByText("due:deck:12")).not.toBeInTheDocument()
   })
 
+  it("uses the singular reviewed-count fallback when one card was reviewed", () => {
+    mockRecentSessionsQuery({
+      data: [
+        {
+          id: 82,
+          deck_id: 12,
+          review_mode: "due",
+          tag_filter: null,
+          scope_key: "due:deck:12",
+          status: "completed",
+          started_at: "2026-04-05T18:00:00Z",
+          last_activity_at: "2026-04-05T18:10:00Z",
+          completed_at: "2026-04-05T18:12:00Z",
+          cards_reviewed: 1,
+          client_id: "test"
+        }
+      ],
+      isLoading: false,
+      isFetching: false
+    })
+
+    render(
+      <RecentStudySessions
+        deckId={12}
+        selectedSessionId={null}
+        onOpenSession={sessionsMock}
+        isActive
+      />
+    )
+
+    expect(screen.getByText("1 card reviewed")).toBeInTheDocument()
+    expect(screen.queryByText("1 cards reviewed")).not.toBeInTheDocument()
+  })
+
   it("shows a retryable error state when loading fails", () => {
     const refetchMock = createRefetchMock()
     mockRecentSessionsQuery({

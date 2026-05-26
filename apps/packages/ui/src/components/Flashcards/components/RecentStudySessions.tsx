@@ -66,7 +66,7 @@ const getReviewedCountLabel = (
   }
 
   return t("option:flashcards.recentStudySessionsReviewedCount", {
-    defaultValue: "{{count}} cards reviewed",
+    defaultValue: count === 1 ? "{{count}} card reviewed" : "{{count}} cards reviewed",
     count
   })
 }
