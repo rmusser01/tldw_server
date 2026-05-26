@@ -91,7 +91,7 @@
     "modeSpeech": "음성",
     "moreTools": "더보기",
     "writingPlayground": "글쓰기 플레이그라운드",
-    "researchWorkspace": "Research Workspace",
+    "researchWorkspace": "리서치 워크스페이스",
     "acpPlayground": "ACP Playground",
     "skills": "Skills",
     "adminLlamacpp": "Llama.cpp Admin",
@@ -100,7 +100,7 @@
     "collections": "Collections",
     "dataTables": "Data Tables",
     "documentWorkspace": "Document Workspace",
-    "modelPlayground": "Model Playground",
+    "modelPlayground": "모델 플레이그라운드",
     "workflowEditor": "Workflow Editor",
     "modeRepo2txt": "Repo2Txt"
   },

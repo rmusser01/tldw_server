@@ -374,6 +374,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.query_ops import (
     get_distinct_media_types,
     get_media_by_id,
     get_media_by_hash,
+    get_media_status_by_id,
     get_media_by_title,
     get_media_by_url,
     get_media_by_uuid,
@@ -1777,6 +1778,7 @@ MediaDatabase.get_chunking_template = get_chunking_template
 MediaDatabase.get_distinct_media_types = get_distinct_media_types
 MediaDatabase.get_media_by_id = get_media_by_id
 MediaDatabase.get_media_by_hash = get_media_by_hash
+MediaDatabase.get_media_status_by_id = get_media_status_by_id
 MediaDatabase.get_media_by_title = get_media_by_title
 MediaDatabase.get_media_by_url = get_media_by_url
 MediaDatabase.get_media_by_uuid = get_media_by_uuid

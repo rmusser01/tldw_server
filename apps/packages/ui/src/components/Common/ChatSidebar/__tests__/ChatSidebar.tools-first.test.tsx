@@ -26,7 +26,7 @@ const debounceState = vi.hoisted(() => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, defaultValue?: string) => defaultValue || key
+    t: (key: string, defaultValue?: string) => defaultValue ?? key
   })
 }))
 

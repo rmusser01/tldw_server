@@ -63,6 +63,45 @@ type ConnectionStoreWindow = Window & {
   __tldw_useConnectionStore?: ConnectionStoreHook
 }
 
+type JsonRecord = Record<string, unknown>
+
+const isJsonRecord = (value: unknown): value is JsonRecord =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const readJsonRecord = async (
+  response: Response,
+  label: string
+): Promise<JsonRecord> => {
+  const payload: unknown = await response.json()
+  if (!isJsonRecord(payload)) {
+    throw new Error(`${label} response was not an object`)
+  }
+  return payload
+}
+
+const readJsonRecordArray = async (
+  response: Response,
+  label: string
+): Promise<JsonRecord[]> => {
+  const payload: unknown = await response.json()
+  if (!Array.isArray(payload) || !payload.every(isJsonRecord)) {
+    throw new Error(`${label} response was not an object array`)
+  }
+  return payload
+}
+
+const getJsonRecordArray = (
+  payload: JsonRecord,
+  key: string,
+  label: string
+): JsonRecord[] => {
+  const value = payload[key]
+  if (!Array.isArray(value) || !value.every(isJsonRecord)) {
+    throw new Error(`${label}.${key} was not an object array`)
+  }
+  return value
+}
+
 const apiFetch = async (
   serverUrl: string,
   apiKey: string,
@@ -100,7 +139,7 @@ const apiFetch = async (
     })
     if (!response.ok) {
       throw new Error(
-        `${init.method || "GET"} ${path} returned ${response.status}: ${await response.text()}`
+        `${init.method ?? "GET"} ${path} returned ${response.status}: ${await response.text()}`
       )
     }
     return response
@@ -183,7 +222,7 @@ test.describe("Research Workspace parity (extension real backend)", () => {
     })
     page.on("requestfailed", (request) => {
       const url = request.url()
-      const errorText = request.failure()?.errorText || "request failed"
+      const errorText = request.failure()?.errorText ?? "request failed"
       if (isBenignRequestFailure(url, errorText)) {
         return
       }
@@ -302,8 +341,13 @@ test.describe("Research Workspace parity (extension real backend)", () => {
         apiKey,
         `/api/v1/web-clipper/${encodeURIComponent(clipId)}`
       )
-      const clipStatus = await clipStatusResponse.json()
-      expect(clipStatus.workspace_placements).toEqual(
+      const clipStatus = await readJsonRecord(
+        clipStatusResponse,
+        "web clipper status"
+      )
+      expect(
+        getJsonRecordArray(clipStatus, "workspace_placements", "web clipper status")
+      ).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             workspace_id: workspaceId,
@@ -317,7 +361,7 @@ test.describe("Research Workspace parity (extension real backend)", () => {
         apiKey,
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/notes`
       )
-      const notes = await notesResponse.json()
+      const notes = await readJsonRecordArray(notesResponse, "workspace notes")
       expect(notes).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -332,13 +376,20 @@ test.describe("Research Workspace parity (extension real backend)", () => {
         apiKey,
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/sources/status`
       )
-      const sourceStatus = await sourceStatusResponse.json()
+      const sourceStatus = await readJsonRecord(
+        sourceStatusResponse,
+        "workspace source status"
+      )
       expect(sourceStatus.workspace_id).toBe(workspaceId)
-      expect(Array.isArray(sourceStatus.sources)).toBe(true)
+      const sourceStatuses = getJsonRecordArray(
+        sourceStatus,
+        "sources",
+        "workspace source status"
+      )
       const expectedSourceId = `web-clipper:${clipId}`
-      const promotedSource = sourceStatus.sources.find(
-        (source: { id?: string; media_id?: number }) => source.id === expectedSourceId
-      ) as { media_id?: number } | undefined
+      const promotedSource = sourceStatuses.find(
+        (source) => source.id === expectedSourceId
+      )
       expect(promotedSource).toEqual(
         expect.objectContaining({
           id: expectedSourceId,
@@ -355,8 +406,12 @@ test.describe("Research Workspace parity (extension real backend)", () => {
           })
         })
       )
-      expect(promotedSource?.media_id).toEqual(expect.any(Number))
-      expect(promotedSource?.media_id).toBeGreaterThan(0)
+      expect(promotedSource).toBeDefined()
+      const promotedMediaId = promotedSource?.media_id
+      if (typeof promotedMediaId !== "number") {
+        throw new Error("Promoted workspace source did not include a numeric media_id")
+      }
+      expect(promotedMediaId).toBeGreaterThan(0)
     } finally {
       await context.close()
     }

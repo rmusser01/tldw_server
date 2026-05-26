@@ -1,3 +1,5 @@
+"""Capability-readiness endpoints for the Research Workspace WebUI surface."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends

@@ -279,7 +279,11 @@ def _require_workspace(db: CharactersRAGDB, workspace_id: str) -> dict:
 
 def try_get_workspace_job_manager() -> JobManager | None:
     """Resolve the Jobs manager for workspace views without blocking workspace reads/writes."""
-    return try_get_job_manager()
+    try:
+        return try_get_job_manager()
+    except Exception as exc:
+        logger.warning("Workspace Jobs manager unavailable: {}", exc)
+        return None
 
 
 def _dedupe_jobs_by_identity(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -305,7 +309,8 @@ def _dedupe_jobs_by_identity(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]
 def _safe_list_jobs(jm: JobManager, **kwargs: Any) -> list[dict[str, Any]]:
     try:
         return jm.list_jobs(**kwargs)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Workspace job list failed for filters {}: {}", kwargs, exc)
         return []
 
 
@@ -335,6 +340,7 @@ def _list_recent_media_ingest_jobs(jm: JobManager | None, current_user: User) ->
 
 
 def _normalize_job_mapping(value: Any) -> dict[str, Any]:
+    """Normalize Jobs payload/result fields that may arrive as JSON strings."""
     if isinstance(value, dict):
         return value
     if isinstance(value, str):
@@ -352,7 +358,7 @@ def _workspace_source_match_keys(sources: list[dict[str, Any]]) -> set[str]:
         media_id = source.get("media_id")
         if media_id is not None:
             keys.add(f"media:{media_id}")
-        for field in ("id", "url", "title"):
+        for field in ("id",):
             raw = source.get(field)
             if raw:
                 keys.add(f"{field}:{str(raw).strip()}")
@@ -371,13 +377,6 @@ def _job_match_keys(job: dict[str, Any]) -> set[str]:
         raw = payload.get(field) or result.get(field)
         if raw:
             keys.add(f"id:{str(raw).strip()}")
-    for field in ("source", "url", "input_ref", "original_filename"):
-        raw = payload.get(field) or result.get(field)
-        if raw:
-            keys.add(f"url:{str(raw).strip()}")
-    raw_title = payload.get("title") or result.get("title")
-    if raw_title:
-        keys.add(f"title:{str(raw_title).strip()}")
     return keys
 
 
@@ -402,7 +401,7 @@ def _active_workspace_jobs(
         if status_value not in WORKSPACE_ACTIVE_JOB_STATUSES:
             continue
         matched_workspace_id = _job_workspace_id(job)
-        if matched_workspace_id and matched_workspace_id != workspace_id:
+        if matched_workspace_id != workspace_id:
             continue
         if _job_match_keys(job).intersection(source_keys):
             active_jobs.append(job)

@@ -77,6 +77,45 @@ class MediaLookupRepository:
             )
             raise DatabaseError(f"Unexpected error fetching media by ID: {exc}") from exc  # noqa: TRY003
 
+    def status_by_id(
+        self,
+        media_id: int,
+        *,
+        include_deleted: bool = False,
+        include_trash: bool = False,
+    ) -> dict[str, Any] | None:
+        """Return lightweight media fields needed for source-readiness status."""
+        if not isinstance(media_id, int):
+            raise InputError("media_id must be an integer.")  # noqa: TRY003
+
+        query = (
+            "SELECT id, uuid, title, type, url, chunking_status, vector_processing, "
+            "CASE WHEN content IS NOT NULL AND content <> '' THEN 1 ELSE 0 END AS has_content "
+            "FROM Media WHERE id = ?"
+        )
+        params = [media_id]
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if not include_trash:
+            query += " AND is_trash = 0"
+
+        db = self.session
+        try:
+            cursor = db.execute_query(query, tuple(params))
+            result = cursor.fetchone()
+            return dict(result) if result else None
+        except sqlite3.Error as exc:
+            logger.error("Error fetching media status by ID {}: {}", media_id, exc, exc_info=True)
+            raise DatabaseError(f"Failed to fetch media status by ID: {exc}") from exc  # noqa: TRY003
+        except Exception as exc:
+            logger.error(
+                "Unexpected error fetching media status by ID {}: {}",
+                media_id,
+                exc,
+                exc_info=True,
+            )
+            raise DatabaseError(f"Unexpected error fetching media status by ID: {exc}") from exc  # noqa: TRY003
+
     def by_uuid(
         self,
         media_uuid: str,

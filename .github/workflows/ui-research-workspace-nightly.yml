@@ -25,10 +25,10 @@ jobs:
       MINIMAL_TEST_APP: "1"
       PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: "0"
       AUTH_MODE: single_user
-      SINGLE_USER_API_KEY: research-workspace-nightly-key-12345
+      SINGLE_USER_API_KEY: "research-workspace-nightly-${{ github.run_id }}-${{ github.run_attempt }}"
       SERVER_LABEL: research-workspace-nightly-webui
       TLDW_SERVER_URL: http://127.0.0.1:8000
-      TLDW_API_KEY: research-workspace-nightly-key-12345
+      TLDW_API_KEY: "research-workspace-nightly-${{ github.run_id }}-${{ github.run_attempt }}"
       TLDW_WEB_URL: http://localhost:8080
       TLDW_WEB_AUTOSTART: "true"
       TLDW_WEB_CMD: "env NEXT_DISABLE_MEM_OVERRIDE=1 NODE_OPTIONS=--max-old-space-size=5120 bun run dev -- --webpack -p 8080"
@@ -128,10 +128,10 @@ jobs:
       MINIMAL_TEST_APP: "1"
       PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: "0"
       AUTH_MODE: single_user
-      SINGLE_USER_API_KEY: research-workspace-nightly-key-12345
+      SINGLE_USER_API_KEY: "research-workspace-nightly-${{ github.run_id }}-${{ github.run_attempt }}"
       SERVER_LABEL: research-workspace-nightly-extension
       TLDW_E2E_SERVER_URL: http://127.0.0.1:8000
-      TLDW_E2E_API_KEY: research-workspace-nightly-key-12345
+      TLDW_E2E_API_KEY: "research-workspace-nightly-${{ github.run_id }}-${{ github.run_attempt }}"
       TLDW_E2E_EXTENSION_LAUNCH_TIMEOUT_MS: "90000"
       TLDW_E2E_EXTENSION_TARGET_WAIT_MS: "90000"
 

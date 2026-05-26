@@ -33,6 +33,7 @@ router = APIRouter()
 
 
 def _loads_json(value: Any, fallback: Any) -> Any:
+    """Return decoded JSON for string values, or the fallback for invalid input."""
     if value is None:
         return fallback
     if isinstance(value, (dict, list)):
@@ -148,7 +149,7 @@ async def create_workspace_migration(
     response: Response,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> WorkspaceMigrationResponse:
     """Create or idempotently return a Research Workspace migration session."""
     _ = current_user
     try:
@@ -172,7 +173,7 @@ async def create_workspace_migration(
 async def list_workspace_migrations(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> list[WorkspaceMigrationResponse]:
     """List recent durable Research Workspace migration sessions."""
     _ = current_user
     try:
@@ -195,7 +196,7 @@ async def get_workspace_migration(
     migration_id: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> WorkspaceMigrationResponse:
     """Return a durable migration session and recovery manifest."""
     _ = current_user
     try:
@@ -222,7 +223,7 @@ async def put_workspace_migration_chunk(
     body: WorkspaceMigrationChunkUploadRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> WorkspaceMigrationChunkReceiptResponse:
     """Record an idempotent chunk receipt for a migration session."""
     _ = current_user
     try:
@@ -250,7 +251,7 @@ async def finalize_workspace_migration(
     body: WorkspaceMigrationFinalizeRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> WorkspaceMigrationResponse:
     """Finalize a migration only after all declared chunks have receipts."""
     _ = current_user
     try:
@@ -291,7 +292,7 @@ async def acknowledge_workspace_migration_client_delete(
     body: WorkspaceMigrationClientDeleteAckRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
-):
+) -> StatusResponse:
     """Reject client deletion acknowledgement until deletion eligibility exists."""
     _ = current_user
     try:

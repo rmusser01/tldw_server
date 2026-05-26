@@ -91,7 +91,7 @@
     "modeSpeech": "語音",
     "moreTools": "更多",
     "writingPlayground": "寫作工坊",
-    "researchWorkspace": "Research Workspace",
+    "researchWorkspace": "研究工作區",
     "acpPlayground": "ACP Playground",
     "skills": "Skills",
     "adminLlamacpp": "Llama.cpp Admin",
@@ -100,7 +100,7 @@
     "collections": "Collections",
     "dataTables": "Data Tables",
     "documentWorkspace": "Document Workspace",
-    "modelPlayground": "Model Playground",
+    "modelPlayground": "模型遊樂場",
     "workflowEditor": "Workflow Editor",
     "modeRepo2txt": "Repo2Txt"
   },

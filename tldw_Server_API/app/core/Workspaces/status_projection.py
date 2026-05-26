@@ -183,8 +183,7 @@ def _status_from_media(
     media_db: Any | None,
     media_id: int,
 ) -> dict[str, Any]:
-    content = str(media.get("content") or "")
-    text_ready = bool(content.strip())
+    text_ready = _media_has_text(media)
     chunking_status = str(media.get("chunking_status") or "").strip().lower()
     vector_processing = media.get("vector_processing")
     vector_ready = _is_vector_ready(vector_processing)
@@ -345,9 +344,26 @@ def _get_media(media_db: Any | None, media_id: int) -> dict[str, Any] | None:
     if media_db is None:
         return None
     try:
-        return media_db_api.get_media_by_id(media_db, media_id)
+        return media_db_api.get_media_status_by_id(media_db, media_id)
     except (AttributeError, DatabaseError, RuntimeError, TypeError, ValueError):
         return None
+
+
+def _media_has_text(media: dict[str, Any]) -> bool:
+    if "has_content" in media:
+        return _coerce_bool(media.get("has_content"))
+    if "content_length" in media:
+        return (_coerce_int(media.get("content_length")) or 0) > 0
+    return bool(str(media.get("content") or "").strip())
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return int(value) != 0
+    normalized = str(value or "").strip().lower()
+    return normalized in {"1", "true", "yes", "y", "ready", "completed", "complete", "done"}
 
 
 def _is_vector_ready(value: Any) -> bool:

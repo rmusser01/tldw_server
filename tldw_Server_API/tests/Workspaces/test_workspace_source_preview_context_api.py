@@ -35,6 +35,24 @@ class _MediaPreviewDB:
         row = self.rows.get(media_id)
         return dict(row) if row else None
 
+    def get_media_status_by_id(
+        self,
+        media_id: int,
+        *,
+        include_deleted: bool = False,
+        include_trash: bool = False,
+    ) -> dict[str, Any] | None:
+        row = self.get_media_by_id(
+            media_id,
+            include_deleted=include_deleted,
+            include_trash=include_trash,
+        )
+        if row is None:
+            return None
+        content = str(row.pop("content", "") or "")
+        row.setdefault("has_content", bool(content.strip()))
+        return row
+
     def has_unvectorized_chunks(self, media_id: int) -> bool:
         return bool(self.chunks.get(media_id))
 
@@ -282,6 +300,15 @@ def test_workspace_context_filters_active_jobs_to_workspace_sources(
             "progress_percent": 20,
             "progress_message": "Processing another workspace source",
             "payload": {"media_id": 777},
+        },
+        {
+            "id": 203,
+            "uuid": "uuid-missing-workspace-id",
+            "status": "processing",
+            "job_type": "workspace_source_ingest",
+            "progress_percent": 35,
+            "progress_message": "Processing matching media without workspace scope",
+            "payload": {"media_id": 1},
         },
         {
             "id": 303,

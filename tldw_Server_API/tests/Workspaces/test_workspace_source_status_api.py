@@ -31,6 +31,24 @@ class _MediaStatusDB:
         row = self.rows.get(media_id)
         return dict(row) if row else None
 
+    def get_media_status_by_id(
+        self,
+        media_id: int,
+        *,
+        include_deleted: bool = False,
+        include_trash: bool = False,
+    ) -> dict[str, Any] | None:
+        row = self.get_media_by_id(
+            media_id,
+            include_deleted=include_deleted,
+            include_trash=include_trash,
+        )
+        if row is None:
+            return None
+        content = str(row.pop("content", "") or "")
+        row.setdefault("has_content", bool(content.strip()))
+        return row
+
     def has_unvectorized_chunks(self, media_id: int) -> bool:
         return media_id in self.unvectorized
 
@@ -331,6 +349,61 @@ def test_workspace_sources_status_prefers_extracted_media_over_workspace_lifecyc
     assert source["job"] is None
 
 
+@pytest.mark.integration
+def test_workspace_sources_status_uses_lightweight_media_status_without_content_load(
+    workspace_status_app,
+    tmp_path,
+):
+    class _LightweightMediaStatusDB:
+        def get_media_status_by_id(
+            self,
+            media_id: int,
+            *,
+            include_deleted: bool = False,
+            include_trash: bool = False,
+        ) -> dict[str, Any] | None:
+            _ = (include_deleted, include_trash)
+            if media_id != 12:
+                return None
+            return {
+                "id": 12,
+                "title": "Lightweight source",
+                "type": "document",
+                "has_content": True,
+                "chunking_status": "completed",
+                "vector_processing": 1,
+            }
+
+        def get_media_by_id(self, *_args: Any, **_kwargs: Any) -> dict[str, Any] | None:
+            raise RuntimeError("full media content should not be loaded for status")
+
+    db = CharactersRAGDB(db_path=str(tmp_path / "lightweight-status.db"), client_id="user-1")
+    db.upsert_workspace("ws-lightweight", "Lightweight Status")
+    db.add_workspace_source(
+        "ws-lightweight",
+        {
+            "id": "src-lightweight",
+            "media_id": 12,
+            "title": "Lightweight source",
+            "source_type": "document",
+            "position": 0,
+            "selected": True,
+        },
+    )
+    _install_overrides(workspace_status_app, db, _LightweightMediaStatusDB())
+    try:
+        with TestClient(workspace_status_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-lightweight/sources/status")
+    finally:
+        _clear_overrides(workspace_status_app)
+
+    assert response.status_code == 200, response.text
+    source = response.json()["sources"][0]
+    assert source["state"] == "queryable"
+    assert source["readiness"]["text_extracted"] is True
+    assert source["readiness"]["vector_ready"] is True
+
+
 def test_recent_media_ingest_jobs_filters_to_supported_media_ingest_jobs() -> None:
     class _MediaIngestJobManager:
         def __init__(self) -> None:
@@ -371,6 +444,6 @@ def test_workspace_job_manager_resolver_fails_open(monkeypatch: pytest.MonkeyPat
     def _raise_job_manager() -> None:
         raise RuntimeError("jobs manager unavailable")
 
-    monkeypatch.setattr(workspaces_endpoint, "get_job_manager", _raise_job_manager)
+    monkeypatch.setattr(workspaces_endpoint, "try_get_job_manager", _raise_job_manager)
 
     assert workspaces_endpoint.try_get_workspace_job_manager() is None
