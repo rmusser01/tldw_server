@@ -17,7 +17,7 @@ The initial profile system should focus on enforceable governance. A profile is 
 - Extract a reusable MCP runtime package without breaking existing `tldw_server` routes, imports, env vars, JSON-RPC behavior, MCP Hub policy behavior, or tests.
 - Make the package usable by other Python applications as an embeddable runtime.
 - Provide clean adapter interfaces for auth, RBAC, rate limits, metrics, audit, path scopes, credential brokering, profile resolution, approval evaluation, and module config loading.
-- Add an optional built-in SQLite-backed profile store for standalone use while allowing hosts to replace persistence.
+- Add optional built-in SQLite-backed stores for standalone use while allowing hosts to replace persistence.
 - Support external MCP server registry, lifecycle, health checks, reconnects, discovery refresh, and policy-gated calls.
 - Support a standalone gateway after the package seam is proven.
 - Treat role-like front-end modes as profile presets, not hardcoded runtime roles.
@@ -45,9 +45,11 @@ Acceptance criteria:
 - Existing `/api/v1/mcp/*` routes, JSON-RPC payloads, auth behavior, env vars, MCP Hub policy behavior, approvals, path scopes, and credential brokering remain compatible in `tldw_server`.
 - Existing clients that do not select a profile continue to resolve through the current default MCP Hub/AuthNZ/RBAC behavior in `tldw_server`; extraction must not unexpectedly deny or grant tools for no-profile legacy requests.
 - A minimal external FastAPI app can mount the package router with fake adapters and successfully call status, tools/list, and tools/call for a stub tool.
-- The optional built-in profile store supports SQLite persistence for profiles, assignments, approval policies, credential grants, external server definitions, provenance, and audit events.
+- The optional built-in SQLite storage provides separate `ProfileStore`, `ExternalRegistryStore`, and `AuditStore` interfaces for profiles/assignments/approval policies/credential grants, external server definitions, provenance, and audit events.
 - File/YAML data is limited to preset loading, seed/import/export, or read-only configuration, not concurrent policy persistence.
 - External-server stdio is supported in Phase A only as a managed upstream MCP server transport; the client-facing gateway stdio MCP server entrypoint belongs to Phase B.
+- The core runtime is instance-scoped. `tldw_server` may keep a singleton compatibility shim, but the package API must allow multiple isolated runtime instances in one process.
+- The package declares its dependency extras and license/publishing decision before release.
 
 ### Phase B: Standalone Gateway
 
@@ -87,6 +89,56 @@ Use a strangler extraction.
 5. Build the standalone gateway on the clean package API.
 
 This preserves strict compatibility for the host app while allowing the package API to be clean and forward-looking.
+
+## Packaging, Licensing, And Dependency Budget
+
+The standalone package cannot inherit the full root dependency surface. It should define a small core install plus optional extras.
+
+Core package dependencies should be limited to runtime essentials such as:
+
+- Python `>=3.10`
+- Pydantic models/settings if needed for schema validation
+- lightweight async utilities from the standard library where possible
+
+Suggested extras:
+
+- `fastapi`: FastAPI router, WebSocket server support, HTTP test client helpers
+- `sqlite`: bundled SQLite stores and migrations
+- `federation`: external MCP transports and lifecycle dependencies
+- `gateway`: all dependencies needed for the standalone HTTP/WebSocket and stdio gateway
+- `dev`: tests, linting, type checking, import-boundary checks
+
+The repository has conflicting license signals in local guidance and package metadata. Before publishing or encouraging third-party embedding, the implementation plan must verify the canonical repo license from authoritative project files and maintainer intent, then make an explicit standalone-package licensing decision:
+
+- keep the standalone package under the verified repo license and document implications for downstream users, or
+- obtain the needed project approval for a different library license such as LGPL or a permissive license
+
+Until that decision is made, the package should be treated as an in-repo/internal package even if its technical boundary is clean.
+
+Packaging acceptance criteria:
+
+- `mcp_unified` can be installed without installing media ingestion, RAG, UI, STT/TTS, or other `tldw_server` optional dependency groups
+- extras are documented and tested independently
+- import-boundary tests run in a minimal environment
+- license metadata is explicit in the package metadata and docs
+
+## Runtime Instance Model
+
+The package runtime should be instance-scoped by design.
+
+`MCPRuntime` or equivalent should own:
+
+- settings
+- module/tool registry
+- profile resolver
+- external server manager
+- idempotency manager
+- approval, credential, path-scope, audit, metrics, RBAC, and rate-limit adapters
+- transport session state
+
+Host applications can construct multiple isolated runtime instances in the same Python process for tests, tenants, workspaces, or separate mounted routers. No standalone package component should require process-global singleton state for normal operation.
+
+For compatibility, `tldw_Server_API.app.core.MCP_unified.get_mcp_server()` may remain as a shim that returns the existing singleton facade. That shim should wrap or delegate to an instance-scoped runtime internally, and new package examples should not teach singleton usage.
 
 ## Legacy And No-Profile Compatibility
 
@@ -149,6 +201,9 @@ mcp_unified/
     path_scope.py
     approvals.py
     module_config.py
+  storage/
+    sqlite.py
+    migrations.py
 ```
 
 The standalone package must not import `tldw_Server_API`. This should be enforced by an import-boundary test or CI check.
@@ -165,6 +220,36 @@ tldw_Server_API/app/core/MCP_unified/adapters/
   telemetry.py
   module_config.py
 ```
+
+Storage interfaces should be split by responsibility:
+
+- `ProfileStore`: profiles, assignments, approval policies, credential grants, schema migrations
+- `ExternalRegistryStore`: external server definitions, credential slot metadata, enabled/disabled state, registry migrations
+- `AuditStore`: append-only audit/provenance events and query helpers
+
+The bundled SQLite implementation can implement all three interfaces for the standalone gateway, but host integrations may provide each interface independently. `tldw_server` should adapt MCP Hub and AuthNZ repositories into these interfaces rather than routing all persistence through a generic profile store.
+
+## Protocol Compatibility
+
+The package must define its MCP protocol compatibility contract explicitly.
+
+Initial compatibility target:
+
+- JSON-RPC 2.0 request/response behavior matching the current MCP Unified implementation
+- protocol version `2024-11-05` unless implementation planning chooses an intentional upgrade
+- method support for `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`, `modules/list`, and `modules/health`
+- existing `tldw_server` HTTP and WebSocket mapping for `/api/v1/mcp/*`
+
+Protocol compatibility tests must cover:
+
+- initialize response shape and negotiated protocol version
+- JSON-RPC error codes and notification behavior
+- batch request handling
+- tool list and tool call behavior under allowed, denied, approval-required, and unavailable-policy states
+- resource and prompt discovery behavior
+- HTTP, WebSocket, and later client-facing stdio transport parity for equivalent JSON-RPC messages
+
+Any future protocol-version upgrade must be handled as negotiation or an explicit compatibility break, not as an incidental extraction side effect.
 
 ## Runtime Data Flow
 
@@ -278,7 +363,9 @@ Phase A enforcement ignores this metadata except for display and audit context.
 The runtime should fail closed for execution. Exact semantics:
 
 - unresolved effective policy: deny tool execution
-- profile store unavailable: deny execution unless the host explicitly enables discovery-only degraded mode
+- `ProfileStore` unavailable: deny execution unless the host explicitly enables discovery-only degraded mode
+- `ExternalRegistryStore` unavailable: deny external-server execution and mark external tools unavailable; local tools may still follow profile/RBAC policy when their required stores are available
+- `AuditStore` unavailable: deny mutating, credential-bearing, external, or approval-required executions unless the host explicitly configures an emergency audit-degraded mode; read-only discovery may continue with an audit-unavailable warning
 - approval service unavailable: deny any action that requires approval
 - credential broker unavailable: deny secret-bearing or external-credential tool calls
 - path-scope resolver unavailable: deny filesystem-affecting tool calls
@@ -287,7 +374,9 @@ The runtime should fail closed for execution. Exact semantics:
 
 Discovery may degrade more softly:
 
-- unavailable profile store may return no executable tools plus reason metadata
+- unavailable `ProfileStore` may return no executable tools plus reason metadata
+- unavailable `ExternalRegistryStore` may return local tools and mark external tools unavailable
+- unavailable `AuditStore` may return discovery results with audit-degraded warning metadata, but must not silently permit high-risk execution
 - external discovery failure degrades only the affected server
 - catalog/profile resolution failures should not grant extra execution authority
 
@@ -393,11 +482,12 @@ Compatibility requirements:
 - Profile schema validation and migrations
 - Effective policy resolution, provenance, and failure semantics
 - Preset safety baseline
-- Optional SQLite profile store
+- Optional SQLite `ProfileStore`, `ExternalRegistryStore`, and `AuditStore`
 - External server discovery refresh, reconnect, circuit breaker, and policy-gated execution
 - Stdio spawn validation with no shell and bounded cwd
 - FastAPI router mounted in a minimal external app
 - Stdio gateway smoke test after stdio transport lands
+- Dependency-extra tests that prove core, `fastapi`, `sqlite`, `federation`, and `gateway` installs do not accidentally depend on the full `tldw_server` dependency graph
 
 ### Host Compatibility Tests
 
@@ -415,6 +505,29 @@ Compatibility requirements:
 - The standalone package must not import `tldw_Server_API`.
 - Host adapters may import both the standalone package and `tldw_Server_API`.
 - Domain modules that remain tldw-specific must not be accidentally packaged as generic runtime modules.
+- Two runtime instances in one process must not share registry, profile, idempotency, session, or external-server state unless explicitly configured to share a store.
+
+## Module Ownership Inventory
+
+Before Stage 2 moves code into the standalone package, Stage 1 must produce a module ownership inventory.
+
+Each current MCP module should be classified as one of:
+
+- `runtime-neutral`: safe to move into the package with no `tldw_Server_API` dependency
+- `adapter-backed`: reusable only after its tldw dependencies are replaced with explicit host adapters
+- `tldw-owned`: remains in `tldw_server` and is exposed to the package runtime as a host-provided module
+
+The inventory should include:
+
+- current file path
+- tool names exposed by the module
+- dependency class
+- data stores touched
+- capability/risk metadata needed for profiles
+- migration recommendation
+- tests that protect current behavior
+
+Stage 2 should move only runtime-neutral modules and infrastructure. Adapter-backed modules require separate design/plan slices. Tldw-owned modules should stay host-owned until there is a clear standalone use case and adapter contract.
 
 ## Migration Plan
 
@@ -422,11 +535,13 @@ Compatibility requirements:
 
 Add interfaces in the current MCP tree for auth, RBAC, rate limiting, metrics, profile resolution, approvals, credentials, path scopes, audit, and module config loading. Convert current direct calls to use default tldw adapters.
 
+Also produce the module ownership inventory and add import-boundary scaffolding tests.
+
 Success means existing tests keep passing and behavior is unchanged.
 
 ### Stage 2: Runtime-Neutral Package
 
-Move request/response models, protocol dispatch, module registry, execution preparation, idempotency helpers, external server manager, transport contracts, profile schemas, and optional SQLite profile store into `mcp_unified`.
+Move request/response models, protocol dispatch, module registry, execution preparation, idempotency helpers, external server manager, transport contracts, profile schemas, and optional SQLite store implementations into `mcp_unified`.
 
 Success means the package test suite runs without importing `tldw_Server_API`.
 
@@ -438,7 +553,7 @@ Success means existing MCP tests and route compatibility tests pass.
 
 ### Stage 4: Standalone Gateway
 
-Add package entrypoints for FastAPI HTTP/WebSocket and stdio MCP server process. Add local SQLite profile storage, preset loading, external MCP lifecycle management, and gateway config commands.
+Add package entrypoints for FastAPI HTTP/WebSocket and stdio MCP server process. Add local SQLite stores, preset loading, external MCP lifecycle management, and gateway config commands.
 
 Success means a user can run the gateway without installing the full `tldw_server` app.
 
@@ -455,10 +570,9 @@ Success means a user can run the gateway without installing the full `tldw_serve
 ## Open Questions For Implementation Planning
 
 - Should the library package live inside this repo initially or as a sibling package/worktree from the start?
-- Should `tldw_server` continue using global singletons behind adapters during the first phase, or should router construction become instance-scoped immediately?
-- Which current tldw-specific modules, if any, should graduate into generic package modules first?
 - What preset set should ship in the first gateway release versus remain examples?
 - Should package settings use Pydantic Settings directly or a smaller dataclass plus host-provided loaders?
+- What license will the standalone package use if published outside this repo?
 
 ## Recommended First Slice
 
@@ -467,6 +581,7 @@ The first implementation slice should be Stage 1 only:
 1. Introduce adapter protocols in the current MCP tree.
 2. Convert the highest-risk direct dependencies in `protocol.py`, `server.py`, and `modules/base.py` to use adapters.
 3. Keep behavior and imports compatible.
-4. Add boundary-oriented tests that prepare for extraction.
+4. Add the module ownership inventory.
+5. Add boundary-oriented tests that prepare for extraction, including no `tldw_Server_API` imports from the future package boundary and no shared state between runtime instances.
 
 This creates the seam needed for the package without mixing it with gateway product work.
