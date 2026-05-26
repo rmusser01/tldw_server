@@ -56,10 +56,17 @@ vi.mock("../tabs", () => ({
     onNavigateToCreate: () => void
     reviewDeckId?: number | null
     onReviewDeckChange: (deckId: number | null | undefined) => void
+    onNavigateToManageDeck?: (deckId: number) => void
+    onNavigateToSchedulerDeck?: (deckId: number) => void
+    onNavigateToExportDeck?: (deckId: number) => void
   }) => (
     <div data-testid="mock-review-tab">
       <button onClick={props.onNavigateToCreate}>Route Create</button>
       <button onClick={() => props.onReviewDeckChange(12)}>Select Deck 12</button>
+      <button onClick={() => props.onReviewDeckChange(21)}>Select Deck 21</button>
+      <button onClick={() => props.onNavigateToManageDeck?.(12)}>Route Manage Deck 12</button>
+      <button onClick={() => props.onNavigateToSchedulerDeck?.(12)}>Route Scheduler Deck 12</button>
+      <button onClick={() => props.onNavigateToExportDeck?.(12)}>Route Export Deck 12</button>
       <span data-testid="mock-review-deck-id">{String(props.reviewDeckId ?? "")}</span>
     </div>
   ),
@@ -67,16 +74,27 @@ vi.mock("../tabs", () => ({
     onNavigateToImport: () => void
     openCreateSignal?: number
     initialDeckId?: number
+    initialDeckHandoffKey?: string | null
     initialShowWorkspaceDecks?: boolean
   }) => (
     <div data-testid="mock-manage-tab">
       <button onClick={props.onNavigateToImport}>Route Import</button>
       <span data-testid="mock-open-create-signal">{String(props.openCreateSignal ?? 0)}</span>
       <span data-testid="mock-manage-initial-deck-id">{String(props.initialDeckId ?? "")}</span>
+      <span data-testid="mock-manage-handoff-key">{String(props.initialDeckHandoffKey ?? "")}</span>
       <span data-testid="mock-manage-show-workspace">{String(props.initialShowWorkspaceDecks ?? false)}</span>
     </div>
   ),
-  ImportExportTab: () => <div data-testid="mock-transfer-tab">Import / Export panel</div>,
+  ImportExportTab: (props: {
+    initialExportDeckId?: number | null
+    initialExportDeckHandoffKey?: string | null
+  }) => (
+    <div data-testid="mock-transfer-tab">
+      Import / Export panel
+      <span data-testid="mock-export-initial-deck-id">{String(props.initialExportDeckId ?? "")}</span>
+      <span data-testid="mock-export-handoff-key">{String(props.initialExportDeckHandoffKey ?? "")}</span>
+    </div>
+  ),
   TemplatesTab: () => <div data-testid="mock-templates-tab">Templates panel</div>,
   SchedulerTab: (props: {
     initialDeckId?: number | null
@@ -231,6 +249,44 @@ describe("FlashcardsManager consistency standards", () => {
 
     expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("12")
     expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("review:12")
+  })
+
+  it("routes deck dashboard actions to the target deck workflows", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Route Manage Deck 12"))
+    expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-manage-initial-deck-id")).toHaveTextContent("12")
+    expect(screen.getByTestId("mock-manage-handoff-key")).toHaveTextContent("manage:12:")
+
+    fireEvent.click(screen.getByText("Study"))
+    fireEvent.click(screen.getByText("Route Scheduler Deck 12"))
+    expect(screen.getByTestId("mock-scheduler-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("12")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("scheduler:12:")
+
+    fireEvent.click(screen.getByText("Study"))
+    fireEvent.click(screen.getByText("Route Export Deck 12"))
+    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-export-initial-deck-id")).toHaveTextContent("12")
+    expect(screen.getByTestId("mock-export-handoff-key")).toHaveTextContent("export:12:")
+  })
+
+  it("clears one-shot scheduler handoff after Study deck selection changes", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Route Scheduler Deck 12"))
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("12")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("scheduler:12:")
+
+    fireEvent.click(screen.getByText("Study"))
+    fireEvent.click(screen.getByText("Select Deck 21"))
+    fireEvent.click(screen.getByText("Scheduler"))
+
+    expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("21")
+    expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("review:21")
   })
 
   it("uses Study/Manage/Create & Import/Scheduler tab labels", () => {

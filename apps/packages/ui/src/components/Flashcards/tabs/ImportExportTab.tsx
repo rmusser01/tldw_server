@@ -26,11 +26,15 @@ const { Text } = Typography
 type ImportExportTabProps = {
   generateIntent?: FlashcardsGenerateIntent | null
   studyPackIntent?: StudyPackIntent | null
+  initialExportDeckId?: number | null
+  initialExportDeckHandoffKey?: string | null
 }
 
 export const ImportExportTab: React.FC<ImportExportTabProps> = ({
   generateIntent,
-  studyPackIntent
+  studyPackIntent,
+  initialExportDeckId = null,
+  initialExportDeckHandoffKey = null
 }) => {
   const { t } = useTranslation(["option", "common"])
   const limitsQuery = useImportLimitsQuery()
@@ -166,7 +170,11 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
           defaultValue: "Export Flashcards"
         })}
       >
-        <ExportPanel onTransferAction={handleTransferAction} />
+        <ExportPanel
+          onTransferAction={handleTransferAction}
+          initialDeckId={initialExportDeckId}
+          initialDeckHandoffKey={initialExportDeckHandoffKey}
+        />
       </Card>
       <Card
         title={t("option:flashcards.generateTitle", {

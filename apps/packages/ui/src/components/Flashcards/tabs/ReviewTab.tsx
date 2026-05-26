@@ -41,6 +41,7 @@ import {
   useNextDueQuery
 } from "../hooks"
 import {
+  DeckStudyDashboard,
   MarkdownWithBoundary,
   ReviewProgress,
   ReviewAnalyticsSummary,
@@ -85,6 +86,9 @@ interface ReviewTabProps {
   onClearOverride?: () => void
   isActive: boolean
   forceShowWorkspaceItems?: boolean
+  onNavigateToManageDeck?: (deckId: number) => void
+  onNavigateToSchedulerDeck?: (deckId: number) => void
+  onNavigateToExportDeck?: (deckId: number) => void
 }
 
 interface ReviewFailureState {
@@ -109,7 +113,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   reviewOverrideCard,
   onClearOverride,
   isActive,
-  forceShowWorkspaceItems = false
+  forceShowWorkspaceItems = false,
+  onNavigateToManageDeck,
+  onNavigateToSchedulerDeck,
+  onNavigateToExportDeck
 }) => {
   const { t } = useTranslation(["option", "common"])
   const navigate = useNavigate()
@@ -228,6 +235,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     localOverrideCard ??
     reviewOverrideCard ??
     (reviewMode === "cram" ? cramQueueCard : reviewQuery.data)
+  const deckDashboardAnalyticsQuery = useReviewAnalyticsSummaryQuery(null, {
+    enabled: isActive && !activeCard,
+    ...(directPathVisibilityOptions ?? {})
+  })
   const assistantQuery = useFlashcardAssistantQuery(activeCard?.uuid, {
     enabled: isActive && !!activeCard
   })
@@ -245,6 +256,32 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         : undefined
   const isCramMode = reviewMode === "cram"
   const showTopBarCreateCta = !activeCard
+  const handleDashboardReviewDeck = React.useCallback(
+    (deckId: number) => {
+      onReviewDeckChange(deckId)
+      setReviewMode("due")
+      setCramQueueIndex(0)
+      setSelectedStudySessionId(null)
+      setActiveReviewSessionId(null)
+      if (reviewOverrideCard) {
+        onClearOverride?.()
+      }
+    },
+    [onClearOverride, onReviewDeckChange, reviewOverrideCard]
+  )
+  const handleDashboardCramDeck = React.useCallback(
+    (deckId: number) => {
+      onReviewDeckChange(deckId)
+      setReviewMode("cram")
+      setCramQueueIndex(0)
+      setSelectedStudySessionId(null)
+      setActiveReviewSessionId(null)
+      if (reviewOverrideCard) {
+        onClearOverride?.()
+      }
+    },
+    [onClearOverride, onReviewDeckChange, reviewOverrideCard]
+  )
   const reviewScopeKey = React.useMemo(
     () => [
       reviewMode,
@@ -1140,6 +1177,22 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           </Button>
         )}
       </div>
+
+      {!activeCard && (
+        <DeckStudyDashboard
+          decks={availableDecks}
+          deckProgress={deckDashboardAnalyticsQuery.data?.decks}
+          selectedDeckId={reviewDeckId ?? null}
+          isLoading={deckDashboardAnalyticsQuery.isLoading}
+          onReviewDeck={handleDashboardReviewDeck}
+          onCramDeck={handleDashboardCramDeck}
+          onManageDeck={(deckId) => {
+            onNavigateToManageDeck?.(deckId)
+          }}
+          onOpenScheduler={onNavigateToSchedulerDeck}
+          onExportDeck={onNavigateToExportDeck}
+        />
+      )}
 
       <ReviewAnalyticsSummary
         summary={analyticsSummaryQuery.data}

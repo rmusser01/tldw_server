@@ -107,6 +107,7 @@ interface ManageTabProps {
   openCreateSignal?: number
   isActive: boolean
   initialDeckId?: number
+  initialDeckHandoffKey?: string | null
   initialShowWorkspaceDecks?: boolean
 }
 
@@ -130,6 +131,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   openCreateSignal,
   isActive,
   initialDeckId,
+  initialDeckHandoffKey = null,
   initialShowWorkspaceDecks = false
 }) => {
   const { t } = useTranslation(["option", "common"])
@@ -173,6 +175,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const [nowMs, setNowMs] = React.useState(() => Date.now())
   const [showWorkspaceDecks, setShowWorkspaceDecks] = React.useState(initialShowWorkspaceDecks)
   const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<string | null>(null)
+  const appliedDeckHandoffKeyRef = React.useRef<string | null>(null)
   const [deckScopeOpen, setDeckScopeOpen] = React.useState(false)
   const [deckScopeForm] = Form.useForm()
 
@@ -196,6 +199,22 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const [pageSize, setPageSize] = React.useState(20)
   const [listDensity, setListDensity] = React.useState<"compact" | "expanded" | "document">("compact")
   const [shortcutHintDensity, setShortcutHintDensity] = useFlashcardsShortcutHintDensity()
+
+  React.useEffect(() => {
+    if (
+      initialDeckId == null ||
+      !initialDeckHandoffKey ||
+      appliedDeckHandoffKeyRef.current === initialDeckHandoffKey
+    ) {
+      return
+    }
+    appliedDeckHandoffKeyRef.current = initialDeckHandoffKey
+    setMDeckId(initialDeckId)
+    setShowWorkspaceDecks(initialShowWorkspaceDecks)
+    setSelectedWorkspaceId(null)
+    setPage(1)
+  }, [initialDeckHandoffKey, initialDeckId, initialShowWorkspaceDecks])
+
   React.useEffect(() => {
     if (!isActive || viewMode !== "cards" || shortcutHintDensity === "hidden") return
     void trackFlashcardsShortcutHintTelemetry({
