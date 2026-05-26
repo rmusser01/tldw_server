@@ -621,6 +621,15 @@ export const ROUTE_METADATA = [
     rationale: "General settings route and sidepanel settings target."
   }),
   defineRoute({
+    path: "/settings/image-generation",
+    label: "Image Generation Settings",
+    group: "settings",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Image generation provider and model configuration route."
+  }),
+  defineRoute({
     path: "/admin",
     label: "Admin",
     group: "settings",
@@ -628,6 +637,15 @@ export const ROUTE_METADATA = [
     smoke: "manual",
     requiresBackend: true,
     rationale: "Admin landing route for operator-only workflows."
+  }),
+  defineRoute({
+    path: "/admin/mlx",
+    label: "Admin MLX",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "Admin route for local MLX model status and operator controls."
   }),
   defineRoute({
     path: "/mcp-hub",

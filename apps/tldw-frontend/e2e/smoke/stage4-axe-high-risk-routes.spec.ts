@@ -33,19 +33,67 @@ const HIGH_RISK_ROUTES: Stage4HighRiskRoute[] = [
     name: 'Chat',
     rationale: 'Primary assistant workflow combines composer, history, and live status controls.',
   },
-  { path: "/document-workspace", name: "Document Workspace" },
-  { path: "/workflow-editor", name: "Workflow Editor" },
-  { path: "/collections", name: "Collections" },
-  { path: "/data-tables", name: "Data Tables" },
-  { path: "/watchlists", name: "Watchlists" },
-  { path: "/evaluations", name: "Evaluations" },
-  { path: "/knowledge", name: "Knowledge QA" },
-  { path: "/companion", name: "Companion" },
-  { path: "/admin/mlx", name: "Admin MLX" },
-  { path: "/quick-chat-popout", name: "Quick Chat Popout" },
-  { path: "/research-workspace", name: "Research Workspace" },
-  { path: "/settings/image-generation", name: "Image Generation Settings" }
-]
+  {
+    path: '/document-workspace',
+    name: 'Document Workspace',
+    rationale: 'Document editing, import, and export controls combine dense panels and forms.',
+  },
+  {
+    path: '/workflow-editor',
+    name: 'Workflow Editor',
+    rationale: 'Node editor and connection controls are high-risk for keyboard and label coverage.',
+  },
+  {
+    path: '/collections',
+    name: 'Collections',
+    rationale: 'Collection organization combines source lists, bulk actions, and navigation state.',
+  },
+  {
+    path: '/data-tables',
+    name: 'Data Tables',
+    rationale: 'Dense table controls and editable cells are high-risk for accessible names.',
+  },
+  {
+    path: '/watchlists',
+    name: 'Watchlists',
+    rationale: 'Monitoring setup, status, and action controls require consistent landmarks.',
+  },
+  {
+    path: '/evaluations',
+    name: 'Evaluations',
+    rationale: 'Evaluation setup and results tables combine forms, metrics, and status controls.',
+  },
+  {
+    path: '/knowledge',
+    name: 'Knowledge QA',
+    rationale: 'Evidence-backed Q&A depends on source lists, answer regions, and search controls.',
+  },
+  {
+    path: '/companion',
+    name: 'Companion',
+    rationale: 'Companion route combines assistant controls, cards, and cross-route launch actions.',
+  },
+  {
+    path: '/admin/mlx',
+    name: 'Admin MLX',
+    rationale: 'Admin model controls expose operator-only settings and status actions.',
+  },
+  {
+    path: '/quick-chat-popout',
+    name: 'Quick Chat Popout',
+    rationale: 'Popout chat has compact composer, message, and window controls.',
+  },
+  {
+    path: '/research-workspace',
+    name: 'Research Workspace',
+    rationale: 'Research Workspace combines source management, chat, Studio, and evidence panes.',
+  },
+  {
+    path: '/settings/image-generation',
+    name: 'Image Generation Settings',
+    rationale: 'Provider settings combine credential, model, and generation configuration forms.',
+  },
+];
 
 const STAGE4_A11Y_RULES = [
   'landmark-one-main',

@@ -57,7 +57,7 @@ export function getStage4HighRiskRouteGovernanceProblems(
       }
     }
 
-    if (route.rationale.trim().length < 20) {
+    if ((route.rationale ?? '').trim().length < 20) {
       problems.push(`${route.path} is missing an explicit Stage 4 Axe rationale`);
     }
 
