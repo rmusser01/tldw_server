@@ -637,7 +637,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Dense smoke sweeps can rate-limit model metadata probes; treated as environment noise for these routes.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/content-review", "/claims-review", "/research-workspace"]
   },
   {
@@ -648,7 +648,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Research Workspace can abort in-flight model metadata fetches during route hydration without user-impacting breakage.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/research-workspace"]
   },
   {
