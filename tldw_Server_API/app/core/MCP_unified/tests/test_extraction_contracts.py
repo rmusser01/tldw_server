@@ -7,8 +7,11 @@ from pathlib import Path
 MCP_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _interface_boundary_violations_for(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+def _interface_boundary_violations_for(path: Path, interface_dir: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    relative_parent = path.parent.relative_to(interface_dir)
+    relative_depth = 0 if relative_parent == Path(".") else len(relative_parent.parts)
+    max_interface_relative_level = relative_depth + 1
     violations: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -19,7 +22,7 @@ def _interface_boundary_violations_for(path: Path) -> list[str]:
                 or alias.name.startswith("tldw_Server_API.")
             )
         elif isinstance(node, ast.ImportFrom):
-            if node.level > 1:
+            if node.level > max_interface_relative_level:
                 violations.append(
                     f"relative import escapes interfaces package: level={node.level}"
                 )
@@ -40,7 +43,7 @@ def test_new_interface_modules_do_not_import_tldw_server_api() -> None:
     assert interface_dir.exists()
     offenders: dict[str, list[str]] = {}
     for path in interface_dir.rglob("*.py"):
-        violations = _interface_boundary_violations_for(path)
+        violations = _interface_boundary_violations_for(path, interface_dir)
         if violations:
             offenders[str(path)] = violations
     assert offenders == {}
@@ -67,6 +70,7 @@ def test_mcp_server_accepts_runtime_dependencies() -> None:
     deps = build_default_runtime_dependencies()
     server = MCPServer(dependencies=deps)
     assert server.protocol.module_registry is deps.module_registry
+    assert server.protocol.rbac_policy is deps.rbac_policy
     if hasattr(server, "module_registry"):
         assert server.module_registry is deps.module_registry
     if hasattr(server, "rbac_policy"):
