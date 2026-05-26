@@ -44,7 +44,7 @@ export interface ResearchWorkspaceMigrationChunkPlan
   storeName?: string
 }
 
-export interface ResearchWorkspaceMigrationManifest {
+export interface ResearchWorkspaceMigrationManifest extends Record<string, unknown> {
   schema_version: typeof RESEARCH_WORKSPACE_MIGRATION_SCHEMA_VERSION
   generated_at: string
   target_workspace_id: string

@@ -22,6 +22,8 @@ interface WorkspaceStatusBarProps {
   storageQuotaBytes?: number
   /** Active operation labels shown in the status bar */
   activeOperations?: string[]
+  /** Non-spinning recovery/status notices shown in the status bar */
+  statusMessages?: string[]
   /** Rollout gate for status/guardrails surfaces */
   statusGuardrailsEnabled?: boolean
 }
@@ -68,6 +70,7 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
   storageUsedBytes,
   storageQuotaBytes,
   activeOperations = [],
+  statusMessages = [],
   statusGuardrailsEnabled = true
 }) => {
   const { t } = useTranslation(["playground", "common"])
@@ -186,6 +189,20 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
 
       {/* Active operations */}
       <div className="flex items-center gap-3">
+        {statusMessages.length > 0 && (
+          <div
+            data-testid="workspace-statusbar-notice"
+            role="status"
+            aria-live="polite"
+            className="flex max-w-[42vw] items-center gap-2 overflow-hidden text-warning"
+          >
+            {statusMessages.map((message, index) => (
+              <span key={`${message}-${index}`} className="truncate">
+                {message}
+              </span>
+            ))}
+          </div>
+        )}
         {activeOperations.length > 0 && (
           <div
             data-testid="workspace-statusbar-activity"

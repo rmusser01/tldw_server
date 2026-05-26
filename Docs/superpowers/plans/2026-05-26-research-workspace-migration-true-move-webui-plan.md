@@ -231,7 +231,7 @@ Expected: PASS.
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/index.tsx`
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx`
 
-- [ ] **Step 1: Write failing UI tests**
+- [x] **Step 1: Write failing UI tests**
 
 Cover:
 
@@ -241,7 +241,7 @@ Cover:
 - does not render a persistent top-level trust bar
 - does not mention `/workspace-playground`
 
-- [ ] **Step 2: Add a small migration status surface**
+- [x] **Step 2: Add a small migration status surface**
 
 Use existing Research Workspace visual patterns. Prefer a compact inline status within first-run/recovery/settings context instead of a page-wide banner.
 
@@ -252,11 +252,11 @@ Required copy:
 - `Local data retained until server deletion eligibility is available`
 - `Review recovery details`
 
-- [ ] **Step 3: Keep normal workspace loading usable**
+- [x] **Step 3: Keep normal workspace loading usable**
 
 Migration errors must not block opening the server-backed workspace. They should leave a recoverable status and keep local content untouched.
 
-- [ ] **Step 4: Run focused Research Workspace tests**
+- [x] **Step 4: Run focused Research Workspace tests**
 
 Run:
 
