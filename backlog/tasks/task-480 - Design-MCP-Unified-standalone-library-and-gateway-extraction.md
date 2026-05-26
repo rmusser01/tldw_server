@@ -8,8 +8,10 @@ labels:
 - mcp-unified
 documentation:
 - Docs/superpowers/specs/2026-05-26-mcp-unified-standalone-library-gateway-design.md
+- Docs/superpowers/plans/2026-05-26-mcp-unified-stage1-adapter-seams-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-05-26-mcp-unified-standalone-library-gateway-design.md
+- Docs/superpowers/plans/2026-05-26-mcp-unified-stage1-adapter-seams-implementation-plan.md
 - backlog/tasks/task-480 - Design-MCP-Unified-standalone-library-and-gateway-extraction.md
 ---
 
@@ -23,6 +25,12 @@ modified_files:
 <!-- AC:BEGIN -->
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-05-26-mcp-unified-stage1-adapter-seams-implementation-plan.md
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
@@ -32,7 +40,7 @@ modified_files:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written and revised for a strangler extraction of MCP Unified into an embeddable runtime library first, then a standalone gateway with governance profiles/modes. The spec preserves strict tldw_server compatibility while defining a clean package boundary, optional SQLite stores, external MCP lifecycle management, fail-closed policy semantics, conservative presets, audit/provenance, protocol compatibility, dependency/license gates, instance-scoped runtime, module ownership inventory, and package-boundary tests.
+Design spec written and revised for a strangler extraction of MCP Unified into an embeddable runtime library first, then a standalone gateway with governance profiles/modes. Stage 1 implementation plan added for adapter seams, module ownership inventory, boundary scaffolding tests, focused compatibility verification, and Bandit gates. Docs-only planning update; Bandit is not applicable until implementation touches Python code. The plan preserves strict tldw_server compatibility while preparing the future standalone package boundary.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
