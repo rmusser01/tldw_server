@@ -48,6 +48,7 @@ import type {
   WorkspaceNote,
   WorkspaceSource,
   WorkspaceSourceReadiness,
+  WorkspaceSourceStatusDetails,
   WorkspaceSourceTransferConflictResolution,
   WorkspaceSourceTransferEmptyFolderPolicy,
   WorkspaceSourceTransferMode,
@@ -2037,13 +2038,15 @@ interface SourcesActions {
     sourceId: string,
     status: WorkspaceSourceStatus,
     statusMessage?: string,
-    readiness?: WorkspaceSourceReadiness
+    readiness?: WorkspaceSourceReadiness,
+    statusDetails?: WorkspaceSourceStatusDetails
   ) => void
   setSourceStatusByMediaId: (
     mediaId: number,
     status: WorkspaceSourceStatus,
     statusMessage?: string,
-    readiness?: WorkspaceSourceReadiness
+    readiness?: WorkspaceSourceReadiness,
+    statusDetails?: WorkspaceSourceStatusDetails
   ) => void
   focusSourceById: (id: string) => boolean
   focusSourceByMediaId: (mediaId: number) => boolean
@@ -2590,11 +2593,24 @@ export const reviveDateOrUndefined = (
   return revived ?? undefined
 }
 
+const reviveSourceStatusDetails = (
+  details: WorkspaceSourceStatusDetails | undefined
+): WorkspaceSourceStatusDetails | undefined =>
+  details
+    ? {
+        ...details,
+        updatedAt: reviveDateOrUndefined(
+          details.updatedAt as Date | string | null | undefined
+        )
+      }
+    : undefined
+
 export const reviveSources = (sources: WorkspaceSource[]): WorkspaceSource[] =>
   sources.map((source) => ({
     ...source,
     status: source.status || "ready",
     statusMessage: source.statusMessage || undefined,
+    statusDetails: reviveSourceStatusDetails(source.statusDetails),
     addedAt: reviveDateOrNull(source.addedAt) || new Date(),
     sourceCreatedAt: reviveDateOrUndefined(source.sourceCreatedAt)
   }))

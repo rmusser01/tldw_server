@@ -19,6 +19,20 @@ export type WorkspaceSourceType =
 
 export type WorkspaceSourceStatus = "processing" | "ready" | "error"
 
+export type WorkspaceSourceLifecycleState =
+  | "queued"
+  | "ingesting"
+  | "extracting"
+  | "chunking"
+  | "indexing"
+  | "queryable"
+  | "partially_queryable"
+  | "failed"
+  | "retrying"
+  | "missing_media"
+  | "blocked_by_permissions"
+  | "unknown"
+
 export interface WorkspaceSourceReadiness {
   metadata_ready: boolean
   text_extracted: boolean
@@ -29,6 +43,28 @@ export interface WorkspaceSourceReadiness {
   tool_accessible: boolean
 }
 
+export interface WorkspaceSourceJobStatus {
+  id: number | null
+  uuid: string | null
+  status: string | null
+  jobType: string | null
+  progressPercent: number | null
+  progressMessage: string | null
+  errorMessage: string | null
+}
+
+export interface WorkspaceSourceStatusDetails {
+  lifecycleState?: WorkspaceSourceLifecycleState | string
+  statusReason?: string
+  sourceOfTruth?: string
+  updatedAt?: Date
+  stale?: boolean
+  retryEligible?: boolean
+  progressPercent?: number | null
+  progressMessage?: string | null
+  job?: WorkspaceSourceJobStatus | null
+}
+
 export interface WorkspaceSource {
   id: string
   mediaId: number // Server-side media ID
@@ -36,6 +72,7 @@ export interface WorkspaceSource {
   type: WorkspaceSourceType
   status?: WorkspaceSourceStatus
   statusMessage?: string
+  statusDetails?: WorkspaceSourceStatusDetails
   readiness?: WorkspaceSourceReadiness
   thumbnailUrl?: string
   addedAt: Date

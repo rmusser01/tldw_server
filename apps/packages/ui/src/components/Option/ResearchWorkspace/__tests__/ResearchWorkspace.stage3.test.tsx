@@ -804,7 +804,17 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
         808,
         "processing",
         "Text search is available while vector indexing continues.",
-        partialReadiness
+        partialReadiness,
+        expect.objectContaining({
+          lifecycleState: "partially_queryable",
+          statusReason: "vector_index_pending",
+          sourceOfTruth: "workspace-status-projection",
+          progressPercent: 75,
+          progressMessage:
+            "Text search is available while vector indexing continues.",
+          stale: false,
+          retryEligible: false
+        })
       )
     })
     await waitFor(() => {
@@ -1015,6 +1025,15 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
         expect.objectContaining({
           text_extracted: true,
           vector_ready: true
+        }),
+        expect.objectContaining({
+          lifecycleState: "queryable",
+          statusReason: "source_queryable",
+          sourceOfTruth: "workspace-status-projection",
+          progressPercent: 100,
+          progressMessage: "Ready for grounded questions.",
+          stale: false,
+          retryEligible: false
         })
       )
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
@@ -1024,6 +1043,15 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
         expect.objectContaining({
           text_extracted: true,
           vector_ready: false
+        }),
+        expect.objectContaining({
+          lifecycleState: "indexing",
+          statusReason: "job_indexing",
+          sourceOfTruth: "workspace-status-projection",
+          progressPercent: 82,
+          progressMessage: "Indexing",
+          stale: false,
+          retryEligible: false
         })
       )
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
@@ -1033,6 +1061,15 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
         expect.objectContaining({
           text_extracted: false,
           tool_accessible: false
+        }),
+        expect.objectContaining({
+          lifecycleState: "missing_media",
+          statusReason: "media_not_found",
+          sourceOfTruth: "workspace-status-projection",
+          progressPercent: 0,
+          progressMessage: "Media item is missing.",
+          stale: false,
+          retryEligible: true
         })
       )
     })
@@ -1054,6 +1091,11 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
         expect.objectContaining({
           text_extracted: true,
           vector_ready: true
+        }),
+        expect.objectContaining({
+          lifecycleState: "queryable",
+          statusReason: "source_queryable",
+          sourceOfTruth: "workspace-status-projection"
         })
       )
     })
@@ -1097,6 +1139,11 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       expect.objectContaining({
         text_extracted: true,
         vector_ready: true
+      }),
+      expect.objectContaining({
+        lifecycleState: "queryable",
+        sourceOfTruth: "workspace-status-projection",
+        progressMessage: "Context source ready"
       })
     )
   })
@@ -1297,6 +1344,13 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
         expect.objectContaining({
           text_extracted: true,
           vector_ready: true
+        }),
+        expect.objectContaining({
+          lifecycleState: "unknown",
+          statusReason: "unrecognized_lifecycle_state",
+          sourceOfTruth: "workspace-status-projection",
+          stale: false,
+          retryEligible: false
         })
       )
     })

@@ -1901,6 +1901,78 @@ describe("workspace store snapshot persistence", () => {
     expect(state.getSelectedMediaIds()).toEqual([])
   })
 
+  it("stores source status drilldown details from workspace status projection", () => {
+    useWorkspaceStore.getState().initializeWorkspace("Status Detail Workspace")
+
+    const source = useWorkspaceStore.getState().addSource({
+      mediaId: 444,
+      title: "Indexed Source",
+      type: "pdf",
+      status: "processing"
+    })
+    const updatedAt = new Date("2026-05-23T12:01:00.000Z")
+
+    useWorkspaceStore.getState().setSourceStatusByMediaId(
+      444,
+      "processing",
+      "Indexing chunks",
+      {
+        metadata_ready: true,
+        text_extracted: true,
+        fts_ready: true,
+        vector_ready: false,
+        citation_ready: false,
+        summary_ready: false,
+        tool_accessible: true
+      },
+      {
+        lifecycleState: "indexing",
+        statusReason: "job_indexing",
+        sourceOfTruth: "workspace-status-projection",
+        updatedAt,
+        stale: false,
+        retryEligible: false,
+        progressPercent: 42,
+        progressMessage: "Indexing chunks",
+        job: {
+          id: 7,
+          uuid: "job-7",
+          status: "running",
+          jobType: "workspace_source_index",
+          progressPercent: 42,
+          progressMessage: "Indexing chunks",
+          errorMessage: null
+        }
+      }
+    )
+
+    const updatedSource = useWorkspaceStore
+      .getState()
+      .sources.find((entry) => entry.id === source.id)
+
+    expect(updatedSource?.statusDetails).toMatchObject({
+      lifecycleState: "indexing",
+      statusReason: "job_indexing",
+      sourceOfTruth: "workspace-status-projection",
+      updatedAt,
+      stale: false,
+      retryEligible: false,
+      progressPercent: 42,
+      progressMessage: "Indexing chunks",
+      job: expect.objectContaining({
+        uuid: "job-7",
+        jobType: "workspace_source_index"
+      })
+    })
+
+    useWorkspaceStore.getState().setSourceStatusByMediaId(444, "ready")
+
+    const readySource = useWorkspaceStore
+      .getState()
+      .sources.find((entry) => entry.id === source.id)
+    expect(readySource?.statusDetails).toBeUndefined()
+  })
+
   it("creates, renames, moves, and deletes source folders safely", () => {
     useWorkspaceStore.getState().initializeWorkspace("Folders Workspace")
 

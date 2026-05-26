@@ -35,7 +35,10 @@ import type {
   WorkspaceSourceStatusApiResponse,
   WorkspaceSourceStatusListResponse
 } from "@/services/tldw/domains/workspace-api"
-import type { WorkspaceSourceStatus } from "@/types/workspace"
+import type {
+  WorkspaceSourceStatus,
+  WorkspaceSourceStatusDetails
+} from "@/types/workspace"
 import {
   buildKnowledgeQaSeedNote,
   consumeResearchWorkspacePrefill
@@ -661,6 +664,41 @@ const getWorkspaceSourceStatusMessage = (
   source: WorkspaceSourceStatusApiResponse
 ): string | undefined =>
   source.progress_message || source.status_reason || undefined
+
+const parseWorkspaceSourceStatusUpdatedAt = (
+  updatedAt: string | null
+): Date | undefined => {
+  if (!updatedAt) return undefined
+  const parsed = new Date(updatedAt)
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed
+}
+
+const buildWorkspaceSourceStatusDetails = (
+  source: WorkspaceSourceStatusApiResponse
+): WorkspaceSourceStatusDetails => ({
+  lifecycleState: source.state,
+  statusReason: source.status_reason || undefined,
+  sourceOfTruth: "workspace-status-projection",
+  updatedAt: parseWorkspaceSourceStatusUpdatedAt(source.updated_at),
+  stale: false,
+  retryEligible:
+    source.state === "failed" ||
+    source.state === "missing_media" ||
+    source.state === "blocked_by_permissions",
+  progressPercent: source.progress_percent,
+  progressMessage: source.progress_message,
+  job: source.job
+    ? {
+        id: source.job.id,
+        uuid: source.job.uuid,
+        status: source.job.status,
+        jobType: source.job.job_type,
+        progressPercent: source.job.progress_percent,
+        progressMessage: source.job.progress_message,
+        errorMessage: source.job.error_message
+      }
+    : null
+})
 
 const describeWorkspaceStatusProjectionError = (error: unknown): string => {
   if (error instanceof Error && error.message.trim().length > 0) {
@@ -1393,7 +1431,8 @@ const ResearchWorkspaceBody: React.FC = () => {
             source.media_id,
             mappedStatus,
             getWorkspaceSourceStatusMessage(source),
-            source.readiness
+            source.readiness,
+            buildWorkspaceSourceStatusDetails(source)
           )
         }
         workspaceProjectedSourceStatusByMediaIdRef.current = {
