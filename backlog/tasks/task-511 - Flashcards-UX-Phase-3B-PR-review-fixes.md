@@ -16,6 +16,7 @@ modified_files:
 - apps/packages/ui/src/components/Flashcards/components/__tests__/DeckStudyDashboard.test.tsx
 - apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx
 - apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx
+- apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.scope-change.guard.test.ts
 ---
 
 ## Description
@@ -45,7 +46,7 @@ Address PR #2068 review feedback for the Phase 3B deck study dashboard: harden d
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR #2068 review fixes are implemented. The dashboard row builder is defensive against incomplete analytics/deck data, all deck-change paths now clear stale one-shot handoffs before applying a new destination handoff, and dashboard analytics no longer fetches during transient review/cram loading gaps. Verification: focused review-fix suite passed 42 tests after red failures; broader ReviewTab suite passed 58 tests; design-system product-state guard passed; `git diff --check` passed. Bandit skipped because this slice only touched frontend TypeScript/TSX tests and Backlog files.
+PR #2068 review fixes are implemented. The dashboard row builder is defensive against incomplete analytics/deck data, all deck-change paths now clear stale one-shot handoffs before applying a new destination handoff, dashboard analytics no longer fetches during transient review/cram loading gaps, and dashboard Review/Cram deck switches no longer pre-clear the active review session id before the scope-change cleanup can close the prior session. Verification: focused review-fix suite passed 44 tests after the new guard test failed red first; broader ReviewTab suite passed 59 tests; design-system product-state guard passed; `git diff --check` passed. Bandit skipped because this slice only touched frontend TypeScript/TSX tests and Backlog files.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

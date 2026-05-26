@@ -266,7 +266,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
       setReviewMode("due")
       setCramQueueIndex(0)
       setSelectedStudySessionId(null)
-      setActiveReviewSessionId(null)
       if (reviewOverrideCard) {
         onClearOverride?.()
       }
@@ -279,7 +278,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
       setReviewMode("cram")
       setCramQueueIndex(0)
       setSelectedStudySessionId(null)
-      setActiveReviewSessionId(null)
       if (reviewOverrideCard) {
         onClearOverride?.()
       }
