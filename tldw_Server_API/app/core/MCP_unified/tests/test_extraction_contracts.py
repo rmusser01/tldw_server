@@ -2,9 +2,29 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 
 
 MCP_ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_INTERFACE_FILES = {"runtime.py", "policy.py", "storage.py"}
+
+
+def _fake_runtime_dependencies() -> SimpleNamespace:
+    return SimpleNamespace(
+        module_registry=object(),
+        rbac_policy=object(),
+        rate_limiter=object(),
+        metrics_collector=object(),
+        telemetry_provider=object(),
+        database_path_resolver=object(),
+        api_key_scope_normalizer=object(),
+        effective_policy_resolver=object(),
+        approval_evaluator=object(),
+        path_scope_enforcer=object(),
+        external_access_evaluator=object(),
+        redis_client_factory=object(),
+        circuit_breaker_factory=object(),
+    )
 
 
 def _interface_boundary_violations_for(path: Path, interface_dir: Path) -> list[str]:
@@ -41,6 +61,8 @@ def _interface_boundary_violations_for(path: Path, interface_dir: Path) -> list[
 def test_new_interface_modules_do_not_import_tldw_server_api() -> None:
     interface_dir = MCP_ROOT / "interfaces"
     assert interface_dir.exists()
+    interface_files = {path.name for path in interface_dir.rglob("*.py")}
+    assert EXPECTED_INTERFACE_FILES.issubset(interface_files)
     offenders: dict[str, list[str]] = {}
     for path in interface_dir.rglob("*.py"):
         violations = _interface_boundary_violations_for(path, interface_dir)
@@ -49,32 +71,34 @@ def test_new_interface_modules_do_not_import_tldw_server_api() -> None:
     assert offenders == {}
 
 
-def test_mcp_protocol_accepts_runtime_dependencies() -> None:
+def test_default_runtime_dependency_builder_exposes_core_dependencies() -> None:
     from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
         build_default_runtime_dependencies,
     )
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
 
     deps = build_default_runtime_dependencies()
+    assert hasattr(deps, "module_registry")
+    assert hasattr(deps, "rbac_policy")
+
+
+def test_mcp_protocol_accepts_runtime_dependencies() -> None:
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
+
+    deps = _fake_runtime_dependencies()
     protocol = MCPProtocol(dependencies=deps)
     assert protocol.module_registry is deps.module_registry
     assert protocol.rbac_policy is deps.rbac_policy
 
 
 def test_mcp_server_accepts_runtime_dependencies() -> None:
-    from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
-        build_default_runtime_dependencies,
-    )
     from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 
-    deps = build_default_runtime_dependencies()
+    deps = _fake_runtime_dependencies()
     server = MCPServer(dependencies=deps)
     assert server.protocol.module_registry is deps.module_registry
     assert server.protocol.rbac_policy is deps.rbac_policy
-    if hasattr(server, "module_registry"):
-        assert server.module_registry is deps.module_registry
-    if hasattr(server, "rbac_policy"):
-        assert server.rbac_policy is deps.rbac_policy
+    assert server.module_registry is deps.module_registry
+    assert server.rbac_policy is deps.rbac_policy
 
 
 def test_protocol_instances_do_not_share_prepared_call_secrets() -> None:
