@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import React from "react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import axe from "axe-core"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -554,6 +555,117 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
           }
         ])
       })
+    )
+  })
+
+  it("explains that local data is retained when the server receipt is saved but local inventory blocks deletion", async () => {
+    window.localStorage.setItem(
+      "tldw-workspace",
+      JSON.stringify({
+        workspaces: [{ id: "legacy-workspace", name: "Legacy Workspace" }]
+      })
+    )
+    mockRunResearchWorkspaceMigration.mockResolvedValueOnce({
+      status: "blocked",
+      migrationId: "research-workspace-workspace-1-blocked",
+      manifestHash: "d".repeat(64),
+      serverMigration: {
+        id: "research-workspace-workspace-1-blocked",
+        status: "finalized",
+        client_delete_eligible: false
+      },
+      localDeletionEligibility: {
+        eligible: false,
+        blockingSurfaces: [],
+        unknownSurfaces: [
+          {
+            id: "unknown:localStorage:tldw:research-workspace:unknown",
+            kind: "local_storage",
+            key: "tldw:research-workspace:unknown",
+            deletionPolicy: "unknown_blocks_deletion"
+          }
+        ],
+        retainedLocalSurfaces: []
+      },
+      deletedSurfaceIds: [],
+      message:
+        "Server receipt was saved, but local deletion is blocked by the legacy inventory gate."
+    })
+
+    render(<ResearchWorkspace />)
+
+    const notice = await screen.findByTestId("workspace-statusbar-notice")
+    expect(notice).toHaveTextContent("Server receipt saved")
+    expect(notice).toHaveTextContent("Local data retained")
+    expect(notice).toHaveTextContent("Review recovery details")
+  })
+
+  it("settles migration status when React StrictMode remounts effects", async () => {
+    const migrationDeferred = createDeferred<{
+      status: string
+      migrationId: string
+      manifestHash: string
+      serverMigration: {
+        id: string
+        status: string
+        client_delete_eligible: boolean
+      }
+      localDeletionEligibility: {
+        eligible: boolean
+        blockingSurfaces: unknown[]
+        unknownSurfaces: unknown[]
+        retainedLocalSurfaces: unknown[]
+      }
+      deletedSurfaceIds: string[]
+      message: string
+    }>()
+    window.localStorage.setItem(
+      "tldw-workspace",
+      JSON.stringify({
+        workspaces: [{ id: "legacy-workspace", name: "Legacy Workspace" }]
+      })
+    )
+    mockRunResearchWorkspaceMigration.mockReturnValueOnce(
+      migrationDeferred.promise
+    )
+
+    render(
+      <React.StrictMode>
+        <ResearchWorkspace />
+      </React.StrictMode>
+    )
+
+    await waitFor(() => {
+      expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledTimes(1)
+    })
+
+    await act(async () => {
+      migrationDeferred.resolve({
+        status: "finalized_not_delete_eligible",
+        migrationId: "research-workspace-workspace-1-strict",
+        manifestHash: "c".repeat(64),
+        serverMigration: {
+          id: "research-workspace-workspace-1-strict",
+          status: "finalized",
+          client_delete_eligible: false
+        },
+        localDeletionEligibility: {
+          eligible: true,
+          blockingSurfaces: [],
+          unknownSurfaces: [],
+          retainedLocalSurfaces: []
+        },
+        deletedSurfaceIds: [],
+        message:
+          "Server receipt was saved. Local data is retained until server deletion eligibility is available."
+      })
+      await Promise.resolve()
+    })
+
+    const notice = await screen.findByTestId("workspace-statusbar-notice")
+    expect(notice).toHaveTextContent("Server receipt saved")
+    expect(notice).toHaveTextContent(
+      "Local data retained until server deletion eligibility is available"
     )
   })
 

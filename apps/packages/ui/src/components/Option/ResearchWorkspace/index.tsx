@@ -1137,6 +1137,10 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   const lastCrossTabSyncWarningRef = React.useRef(0)
   const workspaceMigrationSignatureRef = React.useRef<string | null>(null)
+  const workspaceMigrationInFlightRef = React.useRef<{
+    signature: string
+    promise: Promise<ResearchWorkspaceMigrationRunResult>
+  } | null>(null)
   const onboardingInitializedRef = React.useRef(false)
   const [showTutorialPrompt, setShowTutorialPrompt] = React.useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = React.useState(false)
@@ -1433,9 +1437,10 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (workspaceMigrationResult.status === "blocked") {
       return [
         "Legacy workspace data found",
-        workspaceMigrationResult.serverMigration
-          ? "Server receipt saved"
-          : "Local data retained",
+        ...(workspaceMigrationResult.serverMigration
+          ? ["Server receipt saved"]
+          : []),
+        "Local data retained",
         "Review recovery details"
       ]
     }
@@ -1486,6 +1491,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   useEffect(() => {
     if (!statusGuardrailsEnabled) {
       workspaceMigrationSignatureRef.current = null
+      workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
       return
@@ -1505,37 +1511,58 @@ const ResearchWorkspaceBody: React.FC = () => {
 
     if (!hasLegacyContent) {
       workspaceMigrationSignatureRef.current = null
+      workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
       return
     }
 
     const signature = `${workspaceId}:${discoveredLocalStorageKeys.join("|")}`
-    if (workspaceMigrationSignatureRef.current === signature) return
+    const inFlightMigration = workspaceMigrationInFlightRef.current
+    const canReuseInFlightMigration =
+      inFlightMigration?.signature === signature
+    if (
+      workspaceMigrationSignatureRef.current === signature &&
+      !canReuseInFlightMigration
+    ) {
+      return
+    }
     workspaceMigrationSignatureRef.current = signature
 
     let cancelled = false
     setWorkspaceMigrationLoading(true)
 
-    void runResearchWorkspaceMigration({
-      targetWorkspaceId: workspaceId,
-      targetWorkspaceName: workspaceName || "Research Workspace",
-      discoveredLocalStorageKeys,
-      discoveredIndexedDbStores,
-      readLocalStorageValue: async (key) => window.localStorage.getItem(key),
-      api: {
-        createWorkspaceMigration: tldwClient.createWorkspaceMigration,
-        putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
-        finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
-        getWorkspaceMigration: tldwClient.getWorkspaceMigration,
-        ackWorkspaceMigrationClientDelete:
-          tldwClient.ackWorkspaceMigrationClientDelete
-      },
-      deleteLocalStorageValue: (key) => window.localStorage.removeItem(key),
-      writeLocalStorageValue: (key, value) =>
-        window.localStorage.setItem(key, value),
-      now: () => new Date().toISOString()
-    })
+    const migrationPromise =
+      canReuseInFlightMigration && inFlightMigration
+        ? inFlightMigration.promise
+        : runResearchWorkspaceMigration({
+            targetWorkspaceId: workspaceId,
+            targetWorkspaceName: workspaceName || "Research Workspace",
+            discoveredLocalStorageKeys,
+            discoveredIndexedDbStores,
+            readLocalStorageValue: async (key) => window.localStorage.getItem(key),
+            api: {
+              createWorkspaceMigration: tldwClient.createWorkspaceMigration,
+              putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
+              finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
+              getWorkspaceMigration: tldwClient.getWorkspaceMigration,
+              ackWorkspaceMigrationClientDelete:
+                tldwClient.ackWorkspaceMigrationClientDelete
+            },
+            deleteLocalStorageValue: (key) => window.localStorage.removeItem(key),
+            writeLocalStorageValue: (key, value) =>
+              window.localStorage.setItem(key, value),
+            now: () => new Date().toISOString()
+          })
+
+    if (!canReuseInFlightMigration) {
+      workspaceMigrationInFlightRef.current = {
+        signature,
+        promise: migrationPromise
+      }
+    }
+
+    void migrationPromise
       .then((result) => {
         if (cancelled) return
         setWorkspaceMigrationResult(result)
@@ -1554,6 +1581,9 @@ const ResearchWorkspaceBody: React.FC = () => {
         })
       })
       .finally(() => {
+        if (workspaceMigrationInFlightRef.current?.signature === signature) {
+          workspaceMigrationInFlightRef.current = null
+        }
         if (!cancelled) {
           setWorkspaceMigrationLoading(false)
         }

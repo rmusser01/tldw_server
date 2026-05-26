@@ -272,15 +272,15 @@ Expected: PASS.
 **Files:**
 - Update: `backlog/tasks/task-471 - Wire-Research-Workspace-migration-true-move-WebUI-flow.md`
 
-- [ ] **Step 1: Start live backend and WebUI**
+- [x] **Step 1: Start live backend and WebUI**
 
 Use the configured backend/WebUI process pattern for this worktree. Use CDP/Playwright, not Computer Control.
 
-- [ ] **Step 2: Seed legacy local storage in CDP**
+- [x] **Step 2: Seed legacy local storage in CDP**
 
 Seed a minimal legacy workspace payload plus a split snapshot/chat key. Include an unknown workspace-prefixed key in one run to verify deletion blocking.
 
-- [ ] **Step 3: Visit `/research-workspace`**
+- [x] **Step 3: Visit `/research-workspace`**
 
 Expected:
 
@@ -292,9 +292,11 @@ Expected:
 - local content is retained while backend reports `client_delete_eligible=false`
 - UI shows contextual retained-local-data state
 
-- [ ] **Step 4: Record known backend gap**
+- [x] **Step 4: Record known backend gap**
 
 If backend still never emits deletion eligibility, record that true local deletion is blocked by backend protocol support and create/update the next backend task instead of faking success.
+
+Recorded follow-up: `TASK-515` tracks backend server-side verification and `client_delete_eligible=true` support. Live validation on 2026-05-26 used the current-checkout backend on `127.0.0.1:18001` and WebUI on `127.0.0.1:3001`; finalize returned `client_delete_eligible=false`, so the UI retained local data and showed recovery copy.
 
 ## Verification Before Completion
 
