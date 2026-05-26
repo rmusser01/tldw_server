@@ -363,6 +363,7 @@ export const GenerateCharacterPanel: React.FC<GenerateCharacterPanelProps> = ({
           variant="error"
           title={parsedError.message}
           dismissible
+          dismissLabel={t("common:close", { defaultValue: "Close" })}
           onDismiss={onClearError}
           className="mb-2"
         >

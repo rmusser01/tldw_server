@@ -454,6 +454,7 @@ export function AvatarField({
                   variant="error"
                   title={generationError}
                   dismissible
+                  dismissLabel={t("common:close", { defaultValue: "Close" })}
                   onDismiss={() => setGenerationError(null)}
                 />
               )}

@@ -3,8 +3,8 @@ id: TASK-45.44.11.4
 title: Migrate remaining Character alerts to design-system Alert
 status: Done
 assignee: []
-created_date: ''
-updated_date: '2026-05-24 17:00'
+created_date: '2026-05-24'
+updated_date: '2026-05-26 00:47'
 labels:
   - design-system
   - webui
@@ -46,9 +46,16 @@ GREEN: migrated AvatarField, CharacterListContent, and GenerateCharacterPanel to
 
 Removed the five Option/Characters Alert exceptions from design-system-product-state-baseline.json.
 
+PR review follow-up:
+- Localized dismiss labels for dismissible Character Alerts with common:close.
+- Added GenerateCharacterPanel dismiss-click coverage before retry coverage.
+- Let CharacterListContent use the design-system Alert error variant styling directly.
+- Populated created_date in task front matter.
+
 Verification:
+- bun run test:characters-harness => 3 files / 104 tests passed. Bun emitted its existing localStorage warning and an AntD popup/shadow-root warning in an unrelated preview path.
 - bunx vitest run src/components/Option/Characters/__tests__/GenerateCharacterPanel.test.tsx src/components/Option/Characters/__tests__/AvatarField.design-system.test.tsx src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx => 3 files / 5 tests passed. Bun emitted its existing localStorage warning.
-- node scripts/verify-design-system-product-state.mjs => exit 0; baseline exceptions now 228 with no Character/Persona product area rows.
+- node scripts/verify-design-system-product-state.mjs => exit 0; baseline remains 228 with no Character/Persona product-area rows.
 - git diff --check => exit 0.
 
 Bandit: skipped because this slice only changes TypeScript/TSX frontend and Backlog.md task metadata; no Python code touched.
@@ -57,7 +64,7 @@ Bandit: skipped because this slice only changes TypeScript/TSX frontend and Back
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated the remaining Character/Persona AntD Alert product states in AvatarField, CharacterListContent, and GenerateCharacterPanel to the canonical design-system Alert primitive. Added focused regression coverage for no-backend, load-error, no-model, and generation-error states, then removed the five fixed Option/Characters rows from the product-state baseline.
+Migrated the remaining Character/Persona AntD Alert product states in AvatarField, CharacterListContent, and GenerateCharacterPanel to the canonical design-system Alert primitive. Addressed PR review follow-ups by localizing dismiss labels, relying on Alert variant styling directly for CharacterListContent load-error UI, adding dismiss-action regression coverage, updating Character harness copy assertions to current readiness text, and completing task metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

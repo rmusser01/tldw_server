@@ -102,8 +102,11 @@ describe("GenerateCharacterPanel", () => {
     expect(alert).toBeInTheDocument()
     expect(alert).toHaveTextContent("Check your internet connection and try again.")
 
+    await user.click(within(alert as HTMLElement).getByRole("button", { name: "Close" }))
+    expect(onClearError).toHaveBeenCalledTimes(1)
+
     await user.click(within(alert as HTMLElement).getByRole("button", { name: "Try again" }))
 
-    expect(onClearError).toHaveBeenCalledTimes(1)
+    expect(onClearError).toHaveBeenCalledTimes(2)
   })
 })

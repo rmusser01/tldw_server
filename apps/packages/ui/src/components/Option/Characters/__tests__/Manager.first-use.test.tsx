@@ -3546,7 +3546,7 @@ describe("CharactersManager first-use onboarding", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Saved characters are still available. Configure a chat model, then return here to continue with No Model Character."
+        "Your character selection and draft are kept. Configure a chat model, then return here to continue with No Model Character."
       )
     ).toBeInTheDocument()
     expectDesignSystemAlertForText(
@@ -3615,7 +3615,7 @@ describe("CharactersManager first-use onboarding", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Saved characters are still available. Configure a chat model, then return here to continue with Intent Character."
+        "Your character selection and draft are kept. Configure a chat model, then return here to continue with Intent Character."
       )
     ).toBeInTheDocument()
     expectDesignSystemAlertForText(
@@ -3754,9 +3754,17 @@ describe("CharactersManager first-use onboarding", () => {
     )
     expect(
       await screen.findByText(
-        "Choose a chat model before chatting as Stale Model Character"
+        "Configure a chat model before chatting as Stale Model Character"
       )
     ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Your character selection and draft are kept. Configure a chat model, then return here to continue with Stale Model Character."
+      )
+    ).toBeInTheDocument()
+    expectDesignSystemAlertForText(
+      "Configure a chat model before chatting as Stale Model Character"
+    )
     expect(navigateMock).not.toHaveBeenCalled()
     expect(focusComposerMock).not.toHaveBeenCalled()
   }, 30000)

@@ -81,7 +81,7 @@ describe("AvatarField design-system alerts", () => {
 
     expect(alert).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "Dismiss" }))
+    await user.click(screen.getByRole("button", { name: "Close" }))
 
     expect(screen.queryByText("Generation failed. Try again.")).not.toBeInTheDocument()
   })
