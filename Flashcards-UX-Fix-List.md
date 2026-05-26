@@ -1,6 +1,6 @@
 # Flashcards UX Fix List
 
-Status: closeout update after Phase 0 through Phase 5 remediation.
+Status: closeout update after Phase 0 through Phase 5 remediation plus F06 task-first split follow-up.
 
 Scope: `/flashcards` plus directly connected WebUI and extension flashcard workflows. This file is the master UX audit and fix-list source referenced by `Docs/superpowers/plans/2026-05-25-flashcards-ux-fixes-implementation-plan.md`.
 
@@ -34,20 +34,21 @@ Test setup assumptions from the original audit:
 
 ## Workflow Map
 
-Actual flow after Phase 0-5 remediation:
+Actual flow after Phase 0-5 remediation plus the F06 follow-up:
 
 1. Entry point: user opens `/flashcards`.
 2. Empty first-run state lands on Study instead of a dense import utility screen.
 3. Study provides onboarding and deck-level next actions when data is available.
-4. Create/import/generate work is available through the visible `Create & Import` tab label while preserving the `importExport` route key.
-5. Manual creation can be tested through stable Playwright selectors; failed create keeps user input and shows a visible error.
-6. Review supports keyboard reveal/rate, visible undo/re-rate, recall-first assistant disclosure, and clearer completion actions.
-7. Progress copy distinguishes scheduled due cards from the current available study queue.
-8. Recent sessions show user-facing deck/mode/count/timing labels where data is available.
-9. Deck dashboard rows expose direct Review, Cram, Edit, Scheduler, and Export actions.
-10. Generated-card save recovery distinguishes success, partial success, failure, fatal validation errors, and retry state.
-11. Extension sidepanel offers explicit full Flashcards and Generate from page selection actions, preserving page URL/title as supported manual source references.
-12. Documentation describes the stabilized WebUI/extension handoff using current tab names.
+4. Create/import/generate/export work is available through the visible `Create & Import` tab label while preserving the `importExport` route key.
+5. `Create & Import` now starts with a task selector so Create cards, Import file, and Export backup workflows are separated without changing existing panel APIs.
+6. Manual creation can be tested through stable Playwright selectors; failed create keeps user input and shows a visible error.
+7. Review supports keyboard reveal/rate, visible undo/re-rate, recall-first assistant disclosure, and clearer completion actions.
+8. Progress copy distinguishes scheduled due cards from the current available study queue.
+9. Recent sessions show user-facing deck/mode/count/timing labels where data is available.
+10. Deck dashboard rows expose direct Review, Cram, Edit, Scheduler, and Export actions.
+11. Generated-card save recovery distinguishes success, partial success, failure, fatal validation errors, and retry state.
+12. Extension sidepanel offers explicit full Flashcards and Generate from page selection actions, preserving page URL/title as supported manual source references.
+13. Documentation describes the stabilized WebUI/extension handoff using current tab names.
 
 ## Phase Coverage
 
@@ -59,9 +60,10 @@ Actual flow after Phase 0-5 remediation:
 | Phase 2: Review recovery | TASK-508 | F02, F07, F08, F10, F16, F19 | Completed. Added visible undo/re-rate, completion actions, assistant disclosure, available-now copy, shortcut parity, and clearer completed-session labels. |
 | Phase 3A: Recent sessions | TASK-509 | F09, F19 support | Completed. Recent sessions use deck/mode/count/timing labels and API exposes reviewed counts. |
 | Phase 3B: Deck dashboard | TASK-510, TASK-511 | F11 | Completed. Existing analytics data supports a deck-first dashboard with direct actions. Review fixes preserved session close behavior and dashboard switching. |
-| Phase 4: Import/generate recovery | TASK-512 | F01 support, F06 support | Completed for generated-card save recovery. Broader task-first IA splitting remains deferred because the plan intentionally preserved the existing tab model. |
+| Phase 4: Import/generate recovery | TASK-512 | F01 support, F06 support | Completed for generated-card save recovery. The later F06 follow-up completes the task-first IA split. |
 | Phase 5: Extension capture and docs | TASK-513 | F12 support, F13 | Completed as an extension bridge and WebUI generate handoff. A fully native extension deck-picker/save flow remains deferred. |
 | Closeout source restoration | TASK-514 | Planning traceability | Completed. Restores this tracked source file on `dev`. |
+| F06 follow-up: Task-first Create & Import split | TASK-515 | F06 | Completed. Adds Create cards, Import file, and Export backup task workspaces while preserving existing route keys and panel handoffs. |
 
 ## Severity-Ranked Findings
 
@@ -72,7 +74,7 @@ Actual flow after Phase 0-5 remediation:
 | F03 | High | Visual/copy defect | Transfer summary rendered literal `{{cards}} cards / {{bytes}} bytes`. | Broken copy undermined trust in limits and import/export state. | Default copy relied on unresolved placeholders. | Addressed in TASK-506. |
 | F04 | Medium | Onboarding IA | Empty `/flashcards` opened the setup utility path instead of Study/Home. | First-time users entered a dense screen before understanding the product. | Default tab optimized for implementation setup, not learning flow. | Addressed in TASK-506. |
 | F05 | Medium | Creation reliability | Original browser automation could not confirm manual create submit result. | Users might be blocked at first card creation if the issue reproduced. | Missing proof around create drawer success/error behavior. | Verified and covered in TASK-477; no retained product bug. |
-| F06 | Medium | IA overload | Create/import/generate/export/image occlusion lived together in one task area. | Users had to parse too many setup concepts at once. | Workflows were grouped by implementation area. | Partially addressed by Create & Import label and recovery states in TASK-506/TASK-512; full subtab split deferred. |
+| F06 | Medium | IA overload | Create/import/generate/export/image occlusion lived together in one task area. | Users had to parse too many setup concepts at once. | Workflows were grouped by implementation area. | Addressed in TASK-515 with task-specific Create cards, Import file, and Export backup workspaces. |
 | F07 | Medium | Review focus | Study assistant competed with recall before answer reveal. | Review loop slowed and primary recall action lost focus. | Assistant was promoted as peer workflow instead of on-demand aid. | Addressed in TASK-508. |
 | F08 | Medium | Completion next step | Completion reported caught-up state without clear repeat/practice/edit next actions. | Users lacked a clear path for more practice or deck maintenance. | Completion summarized status but did not map to actions. | Addressed in TASK-508. |
 | F09 | Medium | History comprehension | Recent sessions used labels like `Session #1`, `Deck 1`, or raw scope keys. | Progress/history was present but hard to trust. | Backend identifiers leaked into user-facing history. | Addressed in TASK-509. |
@@ -92,7 +94,7 @@ Actual flow after Phase 0-5 remediation:
 
 The remediated first-time path is materially stronger than the audited baseline. Users now land in a learning-oriented Study entry instead of a dense transfer surface, can see scheduler and quiz affordances in context, and can reach Create & Import without decoding an LLM-oriented tab name. Manual create has explicit success/error coverage, and empty Manage no longer leads with expert filters.
 
-Remaining weakness: Create & Import still contains several workflows in one area. The label and recovery states make it workable, but a future task-first split could reduce cognitive load further.
+Create & Import now separates setup into task-specific workspaces, so first-time users no longer have to parse import, export, generation, study-pack, and image-occlusion controls all at once.
 
 ## Power-User Assessment
 
@@ -122,10 +124,10 @@ Remaining weakness: extension capture is still a bridge to full Flashcards gener
 - Make Quiz handoff state-aware.
 - Add first-time/review/create keyboard e2e coverage.
 - Add generated-card save recovery states with retry.
+- Split Create & Import into task-specific Create cards, Import file, and Export backup workspaces.
 
 ### Deferred Larger Product Improvements
 
-- Split Create & Import into task-specific subtabs or sections.
 - Build a fully native extension capture flow with deck picker, generated drafts, edit, save, and open-in-WebUI continuation.
 - Add broader import result normalization if future evidence shows unresolved partial/fatal import ambiguity outside generated-card save.
 - Run a full browser accessibility audit beyond the focused keyboard e2e coverage.
@@ -171,7 +173,7 @@ Remaining weakness: extension capture is still a bridge to full Flashcards gener
 ### First-Time Flow
 
 - [x] F04 Empty `/flashcards` users default to Study.
-- [ ] F06 Full task-first Create & Import split remains deferred.
+- [x] F06 Task-first Create & Import split completed for WebUI Create cards, Import file, and Export backup workflows.
 - [x] F07 Study assistant collapsed/deferred.
 - [x] F08 Completion CTAs added.
 - [x] F10 Progress labels clarified with current study availability.
