@@ -1,0 +1,49 @@
+---
+id: TASK-509
+title: Flashcards UX Phase 3A recent session labels
+status: Done
+labels:
+- ux
+- flashcards
+- phase-3
+- frontend
+modified_files:
+- apps/packages/ui/src/components/Flashcards/components/RecentStudySessions.tsx
+- apps/packages/ui/src/components/Flashcards/components/__tests__/RecentStudySessions.test.tsx
+- apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx
+- apps/packages/ui/src/services/flashcards.ts
+- tldw_Server_API/app/api/v1/schemas/flashcards.py
+- tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Implement the Phase 3A flashcards UX remediation slice: make Recent study sessions render user-facing deck/mode/count/timing labels and clear completed-session actions without using raw scope_key, Deck {id}, or Session #{id} as primary copy. Scope is /flashcards recent-session history only; deck dashboard/data proof remains a later Phase 3B task.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented Phase 3A recent-session label cleanup. RecentStudySessions now joins loaded deck names, derives readable mode labels from review mode/scope, shows reviewed counts when provided, and uses completed-session timing instead of raw scope_key/session-number primary copy. ReviewTab passes loaded decks into the history component. The flashcards review-session API schema and UI client type now expose cards_reviewed, backed by endpoint regression coverage. Verification: red tests first confirmed missing deck/mode/count UI and missing cards_reviewed API field. Passing checks: bunx vitest run src/components/Flashcards/components/__tests__/RecentStudySessions.test.tsx; bunx vitest run src/components/Flashcards/components/__tests__/RecentStudySessions.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab*.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.scope-change.guard.test.ts; python -m pytest tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py -v; bun run verify:design-system-state; git diff --check; python -m bandit -r tldw_Server_API/app/api/v1/schemas/flashcards.py -f json -o /tmp/bandit_flashcards_phase3a.json. Typecheck note: bunx tsc --noEmit needs NODE_OPTIONS=--max-old-space-size=8192 to avoid OOM, then still fails on existing repo-wide baseline type errors; filtered log contains no RecentStudySessions/cards_reviewed/FlashcardReviewSessionSummary errors.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->

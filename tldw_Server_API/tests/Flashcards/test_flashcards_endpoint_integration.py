@@ -2085,6 +2085,7 @@ def test_list_review_sessions_returns_sessions(
     assert [item["id"] for item in payload] == [session["id"]]
     assert payload[0]["status"] == "active"
     assert payload[0]["deck_id"] == deck_id
+    assert payload[0]["cards_reviewed"] == 0
 
 
 def test_list_review_sessions_returns_400_for_input_error(

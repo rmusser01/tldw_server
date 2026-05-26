@@ -449,6 +449,7 @@ export type FlashcardReviewSessionSummary = {
   started_at?: string | null
   last_activity_at?: string | null
   completed_at?: string | null
+  cards_reviewed?: number | null
   client_id: string
 }
 

@@ -425,6 +425,7 @@ class FlashcardReviewSessionSummary(BaseModel):
     started_at: Optional[str] = None
     last_activity_at: Optional[str] = None
     completed_at: Optional[str] = None
+    cards_reviewed: int = 0
     client_id: str
 
 
