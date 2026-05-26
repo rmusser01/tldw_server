@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Card, List, Space, Tag, Typography } from "antd"
+import { Button, Card, List, Tag, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 
 import { EmptyState } from "@/components/ui/feedback/EmptyState"
@@ -171,7 +171,7 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
 
             return (
               <List.Item key={session.id}>
-                <Space orientation="vertical" size={6} className="w-full">
+                <div className="flex w-full flex-col gap-1.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Text strong>{deckLabel}</Text>
                     <Button
@@ -204,7 +204,7 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
                       })}
                     </Text>
                   ) : null}
-                </Space>
+                </div>
               </List.Item>
             )
           }}
