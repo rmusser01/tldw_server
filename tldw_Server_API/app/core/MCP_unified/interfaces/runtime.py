@@ -62,6 +62,10 @@ class RateLimiter(Protocol):
 
 
 class MetricsCollector(Protocol):
+    async def start_collection(self) -> None: ...
+
+    async def stop_collection(self) -> None: ...
+
     def record_request(
         self,
         method: str,
