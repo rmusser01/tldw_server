@@ -9,6 +9,7 @@ labels:
 - closeout
 modified_files:
 - Flashcards-UX-Fix-List.md
+- Docs/superpowers/plans/2026-05-25-flashcards-ux-fixes-implementation-plan.md
 - backlog/tasks/task-514 - Flashcards-UX-closeout-master-fix-list-source.md
 ---
 
@@ -35,7 +36,7 @@ Restore the master Flashcards UX audit/fix-list source document on latest dev an
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Restored the tracked Flashcards-UX-Fix-List.md source document on latest dev and aligned it with the completed Phase 0-5 remediation tasks. The closeout file maps findings F01-F20 to TASK-477, TASK-503, TASK-506, TASK-507, TASK-508, TASK-509, TASK-510, TASK-511, TASK-512, TASK-513, and TASK-514, and explicitly marks the larger deferred items: full Create & Import subtab split and native extension deck-picker/edit/save. Verification: wc -l Flashcards-UX-Fix-List.md reported 201 lines; rg confirmed phase/task/deferred references; LC_ALL=C rg -n '[^ -~\t]' Flashcards-UX-Fix-List.md returned no matches; git diff --check passed. Bandit/tests skipped because this closeout touched Markdown/Backlog documentation only, not executable runtime code.
+Restored the tracked Flashcards-UX-Fix-List.md source document on latest dev and aligned it with the completed Phase 0-5 remediation tasks. The closeout file maps findings F01-F20 to TASK-477, TASK-503, TASK-506, TASK-507, TASK-508, TASK-509, TASK-510, TASK-511, TASK-512, TASK-513, and TASK-514, explicitly marks the larger deferred items, and the implementation plan now links back to the fix-list source for traceability. Local documentation verification: wc -l Flashcards-UX-Fix-List.md reported 201 lines; rg confirmed phase/task/deferred references and the implementation-plan source link; LC_ALL=C rg -n '[^ -~\t]' on the touched Markdown files returned no matches; git diff --check passed. This change only touches Markdown/Backlog planning documents; repository test and security gates are validated by PR CI.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
