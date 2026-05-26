@@ -1,4 +1,4 @@
-name: UI Workspace Playground Nightly
+name: UI Research Workspace Nightly
 
 on:
   schedule:
@@ -9,12 +9,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ui-workspace-playground-nightly-${{ github.ref }}
+  group: ui-research-workspace-nightly-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  webui-workspace-playground-real-backend:
-    name: WebUI Workspace Playground Real Backend
+  webui-research-workspace-real-backend:
+    name: WebUI Research Workspace Real Backend
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
@@ -25,10 +25,10 @@ jobs:
       MINIMAL_TEST_APP: "1"
       PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: "0"
       AUTH_MODE: single_user
-      SINGLE_USER_API_KEY: workspace-nightly-key-12345
-      SERVER_LABEL: workspace-nightly-webui
+      SINGLE_USER_API_KEY: research-workspace-nightly-key-12345
+      SERVER_LABEL: research-workspace-nightly-webui
       TLDW_SERVER_URL: http://127.0.0.1:8000
-      TLDW_API_KEY: workspace-nightly-key-12345
+      TLDW_API_KEY: research-workspace-nightly-key-12345
       TLDW_WEB_URL: http://localhost:8080
       TLDW_WEB_AUTOSTART: "true"
       TLDW_WEB_CMD: "env NEXT_DISABLE_MEM_OVERRIDE=1 NODE_OPTIONS=--max-old-space-size=5120 bun run dev -- --webpack -p 8080"
@@ -81,15 +81,15 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
 
-      - name: Run workspace real-backend WebUI spec
+      - name: Run research workspace real-backend WebUI spec
         working-directory: apps/tldw-frontend
-        run: bun run e2e:workspace-playground:real
+        run: bun run e2e:research-workspace:real
 
       - name: Upload WebUI nightly artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: workspace-playground-nightly-webui-artifacts
+          name: research-workspace-nightly-webui-artifacts
           if-no-files-found: ignore
           path: |
             apps/tldw-frontend/test-results/**
@@ -103,7 +103,7 @@ jobs:
           import os
           import pathlib
 
-          label = os.environ.get("SERVER_LABEL", "workspace-nightly-webui")
+          label = os.environ.get("SERVER_LABEL", "research-workspace-nightly-webui")
           log_path = pathlib.Path(f"server-{label}.log")
           if log_path.exists():
               print("===== backend server log =====")
@@ -116,8 +116,8 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
-  extension-workspace-playground-real-backend:
-    name: Extension Workspace Playground Real Backend
+  extension-research-workspace-real-backend:
+    name: Extension Research Workspace Real Backend
     runs-on: ubuntu-latest
     timeout-minutes: 55
     env:
@@ -128,10 +128,10 @@ jobs:
       MINIMAL_TEST_APP: "1"
       PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: "0"
       AUTH_MODE: single_user
-      SINGLE_USER_API_KEY: workspace-nightly-key-12345
-      SERVER_LABEL: workspace-nightly-extension
+      SINGLE_USER_API_KEY: research-workspace-nightly-key-12345
+      SERVER_LABEL: research-workspace-nightly-extension
       TLDW_E2E_SERVER_URL: http://127.0.0.1:8000
-      TLDW_E2E_API_KEY: workspace-nightly-key-12345
+      TLDW_E2E_API_KEY: research-workspace-nightly-key-12345
       TLDW_E2E_EXTENSION_LAUNCH_TIMEOUT_MS: "90000"
       TLDW_E2E_EXTENSION_TARGET_WAIT_MS: "90000"
 
@@ -183,7 +183,7 @@ jobs:
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
 
-      - name: Run workspace-focused extension real-server spec (strict no-skip)
+      - name: Run research workspace-focused extension real-server spec (strict no-skip)
         working-directory: apps/extension
         run: bun run test:e2e:workspace-parity:real:strict
 
@@ -191,7 +191,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: workspace-playground-nightly-extension-artifacts
+          name: research-workspace-nightly-extension-artifacts
           if-no-files-found: ignore
           path: |
             apps/extension/test-results/**
@@ -205,7 +205,7 @@ jobs:
           import os
           import pathlib
 
-          label = os.environ.get("SERVER_LABEL", "workspace-nightly-extension")
+          label = os.environ.get("SERVER_LABEL", "research-workspace-nightly-extension")
           log_path = pathlib.Path(f"server-{label}.log")
           if log_path.exists():
               print("===== backend server log =====")

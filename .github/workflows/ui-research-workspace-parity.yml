@@ -1,4 +1,4 @@
-name: UI Workspace Playground Parity
+name: UI Research Workspace Parity
 
 on:
   pull_request:
@@ -6,48 +6,48 @@ on:
       - main
       - dev
     paths:
-      - "apps/test-utils/workspace-playground/**"
-      - "apps/tldw-frontend/e2e/workflows/workspace-playground.parity.spec.ts"
-      - "apps/extension/tests/e2e/workspace-playground.parity.spec.ts"
-      - "apps/packages/ui/src/components/Option/WorkspacePlayground/**"
+      - "apps/test-utils/research-workspace/**"
+      - "apps/tldw-frontend/e2e/workflows/research-workspace.parity.spec.ts"
+      - "apps/extension/tests/e2e/research-workspace.parity.spec.ts"
+      - "apps/packages/ui/src/components/Option/ResearchWorkspace/**"
       - "apps/packages/ui/src/store/workspace.ts"
       - "apps/packages/ui/src/store/workspace-bundle.ts"
-      - "apps/packages/ui/src/utils/workspace-playground-*.ts"
+      - "apps/packages/ui/src/utils/research-workspace-*.ts"
       - "apps/tldw-frontend/package.json"
       - "apps/extension/package.json"
       - "apps/tldw-frontend/playwright.config.ts"
       - "apps/extension/playwright.config.ts"
       - "apps/bun.lock"
-      - ".github/workflows/ui-workspace-playground-parity.yml"
+      - ".github/workflows/ui-research-workspace-parity.yml"
   push:
     branches:
       - main
     paths:
-      - "apps/test-utils/workspace-playground/**"
-      - "apps/tldw-frontend/e2e/workflows/workspace-playground.parity.spec.ts"
-      - "apps/extension/tests/e2e/workspace-playground.parity.spec.ts"
-      - "apps/packages/ui/src/components/Option/WorkspacePlayground/**"
+      - "apps/test-utils/research-workspace/**"
+      - "apps/tldw-frontend/e2e/workflows/research-workspace.parity.spec.ts"
+      - "apps/extension/tests/e2e/research-workspace.parity.spec.ts"
+      - "apps/packages/ui/src/components/Option/ResearchWorkspace/**"
       - "apps/packages/ui/src/store/workspace.ts"
       - "apps/packages/ui/src/store/workspace-bundle.ts"
-      - "apps/packages/ui/src/utils/workspace-playground-*.ts"
+      - "apps/packages/ui/src/utils/research-workspace-*.ts"
       - "apps/tldw-frontend/package.json"
       - "apps/extension/package.json"
       - "apps/tldw-frontend/playwright.config.ts"
       - "apps/extension/playwright.config.ts"
       - "apps/bun.lock"
-      - ".github/workflows/ui-workspace-playground-parity.yml"
+      - ".github/workflows/ui-research-workspace-parity.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ui-workspace-playground-parity-${{ github.event.pull_request.head.sha || github.sha }}
+  group: ui-research-workspace-parity-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
-  webui-workspace-playground-parity:
-    name: WebUI Workspace Playground Parity
+  webui-research-workspace-parity:
+    name: WebUI Research Workspace Parity
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -81,22 +81,22 @@ jobs:
         working-directory: apps/tldw-frontend
         run: bunx playwright install --with-deps chromium
 
-      - name: Run WebUI workspace parity spec
+      - name: Run WebUI research workspace parity spec
         working-directory: apps/tldw-frontend
-        run: bun run e2e:workspace-playground:parity
+        run: bun run e2e:research-workspace:parity
 
       - name: Upload WebUI parity artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: workspace-playground-webui-parity-artifacts
+          name: research-workspace-webui-parity-artifacts
           if-no-files-found: ignore
           path: |
             apps/tldw-frontend/test-results/**
             apps/tldw-frontend/playwright-report/**
 
-  extension-workspace-playground-parity:
-    name: Extension Workspace Playground Parity
+  extension-research-workspace-parity:
+    name: Extension Research Workspace Parity
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -127,7 +127,7 @@ jobs:
         working-directory: apps/extension
         run: bunx playwright install --with-deps chromium
 
-      - name: Run extension workspace parity spec (strict no-skip)
+      - name: Run extension research workspace parity spec (strict no-skip)
         working-directory: apps/extension
         run: bun run test:e2e:workspace-parity:strict
 
@@ -135,7 +135,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: workspace-playground-extension-parity-artifacts
+          name: research-workspace-extension-parity-artifacts
           if-no-files-found: ignore
           path: |
             apps/extension/test-results/**
