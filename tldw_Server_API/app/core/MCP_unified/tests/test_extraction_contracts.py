@@ -4,32 +4,45 @@ import ast
 from pathlib import Path
 
 
-MCP_ROOT = Path("tldw_Server_API/app/core/MCP_unified")
+MCP_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _imports_for(path: Path) -> list[str]:
+def _interface_boundary_violations_for(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    imports: list[str] = []
+    violations: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            imports.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imports.append(node.module)
-    return imports
+            violations.extend(
+                alias.name
+                for alias in node.names
+                if alias.name == "tldw_Server_API"
+                or alias.name.startswith("tldw_Server_API.")
+            )
+        elif isinstance(node, ast.ImportFrom):
+            if node.level > 1:
+                violations.append(
+                    f"relative import escapes interfaces package: level={node.level}"
+                )
+            elif (
+                node.module
+                and node.level == 0
+                and (
+                    node.module == "tldw_Server_API"
+                    or node.module.startswith("tldw_Server_API.")
+                )
+            ):
+                violations.append(node.module)
+    return violations
 
 
 def test_new_interface_modules_do_not_import_tldw_server_api() -> None:
     interface_dir = MCP_ROOT / "interfaces"
     assert interface_dir.exists()
     offenders: dict[str, list[str]] = {}
-    for path in interface_dir.glob("*.py"):
-        imports = [
-            name
-            for name in _imports_for(path)
-            if name == "tldw_Server_API" or name.startswith("tldw_Server_API.")
-        ]
-        if imports:
-            offenders[str(path)] = imports
+    for path in interface_dir.rglob("*.py"):
+        violations = _interface_boundary_violations_for(path)
+        if violations:
+            offenders[str(path)] = violations
     assert offenders == {}
 
 
@@ -54,6 +67,10 @@ def test_mcp_server_accepts_runtime_dependencies() -> None:
     deps = build_default_runtime_dependencies()
     server = MCPServer(dependencies=deps)
     assert server.protocol.module_registry is deps.module_registry
+    if hasattr(server, "module_registry"):
+        assert server.module_registry is deps.module_registry
+    if hasattr(server, "rbac_policy"):
+        assert server.rbac_policy is deps.rbac_policy
 
 
 def test_protocol_instances_do_not_share_prepared_call_secrets() -> None:
