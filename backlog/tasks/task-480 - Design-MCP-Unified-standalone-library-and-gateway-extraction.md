@@ -32,7 +32,7 @@ modified_files:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written for a strangler extraction of MCP Unified into an embeddable runtime library first, then a standalone gateway with governance profiles/modes. The spec preserves strict tldw_server compatibility while defining a clean package boundary, optional SQLite profile store, external MCP lifecycle management, fail-closed policy semantics, conservative presets, audit/provenance, and package-boundary tests.
+Design spec written and revised for a strangler extraction of MCP Unified into an embeddable runtime library first, then a standalone gateway with governance profiles/modes. The spec preserves strict tldw_server compatibility while defining a clean package boundary, optional SQLite stores, external MCP lifecycle management, fail-closed policy semantics, conservative presets, audit/provenance, protocol compatibility, dependency/license gates, instance-scoped runtime, module ownership inventory, and package-boundary tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
