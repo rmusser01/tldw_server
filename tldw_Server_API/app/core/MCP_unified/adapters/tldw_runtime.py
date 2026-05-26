@@ -15,6 +15,20 @@ from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_
 from tldw_Server_API.app.core.Metrics.telemetry import get_telemetry_manager
 
 
+_SCOPE_NORMALIZATION_FALLBACK_EXCEPTIONS = (
+    AssertionError,
+    AttributeError,
+    ImportError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TimeoutError,
+    TypeError,
+    UnicodeDecodeError,
+    ValueError,
+)
+
+
 class TldwDatabasePathResolver:
     def resolve_user_db_paths(self, user_id: str | int | None) -> dict[str, str]:
         if user_id is None:
@@ -36,8 +50,21 @@ class TldwApiKeyScopeNormalizer:
             from tldw_Server_API.app.core.AuthNZ.api_key_manager import normalize_scope
 
             return set(normalize_scope(raw_scopes))
-        except Exception:
-            return set()
+        except _SCOPE_NORMALIZATION_FALLBACK_EXCEPTIONS:
+            return self._manual_normalize(raw_scopes)
+
+    @staticmethod
+    def _manual_normalize(raw_scopes: Any) -> set[str]:
+        if isinstance(raw_scopes, str):
+            stripped = raw_scopes.strip()
+            return {stripped.lower()} if stripped else set()
+        if isinstance(raw_scopes, list):
+            return {
+                str(item).strip().lower()
+                for item in raw_scopes
+                if str(item).strip()
+            }
+        return set()
 
 
 def create_tldw_circuit_breaker(*, name: str, config: CircuitBreakerConfig) -> CircuitBreaker:
