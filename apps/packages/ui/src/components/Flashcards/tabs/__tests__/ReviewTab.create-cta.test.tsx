@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { ReviewTab } from "../ReviewTab"
 import { clearSetting } from "@/services/settings/registry"
@@ -425,6 +425,100 @@ describe("ReviewTab create CTA visibility", () => {
 
     fireEvent.mouseDown(screen.getByRole("combobox"))
     expect(screen.getByText("Biology (7 due)")).toBeInTheDocument()
+  })
+
+  it("shows deck study dashboard actions from review analytics", () => {
+    const onReviewDeckChange = vi.fn()
+    const onNavigateToManageDeck = vi.fn()
+    const onNavigateToSchedulerDeck = vi.fn()
+    const onNavigateToExportDeck = vi.fn()
+
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewAnalyticsSummaryQuery).mockReturnValue({
+      data: {
+        reviewed_today: 0,
+        retention_rate_today: null,
+        lapse_rate_today: null,
+        avg_answer_time_ms_today: null,
+        study_streak_days: 0,
+        generated_at: "2026-02-18T12:00:00.000Z",
+        decks: [
+          {
+            deck_id: 11,
+            deck_name: "Biology",
+            total: 20,
+            new: 2,
+            learning: 1,
+            due: 1,
+            mature: 16
+          }
+        ]
+      },
+      isLoading: false
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={undefined}
+        onReviewDeckChange={onReviewDeckChange}
+        isActive
+        onNavigateToManageDeck={onNavigateToManageDeck}
+        onNavigateToSchedulerDeck={onNavigateToSchedulerDeck}
+        onNavigateToExportDeck={onNavigateToExportDeck}
+      />
+    )
+
+    const dashboard = screen.getByTestId("flashcards-deck-study-dashboard")
+    const row = within(dashboard).getByTestId("flashcards-deck-study-dashboard-row-11")
+    expect(within(row).getByText("Biology")).toBeInTheDocument()
+    expect(within(row).getByText("Due: 1")).toBeInTheDocument()
+    expect(within(row).getByText("New: 2")).toBeInTheDocument()
+    expect(within(row).getByText("Learning: 1")).toBeInTheDocument()
+
+    fireEvent.click(within(row).getByRole("button", { name: "Review 4 ready" }))
+    fireEvent.click(within(row).getByRole("button", { name: "Cram" }))
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }))
+    fireEvent.click(within(row).getByRole("button", { name: "Scheduler" }))
+    fireEvent.click(within(row).getByRole("button", { name: "Export" }))
+
+    expect(onReviewDeckChange).toHaveBeenCalledWith(11)
+    expect(onReviewDeckChange).toHaveBeenCalledTimes(2)
+    expect(onNavigateToManageDeck).toHaveBeenCalledWith(11)
+    expect(onNavigateToSchedulerDeck).toHaveBeenCalledWith(11)
+    expect(onNavigateToExportDeck).toHaveBeenCalledWith(11)
+  })
+
+  it("does not fetch dashboard analytics while the review card query is loading", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: null,
+      isLoading: true,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(useReviewAnalyticsSummaryQuery).toHaveBeenCalledWith(11, undefined)
+    expect(useReviewAnalyticsSummaryQuery).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ enabled: false })
+    )
   })
 
   it("force-shows the addressed workspace deck without widening the visible deck list", () => {

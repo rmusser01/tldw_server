@@ -98,6 +98,36 @@ export const FlashcardsManager: React.FC = () => {
   const [shortcutsModalOpen, setShortcutsModalOpen] = React.useState(false)
   const [schedulerDirty, setSchedulerDirty] = React.useState(false)
   const [schedulerDiscardSignal, setSchedulerDiscardSignal] = React.useState(0)
+  const [manageDeckHandoff, setManageDeckHandoff] = React.useState<{
+    deckId: number
+    key: string
+    showWorkspaceDecks: boolean
+  } | null>(null)
+  const [schedulerDeckHandoff, setSchedulerDeckHandoff] = React.useState<{
+    deckId: number
+    key: string
+  } | null>(null)
+  const [exportDeckHandoff, setExportDeckHandoff] = React.useState<{
+    deckId: number
+    key: string
+  } | null>(null)
+  const deckHandoffCounterRef = React.useRef(0)
+  const nextDeckHandoffKey = React.useCallback((prefix: string, deckId: number) => {
+    deckHandoffCounterRef.current += 1
+    return `${prefix}:${deckId}:${deckHandoffCounterRef.current}`
+  }, [])
+  const clearDeckHandoffs = React.useCallback(() => {
+    setManageDeckHandoff(null)
+    setSchedulerDeckHandoff(null)
+    setExportDeckHandoff(null)
+  }, [])
+  const applyReviewDeckChange = React.useCallback(
+    (deckId: number | null | undefined) => {
+      setReviewDeckId(deckId)
+      clearDeckHandoffs()
+    },
+    [clearDeckHandoffs]
+  )
 
   // Listen for "?" key to open keyboard shortcuts modal
   React.useEffect(() => {
@@ -129,23 +159,57 @@ export const FlashcardsManager: React.FC = () => {
       setActiveTab(nextTab)
     }
     if (currentStudyIntent?.deckId !== undefined) {
-      setReviewDeckId(currentStudyIntent.deckId ?? undefined)
+      applyReviewDeckChange(currentStudyIntent.deckId ?? undefined)
     }
-  }, [currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
+  }, [applyReviewDeckChange, currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
 
   const handleReviewCard = React.useCallback(
     (card: Flashcard) => {
-      setReviewDeckId(card.deck_id ?? undefined)
+      applyReviewDeckChange(card.deck_id ?? undefined)
       setReviewOverrideCard(card)
       setActiveTab("review")
     },
-    []
+    [applyReviewDeckChange]
   )
 
   const routeToCreateEntryPoint = React.useCallback(() => {
     setActiveTab("cards")
     setOpenCreateSignal((prev) => prev + 1)
   }, [])
+  const navigateToManageDeck = React.useCallback(
+    (deckId: number) => {
+      applyReviewDeckChange(deckId)
+      setManageDeckHandoff({
+        deckId,
+        key: nextDeckHandoffKey("manage", deckId),
+        showWorkspaceDecks: currentStudyIntent?.forceShowWorkspaceItems ?? false
+      })
+      setActiveTab("cards")
+    },
+    [applyReviewDeckChange, currentStudyIntent?.forceShowWorkspaceItems, nextDeckHandoffKey]
+  )
+  const navigateToSchedulerDeck = React.useCallback(
+    (deckId: number) => {
+      applyReviewDeckChange(deckId)
+      setSchedulerDeckHandoff({
+        deckId,
+        key: nextDeckHandoffKey("scheduler", deckId)
+      })
+      setActiveTab("scheduler")
+    },
+    [applyReviewDeckChange, nextDeckHandoffKey]
+  )
+  const navigateToExportDeck = React.useCallback(
+    (deckId: number) => {
+      applyReviewDeckChange(deckId)
+      setExportDeckHandoff({
+        deckId,
+        key: nextDeckHandoffKey("export", deckId)
+      })
+      setActiveTab("importExport")
+    },
+    [applyReviewDeckChange, nextDeckHandoffKey]
+  )
 
   const quizCtaRoute = React.useMemo(() => {
     const startQuizId = currentStudyIntent?.quizId
@@ -160,6 +224,9 @@ export const FlashcardsManager: React.FC = () => {
   const canOpenQuizCta = currentStudyIntent?.quizId !== undefined
   const effectiveActiveTab =
     schedulerDisabled && activeTab === "scheduler" ? "review" : activeTab
+  const effectiveSchedulerDeckId = schedulerDeckHandoff?.deckId ?? schedulerHandoffDeckId
+  const effectiveSchedulerHandoffKey =
+    schedulerDeckHandoff?.key ?? schedulerHandoffKey
   const schedulerTabLabel = schedulerDisabled ? (
     <Tooltip
       title={t("option:flashcards.schedulerNeedsDeck", {
@@ -256,11 +323,14 @@ export const FlashcardsManager: React.FC = () => {
                 onNavigateToCreate={routeToCreateEntryPoint}
                 onNavigateToImport={() => setActiveTab("importExport")}
                 reviewDeckId={reviewDeckId}
-                onReviewDeckChange={setReviewDeckId}
+                onReviewDeckChange={applyReviewDeckChange}
                 reviewOverrideCard={reviewOverrideCard}
                 onClearOverride={() => setReviewOverrideCard(null)}
                 isActive={effectiveActiveTab === "review"}
                 forceShowWorkspaceItems={currentStudyIntent?.forceShowWorkspaceItems ?? false}
+                onNavigateToManageDeck={navigateToManageDeck}
+                onNavigateToSchedulerDeck={navigateToSchedulerDeck}
+                onNavigateToExportDeck={navigateToExportDeck}
               />
             )
           },
@@ -273,9 +343,14 @@ export const FlashcardsManager: React.FC = () => {
                 onReviewCard={handleReviewCard}
                 openCreateSignal={openCreateSignal}
                 isActive={effectiveActiveTab === "cards"}
-                initialDeckId={currentTab === "cards" ? currentStudyIntent?.deckId : undefined}
+                initialDeckId={
+                  manageDeckHandoff?.deckId ??
+                  (currentTab === "cards" ? currentStudyIntent?.deckId : undefined)
+                }
+                initialDeckHandoffKey={manageDeckHandoff?.key ?? null}
                 initialShowWorkspaceDecks={
-                  currentTab === "cards" ? (currentStudyIntent?.forceShowWorkspaceItems ?? false) : false
+                  manageDeckHandoff?.showWorkspaceDecks ??
+                  (currentTab === "cards" ? (currentStudyIntent?.forceShowWorkspaceItems ?? false) : false)
                 }
               />
             )
@@ -287,6 +362,8 @@ export const FlashcardsManager: React.FC = () => {
               <ImportExportTab
                 generateIntent={currentGenerateIntent}
                 studyPackIntent={currentStudyPackIntent}
+                initialExportDeckId={exportDeckHandoff?.deckId ?? null}
+                initialExportDeckHandoffKey={exportDeckHandoff?.key ?? null}
               />
             )
           },
@@ -301,8 +378,8 @@ export const FlashcardsManager: React.FC = () => {
             children: schedulerDisabled ? null : (
               <SchedulerTab
                 isActive={effectiveActiveTab === "scheduler"}
-                initialDeckId={schedulerHandoffDeckId}
-                initialDeckHandoffKey={schedulerHandoffKey}
+                initialDeckId={effectiveSchedulerDeckId}
+                initialDeckHandoffKey={effectiveSchedulerHandoffKey}
                 onDirtyChange={setSchedulerDirty}
                 discardSignal={schedulerDiscardSignal}
               />

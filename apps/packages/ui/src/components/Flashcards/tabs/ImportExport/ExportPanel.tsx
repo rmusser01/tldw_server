@@ -19,11 +19,21 @@ const toJsonExportText = (payload: unknown): string => {
   return JSON.stringify(payload, null, 2) ?? ""
 }
 
-export const ExportPanel: React.FC<TransferActionReporterProps> = ({ onTransferAction }) => {
+type ExportPanelProps = TransferActionReporterProps & {
+  initialDeckId?: number | null
+  initialDeckHandoffKey?: string | null
+}
+
+export const ExportPanel: React.FC<ExportPanelProps> = ({
+  onTransferAction,
+  initialDeckId = null,
+  initialDeckHandoffKey = null
+}) => {
   const { t } = useTranslation(["option", "common"])
   const message = useAntdMessage()
   const decksQuery = useDecksQuery()
   const [exportDeckId, setExportDeckId] = React.useState<number | null>(null)
+  const appliedDeckHandoffKeyRef = React.useRef<string | null>(null)
   const [exportFormat, setExportFormat] = React.useState<"csv" | "apkg" | "json">("csv")
   const [exportTag, setExportTag] = React.useState("")
   const [exportQueryText, setExportQueryText] = React.useState("")
@@ -36,6 +46,18 @@ export const ExportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
   const normalizedExportTag = exportTag.trim()
   const normalizedExportTagLower = normalizedExportTag.toLowerCase()
   const normalizedExportQuery = exportQueryText.trim()
+
+  React.useEffect(() => {
+    if (
+      initialDeckId == null ||
+      !initialDeckHandoffKey ||
+      appliedDeckHandoffKeyRef.current === initialDeckHandoffKey
+    ) {
+      return
+    }
+    appliedDeckHandoffKeyRef.current = initialDeckHandoffKey
+    setExportDeckId(initialDeckId)
+  }, [initialDeckHandoffKey, initialDeckId])
 
   const exportPreviewCountQuery = useQuery({
     queryKey: [

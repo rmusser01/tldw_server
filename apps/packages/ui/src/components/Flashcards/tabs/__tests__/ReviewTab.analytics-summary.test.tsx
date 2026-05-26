@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ReviewTab } from "../ReviewTab"
 import { clearSetting } from "@/services/settings/registry"
@@ -215,7 +215,8 @@ describe("ReviewTab analytics summary", () => {
     )
 
     expect(useReviewAnalyticsSummaryQuery).toHaveBeenCalledWith(9, undefined)
-    expect(screen.getByTestId("flashcards-review-analytics-summary")).toBeInTheDocument()
+    const analyticsSummary = screen.getByTestId("flashcards-review-analytics-summary")
+    expect(analyticsSummary).toBeInTheDocument()
     expect(screen.getByText("Reviewed today")).toBeInTheDocument()
     expect(screen.getByText("12")).toBeInTheDocument()
     expect(screen.getByText("87.5%")).toBeInTheDocument()
@@ -223,10 +224,10 @@ describe("ReviewTab analytics summary", () => {
     expect(screen.getByText("12.5%")).toBeInTheDocument()
     expect(screen.getByText("1.9s")).toBeInTheDocument()
     expect(screen.getByText("6 days")).toBeInTheDocument()
-    expect(screen.getByText("Deck progress")).toBeInTheDocument()
+    expect(within(analyticsSummary).getByText("Deck progress")).toBeInTheDocument()
     expect(screen.getAllByText("Biology").length).toBeGreaterThan(0)
-    expect(screen.getByText("Due: 6")).toBeInTheDocument()
-    expect(screen.getByText("Mature: 22")).toBeInTheDocument()
+    expect(within(analyticsSummary).getByText("Due: 6")).toBeInTheDocument()
+    expect(within(analyticsSummary).getByText("Mature: 22")).toBeInTheDocument()
   })
 
   it("renders a fallback for missing lapse rate", () => {
