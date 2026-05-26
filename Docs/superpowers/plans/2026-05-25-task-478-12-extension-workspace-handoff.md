@@ -113,3 +113,36 @@ Include build result, live probe result, tests run, screenshots/log paths if any
 - [x] **Step 3: Commit and push scoped changes**
 
 Stage only TASK-478.12 files plus any intentional fix files. Leave unrelated untracked watchlist template files untouched unless they become part of this task.
+
+### Task 5: Approach A Continuation - Promote Browser Clips To Workspace Sources
+
+**Goal:** Preserve canonical clip notes and workspace note placements while also making workspace-targeted browser clips first-class, Media DB-backed workspace sources.
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/WebClipper/service.py`
+- Modify: `tldw_Server_API/app/api/v1/endpoints/web_clipper.py`
+- Modify if useful: `tldw_Server_API/app/api/v1/endpoints/workspaces.py`
+- Modify: `tldw_Server_API/tests/Notes_NEW/unit/test_web_clipper_service.py`
+- Modify: `tldw_Server_API/tests/Notes_NEW/integration/test_web_clipper_api.py`
+- Modify: `apps/extension/tests/e2e/research-workspace.real-backend.spec.ts`
+- Modify: `Docs/Reviews/RESEARCH_WORKSPACE_LIVE_UAT_MATRIX_2026_05_25.md`
+
+- [x] **Step 1: Write failing source-promotion tests**
+
+Add focused assertions proving a workspace-targeted Web Clipper save creates a stable Media DB record and a stable `workspace_sources` row. Cover idempotent retry behavior before implementation.
+
+- [x] **Step 2: Persist clip content into Media DB**
+
+When a clip targets a workspace and Media DB is available, create or update a text/article media record using the clip id as the idempotency source hash. Preserve existing note behavior when Media DB is unavailable by returning a warning rather than dropping the note placement.
+
+- [x] **Step 3: Create or reuse the workspace source row**
+
+Create a deterministic `workspace_sources` row that points at the Media DB item. Repeated saves for the same clip and workspace must reuse the same source identity and media id.
+
+- [x] **Step 4: Enqueue workspace source lifecycle status**
+
+After the source row exists, enqueue the existing `workspace_source_ingest` job with the same idempotency key semantics used by `POST /workspaces/{workspace_id}/sources`.
+
+- [x] **Step 5: Verify API, status projection, and live extension handoff**
+
+Run focused backend tests, update the extension real-backend assertion to require the promoted source in `/sources/status`, and re-run the CDP-backed extension walkthrough against the live backend/WebUI.

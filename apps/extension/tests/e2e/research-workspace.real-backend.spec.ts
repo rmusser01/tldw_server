@@ -293,6 +293,28 @@ test.describe("Research Workspace parity (extension real backend)", () => {
       const sourceStatus = await sourceStatusResponse.json()
       expect(sourceStatus.workspace_id).toBe(workspaceId)
       expect(Array.isArray(sourceStatus.sources)).toBe(true)
+      const expectedSourceId = `web-clipper:${clipId}`
+      const promotedSource = sourceStatus.sources.find(
+        (source: { id?: string; media_id?: number }) => source.id === expectedSourceId
+      ) as { media_id?: number } | undefined
+      expect(promotedSource).toEqual(
+        expect.objectContaining({
+          id: expectedSourceId,
+          workspace_id: workspaceId,
+          title: "TASK-478.12 Web Clipper Handoff",
+          source_type: "web_clip",
+          url: `https://example.com/task-47812/${suffix}`,
+          state: expect.stringMatching(/^(partially_queryable|queryable)$/),
+          readiness: expect.objectContaining({
+            metadata_ready: true,
+            text_extracted: true,
+            fts_ready: true,
+            citation_ready: true
+          })
+        })
+      )
+      expect(promotedSource?.media_id).toEqual(expect.any(Number))
+      expect(promotedSource?.media_id).toBeGreaterThan(0)
     } finally {
       await context.close()
     }

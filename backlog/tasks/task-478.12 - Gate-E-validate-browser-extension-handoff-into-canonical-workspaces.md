@@ -26,6 +26,13 @@ modified_files:
 - apps/packages/ui/src/services/__tests__/background-proxy.test.ts
 - apps/packages/ui/src/services/tldw/domains/web-clipper.ts
 - apps/packages/ui/src/services/__tests__/web-clipper-client.test.ts
+- tldw_Server_API/app/api/v1/API_Deps/jobs_deps.py
+- tldw_Server_API/app/api/v1/endpoints/web_clipper.py
+- tldw_Server_API/app/api/v1/endpoints/workspaces.py
+- tldw_Server_API/app/core/WebClipper/service.py
+- tldw_Server_API/app/core/Workspaces/source_jobs.py
+- tldw_Server_API/tests/Notes_NEW/integration/test_web_clipper_api.py
+- tldw_Server_API/tests/Notes_NEW/unit/test_web_clipper_service.py
 ---
 
 ## Description
@@ -81,24 +88,40 @@ Live result:
 - `GET /api/v1/workspaces/{workspace_id}/notes` included the clipped body.
 - `GET /api/v1/workspaces/{workspace_id}/sources/status` was reachable.
 
-Known gap: browser clips currently persist as workspace notes/placements, not as
-first-class `workspace_sources` entries with ingestion/indexing/RAG source
-status. RW-UAT-024 is therefore `Partial`, not `Pass`.
+Approach A continuation:
+- Preserved canonical Web Clipper notes and workspace note placement behavior.
+- Added Media DB-backed promotion for workspace-targeted browser clips.
+- Created deterministic `workspace_sources` IDs as `web-clipper:{clip_id}`.
+- Reused the existing workspace source ingest job semantics and idempotency key.
+- Verified the live status projection includes the promoted `web_clip` source as
+  `partially_queryable` with FTS/citation readiness while vector indexing is
+  pending.
+
+Verification:
+- `../../.venv/bin/python -m pytest tldw_Server_API/tests/Notes_NEW/unit/test_web_clipper_service.py tldw_Server_API/tests/Notes_NEW/integration/test_web_clipper_api.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -k "workspace_source or add_source" -q` -> 15 passed.
+- `bun run compile` from `apps/extension` -> passed.
+- `bun run build:chrome` from `apps/extension` -> passed with existing duplicate import, font resolution, chunk-size, and Rollup circular re-export warnings.
+- `TLDW_E2E_SERVER_URL=http://127.0.0.1:18002 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY npx playwright test tests/e2e/research-workspace.real-backend.spec.ts --reporter=line --grep "saves a Web Clipper workspace clip"` -> 1 passed against the live backend.
+- `../../.venv/bin/python -m bandit -r tldw_Server_API/app/core/WebClipper/service.py tldw_Server_API/app/api/v1/API_Deps/jobs_deps.py tldw_Server_API/app/api/v1/endpoints/web_clipper.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/core/Workspaces/source_jobs.py -f json -o /tmp/bandit_task47812_webclip_workspace_sources.json` -> 0 findings.
+- `git diff --check` -> clean.
+
+RW-UAT-024 is now `Pass` for capture -> canonical workspace/source handoff. Long
+running vector completion remains a separate watch item.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK-478.12 validates the live browser-extension handoff into canonical Research Workspace. The extension now opens #/research-workspace for workspace saves, the save path survives runtime messaging timeouts through a scoped idempotent fallback, and regression coverage covers both the UI route target and the live Chrome MV3 backend handoff. RW-UAT-024 is updated to Partial because the handoff works as workspace note placement but not yet as first-class indexed source ingestion.
+TASK-478.12 validates the live browser-extension handoff into canonical Research Workspace. The extension now opens #/research-workspace for workspace saves, the save path survives runtime messaging timeouts through a scoped idempotent fallback, and workspace-targeted Web Clipper saves now preserve note placement while also creating Media DB-backed first-class workspace sources with status projection and job enqueue attempts. RW-UAT-024 is updated to Pass for capture -> canonical workspace/source handoff; long-running vector completion remains a watch item.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed for canonical extension save/open handoff; first-class indexed source ingestion remains documented as a follow-up gap
+- [x] #1 Acceptance criteria completed for canonical extension save/open handoff and first-class workspace source promotion/status
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
-- [x] #4 Bandit not applicable: no Python files changed in TASK-478.12
+- [x] #4 Bandit completed for touched Python files with 0 findings
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

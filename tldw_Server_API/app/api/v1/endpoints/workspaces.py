@@ -12,7 +12,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT,
@@ -52,6 +52,12 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Workspaces.source_jobs import (
+    WORKSPACE_SOURCE_JOB_DOMAIN,
+    WORKSPACE_SOURCE_JOB_QUEUE,
+    WORKSPACE_SOURCE_JOB_TYPE,
+    enqueue_workspace_source_ingest_job,
+)
 from tldw_Server_API.app.core.Workspaces.status_projection import (
     build_source_status_projection,
     build_workspace_capability_projection,
@@ -63,10 +69,6 @@ from tldw_Server_API.app.core.exceptions import WorkspaceArtifactExportStateErro
 
 router = APIRouter()
 
-WORKSPACE_SOURCE_JOB_DOMAIN = "media_ingest"
-WORKSPACE_SOURCE_JOB_QUEUE = "default"
-WORKSPACE_SOURCE_JOB_TYPE = "workspace_source_ingest"
-WORKSPACE_SOURCE_JOB_STAGES = ["ingestion", "extraction", "chunking", "indexing"]
 WORKSPACE_ACTIVE_JOB_STATUSES = {"queued", "processing", "running", "retrying"}
 
 
@@ -277,11 +279,7 @@ def _require_workspace(db: CharactersRAGDB, workspace_id: str) -> dict:
 
 def try_get_workspace_job_manager() -> JobManager | None:
     """Resolve the Jobs manager for workspace views without blocking workspace reads/writes."""
-    try:
-        return get_job_manager()
-    except Exception as exc:
-        logger.warning("Workspace Jobs manager unavailable: {}", exc)
-        return None
+    return try_get_job_manager()
 
 
 def _dedupe_jobs_by_identity(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -585,37 +583,12 @@ def _enqueue_workspace_source_ingest_job(
     src: dict[str, Any],
 ) -> None:
     """Submit a user-visible lifecycle job after the workspace source row exists."""
-    if jm is None:
-        return
-    source_id = str(src["id"])
-    media_id = int(src["media_id"])
-    payload = {
-        "workspace_id": workspace_id,
-        "workspace_source_id": source_id,
-        "source_id": source_id,
-        "media_id": media_id,
-        "source_type": str(src["source_type"]),
-        "title": str(src["title"]),
-        "url": src.get("url"),
-        "requested_stages": WORKSPACE_SOURCE_JOB_STAGES,
-    }
-    try:
-        jm.create_job(
-            domain=WORKSPACE_SOURCE_JOB_DOMAIN,
-            queue=WORKSPACE_SOURCE_JOB_QUEUE,
-            job_type=WORKSPACE_SOURCE_JOB_TYPE,
-            payload=payload,
-            owner_user_id=str(current_user.id),
-            idempotency_key=f"workspace-source:{workspace_id}:{source_id}:{media_id}",
-            max_retries=3,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Workspace source ingest job enqueue failed for workspace={} source={}: {}",
-            workspace_id,
-            source_id,
-            exc,
-        )
+    enqueue_workspace_source_ingest_job(
+        jm=jm,
+        owner_user_id=current_user.id,
+        workspace_id=workspace_id,
+        src=src,
+    )
 
 
 # ── Workspace CRUD ──────────────────────────────────────────────
