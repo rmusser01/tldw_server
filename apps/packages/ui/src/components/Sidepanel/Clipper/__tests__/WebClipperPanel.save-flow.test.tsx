@@ -213,7 +213,7 @@ describe("WebClipperPanel save flow", () => {
   it.each([
     ["Note", "#/notes"],
     ["Both", "#/notes"],
-    ["Workspace", "#/document-workspace"]
+    ["Workspace", "#/research-workspace"]
   ])(
     "save and open routes %s clips to %s",
     async (destinationLabel, expectedPath) => {

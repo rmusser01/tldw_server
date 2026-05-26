@@ -105,8 +105,8 @@ export function MediaReadAlongPopover({
   onAnnotate,
   t
 }: MediaReadAlongPopoverProps) {
-  const supportedScopeSet = new Set(supportedScopes)
-  const actions: PopoverAction[] = [
+  const supportedScopeSet = new Set<ReadAlongScope>(supportedScopes)
+  const allActions: PopoverAction[] = [
     {
       scope: 'selection',
       testId: 'media-selection-action-read-selection',
@@ -154,7 +154,10 @@ export function MediaReadAlongPopover({
       icon: <StickyNote className="h-3.5 w-3.5" />,
       onClick: onAnnotate
     }
-  ].filter((action) => !action.scope || supportedScopeSet.has(action.scope))
+  ]
+  const actions = allActions.filter((action) => {
+    return !action.scope || supportedScopeSet.has(action.scope)
+  })
 
   const position = getPopoverPosition(anchorRect, viewportRect)
 

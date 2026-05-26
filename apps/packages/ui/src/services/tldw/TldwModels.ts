@@ -98,12 +98,20 @@ export class TldwModelsService {
   private readonly CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
-  private readonly CACHE_SCHEMA_VERSION = 7
+  private readonly CACHE_SCHEMA_VERSION = 3
   private storage = createSafeStorage({ area: "local" })
   private storageLoaded = false
   private storageInitPromise: Promise<void> | null = null
   private inFlightFetch: Promise<ModelInfo[]> | null = null
   private cacheScopeKey: string | null = null
+
+  constructor() {
+    this.getModels = this.getModels.bind(this)
+    this.getChatModels = this.getChatModels.bind(this)
+    this.getCachedChatModels = this.getCachedChatModels.bind(this)
+    this.getEmbeddingModels = this.getEmbeddingModels.bind(this)
+    this.getImageModels = this.getImageModels.bind(this)
+  }
 
   private async ensureStorageLoaded() {
     if (this.storageLoaded) return
@@ -423,26 +431,27 @@ export class TldwModelsService {
       capabilities: caps.length ? Array.from(new Set(caps)) : undefined,
       contextLength: tldwModel.context_length,
       description: tldwModel.description,
+      modalities: tldwModel.modalities,
       isConfigured: toOptionalBoolean(tldwModel.is_configured),
-      providerIsConfigured: toOptionalBoolean(tldwModel.provider_is_configured),
       providerEnabled: toOptionalBoolean(tldwModel.provider_enabled),
       availability:
         typeof tldwModel.availability === "string"
           ? tldwModel.availability
-          : undefined,
-      catalogOnly: toOptionalBoolean(tldwModel.catalog_only),
-      modalities: tldwModel.modalities
+          : undefined
     }
   }
 
   private isSelectableChatModel(model: ModelInfo): boolean {
     if (model.type !== "chat") return false
     if (model.isConfigured === false) return false
-    if (model.providerIsConfigured === false) return false
     if (model.providerEnabled === false) return false
-    if (model.catalogOnly === true) return false
-    const availability = normalizeAvailabilityStatus(model.availability)
-    if (availability && UNSELECTABLE_CHAT_MODEL_AVAILABILITY.has(availability)) {
+    const availability = model.availability?.trim().toLowerCase()
+    if (
+      availability &&
+      ["disabled", "failed", "unavailable", "not-configured"].includes(
+        availability
+      )
+    ) {
       return false
     }
     return true

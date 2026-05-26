@@ -18,6 +18,7 @@ const makeState = (overrides: Partial<ConnectionState> = {}): ConnectionState =>
   configStep: "none",
   errorKind: "none",
   hasCompletedFirstRun: false,
+  userPersona: null,
   lastConfigUpdatedAt: null,
   checksSinceConfigChange: 0,
   ...overrides

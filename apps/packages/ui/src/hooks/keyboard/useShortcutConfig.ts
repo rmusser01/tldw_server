@@ -121,8 +121,7 @@ export const defaultShortcuts: ShortcutConfig = {
   }
 }
 
-type PersistedShortcutConfig = Partial<ShortcutConfig> &
-  Partial<Record<string, unknown>>
+type PersistedShortcutConfig = Partial<ShortcutConfig>
 
 const coerceShortcutOverrides = (value: unknown): PersistedShortcutConfig => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

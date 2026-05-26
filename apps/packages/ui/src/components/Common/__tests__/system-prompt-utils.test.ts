@@ -5,16 +5,21 @@ import {
   resolveSelectedSystemPromptContent
 } from "../system-prompt-utils"
 
+const makePrompt = (content: string) => ({
+  id: "prompt-1",
+  title: "Prompt",
+  content,
+  is_system: true,
+  createdAt: Date.parse("2026-01-01T00:00:00Z")
+})
+
 describe("system prompt utils", () => {
   it("returns selected template content when systemPrompt override is empty", async () => {
     await expect(
       resolveEffectiveSystemPromptState({
         selectedSystemPrompt: "prompt-1",
         systemPrompt: "",
-        getPromptByIdFn: vi.fn(async () => ({
-          id: "prompt-1",
-          content: "Template body"
-        }))
+        getPromptByIdFn: vi.fn(async () => makePrompt("Template body"))
       })
     ).resolves.toMatchObject({
       templateContent: "Template body",
@@ -28,10 +33,7 @@ describe("system prompt utils", () => {
       resolveEffectiveSystemPromptState({
         selectedSystemPrompt: "prompt-1",
         systemPrompt: "Conversation override",
-        getPromptByIdFn: vi.fn(async () => ({
-          id: "prompt-1",
-          content: "Template body"
-        }))
+        getPromptByIdFn: vi.fn(async () => makePrompt("Template body"))
       })
     ).resolves.toMatchObject({
       templateContent: "Template body",

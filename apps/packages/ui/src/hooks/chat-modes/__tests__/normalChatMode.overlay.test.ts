@@ -92,7 +92,7 @@ describe("normalChatMode overlay prompt ordering", () => {
   })
 
   it("keeps base prompt first, overlay second, actor after overlay, and web search last", async () => {
-    const prompt = await normalChatMode(
+    const prompt = (await normalChatMode(
       "Where should I go?",
       "",
       false,
@@ -117,7 +117,7 @@ describe("normalChatMode overlay prompt ordering", () => {
         historyId: null,
         setHistoryId: vi.fn()
       }
-    )
+    )) as unknown as { chatHistory: SystemMessage[] }
 
     expect(prompt.chatHistory).toHaveLength(4)
     expect((prompt.chatHistory[0] as SystemMessage).content).toBe("Base system prompt")
@@ -127,7 +127,7 @@ describe("normalChatMode overlay prompt ordering", () => {
   })
 
   it("keeps generic systemPromptAppendix appended to the active base prompt", async () => {
-    const prompt = await normalChatMode(
+    const prompt = (await normalChatMode(
       "Hello",
       "",
       false,
@@ -150,7 +150,7 @@ describe("normalChatMode overlay prompt ordering", () => {
         historyId: null,
         setHistoryId: vi.fn()
       }
-    )
+    )) as unknown as { chatHistory: SystemMessage[] }
 
     expect(prompt.chatHistory).toHaveLength(1)
     expect((prompt.chatHistory[0] as SystemMessage).content).toBe(

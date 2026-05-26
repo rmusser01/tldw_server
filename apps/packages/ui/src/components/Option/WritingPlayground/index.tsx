@@ -1276,7 +1276,15 @@ export const WritingPlayground = () => {
           ? null
           : composeContextPrompt(documentText, contextSettings),
         contextMessages: chatMode
-          ? buildContextSystemMessages(documentText, contextSettings)
+          ? buildContextSystemMessages(documentText, contextSettings).map(
+              (message) => ({
+                role: message.role,
+                content:
+                  typeof message.content === "string"
+                    ? message.content
+                    : JSON.stringify(message.content)
+              })
+            )
           : null,
         memoryBlock,
         authorNote,
@@ -1304,7 +1312,8 @@ export const WritingPlayground = () => {
     const stopStrings = resolveGenerationStopStrings({
       useBasicMode: settings.use_basic_stopping_mode,
       basicModeType: settings.basic_stopping_mode_type,
-      customStopStrings: settings.stop
+      customStopStrings: settings.stop,
+      fillSuffix: ""
     })
     const genAdvancedExtraBody =
       supportsAdvancedCompat

@@ -296,9 +296,11 @@ export const fetchChatModels = async ({
       }
 
       const resolved = dedupeChatModelsByModel(combined)
-      chatModelsCache = {
-        value: resolved,
-        expiresAt: Date.now() + CHAT_MODELS_CACHE_TTL_MS
+      if (resolved.length > 0) {
+        chatModelsCache = {
+          value: resolved,
+          expiresAt: Date.now() + CHAT_MODELS_CACHE_TTL_MS
+        }
       }
       return resolved
     })()

@@ -51,6 +51,8 @@ interface ChatSidebarProps {
   onToggleCollapse?: () => void
   /** Additional class names */
   className?: string
+  /** Monotonic signal from parent layouts when the sidebar should reset open state */
+  openResetKey?: number
 }
 
 type SidebarTab = "server" | "folders"
@@ -58,7 +60,8 @@ type SidebarTab = "server" | "folders"
 export function ChatSidebar({
   collapsed = false,
   onToggleCollapse,
-  className
+  className,
+  openResetKey
 }: ChatSidebarProps) {
   const { t } = useTranslation(["common", "sidepanel", "option", "settings"])
   const navigate = useNavigate()
@@ -66,10 +69,9 @@ export function ChatSidebar({
   const [searchQuery, setSearchQuery] = useState("")
   const debouncedSearchQuery = useDebounce(searchQuery, 300)
   const [selectionMode, setSelectionMode] = useState(false)
-  const normalizedSearchQuery = useMemo(
-    () => debouncedSearchQuery.trim().toLowerCase(),
-    [debouncedSearchQuery]
-  )
+  const [recentCollapsed, setRecentCollapsed] = useState(true)
+  const hasSearchQuery = searchQuery.trim().length > 0
+  const recentHistoryVisible = !recentCollapsed || hasSearchQuery
 
   // Tab state persisted in UI settings
   const [currentTab, setCurrentTab] = useSetting(SIDEBAR_ACTIVE_TAB_SETTING)
@@ -87,6 +89,8 @@ export function ChatSidebar({
   const serverHistoryOverviewEnabled = useChatSurfaceCoordinatorStore(
     (state) => shouldEnableOptionalResource(state, "server-history")
   )
+  const serverHistoryPanelVisible =
+    !collapsed && recentHistoryVisible && currentTab === "server"
 
   const clearChat = useClearChat()
   const temporaryChat = useStoreMessageOption((state) => state.temporaryChat)
@@ -101,7 +105,7 @@ export function ChatSidebar({
 
   // Server chat count for tab badge
   const { total: serverChatCount = 0 } = useServerChatHistory("", {
-    enabled: serverHistoryOverviewEnabled,
+    enabled: serverHistoryPanelVisible && serverHistoryOverviewEnabled,
     mode: "overview",
     page: 1,
     limit: SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE,
@@ -207,6 +211,34 @@ export function ChatSidebar({
     [location.pathname, navigate, setShortcutsCollapsed, startRouteTransition]
   )
 
+  const resetToolsFirst = React.useCallback(() => {
+    if (shortcutsCollapsed === true) {
+      void setShortcutsCollapsed(false)
+    }
+    setRecentCollapsed(true)
+    setSelectionMode(false)
+  }, [setShortcutsCollapsed, shortcutsCollapsed])
+
+  const previousCollapsedRef = React.useRef<boolean | null>(null)
+  React.useEffect(() => {
+    const wasCollapsed = previousCollapsedRef.current
+    if (!collapsed && (wasCollapsed === null || wasCollapsed === true)) {
+      resetToolsFirst()
+    }
+    previousCollapsedRef.current = collapsed
+  }, [collapsed, resetToolsFirst])
+
+  const previousOpenResetKeyRef = React.useRef(openResetKey)
+  React.useEffect(() => {
+    if (previousOpenResetKeyRef.current === openResetKey) {
+      return
+    }
+    previousOpenResetKeyRef.current = openResetKey
+    if (!collapsed) {
+      resetToolsFirst()
+    }
+  }, [collapsed, openResetKey, resetToolsFirst])
+
   React.useEffect(() => {
     if (currentTab !== "server" && selectionMode) {
       setSelectionMode(false)
@@ -214,12 +246,18 @@ export function ChatSidebar({
   }, [currentTab, selectionMode])
 
   React.useEffect(() => {
-    setPanelVisible("server-history", currentTab === "server" && !collapsed)
+    setPanelVisible("server-history", serverHistoryPanelVisible)
 
     return () => {
       setPanelVisible("server-history", false)
     }
-  }, [collapsed, currentTab, setPanelVisible])
+  }, [serverHistoryPanelVisible, setPanelVisible])
+
+  React.useEffect(() => {
+    if (serverHistoryPanelVisible) {
+      markPanelEngaged("server-history")
+    }
+  }, [markPanelEngaged, serverHistoryPanelVisible])
 
   const previousPathRef = React.useRef(location.pathname)
   React.useEffect(() => {
@@ -246,6 +284,18 @@ export function ChatSidebar({
   )
   const focusRingClasses =
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+  const recentConversationsExpanded = recentHistoryVisible
+  const toggleRecentConversations = React.useCallback(() => {
+    setRecentCollapsed((prev) => {
+      const next = !prev
+      if (next) {
+        setSelectionMode(false)
+      } else if (currentTab === "server") {
+        markPanelEngaged("server-history")
+      }
+      return next
+    })
+  }, [currentTab, markPanelEngaged])
 
   // Collapsed view - just icons
   if (collapsed) {
@@ -375,7 +425,7 @@ export function ChatSidebar({
               <Plus className="size-4" />
             </button>
           </Tooltip>
-          {currentTab === "server" && (
+          {recentHistoryVisible && currentTab === "server" && (
             <Tooltip
               title={
                 selectionMode
@@ -422,38 +472,6 @@ export function ChatSidebar({
         </div>
       </div>
 
-      {/* Search */}
-      <div className="px-3 py-2 border-b border-border">
-        <Input
-          data-testid="chat-sidebar-search"
-          prefix={<Search className="size-3.5 text-text-subtle" />}
-          placeholder={t("common:chatSidebar.search", "Search chats...")}
-          value={searchQuery}
-          onChange={handleSearchChange}
-          size="small"
-          className="bg-surface"
-          allowClear
-        />
-      </div>
-
-      {/* Tabs */}
-      <div className="px-3 py-2 border-b border-border">
-        <label id="chat-sidebar-tab-label" className="sr-only">
-          {t("common:chatSidebar.tabsLabel", "Chat view")}
-        </label>
-        <Segmented<SidebarTab>
-          value={currentTab}
-          onChange={(value) => {
-            void setCurrentTab(value)
-          }}
-          options={tabOptions}
-          block
-          size="small"
-          className="w-full"
-          aria-labelledby="chat-sidebar-tab-label"
-        />
-      </div>
-
       {/* Quick Actions */}
       <button
         type="button"
@@ -495,24 +513,97 @@ export function ChatSidebar({
 
       <div className="h-px bg-border mx-3" />
 
-      {/* Tab Content */}
-      <div
+      {/* Recent Conversations */}
+      <button
+        type="button"
+        aria-expanded={recentConversationsExpanded}
+        aria-controls="chat-sidebar-recent-conversations"
+        onClick={toggleRecentConversations}
         className={cn(
-          "flex-1 overflow-y-auto",
-          temporaryChat ? "pointer-events-none opacity-50" : ""
+          "group flex w-full items-center justify-between px-3 py-2 text-left hover:bg-surface",
+          focusRingClasses
+        )}
+        title={t(
+          "common:chatSidebar.recentConversations",
+          "Recent conversations"
         )}
       >
-        {currentTab === "server" && (
-          <ServerChatList
-            searchQuery={debouncedSearchQuery}
-            selectionMode={selectionMode}
-          />
-        )}
+        <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+          {t("common:chatSidebar.recentConversations", "Recent conversations")}
+        </span>
+        <ChevronDown
+          className={cn(
+            "size-4 text-text-muted transition-transform group-hover:text-text",
+            recentConversationsExpanded ? "rotate-0" : "-rotate-90"
+          )}
+        />
+      </button>
 
-        {currentTab === "folders" && (
-          <FolderChatList />
-        )}
-      </div>
+      {recentHistoryVisible && (
+        <div
+          id="chat-sidebar-recent-conversations"
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          {/* Search */}
+          <div className="px-3 py-2 border-b border-border">
+            <Input
+              data-testid="chat-sidebar-search"
+              prefix={<Search className="size-3.5 text-text-subtle" />}
+              placeholder={t("common:chatSidebar.search", "Search chats...")}
+              value={searchQuery}
+              onChange={handleSearchChange}
+              size="small"
+              className="bg-surface"
+              allowClear
+            />
+          </div>
+
+          {/* Tabs */}
+          <div className="px-3 py-2 border-b border-border">
+            <label id="chat-sidebar-tab-label" className="sr-only">
+              {t("common:chatSidebar.tabsLabel", "Chat view")}
+            </label>
+            <Segmented<SidebarTab>
+              value={currentTab}
+              onChange={(value) => {
+                void setCurrentTab(value)
+              }}
+              options={tabOptions}
+              block
+              size="small"
+              className="w-full"
+              aria-labelledby="chat-sidebar-tab-label"
+            />
+          </div>
+
+          {/* Tab Content */}
+          <div
+            className={cn(
+              "flex-1 overflow-y-auto",
+              temporaryChat ? "pointer-events-none opacity-50" : ""
+            )}
+          >
+            {currentTab === "server" && (
+              <ServerChatList
+                searchQuery={debouncedSearchQuery}
+                selectionMode={selectionMode}
+              />
+            )}
+
+            {currentTab === "folders" && (
+              <FolderChatList />
+            )}
+          </div>
+        </div>
+      )}
+
+      {!recentHistoryVisible && (
+        <div
+          id="chat-sidebar-recent-conversations"
+          className="flex-1"
+          hidden
+        />
+      )}
 
       {/* Footer */}
       <div className="border-t border-border px-3 py-2">

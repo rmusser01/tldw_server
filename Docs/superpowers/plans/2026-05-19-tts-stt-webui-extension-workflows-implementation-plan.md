@@ -290,14 +290,14 @@ Privacy rules:
 
 **Tests:** Documentation verification only for this plan.
 
-**Status:** Complete via `TASK-428`; follow-up implementation tasks were created for Slice 1 and Slice 2A before file edits.
+**Status:** Not Started
 
 ### Tasks
 
-- [x] Create follow-up Backlog tasks for Slice 1 through Slice 3 before implementation starts.
-- [x] Create optional Backlog tasks for Phase 2B and Phase 4 only when gates are satisfied.
-- [x] Confirm current route files still match the evidence snapshot.
-- [x] Keep this plan as the implementation source of truth for the first coding slice.
+- [ ] Create follow-up Backlog tasks for Slice 1 through Slice 3 before implementation starts.
+- [ ] Create optional Backlog tasks for Phase 2B and Phase 4 only when gates are satisfied.
+- [ ] Confirm current route files still match the evidence snapshot.
+- [ ] Keep this plan as the implementation source of truth for the first coding slice.
 
 ## Stage 1: Route Parity, Copy, And TTS Configuration Truthfulness
 
@@ -318,7 +318,7 @@ Privacy rules:
 - `cd apps/packages/ui && bunx vitest run src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx src/components/Option/Speech/__tests__/RenderStrip.test.tsx`
 - `cd apps/tldw-frontend && bun run test:extension -- extension/__tests__/audio-route-parity.guard.test.tsx`
 
-**Status:** Complete via `TASK-429` / commit `9fcf83198`.
+**Status:** Not Started
 
 ### Files
 
@@ -346,19 +346,19 @@ Optional new helper:
 
 ### Implementation Steps
 
-- [x] Write failing route parity tests for extension `#/stt` and `#/tts`.
+- [ ] Write failing route parity tests for extension `#/stt` and `#/tts`.
   - `#/stt` must import/render `SttPlaygroundPage`.
   - `#/tts` must pass `lockedMode="listen"` and `hideModeSwitcher` to `SpeechPlaygroundPage`.
-- [x] Update `apps/tldw-frontend/extension/routes/option-stt.tsx` to use `SttPlaygroundPage`.
-- [x] Update `apps/tldw-frontend/extension/routes/option-tts.tsx` to mirror WebUI `/tts` mode locking.
-- [x] Add `RouteErrorBoundary` to shared `/stt` only if tests confirm it is still missing and the local route-boundary pattern expects it. Closed as not required by the implemented route parity tests.
-- [x] Add `tts-render-config.ts` and tests for provider-specific defaults. Closed as unnecessary because Slice 1 fixed provider-specific selection in-place without requiring a new helper.
-- [x] Replace ad hoc provider/model/voice construction in `handleAddRenderStrip` with `buildTtsRenderConfig`. Closed with the helper decision above; provider-specific selection is covered by focused render tests.
-- [x] Replace route-level TTS provider strip values so OpenAI and ElevenLabs do not display tldw model or voice values.
-- [x] Update `RenderStrip` labels so Browser TTS says "Browser preview" and custom/tldw providers do not mask the provider as the model.
-- [x] Fix speech settings copy to `/settings/speech`.
-- [x] Add first-run empty copy for dedicated TTS and STT routes using the PRD language.
-- [x] Verify keyboard focus order did not regress for route headings, primary inputs, and result rows through focused render tests.
+- [ ] Update `apps/tldw-frontend/extension/routes/option-stt.tsx` to use `SttPlaygroundPage`.
+- [ ] Update `apps/tldw-frontend/extension/routes/option-tts.tsx` to mirror WebUI `/tts` mode locking.
+- [ ] Add `RouteErrorBoundary` to shared `/stt` only if tests confirm it is still missing and the local route-boundary pattern expects it.
+- [ ] Add `tts-render-config.ts` and tests for provider-specific defaults.
+- [ ] Replace ad hoc provider/model/voice construction in `handleAddRenderStrip` with `buildTtsRenderConfig`.
+- [ ] Replace route-level TTS provider strip values so OpenAI and ElevenLabs do not display tldw model or voice values.
+- [ ] Update `RenderStrip` labels so Browser TTS says "Browser preview" and custom/tldw providers do not mask the provider as the model.
+- [ ] Fix speech settings copy to `/settings/speech`.
+- [ ] Add first-run empty copy for dedicated TTS and STT routes using the PRD language.
+- [ ] Verify keyboard focus order did not regress for route headings, primary inputs, and result rows.
 
 ### Stage 1 Commit Guidance
 
@@ -395,7 +395,7 @@ git commit -m "fix speech route parity and tts config provenance"
 - `cd apps/packages/ui && bunx vitest run src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx src/components/Option/Speech/__tests__/TtsProviderStrip.test.tsx`
 - `cd apps/tldw-frontend && bun run test:extension -- extension/__tests__/audio-route-parity.guard.test.tsx`
 
-**Status:** Complete via `TASK-430` / commit `c46563eaa`.
+**Status:** Not Started
 
 ### Files
 
@@ -420,7 +420,7 @@ Add:
 
 ### Implementation Steps
 
-- [x] Add failing tests for readiness summary states:
+- [ ] Add failing tests for readiness summary states:
   - TTS provider ready.
   - TTS provider missing credentials.
   - Browser preview available.
@@ -428,15 +428,15 @@ Add:
   - STT model on demand.
   - STT model unavailable.
   - Unknown diarization support remains unknown.
-- [x] Add `audio-readiness.ts` pure functions for formatting readiness and confidence labels.
-- [x] Extend `useTranscriptionModelsCatalog` to expose `modelOptions` while preserving `serverModels`.
-- [x] Add typed client responses in `models-audio.ts` for transcription model catalog and health if the existing `any` return makes tests fragile. Closed as not required because tests remained stable through the hook-level type boundary.
-- [x] Compose STT model options from static catalog response and bounded health checks.
-- [x] Add readiness strip to `SttPlaygroundPage` above source input.
-- [x] Add readiness strip to `SpeechPlaygroundPage` when in locked TTS mode and in combined mode where TTS controls are visible.
-- [x] Keep advanced capability details compact, with accessible text on every badge.
-- [x] Add extension-width tests or snapshots to catch horizontal overflow in the readiness strip. Covered by route parity/identity tests and Stage 8 browser QA notes; full live extension browser QA remains recorded as a validation gap.
-- [x] Ensure unknown states are visible instead of hidden.
+- [ ] Add `audio-readiness.ts` pure functions for formatting readiness and confidence labels.
+- [ ] Extend `useTranscriptionModelsCatalog` to expose `modelOptions` while preserving `serverModels`.
+- [ ] Add typed client responses in `models-audio.ts` for transcription model catalog and health if the existing `any` return makes tests fragile.
+- [ ] Compose STT model options from static catalog response and bounded health checks.
+- [ ] Add readiness strip to `SttPlaygroundPage` above source input.
+- [ ] Add readiness strip to `SpeechPlaygroundPage` when in locked TTS mode and in combined mode where TTS controls are visible.
+- [ ] Keep advanced capability details compact, with accessible text on every badge.
+- [ ] Add extension-width tests or snapshots to catch horizontal overflow in the readiness strip.
+- [ ] Ensure unknown states are visible instead of hidden.
 
 ### Phase 2A Guardrails
 
@@ -464,7 +464,7 @@ Add:
 - `cd apps/packages/ui && bunx vitest run src/components/Option/STT/__tests__/RecordingStrip.test.tsx src/components/Option/STT/__tests__/ComparisonPanel.test.tsx`
 - `cd apps/packages/ui && bunx vitest run src/components/Option/Speech/__tests__/SpeechPlaygroundPage.audio-source.test.tsx src/components/Option/Speech/__tests__/RenderStrip.test.tsx`
 
-**Status:** Complete via `TASK-431`.
+**Status:** Not Started
 
 ### Files
 
@@ -484,20 +484,14 @@ Add:
 
 ### Implementation Steps
 
-- [x] Write classification tests for known error shapes and browser `NotAllowedError`.
-- [x] Implement `classifyAudioError(error)`.
-- [x] Apply classification to STT comparison errors in `useComparisonTranscribe`.
-- [x] Apply classification to TTS render errors in `useMultiRenderState` or at the closest existing render failure boundary.
-- [x] Update `ComparisonPanel` and `RenderStrip` to show category title and recovery copy.
-- [x] Add `/settings/speech` as the recovery link for missing credentials or setup where appropriate.
-- [x] Add microphone-denied UI to `RecordingStrip` with retry and browser settings guidance.
-- [x] Confirm errors remain keyboard reachable and screen-reader-readable.
-
-### Stage 3 Verification Notes
-
-- Added shared classifier coverage for credentials, missing model, microphone permission, network, timeout, engine unavailable, unsupported, and unknown failures.
-- Added STT comparison and TTS render recovery links to `/settings/speech` when the classifier returns a settings recovery target.
-- Verified with focused Stage 3 and audio readiness/parity suites; full package TypeScript remains blocked by existing unrelated frontend baseline errors outside the touched audio files.
+- [ ] Write classification tests for known error shapes and browser `NotAllowedError`.
+- [ ] Implement `classifyAudioError(error)`.
+- [ ] Apply classification to STT comparison errors in `useComparisonTranscribe`.
+- [ ] Apply classification to TTS render errors in `useMultiRenderState` or at the closest existing render failure boundary.
+- [ ] Update `ComparisonPanel` and `RenderStrip` to show category title and recovery copy.
+- [ ] Add `/settings/speech` as the recovery link for missing credentials or setup where appropriate.
+- [ ] Add microphone-denied UI to `RecordingStrip` with retry and browser settings guidance.
+- [ ] Confirm errors remain keyboard reachable and screen-reader-readable.
 
 ## Stage 4: Comparison Run Provenance And Power-User Controls
 
@@ -520,17 +514,7 @@ Add:
 - `cd apps/packages/ui && bunx vitest run src/components/Option/Speech/__tests__/RenderStrip.test.tsx src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx`
 - `cd apps/tldw-frontend && bun run e2e:smoke:audio`
 
-**Status:** Complete via `TASK-432`
-
-### Stage 4 Verification Notes
-
-- Added shared comparison provenance helpers for created time, byte size, client-measured latency, text preview, and local text hash.
-- STT comparison rows now keep row IDs, request config, response metadata, retry-original-settings behavior, duplicate rows, disabled rows, and history provenance.
-- TTS render rows now keep created time, input preview/hash, audio size, client latency, duplicate rows, and disabled rows for Generate All.
-- Verified with `./node_modules/.bin/vitest run src/components/Option/Audio/__tests__/comparison-provenance.test.ts src/hooks/__tests__/useComparisonTranscribe.test.ts src/components/Option/STT/__tests__/ComparisonPanel.test.tsx src/components/Option/STT/__tests__/HistoryPanel.test.tsx src/hooks/__tests__/useMultiRenderState.test.ts src/components/Option/Speech/__tests__/RenderStrip.test.tsx src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx`: 7 files, 75 tests passed.
-- `bun run e2e:smoke:audio` starts only outside the sandbox. The run finished with 2 passing and 4 failing tests because the frontend attempted `http://127.0.0.1:8000/api/v1/health` while no backend was listening; downstream STT/speech smoke checks remained blocked in that no-backend app state.
-- `./node_modules/.bin/tsc --noEmit --pretty false` still fails on the existing package-wide frontend baseline; the listed failures were outside the touched TTS/STT comparison files.
-- `./node_modules/.bin/vitest run src/components/Option/Speech/__tests__/SpeechPlaygroundPage.audio-source.test.tsx` still has one unrelated low-level audio-capture ownership message failure.
+**Status:** Not Started
 
 ### Files
 
@@ -551,16 +535,16 @@ Add:
 
 ### Implementation Steps
 
-- [x] Add pure helpers for text preview/hash, created-time formatting, byte-size formatting, and client-latency labeling.
-- [x] Extend `ComparisonResult` to include `config` and `metadata` while preserving current fields.
-- [x] Update `extractText` or a new response normalizer to also extract `language`, `duration`, `segments`, and `word` metadata when present.
-- [x] Store STT comparison history with configuration provenance, not only model/text/latency/word count.
-- [x] Add STT card metadata rows for language, duration, segment count, timestamp settings, and source label.
-- [x] Add TTS render row metadata for provider/model/voice/format/speed, created time, input length, input preview/hash, byte size, and client latency.
-- [x] Label client-measured latency as "Client measured" or equivalent.
-- [x] Add retry, duplicate, and disable controls to TTS and STT rows using existing icon/button patterns.
-- [x] Preserve current copy, save-to-notes, download, and history actions.
-- [x] Ensure result metadata cannot resize rows unpredictably at extension widths.
+- [ ] Add pure helpers for text preview/hash, created-time formatting, byte-size formatting, and client-latency labeling.
+- [ ] Extend `ComparisonResult` to include `config` and `metadata` while preserving current fields.
+- [ ] Update `extractText` or a new response normalizer to also extract `language`, `duration`, `segments`, and `word` metadata when present.
+- [ ] Store STT comparison history with configuration provenance, not only model/text/latency/word count.
+- [ ] Add STT card metadata rows for language, duration, segment count, timestamp settings, and source label.
+- [ ] Add TTS render row metadata for provider/model/voice/format/speed, created time, input length, input preview/hash, byte size, and client latency.
+- [ ] Label client-measured latency as "Client measured" or equivalent.
+- [ ] Add retry, duplicate, and disable controls to TTS and STT rows using existing icon/button patterns.
+- [ ] Preserve current copy, save-to-notes, download, and history actions.
+- [ ] Ensure result metadata cannot resize rows unpredictably at extension widths.
 
 ## Stage 5: Optional Phase 2B STT Capability Summary Endpoint
 
@@ -579,74 +563,11 @@ Add:
 - `cd apps/packages/ui && bunx vitest run src/hooks/__tests__/useTranscriptionModelsCatalog.test.tsx`
 - `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints tldw_Server_API/app/core -f json -o /tmp/bandit_tts_stt_capabilities.json`
 
-**Status:** Complete via `TASK-433`
-
-### Phase 2A Gap Note
-
-`TASK-433` confirms the Phase 2B gate is satisfied. The Stage 2A UI can show
-explicit `unknown` capability states, but current public APIs do not provide
-enough structured metadata for clear STT capability comparison.
-
-Observed API gaps:
-
-- `/api/v1/media/transcription-models` returns static categories and model ids
-  only. It does not return provider ids, readiness, capability support, or
-  metadata source/confidence.
-- `/api/v1/audio/transcriptions/health?model=...` returns availability,
-  usability, on-demand state, provider, message, and estimated size for one
-  requested model. It does not return batch, streaming, diarization, timestamp,
-  or segment capability metadata.
-- `useTranscriptionModelsCatalog` intentionally bounds health checks to the
-  selected/default/first model, so most models remain `unknown` for
-  availability and all models remain `unknown` for capabilities.
-- The backend STT provider adapter registry already exposes lightweight
-  provider-level batch, streaming, and diarization metadata without loading
-  models. That metadata is not currently surfaced to WebUI or extension routes.
-- REST transcription responses can include duration, language, and segments
-  after a run, and can include word data when `timestamp_granularities` requests
-  words and the backend returns it. That proves result metadata, not reliable
-  pre-run capability disclosure for every model.
-
-Decision:
-
-- Implement `GET /api/v1/audio/transcriptions/capabilities` as a read-only
-  enhancement. It must reuse the static catalog, the existing lightweight
-  health check, and provider adapter capabilities.
-- The endpoint must not warm, download, or initialize STT models.
-- It must label unsupported only when the provider adapter or endpoint contract
-  explicitly says unsupported; otherwise use unknown.
-- Frontend consumers must keep the existing catalog/health fallback when the
-  endpoint is unavailable.
-- AuthNZ and rate-limit behavior should match current audio health endpoints:
-  `/api/v1/audio/health` and `/api/v1/audio/transcriptions/health` are mounted
-  under the audio router without explicit `check_rate_limit` or token-scope
-  dependencies, while generation/transcription mutation endpoints carry those
-  dependencies.
-
-### Stage 5 Verification Notes
-
-- Added `GET /api/v1/audio/transcriptions/capabilities` under the current
-  audio health endpoint owner. The endpoint is read-only and calls the existing
-  lightweight status probe with `warm=false` behavior; tests assert it does not
-  warm or load Whisper models.
-- The response combines static catalog labels/categories, lightweight health
-  availability, provider adapter batch/streaming/diarization support, and
-  response-schema timestamp/segment support with per-field sources.
-- Frontend model catalog loading now attempts the capability summary first and
-  falls back to the existing bounded one-model health probe when the endpoint is
-  unavailable.
-- Verified with backend capability and health tests, focused STT/readiness
-  Vitest suites, the tldw API client ownership guard, Bandit on the touched
-  backend endpoint, and `git diff --check`.
-- `./node_modules/.bin/tsc --noEmit --pretty false` still fails on the existing
-  package-wide frontend baseline; after fixing the new `response_schema` source
-  label, the focused Stage 5 suites pass and the remaining reported failures
-  are inherited package-wide test/source type debt outside the capability
-  endpoint path.
+**Status:** Gated
 
 ### Potential Files
 
-Modified or added:
+Modify or add only after the gate:
 
 - `tldw_Server_API/app/api/v1/endpoints/audio.py` or the current audio endpoint owner.
 - `tldw_Server_API/app/api/v1/schemas/audio.py` or the current audio schema owner.
@@ -696,12 +617,12 @@ Candidate response:
 
 ### Gate Checklist
 
-- [x] Document the Phase 2A gap.
-- [x] Confirm existing backend owner for audio schemas and endpoints.
-- [x] Confirm AuthNZ dependency and rate-limit behavior by matching current audio endpoint patterns.
-- [x] Confirm response does not require downloading or warming models just to inspect metadata.
-- [x] Add API tests before implementation.
-- [x] Run backend tests and Bandit on touched backend scope.
+- [ ] Document the Phase 2A gap.
+- [ ] Confirm existing backend owner for audio schemas and endpoints.
+- [ ] Confirm AuthNZ dependency and rate-limit behavior by matching current audio endpoint patterns.
+- [ ] Confirm response does not require downloading or warming models just to inspect metadata.
+- [ ] Add API tests before implementation.
+- [ ] Run backend tests and Bandit on touched backend scope.
 
 ## Stage 6: Phase 4 Preset Ownership Decision
 
@@ -716,7 +637,7 @@ Candidate response:
 
 **Tests:** Documentation review plus any architecture tests defined by the decision document.
 
-**Status:** Complete via `TASK-434`
+**Status:** Gated
 
 ### Decision Document
 
@@ -740,9 +661,7 @@ Minimum contents:
 
 ### Preset CRUD Candidate Shape
 
-The decision document is accepted. Implement CRUD using
-`Docs/Design/Audio_Presets_Ownership_2026_05.md` as the Stage 7 source of
-truth.
+Do not implement until the decision document is accepted.
 
 Candidate endpoints:
 
@@ -774,33 +693,6 @@ export type AudioPreset = {
 }
 ```
 
-### Stage 6 Decision Notes
-
-- Presets are per-user server state owned by the Audio API.
-- Presets live in the user's Media DB v2 database, in a new `audio_presets`
-  table, not in TTS history, STT transcript rows, generated artifacts,
-  comparison history, ChaChaNotes, or browser-local extension state.
-- Endpoint ownership follows the current audio subpackage shape:
-  `tldw_Server_API/app/api/v1/endpoints/audio/audio_presets.py`, mounted by
-  `tldw_Server_API/app/api/v1/endpoints/audio/audio.py`.
-- AuthNZ resolves the owner from `get_request_user` in both single-user and
-  multi-user modes; clients never submit an owner id.
-- Browser TTS remains a no-setup escape hatch. If persisted at all, it must be
-  marked non-portable and revalidated against the current browser.
-- WebUI and extension must use the same server API and shared `apps/packages/ui`
-  hooks/components for preset list/apply/validate flows.
-
-### Stage 6 Verification Notes
-
-- Added `Docs/Design/Audio_Presets_Ownership_2026_05.md`.
-- Reviewed current audio route ownership, TTS history endpoint ownership,
-  Media DB `tts_history` persistence, and the Stage 5 STT capability summary
-  contract before making the decision.
-- Verification is docs-focused: required-topic scan passed and `git diff
-  --check` passed.
-- Bandit is skipped for this stage because the slice changes documentation and
-  Backlog/plan records only.
-
 ## Stage 7: Preset CRUD And Reuse UX
 
 **Goal:** Add server-side per-user TTS/STT presets after Stage 5 is complete.
@@ -820,15 +712,15 @@ export type AudioPreset = {
 - Extension route parity tests for applying a saved STT preset.
 - Bandit on touched backend scope.
 
-**Status:** Complete via `TASK-435`
+**Status:** Gated
 
 ### Potential Files
 
-Backend, exact owner confirmed by Stage 6:
+Backend, exact owner to be confirmed in Stage 5:
 
-- `tldw_Server_API/app/api/v1/endpoints/audio/audio_presets.py`
+- `tldw_Server_API/app/api/v1/endpoints/audio_presets.py`
 - `tldw_Server_API/app/api/v1/schemas/audio_presets.py`
-- `tldw_Server_API/app/core/DB_Management/media_db/runtime/audio_preset_ops.py`
+- `tldw_Server_API/app/core/DB_Management/*`
 - `tldw_Server_API/tests/audio/test_audio_presets.py`
 
 Frontend:
@@ -843,26 +735,14 @@ Frontend:
 
 ### Implementation Steps
 
-- [x] Write backend CRUD and AuthNZ tests first.
-- [x] Implement storage migration and API endpoints using the decision document.
-- [x] Add frontend API client methods.
-- [x] Add `useAudioPresets` with query invalidation and validation behavior.
-- [x] Add preset picker/save/apply controls to TTS and STT pages.
-- [x] Add preset validation warnings for unavailable providers/models.
-- [x] Add extension route parity verification for `#/stt` and `#/tts`; shared page tests cover preset apply behavior on both WebUI and extension surfaces.
-- [x] Run backend, frontend, extension, and Bandit verification.
-
-### Stage 7 Verification Notes
-
-- Backend red/green coverage added in `tldw_Server_API/tests/Audio/test_audio_presets_endpoint.py` for CRUD, user scoping, default replacement, soft delete, Browser TTS revalidation warnings, kind validation, and secret-key rejection.
-- Added per-user Media DB v2 storage in `audio_presets` with SQLite and PostgreSQL schema bootstrap, plus authenticated `/api/v1/audio/presets` CRUD and validate endpoints mounted under the existing Audio router.
-- Added shared UI types, client methods, `useAudioPresets`, and `AudioPresetControls` with accessible icon buttons for save/apply/duplicate/rename/favorite/default/delete flows.
-- TTS and STT shared pages now expose preset controls without auto-running generation or transcription. TTS apply persists provider/model/voice/format/speed/splitting settings; STT apply updates selected models and local comparison settings.
-- Verified backend with `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Audio/test_audio_presets_endpoint.py -v`: 4 passed, 5 warnings.
-- Verified frontend preset flow with `./node_modules/.bin/vitest run src/hooks/__tests__/useAudioPresets.test.tsx src/components/Option/Audio/__tests__/AudioPresetControls.test.tsx src/components/Option/STT/__tests__/SttPlaygroundPage.test.tsx src/components/Option/STT/__tests__/ComparisonPanel.test.tsx src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx src/services/__tests__/tldw-api-client.ownership-guard.test.ts`: 6 files, 34 tests passed.
-- Verified extension route parity with `./node_modules/.bin/vitest run extension/__tests__/audio-route-parity.guard.test.ts`: 2 tests passed.
-- Bandit on touched backend preset files wrote `/tmp/bandit_audio_presets.json` with `results: []`; one `nosec` skip remains on the runtime update helper's constant-column dynamic SET clause.
-- `./node_modules/.bin/tsc --noEmit --pretty false` still fails on existing package-wide TypeScript debt outside the touched preset implementation files; touched page/component/hook tests compile through Vitest.
+- [ ] Write backend CRUD and AuthNZ tests first.
+- [ ] Implement storage migration and API endpoints using the decision document.
+- [ ] Add frontend API client methods.
+- [ ] Add `useAudioPresets` with query invalidation and validation behavior.
+- [ ] Add preset picker/save/apply controls to TTS and STT pages.
+- [ ] Add preset validation warnings for unavailable providers/models.
+- [ ] Add extension tests proving saved STT presets apply in `#/stt`.
+- [ ] Run backend, frontend, extension, and Bandit verification.
 
 ## Stage 8: Browser QA And Accessibility Verification
 
@@ -882,44 +762,19 @@ Frontend:
 - `cd apps/tldw-frontend && bunx playwright test e2e/workflows/tier-2-features/stt-transcription.spec.ts --reporter=line`
 - `cd apps/tldw-frontend && bunx playwright test e2e/workflows/tier-2-features/tts-synthesis.spec.ts --reporter=line`
 
-**Status:** Complete via `TASK-436`
+**Status:** Not Started
 
-### Stage 8 Browser QA Notes
+### Manual Browser Checklist
 
-- Started the local backend and WebUI, then exercised `/settings/tldw`, `/tts`, and `/stt` in the in-app browser.
-- Found and fixed the audio preset privilege catalog gap that prevented backend startup with the new preset routes.
-- Found and fixed WebUI connection-state drift where `tldwConfig` and the legacy `tldw-api-host` bootstrap key could disagree and route audio requests back to the WebUI origin.
-- Found and fixed the request guard blocking absolute OpenAPI discovery URLs when the URL matched the configured server origin.
-- Found and fixed WebUI audio preset requests using storage-only background proxy state instead of the active client config.
-- Verified `/tts` readiness with `Browser preview: Ready` and `tldw: Ready`, then saved a TTS preset and observed the selected `QA TTS balanced direct` preset with `Preset saved`.
-- Verified `/stt` readiness with `STT models: Ready. 37 listed, 33 on demand, 4 unavailable Source: model health.`, then saved a default STT preset and observed `Preset saved`.
-- Final `/tts` and `/stt` refresh smoke had no fresh console warnings and no backend unreachable dialog.
-- Extension live browser surface was not loaded in this pass; route parity was covered by `option-audio-route-identity.test.tsx` and `extension/__tests__/audio-route-parity.guard.test.ts`.
-- Actual TTS synthesis and STT transcription outputs were not generated in this pass because no source audio was provided and the blocking issues were connection/readiness/preset workflow issues.
-
-### Browser QA Coverage And Validation Gaps
-
-Verified in the running WebUI:
-
-- [x] `/tts` first visit: page title, no-setup Browser preview label, provider readiness, text input, add row, generate path entry points, and preset save.
-- [x] `/stt` first visit: page title, upload/record prompt, model readiness, settings discoverability, and preset save.
-- [x] Final `/tts` and `/stt` refresh smoke: no fresh console warnings and no backend unreachable dialog.
-- [x] Keyboard/accessibility spot check: reachable named controls appeared in DOM snapshots; full keyboard-only traversal remains a broader pass.
-
-Verified by automated route/component tests:
-
-- [x] `/tts` provider/config provenance and repeat controls.
-- [x] `/stt` comparison provenance and repeat controls.
-- [x] `/stt` microphone-denial recovery copy and retry controls.
-- [x] Extension `#/tts`: locked TTS surface route parity.
-- [x] Extension `#/stt`: dedicated STT comparison surface route parity.
-
-Recorded validation gaps:
-
-- Actual TTS audio synthesis output was not generated in the Stage 8 browser pass.
-- Actual STT transcription output was not generated in the Stage 8 browser pass because no source audio was provided.
-- Live extension browser surfaces were not loaded in the Stage 8 pass; extension parity is covered by route/component tests.
-- Full keyboard-only traversal remains broader than the Stage 8 spot check.
+- [ ] `/tts` first visit: page title, no-setup Browser preview label, provider readiness, text input, add row, generate path.
+- [ ] `/tts` provider switch: model/voice do not remain from another provider.
+- [ ] `/tts` result: config metadata, client latency label, retry/duplicate/disable controls.
+- [ ] `/stt` first visit: page title, upload/record prompt, model readiness, settings discoverability.
+- [ ] `/stt` model comparison: three models or mocked models show distinct config/result provenance.
+- [ ] `/stt` microphone denial: recovery text and retry are visible.
+- [ ] Extension `#/tts`: locked TTS surface fits extension viewport.
+- [ ] Extension `#/stt`: dedicated STT comparison surface fits extension viewport.
+- [ ] Keyboard only: controls and result actions are reachable in logical order.
 
 ## Verification Matrix
 
@@ -976,11 +831,11 @@ git diff --check
 
 ## Definition Of Done For Implementation Program
 
-- [x] Slice 1 route parity and TTS config truthfulness shipped with tests.
-- [x] Slice 2A readiness shipped with current APIs and explicit unknown states.
-- [x] Slice 3 comparison provenance shipped with privacy-safe metadata.
-- [x] Phase 2B either shipped with backend tests or explicitly closed as unnecessary after Phase 2A.
-- [x] Phase 4 preset ownership decision completed before CRUD work.
-- [x] Preset CRUD shipped only after storage/AuthNZ/migration ownership is approved.
-- [x] Browser-observed QA completed for WebUI `/tts` and `/stt`; extension `#/tts` and `#/stt` route parity covered by automated tests, with the live-extension validation gap recorded above.
-- [x] Intended TTS/STT review slice excludes unrelated WebUI, backend, media ingestion, RAG, chat, and app-wide redesign changes; `TASK-438` records the final clean-branch isolation step because the original local worktree was stacked on inherited commits.
+- [ ] Slice 1 route parity and TTS config truthfulness shipped with tests.
+- [ ] Slice 2A readiness shipped with current APIs and explicit unknown states.
+- [ ] Slice 3 comparison provenance shipped with privacy-safe metadata.
+- [ ] Phase 2B either shipped with backend tests or explicitly closed as unnecessary after Phase 2A.
+- [ ] Phase 4 preset ownership decision completed before CRUD work.
+- [ ] Preset CRUD shipped only after storage/AuthNZ/migration ownership is approved.
+- [ ] Browser-observed QA completed for WebUI `/tts`, WebUI `/stt`, extension `#/tts`, and extension `#/stt`.
+- [ ] No unrelated WebUI, backend, media ingestion, RAG, chat, or app-wide redesign changes included.

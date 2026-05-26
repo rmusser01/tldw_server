@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildQuickIngestOpenDetailFromUrl,
   createQuickIngestSessionSeedFromOpenDetail,
+  isQuickIngestPlaylistPreflightDetail,
   requestQuickIngestOpen,
 } from "../quick-ingest-open"
 
@@ -18,10 +19,14 @@ describe("quick ingest open handoff", () => {
       action: "playlist_preflight",
     })
 
+    const playlistDetail = buildQuickIngestOpenDetailFromUrl(
+      "https://www.youtube.com/playlist?list=PL0065D9B288E6804B"
+    )
+    expect(isQuickIngestPlaylistPreflightDetail(playlistDetail)).toBe(true)
     expect(
-      buildQuickIngestOpenDetailFromUrl(
-        "https://www.youtube.com/playlist?list=PL0065D9B288E6804B"
-      )?.sourceKind
+      isQuickIngestPlaylistPreflightDetail(playlistDetail)
+        ? playlistDetail.sourceKind
+        : null
     ).toBe("youtube_playlist")
     expect(
       buildQuickIngestOpenDetailFromUrl("https://www.youtube.com/watch?v=abc123")

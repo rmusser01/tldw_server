@@ -2612,8 +2612,8 @@
   "moderationPlayground_subtitle": {
     "message": "Familiensicherheit und Schutzmechanismen des Servers an einem Ort."
   },
-  "header_workspacePlayground": {
-    "message": "Model Playground"
+  "header_researchWorkspace": {
+    "message": "Research Workspace"
   },
   "omniSearch_searchError": {
     "message": "Die Suche ist fehlgeschlagen. Bitte versuchen Sie es erneut."
@@ -2667,7 +2667,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Workspace Playground"
+    "message": "Model Playground"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"

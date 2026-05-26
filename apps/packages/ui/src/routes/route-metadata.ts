@@ -1,4 +1,4 @@
-import { normalizeRoutePath } from "./route-path-normalization"
+import { HOSTED_VISIBLE_OPTION_PATHS } from "./route-hosted-visibility"
 
 export type RouteSurface =
   | "default_self_hosted"
@@ -25,1794 +25,988 @@ export type RouteGroup =
   | "safety"
   | "specialized"
   | "documentation"
-  | "marketing"
   | "account"
+  | "extension"
 
 export type RouteAvailability =
   | "web"
   | "extension_options"
   | "extension_sidepanel"
 
-export type HostedOptionVisibility = "visible"
+export type RouteSmokePolicy = "include" | "exclude" | "manual"
+
+export type RouteNavPolicy = "primary" | "secondary" | "hidden"
+export type HostedOptionVisibility = "visible" | "hidden"
 
 export type RouteMetadata = {
   path: string
   canonicalPath: string
   label: string
-  commandLabel?: string
   group: RouteGroup
   surface: RouteSurface
   availability: RouteAvailability[]
   aliases?: string[]
   redirectsTo?: string
-  smoke: "include" | "exclude" | "manual"
+  smoke: RouteSmokePolicy
   commandPalette: "show" | "hide" | "alias_only"
-  hostedOptionVisibility?: HostedOptionVisibility
-  nav: "primary" | "secondary" | "hidden"
+  nav: RouteNavPolicy
+  hostedOptionVisibility: HostedOptionVisibility
   requiresAuth?: boolean
   requiresBackend?: boolean
-  requiresH1?: boolean
-  h1ExceptionReason?: string
   rationale: string
 }
 
-export type RouteHeadingPolicy = {
-  requiresH1: boolean
-  exceptionReason?: string
-}
+type RouteMetadataInput = Omit<
+  RouteMetadata,
+  | "canonicalPath"
+  | "availability"
+  | "smoke"
+  | "commandPalette"
+  | "nav"
+  | "hostedOptionVisibility"
+> &
+  Partial<
+    Pick<RouteMetadata, "canonicalPath" | "smoke" | "commandPalette" | "nav">
+  > & {
+    availability?: readonly RouteAvailability[]
+  }
 
-const webAndExtensionOptions: RouteAvailability[] = ["web", "extension_options"]
-const webOnly: RouteAvailability[] = ["web"]
+const web = ["web"] as const
+const webAndExtension = ["web", "extension_options"] as const
+const sidepanel = ["extension_sidepanel"] as const
 
-const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
-  {
+const defineRoute = ({
+  canonicalPath,
+  availability = web,
+  smoke = "include",
+  commandPalette = "hide",
+  nav = "hidden",
+  ...metadata
+}: RouteMetadataInput): RouteMetadata => ({
+  ...metadata,
+  canonicalPath: canonicalPath ?? metadata.path,
+  availability: [...availability],
+  smoke,
+  commandPalette,
+  nav,
+  hostedOptionVisibility: HOSTED_VISIBLE_OPTION_PATHS.has(metadata.path)
+    ? "visible"
+    : "hidden"
+})
+
+export const AUDITED_ROOT_ROUTE_PATHS = [
+  "/",
+  "/setup",
+  "/login",
+  "/signup",
+  "/account",
+  "/profile",
+  "/privileges",
+  "/config",
+  "/billing",
+  "/404",
+  "/chat",
+  "/quick-chat-popout",
+  "/persona",
+  "/characters",
+  "/companion",
+  "/agents",
+  "/agent-tasks",
+  "/chat-workflows",
+  "/chat-workspace",
+  "/knowledge",
+  "/search",
+  "/research",
+  "/research-workspace",
+  "/document-workspace",
+  "/repo2txt",
+  "/model-playground",
+  "/writing-playground",
+  "/presentation-studio",
+  "/audiobook-studio",
+  "/media",
+  "/media-multi",
+  "/review",
+  "/media-trash",
+  "/items",
+  "/collections",
+  "/reading",
+  "/notes",
+  "/shared",
+  "/chatbooks",
+  "/chatbooks-playground",
+  "/sources",
+  "/connectors",
+  "/integrations",
+  "/scheduled-tasks",
+  "/watchlists",
+  "/workflow-editor",
+  "/settings",
+  "/admin",
+  "/mcp-hub",
+  "/acp-playground",
+  "/prompts",
+  "/prompt-studio",
+  "/dictionaries",
+  "/world-books",
+  "/speech",
+  "/stt",
+  "/tts",
+  "/audio",
+  "/evaluations",
+  "/flashcards",
+  "/quiz",
+  "/moderation-playground",
+  "/content-review",
+  "/claims-review",
+  "/data-tables",
+  "/chunking-playground",
+  "/kanban",
+  "/skills",
+  "/vn-assets",
+  "/vn-play",
+  "/documentation",
+  "/notifications",
+  "/composer-variants-preview",
+  "/onboarding-test"
+] as const
+
+export const ROUTE_METADATA = [
+  defineRoute({
     path: "/",
-    canonicalPath: "/",
     label: "Home",
     group: "start",
     surface: "default_self_hosted",
-    availability: [...webAndExtensionOptions, "extension_sidepanel"],
-    smoke: "include",
-    commandPalette: "show",
-    hostedOptionVisibility: "visible",
+    availability: ["web", "extension_options", "extension_sidepanel"],
+    commandPalette: "hide",
     nav: "primary",
-    requiresBackend: true,
-    rationale: "Default entry route for self-hosted WebUI and extension shells."
-  },
-  {
+    requiresBackend: false,
+    rationale: "Entry resolver for setup, home, or the extension sidepanel home state."
+  }),
+  defineRoute({
     path: "/setup",
-    canonicalPath: "/setup",
     label: "Setup",
     group: "start",
     surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Initial configuration route is stateful and only relevant before setup completes."
-  },
-  {
+    availability: webAndExtension,
+    nav: "secondary",
+    requiresBackend: false,
+    rationale: "Connection and first-run setup route."
+  }),
+  defineRoute({
     path: "/login",
-    canonicalPath: "/login",
     label: "Login",
     group: "account",
-    surface: "default_self_hosted",
-    availability: webOnly,
+    surface: "hosted_only",
     smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Authentication entry point appears only when auth mode requires it."
-  },
-  {
+    requiresBackend: true,
+    rationale: "Hosted or multi-user authentication entry point."
+  }),
+  defineRoute({
     path: "/signup",
-    canonicalPath: "/signup",
     label: "Sign Up",
     group: "account",
     surface: "hosted_only",
-    availability: webOnly,
     smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Account creation is deployment-mode dependent and should not be default self-hosted navigation."
-  },
-  {
+    requiresBackend: true,
+    rationale: "Hosted account creation entry point."
+  }),
+  defineRoute({
     path: "/account",
-    canonicalPath: "/account",
     label: "Account",
     group: "account",
     surface: "hosted_only",
-    availability: webOnly,
     smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
     requiresAuth: true,
-    rationale: "Account management is user-authenticated and primarily hosted-facing."
-  },
-  {
+    rationale: "Hosted account management route."
+  }),
+  defineRoute({
     path: "/profile",
-    canonicalPath: "/profile",
     label: "Profile",
     group: "account",
-    surface: "advanced_self_hosted",
-    availability: webOnly,
+    surface: "hosted_only",
     smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
     requiresAuth: true,
-    rationale: "Profile state depends on authentication and is not a primary self-hosted workflow."
-  },
-  {
+    rationale: "User profile and account identity route."
+  }),
+  defineRoute({
     path: "/privileges",
-    canonicalPath: "/privileges",
     label: "Privileges",
     group: "account",
     surface: "advanced_self_hosted",
-    availability: webOnly,
     smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    requiresAuth: true,
-    rationale: "Privilege review is account-scoped and should stay outside default navigation."
-  },
-  {
-    path: "/config",
-    canonicalPath: "/config",
-    label: "Configuration",
-    group: "settings",
-    surface: "admin_operator",
-    availability: webOnly,
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
     requiresBackend: true,
-    rationale: "Configuration state is operator-facing and overlaps with settings/admin surfaces."
-  },
-  {
+    rationale: "Privilege inspection route for deployments with authorization features."
+  }),
+  defineRoute({
+    path: "/config",
+    label: "Config",
+    group: "settings",
+    surface: "advanced_self_hosted",
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "Deployment configuration route surfaced outside the main settings area."
+  }),
+  defineRoute({
     path: "/billing",
-    canonicalPath: "/billing",
     label: "Billing",
     group: "account",
     surface: "hosted_only",
-    availability: webOnly,
     smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
     requiresAuth: true,
-    rationale: "Billing is hosted/account-specific and not part of default self-hosted IA."
-  },
-  {
+    rationale: "Hosted billing entry point."
+  }),
+  defineRoute({
     path: "/404",
-    canonicalPath: "/404",
     label: "Not Found",
     group: "start",
     surface: "default_self_hosted",
-    availability: webOnly,
-    smoke: "include",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Error-state route is useful for coverage but should not be user navigation."
-  },
-  {
+    smoke: "manual",
+    rationale: "Recovery route for unknown paths."
+  }),
+  defineRoute({
     path: "/chat",
-    canonicalPath: "/chat",
     label: "Chat",
     group: "chat",
     surface: "default_self_hosted",
-    availability: [...webAndExtensionOptions, "extension_sidepanel"],
-    smoke: "include",
+    availability: ["web", "extension_options", "extension_sidepanel"],
     commandPalette: "show",
-    hostedOptionVisibility: "visible",
     nav: "primary",
     requiresBackend: true,
-    rationale: "Primary assistant conversation route across WebUI and extension sidepanel."
-  },
-  {
+    rationale: "Primary conversation route."
+  }),
+  defineRoute({
     path: "/quick-chat-popout",
-    canonicalPath: "/quick-chat-popout",
     label: "Quick Chat Popout",
     group: "chat",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Detached chat surface is a secondary convenience entry rather than primary IA."
-  },
-  {
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Focused popout route for quick chat."
+  }),
+  defineRoute({
     path: "/persona",
-    canonicalPath: "/persona",
     label: "Persona",
     group: "chat",
-    surface: "advanced_self_hosted",
-    availability: [...webAndExtensionOptions, "extension_sidepanel"],
-    smoke: "include",
-    commandPalette: "show",
+    surface: "default_self_hosted",
+    availability: ["web", "extension_options", "extension_sidepanel"],
     nav: "secondary",
     requiresBackend: true,
-    rationale: "Persona chat is a real route but secondary to the core chat path."
-  },
-  {
+    rationale: "Persona chat and extension persona sidepanel route."
+  }),
+  defineRoute({
     path: "/characters",
-    canonicalPath: "/characters",
     label: "Characters",
-    group: "knowledge",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
+    group: "chat",
+    surface: "default_self_hosted",
+    availability: webAndExtension,
     nav: "secondary",
     requiresBackend: true,
-    rationale: "Character library is a knowledge asset manager used by chat workflows."
-  },
-  {
+    rationale: "Character library and role-play setup route."
+  }),
+  defineRoute({
     path: "/companion",
-    canonicalPath: "/companion",
     label: "Companion",
     group: "chat",
-    surface: "labs_beta",
-    availability: [...webAndExtensionOptions, "extension_sidepanel"],
-    smoke: "manual",
-    commandPalette: "show",
+    surface: "default_self_hosted",
+    availability: ["web", "extension_options", "extension_sidepanel"],
     nav: "secondary",
-    rationale: "Companion is discoverable but still a specialized persona surface."
-  },
-  {
+    requiresBackend: true,
+    rationale: "Companion route shared by WebUI and sidepanel."
+  }),
+  defineRoute({
     path: "/agents",
-    canonicalPath: "/agents",
     label: "Agents",
     group: "chat",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "manual",
-    commandPalette: "show",
-    nav: "secondary",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "Agent management is an advanced assistant workflow."
-  },
-  {
+    rationale: "Agent registry and orchestration entry point."
+  }),
+  defineRoute({
     path: "/agent-tasks",
-    canonicalPath: "/agent-tasks",
     label: "Agent Tasks",
     group: "chat",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "manual",
-    commandPalette: "show",
-    nav: "secondary",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "Agent task tracking is useful after agent workflows are configured."
-  },
-  {
+    rationale: "Agent task status and unsupported-state route."
+  }),
+  defineRoute({
     path: "/chat-workflows",
-    canonicalPath: "/chat-workflows",
     label: "Chat Workflows",
     group: "chat",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "Chat workflow authoring is adjacent to chat but more advanced than daily chat."
-  },
-  {
+    rationale: "Workflow list entry point from chat-related routes."
+  }),
+  defineRoute({
     path: "/chat-workspace",
-    canonicalPath: "/chat-workspace",
     label: "Chat Workspace",
-    group: "chat",
+    group: "workspace",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    hostedOptionVisibility: "visible",
+    availability: webAndExtension,
     nav: "secondary",
     requiresBackend: true,
-    rationale: "Workspace-style chat is available for users who need denser working context."
-  },
-  {
+    rationale: "Workspace-focused chat route with runtime and approvals."
+  }),
+  defineRoute({
     path: "/knowledge",
-    canonicalPath: "/knowledge",
-    label: "Knowledge",
+    label: "Knowledge QA",
     group: "knowledge",
     surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
+    availability: webAndExtension,
     commandPalette: "show",
-    hostedOptionVisibility: "visible",
     nav: "primary",
     requiresBackend: true,
-    rationale: "Primary knowledge and RAG route for self-hosted users."
-  },
-  {
+    rationale: "Ask questions over selected knowledge sources."
+  }),
+  defineRoute({
     path: "/search",
-    canonicalPath: "/search",
+    canonicalPath: "/knowledge",
     label: "Search",
     group: "knowledge",
-    surface: "default_self_hosted",
-    availability: webOnly,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "primary",
-    requiresBackend: true,
-    rationale: "Top-level search is a primary retrieval workflow for existing content."
-  },
-  {
-    path: "/research",
-    canonicalPath: "/research",
-    label: "Research",
-    group: "knowledge",
-    surface: "advanced_self_hosted",
-    availability: webOnly,
-    smoke: "manual",
-    commandPalette: "show",
-    nav: "secondary",
-    requiresBackend: true,
-    rationale: "Research runs are backend-stateful and should be discoverable after setup."
-  },
-  {
-    path: "/workspace-playground",
-    canonicalPath: "/workspace-playground",
-    label: "Workspace Playground",
-    group: "workspace",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
-    requiresBackend: true,
-    rationale: "Workspace playground is a power-user composition surface."
-  },
-  {
-    path: "/document-workspace",
-    canonicalPath: "/document-workspace",
-    label: "Document Workspace",
-    group: "workspace",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
-    requiresBackend: true,
-    rationale: "Document workspace supports document-heavy workflows outside the main library."
-  },
-  {
-    path: "/repo2txt",
-    canonicalPath: "/repo2txt",
-    label: "Repo2Txt",
-    group: "workspace",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
-    rationale: "Repository conversion is a specialized utility for technical users."
-  },
-  {
-    path: "/model-playground",
-    canonicalPath: "/model-playground",
-    label: "Model Playground",
-    group: "workspace",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
-    requiresBackend: true,
-    rationale: "Model experimentation is an advanced workflow that depends on configured providers."
-  },
-  {
-    path: "/writing-playground",
-    canonicalPath: "/writing-playground",
-    label: "Writing Playground",
-    group: "workspace",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "manual",
-    commandPalette: "show",
-    nav: "secondary",
-    requiresBackend: true,
-    rationale: "Writing tools are useful but have broader setup and state dependencies."
-  },
-  {
-    path: "/presentation-studio",
-    canonicalPath: "/presentation-studio",
-    label: "Presentation Studio",
-    group: "workspace",
-    surface: "labs_beta",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
-    rationale: "Presentation creation is a labs workflow with dedicated project state."
-  },
-  {
-    path: "/audiobook-studio",
-    canonicalPath: "/audiobook-studio",
-    label: "Audiobook Studio",
-    group: "audio",
-    surface: "labs_beta",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
-    requiresBackend: true,
-    rationale: "Audiobook generation is an audio-specific studio workflow."
-  },
-  {
-    path: "/media",
-    canonicalPath: "/media",
-    label: "Media Library",
-    commandLabel: "Go to Media",
-    group: "media_library",
-    surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    hostedOptionVisibility: "visible",
-    nav: "primary",
-    requiresBackend: true,
-    rationale: "Primary route for ingested media review and management."
-  },
-  {
-    path: "/media-multi",
-    canonicalPath: "/media-multi",
-    label: "Media Multi",
-    group: "media_library",
-    surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
-    requiresBackend: true,
-    rationale: "Dense media workflow for batch review and multi-item operations."
-  },
-  {
-    path: "/review",
-    canonicalPath: "/media-multi",
-    label: "Review",
-    group: "media_library",
-    surface: "redirect",
-    availability: webAndExtensionOptions,
-    redirectsTo: "/media-multi",
-    smoke: "exclude",
+    surface: "legacy_alias",
+    aliases: ["/knowledge"],
     commandPalette: "alias_only",
     nav: "hidden",
     requiresBackend: true,
-    rationale: "Legacy review route redirects to the current media multi workflow."
-  },
-  {
+    rationale: "Legacy search-facing entry to the Knowledge QA surface."
+  }),
+  defineRoute({
+    path: "/research",
+    label: "Research",
+    group: "knowledge",
+    surface: "advanced_self_hosted",
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "Research run route discovered outside the original smoke inventory."
+  }),
+  defineRoute({
+    path: "/research-workspace",
+    label: "Research Workspace",
+    group: "workspace",
+    surface: "labs_beta",
+    availability: webAndExtension,
+    smoke: "manual",
+    nav: "secondary",
+    requiresBackend: true,
+    rationale: "Research workspace and source orchestration route."
+  }),
+  defineRoute({
+    path: "/document-workspace",
+    label: "Document Workspace",
+    group: "workspace",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Document-centered workspace route."
+  }),
+  defineRoute({
+    path: "/repo2txt",
+    label: "Repo2Txt",
+    group: "workspace",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Repository text export route."
+  }),
+  defineRoute({
+    path: "/model-playground",
+    label: "Model Playground",
+    group: "workspace",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Model testing and comparison route."
+  }),
+  defineRoute({
+    path: "/writing-playground",
+    label: "Writing Playground",
+    group: "workspace",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "Writing-focused playground route with known full-suite smoke instability."
+  }),
+  defineRoute({
+    path: "/presentation-studio",
+    label: "Presentation Studio",
+    group: "workspace",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Presentation creation and editing route."
+  }),
+  defineRoute({
+    path: "/audiobook-studio",
+    label: "Audiobook Studio",
+    group: "audio",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Long-form audio production route tied to TTS readiness."
+  }),
+  defineRoute({
+    path: "/media",
+    label: "Media",
+    group: "media_library",
+    surface: "default_self_hosted",
+    availability: webAndExtension,
+    commandPalette: "show",
+    nav: "primary",
+    requiresBackend: true,
+    rationale: "Primary library browsing and media inspection route."
+  }),
+  defineRoute({
+    path: "/media-multi",
+    label: "Media Multi Select",
+    group: "media_library",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Bulk media selection and review route."
+  }),
+  defineRoute({
+    path: "/review",
+    label: "Review",
+    group: "media_library",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Media review route and queue-style workflow entry point."
+  }),
+  defineRoute({
     path: "/media-trash",
-    canonicalPath: "/media-trash",
     label: "Media Trash",
     group: "media_library",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "Recovery route for deleted media and library cleanup."
-  },
-  {
+    rationale: "Deleted media recovery and cleanup route."
+  }),
+  defineRoute({
     path: "/items",
-    canonicalPath: "/items",
     label: "Items",
     group: "media_library",
     surface: "advanced_self_hosted",
-    availability: webOnly,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
     requiresBackend: true,
-    rationale: "Item-level content management is a secondary library workflow."
-  },
-  {
+    rationale: "Item workspace route for library objects."
+  }),
+  defineRoute({
     path: "/collections",
-    canonicalPath: "/collections",
     label: "Collections",
     group: "media_library",
     surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    hostedOptionVisibility: "visible",
+    availability: webAndExtension,
     nav: "secondary",
     requiresBackend: true,
-    rationale: "Collection organization is a common media-library workflow."
-  },
-  {
+    rationale: "Collection organization route."
+  }),
+  defineRoute({
     path: "/reading",
-    canonicalPath: "/reading",
     label: "Reading",
     group: "media_library",
     surface: "default_self_hosted",
-    availability: webOnly,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "primary",
     requiresBackend: true,
-    rationale: "Reading route supports document and article review for knowledge workflows."
-  },
-  {
+    rationale: "Reading-list and reading workspace route."
+  }),
+  defineRoute({
     path: "/notes",
-    canonicalPath: "/notes",
     label: "Notes",
-    group: "knowledge",
+    group: "media_library",
     surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
+    availability: webAndExtension,
     commandPalette: "show",
     nav: "primary",
     requiresBackend: true,
-    requiresH1: false,
-    h1ExceptionReason:
-      "Notes can render user-authored document headings, including h1, inside the editor and preview surface.",
-    rationale: "Notes are a primary knowledge capture surface."
-  },
-  {
+    rationale: "Notes workspace route."
+  }),
+  defineRoute({
     path: "/shared",
-    canonicalPath: "/shared",
     label: "Shared",
-    group: "knowledge",
+    group: "media_library",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "Shared content depends on share state and should not lead default navigation."
-  },
-  {
+    rationale: "Shared content and workspaces route."
+  }),
+  defineRoute({
     path: "/chatbooks",
-    canonicalPath: "/chatbooks",
     label: "Chatbooks",
-    group: "workspace",
+    group: "media_library",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
+    availability: webAndExtension,
     smoke: "manual",
-    commandPalette: "show",
+    requiresBackend: true,
+    rationale: "Chatbook management entry route with known full-suite smoke instability."
+  }),
+  defineRoute({
+    path: "/chatbooks-playground",
+    label: "Chatbooks Playground",
+    group: "media_library",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Chatbook authoring and testing workspace."
+  }),
+  defineRoute({
+    path: "/sources",
+    label: "Sources",
+    group: "operations",
+    surface: "default_self_hosted",
+    availability: webAndExtension,
     nav: "secondary",
     requiresBackend: true,
-    rationale: "Chatbook import/export is a power-user workflow with larger state dependencies."
-  },
-  {
-    path: "/chatbooks-playground",
-    canonicalPath: "/chatbooks-playground",
-    label: "Chatbooks Playground",
-    group: "workspace",
-    surface: "labs_beta",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale: "Experimental chatbook surface should be testable without primary IA prominence."
-  },
-  {
-    path: "/sources",
-    canonicalPath: "/sources",
-    label: "Sources",
-    group: "knowledge",
-    surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "primary",
-    requiresBackend: true,
-    rationale: "Source management is a primary path into ingestion and knowledge setup."
-  },
-  {
+    rationale: "Source management route called out by the audit for capability-state remediation."
+  }),
+  defineRoute({
     path: "/connectors",
-    canonicalPath: "/connectors",
     label: "Connectors",
     group: "operations",
-    surface: "labs_beta",
-    availability: webOnly,
-    smoke: "manual",
-    commandPalette: "show",
-    nav: "secondary",
+    surface: "advanced_self_hosted",
     requiresBackend: true,
-    rationale: "Connector routes are planned/operator workflows with placeholder coverage."
-  },
-  {
+    rationale: "Connector hub route."
+  }),
+  defineRoute({
     path: "/integrations",
-    canonicalPath: "/integrations",
     label: "Integrations",
     group: "operations",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
+    availability: webAndExtension,
     nav: "secondary",
     requiresBackend: true,
-    rationale: "Integration management is an operator-adjacent configuration workflow."
-  },
-  {
+    rationale: "Integration setup and discovery route."
+  }),
+  defineRoute({
     path: "/scheduled-tasks",
-    canonicalPath: "/scheduled-tasks",
     label: "Scheduled Tasks",
     group: "operations",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
+    availability: webAndExtension,
     nav: "secondary",
     requiresBackend: true,
-    rationale: "Scheduled work is a returning-user operations workflow."
-  },
-  {
+    rationale: "Automation schedule management route."
+  }),
+  defineRoute({
     path: "/watchlists",
-    canonicalPath: "/watchlists",
     label: "Watchlists",
     group: "operations",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
+    surface: "labs_beta",
+    availability: webAndExtension,
     nav: "secondary",
     requiresBackend: true,
-    rationale: "Watchlists are a recurring automation workflow for power users."
-  },
-  {
+    rationale: "Watchlist monitoring route with beta workflow framing."
+  }),
+  defineRoute({
     path: "/workflow-editor",
-    canonicalPath: "/workflow-editor",
     label: "Workflow Editor",
     group: "operations",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "Workflow editing is an advanced orchestration surface."
-  },
-  {
+    rationale: "Workflow editing route."
+  }),
+  defineRoute({
     path: "/settings",
-    canonicalPath: "/settings",
     label: "Settings",
     group: "settings",
     surface: "default_self_hosted",
-    availability: [...webAndExtensionOptions, "extension_sidepanel"],
-    smoke: "include",
+    availability: ["web", "extension_options", "extension_sidepanel"],
     commandPalette: "show",
     nav: "primary",
-    rationale: "Primary route for user and server configuration."
-  },
-  {
-    path: "/admin",
-    canonicalPath: "/admin",
-    label: "Admin",
-    group: "operations",
-    surface: "admin_operator",
-    availability: webOnly,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
-    requiresAuth: true,
+    requiresBackend: false,
+    rationale: "General settings route and sidepanel settings target."
+  }),
+  defineRoute({
+    path: "/settings/image-generation",
+    label: "Image Generation Settings",
+    group: "settings",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "Admin hub is operator-only and should remain separate from regular user navigation."
-  },
-  {
+    rationale: "Image generation provider and model configuration route."
+  }),
+  defineRoute({
+    path: "/admin",
+    label: "Admin",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "Admin landing route for operator-only workflows."
+  }),
+  defineRoute({
+    path: "/admin/mlx",
+    label: "Admin MLX",
+    group: "settings",
+    surface: "admin_operator",
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "Admin route for local MLX model status and operator controls."
+  }),
+  defineRoute({
     path: "/mcp-hub",
-    canonicalPath: "/mcp-hub",
     label: "MCP Hub",
     group: "operations",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
+    availability: webAndExtension,
     commandPalette: "show",
     nav: "secondary",
     requiresBackend: true,
-    rationale: "MCP hub is a configured integration surface for advanced automation users."
-  },
-  {
+    rationale: "MCP setup and operations hub."
+  }),
+  defineRoute({
     path: "/acp-playground",
-    canonicalPath: "/acp-playground",
     label: "ACP Playground",
     group: "operations",
-    surface: "labs_beta",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "hidden",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "ACP testing is useful for verification but should not be default navigation."
-  },
-  {
+    rationale: "ACP testing and agent protocol playground route."
+  }),
+  defineRoute({
     path: "/prompts",
-    canonicalPath: "/prompts",
     label: "Prompts",
     group: "knowledge",
     surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
+    availability: webAndExtension,
     commandPalette: "show",
     nav: "primary",
     requiresBackend: true,
-    rationale: "Prompt library and prompt-studio tools live under the prompts workspace."
-  },
-  {
+    rationale: "Prompt library and prompt-studio home route."
+  }),
+  defineRoute({
     path: "/prompt-studio",
     canonicalPath: "/prompts",
     label: "Prompt Studio",
     group: "knowledge",
-    surface: "redirect",
-    availability: webAndExtensionOptions,
+    surface: "legacy_alias",
+    availability: webAndExtension,
+    aliases: ["/prompts?tab=studio"],
     redirectsTo: "/prompts?tab=studio",
-    smoke: "exclude",
     commandPalette: "alias_only",
     nav: "hidden",
     requiresBackend: true,
-    rationale: "Legacy prompt-studio route redirects to the prompts workspace studio tab."
-  },
-  {
+    rationale: "Legacy prompt-studio route that redirects into the Prompts surface."
+  }),
+  defineRoute({
     path: "/dictionaries",
-    canonicalPath: "/dictionaries",
     label: "Dictionaries",
     group: "knowledge",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
+    surface: "default_self_hosted",
+    availability: webAndExtension,
     nav: "secondary",
     requiresBackend: true,
-    rationale: "Dictionaries support character and prompt workflows but are not a primary start point."
-  },
-  {
+    rationale: "Chat dictionary management route."
+  }),
+  defineRoute({
     path: "/world-books",
-    canonicalPath: "/world-books",
     label: "World Books",
     group: "knowledge",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
+    surface: "default_self_hosted",
+    availability: webAndExtension,
     nav: "secondary",
     requiresBackend: true,
-    rationale: "World books are reusable context assets for advanced knowledge and persona workflows."
-  },
-  {
+    rationale: "World book and lorebook management route."
+  }),
+  defineRoute({
     path: "/speech",
-    canonicalPath: "/speech",
     label: "Speech",
     group: "audio",
     surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "primary",
+    availability: webAndExtension,
+    nav: "secondary",
     requiresBackend: true,
-    rationale: "Speech is the canonical audio workspace for STT and TTS."
-  },
-  {
+    rationale: "Speech overview route for STT/TTS readiness."
+  }),
+  defineRoute({
     path: "/stt",
-    canonicalPath: "/stt",
-    label: "Speech to Text",
+    label: "STT",
     group: "audio",
     surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    hostedOptionVisibility: "visible",
-    nav: "secondary",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "STT remains a direct task route inside the broader speech workflow."
-  },
-  {
+    rationale: "Speech-to-text workflow route."
+  }),
+  defineRoute({
     path: "/tts",
-    canonicalPath: "/tts",
-    label: "Text to Speech",
+    label: "TTS",
     group: "audio",
     surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    hostedOptionVisibility: "visible",
-    nav: "secondary",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "TTS remains a direct task route inside the broader speech workflow."
-  },
-  {
+    rationale: "Text-to-speech workflow route."
+  }),
+  defineRoute({
     path: "/audio",
     canonicalPath: "/speech",
     label: "Audio",
     group: "audio",
-    surface: "redirect",
-    availability: webOnly,
-    redirectsTo: "/speech",
-    smoke: "exclude",
+    surface: "legacy_alias",
+    aliases: ["/speech"],
     commandPalette: "alias_only",
     nav: "hidden",
     requiresBackend: true,
-    rationale: "Legacy audio route redirects to the canonical speech workspace."
-  },
-  {
+    rationale: "Legacy audio alias retained for compatibility with the speech route family."
+  }),
+  defineRoute({
     path: "/evaluations",
-    canonicalPath: "/evaluations",
     label: "Evaluations",
-    group: "workspace",
+    group: "study",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "Evaluation workflows are advanced and depend on configured models and datasets."
-  },
-  {
+    rationale: "Evaluation setup and result inspection route."
+  }),
+  defineRoute({
     path: "/flashcards",
-    canonicalPath: "/flashcards",
     label: "Flashcards",
     group: "study",
     surface: "default_self_hosted",
-    availability: [...webAndExtensionOptions, "extension_sidepanel"],
-    smoke: "include",
+    availability: ["web", "extension_options", "extension_sidepanel"],
     commandPalette: "show",
     nav: "secondary",
     requiresBackend: true,
-    rationale: "Flashcards are a direct study workflow reachable from web and sidepanel contexts."
-  },
-  {
+    rationale: "Flashcard study and sidepanel review route."
+  }),
+  defineRoute({
     path: "/quiz",
-    canonicalPath: "/quiz",
     label: "Quiz",
     group: "study",
     surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "Quizzes are a direct study workflow for ingested knowledge."
-  },
-  {
+    rationale: "Quiz and study route."
+  }),
+  defineRoute({
     path: "/moderation-playground",
-    canonicalPath: "/moderation/rules",
     label: "Moderation Playground",
     group: "safety",
-    surface: "redirect",
-    availability: webOnly,
-    redirectsTo: "/moderation/rules",
-    smoke: "exclude",
-    commandPalette: "alias_only",
-    nav: "hidden",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "Legacy moderation playground redirects to the current content rules route."
-  },
-  {
+    rationale: "Moderation and safety testing route."
+  }),
+  defineRoute({
     path: "/content-review",
-    canonicalPath: "/content-review",
     label: "Content Review",
     group: "safety",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
+    smoke: "manual",
     requiresBackend: true,
-    rationale: "Content review is a safety workflow for flagged or queued material."
-  },
-  {
+    rationale: "Content review queue route."
+  }),
+  defineRoute({
     path: "/claims-review",
-    canonicalPath: "/content-review",
     label: "Claims Review",
     group: "safety",
-    surface: "redirect",
-    availability: webOnly,
-    redirectsTo: "/content-review",
-    smoke: "exclude",
-    commandPalette: "alias_only",
-    nav: "hidden",
+    surface: "advanced_self_hosted",
+    smoke: "manual",
     requiresBackend: true,
-    rationale: "Legacy claims review route redirects to the canonical content review workflow."
-  },
-  {
+    rationale: "Claims review and verification route."
+  }),
+  defineRoute({
     path: "/data-tables",
-    canonicalPath: "/data-tables",
     label: "Data Tables",
-    group: "workspace",
+    group: "specialized",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
-    rationale: "Structured table work is an advanced utility surface."
-  },
-  {
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Structured data table route."
+  }),
+  defineRoute({
     path: "/chunking-playground",
-    canonicalPath: "/chunking-playground",
     label: "Chunking Playground",
-    group: "workspace",
-    surface: "labs_beta",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "hidden",
-    rationale: "Chunking experiments are useful for RAG tuning but should remain lab-scoped."
-  },
-  {
-    path: "/kanban",
-    canonicalPath: "/kanban",
-    label: "Kanban",
-    group: "workspace",
+    group: "specialized",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
-    rationale: "Kanban is a secondary organization surface."
-  },
-  {
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Chunking strategy playground route."
+  }),
+  defineRoute({
+    path: "/kanban",
+    label: "Kanban",
+    group: "specialized",
+    surface: "advanced_self_hosted",
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Kanban board route."
+  }),
+  defineRoute({
     path: "/skills",
-    canonicalPath: "/skills",
     label: "Skills",
     group: "operations",
     surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
+    availability: webAndExtension,
     requiresBackend: true,
-    rationale: "Skill management is an advanced automation and assistant configuration workflow."
-  },
-  {
+    rationale: "Skills discovery and management route."
+  }),
+  defineRoute({
     path: "/vn-assets",
-    canonicalPath: "/vn-assets",
     label: "VN Assets",
     group: "specialized",
     surface: "labs_beta",
-    availability: webOnly,
-    smoke: "include",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Visual novel assets are a specialized labs surface."
-  },
-  {
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "Visual novel asset route discovered outside the original smoke inventory."
+  }),
+  defineRoute({
     path: "/vn-play",
-    canonicalPath: "/vn-play",
     label: "VN Play",
     group: "specialized",
     surface: "labs_beta",
-    availability: webOnly,
-    smoke: "include",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Visual novel play is a specialized labs surface."
-  },
-  {
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "Visual novel play route discovered outside the original smoke inventory."
+  }),
+  defineRoute({
     path: "/documentation",
-    canonicalPath: "/documentation",
     label: "Documentation",
     group: "documentation",
     surface: "default_self_hosted",
-    availability: webAndExtensionOptions,
-    smoke: "include",
+    availability: webAndExtension,
     commandPalette: "show",
     nav: "secondary",
-    rationale: "Documentation is a support surface reachable when users need help."
-  },
-  {
+    requiresBackend: false,
+    rationale: "In-app documentation route."
+  }),
+  defineRoute({
     path: "/notifications",
-    canonicalPath: "/notifications",
     label: "Notifications",
-    group: "account",
-    surface: "advanced_self_hosted",
-    availability: webOnly,
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
+    group: "operations",
+    surface: "default_self_hosted",
     requiresBackend: true,
-    rationale: "Notifications are user-stateful and should not be primary navigation."
-  },
-  {
+    rationale: "Notification inbox and alert route."
+  }),
+  defineRoute({
     path: "/composer-variants-preview",
-    canonicalPath: "/composer-variants-preview",
     label: "Composer Variants Preview",
     group: "specialized",
     surface: "internal_qa_debug",
-    availability: webOnly,
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Composer variants preview is an internal QA route for visual comparison."
-  },
-  {
+    smoke: "exclude",
+    rationale: "Internal composer preview route, not normal product navigation."
+  }),
+  defineRoute({
     path: "/onboarding-test",
-    canonicalPath: "/onboarding-test",
-    label: "Onboarding Test",
+    label: "Onboarding Test Harness",
     group: "start",
     surface: "internal_qa_debug",
-    availability: webAndExtensionOptions,
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Onboarding test route is for verification and should not appear in normal IA."
-  }
-]
-
-type RegistryRouteMetadataInput = Pick<
-  RouteMetadata,
-  "path" | "label" | "group" | "rationale"
-> &
-  Partial<Omit<RouteMetadata, "path" | "label" | "group" | "rationale">>
-
-const registryRoute = ({
-  path,
-  canonicalPath = path,
-  label,
-  commandLabel,
-  group,
-  surface = "advanced_self_hosted",
-  availability = webAndExtensionOptions,
-  aliases,
-  redirectsTo,
-  smoke = "include",
-  commandPalette = "show",
-  hostedOptionVisibility,
-  nav = "secondary",
-  requiresAuth,
-  requiresBackend,
-  requiresH1,
-  h1ExceptionReason,
-  rationale
-}: RegistryRouteMetadataInput): RouteMetadata => ({
-  path,
-  canonicalPath,
-  label,
-  commandLabel,
-  group,
-  surface,
-  availability,
-  aliases,
-  redirectsTo,
-  smoke,
-  commandPalette,
-  hostedOptionVisibility,
-  nav,
-  requiresAuth,
-  requiresBackend,
-  requiresH1,
-  h1ExceptionReason,
-  rationale
-})
-
-const settingsRoute = (
-  path: string,
-  label: string,
-  rationale: string,
-  overrides: Partial<
-    Omit<RouteMetadata, "path" | "label" | "group" | "rationale">
-  > = {}
-): RouteMetadata =>
-  registryRoute({
-    path,
-    label,
-    group: "settings",
-    surface: "default_self_hosted",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale,
-    ...overrides
-  })
-
-const adminRoute = (
-  path: string,
-  label: string,
-  rationale: string,
-  overrides: Partial<
-    Omit<RouteMetadata, "path" | "label" | "group" | "rationale">
-  > = {}
-): RouteMetadata =>
-  registryRoute({
-    path,
-    label,
-    group: "operations",
-    surface: "admin_operator",
-    availability: webAndExtensionOptions,
-    nav: "secondary",
-    requiresAuth: true,
-    requiresBackend: true,
-    rationale,
-    ...overrides
-  })
-
-const ROUTE_REGISTRY_METADATA: RouteMetadata[] = [
-  settingsRoute(
-    "/settings/tldw",
-    "TLDW Settings",
-    "Product-level settings are nested under the primary settings route."
-  ),
-  settingsRoute(
-    "/settings/model",
-    "Model Settings",
-    "Provider and model defaults are nested under settings for setup continuity."
-  ),
-  settingsRoute(
-    "/settings/mcp-hub",
-    "MCP Hub Settings",
-    "MCP settings configure the advanced MCP hub surface."
-  ),
-  settingsRoute(
-    "/settings/prompt",
-    "Prompt Settings",
-    "Prompt workspace preferences are nested under settings."
-  ),
-  settingsRoute(
-    "/settings/evaluations",
-    "Evaluation Settings",
-    "Evaluation defaults are nested under settings because they affect advanced workflows."
-  ),
-  settingsRoute(
-    "/settings/chat",
-    "Chat Settings",
-    "Chat defaults are nested under settings and are reachable from chat contexts."
-  ),
-  settingsRoute(
-    "/settings/ui",
-    "UI Settings",
-    "Interface preferences are nested under settings."
-  ),
-  settingsRoute(
-    "/settings/splash",
-    "Splash Settings",
-    "Startup and splash preferences are nested under settings."
-  ),
-  settingsRoute(
-    "/settings/quick-ingest",
-    "Quick Ingest Settings",
-    "Quick ingest preferences are nested under settings for capture workflow configuration."
-  ),
-  settingsRoute(
-    "/settings/speech",
-    "Speech Settings",
-    "Speech defaults are nested under settings and support STT/TTS workflows."
-  ),
-  settingsRoute(
-    "/settings/image-generation",
-    "Image Generation Settings",
-    "Image-generation provider defaults are nested under settings."
-  ),
-  settingsRoute(
-    "/settings/image-gen",
-    "Image Generation Settings Alias",
-    "Legacy image-generation settings route redirects to the canonical settings route.",
-    {
-      canonicalPath: "/settings/image-generation",
-      surface: "redirect",
-      redirectsTo: "/settings/image-generation",
-      smoke: "exclude",
-      commandPalette: "alias_only"
-    }
-  ),
-  settingsRoute(
-    "/settings/share",
-    "Share Settings",
-    "Sharing preferences are nested under settings because they affect publish and recovery flows."
-  ),
-  settingsRoute(
-    "/settings/processed",
-    "Processed Content Settings",
-    "Processed-content settings are nested under settings for library maintenance."
-  ),
-  settingsRoute(
-    "/settings/health",
-    "Health Settings",
-    "Health and connection diagnostics are nested under settings.",
-    {
-      commandLabel: "Go to Health & Diagnostics"
-    }
-  ),
-  settingsRoute(
-    "/settings/prompt-studio",
-    "Prompt Studio Settings",
-    "Prompt Studio preferences remain under settings after the workspace moved to prompts."
-  ),
-  settingsRoute(
-    "/settings/knowledge",
-    "Knowledge Settings",
-    "Knowledge and retrieval settings are nested under settings."
-  ),
-  settingsRoute(
-    "/settings/chatbooks",
-    "Chatbooks Settings",
-    "Chatbook import/export preferences are nested under settings."
-  ),
-  settingsRoute(
-    "/settings/characters",
-    "Characters Settings",
-    "Character workspace preferences are nested under settings."
-  ),
-  settingsRoute(
-    "/settings/world-books",
-    "World Books Settings",
-    "World book preferences are nested under settings."
-  ),
-  settingsRoute(
-    "/settings/chat-dictionaries",
-    "Dictionary Settings",
-    "Dictionary preferences are nested under settings."
-  ),
-  settingsRoute(
-    "/settings/rag",
-    "RAG Settings",
-    "RAG defaults are nested under settings because they affect chat and knowledge answers."
-  ),
-  settingsRoute(
-    "/settings/about",
-    "About",
-    "About and version details live under settings rather than primary navigation.",
-    {
-      requiresBackend: false
-    }
-  ),
-  settingsRoute(
-    "/settings/family-guardrails",
-    "Family Guardrails",
-    "Family guardrail configuration is capability-gated under settings.",
-    {
-      surface: "advanced_self_hosted",
-      smoke: "manual"
-    }
-  ),
-  settingsRoute(
-    "/settings/guardian",
-    "Guardian Settings",
-    "Guardian settings are capability-gated and should remain nested under settings.",
-    {
-      surface: "advanced_self_hosted",
-      smoke: "manual"
-    }
-  ),
-  adminRoute(
-    "/admin/integrations",
-    "Admin Integrations",
-    "Administrative integration controls are operator-only."
-  ),
-  adminRoute(
-    "/admin/sources",
-    "Admin Sources",
-    "Administrative source controls are operator-only."
-  ),
-  adminRoute(
-    "/admin/server",
-    "Server Admin",
-    "Server runtime controls are operator-only."
-  ),
-  adminRoute(
-    "/admin/llamacpp",
-    "Llama.cpp Admin",
-    "Local llama.cpp server controls are operator-only."
-  ),
-  adminRoute(
-    "/admin/mlx",
-    "MLX Admin",
-    "Local MLX server controls are operator-only."
-  ),
-  adminRoute(
-    "/admin/runtime-config",
-    "Runtime Config Admin",
-    "Runtime configuration controls are operator-only.",
-    {
-      smoke: "manual"
-    }
-  ),
-  adminRoute(
-    "/admin/monitoring",
-    "Monitoring Admin",
-    "Monitoring is an operator route for service status and diagnostics."
-  ),
-  adminRoute(
-    "/admin/api-keys",
-    "API Keys Admin",
-    "API key administration is a Next-only operator page outside normal user navigation.",
-    {
-      availability: webOnly
-    }
-  ),
-  adminRoute(
-    "/admin/billing",
-    "Billing Admin",
-    "Billing administration is an operator page and remains separate from hosted user billing.",
-    {
-      availability: webOnly
-    }
-  ),
-  adminRoute(
-    "/admin/data-ops",
-    "Data Operations Admin",
-    "Data operations administration is a Next-only operator workflow.",
-    {
-      availability: webOnly
-    }
-  ),
-  adminRoute(
-    "/admin/maintenance",
-    "Maintenance Admin",
-    "Maintenance controls are operator-only and should stay out of default user navigation.",
-    {
-      availability: webOnly
-    }
-  ),
-  adminRoute(
-    "/admin/orgs",
-    "Organizations Admin",
-    "Organization administration is operator-owned and deployment-mode dependent.",
-    {
-      availability: webOnly
-    }
-  ),
-  adminRoute(
-    "/admin/rate-limiting",
-    "Rate Limiting Admin",
-    "Rate-limit administration is an operator-only controls page.",
-    {
-      availability: webOnly
-    }
-  ),
-  adminRoute(
-    "/admin/rbac",
-    "RBAC Admin",
-    "RBAC administration is an operator-only access-control page.",
-    {
-      availability: webOnly
-    }
-  ),
-  adminRoute(
-    "/admin/usage",
-    "Usage Admin",
-    "Usage administration is an operator-only reporting page.",
-    {
-      availability: webOnly
-    }
-  ),
-  adminRoute(
-    "/admin/watchlists-items",
-    "Watchlists Items Admin",
-    "Watchlist item administration is an operator drill-down page.",
-    {
-      availability: webOnly
-    }
-  ),
-  adminRoute(
-    "/admin/watchlists-runs",
-    "Watchlists Runs Admin",
-    "Watchlist run administration is an operator placeholder and drill-down page.",
-    {
-      availability: webOnly
-    }
-  ),
-  registryRoute({
-    path: "/auth/magic-link",
-    label: "Magic Link Sign-In",
-    group: "account",
-    surface: "hosted_only",
-    availability: webOnly,
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Hosted magic-link auth lives outside the self-hosted WebUI distribution."
-  }),
-  registryRoute({
-    path: "/auth/reset-password",
-    label: "Reset Password",
-    group: "account",
-    surface: "hosted_only",
-    availability: webOnly,
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Hosted password-reset auth lives outside the self-hosted WebUI distribution."
-  }),
-  registryRoute({
-    path: "/auth/verify-email",
-    label: "Verify Email",
-    group: "account",
-    surface: "hosted_only",
-    availability: webOnly,
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Hosted email verification lives outside the self-hosted WebUI distribution."
-  }),
-  registryRoute({
-    path: "/billing/success",
-    label: "Billing Success",
-    group: "account",
-    surface: "hosted_only",
-    availability: webOnly,
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Hosted billing completion is represented by a self-hosted placeholder."
-  }),
-  registryRoute({
-    path: "/billing/cancel",
-    label: "Billing Cancel",
-    group: "account",
-    surface: "hosted_only",
-    availability: webOnly,
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Hosted billing cancellation is represented by a self-hosted placeholder."
-  }),
-  registryRoute({
-    path: "/chat/agent",
-    canonicalPath: "/agents",
-    label: "Agent Chat",
-    group: "chat",
-    surface: "advanced_self_hosted",
-    availability: webOnly,
-    smoke: "include",
-    commandPalette: "hide",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale: "Legacy web wrapper for the sidepanel agent chat route remains in smoke inventory."
-  }),
-  registryRoute({
-    path: "/media/:id/view",
-    canonicalPath: "/media",
-    label: "Media Item View Redirect",
-    group: "media_library",
-    surface: "redirect",
-    availability: webOnly,
-    aliases: ["/media/123/view"],
-    redirectsTo: "/media",
+    availability: webAndExtension,
     smoke: "exclude",
-    commandPalette: "alias_only",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale: "Dynamic media view redirects into the canonical media library surface."
+    rationale: "Internal onboarding QA route."
   }),
-  registryRoute({
-    path: "/connectors/browse",
-    label: "Connector Browse",
-    group: "operations",
-    surface: "labs_beta",
-    availability: webOnly,
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Connector browse is a placeholder child route under the connectors hub."
-  }),
-  registryRoute({
-    path: "/connectors/jobs",
-    label: "Connector Jobs",
-    group: "operations",
-    surface: "labs_beta",
-    availability: webOnly,
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Connector jobs is a placeholder child route under the connectors hub."
-  }),
-  registryRoute({
-    path: "/connectors/sources",
-    label: "Connector Sources",
-    group: "operations",
-    surface: "labs_beta",
-    availability: webOnly,
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Connector sources is a placeholder child route under the connectors hub."
-  }),
-  registryRoute({
-    path: "/for/journalists",
-    label: "For Journalists",
-    group: "marketing",
-    surface: "default_self_hosted",
-    availability: webOnly,
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Audience landing page is public web content rather than application navigation."
-  }),
-  registryRoute({
-    path: "/for/osint",
-    label: "For OSINT",
-    group: "marketing",
-    surface: "default_self_hosted",
-    availability: webOnly,
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Audience landing page is public web content rather than application navigation."
-  }),
-  registryRoute({
-    path: "/for/researchers",
-    label: "For Researchers",
-    group: "marketing",
-    surface: "default_self_hosted",
-    availability: webOnly,
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Audience landing page is public web content rather than application navigation."
-  }),
-  registryRoute({
-    path: "/sources/new",
-    label: "New Source",
-    group: "knowledge",
-    surface: "default_self_hosted",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale: "Source creation is a task route owned by the sources workflow."
-  }),
-  registryRoute({
-    path: "/sources/:sourceId",
-    canonicalPath: "/sources",
-    label: "Source Detail",
-    group: "knowledge",
-    surface: "default_self_hosted",
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale: "Dynamic source detail route belongs to the canonical Sources workflow."
-  }),
-  registryRoute({
-    path: "/share/:token",
-    canonicalPath: "/shared",
-    label: "Public Share",
-    group: "knowledge",
-    surface: "advanced_self_hosted",
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale: "Tokenized public share route depends on share state and should not appear in navigation."
-  }),
-  registryRoute({
-    path: "/knowledge/thread/:threadId",
-    canonicalPath: "/knowledge",
-    label: "Knowledge Thread",
-    group: "knowledge",
-    surface: "default_self_hosted",
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale: "Dynamic knowledge thread routes resolve inside the canonical Knowledge workspace."
-  }),
-  registryRoute({
-    path: "/knowledge/shared/:shareToken",
-    canonicalPath: "/knowledge",
-    label: "Shared Knowledge Thread",
-    group: "knowledge",
-    surface: "advanced_self_hosted",
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale: "Shared knowledge thread links are tokenized stateful routes under the Knowledge workspace."
-  }),
-  registryRoute({
-    path: "/companion/conversation",
-    label: "Companion Conversation",
-    group: "chat",
-    surface: "labs_beta",
-    availability: [...webAndExtensionOptions, "extension_sidepanel"],
-    smoke: "manual",
-    requiresBackend: true,
-    rationale: "Companion conversation is a nested sidepanel-capable companion workflow."
-  }),
-  registryRoute({
+  defineRoute({
     path: "/agent",
     canonicalPath: "/agents",
-    label: "Sidepanel Agent",
-    group: "chat",
+    label: "Agent Sidepanel",
+    group: "extension",
     surface: "extension_sidepanel",
-    availability: ["extension_sidepanel"],
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale: "Singular sidepanel agent route is extension-only and maps conceptually to the web Agents surface."
+    availability: sidepanel,
+    smoke: "exclude",
+    rationale: "Extension-only sidepanel agent route."
   }),
-  registryRoute({
+  defineRoute({
     path: "/clipper",
-    label: "Sidepanel Clipper",
-    group: "knowledge",
+    label: "Clipper",
+    group: "extension",
     surface: "extension_sidepanel",
-    availability: ["extension_sidepanel"],
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale: "Clipper is a sidepanel-only capture workflow and should not be inferred from web route availability."
+    availability: sidepanel,
+    smoke: "exclude",
+    rationale: "Extension-only page clipping route."
   }),
-  registryRoute({
+  defineRoute({
+    path: "/companion/conversation",
+    canonicalPath: "/companion",
+    label: "Companion Conversation",
+    group: "extension",
+    surface: "extension_sidepanel",
+    availability: sidepanel,
+    smoke: "exclude",
+    rationale: "Extension-only companion conversation sidepanel route."
+  }),
+  defineRoute({
     path: "/error-boundary-test",
-    label: "Sidepanel Error Boundary Test",
-    group: "specialized",
+    label: "Error Boundary Test",
+    group: "extension",
     surface: "internal_qa_debug",
-    availability: ["extension_sidepanel"],
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Sidepanel error-boundary route is a development-only QA route."
+    availability: sidepanel,
+    smoke: "exclude",
+    rationale: "Sidepanel QA route for error boundary testing."
   }),
-  registryRoute({
+  defineRoute({
     path: "/__debug__/sidepanel-chat",
     label: "Debug Sidepanel Chat",
-    group: "specialized",
+    group: "extension",
     surface: "internal_qa_debug",
-    availability: webOnly,
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Web debug page mounts the sidepanel chat route for QA without exposing it in navigation."
+    smoke: "exclude",
+    rationale: "Web debug route for sidepanel chat rendering."
   }),
-  registryRoute({
+  defineRoute({
     path: "/__debug__/sidepanel-error-boundary",
     label: "Debug Sidepanel Error Boundary",
-    group: "specialized",
+    group: "extension",
     surface: "internal_qa_debug",
-    availability: webOnly,
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Web debug page mounts the sidepanel error-boundary route for QA without exposing it in navigation."
-  }),
-  registryRoute({
-    path: "/presentation-studio/new",
-    label: "New Presentation",
-    group: "workspace",
-    surface: "labs_beta",
-    nav: "hidden",
-    rationale: "Presentation creation is a nested task route owned by Presentation Studio."
-  }),
-  registryRoute({
-    path: "/presentation-studio/start",
-    label: "Presentation Studio Start",
-    group: "workspace",
-    surface: "labs_beta",
-    smoke: "manual",
-    nav: "hidden",
-    rationale: "Presentation startup flow is a nested task route owned by Presentation Studio."
-  }),
-  registryRoute({
-    path: "/presentation-studio/:projectId",
-    canonicalPath: "/presentation-studio",
-    label: "Presentation Detail",
-    group: "workspace",
-    surface: "labs_beta",
-    smoke: "manual",
-    commandPalette: "hide",
-    nav: "hidden",
-    rationale: "Dynamic presentation project route belongs to the canonical Presentation Studio workflow."
-  }),
-  registryRoute({
-    path: "/moderation",
-    label: "Moderation Review",
-    group: "safety",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    requiresBackend: true,
-    rationale: "Moderation review is the canonical review route for safety workflows."
-  }),
-  registryRoute({
-    path: "/moderation/rules",
-    label: "Moderation Rules",
-    group: "safety",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    requiresBackend: true,
-    rationale: "Moderation rules own policy, blocklist, override, and testing configuration."
-  }),
-  registryRoute({
-    path: "/prototype-workspaces",
-    label: "Prototype Workspaces",
-    group: "workspace",
-    surface: "labs_beta",
-    smoke: "manual",
-    requiresBackend: true,
-    rationale: "Prototype workspaces are a labs route retained for compatibility."
-  }),
-  registryRoute({
-    path: "/research-studio",
-    label: "Research Studio",
-    group: "workspace",
-    surface: "advanced_self_hosted",
-    availability: webAndExtensionOptions,
-    hostedOptionVisibility: "visible",
-    requiresBackend: true,
-    rationale: "Research Studio is the canonical route for workspace playground behavior in the shared router."
-  }),
-  registryRoute({
-    path: "/workspace-studio",
-    canonicalPath: "/research-studio",
-    label: "Workspace Studio",
-    group: "workspace",
-    surface: "redirect",
-    availability: webAndExtensionOptions,
-    redirectsTo: "/research-studio",
     smoke: "exclude",
-    commandPalette: "alias_only",
-    nav: "hidden",
-    requiresBackend: true,
-    rationale: "Workspace Studio is a compatibility alias to Research Studio in the shared router."
+    rationale: "Web debug route for sidepanel error-boundary rendering."
   })
-]
+] as const satisfies readonly RouteMetadata[]
 
-export const ROUTE_METADATA: RouteMetadata[] = [
-  ...AUDITED_ROUTE_METADATA,
-  ...ROUTE_REGISTRY_METADATA
-]
-
-export { normalizeRoutePath }
-
-const routeMetadataByPath = new Map<string, RouteMetadata>()
-const routeMetadataByAlias = new Map<string, RouteMetadata>()
-
-for (const metadata of ROUTE_METADATA) {
-  routeMetadataByPath.set(normalizeRoutePath(metadata.path), metadata)
-
-  for (const alias of metadata.aliases ?? []) {
-    routeMetadataByAlias.set(normalizeRoutePath(alias), metadata)
+export const normalizeRoutePath = (path: string): string => {
+  const [pathname] = path.split("?")
+  if (!pathname || pathname === "/") {
+    return "/"
   }
+  return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname
 }
 
-export const getRouteMetadata = (path: string): RouteMetadata | undefined => {
-  const normalizedPath = normalizeRoutePath(path)
+const metadataByPath = new Map<string, RouteMetadata>()
 
-  return (
-    routeMetadataByPath.get(normalizedPath) ??
-    routeMetadataByAlias.get(normalizedPath)
+for (const metadata of ROUTE_METADATA) {
+  metadataByPath.set(normalizeRoutePath(metadata.path), metadata)
+}
+
+export function getRouteMetadata(path: string): RouteMetadata | undefined {
+  return metadataByPath.get(normalizeRoutePath(path))
+}
+
+export function getCanonicalRoutePath(path: string): string | undefined {
+  return getRouteMetadata(path)?.canonicalPath
+}
+
+export function isRouteAvailableForSurface(
+  path: string,
+  availability: RouteAvailability
+): boolean {
+  return getRouteMetadata(path)?.availability.includes(availability) ?? false
+}
+
+export function getRoutesForSmokeInventory(): string[] {
+  return ROUTE_METADATA.filter((metadata) => metadata.smoke === "include").map(
+    (metadata) => metadata.path
   )
 }
 
-export const getCanonicalRoutePath = (path: string): string | undefined =>
-  getRouteMetadata(path)?.canonicalPath
+export function getCommandPaletteRoutes(): RouteMetadata[] {
+  return ROUTE_METADATA.filter((metadata) => metadata.commandPalette === "show")
+}
 
-export const getRouteCommandPaletteLabel = (
+export function getCommandPaletteTarget(path: string): string {
+  return getRouteMetadata(path)?.canonicalPath ?? path
+}
+
+export function getRouteCommandPaletteLabel(
   route: RouteMetadata | string
-): string => {
-  const metadata = typeof route === "string" ? getRouteMetadata(route) : route
-
-  return metadata?.commandLabel ?? (metadata ? `Go to ${metadata.label}` : "")
+): string {
+  return typeof route === "string"
+    ? getRouteMetadata(route)?.label ?? route
+    : route.label
 }
 
-const h1ExceptionSurfaceReasons: Partial<Record<RouteSurface, string>> = {
-  hosted_only: "Hosted-only route can be gated outside self-hosted smoke runs.",
-  extension_sidepanel:
-    "Extension sidepanel route uses a constrained shell instead of the standard page heading contract.",
-  internal_qa_debug:
-    "Internal QA/debug route is not part of normal user-facing page inventory.",
-  legacy_alias:
-    "Legacy alias route delegates ownership to its canonical route.",
-  redirect: "Redirect route delegates ownership to its destination route.",
-  deprecated: "Deprecated route is retained for compatibility and not normal IA."
+export function isAuditedRootRoute(path: string): boolean {
+  return (AUDITED_ROOT_ROUTE_PATHS as readonly string[]).includes(
+    normalizeRoutePath(path)
+  )
 }
-
-export const getRouteHeadingPolicy = (
-  route: RouteMetadata | string
-): RouteHeadingPolicy => {
-  const metadata = typeof route === "string" ? getRouteMetadata(route) : route
-
-  if (!metadata) {
-    return {
-      requiresH1: false,
-      exceptionReason: "Route metadata is missing."
-    }
-  }
-
-  if (metadata.requiresH1 === true) {
-    return { requiresH1: true }
-  }
-
-  if (metadata.requiresH1 === false) {
-    return {
-      requiresH1: false,
-      exceptionReason: metadata.h1ExceptionReason
-    }
-  }
-
-  const exceptionReason = h1ExceptionSurfaceReasons[metadata.surface]
-  if (exceptionReason) {
-    return {
-      requiresH1: false,
-      exceptionReason: metadata.h1ExceptionReason ?? exceptionReason
-    }
-  }
-
-  return { requiresH1: true }
-}
-
-export const isRouteVisibleForSurface = (
-  path: string,
-  availability: RouteAvailability
-): boolean => getRouteMetadata(path)?.availability.includes(availability) ?? false
-
-export const getRoutesForSmokeInventory = (): RouteMetadata[] =>
-  ROUTE_METADATA.filter((metadata) => metadata.smoke === "include")

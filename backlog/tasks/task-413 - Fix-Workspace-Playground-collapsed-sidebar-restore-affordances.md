@@ -38,9 +38,11 @@ Keep the Workspace Playground Sources and Studio restore controls visible, assoc
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

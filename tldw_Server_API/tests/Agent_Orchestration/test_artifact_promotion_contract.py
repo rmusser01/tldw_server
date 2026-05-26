@@ -51,7 +51,7 @@ def promotion_context():
         root_path="workspace-root",
         metadata={
             CANONICAL_WORKSPACE_ID_METADATA_KEY: "workspace-alpha",
-            "canonical_workspace_source": "workspace_playground",
+            "canonical_workspace_source": "research_workspace",
             "link_status": "linked",
         },
     )

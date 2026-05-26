@@ -161,7 +161,7 @@ Other
 - #/evaluations
 - #/audiobook-studio
 - #/workflow-editor
-- #/research-studio
+- #/research-workspace
 - #/moderation-playground
 - #/admin/server
 - #/admin/llamacpp

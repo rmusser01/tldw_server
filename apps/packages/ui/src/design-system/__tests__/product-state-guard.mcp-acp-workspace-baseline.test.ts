@@ -19,7 +19,7 @@ const baselinePath = path.resolve(
 const scopedPrefixes = [
   "src/components/Option/MCPHub/",
   "src/components/Option/ACPPlayground/",
-  "src/components/Option/WorkspacePlayground/",
+  "src/components/Option/ResearchWorkspace/",
 ]
 
 const readBaseline = (): ProductStateBaselineEntry[] =>

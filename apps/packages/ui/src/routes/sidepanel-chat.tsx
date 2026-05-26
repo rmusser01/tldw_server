@@ -579,6 +579,7 @@ const SidepanelChat = () => {
   useCharacterGreeting({
     playgroundReady: !isRestoringChat,
     selectedCharacter,
+    selectedCharacterMode: null,
     serverChatId,
     historyId,
     messagesLength: messages.length,

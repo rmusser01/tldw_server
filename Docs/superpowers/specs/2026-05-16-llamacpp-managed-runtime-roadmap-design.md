@@ -1,29 +1,11 @@
 # llama.cpp Managed Runtime Roadmap Design
 
-Status: Closed for staged implementation tracking
+Status: Draft
 Date: 2026-05-16
 Owner: Core/WebUI maintainers
 Scope: Multi-instance llama.cpp management, local model import/register workflows, durable instance profiles, supervisor behavior, and model-family/mmproj support
 Tracking: TASK-397
 Reference: https://github.com/m94301/llama-studio
-
-## Closeout Status - 2026-05-23
-
-This roadmap is no longer a draft. It was used as the governing design for the
-staged managed-runtime work recorded under `TASK-397.1`, `TASK-397.2`,
-`TASK-397.5`, `TASK-397.6`, `TASK-397.7`, `TASK-397.8`, `TASK-407`, `TASK-418`,
-`TASK-418.14`, `TASK-418.15`, `TASK-418.16`, `TASK-419`, and `TASK-423`.
-
-The implementation chain delivered the core backend-owned runtime posture this
-design called for: durable profiles, a process runner, multi-profile
-supervisor, default-profile V1 compatibility, local asset inventory, mmproj and
-model-family metadata, Admin UI assets/runtime/profile panels, startup/shutdown
-reconciliation, API compatibility hardening, documentation, and E2E smoke
-coverage.
-
-Remote model downloads, curated catalogs, and broader acquisition workflows
-remain intentionally deferred to separate acquisition/import tasks rather than
-being part of this closed roadmap-design task.
 
 ## Summary
 

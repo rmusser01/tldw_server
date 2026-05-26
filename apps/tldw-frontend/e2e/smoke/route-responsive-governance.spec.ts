@@ -22,7 +22,7 @@ const RESPONSIVE_ROUTE_PATHS = [
   '/settings',
   '/settings/model',
   '/prompts',
-  '/workspace-playground',
+  '/research-workspace',
   '/setup',
   '/sources',
   '/mcp-hub',

@@ -13,14 +13,14 @@ to the canonical workspace model instead of defining a second product workspace.
 
 For the first implementation slice:
 
-- `WorkspacePlayground` remains the canonical user-facing workspace shell.
+- `Research Workspace` remains the canonical user-facing workspace shell.
 - `/api/v1/workspaces/{workspace_id}` remains the canonical server workspace
   record for product membership: sources, selected source state, generated
   artifacts, notes, and workspace-level settings.
 - `/api/v1/agent-orchestration/workspaces/{id}` remains the ACP execution
   binding for filesystem root, health, MCP server config, and per-session env.
 - The ACP execution binding must carry a reference to the canonical workspace
-  when it is created from, displayed in, or used by WorkspacePlayground.
+  when it is created from, displayed in, or used by Research Workspace.
 
 This preserves the existing ACP runtime safety model while preventing ACP from
 becoming a parallel workspace product.
@@ -30,7 +30,7 @@ becoming a parallel workspace product.
 ### Canonical Workspace
 
 `Docs/Design/Workspace_Canonical_Model_Decision_2026_05.md` names
-`WorkspacePlayground` as the canonical first-slice shell. The browser-local
+`Research Workspace` as the canonical first-slice shell. The browser-local
 Zustand store in `apps/packages/ui/src/store/workspace.ts` remains the
 responsive cache and offline-friendly UI state.
 
@@ -62,7 +62,7 @@ enabled workspace MCP servers, and forwards workspace env into ACP sessions.
 The canonical workspace ID is a string. The ACP orchestration workspace ID is an
 integer. Existing UI paths also mix them:
 
-- `ACPSessionCreateModal` reads the current `WorkspacePlayground` `workspaceId`
+- `ACPSessionCreateModal` reads the current `Research Workspace` `workspaceId`
   and sends it to ACP session creation as `workspace_id`.
 - `AgentTasks` currently talks to `/api/v1/agent-orchestration/projects` and
   does not yet present canonical workspace membership as a first-class filter.
@@ -82,7 +82,7 @@ The canonical workspace is the product context users understand. It owns:
 - workspace notes;
 - generated work-product artifacts;
 - saved workspace metadata and local persistence state;
-- route handoffs from WorkspacePlayground, ChatWorkspace, DocumentWorkspace,
+- route handoffs from Research Workspace, ChatWorkspace, DocumentWorkspace,
   Chatbooks, and extension capture.
 
 ### ACP Execution Workspace Owns Runtime Context
@@ -105,7 +105,7 @@ workspace to canonical workspace:
 {
   "acp_workspace_id": 42,
   "canonical_workspace_id": "workspace-alpha",
-  "canonical_workspace_source": "workspace_playground",
+  "canonical_workspace_source": "research_workspace",
   "link_status": "linked"
 }
 ```
@@ -122,9 +122,9 @@ valid ACP execution workspace exists.
 
 ## User Flows
 
-### WorkspacePlayground: Run Agent Task From Workspace
+### Research Workspace: Run Agent Task From Workspace
 
-WorkspacePlayground is the preferred entry point for workspace-scoped ACP work.
+Research Workspace is the preferred entry point for workspace-scoped ACP work.
 A user should be able to start from the current workspace, choose a configured
 agent/task template, and create an ACP project/task bound to the workspace.
 
@@ -147,12 +147,12 @@ support:
 - surfacing execution-workspace setup gaps before dispatch.
 
 Agent Tasks should not become a separate workspace browser. It should reuse the
-canonical workspace identity and link back to WorkspacePlayground.
+canonical workspace identity and link back to Research Workspace.
 
 ### ACP Playground: Direct Session Diagnostics
 
 ACP Playground remains the direct session experimentation and diagnostics
-surface. It may use the active WorkspacePlayground context as a convenience,
+surface. It may use the active Research Workspace context as a convenience,
 but it should not be the main workspace task workflow.
 
 Direct sessions can record the canonical workspace ID as session metadata when
@@ -251,7 +251,7 @@ that should be a separate MCP Hub integration slice.
 
 - `apps/packages/ui/src/store/workspace.ts`
   - Canonical browser workspace state and local persistence.
-- `apps/packages/ui/src/components/Option/WorkspacePlayground/`
+- `apps/packages/ui/src/components/Option/Research Workspace/`
   - Preferred workspace-scoped ACP entry point.
 - `apps/packages/ui/src/components/Option/AgentTasks/`
   - Project/task/run/review management and diagnostics.
@@ -279,13 +279,13 @@ Scope:
 - Add backend tests for ownership, missing workspace, missing allowlist,
   trusted-root inheritance, cwd containment, and duplicate bridge prevention.
 
-### Slice 2: WorkspacePlayground Handoff
+### Slice 2: Research Workspace Handoff
 
 Goal: let users start an agent task from the canonical workspace shell.
 
 Scope:
 
-- Add a WorkspacePlayground action that opens a create-agent-task flow.
+- Add a Research Workspace action that opens a create-agent-task flow.
 - Create or select the linked ACP execution workspace.
 - Create the AgentProject/AgentTask with workspace context.
 - Link back to Agent Tasks and ACP session detail after dispatch.
@@ -313,7 +313,7 @@ Scope:
 
 Implementation note:
 
-- First UI pass adds WorkspacePlayground `ACP run history`, reusing existing
+- First UI pass adds Research Workspace `ACP run history`, reusing existing
   Agent Orchestration project/task/task-detail contracts and ACP Playground
   session view routes. It intentionally does not add a new backend workspace
   history endpoint or a parallel ACP workspace browser.
@@ -327,7 +327,7 @@ Scope:
 
 - Run backend tests for bridge creation, ownership, allowlist failures,
   trusted-root inheritance, and cwd escape rejection.
-- Run frontend tests for WorkspacePlayground handoff, Agent Tasks filtering,
+- Run frontend tests for Research Workspace handoff, Agent Tasks filtering,
   setup-gap states, and ACP detail links.
 - Add or update docs checks that preserve the canonical workspace versus ACP
   execution workspace distinction.
@@ -350,7 +350,7 @@ Scope:
 
 - Should the canonical workspace to ACP execution workspace link be promoted
   from metadata to a dedicated column before team-scale filtering?
-- Should WorkspacePlayground create execution workspaces automatically, or
+- Should Research Workspace create execution workspaces automatically, or
   require explicit user confirmation when a filesystem root/env/MCP config is
   needed?
 - Which artifact states from #1525 should be implemented in the first

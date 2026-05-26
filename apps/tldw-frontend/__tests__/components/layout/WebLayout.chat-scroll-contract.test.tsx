@@ -1,8 +1,21 @@
+// @vitest-environment jsdom
 import React from 'react';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import OptionLayout from '../../../components/layout/WebLayout';
+
+const testModulePath = import.meta.url.startsWith('file:')
+  ? fileURLToPath(import.meta.url)
+  : import.meta.url;
+const webLayoutSourcePath = resolve(
+  dirname(testModulePath),
+  '../../../components/layout/WebLayout.tsx'
+);
 
 const routerState = vi.hoisted(() => ({
   location: {
@@ -66,6 +79,12 @@ const connectionState = vi.hoisted(() => ({
 const confirmDangerMock = vi.hoisted(() => vi.fn(async () => false));
 const storageState = vi.hoisted(() => ({
   stickyChatInput: true,
+}));
+const featureFlagState = vi.hoisted(() => ({
+  showChatSidebar: false,
+}));
+const chatSidebarMockState = vi.hoisted(() => ({
+  props: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('antd', () => ({
@@ -142,6 +161,7 @@ vi.mock('@/hooks/keyboard/useKeyboardShortcuts', () => ({
   useChatShortcuts: () => undefined,
   useSidebarShortcuts: () => undefined,
   useQuickChatShortcuts: () => undefined,
+  useModeNavigationShortcuts: () => undefined,
 }));
 
 vi.mock('@/store/quick-chat', () => ({
@@ -205,7 +225,7 @@ vi.mock('@/hooks/useLayoutEffectsOwner', () => ({
 }));
 
 vi.mock('@/hooks/useFeatureFlags', () => ({
-  useChatSidebar: () => [false],
+  useChatSidebar: () => [featureFlagState.showChatSidebar],
 }));
 
 vi.mock('@/hooks/useMediaQuery', () => ({
@@ -230,7 +250,10 @@ vi.mock('@/hooks/useServerOnline', () => ({
 }));
 
 vi.mock('@/components/Common/ChatSidebar', () => ({
-  ChatSidebar: () => null,
+  ChatSidebar: (props: Record<string, unknown>) => {
+    chatSidebarMockState.props.push(props);
+    return <aside data-testid="chat-sidebar" />;
+  },
 }));
 
 vi.mock('@/components/Common/EventHosts', () => ({
@@ -282,6 +305,10 @@ vi.mock('@/components/Common/CommandPalette', () => ({
   CommandPalette: () => null,
 }));
 
+vi.mock('@/components/Common/TutorialRunner', () => ({
+  TutorialRunner: () => <div data-testid="tutorial-runner" />,
+}));
+
 vi.mock('@/hooks/useConnectionState', () => ({
   useConnectionActions: () => ({ checkOnce: connectionState.value.checkOnce }),
   useConnectionState: () => ({
@@ -310,11 +337,19 @@ vi.mock('@/context/demo-mode', () => ({
 
 describe('WebLayout /chat scroll contract', () => {
   beforeEach(() => {
+    delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
     vi.clearAllMocks();
     routerState.location.pathname = '/chat';
     routerState.location.search = '';
     routerState.location.hash = '';
     storageState.stickyChatInput = true;
+    featureFlagState.showChatSidebar = false;
+    chatSidebarMockState.props = [];
+  });
+
+  afterEach(() => {
+    cleanup();
+    delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
   });
 
   it('marks the /chat route shell as transcript-owned when sticky chat input is active', () => {
@@ -325,5 +360,66 @@ describe('WebLayout /chat scroll contract', () => {
     );
 
     expect(html).toContain('data-chat-scroll-owner="transcript"');
+  });
+
+  it('passes openResetKey when the shared ChatSidebar feature is enabled', () => {
+    featureFlagState.showChatSidebar = true;
+
+    renderToStaticMarkup(
+      <OptionLayout>
+        <div data-testid="chat-route-content">Chat route</div>
+      </OptionLayout>
+    );
+
+    expect(chatSidebarMockState.props).toHaveLength(1);
+    expect(chatSidebarMockState.props[0]).toEqual(
+      expect.objectContaining({
+        collapsed: true,
+        openResetKey: expect.any(Number),
+      })
+    );
+  });
+
+  it('mirrors shared layout reset-key wiring for desktop and mobile mounts', () => {
+    const source = readFileSync(webLayoutSourcePath, 'utf8');
+
+    expect(source).toContain('chatSidebarOpenResetKey');
+    expect(source.match(/openResetKey=\{chatSidebarOpenResetKey\}/g)).toHaveLength(2);
+    expect(source).toContain('signalChatSidebarOpen');
+    expect(source).toContain('setChatSidebarOpenResetKey((value) => value + 1)');
+    expect(source).toContain('if (!sidebarOpen) signalChatSidebarOpen()');
+    expect(source).toContain('if (chatSidebarCollapsed) signalChatSidebarOpen()');
+    expect(source).toContain("window.addEventListener('tldw:open-chat-sidebar', handler)");
+    expect(source).toContain("if (typeof window === 'undefined' || !showChatSidebar) return;");
+  });
+
+  it('ignores chat sidebar open events when the shared ChatSidebar feature is disabled', async () => {
+    featureFlagState.showChatSidebar = false;
+
+    render(
+      <OptionLayout>
+        <div data-testid="chat-route-content">Chat route</div>
+      </OptionLayout>
+    );
+
+    expect(screen.queryByTestId('drawer')).toBeNull();
+
+    await act(async () => undefined);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('tldw:open-chat-sidebar'));
+    });
+
+    expect(screen.queryByTestId('drawer')).toBeNull();
+    expect(chatSidebarMockState.props).toHaveLength(0);
+  });
+
+  it('mounts the shared tutorial runner in the web shell so page tour controls can render overlays', async () => {
+    render(
+      <OptionLayout>
+        <div data-testid="route-content">Research workspace route</div>
+      </OptionLayout>
+    );
+
+    expect(await screen.findByTestId('tutorial-runner')).toBeInTheDocument();
   });
 });

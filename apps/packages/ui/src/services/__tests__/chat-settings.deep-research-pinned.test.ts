@@ -27,10 +27,14 @@ vi.mock("@/utils/safe-storage", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    initialize: (...args: unknown[]) => storageState.initialize(...args),
-    getChatSettings: (...args: unknown[]) => storageState.getChatSettings(...args),
-    updateChatSettings: (...args: unknown[]) =>
-      storageState.updateChatSettings(...args)
+    initialize: (requireAuth?: boolean) =>
+      (storageState.initialize as (requireAuth?: boolean) => unknown)(
+        requireAuth
+      ),
+    getChatSettings: (serverChatId: unknown) =>
+      storageState.getChatSettings(serverChatId),
+    updateChatSettings: (serverChatId: unknown, payload: unknown) =>
+      storageState.updateChatSettings(serverChatId, payload)
   }
 }))
 

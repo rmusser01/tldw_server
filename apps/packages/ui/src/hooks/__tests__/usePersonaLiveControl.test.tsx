@@ -14,25 +14,24 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/services/persona-live-control", () => ({
-  listPersonaLiveSessions: (...args: unknown[]) =>
-    mocks.listPersonaLiveSessions(...args),
-  createPersonaLiveSession: (...args: unknown[]) =>
-    mocks.createPersonaLiveSession(...args),
-  focusPersonaLiveSession: (...args: unknown[]) =>
-    mocks.focusPersonaLiveSession(...args),
-  stopPersonaLiveSession: (...args: unknown[]) =>
-    mocks.stopPersonaLiveSession(...args)
+  listPersonaLiveSessions: () => mocks.listPersonaLiveSessions(),
+  createPersonaLiveSession: (input: unknown) =>
+    mocks.createPersonaLiveSession(input),
+  focusPersonaLiveSession: (sessionId: unknown) =>
+    mocks.focusPersonaLiveSession(sessionId),
+  stopPersonaLiveSession: (sessionId: unknown) =>
+    mocks.stopPersonaLiveSession(sessionId)
 }))
 
 vi.mock("@/services/persona-stream", () => ({
-  buildPersonaWebSocketUrl: (...args: unknown[]) =>
-    mocks.buildPersonaWebSocketUrl(...args)
+  buildPersonaWebSocketUrl: (options: unknown) =>
+    (mocks.buildPersonaWebSocketUrl as (options: unknown) => unknown)(options)
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    ensureConfigForRequest: (...args: unknown[]) =>
-      mocks.ensureConfigForRequest(...args)
+    ensureConfigForRequest: (requireAuth?: boolean) =>
+      mocks.ensureConfigForRequest(requireAuth)
   }
 }))
 

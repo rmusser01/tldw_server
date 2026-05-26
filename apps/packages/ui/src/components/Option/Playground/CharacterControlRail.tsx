@@ -1,7 +1,10 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
-import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
+import {
+  type EffectiveAssistantState,
+  resolveEffectiveAssistantState
+} from "@/hooks/chat/effective-assistant-state"
 import { useClearChat } from "@/hooks/chat/useClearChat"
 import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
 import {
@@ -55,7 +58,7 @@ export const CharacterControlRail = () => {
     filterMode: "all"
   })
 
-  const effectiveAssistantState = React.useMemo(
+  const effectiveAssistantState = React.useMemo<EffectiveAssistantState>(
     () => {
       const resolved = resolveEffectiveAssistantState({
         tracked: {

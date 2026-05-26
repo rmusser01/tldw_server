@@ -362,7 +362,7 @@ class TestWorkspaceCRUD:
             root_path="/tmp/linked",
             metadata={
                 "canonical_workspace_id": "workspace-alpha",
-                "canonical_workspace_source": "workspace_playground",
+                "canonical_workspace_source": "research_workspace",
                 "link_status": "linked",
             },
         )
@@ -397,14 +397,14 @@ class TestWorkspaceCRUD:
         linked = db.link_workspace_to_canonical(
             ws.id,
             canonical_workspace_id="workspace-alpha",
-            canonical_workspace_source="workspace_playground",
+            canonical_workspace_source="research_workspace",
         )
 
         assert linked.id == ws.id
         assert linked.metadata == {
             "existing": "kept",
             "canonical_workspace_id": "workspace-alpha",
-            "canonical_workspace_source": "workspace_playground",
+            "canonical_workspace_source": "research_workspace",
             "link_status": "linked",
         }
         assert len(db.list_workspaces()) == 1
@@ -416,14 +416,14 @@ class TestWorkspaceCRUD:
         db.link_workspace_to_canonical(
             first.id,
             canonical_workspace_id="workspace-alpha",
-            canonical_workspace_source="workspace_playground",
+            canonical_workspace_source="research_workspace",
         )
 
         with pytest.raises(ValueError, match="already linked"):
             db.link_workspace_to_canonical(
                 second.id,
                 canonical_workspace_id="workspace-alpha",
-                canonical_workspace_source="workspace_playground",
+                canonical_workspace_source="research_workspace",
             )
 
     def test_link_workspace_to_canonical_rejects_overwriting_existing_link(self, db):
@@ -431,7 +431,7 @@ class TestWorkspaceCRUD:
         db.link_workspace_to_canonical(
             ws.id,
             canonical_workspace_id="workspace-alpha",
-            canonical_workspace_source="workspace_playground",
+            canonical_workspace_source="research_workspace",
         )
 
         with pytest.raises(
@@ -441,7 +441,7 @@ class TestWorkspaceCRUD:
             db.link_workspace_to_canonical(
                 ws.id,
                 canonical_workspace_id="workspace-beta",
-                canonical_workspace_source="workspace_playground",
+                canonical_workspace_source="research_workspace",
             )
 
         assert (

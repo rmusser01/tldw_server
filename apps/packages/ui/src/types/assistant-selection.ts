@@ -30,6 +30,7 @@ export const getAssistantSelectionMode = (
 type SelectionModeCarrier = {
   id?: unknown
   metadata?: Record<string, unknown> | null
+  [key: string]: unknown
 }
 
 export const preserveAssistantSelectionMode = <
@@ -44,10 +45,10 @@ export const preserveAssistantSelectionMode = <
   const currentId = normalizeSelectionId(current?.id)
   if (!nextId || !currentId || nextId !== currentId) return next
 
-  const nextMode = getAssistantSelectionMode(next as AssistantSelection)
+  const nextMode = getAssistantSelectionMode(next as unknown as AssistantSelection)
   if (nextMode) return next
 
-  const currentMode = getAssistantSelectionMode(current as AssistantSelection)
+  const currentMode = getAssistantSelectionMode(current as unknown as AssistantSelection)
   if (!currentMode) return next
 
   return {

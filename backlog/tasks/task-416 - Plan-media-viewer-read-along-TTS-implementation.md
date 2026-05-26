@@ -60,10 +60,7 @@ Verification:
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-05-23 plan-hardening review:
-- Re-reviewed the implementation plan against current `origin/dev` after the read-along implementation and PR review fixes had already landed.
-- Confirmed the planned shared UI ownership, read-along module layout, `ContentViewer` wiring, annotation selection mediation, TTS provider abort surface, Dexie cache table, route parity guard, and focused test surfaces all exist in current code.
-- Updated the plan with an execution-status note so future workers do not mistake the preserved unchecked task-step checklist for remaining backlog work.
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

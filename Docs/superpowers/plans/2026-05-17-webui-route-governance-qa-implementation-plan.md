@@ -74,7 +74,6 @@ These checks remain evidence-backed but not fully deterministic:
 - Sidepanel screenshots when the route is extension-sidepanel reachable.
 
 Manual evidence must be stored under the relevant task or review artifact path and referenced from the Backlog task final summary.
-Use `apps/tldw-frontend/e2e/smoke/route-evidence-protocol.md` as the route-family evidence format for screenshots, DOM or browser observations, console/request triage, known skips, and Backlog closure notes.
 
 ## Current QA Surface
 
@@ -336,7 +335,7 @@ git commit -m "test: govern route inventory coverage"
 - Modify: `apps/packages/ui/src/components/Common/CommandPalette.tsx`
 - Modify: `apps/packages/ui/src/components/Common/CommandPaletteHost.tsx`
 
-- [x] **Step 1: Write heading governance test**
+- [ ] **Step 1: Write heading governance test**
 
 Create `route-heading-governance.spec.ts`:
 
@@ -363,7 +362,7 @@ test.describe("Route heading governance", () => {
 
 Before implementation, this simple test will fail on valid alias and exception routes. Replace the raw `h1Count` assertion with route metadata exception logic before committing.
 
-- [x] **Step 2: Run heading test to verify failures**
+- [ ] **Step 2: Run heading test to verify failures**
 
 Run:
 
@@ -373,7 +372,7 @@ bunx playwright test apps/tldw-frontend/e2e/smoke/route-heading-governance.spec.
 
 Expected: FAIL until metadata exceptions are wired.
 
-- [x] **Step 3: Add metadata-backed heading exceptions**
+- [ ] **Step 3: Add metadata-backed heading exceptions**
 
 Update the test so:
 
@@ -382,7 +381,7 @@ Update the test so:
 - Alias and redirect routes assert the final canonical path or redirect panel.
 - Internal/debug routes are excluded from user-facing heading enforcement.
 
-- [x] **Step 4: Add command target tests**
+- [ ] **Step 4: Add command target tests**
 
 Create `CommandPalette.route-targets.test.tsx` to assert:
 
@@ -392,7 +391,7 @@ Create `CommandPalette.route-targets.test.tsx` to assert:
 - No two route commands share the same label with different targets.
 - Aliases either do not appear as separate commands or are labeled as aliases.
 
-- [x] **Step 5: Run heading and command tests**
+- [ ] **Step 5: Run heading and command tests**
 
 Run:
 
@@ -410,20 +409,12 @@ bunx playwright test apps/tldw-frontend/e2e/smoke/route-heading-governance.spec.
 
 Expected: PASS.
 
-- [x] **Step 6: Commit heading and command governance**
+- [ ] **Step 6: Commit heading and command governance**
 
 ```bash
-git add apps/tldw-frontend/e2e/smoke/route-heading-governance.spec.ts apps/tldw-frontend/__tests__/smoke/route-heading-governance.metadata.test.ts apps/packages/ui/src/components/Common/__tests__/CommandPalette.route-targets.test.tsx apps/packages/ui/src/components/Common/__tests__/CommandPalette.shortcuts.test.tsx apps/packages/ui/src/components/Common/CommandPalette.tsx apps/packages/ui/src/components/Common/CommandPaletteHost.tsx
+git add apps/tldw-frontend/e2e/smoke/route-heading-governance.spec.ts apps/packages/ui/src/components/Common/__tests__/CommandPalette.route-targets.test.tsx apps/packages/ui/src/components/Common/__tests__/CommandPalette.shortcuts.test.tsx apps/packages/ui/src/components/Common/CommandPalette.tsx apps/packages/ui/src/components/Common/CommandPaletteHost.tsx
 git commit -m "test: govern headings and command targets"
 ```
-
-Implementation outcome:
-- Added metadata-backed command labels and h1 policy helpers in route metadata.
-- Added command palette route-target governance and frontend-owned route heading governance tests.
-- Browser QA initially found `/media` and `/notes` heading failures; `/media` needed route test mocks, and `/notes` is now a metadata-backed h1-policy exception because user-authored note content can contain document h1s.
-- Kept CommandPaletteHost and shortcut behavior unchanged because the new target contract passed without host changes.
-- Follow-up review moved the metadata-only heading governance test out of `@tldw/ui` so the package no longer imports frontend smoke inventory.
-- Follow-up review also added a non-empty browser route guard and made explicit `requiresH1: false` opt-outs require `h1ExceptionReason` directly.
 
 ### Task 3: Govern Sidepanel And Hosted Visibility
 
@@ -539,7 +530,7 @@ git commit -m "test: govern route capability states"
 - Modify: `apps/tldw-frontend/e2e/smoke/stage4-axe-high-risk-routes.helpers.ts`
 - Modify: `apps/tldw-frontend/package.json`
 
-- [x] **Step 1: Write 390px overflow governance**
+- [ ] **Step 1: Write 390px overflow governance**
 
 Create `route-responsive-governance.spec.ts` with route metadata-driven checks for:
 
@@ -566,7 +557,7 @@ const overflow = await page.evaluate(() => {
 expect(overflow, `${route.path} has page-level horizontal overflow`).toBeLessThanOrEqual(1)
 ```
 
-- [x] **Step 2: Add sidepanel-width checks**
+- [ ] **Step 2: Add sidepanel-width checks**
 
 For routes marked sidepanel available and changed by the current PR, run a sidepanel viewport check. Start with:
 
@@ -577,31 +568,29 @@ For routes marked sidepanel available and changed by the current PR, run a sidep
 
 Use route metadata to expand this set as sidepanel support grows.
 
-- [x] **Step 3: Align high-risk Axe routes with metadata**
+- [ ] **Step 3: Align high-risk Axe routes with metadata**
 
 Update `stage4-axe-high-risk-routes.spec.ts` so high-risk routes are selected from metadata or checked against metadata. Every manual high-risk route entry needs a rationale.
 
-- [x] **Step 4: Add package scripts**
+- [ ] **Step 4: Add package scripts**
 
 Add scripts to `apps/tldw-frontend/package.json`:
 
 ```json
 {
-  "e2e:smoke:route-governance": "playwright test e2e/smoke/route-responsive-governance.spec.ts --reporter=line --workers=1",
+  "e2e:smoke:route-governance": "playwright test e2e/smoke/route-heading-governance.spec.ts e2e/smoke/route-responsive-governance.spec.ts e2e/smoke/route-capability-state-governance.spec.ts --reporter=line",
   "e2e:smoke:governance-gate": "bun run e2e:smoke:all-pages:gate && bun run e2e:smoke:stage4 && bun run e2e:smoke:route-governance"
 }
 ```
 
-The route-governance script intentionally scopes to the stable WP12 responsive/sidepanel governance spec. An attempted broader bundle with existing route-heading and route-capability governance suites exposed unrelated baseline failures and is not used for this Task 5 gate.
-
 If repository script conventions avoid shell chaining, create a small Node runner instead of adding an `&&` script.
 
-- [x] **Step 5: Run responsive and Axe tests**
+- [ ] **Step 5: Run responsive and Axe tests**
 
 Run:
 
 ```bash
-bun run e2e:smoke:route-governance
+bunx playwright test apps/tldw-frontend/e2e/smoke/route-responsive-governance.spec.ts --reporter=line
 ```
 
 Expected: PASS.
@@ -614,7 +603,7 @@ bun run e2e:smoke:stage4
 
 Expected: PASS.
 
-- [x] **Step 6: Commit responsive and accessibility governance**
+- [ ] **Step 6: Commit responsive and accessibility governance**
 
 ```bash
 git add apps/tldw-frontend/e2e/smoke/route-responsive-governance.spec.ts apps/tldw-frontend/e2e/smoke/stage4-axe-high-risk-routes.spec.ts apps/tldw-frontend/e2e/smoke/stage4-axe-high-risk-routes.helpers.ts apps/tldw-frontend/package.json
@@ -628,7 +617,7 @@ git commit -m "test: govern responsive route behavior"
 - Modify: `Docs/Reviews/WEBUI_EXTENSION_UX_HCI_AUDIT_2026_05_17.md` only if the user asks to append final evidence links
 - Modify: Backlog tasks for completed slices during implementation
 
-- [x] **Step 1: Write evidence protocol**
+- [ ] **Step 1: Write evidence protocol**
 
 Create `route-evidence-protocol.md` documenting:
 
@@ -640,7 +629,7 @@ Create `route-evidence-protocol.md` documenting:
 - Known-skip format.
 - Backlog task final-summary fields.
 
-- [x] **Step 2: Add evidence template**
+- [ ] **Step 2: Add evidence template**
 
 Include this template:
 
@@ -660,11 +649,11 @@ Include this template:
 - Follow-up task:
 ```
 
-- [x] **Step 3: Link protocol from governance plan or task docs**
+- [ ] **Step 3: Link protocol from governance plan or task docs**
 
 Reference the protocol from Task 12 implementation PRs and route-family Backlog tasks. Do not append screenshot links to the original audit unless the user explicitly asks for a consolidated final report update.
 
-- [x] **Step 4: Commit evidence protocol**
+- [ ] **Step 4: Commit evidence protocol**
 
 ```bash
 git add apps/tldw-frontend/e2e/smoke/route-evidence-protocol.md

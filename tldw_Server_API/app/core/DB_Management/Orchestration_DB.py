@@ -569,7 +569,7 @@ class OrchestrationDB:
         workspace_id: int,
         *,
         canonical_workspace_id: str,
-        canonical_workspace_source: str = "workspace_playground",
+        canonical_workspace_source: str = "research_workspace",
         link_status: str = CANONICAL_WORKSPACE_LINKED_STATUS,
         metadata: dict[str, Any] | None = None,
     ) -> ACPWorkspace:

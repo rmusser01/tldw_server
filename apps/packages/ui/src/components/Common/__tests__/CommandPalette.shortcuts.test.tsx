@@ -71,6 +71,11 @@ const expectedShortcutLabel = (shortcut: {
     modifiers: toCommandModifiers(shortcut)
   })
 
+const LocationProbe = () => {
+  const location = useLocation()
+  return <span data-testid="current-route">{location.pathname}</span>
+}
+
 describe("CommandPalette shortcut hints", () => {
   const LocationProbe = () => {
     const location = useLocation()
@@ -199,9 +204,9 @@ describe("CommandPalette shortcut hints", () => {
     expect(newChat.className).toContain("focus-visible:ring-offset-bg")
   })
 
-  it("disables the global Cmd/Ctrl+K shortcut on the workspace playground route", async () => {
+  it("disables the global Cmd/Ctrl+K shortcut on the research workspace route", async () => {
     render(
-      <MemoryRouter initialEntries={["/workspace-playground"]}>
+      <MemoryRouter initialEntries={["/research-workspace"]}>
         <CommandPalette
           onNewChat={vi.fn()}
           onToggleRag={vi.fn()}
@@ -241,5 +246,53 @@ describe("CommandPalette shortcut hints", () => {
     fireEvent.keyDown(window, { key: "k", ctrlKey: true })
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("routes the Go to Chat command to the chat page", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+        <LocationProbe />
+      </MemoryRouter>
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    const goToChat = await screen.findByRole("option", { name: /Go to Chat/i })
+    fireEvent.click(goToChat)
+
+    expect(screen.getByTestId("current-route")).toHaveTextContent("/chat")
+  })
+
+  it("routes the Go to MCP Hub command to the product hub page", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+        <LocationProbe />
+      </MemoryRouter>
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    const goToMcpHub = await screen.findByRole("option", {
+      name: /Go to MCP Hub/i
+    })
+    fireEvent.click(goToMcpHub)
+
+    expect(screen.getByTestId("current-route")).toHaveTextContent("/mcp-hub")
   })
 })

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import JSZip from "jszip"
 import {
+  LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT,
   WORKSPACE_EXPORT_BUNDLE_FORMAT,
   WORKSPACE_EXPORT_BUNDLE_MANIFEST_FILE,
   WORKSPACE_EXPORT_BUNDLE_PAYLOAD_FILE,
@@ -20,10 +21,12 @@ const createBundleFixture = (): WorkspaceExportBundle => ({
     name: "Alpha Research",
     tag: "workspace:alpha-research",
     createdAt: new Date("2026-02-18T09:00:00.000Z"),
+    studyMaterialsPolicy: null,
     snapshot: {
       workspaceName: "Alpha Research",
       workspaceTag: "workspace:alpha-research",
       workspaceCreatedAt: new Date("2026-02-18T09:00:00.000Z"),
+      studyMaterialsPolicy: null,
       sources: [
         {
           id: "source-1",
@@ -176,6 +179,7 @@ describe("workspace bundle zip compatibility", () => {
 
   it("imports legacy JSON workspace bundles", async () => {
     const bundle = createBundleFixture()
+    bundle.format = LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT
     const file = new File([JSON.stringify(bundle)], "alpha.workspace.json", {
       type: "application/json"
     })

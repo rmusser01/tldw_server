@@ -153,8 +153,17 @@ describe("App layout routing", () => {
     expect(screen.getByTestId("page-content")).toBeInTheDocument()
   })
 
-  it("allows degraded server readiness only on chat", () => {
+  it("allows degraded server readiness on chat and research workspace routes", () => {
     const { rerender } = renderApp("/chat")
+    expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
+      "data-allow-degraded",
+      "true"
+    )
+
+    mockRouter.pathname = "/research-workspace"
+    mockRouter.asPath = "/research-workspace"
+    rerender(<App Component={DummyPage} pageProps={{}} />)
+
     expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
       "data-allow-degraded",
       "true"

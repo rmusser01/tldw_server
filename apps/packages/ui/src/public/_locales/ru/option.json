@@ -2624,8 +2624,8 @@
   "moderationPlayground_subtitle": {
     "message": "Семейные настройки безопасности и защитные барьеры сервера в одном месте."
   },
-  "header_workspacePlayground": {
-    "message": "Model Playground"
+  "header_researchWorkspace": {
+    "message": "Research Workspace"
   },
   "omniSearch_searchError": {
     "message": "Поиск не удался. Повторите попытку."
@@ -2679,7 +2679,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Workspace Playground"
+    "message": "Model Playground"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"

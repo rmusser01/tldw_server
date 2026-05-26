@@ -264,13 +264,64 @@ describe("background proxy fallback safety", () => {
     const pending = bgRequest({
       path: "/api/v1/notes/search/",
       method: "POST",
-      body: { q: "hello" }
+      body: { q: "hello" },
+      timeoutMs: 100
     })
     const assertion = expect(pending).rejects.toThrow("Extension messaging timeout")
 
-    await vi.advanceTimersByTimeAsync(3001)
+    await vi.advanceTimersByTimeAsync(5001)
 
     await assertion
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("falls back to direct request for idempotent Web Clipper saves on extension timeout", async () => {
+    vi.useFakeTimers()
+    mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { via: "direct" }
+    })
+
+    const { bgRequest } = await importProxy()
+    const pending = bgRequest<{ via: string }>({
+      path: "/api/v1/web-clipper/save",
+      method: "POST",
+      body: { clip_id: "clip-1" },
+      timeoutMs: 100
+    })
+
+    await vi.advanceTimersByTimeAsync(5001)
+
+    await expect(pending).resolves.toEqual({ via: "direct" })
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("waits beyond the short safe-method timeout for unsafe background writes", async () => {
+    vi.useFakeTimers()
+    mocks.sendMessage.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () => resolve({ ok: true, status: 200, data: { via: "runtime" } }),
+            3500
+          )
+        })
+    )
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { via: "direct" } })
+
+    const { bgRequest } = await importProxy()
+    const pending = bgRequest<{ via: string }>({
+      path: "/api/v1/web-clipper/save",
+      method: "POST",
+      body: { clip_id: "clip-1" }
+    })
+
+    await vi.advanceTimersByTimeAsync(3001)
+    await vi.advanceTimersByTimeAsync(500)
+
+    await expect(pending).resolves.toEqual({ via: "runtime" })
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
@@ -454,7 +505,7 @@ describe("background proxy fallback safety", () => {
         body: {
           getReader: () => reader
         }
-      } as Response
+      } as unknown as Response
     })
     vi.stubGlobal("fetch", fetchSpy as any)
 
@@ -799,7 +850,10 @@ describe("background proxy fallback safety", () => {
     }
 
     expect(fetchSpy).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchSpy.mock.calls[0] as [RequestInfo | URL, RequestInit?]
+    const [url, init] = fetchSpy.mock.calls[0] as unknown as [
+      RequestInfo | URL,
+      RequestInit?
+    ]
     const requestHeaders = new Headers(init?.headers)
     expect(url).toBe("/api/proxy/chat/completions")
     expect(requestHeaders.get("Authorization")).toBeNull()

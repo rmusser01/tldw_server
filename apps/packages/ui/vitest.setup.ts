@@ -10,6 +10,51 @@ const originalConsoleWarn = console.warn.bind(console)
 const originalConsoleError = console.error.bind(console)
 const originalMutationObserver = window.MutationObserver
 
+class MemoryStorage implements Storage {
+  private store = new Map<string, string>()
+
+  get length(): number {
+    return this.store.size
+  }
+
+  clear(): void {
+    this.store.clear()
+  }
+
+  getItem(key: string): string | null {
+    return this.store.get(String(key)) ?? null
+  }
+
+  key(index: number): string | null {
+    return Array.from(this.store.keys())[index] ?? null
+  }
+
+  removeItem(key: string): void {
+    this.store.delete(String(key))
+  }
+
+  setItem(key: string, value: string): void {
+    this.store.set(String(key), String(value))
+  }
+}
+
+const ensureLocalStorage = (): void => {
+  const storage =
+    typeof window.localStorage !== "undefined"
+      ? window.localStorage
+      : new MemoryStorage()
+
+  if (typeof globalThis.localStorage === "undefined") {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: storage,
+      writable: true
+    })
+  }
+}
+
+ensureLocalStorage()
+
 const TEXTAREA_STYLE_FALLBACKS: Record<string, string> = {
   "letter-spacing": "normal",
   "line-height": "20px",
@@ -159,6 +204,8 @@ window.getComputedStyle = ((element: Element, _pseudoElt?: string | null) =>
   withTextareaStyleFallback(element, originalGetComputedStyle(element))) as typeof window.getComputedStyle
 
 beforeAll(() => {
+  ensureLocalStorage()
+
   console.log = (...args: unknown[]) => {
     if (shouldSuppressConsoleOutput(args)) return
     originalConsoleLog(...args)

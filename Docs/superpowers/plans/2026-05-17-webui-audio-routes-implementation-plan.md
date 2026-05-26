@@ -13,29 +13,12 @@
 ## Source Documents
 
 - Backlog task: `TASK-418.8`
-- Completion ledger task: `TASK-418.8.6`
 - Parent implementation plan: `Docs/superpowers/plans/2026-05-17-webui-extension-ux-remediation-implementation-plan.md`
 - UX remediation spec: `Docs/superpowers/specs/2026-05-17-webui-extension-ux-remediation-program-design.md`
 - Dependency plans:
   - `Docs/superpowers/plans/2026-05-17-webui-route-contract-visibility-implementation-plan.md`
   - `Docs/superpowers/plans/2026-05-17-webui-capability-error-state-implementation-plan.md`
   - `Docs/superpowers/plans/2026-05-17-webui-responsive-landmarks-implementation-plan.md`
-
-## Completion Ledger
-
-WP11A implementation has been completed across six merged PRs on `dev`:
-
-| Plan task | Backlog task | PR | Merge commit | Result |
-| --- | --- | --- | --- | --- |
-| Task 1, route contract | `TASK-446` | `#1870` | `4a92ab1063c3bcf7b5435302320d88519c4b25ce` | Audio route-job contract and ownership tests landed. |
-| Task 2, `/audio` alias and `/speech` coverage | `TASK-418.8.1` | `#1875` | `c3b4d50ad6ce60a8a9f776f2cfac80fbeefc7730` | `/audio` alias and `/speech` first-screen coverage landed. |
-| Task 3, `/stt` recoverability | `TASK-418.8.2` | `#1881` | `2cfb7be6ef4e97d33eb4300c6fd7f82d2ce3a95c` | Dedicated STT route boundary, parity, readiness, and recovery states landed. |
-| Task 4, `/tts` route ownership | `TASK-418.8.3` | `#1885` | `312af10314b0bb00f4bc5831ab1d5f50f2531a98` | Locked TTS route ownership and provider/voice readiness states landed. |
-| Task 5, `/audiobook-studio` status-first route | `TASK-418.8.4` | `#1887` | `16a238c7e63126783cd803a2d399f401017d8818` | Audiobook Studio boundary, save status, output, and review fixes landed. |
-| Task 6, browser and responsive verification | `TASK-418.8.5` | `#1890` | `2a63a1600f6494db7a30325bb5a9b73dbcb06ebc` | Audio route smoke, responsive, and capability-aware verification landed. |
-
-Current `origin/dev` contains all six merge commits. The unchecked task steps
-below are marked complete as of the `TASK-418.8.6` ledger reconciliation.
 
 ## Audit Findings Addressed
 
@@ -327,7 +310,7 @@ Use the WP2 shared states. Do not invent audio-only names for equivalent states.
 - Modify: `apps/packages/ui/src/routes/route-registry.tsx`
 - Modify: `apps/tldw-frontend/extension/routes/route-registry.tsx`
 
-- [x] **Step 1: Write the failing route-job coverage test**
+- [ ] **Step 1: Write the failing route-job coverage test**
 
 Create `apps/packages/ui/src/routes/__tests__/audio-route-jobs.test.ts`:
 
@@ -361,7 +344,7 @@ describe("audio route jobs", () => {
 })
 ```
 
-- [x] **Step 2: Run the route-job test to verify it fails**
+- [ ] **Step 2: Run the route-job test to verify it fails**
 
 Run:
 
@@ -371,11 +354,11 @@ bunx vitest run apps/packages/ui/src/routes/__tests__/audio-route-jobs.test.ts
 
 Expected: FAIL because `audio-route-jobs.ts` does not exist.
 
-- [x] **Step 3: Add the audio route-job metadata**
+- [ ] **Step 3: Add the audio route-job metadata**
 
 Create `apps/packages/ui/src/routes/audio-route-jobs.ts` with the route contract from the "Audio Route Job Contract" section. Keep it pure data with no React imports.
 
-- [x] **Step 4: Run the route-job test to verify it passes**
+- [ ] **Step 4: Run the route-job test to verify it passes**
 
 Run:
 
@@ -385,7 +368,7 @@ bunx vitest run apps/packages/ui/src/routes/__tests__/audio-route-jobs.test.ts
 
 Expected: PASS.
 
-- [x] **Step 5: Extend route identity tests**
+- [ ] **Step 5: Extend route identity tests**
 
 Extend `apps/packages/ui/src/routes/__tests__/option-audio-route-identity.test.tsx` so it also asserts:
 
@@ -394,7 +377,7 @@ Extend `apps/packages/ui/src/routes/__tests__/option-audio-route-identity.test.t
 - `/tts` still renders `SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher`.
 - `/tts` does not render `TtsPlaygroundPage` unless the implementation intentionally changes the route contract and updates `audio-route-jobs.ts` in the same commit.
 
-- [x] **Step 6: Commit the route contract**
+- [ ] **Step 6: Commit the route contract**
 
 ```bash
 git add apps/packages/ui/src/routes/audio-route-jobs.ts apps/packages/ui/src/routes/__tests__/audio-route-jobs.test.ts apps/packages/ui/src/routes/__tests__/option-audio-route-identity.test.tsx
@@ -409,7 +392,7 @@ git commit -m "test: lock audio route ownership"
 - Test: `apps/tldw-frontend/e2e/workflows/tier-2-features/audio-alias.spec.ts`
 - Test: `apps/tldw-frontend/e2e/workflows/tier-2-features/speech-playground.spec.ts`
 
-- [x] **Step 1: Write the alias regression test**
+- [ ] **Step 1: Write the alias regression test**
 
 Create or extend a Playwright route test:
 
@@ -423,7 +406,7 @@ test("audio alias opens the canonical speech playground", async ({ page }) => {
 })
 ```
 
-- [x] **Step 2: Run the alias test to capture current behavior**
+- [ ] **Step 2: Run the alias test to capture current behavior**
 
 Run:
 
@@ -433,7 +416,7 @@ bunx playwright test apps/tldw-frontend/e2e/workflows/tier-2-features/audio-alia
 
 Expected: PASS if the current `RouteRedirect` behavior is intact. If it fails, inspect whether Next routing base paths or hosted routing changed before editing.
 
-- [x] **Step 3: Keep `/audio` UI-free unless the alias is broken**
+- [ ] **Step 3: Keep `/audio` UI-free unless the alias is broken**
 
 Leave `apps/tldw-frontend/pages/audio.tsx` as:
 
@@ -447,7 +430,7 @@ export default function AudioPage() {
 
 Only adjust imports or route plumbing if the test exposes an actual alias failure.
 
-- [x] **Step 4: Verify `/speech` first screen route identity**
+- [ ] **Step 4: Verify `/speech` first screen route identity**
 
 Extend `speech-playground.spec.ts` to assert:
 
@@ -457,7 +440,7 @@ Extend `speech-playground.spec.ts` to assert:
 - TTS provider readiness is visible near TTS controls.
 - Generated audio history or empty output state is present after route load.
 
-- [x] **Step 5: Run speech route E2E**
+- [ ] **Step 5: Run speech route E2E**
 
 Run:
 
@@ -467,7 +450,7 @@ bunx playwright test apps/tldw-frontend/e2e/workflows/tier-2-features/speech-pla
 
 Expected: PASS.
 
-- [x] **Step 6: Commit the alias and speech route coverage**
+- [ ] **Step 6: Commit the alias and speech route coverage**
 
 ```bash
 git add apps/tldw-frontend/e2e/workflows/tier-2-features/audio-alias.spec.ts apps/tldw-frontend/e2e/workflows/tier-2-features/speech-playground.spec.ts apps/tldw-frontend/pages/audio.tsx
@@ -487,7 +470,7 @@ git commit -m "test: preserve audio alias to speech playground"
 - Modify: `apps/packages/ui/src/components/Option/STT/__tests__/HistoryPanel.test.tsx`
 - Modify: `apps/tldw-frontend/e2e/workflows/tier-2-features/stt-transcription.spec.ts`
 
-- [x] **Step 1: Add failing route-boundary coverage**
+- [ ] **Step 1: Add failing route-boundary coverage**
 
 Extend `option-audio-route-identity.test.tsx`:
 
@@ -502,7 +485,7 @@ it("wraps the dedicated STT route in a route boundary", async () => {
 })
 ```
 
-- [x] **Step 2: Run the route-boundary test to verify it fails**
+- [ ] **Step 2: Run the route-boundary test to verify it fails**
 
 Run:
 
@@ -512,7 +495,7 @@ bunx vitest run apps/packages/ui/src/routes/__tests__/option-audio-route-identit
 
 Expected: FAIL while `option-stt.tsx` lacks `RouteErrorBoundary`.
 
-- [x] **Step 3: Add the route boundary and keep hosted behavior**
+- [ ] **Step 3: Add the route boundary and keep hosted behavior**
 
 Wrap `OptionStt` in:
 
@@ -524,11 +507,11 @@ Wrap `OptionStt` in:
 
 Keep `HostedAudioFeatureMessage` as the hosted-mode path.
 
-- [x] **Step 4: Verify extension route parity before changing ownership**
+- [ ] **Step 4: Verify extension route parity before changing ownership**
 
 Add tests or route-registry assertions that document the current extension `/stt` mapping. If the extension must match the shared WebUI dedicated STT route, update `apps/tldw-frontend/extension/routes/option-stt.tsx` to render `SttPlaygroundPage` with the same hosted, loading, and boundary behavior. If extension bundle constraints require `SpeechPlaygroundPage initialMode="speak"`, record that exception in `audio-route-jobs.ts` with a distinct `extension_route` entry and route-specific test.
 
-- [x] **Step 5: Add STT page readiness tests**
+- [ ] **Step 5: Add STT page readiness tests**
 
 Extend `SttPlaygroundPage.test.tsx` to cover:
 
@@ -540,11 +523,11 @@ Extend `SttPlaygroundPage.test.tsx` to cover:
 - Save-to-notes preserves transcript text on failure.
 - History empty state explains what will appear after transcription.
 
-- [x] **Step 6: Implement the minimal STT page adjustments**
+- [ ] **Step 6: Implement the minimal STT page adjustments**
 
 Use existing STT components and hooks. Keep advanced controls inside the existing `InlineSettingsPanel`. Do not move comparison, history, or shortcuts into new global chrome.
 
-- [x] **Step 7: Run STT component tests**
+- [ ] **Step 7: Run STT component tests**
 
 Run:
 
@@ -554,7 +537,7 @@ bunx vitest run apps/packages/ui/src/components/Option/STT/__tests__/SttPlaygrou
 
 Expected: PASS.
 
-- [x] **Step 8: Run STT E2E**
+- [ ] **Step 8: Run STT E2E**
 
 Run:
 
@@ -564,7 +547,7 @@ bunx playwright test apps/tldw-frontend/e2e/workflows/tier-2-features/stt-transc
 
 Expected: PASS.
 
-- [x] **Step 9: Commit STT route readiness**
+- [ ] **Step 9: Commit STT route readiness**
 
 ```bash
 git add apps/packages/ui/src/routes/option-stt.tsx apps/tldw-frontend/extension/routes/option-stt.tsx apps/packages/ui/src/components/Option/STT apps/tldw-frontend/e2e/workflows/tier-2-features/stt-transcription.spec.ts apps/packages/ui/src/routes/__tests__/option-audio-route-identity.test.tsx
@@ -588,7 +571,7 @@ git commit -m "feat: clarify stt route readiness"
 - Modify: `apps/packages/ui/src/components/Option/TTS/__tests__/TtsPlaygroundPage.defaults.test.tsx`
 - Modify: `apps/tldw-frontend/e2e/workflows/tier-2-features/tts-synthesis.spec.ts`
 
-- [x] **Step 1: Add route-owner guard coverage**
+- [ ] **Step 1: Add route-owner guard coverage**
 
 Extend `option-audio-route-identity.test.tsx` so `/tts` asserts:
 
@@ -598,7 +581,7 @@ Extend `option-audio-route-identity.test.tsx` so `/tts` asserts:
 - Mode switcher is hidden.
 - `TtsPlaygroundPage` is not rendered by the route.
 
-- [x] **Step 2: Run route-owner guard coverage**
+- [ ] **Step 2: Run route-owner guard coverage**
 
 Run:
 
@@ -608,7 +591,7 @@ bunx vitest run apps/packages/ui/src/routes/__tests__/option-audio-route-identit
 
 Expected: PASS before implementation. This protects current ownership while the page content changes.
 
-- [x] **Step 3: Add TTS readiness tests to the routed page**
+- [ ] **Step 3: Add TTS readiness tests to the routed page**
 
 Extend Speech tests for the locked listen route:
 
@@ -620,15 +603,15 @@ Extend Speech tests for the locked listen route:
 - Generated audio segments remain inspectable after generation.
 - Advanced voice and model controls remain accessible through current inspector tabs.
 
-- [x] **Step 4: Implement TTS page adjustments in `SpeechPlaygroundPage` and child components**
+- [ ] **Step 4: Implement TTS page adjustments in `SpeechPlaygroundPage` and child components**
 
 Keep the current locked listen route. Use existing provider strip, voice picker, inspector, sticky action bar, render strip, generated segment list, and fallback components. Avoid adding a second TTS route surface through `TtsPlaygroundPage`.
 
-- [x] **Step 5: Keep legacy `TtsPlaygroundPage` from drifting**
+- [ ] **Step 5: Keep legacy `TtsPlaygroundPage` from drifting**
 
 If `TtsPlaygroundPage` stays in the repository, keep its default test focused on component defaults and add a comment-free test assertion that the route owner remains `SpeechPlaygroundPage:listen` in `audio-route-jobs.ts`. Do not add new user-facing copy to explain why two components exist.
 
-- [x] **Step 6: Run TTS component tests**
+- [ ] **Step 6: Run TTS component tests**
 
 Run:
 
@@ -638,7 +621,7 @@ bunx vitest run apps/packages/ui/src/components/Option/Speech/__tests__/SpeechPl
 
 Expected: PASS.
 
-- [x] **Step 7: Run TTS E2E**
+- [ ] **Step 7: Run TTS E2E**
 
 Run:
 
@@ -648,7 +631,7 @@ bunx playwright test apps/tldw-frontend/e2e/workflows/tier-2-features/tts-synthe
 
 Expected: PASS.
 
-- [x] **Step 8: Commit TTS route readiness**
+- [ ] **Step 8: Commit TTS route readiness**
 
 ```bash
 git add apps/packages/ui/src/routes/option-tts.tsx apps/tldw-frontend/extension/routes/option-tts.tsx apps/packages/ui/src/components/Option/Speech apps/packages/ui/src/components/Option/TTS apps/tldw-frontend/e2e/workflows/tier-2-features/tts-synthesis.spec.ts apps/packages/ui/src/routes/__tests__/option-audio-route-identity.test.tsx
@@ -669,7 +652,7 @@ git commit -m "feat: clarify tts route readiness"
 - Test: add or extend `apps/packages/ui/src/components/Option/AudiobookStudio/__tests__/AudiobookStudioPage.test.tsx`
 - Test: extend `apps/tldw-frontend/e2e/workflows/tier-2-features/audiobook-studio.spec.ts`
 
-- [x] **Step 1: Add failing route-boundary coverage**
+- [ ] **Step 1: Add failing route-boundary coverage**
 
 Extend the audio route identity test so `/audiobook-studio` requires:
 
@@ -677,7 +660,7 @@ Extend the audio route identity test so `/audiobook-studio` requires:
 - `RouteErrorBoundary routeLabel="Audiobook Studio"`.
 - `AudiobookStudioPage` as the route-owned component.
 
-- [x] **Step 2: Run route-boundary coverage to verify it fails**
+- [ ] **Step 2: Run route-boundary coverage to verify it fails**
 
 Run:
 
@@ -687,7 +670,7 @@ bunx vitest run apps/packages/ui/src/routes/__tests__/option-audio-route-identit
 
 Expected: FAIL while `option-audiobook-studio.tsx` lacks `RouteErrorBoundary`.
 
-- [x] **Step 3: Add the route boundary**
+- [ ] **Step 3: Add the route boundary**
 
 Wrap `OptionAudiobookStudio` in:
 
@@ -699,7 +682,7 @@ Wrap `OptionAudiobookStudio` in:
 </RouteErrorBoundary>
 ```
 
-- [x] **Step 4: Add audiobook studio status tests**
+- [ ] **Step 4: Add audiobook studio status tests**
 
 Create or extend `AudiobookStudioPage.test.tsx` to cover:
 
@@ -711,11 +694,11 @@ Create or extend `AudiobookStudioPage.test.tsx` to cover:
 - Generation unavailable state keeps content and chapters intact.
 - Output empty state explains that generated chapters appear after generation.
 
-- [x] **Step 5: Implement minimal audiobook studio adjustments**
+- [ ] **Step 5: Implement minimal audiobook studio adjustments**
 
 Use current `AudiobookStudioPage` layout, `DismissibleBetaAlert`, tab components, project store, autosave state, and generation state. Keep dense project controls for returning users. Add route-level readiness or recovery only where existing state exists.
 
-- [x] **Step 6: Run audiobook component tests**
+- [ ] **Step 6: Run audiobook component tests**
 
 Run:
 
@@ -725,7 +708,7 @@ bunx vitest run apps/packages/ui/src/components/Option/AudiobookStudio/__tests__
 
 Expected: PASS.
 
-- [x] **Step 7: Run audiobook E2E**
+- [ ] **Step 7: Run audiobook E2E**
 
 Run:
 
@@ -735,7 +718,7 @@ bunx playwright test apps/tldw-frontend/e2e/workflows/tier-2-features/audiobook-
 
 Expected: PASS.
 
-- [x] **Step 8: Commit audiobook route readiness**
+- [ ] **Step 8: Commit audiobook route readiness**
 
 ```bash
 git add apps/packages/ui/src/routes/option-audiobook-studio.tsx apps/packages/ui/src/components/Option/AudiobookStudio apps/tldw-frontend/e2e/workflows/tier-2-features/audiobook-studio.spec.ts apps/packages/ui/src/routes/__tests__/option-audio-route-identity.test.tsx
@@ -751,7 +734,7 @@ git commit -m "feat: clarify audiobook studio readiness"
 - Modify: `apps/tldw-frontend/e2e/workflows/tier-2-features/tts-synthesis.spec.ts`
 - Modify: `apps/tldw-frontend/e2e/workflows/tier-2-features/audiobook-studio.spec.ts`
 
-- [x] **Step 1: Extend stage 7 smoke coverage**
+- [ ] **Step 1: Extend stage 7 smoke coverage**
 
 Add assertions that each route exposes:
 
@@ -761,7 +744,7 @@ Add assertions that each route exposes:
 - Recovery path when the feature is unavailable.
 - Mobile viewport layout without overlapping controls.
 
-- [x] **Step 2: Run route unit tests**
+- [ ] **Step 2: Run route unit tests**
 
 Run:
 
@@ -771,7 +754,7 @@ bunx vitest run apps/packages/ui/src/routes/__tests__/audio-route-jobs.test.ts a
 
 Expected: PASS.
 
-- [x] **Step 3: Run focused audio component tests**
+- [ ] **Step 3: Run focused audio component tests**
 
 Run:
 
@@ -781,7 +764,7 @@ bunx vitest run apps/packages/ui/src/components/Option/Speech/__tests__ apps/pac
 
 Expected: PASS.
 
-- [x] **Step 4: Run required WP11A Playwright coverage**
+- [ ] **Step 4: Run required WP11A Playwright coverage**
 
 Run:
 
@@ -791,7 +774,7 @@ bunx playwright test apps/tldw-frontend/e2e/workflows/tier-2-features/stt-transc
 
 Expected: PASS.
 
-- [x] **Step 5: Run expanded audio workflow Playwright coverage**
+- [ ] **Step 5: Run expanded audio workflow Playwright coverage**
 
 Run:
 
@@ -801,7 +784,7 @@ bunx playwright test apps/tldw-frontend/e2e/workflows/tier-2-features/speech-pla
 
 Expected: PASS.
 
-- [x] **Step 6: Perform browser QA**
+- [ ] **Step 6: Perform browser QA**
 
 With the WebUI running, inspect these routes in desktop and mobile viewports:
 
@@ -813,7 +796,7 @@ With the WebUI running, inspect these routes in desktop and mobile viewports:
 
 Capture observations in the Backlog task and PR description. If a route has a browser-only issue, add the smallest route-specific follow-up test before fixing.
 
-- [x] **Step 7: Run final repository hygiene checks for touched scope**
+- [ ] **Step 7: Run final repository hygiene checks for touched scope**
 
 Run:
 
@@ -831,7 +814,7 @@ bunx tsc --noEmit
 
 Expected: PASS, or document pre-existing TypeScript failures with exact file and error evidence.
 
-- [x] **Step 8: Commit verification updates**
+- [ ] **Step 8: Commit verification updates**
 
 ```bash
 git add apps/tldw-frontend/e2e/smoke/stage7-audio-regression.spec.ts apps/tldw-frontend/e2e/workflows/tier-2-features/speech-playground.spec.ts apps/tldw-frontend/e2e/workflows/tier-2-features/stt-transcription.spec.ts apps/tldw-frontend/e2e/workflows/tier-2-features/tts-synthesis.spec.ts apps/tldw-frontend/e2e/workflows/tier-2-features/audiobook-studio.spec.ts

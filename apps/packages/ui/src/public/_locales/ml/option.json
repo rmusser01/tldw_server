@@ -2534,8 +2534,8 @@
   "moderationPlayground_subtitle": {
     "message": "കുടുംബ സുരക്ഷ നിയന്ത്രണങ്ങളും സർവർ ഗാർഡ്റെയിലുകളും ഒരിടത്ത്."
   },
-  "header_workspacePlayground": {
-    "message": "Model Playground"
+  "header_researchWorkspace": {
+    "message": "Research Workspace"
   },
   "omniSearch_searchError": {
     "message": "തിരയൽ പരാജയപ്പെട്ടു. വീണ്ടും ശ്രമിക്കുക."
@@ -2589,7 +2589,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Workspace Playground"
+    "message": "Model Playground"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"

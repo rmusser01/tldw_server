@@ -581,7 +581,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 47  # Schema v47 adds persona visual candidate provenance
+    _CURRENT_SCHEMA_VERSION = 47  # Schema v47 adds Research Workspace migration protocol state
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
     _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
@@ -5358,13 +5358,100 @@ UPDATE db_schema_version
    AND version < 46;
 """
 
+    _MIGRATION_SQL_V46_TO_V47 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 47 — Research Workspace migration protocol state (2026-05-23)
+───────────────────────────────────────────────────────────────*/
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
+  id                     TEXT PRIMARY KEY NOT NULL,
+  target_workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  target_workspace_name  TEXT NOT NULL,
+  source_product         TEXT NOT NULL,
+  idempotency_key        TEXT NOT NULL,
+  manifest_hash          TEXT NOT NULL,
+  manifest_json          TEXT NOT NULL DEFAULT '{}',
+  diagnostics_json       TEXT NOT NULL DEFAULT '{}',
+  declared_chunks_json   TEXT NOT NULL DEFAULT '[]',
+  status                 TEXT NOT NULL DEFAULT 'created',
+  finalized_at           DATETIME,
+  recovery_manifest_json TEXT,
+  client_delete_eligible BOOLEAN NOT NULL DEFAULT 0,
+  client_delete_ack_at   DATETIME,
+  created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  version                INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_migration_sessions_idempotency
+  ON workspace_migration_sessions(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_ws_migration_sessions_workspace
+  ON workspace_migration_sessions(target_workspace_id);
+
+CREATE TABLE IF NOT EXISTS workspace_migration_chunks (
+  migration_id TEXT NOT NULL REFERENCES workspace_migration_sessions(id) ON DELETE CASCADE,
+  id           TEXT NOT NULL,
+  sha256       TEXT NOT NULL,
+  byte_count   INTEGER NOT NULL,
+  chunk_kind   TEXT NOT NULL DEFAULT 'workspace_bundle',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  accepted_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (migration_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ws_migration_chunks_migration
+  ON workspace_migration_chunks(migration_id);
+
+UPDATE db_schema_version
+   SET version = 47
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 47;
+"""
+
     _MIGRATION_SQL_V46_TO_V47_POSTGRES = """
 /*───────────────────────────────────────────────────────────────
-  Migration to Version 47 — Persona visual candidate provenance (2026-05-16) [Postgres]
+  Migration to Version 47 — Research Workspace migration protocol state (2026-05-23) [Postgres]
 ───────────────────────────────────────────────────────────────*/
 
-ALTER TABLE persona_visual_candidates
-  ADD COLUMN IF NOT EXISTS generation_provenance_json TEXT NOT NULL DEFAULT '{}';
+CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
+  id                     TEXT PRIMARY KEY NOT NULL,
+  target_workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  target_workspace_name  TEXT NOT NULL,
+  source_product         TEXT NOT NULL,
+  idempotency_key        TEXT NOT NULL,
+  manifest_hash          TEXT NOT NULL,
+  manifest_json          TEXT NOT NULL DEFAULT '{}',
+  diagnostics_json       TEXT NOT NULL DEFAULT '{}',
+  declared_chunks_json   TEXT NOT NULL DEFAULT '[]',
+  status                 TEXT NOT NULL DEFAULT 'created',
+  finalized_at           TIMESTAMP,
+  recovery_manifest_json TEXT,
+  client_delete_eligible BOOLEAN NOT NULL DEFAULT FALSE,
+  client_delete_ack_at   TIMESTAMP,
+  created_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  version                INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_migration_sessions_idempotency
+  ON workspace_migration_sessions(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_ws_migration_sessions_workspace
+  ON workspace_migration_sessions(target_workspace_id);
+
+CREATE TABLE IF NOT EXISTS workspace_migration_chunks (
+  migration_id TEXT NOT NULL REFERENCES workspace_migration_sessions(id) ON DELETE CASCADE,
+  id           TEXT NOT NULL,
+  sha256       TEXT NOT NULL,
+  byte_count   INTEGER NOT NULL,
+  chunk_kind   TEXT NOT NULL DEFAULT 'workspace_bundle',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  accepted_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (migration_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ws_migration_chunks_migration
+  ON workspace_migration_chunks(migration_id);
 
 UPDATE db_schema_version
    SET version = 47
@@ -7526,23 +7613,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError(f"Unexpected error migrating to V46 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
     def _migrate_from_v46_to_v47(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V46 to V47 (persona visual candidate provenance)."""
+        """Migrate schema from V46 to V47 (Research Workspace migration protocol)."""
         logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V46 to V47 for DB: {self.db_path_str}...")
         try:
-            candidate_cols = {
-                str(row[1])
-                for row in conn.execute("PRAGMA table_info('persona_visual_candidates')").fetchall()
-            }
-            if "generation_provenance_json" not in candidate_cols:
-                conn.execute(
-                    "ALTER TABLE persona_visual_candidates "
-                    "ADD COLUMN generation_provenance_json TEXT NOT NULL DEFAULT '{}'"
-                )
-            conn.execute(
-                "UPDATE db_schema_version SET version = 47 "
-                "WHERE schema_name = ? AND version < 47",
-                (self._SCHEMA_NAME,),
-            )
+            self._ensure_workspace_migration_schema_sqlite(conn)
+            conn.executescript(self._MIGRATION_SQL_V46_TO_V47)
             final_version = self._get_db_version(conn)
             if final_version != 47:
                 raise SchemaError(  # noqa: TRY003, TRY301
@@ -7558,127 +7633,56 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V46->V47: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V47 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
-    def _sqlite_linear_migration_steps(self) -> Mapping[int, Callable[[sqlite3.Connection], None]]:
-        """Return SQLite migration handlers keyed by their source schema version."""
-        return {
-            4: self._migrate_from_v4_to_v5,
-            5: self._migrate_from_v5_to_v6,
-            6: self._migrate_from_v6_to_v7,
-            7: self._migrate_from_v7_to_v8,
-            8: self._migrate_from_v8_to_v9,
-            9: self._migrate_from_v9_to_v10,
-            10: self._migrate_from_v10_to_v11,
-            11: self._migrate_from_v11_to_v12,
-            12: self._migrate_from_v12_to_v13,
-            13: self._migrate_from_v13_to_v14,
-            14: self._migrate_from_v14_to_v15,
-            15: self._migrate_from_v15_to_v16,
-            16: self._migrate_from_v16_to_v17,
-            17: self._migrate_from_v17_to_v18,
-            18: self._migrate_from_v18_to_v19,
-            19: self._migrate_from_v19_to_v20,
-            20: self._migrate_from_v20_to_v21,
-            21: self._migrate_from_v21_to_v22,
-            22: self._migrate_from_v22_to_v23,
-            23: self._migrate_from_v23_to_v24,
-            24: self._migrate_from_v24_to_v25,
-            25: self._migrate_from_v25_to_v26,
-            26: self._migrate_from_v26_to_v27,
-            27: self._migrate_from_v27_to_v28,
-            28: self._migrate_from_v28_to_v29,
-            29: self._migrate_from_v29_to_v30,
-            30: self._migrate_from_v30_to_v31,
-            31: self._migrate_from_v31_to_v32,
-            32: self._migrate_from_v32_to_v33,
-            33: self._migrate_from_v33_to_v34,
-            34: self._migrate_from_v34_to_v35,
-            35: self._migrate_from_v35_to_v36,
-            36: self._migrate_from_v36_to_v37,
-            37: self._migrate_from_v37_to_v38,
-            38: self._migrate_from_v38_to_v39,
-            39: self._migrate_from_v39_to_v40,
-            40: self._migrate_from_v40_to_v41,
-            41: self._migrate_from_v41_to_v42,
-            42: self._migrate_from_v42_to_v43,
-            43: self._migrate_from_v43_to_v44,
-            44: self._migrate_from_v44_to_v45,
-            45: self._migrate_from_v45_to_v46,
-            46: self._migrate_from_v46_to_v47,
-        }
-
-    def _migrate_sqlite_linearly_to_target(
-        self,
-        conn: sqlite3.Connection,
-        current_db_version: int,
-        target_version: int,
-        current_initial_version: int,
-    ) -> int:
-        """Run registered SQLite migrations until `target_version` is reached."""
-        migration_steps = self._sqlite_linear_migration_steps()
-        while current_db_version < target_version:
-            migration_step = migration_steps.get(current_db_version)
-            if migration_step is None:
-                missing_target_version = current_db_version + 1
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"Migration path undefined for '{self._SCHEMA_NAME}' from version "
-                    f"{current_db_version} to {missing_target_version} while migrating "
-                    f"from {current_initial_version} to {target_version}. "
-                    f"Manual migration or a new database may be required."
-                )
-            migration_step(conn)
-            next_version = self._get_db_version(conn)
-            expected_next_version = current_db_version + 1
-            if next_version != expected_next_version:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"Migration for '{self._SCHEMA_NAME}' advanced from version "
-                    f"{current_db_version} to {next_version}; expected {expected_next_version}."
-                )
-            current_db_version = next_version
-        return current_db_version
-
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Repair persona persistence tables for databases with collided schema versions."""
-        required_tables = {
-            "persona_profiles",
-            "persona_scope_rules",
-            "persona_policy_rules",
-            "persona_sessions",
-            "persona_memory_entries",
-        }
-        existing_tables = self._sqlite_table_names(conn)
-        missing_tables = required_tables - existing_tables
-        if missing_tables:
-            logger.warning(
-                "[{}] Persona persistence tables missing despite current schema marker: {}. Reapplying base schema.",
-                self._SCHEMA_NAME,
-                ", ".join(sorted(missing_tables)),
-            )
+        """Ensure persona persistence tables and columns exist for drifted SQLite schemas."""
+        try:
             conn.executescript(self._MIGRATION_SQL_V25_TO_V26)
+            conn.executescript(self._MIGRATION_SQL_V32_TO_V33)
+            conn.executescript(self._MIGRATION_SQL_V39_TO_V40)
 
-        profile_cols = self._sqlite_column_names(conn, "persona_profiles")
-        if "use_persona_state_context_default" not in profile_cols:
+            profile_cols = self._sqlite_column_names(conn, "persona_profiles")
+            profile_col_ddls = {
+                "use_persona_state_context_default": (
+                    "ALTER TABLE persona_profiles "
+                    "ADD COLUMN use_persona_state_context_default BOOLEAN NOT NULL DEFAULT 1"
+                ),
+                "origin_character_id": "ALTER TABLE persona_profiles ADD COLUMN origin_character_id INTEGER",
+                "origin_character_name": "ALTER TABLE persona_profiles ADD COLUMN origin_character_name TEXT",
+                "origin_character_snapshot_at": (
+                    "ALTER TABLE persona_profiles ADD COLUMN origin_character_snapshot_at TEXT"
+                ),
+                "voice_defaults_json": "ALTER TABLE persona_profiles ADD COLUMN voice_defaults_json TEXT",
+                "setup_json": "ALTER TABLE persona_profiles ADD COLUMN setup_json TEXT",
+            }
+            for col_name, ddl in profile_col_ddls.items():
+                if col_name not in profile_cols:
+                    conn.execute(ddl)
+
+            memory_cols = self._sqlite_column_names(conn, "persona_memory_entries")
+            if "scope_snapshot_id" not in memory_cols:
+                conn.execute("ALTER TABLE persona_memory_entries ADD COLUMN scope_snapshot_id TEXT")
+            if "session_id" not in memory_cols:
+                conn.execute("ALTER TABLE persona_memory_entries ADD COLUMN session_id TEXT")
             conn.execute(
-                "ALTER TABLE persona_profiles "
-                "ADD COLUMN use_persona_state_context_default BOOLEAN NOT NULL DEFAULT 1"
+                "CREATE INDEX IF NOT EXISTS idx_persona_memory_scope "
+                "ON persona_memory_entries(user_id, persona_id, scope_snapshot_id, archived, deleted)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_persona_memory_session "
+                "ON persona_memory_entries(user_id, persona_id, session_id, archived, deleted)"
             )
 
-        memory_cols = self._sqlite_column_names(conn, "persona_memory_entries")
-        if "scope_snapshot_id" not in memory_cols:
-            conn.execute("ALTER TABLE persona_memory_entries ADD COLUMN scope_snapshot_id TEXT")
-        if "session_id" not in memory_cols:
-            conn.execute("ALTER TABLE persona_memory_entries ADD COLUMN session_id TEXT")
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_persona_memory_scope
-              ON persona_memory_entries(user_id, persona_id, scope_snapshot_id, archived, deleted)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_persona_memory_session
-              ON persona_memory_entries(user_id, persona_id, session_id, archived, deleted)
-            """
-        )
+            session_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_sessions')").fetchall()}
+            if "activity_surface" not in session_cols:
+                conn.execute(
+                    "ALTER TABLE persona_sessions ADD COLUMN activity_surface TEXT NOT NULL DEFAULT 'api.persona'"
+                )
+            if "preferences_json" not in session_cols:
+                conn.execute(
+                    "ALTER TABLE persona_sessions ADD COLUMN preferences_json TEXT NOT NULL DEFAULT '{}'"
+                )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite persona persistence schema: {exc}") from exc  # noqa: TRY003
 
     def _ensure_recent_persona_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Backfill recent persona schema columns after version-number collisions."""
@@ -8813,6 +8817,102 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for statement in statements:
             self.backend.execute(statement, connection=conn)
 
+    def _ensure_workspace_migration_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure Research Workspace migration protocol tables exist for SQLite."""
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
+                    id                     TEXT PRIMARY KEY NOT NULL,
+                    target_workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    target_workspace_name  TEXT NOT NULL,
+                    source_product         TEXT NOT NULL,
+                    idempotency_key        TEXT NOT NULL,
+                    manifest_hash          TEXT NOT NULL,
+                    manifest_json          TEXT NOT NULL DEFAULT '{}',
+                    diagnostics_json       TEXT NOT NULL DEFAULT '{}',
+                    declared_chunks_json   TEXT NOT NULL DEFAULT '[]',
+                    status                 TEXT NOT NULL DEFAULT 'created',
+                    finalized_at           DATETIME,
+                    recovery_manifest_json TEXT,
+                    client_delete_eligible BOOLEAN NOT NULL DEFAULT 0,
+                    client_delete_ack_at   DATETIME,
+                    created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    version                INTEGER NOT NULL DEFAULT 1
+                )
+            """)
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_migration_sessions_idempotency "
+                "ON workspace_migration_sessions(idempotency_key)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_migration_sessions_workspace "
+                "ON workspace_migration_sessions(target_workspace_id)"
+            )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_migration_chunks (
+                    migration_id  TEXT NOT NULL REFERENCES workspace_migration_sessions(id) ON DELETE CASCADE,
+                    id            TEXT NOT NULL,
+                    sha256        TEXT NOT NULL,
+                    byte_count    INTEGER NOT NULL,
+                    chunk_kind    TEXT NOT NULL DEFAULT 'workspace_bundle',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    accepted_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (migration_id, id)
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_migration_chunks_migration "
+                "ON workspace_migration_chunks(migration_id)"
+            )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite workspace migration schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_workspace_migration_schema_postgres(self, conn: Any) -> None:
+        """Ensure Research Workspace migration protocol tables exist for PostgreSQL."""
+        if not hasattr(self.backend, "execute"):
+            return
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
+                id                     TEXT PRIMARY KEY NOT NULL,
+                target_workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                target_workspace_name  TEXT NOT NULL,
+                source_product         TEXT NOT NULL,
+                idempotency_key        TEXT NOT NULL,
+                manifest_hash          TEXT NOT NULL,
+                manifest_json          TEXT NOT NULL DEFAULT '{}',
+                diagnostics_json       TEXT NOT NULL DEFAULT '{}',
+                declared_chunks_json   TEXT NOT NULL DEFAULT '[]',
+                status                 TEXT NOT NULL DEFAULT 'created',
+                finalized_at           TIMESTAMP,
+                recovery_manifest_json TEXT,
+                client_delete_eligible BOOLEAN NOT NULL DEFAULT FALSE,
+                client_delete_ack_at   TIMESTAMP,
+                created_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                version                INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_migration_sessions_idempotency ON workspace_migration_sessions(idempotency_key)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_migration_sessions_workspace ON workspace_migration_sessions(target_workspace_id)",
+            """
+            CREATE TABLE IF NOT EXISTS workspace_migration_chunks (
+                migration_id  TEXT NOT NULL REFERENCES workspace_migration_sessions(id) ON DELETE CASCADE,
+                id            TEXT NOT NULL,
+                sha256        TEXT NOT NULL,
+                byte_count    INTEGER NOT NULL,
+                chunk_kind    TEXT NOT NULL DEFAULT 'workspace_bundle',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                accepted_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (migration_id, id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_migration_chunks_migration ON workspace_migration_chunks(migration_id)",
+        ]
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+
     def _ensure_workspace_study_material_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure workspace ownership columns and workspace study-material policy exist for SQLite."""
         try:
@@ -9014,6 +9114,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     # Verify core FTS tables exist to avoid silent search failures
                     self._verify_required_fts_tables_sqlite(conn)
                     self._ensure_workspace_subresource_schema_sqlite(conn)
+                    self._ensure_workspace_migration_schema_sqlite(conn)
                     self._ensure_flashcard_asset_schema_sqlite(conn)
                     self._ensure_flashcard_template_schema_sqlite(conn)
                     self._ensure_flashcard_scheduler_schema_sqlite(conn)
@@ -9039,12 +9140,135 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     # New DB: apply V4 base then migrate to current target (>= V5)
                     self._apply_schema_v4(conn)
                     current_db_version = self._get_db_version(conn)
-                    current_db_version = self._migrate_sqlite_linearly_to_target(
-                        conn,
-                        current_db_version,
-                        target_version,
-                        current_initial_version,
-                    )
+                    if target_version >= 5 and current_db_version == 4:
+                        self._migrate_from_v4_to_v5(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 6 and current_db_version == 5:
+                        self._migrate_from_v5_to_v6(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 7 and current_db_version == 6:
+                        self._migrate_from_v6_to_v7(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 8 and current_db_version == 7:
+                        self._migrate_from_v7_to_v8(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 9 and current_db_version == 8:
+                        self._migrate_from_v8_to_v9(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 10 and current_db_version == 9:
+                        self._migrate_from_v9_to_v10(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 11 and current_db_version == 10:
+                        self._migrate_from_v10_to_v11(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 12 and current_db_version == 11:
+                        self._migrate_from_v11_to_v12(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 13 and current_db_version == 12:
+                        self._migrate_from_v12_to_v13(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 14 and current_db_version == 13:
+                        self._migrate_from_v13_to_v14(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 15 and current_db_version == 14:
+                        self._migrate_from_v14_to_v15(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 16 and current_db_version == 15:
+                        self._migrate_from_v15_to_v16(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 17 and current_db_version == 16:
+                        self._migrate_from_v16_to_v17(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 18 and current_db_version == 17:
+                        self._migrate_from_v17_to_v18(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 19 and current_db_version == 18:
+                        self._migrate_from_v18_to_v19(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 20 and current_db_version == 19:
+                        self._migrate_from_v19_to_v20(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 21 and current_db_version == 20:
+                        self._migrate_from_v20_to_v21(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 22 and current_db_version == 21:
+                        self._migrate_from_v21_to_v22(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 23 and current_db_version == 22:
+                        self._migrate_from_v22_to_v23(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 24 and current_db_version == 23:
+                        self._migrate_from_v23_to_v24(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 25 and current_db_version == 24:
+                        self._migrate_from_v24_to_v25(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 26 and current_db_version == 25:
+                        self._migrate_from_v25_to_v26(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 27 and current_db_version == 26:
+                        self._migrate_from_v26_to_v27(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 28 and current_db_version == 27:
+                        self._migrate_from_v27_to_v28(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 29 and current_db_version == 28:
+                        self._migrate_from_v28_to_v29(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 30 and current_db_version == 29:
+                        self._migrate_from_v29_to_v30(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 31 and current_db_version == 30:
+                        self._migrate_from_v30_to_v31(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 32 and current_db_version == 31:
+                        self._migrate_from_v31_to_v32(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 33 and current_db_version == 32:
+                        self._migrate_from_v32_to_v33(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 34 and current_db_version == 33:
+                        self._migrate_from_v33_to_v34(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 35 and current_db_version == 34:
+                        self._migrate_from_v34_to_v35(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 36 and current_db_version == 35:
+                        self._migrate_from_v35_to_v36(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 37 and current_db_version == 36:
+                        self._migrate_from_v36_to_v37(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 38 and current_db_version == 37:
+                        self._migrate_from_v37_to_v38(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 39 and current_db_version == 38:
+                        self._migrate_from_v38_to_v39(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 40 and current_db_version == 39:
+                        self._migrate_from_v39_to_v40(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 41 and current_db_version == 40:
+                        self._migrate_from_v40_to_v41(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 42 and current_db_version == 41:
+                        self._migrate_from_v41_to_v42(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 43 and current_db_version == 42:
+                        self._migrate_from_v42_to_v43(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 44 and current_db_version == 43:
+                        self._migrate_from_v43_to_v44(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 45 and current_db_version == 44:
+                        self._migrate_from_v44_to_v45(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 46 and current_db_version == 45:
+                        self._migrate_from_v45_to_v46(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 47 and current_db_version == 46:
+                        self._migrate_from_v46_to_v47(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -9086,13 +9310,431 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._ensure_workspace_study_material_schema_sqlite(conn)
                 except sqlite3.Error:
                     pass
-                if current_initial_version < target_version and current_initial_version != 0:
-                    current_db_version = self._migrate_sqlite_linearly_to_target(
-                        conn,
-                        current_initial_version,
-                        target_version,
-                        current_initial_version,
-                    )
+                # Example for future migrations:
+                # elif current_db_version == 1:
+                #     self._migrate_from_v1_to_v2(conn)
+                #     current_db_version = self._get_db_version(conn) # Refresh version
+                #     if current_db_version == 2 and target_version > 2: # Continue if more migrations needed
+                #         self._migrate_from_v2_to_v3(conn)
+                #         # ...and so on
+                if current_initial_version < target_version:
+                    # If this was a brand new database (version 0), we have already
+                    # applied the base schema and stepped migrations above. Skip
+                    # the secondary migration-path dispatcher.
+                    if current_initial_version == 0:
+                        pass
+                    # Handle known migration paths for pre-existing databases
+                    elif current_initial_version == 4 and target_version >= 5:
+                        self._migrate_from_v4_to_v5(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 6 and current_db_version == 5:
+                            self._migrate_from_v5_to_v6(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 7 and current_db_version == 6:
+                            self._migrate_from_v6_to_v7(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 8 and current_db_version == 7:
+                            self._migrate_from_v7_to_v8(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 9 and current_db_version == 8:
+                            self._migrate_from_v8_to_v9(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 10 and current_db_version == 9:
+                            self._migrate_from_v9_to_v10(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 11 and current_db_version == 10:
+                            self._migrate_from_v10_to_v11(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 5 and target_version >= 6:
+                        self._migrate_from_v5_to_v6(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 7 and current_db_version == 6:
+                            self._migrate_from_v6_to_v7(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 8 and current_db_version == 7:
+                            self._migrate_from_v7_to_v8(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 9 and current_db_version == 8:
+                            self._migrate_from_v8_to_v9(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 10 and current_db_version == 9:
+                            self._migrate_from_v9_to_v10(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 11 and current_db_version == 10:
+                            self._migrate_from_v10_to_v11(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 6 and target_version >= 7:
+                        self._migrate_from_v6_to_v7(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 8 and current_db_version == 7:
+                            self._migrate_from_v7_to_v8(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 9 and current_db_version == 8:
+                            self._migrate_from_v8_to_v9(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 10 and current_db_version == 9:
+                            self._migrate_from_v9_to_v10(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 11 and current_db_version == 10:
+                            self._migrate_from_v10_to_v11(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 7 and target_version >= 8:
+                        self._migrate_from_v7_to_v8(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 9 and current_db_version == 8:
+                            self._migrate_from_v8_to_v9(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 10 and current_db_version == 9:
+                            self._migrate_from_v9_to_v10(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 11 and current_db_version == 10:
+                            self._migrate_from_v10_to_v11(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 8 and target_version >= 9:
+                        self._migrate_from_v8_to_v9(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 10 and current_db_version == 9:
+                            self._migrate_from_v9_to_v10(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 11 and current_db_version == 10:
+                            self._migrate_from_v10_to_v11(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 9 and target_version >= 10:
+                        self._migrate_from_v9_to_v10(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 11 and current_db_version == 10:
+                            self._migrate_from_v10_to_v11(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 10 and target_version >= 11:
+                        self._migrate_from_v10_to_v11(conn)
+                        current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 11 and target_version >= 12:
+                        self._migrate_from_v11_to_v12(conn)
+                        current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 12 and target_version >= 13:
+                        self._migrate_from_v12_to_v13(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 14 and current_db_version == 13:
+                            self._migrate_from_v13_to_v14(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 15 and current_db_version == 14:
+                            self._migrate_from_v14_to_v15(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 16 and current_db_version == 15:
+                            self._migrate_from_v15_to_v16(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 13 and target_version >= 14:
+                        self._migrate_from_v13_to_v14(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 15 and current_db_version == 14:
+                            self._migrate_from_v14_to_v15(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 16 and current_db_version == 15:
+                            self._migrate_from_v15_to_v16(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 14 and target_version >= 15:
+                        self._migrate_from_v14_to_v15(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 16 and current_db_version == 15:
+                            self._migrate_from_v15_to_v16(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 15 and target_version >= 16:
+                        self._migrate_from_v15_to_v16(conn)
+                        current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 16 and target_version >= 17:
+                        self._migrate_from_v16_to_v17(conn)
+                        current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 17 and target_version >= 18:
+                        self._migrate_from_v17_to_v18(conn)
+                        current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 18 and target_version >= 19:
+                        self._migrate_from_v18_to_v19(conn)
+                        current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 19 and target_version >= 20:
+                        self._migrate_from_v19_to_v20(conn)
+                        current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 20 and target_version >= 21:
+                        self._migrate_from_v20_to_v21(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 22 and current_db_version == 21:
+                            self._migrate_from_v21_to_v22(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 23 and current_db_version == 22:
+                            self._migrate_from_v22_to_v23(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 24 and current_db_version == 23:
+                            self._migrate_from_v23_to_v24(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 25 and current_db_version == 24:
+                            self._migrate_from_v24_to_v25(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 21 and target_version >= 22:
+                        self._migrate_from_v21_to_v22(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 23 and current_db_version == 22:
+                            self._migrate_from_v22_to_v23(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 24 and current_db_version == 23:
+                            self._migrate_from_v23_to_v24(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 25 and current_db_version == 24:
+                            self._migrate_from_v24_to_v25(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 22 and target_version >= 23:
+                        self._migrate_from_v22_to_v23(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 24 and current_db_version == 23:
+                            self._migrate_from_v23_to_v24(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 25 and current_db_version == 24:
+                            self._migrate_from_v24_to_v25(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 23 and target_version >= 24:
+                        self._migrate_from_v23_to_v24(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 25 and current_db_version == 24:
+                            self._migrate_from_v24_to_v25(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 24 and target_version >= 25:
+                        self._migrate_from_v24_to_v25(conn)
+                        current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 25 and target_version >= 26:
+                        self._migrate_from_v25_to_v26(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 27 and current_db_version == 26:
+                            self._migrate_from_v26_to_v27(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 28 and current_db_version == 27:
+                            self._migrate_from_v27_to_v28(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 29 and current_db_version == 28:
+                            self._migrate_from_v28_to_v29(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 26 and target_version >= 27:
+                        self._migrate_from_v26_to_v27(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 28 and current_db_version == 27:
+                            self._migrate_from_v27_to_v28(conn)
+                            current_db_version = self._get_db_version(conn)
+                        if target_version >= 29 and current_db_version == 28:
+                            self._migrate_from_v28_to_v29(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 27 and target_version >= 28:
+                        self._migrate_from_v27_to_v28(conn)
+                        current_db_version = self._get_db_version(conn)
+                        if target_version >= 29 and current_db_version == 28:
+                            self._migrate_from_v28_to_v29(conn)
+                            current_db_version = self._get_db_version(conn)
+                    elif current_initial_version == 28 and target_version >= 29:
+                        self._migrate_from_v28_to_v29(conn)
+                        current_db_version = self._get_db_version(conn)
+                    else:
+                        # Fallback: attempt linear migrations for known versions.
+                        fallback_version = current_initial_version
+                        while fallback_version < target_version:
+                            if fallback_version == 4:
+                                self._migrate_from_v4_to_v5(conn)
+                            elif fallback_version == 5:
+                                self._migrate_from_v5_to_v6(conn)
+                            elif fallback_version == 6:
+                                self._migrate_from_v6_to_v7(conn)
+                            elif fallback_version == 7:
+                                self._migrate_from_v7_to_v8(conn)
+                            elif fallback_version == 8:
+                                self._migrate_from_v8_to_v9(conn)
+                            elif fallback_version == 9:
+                                self._migrate_from_v9_to_v10(conn)
+                            elif fallback_version == 10:
+                                self._migrate_from_v10_to_v11(conn)
+                            elif fallback_version == 11:
+                                self._migrate_from_v11_to_v12(conn)
+                            elif fallback_version == 12:
+                                self._migrate_from_v12_to_v13(conn)
+                            elif fallback_version == 13:
+                                self._migrate_from_v13_to_v14(conn)
+                            elif fallback_version == 14:
+                                self._migrate_from_v14_to_v15(conn)
+                            elif fallback_version == 15:
+                                self._migrate_from_v15_to_v16(conn)
+                            elif fallback_version == 16:
+                                self._migrate_from_v16_to_v17(conn)
+                            elif fallback_version == 17:
+                                self._migrate_from_v17_to_v18(conn)
+                            elif fallback_version == 18:
+                                self._migrate_from_v18_to_v19(conn)
+                            elif fallback_version == 19:
+                                self._migrate_from_v19_to_v20(conn)
+                            elif fallback_version == 20:
+                                self._migrate_from_v20_to_v21(conn)
+                            elif fallback_version == 21:
+                                self._migrate_from_v21_to_v22(conn)
+                            elif fallback_version == 22:
+                                self._migrate_from_v22_to_v23(conn)
+                            elif fallback_version == 23:
+                                self._migrate_from_v23_to_v24(conn)
+                            elif fallback_version == 24:
+                                self._migrate_from_v24_to_v25(conn)
+                            elif fallback_version == 25:
+                                self._migrate_from_v25_to_v26(conn)
+                            elif fallback_version == 26:
+                                self._migrate_from_v26_to_v27(conn)
+                            elif fallback_version == 27:
+                                self._migrate_from_v27_to_v28(conn)
+                            elif fallback_version == 28:
+                                self._migrate_from_v28_to_v29(conn)
+                            elif fallback_version == 29:
+                                self._migrate_from_v29_to_v30(conn)
+                            elif fallback_version == 30:
+                                self._migrate_from_v30_to_v31(conn)
+                            elif fallback_version == 31:
+                                self._migrate_from_v31_to_v32(conn)
+                            elif fallback_version == 32:
+                                self._migrate_from_v32_to_v33(conn)
+                            elif fallback_version == 33:
+                                self._migrate_from_v33_to_v34(conn)
+                            elif fallback_version == 34:
+                                self._migrate_from_v34_to_v35(conn)
+                            elif fallback_version == 35:
+                                self._migrate_from_v35_to_v36(conn)
+                            elif fallback_version == 36:
+                                self._migrate_from_v36_to_v37(conn)
+                            elif fallback_version == 37:
+                                self._migrate_from_v37_to_v38(conn)
+                            elif fallback_version == 38:
+                                self._migrate_from_v38_to_v39(conn)
+                            elif fallback_version == 39:
+                                self._migrate_from_v39_to_v40(conn)
+                            elif fallback_version == 40:
+                                self._migrate_from_v40_to_v41(conn)
+                            elif fallback_version == 41:
+                                self._migrate_from_v41_to_v42(conn)
+                            elif fallback_version == 42:
+                                self._migrate_from_v42_to_v43(conn)
+                            elif fallback_version == 43:
+                                self._migrate_from_v43_to_v44(conn)
+                            elif fallback_version == 44:
+                                self._migrate_from_v44_to_v45(conn)
+                            elif fallback_version == 45:
+                                self._migrate_from_v45_to_v46(conn)
+                            elif fallback_version == 46:
+                                self._migrate_from_v46_to_v47(conn)
+                            else:
+                                raise SchemaError(  # noqa: TRY003, TRY301
+                                    f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
+                                    f"Manual migration or a new database may be required.")
+                            fallback_version = self._get_db_version(conn)
+                        current_db_version = fallback_version
+                else: # Should not be reached due to prior checks
+                    raise SchemaError(f"Unexpected schema state: current {current_initial_version}, target {target_version}")  # noqa: TRY003, TRY301
+
+                if target_version >= 12 and current_db_version == 11:
+                    self._migrate_from_v11_to_v12(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 13 and current_db_version == 12:
+                    self._migrate_from_v12_to_v13(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 14 and current_db_version == 13:
+                    self._migrate_from_v13_to_v14(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 15 and current_db_version == 14:
+                    self._migrate_from_v14_to_v15(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 16 and current_db_version == 15:
+                    self._migrate_from_v15_to_v16(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 17 and current_db_version == 16:
+                    self._migrate_from_v16_to_v17(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 18 and current_db_version == 17:
+                    self._migrate_from_v17_to_v18(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 19 and current_db_version == 18:
+                    self._migrate_from_v18_to_v19(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 20 and current_db_version == 19:
+                    self._migrate_from_v19_to_v20(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 21 and current_db_version == 20:
+                    self._migrate_from_v20_to_v21(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 22 and current_db_version == 21:
+                    self._migrate_from_v21_to_v22(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 23 and current_db_version == 22:
+                    self._migrate_from_v22_to_v23(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 24 and current_db_version == 23:
+                    self._migrate_from_v23_to_v24(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 25 and current_db_version == 24:
+                    self._migrate_from_v24_to_v25(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 26 and current_db_version == 25:
+                    self._migrate_from_v25_to_v26(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 27 and current_db_version == 26:
+                    self._migrate_from_v26_to_v27(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 28 and current_db_version == 27:
+                    self._migrate_from_v27_to_v28(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 29 and current_db_version == 28:
+                    self._migrate_from_v28_to_v29(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 30 and current_db_version == 29:
+                    self._migrate_from_v29_to_v30(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 31 and current_db_version == 30:
+                    self._migrate_from_v30_to_v31(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 32 and current_db_version == 31:
+                    self._migrate_from_v31_to_v32(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 33 and current_db_version == 32:
+                    self._migrate_from_v32_to_v33(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 34 and current_db_version == 33:
+                    self._migrate_from_v33_to_v34(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 35 and current_db_version == 34:
+                    self._migrate_from_v34_to_v35(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 36 and current_db_version == 35:
+                    self._migrate_from_v35_to_v36(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 37 and current_db_version == 36:
+                    self._migrate_from_v36_to_v37(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 38 and current_db_version == 37:
+                    self._migrate_from_v37_to_v38(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 39 and current_db_version == 38:
+                    self._migrate_from_v38_to_v39(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 40 and current_db_version == 39:
+                    self._migrate_from_v39_to_v40(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 41 and current_db_version == 40:
+                    self._migrate_from_v40_to_v41(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 42 and current_db_version == 41:
+                    self._migrate_from_v41_to_v42(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 43 and current_db_version == 42:
+                    self._migrate_from_v42_to_v43(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 44 and current_db_version == 43:
+                    self._migrate_from_v43_to_v44(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 45 and current_db_version == 44:
+                    self._migrate_from_v44_to_v45(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 46 and current_db_version == 45:
+                    self._migrate_from_v45_to_v46(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 47 and current_db_version == 46:
+                    self._migrate_from_v46_to_v47(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
@@ -9107,6 +9749,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 # Verify core FTS tables after migrations complete
                 self._verify_required_fts_tables_sqlite(conn)
                 self._ensure_workspace_subresource_schema_sqlite(conn)
+                self._ensure_workspace_migration_schema_sqlite(conn)
                 self._ensure_workspace_study_material_schema_sqlite(conn)
                 self._ensure_flashcard_asset_schema_sqlite(conn)
                 self._ensure_flashcard_template_schema_sqlite(conn)
@@ -12936,6 +13579,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_note_studio_schema_postgres(conn)
             self._ensure_web_clipper_schema_postgres(conn)
             self._ensure_workspace_subresource_schema_postgres(conn)
+            self._ensure_workspace_migration_schema_postgres(conn)
             self._ensure_manuscript_phase2_sync_triggers_postgres(conn)
 
             if current_version < target_version:
@@ -14668,6 +15312,408 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         with self.transaction() as conn:
             conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
 
+    # --- Workspace Migration Methods ---
+
+    @staticmethod
+    def _serialize_workspace_migration_json(value: Any, field_name: str, *, default: Any) -> str:
+        if value is None:
+            value = default
+        if isinstance(value, str):
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise InputError(f"{field_name} must be valid JSON when provided as a string.") from exc  # noqa: TRY003
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=True)
+        except TypeError as exc:
+            raise InputError(f"{field_name} must be JSON serializable.") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _parse_workspace_migration_json(value: Any, *, fallback: Any) -> Any:
+        if value is None:
+            return fallback
+        if isinstance(value, (dict, list)):
+            return value
+        if not isinstance(value, str) or not value.strip():
+            return fallback
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return fallback
+
+    def _get_workspace_migration_session_by_idempotency_key(self, idempotency_key: str) -> dict[str, Any] | None:
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_migration_sessions WHERE idempotency_key = ?",
+            (idempotency_key,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        session = dict(row)
+        session["_chunks"] = self._list_workspace_migration_chunks(str(session["id"]))
+        return session
+
+    def _list_workspace_migration_chunks(self, migration_id: str) -> list[dict[str, Any]]:
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_migration_chunks WHERE migration_id = ? ORDER BY accepted_at, id",
+            (migration_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_workspace_migration_session(self, migration_id: str) -> dict[str, Any] | None:
+        """Return a Research Workspace migration session and accepted chunk receipts."""
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_migration_sessions WHERE id = ?",
+            (migration_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        session = dict(row)
+        session["_chunks"] = self._list_workspace_migration_chunks(migration_id)
+        return session
+
+    def list_workspace_migration_sessions(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return recent Research Workspace migration sessions with accepted chunk receipts."""
+        bounded_limit = max(1, min(int(limit), 500))
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_migration_sessions ORDER BY updated_at DESC, created_at DESC LIMIT ?",
+            (bounded_limit,),
+        )
+        sessions: list[dict[str, Any]] = []
+        for row in cursor.fetchall():
+            session = dict(row)
+            session["_chunks"] = self._list_workspace_migration_chunks(str(session["id"]))
+            sessions.append(session)
+        return sessions
+
+    def _get_workspace_migration_chunk(self, migration_id: str, chunk_id: str) -> dict[str, Any] | None:
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_migration_chunks WHERE migration_id = ? AND id = ?",
+            (migration_id, chunk_id),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def upsert_workspace_migration_session(self, data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        """Create a workspace migration session or return the existing idempotent session."""
+        migration_id = str(data.get("id") or "").strip()
+        idempotency_key = str(data.get("idempotency_key") or "").strip()
+        target_workspace_id = str(data.get("target_workspace_id") or "").strip()
+        target_workspace_name = str(data.get("target_workspace_name") or "").strip()
+        manifest_hash = str(data.get("manifest_hash") or "").strip().lower()
+        source_product = str(data.get("source_product") or "research-workspace-webui").strip()
+        if not all((migration_id, idempotency_key, target_workspace_id, target_workspace_name, manifest_hash)):
+            raise InputError(  # noqa: TRY003
+                "id, idempotency_key, target_workspace_id, target_workspace_name, and manifest_hash are required."
+            )
+
+        existing = self.get_workspace_migration_session(migration_id)
+        existing_by_key = self._get_workspace_migration_session_by_idempotency_key(idempotency_key)
+        if existing_by_key is not None and existing_by_key["id"] != migration_id:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration idempotency key is already used by another migration.",
+                entity="workspace_migration_sessions",
+                entity_id=idempotency_key,
+            )
+        if existing is not None:
+            if existing["idempotency_key"] != idempotency_key or existing["manifest_hash"] != manifest_hash:
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration already exists with different idempotency data.",
+                    entity="workspace_migration_sessions",
+                    entity_id=migration_id,
+                )
+            return existing, False
+
+        self.upsert_workspace(
+            target_workspace_id,
+            target_workspace_name,
+            study_materials_policy="workspace",
+        )
+
+        now = self._get_current_utc_timestamp_iso()
+        manifest_json = self._serialize_workspace_migration_json(data.get("manifest"), "manifest", default={})
+        diagnostics_json = self._serialize_workspace_migration_json(
+            data.get("diagnostics"),
+            "diagnostics",
+            default={},
+        )
+        declared_chunks_json = self._serialize_workspace_migration_json(
+            data.get("declared_chunks"),
+            "declared_chunks",
+            default=[],
+        )
+        false_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        params = (
+            migration_id,
+            target_workspace_id,
+            target_workspace_name,
+            source_product,
+            idempotency_key,
+            manifest_hash,
+            manifest_json,
+            diagnostics_json,
+            declared_chunks_json,
+            "created",
+            false_value,
+            now,
+            now,
+            1,
+        )
+        with self.transaction() as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO workspace_migration_sessions ("
+                    "id, target_workspace_id, target_workspace_name, source_product, idempotency_key, "
+                    "manifest_hash, manifest_json, diagnostics_json, declared_chunks_json, status, "
+                    "client_delete_eligible, created_at, updated_at, version"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    params,
+                )
+            except sqlite3.IntegrityError as exc:
+                raced = self.get_workspace_migration_session(migration_id)
+                if raced is not None and raced["idempotency_key"] == idempotency_key and raced["manifest_hash"] == manifest_hash:
+                    return raced, False
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration could not be created due to a uniqueness conflict.",
+                    entity="workspace_migration_sessions",
+                    entity_id=migration_id,
+                ) from exc
+        created = self.get_workspace_migration_session(migration_id)
+        if created is None:
+            raise CharactersRAGDBError(f"Failed to read workspace migration '{migration_id}' after create.")  # noqa: TRY003
+        return created, True
+
+    def _declared_workspace_migration_chunks(self, session: dict[str, Any]) -> list[dict[str, Any]]:
+        parsed = self._parse_workspace_migration_json(session.get("declared_chunks_json"), fallback=[])
+        return parsed if isinstance(parsed, list) else []
+
+    def _workspace_migration_missing_chunk_ids(self, session: dict[str, Any]) -> list[str]:
+        accepted = {str(chunk.get("id")) for chunk in session.get("_chunks", [])}
+        return [
+            str(chunk.get("id"))
+            for chunk in self._declared_workspace_migration_chunks(session)
+            if str(chunk.get("id")) not in accepted
+        ]
+
+    def add_workspace_migration_chunk(
+        self,
+        migration_id: str,
+        chunk_id: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Record an idempotent chunk receipt for a workspace migration."""
+        normalized_migration_id = str(migration_id or "").strip()
+        normalized_chunk_id = str(chunk_id or "").strip()
+        sha256 = str(data.get("sha256") or "").strip().lower()
+        chunk_kind = str(data.get("chunk_kind") or "workspace_bundle").strip()
+        try:
+            byte_count = int(data.get("byte_count"))
+        except (TypeError, ValueError) as exc:
+            raise InputError("byte_count must be an integer.") from exc  # noqa: TRY003
+        if not all((normalized_migration_id, normalized_chunk_id, sha256, chunk_kind)):
+            raise InputError("migration_id, chunk_id, sha256, and chunk_kind are required.")  # noqa: TRY003
+
+        session = self.get_workspace_migration_session(normalized_migration_id)
+        if session is None:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration not found.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+        if session.get("status") == "finalized":
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration is already finalized.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+
+        declared = self._declared_workspace_migration_chunks(session)
+        declared_by_id = {str(chunk.get("id")): chunk for chunk in declared}
+        if declared_by_id:
+            expected = declared_by_id.get(normalized_chunk_id)
+            if expected is None:
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration chunk was not declared in the manifest.",
+                    entity="workspace_migration_chunks",
+                    entity_id=normalized_chunk_id,
+                )
+            try:
+                expected_byte_count = int(expected.get("byte_count"))
+            except (TypeError, ValueError) as exc:
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration chunk declaration has an invalid byte count.",
+                    entity="workspace_migration_chunks",
+                    entity_id=normalized_chunk_id,
+                ) from exc
+            if (
+                str(expected.get("sha256") or "").lower() != sha256
+                or expected_byte_count != byte_count
+                or str(expected.get("chunk_kind") or "workspace_bundle") != chunk_kind
+            ):
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration chunk receipt does not match the declared manifest.",
+                    entity="workspace_migration_chunks",
+                    entity_id=normalized_chunk_id,
+                )
+
+        existing = self._get_workspace_migration_chunk(normalized_migration_id, normalized_chunk_id)
+        if existing is not None:
+            if existing["sha256"] == sha256 and int(existing["byte_count"]) == byte_count:
+                return existing
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration chunk already exists with different content.",
+                entity="workspace_migration_chunks",
+                entity_id=normalized_chunk_id,
+            )
+
+        metadata_json = self._serialize_workspace_migration_json(data.get("metadata"), "metadata", default={})
+        now = self._get_current_utc_timestamp_iso()
+        with self.transaction() as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO workspace_migration_chunks ("
+                    "migration_id, id, sha256, byte_count, chunk_kind, metadata_json, accepted_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        normalized_migration_id,
+                        normalized_chunk_id,
+                        sha256,
+                        byte_count,
+                        chunk_kind,
+                        metadata_json,
+                        now,
+                    ),
+                )
+                conn.execute(
+                    "UPDATE workspace_migration_sessions SET updated_at = ?, version = version + 1 WHERE id = ?",
+                    (now, normalized_migration_id),
+                )
+            except sqlite3.IntegrityError as exc:
+                raced = self._get_workspace_migration_chunk(normalized_migration_id, normalized_chunk_id)
+                if raced is not None and raced["sha256"] == sha256 and int(raced["byte_count"]) == byte_count:
+                    return raced
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace migration chunk could not be accepted due to a uniqueness conflict.",
+                    entity="workspace_migration_chunks",
+                    entity_id=normalized_chunk_id,
+                ) from exc
+        accepted = self._get_workspace_migration_chunk(normalized_migration_id, normalized_chunk_id)
+        if accepted is None:
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to read workspace migration chunk '{normalized_chunk_id}' after insert."
+            )
+        return accepted
+
+    def finalize_workspace_migration(
+        self,
+        migration_id: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Finalize a workspace migration after all declared chunks have receipts."""
+        normalized_migration_id = str(migration_id or "").strip()
+        manifest_hash = str(data.get("manifest_hash") or "").strip().lower()
+        session = self.get_workspace_migration_session(normalized_migration_id)
+        if session is None:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration not found.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+        if session["manifest_hash"] != manifest_hash:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration manifest hash mismatch.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+        if session.get("status") == "finalized":
+            return session
+
+        missing = self._workspace_migration_missing_chunk_ids(session)
+        if missing:
+            raise ConflictError(  # noqa: TRY003
+                f"Workspace migration is missing declared chunks: {', '.join(missing)}",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+
+        now = self._get_current_utc_timestamp_iso()
+        declared_count = len(self._declared_workspace_migration_chunks(session))
+        accepted_count = len(session.get("_chunks", []))
+        recovery_manifest = {
+            "migration_id": normalized_migration_id,
+            "target_workspace_id": session["target_workspace_id"],
+            "source_product": session["source_product"],
+            "manifest_hash": session["manifest_hash"],
+            "status": "finalized",
+            "declared_chunk_count": declared_count,
+            "accepted_chunk_count": accepted_count,
+            "missing_chunk_ids": [],
+            "client_delete_eligible": False,
+            "can_delete_legacy_storage": False,
+            "next_step": "enqueue_workspace_source_ingestion_jobs",
+            "finalized_at": now,
+        }
+        recovery_json = self._serialize_workspace_migration_json(
+            recovery_manifest,
+            "recovery_manifest",
+            default={},
+        )
+        false_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE workspace_migration_sessions "
+                "SET status = ?, finalized_at = ?, recovery_manifest_json = ?, "
+                "client_delete_eligible = ?, updated_at = ?, version = version + 1 "
+                "WHERE id = ?",
+                ("finalized", now, recovery_json, false_value, now, normalized_migration_id),
+            )
+        finalized = self.get_workspace_migration_session(normalized_migration_id)
+        if finalized is None:
+            raise CharactersRAGDBError(  # noqa: TRY003
+                f"Failed to read workspace migration '{normalized_migration_id}' after finalize."
+            )
+        return finalized
+
+    def record_workspace_migration_client_delete_ack(
+        self,
+        migration_id: str,
+        data: dict[str, Any],
+    ) -> bool:
+        """Record client deletion acknowledgement only after deletion eligibility is explicitly enabled."""
+        normalized_migration_id = str(migration_id or "").strip()
+        manifest_hash = str(data.get("acknowledged_manifest_hash") or "").strip().lower()
+        session = self.get_workspace_migration_session(normalized_migration_id)
+        if session is None:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration not found.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+        if session["manifest_hash"] != manifest_hash:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration manifest hash mismatch.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+        if not bool(session.get("client_delete_eligible")):
+            raise ConflictError(  # noqa: TRY003
+                "Client deletion is not enabled for Research Workspace migrations.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+
+        now = self._get_current_utc_timestamp_iso()
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE workspace_migration_sessions "
+                "SET client_delete_ack_at = ?, updated_at = ?, version = version + 1 "
+                "WHERE id = ?",
+                (now, now, normalized_migration_id),
+            )
+        return True
+
     # --- Workspace Source Methods ---
 
     def add_workspace_source(self, workspace_id: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -14692,7 +15738,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             now,
         )
         with self.transaction() as conn:
-            conn.execute(query, params)
+            try:
+                conn.execute(query, params)
+            except sqlite3.IntegrityError as exc:
+                existing = conn.execute(
+                    "SELECT * FROM workspace_sources WHERE workspace_id = ? AND id = ?",
+                    (workspace_id, source_id),
+                ).fetchone()
+                if existing is not None:
+                    return dict(existing)
+                raise ConflictError(  # noqa: TRY003
+                    f"Workspace source '{source_id}' could not be added.",
+                    entity="workspace_sources",
+                    entity_id=source_id,
+                ) from exc
         return self._get_workspace_source(workspace_id, source_id)  # type: ignore[return-value]
 
     def _get_workspace_source(self, workspace_id: str, source_id: str) -> dict[str, Any] | None:

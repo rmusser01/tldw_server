@@ -14,7 +14,7 @@ const RESPONSIVE_ROUTE_MATRIX: ResponsiveRouteMatrixEntry[] = [
   { path: '/settings', heading: /^Settings$/i },
   { path: '/settings/model', heading: /^Model settings$/i },
   { path: '/prompts', heading: /^Prompts$/i },
-  { path: '/workspace-playground', heading: /^New Research$/i },
+  { path: '/research-workspace', heading: /^New Research$/i },
   { path: '/setup', heading: /setup/i, allowRedirect: true },
   { path: '/sources', heading: /sources/i },
   { path: '/mcp-hub', heading: /mcp hub/i },

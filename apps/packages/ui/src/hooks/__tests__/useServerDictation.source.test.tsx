@@ -59,12 +59,29 @@ vi.stubGlobal("navigator", {
 })
 
 import { useServerDictation } from "../useServerDictation"
+import type { SttSettings } from "../useSttSettings"
+
+const defaultSttSettings: SttSettings = {
+  model: "whisper-1",
+  temperature: 0,
+  task: "transcribe",
+  responseFormat: "json",
+  timestampGranularities: "segment",
+  prompt: "",
+  useSegmentation: false,
+  segK: 3,
+  segMinSegmentSize: 10,
+  segLambdaBalance: 0.5,
+  segUtteranceExpansionWidth: 1,
+  segEmbeddingsProvider: "",
+  segEmbeddingsModel: ""
+}
 
 const buildHook = (overrides?: Partial<Parameters<typeof useServerDictation>[0]>) =>
   useServerDictation({
     canUseServerStt: true,
     speechToTextLanguage: "en-US",
-    sttSettings: {},
+    sttSettings: defaultSttSettings,
     onTranscript: vi.fn(),
     ...overrides
   })

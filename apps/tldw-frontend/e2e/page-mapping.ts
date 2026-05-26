@@ -849,12 +849,12 @@ export const EXTENSION_ONLY_PAGES: PageMapping[] = [
     ]
   },
   {
-    name: "Research Studio",
+    name: "Research Workspace",
     category: "workspace",
     webuiPath: null,
-    extensionOptionsPath: "/research-studio",
+    extensionOptionsPath: "/research-workspace",
     extensionSidepanelPath: null,
-    sharedComponent: "OptionWorkspacePlayground",
+    sharedComponent: "OptionResearchWorkspace",
     session: 7,
     checklistItems: CHECKLIST_TEMPLATES.workspace
   }

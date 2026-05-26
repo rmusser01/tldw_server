@@ -30,7 +30,7 @@ import {
 } from "lucide-react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
-import { WORKSPACE_PLAYGROUND_PATH } from "@/routes/route-paths"
+import { RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { buildACPAuthHeaders } from "@/services/acp/connection"
 import { buildACPSetupIssues, normalizeACPHealthStatus, type ACPSetupIssue } from "@/services/acp/readiness"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
@@ -670,7 +670,7 @@ export const AgentTasksPage: React.FC = () => {
           code: "canonical_workspace_bridge_missing",
           title: `No ACP execution workspace is linked to ${workspaceFilterId}`,
           description:
-            "Create an agent task from WorkspacePlayground so the execution root, environment, and MCP readiness can be validated before dispatch."
+            "Create an agent task from Research Workspace so the execution root, environment, and MCP readiness can be validated before dispatch."
         }
       ]
     }
@@ -691,7 +691,7 @@ export const AgentTasksPage: React.FC = () => {
           code: "canonical_workspace_bridge_unlinked",
           title: `ACP execution workspace link is ${status}`,
           description:
-            "Recreate the workspace handoff from WorkspacePlayground so root, environment, and MCP readiness are checked before dispatch."
+            "Recreate the workspace handoff from Research Workspace so root, environment, and MCP readiness are checked before dispatch."
         }
       ]
     }
@@ -781,7 +781,7 @@ export const AgentTasksPage: React.FC = () => {
             body="Resolve these workspace setup items before dispatching task runs."
             issues={workspaceSetupIssues}
             showAgentRegistry={false}
-            showWorkspacePlayground
+            showResearchWorkspace
           />
         </Alert>
       )}
@@ -1073,12 +1073,12 @@ const AgentTasksSetupDescription: React.FC<{
   body: string
   issues: ACPSetupIssue[]
   showAgentRegistry?: boolean
-  showWorkspacePlayground?: boolean
+  showResearchWorkspace?: boolean
 }> = ({
   body,
   issues,
   showAgentRegistry = true,
-  showWorkspacePlayground = false
+  showResearchWorkspace = false
 }) => (
   <div className="space-y-3">
     <div>{body}</div>
@@ -1100,13 +1100,13 @@ const AgentTasksSetupDescription: React.FC<{
           Open Agent Registry
         </Button>
       )}
-      {showWorkspacePlayground && (
+      {showResearchWorkspace && (
         <Button
           size="small"
           icon={<ExternalLink className="h-3 w-3" />}
-          onClick={() => navigateOptionRoute(WORKSPACE_PLAYGROUND_PATH)}
+          onClick={() => navigateOptionRoute(RESEARCH_WORKSPACE_PATH)}
         >
-          Open WorkspacePlayground
+          Open Research Workspace
         </Button>
       )}
       <Button

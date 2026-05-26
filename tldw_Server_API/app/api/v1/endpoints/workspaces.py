@@ -1,11 +1,19 @@
 """Workspace lifecycle CRUD endpoints."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import json
+from datetime import datetime, timezone
+from typing import Any
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT,
     WORKSPACES_READ_RATE_LIMIT,
@@ -18,32 +26,50 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceArtifactExportResponse,
     WorkspaceArtifactResponse,
     WorkspaceArtifactUpdateRequest,
+    WorkspaceContextResponse,
     WorkspaceListResponse,
     WorkspaceNoteCreateRequest,
     WorkspaceNoteResponse,
     WorkspaceNoteUpdateRequest,
     WorkspacePatchRequest,
+    WorkspaceCapabilitiesResponse,
     WorkspaceResponse,
     WorkspaceSourceCreateRequest,
+    WorkspaceSourcePreviewResponse,
     WorkspaceSourceReorderRequest,
     WorkspaceSourceResponse,
     WorkspaceSourceSelectionRequest,
+    WorkspaceSourceStatusListResponse,
     WorkspaceSourceUpdateRequest,
     WorkspaceUpsertRequest,
 )
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
     InputError,
 )
-from tldw_Server_API.app.core.exceptions import WorkspaceArtifactExportStateError
+from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Workspaces.source_jobs import (
+    WORKSPACE_SOURCE_JOB_DOMAIN,
+    WORKSPACE_SOURCE_JOB_QUEUE,
+    WORKSPACE_SOURCE_JOB_TYPE,
+    enqueue_workspace_source_ingest_job,
+)
+from tldw_Server_API.app.core.Workspaces.status_projection import (
+    build_source_status_projection,
+    build_workspace_capability_projection,
+)
 from tldw_Server_API.app.core.Workspaces.workspace_artifact_exports import (
     export_workspace_artifact_version,
 )
+from tldw_Server_API.app.core.exceptions import WorkspaceArtifactExportStateError
 
 router = APIRouter()
+
+WORKSPACE_ACTIVE_JOB_STATUSES = {"queued", "processing", "running", "retrying"}
 
 
 def _ws_to_response(ws: dict) -> WorkspaceResponse:
@@ -81,6 +107,84 @@ def _src_to_response(src: dict) -> WorkspaceSourceResponse:
         added_at=str(src.get("added_at", "")),
         version=src.get("version", 1),
     )
+
+
+def _utc_now_iso() -> str:
+    """Return a UTC timestamp suitable for read-projection responses."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _source_preview_href(workspace_id: str, source_id: str) -> str:
+    """Return the API-relative source preview URL for a workspace source."""
+    return (
+        f"/api/v1/workspaces/{quote(workspace_id, safe='')}"
+        f"/sources/{quote(source_id, safe='')}/preview"
+    )
+
+
+def _find_source_in_workspace(
+    sources: list[dict[str, Any]],
+    source_id: str,
+) -> dict[str, Any] | None:
+    for source in sources:
+        if str(source.get("id")) == source_id:
+            return source
+    return None
+
+
+def _source_preview_summary(
+    workspace_id: str,
+    source_status: dict[str, Any],
+) -> dict[str, Any]:
+    readiness = source_status.get("readiness") or {}
+    available = bool(
+        readiness.get("citation_ready") or readiness.get("text_extracted")
+    )
+    return {
+        "available": available,
+        "detail_href": _source_preview_href(
+            workspace_id,
+            str(source_status.get("id") or ""),
+        ),
+        "snippet_count": None,
+        "total_chars": None,
+        "unavailable_reason": None
+        if available
+        else str(source_status.get("status_reason") or "source_unavailable"),
+    }
+
+
+def _context_source_payload(
+    *,
+    workspace_id: str,
+    source: dict[str, Any],
+    source_status: dict[str, Any],
+) -> dict[str, Any]:
+    base = _src_to_response(source).model_dump()
+    source_status = {"id": source["id"], **source_status}
+    return {
+        **base,
+        "state": source_status.get("state") or "missing_media",
+        "status_reason": source_status.get("status_reason") or "unknown",
+        "readiness": source_status.get("readiness") or {},
+        "progress_percent": source_status.get("progress_percent"),
+        "progress_message": source_status.get("progress_message"),
+        "job": source_status.get("job"),
+        "updated_at": source_status.get("updated_at") or "",
+        "preview": _source_preview_summary(workspace_id, source_status),
+    }
+
+
+def _job_status_payload(job: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": job.get("id"),
+        "uuid": job.get("uuid"),
+        "status": job.get("status"),
+        "job_type": job.get("job_type"),
+        "progress_percent": job.get("progress_percent"),
+        "progress_message": job.get("progress_message"),
+        "error_message": job.get("error_message"),
+    }
 
 
 def _art_to_response(art: dict) -> WorkspaceArtifactResponse:
@@ -171,6 +275,319 @@ def _require_workspace(db: CharactersRAGDB, workspace_id: str) -> dict:
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return ws
+
+
+def try_get_workspace_job_manager() -> JobManager | None:
+    """Resolve the Jobs manager for workspace views without blocking workspace reads/writes."""
+    try:
+        return try_get_job_manager()
+    except Exception as exc:
+        logger.warning("Workspace Jobs manager unavailable: {}", exc)
+        return None
+
+
+def _dedupe_jobs_by_identity(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[Any] = set()
+    for job in jobs:
+        key = job.get("id") or job.get("uuid")
+        if key is None:
+            key = (
+                job.get("domain"),
+                job.get("queue"),
+                job.get("job_type"),
+                job.get("created_at"),
+                str(job.get("payload") or ""),
+            )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(job)
+    return deduped
+
+
+def _safe_list_jobs(jm: JobManager, **kwargs: Any) -> list[dict[str, Any]]:
+    try:
+        return jm.list_jobs(**kwargs)
+    except Exception as exc:
+        logger.warning("Workspace job list failed for filters {}: {}", kwargs, exc)
+        return []
+
+
+def _list_recent_media_ingest_jobs(jm: JobManager | None, current_user: User) -> list[dict[str, Any]]:
+    """Return recent media-ingest Jobs for status projection, failing open."""
+    if jm is None:
+        return []
+    workspace_source_jobs = _safe_list_jobs(
+        jm,
+        domain=WORKSPACE_SOURCE_JOB_DOMAIN,
+        queue=WORKSPACE_SOURCE_JOB_QUEUE,
+        owner_user_id=str(current_user.id),
+        job_type=WORKSPACE_SOURCE_JOB_TYPE,
+        limit=500,
+        sort_by="created_at",
+        sort_order="desc",
+    )
+    legacy_media_jobs = _safe_list_jobs(
+        jm,
+        domain=WORKSPACE_SOURCE_JOB_DOMAIN,
+        owner_user_id=str(current_user.id),
+        limit=500,
+        sort_by="created_at",
+        sort_order="desc",
+    )
+    return _dedupe_jobs_by_identity(workspace_source_jobs + legacy_media_jobs)
+
+
+def _normalize_job_mapping(value: Any) -> dict[str, Any]:
+    """Normalize Jobs payload/result fields that may arrive as JSON strings."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _workspace_source_match_keys(sources: list[dict[str, Any]]) -> set[str]:
+    keys: set[str] = set()
+    for source in sources:
+        media_id = source.get("media_id")
+        if media_id is not None:
+            keys.add(f"media:{media_id}")
+        for field in ("id",):
+            raw = source.get(field)
+            if raw:
+                keys.add(f"{field}:{str(raw).strip()}")
+    return keys
+
+
+def _job_match_keys(job: dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    payload = _normalize_job_mapping(job.get("payload"))
+    result = _normalize_job_mapping(job.get("result"))
+    for container in (payload, result):
+        media_id = container.get("media_id")
+        if media_id is not None:
+            keys.add(f"media:{media_id}")
+    for field in ("source_id", "workspace_source_id"):
+        raw = payload.get(field) or result.get(field)
+        if raw:
+            keys.add(f"id:{str(raw).strip()}")
+    return keys
+
+
+def _job_workspace_id(job: dict[str, Any]) -> str | None:
+    payload = _normalize_job_mapping(job.get("payload"))
+    result = _normalize_job_mapping(job.get("result"))
+    raw = payload.get("workspace_id") or result.get("workspace_id")
+    return str(raw).strip() if raw else None
+
+
+def _active_workspace_jobs(
+    jobs: list[dict[str, Any]],
+    sources: list[dict[str, Any]],
+    workspace_id: str,
+) -> list[dict[str, Any]]:
+    source_keys = _workspace_source_match_keys(sources)
+    if not source_keys:
+        return []
+    active_jobs: list[dict[str, Any]] = []
+    for job in jobs:
+        status_value = str(job.get("status") or "").strip().lower()
+        if status_value not in WORKSPACE_ACTIVE_JOB_STATUSES:
+            continue
+        matched_workspace_id = _job_workspace_id(job)
+        if matched_workspace_id != workspace_id:
+            continue
+        if _job_match_keys(job).intersection(source_keys):
+            active_jobs.append(job)
+    return active_jobs
+
+
+def _safe_get_media(media_db: Any | None, media_id: int) -> dict[str, Any] | None:
+    if media_db is None:
+        return None
+    try:
+        return media_db_api.get_media_by_id(media_db, media_id)
+    except (AttributeError, DatabaseError, RuntimeError, TypeError, ValueError):
+        return None
+
+
+def _preview_mode_for_unavailable(source_status: dict[str, Any]) -> str:
+    state = str(source_status.get("state") or "")
+    reason = str(source_status.get("status_reason") or "")
+    if state == "missing_media" or reason in {"media_not_found", "media_id_missing", "media_db_unavailable"}:
+        return "missing_media"
+    if state == "failed" or "failed" in reason:
+        return "failed"
+    if state in {"queued", "ingesting", "extracting", "chunking", "indexing", "retrying"}:
+        return "pending"
+    return "empty"
+
+
+def _content_excerpt_snippet(
+    *,
+    source_id: str,
+    media_id: int | None,
+    text_preview: str,
+) -> dict[str, Any]:
+    return {
+        "id": "content:0",
+        "source_id": source_id,
+        "media_id": media_id,
+        "kind": "content_excerpt",
+        "text": text_preview,
+        "start_char": 0,
+        "end_char": len(text_preview),
+        "chunk_index": None,
+        "chunk_uuid": None,
+        "chunk_type": None,
+    }
+
+
+def _chunk_preview_snippets(
+    *,
+    media_db: Any | None,
+    source_id: str,
+    media_id: int | None,
+    chunk_limit: int,
+) -> list[dict[str, Any]]:
+    if media_db is None or media_id is None or chunk_limit <= 0:
+        return []
+    try:
+        chunks = media_db_api.get_unvectorized_chunks_in_range(
+            media_db,
+            media_id,
+            0,
+            chunk_limit - 1,
+        )
+    except (AttributeError, DatabaseError, RuntimeError, TypeError, ValueError):
+        return []
+    snippets: list[dict[str, Any]] = []
+    for index, chunk in enumerate(chunks):
+        text = str(chunk.get("chunk_text") or "")
+        if not text.strip():
+            continue
+        chunk_uuid = chunk.get("uuid")
+        chunk_index = chunk.get("chunk_index")
+        snippet_id = str(chunk_uuid or f"chunk:{chunk_index if chunk_index is not None else index}")
+        snippets.append(
+            {
+                "id": snippet_id,
+                "source_id": source_id,
+                "media_id": media_id,
+                "kind": "chunk",
+                "text": text,
+                "start_char": chunk.get("start_char"),
+                "end_char": chunk.get("end_char"),
+                "chunk_index": chunk_index,
+                "chunk_uuid": str(chunk_uuid) if chunk_uuid is not None else None,
+                "chunk_type": chunk.get("chunk_type"),
+            }
+        )
+    return snippets
+
+
+def _source_preview_payload(
+    *,
+    workspace_id: str,
+    source: dict[str, Any],
+    source_status: dict[str, Any],
+    media_db: Any | None,
+    max_chars: int,
+    chunk_limit: int,
+) -> dict[str, Any]:
+    media_id_raw = source.get("media_id")
+    try:
+        media_id = int(media_id_raw) if media_id_raw is not None else None
+    except (TypeError, ValueError):
+        media_id = None
+
+    media = _safe_get_media(media_db, media_id) if media_id is not None else None
+    content = str((media or {}).get("content") or "")
+    if not content.strip():
+        reason = (
+            "media_db_unavailable"
+            if media_db is None
+            else str(source_status.get("status_reason") or "content_unavailable")
+        )
+        return {
+            "workspace_id": workspace_id,
+            "source_id": source["id"],
+            "media_id": media_id,
+            "title": source.get("title") or "",
+            "source_type": source.get("source_type") or "",
+            "url": source.get("url"),
+            "state": source_status.get("state") or "missing_media",
+            "status_reason": reason,
+            "readiness": source_status.get("readiness") or {},
+            "content_available": False,
+            "preview_mode": _preview_mode_for_unavailable(
+                {**source_status, "status_reason": reason}
+            ),
+            "unavailable_reason": reason,
+            "text_preview": None,
+            "text_total_chars": None,
+            "text_truncated": False,
+            "snippets": [],
+            "generated_at": _utc_now_iso(),
+        }
+
+    text_preview = content[:max_chars]
+    snippets = [
+        _content_excerpt_snippet(
+            source_id=str(source["id"]),
+            media_id=media_id,
+            text_preview=text_preview,
+        )
+    ]
+    snippets.extend(
+        _chunk_preview_snippets(
+            media_db=media_db,
+            source_id=str(source["id"]),
+            media_id=media_id,
+            chunk_limit=chunk_limit,
+        )
+    )
+    return {
+        "workspace_id": workspace_id,
+        "source_id": source["id"],
+        "media_id": media_id,
+        "title": source.get("title") or "",
+        "source_type": source.get("source_type") or "",
+        "url": source.get("url"),
+        "state": source_status.get("state") or "queryable",
+        "status_reason": source_status.get("status_reason") or "source_queryable",
+        "readiness": source_status.get("readiness") or {},
+        "content_available": True,
+        "preview_mode": "available",
+        "unavailable_reason": None,
+        "text_preview": text_preview,
+        "text_total_chars": len(content),
+        "text_truncated": len(content) > len(text_preview),
+        "snippets": snippets,
+        "generated_at": _utc_now_iso(),
+    }
+
+
+def _enqueue_workspace_source_ingest_job(
+    *,
+    jm: JobManager | None,
+    current_user: User,
+    workspace_id: str,
+    src: dict[str, Any],
+) -> None:
+    """Submit a user-visible lifecycle job after the workspace source row exists."""
+    enqueue_workspace_source_ingest_job(
+        jm=jm,
+        owner_user_id=current_user.id,
+        workspace_id=workspace_id,
+        src=src,
+    )
 
 
 # ── Workspace CRUD ──────────────────────────────────────────────
@@ -306,6 +723,194 @@ async def list_sources(
     return [_src_to_response(s) for s in sources]
 
 
+@router.get(
+    "/{workspace_id}/sources/status",
+    response_model=WorkspaceSourceStatusListResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace source ingestion and indexing status",
+)
+async def get_sources_status(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceSourceStatusListResponse:
+    """Return read-computed ingestion, extraction, chunking, and indexing status."""
+    _require_workspace(db, workspace_id)
+    try:
+        sources = db.list_workspace_sources(workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace source status") from exc
+    jobs = _list_recent_media_ingest_jobs(jm, current_user)
+    payload = build_source_status_projection(
+        workspace_id=workspace_id,
+        sources=sources,
+        media_db=media_db,
+        jobs=jobs,
+    )
+    return WorkspaceSourceStatusListResponse(**payload)
+
+
+@router.get(
+    "/{workspace_id}/capabilities",
+    response_model=WorkspaceCapabilitiesResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace capability gates",
+)
+async def get_workspace_capabilities(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceCapabilitiesResponse:
+    """Return conservative UI capability gates for the workspace model."""
+    workspace = _require_workspace(db, workspace_id)
+    try:
+        sources = db.list_workspace_sources(workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace capabilities") from exc
+    status_payload = build_source_status_projection(
+        workspace_id=workspace_id,
+        sources=sources,
+        media_db=media_db,
+        jobs=_list_recent_media_ingest_jobs(jm, current_user),
+    )
+    payload = build_workspace_capability_projection(
+        workspace=workspace,
+        status_projection=status_payload,
+    )
+    return WorkspaceCapabilitiesResponse(**payload)
+
+
+@router.get(
+    "/{workspace_id}/context",
+    response_model=WorkspaceContextResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace page context",
+)
+async def get_workspace_context(
+    workspace_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceContextResponse:
+    """Return the canonical read model for the workspace page shell."""
+    workspace = _require_workspace(db, workspace_id)
+    try:
+        sources = db.list_workspace_sources(workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace context") from exc
+
+    jobs = _list_recent_media_ingest_jobs(jm, current_user)
+    status_payload = build_source_status_projection(
+        workspace_id=workspace_id,
+        sources=sources,
+        media_db=media_db,
+        jobs=jobs,
+    )
+    capability_payload = build_workspace_capability_projection(
+        workspace=workspace,
+        status_projection=status_payload,
+    )
+    statuses_by_id = {
+        str(source_status.get("id")): source_status
+        for source_status in status_payload.get("sources", [])
+    }
+    partial_errors: list[dict[str, str]] = []
+    if media_db is None and sources:
+        partial_errors.append(
+            {
+                "scope": "sources",
+                "code": "media_db_unavailable",
+                "message": "Media database is unavailable; source readiness is conservative.",
+            }
+        )
+    if jm is None and sources:
+        partial_errors.append(
+            {
+                "scope": "jobs",
+                "code": "jobs_unavailable",
+                "message": "Jobs service is unavailable; in-flight ingestion progress may be incomplete.",
+            }
+        )
+
+    context_sources = [
+        _context_source_payload(
+            workspace_id=workspace_id,
+            source=source,
+            source_status=statuses_by_id.get(str(source["id"]), {}),
+        )
+        for source in sources
+    ]
+    active_jobs = [
+        _job_status_payload(job)
+        for job in _active_workspace_jobs(jobs, sources, workspace_id)
+    ]
+    return WorkspaceContextResponse(
+        workspace_id=workspace_id,
+        workspace_kind="research_workspace",
+        schema_version=1,
+        generated_at=_utc_now_iso(),
+        workspace=_ws_to_response(workspace),
+        sources={
+            "items": context_sources,
+            "summary": status_payload.get("summary") or {},
+        },
+        capabilities=WorkspaceCapabilitiesResponse(**capability_payload),
+        services=capability_payload.get("workspace_services") or {},
+        allowed_actions=capability_payload.get("allowed_actions") or {},
+        active_jobs=active_jobs,
+        partial_errors=partial_errors,
+    )
+
+
+@router.get(
+    "/{workspace_id}/sources/{source_id}/preview",
+    response_model=WorkspaceSourcePreviewResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Preview workspace source content and evidence",
+)
+async def get_source_preview(
+    workspace_id: str,
+    source_id: str,
+    max_chars: int = Query(default=3000, ge=1, le=12000),
+    chunk_limit: int = Query(default=3, ge=0, le=10),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceSourcePreviewResponse:
+    """Return bounded captured text and chunk evidence for one workspace source."""
+    _require_workspace(db, workspace_id)
+    try:
+        sources = db.list_workspace_sources(workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace source preview") from exc
+    source = _find_source_in_workspace(sources, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Workspace source not found")
+
+    status_payload = build_source_status_projection(
+        workspace_id=workspace_id,
+        sources=[source],
+        media_db=media_db,
+        jobs=_list_recent_media_ingest_jobs(jm, current_user),
+    )
+    source_status = (status_payload.get("sources") or [{}])[0]
+    payload = _source_preview_payload(
+        workspace_id=workspace_id,
+        source=source,
+        source_status=source_status,
+        media_db=media_db,
+        max_chars=max_chars,
+        chunk_limit=chunk_limit,
+    )
+    return WorkspaceSourcePreviewResponse(**payload)
+
+
 @router.post(
     "/{workspace_id}/sources",
     response_model=WorkspaceSourceResponse,
@@ -317,12 +922,19 @@ async def add_source(
     workspace_id: str,
     body: WorkspaceSourceCreateRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceSourceResponse:
     """Add a media source to a workspace."""
     _require_workspace(db, workspace_id)
     try:
         src = db.add_workspace_source(workspace_id, body.model_dump())
+        _enqueue_workspace_source_ingest_job(
+            jm=jm,
+            current_user=current_user,
+            workspace_id=workspace_id,
+            src=src,
+        )
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to add workspace source") from exc
     return _src_to_response(src)

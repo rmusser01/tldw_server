@@ -280,7 +280,6 @@ describe("NodeConfigPanel selectors", () => {
             type: "string",
             enum: ["question", "verification_summary", "unsupported_claims"]
           },
-          minItems: 1,
           description: "Canonical top-level bundle fields to load inline"
         },
         save_artifact: { type: "boolean", default: true }

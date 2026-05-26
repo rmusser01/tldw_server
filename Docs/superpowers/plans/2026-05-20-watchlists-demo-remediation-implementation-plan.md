@@ -358,7 +358,7 @@ git commit -m "fix: normalize watchlists digest template payloads"
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_watchlists_api.py`
 
-- [x] **Step 1: Write failing audio enqueue test**
+- [ ] **Step 1: Write failing audio enqueue test**
 
 In `test_audio_briefing_workflow.py`, replace enqueue-oriented mocks with a scheduler double that only exposes `submit`:
 
@@ -369,9 +369,6 @@ class FakeScheduler:
 
     async def submit(self, handler, payload=None, priority=None, queue_name=None,
                      depends_on=None, idempotency_key=None, metadata=None, auth_context=None):
-        user_id = metadata.get("user_id") if isinstance(metadata, dict) else None
-        if not isinstance(user_id, str) or not user_id.strip():
-            raise ValueError("Task metadata must include a non-empty 'user_id'")
         self.calls.append({
             "handler": handler,
             "payload": payload,
@@ -390,11 +387,10 @@ assert scheduler.calls[0]["handler"] == "workflow_run"
 assert scheduler.calls[0]["payload"]["definition_snapshot"]["name"] == "audio_briefing"
 assert scheduler.calls[0]["payload"]["metadata"]["watchlist_run_id"] == 123
 assert scheduler.calls[0]["queue_name"] == "workflows"
-assert scheduler.calls[0]["idempotency_key"] == "watchlist-audio-briefing:1:42:123"
-assert scheduler.calls[0]["metadata"]["user_id"] == "1"
+assert scheduler.calls[0]["idempotency_key"] == "watchlist-audio-briefing:123"
 ```
 
-- [x] **Step 2: Run the failing backend test**
+- [ ] **Step 2: Run the failing backend test**
 
 Run:
 
@@ -405,7 +401,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.p
 
 Expected: FAIL because production code calls `enqueue`.
 
-- [x] **Step 3: Replace enqueue with submit**
+- [ ] **Step 3: Replace enqueue with submit**
 
 In `audio_briefing_workflow.py`, remove the `Task` import and replace the enqueue block with:
 
@@ -425,23 +421,22 @@ task_id = await scheduler.submit(
         },
     },
     queue_name="workflows",
-    idempotency_key=f"watchlist-audio-briefing:{user_id}:{job_id}:{run_id}",
+    idempotency_key=f"watchlist-audio-briefing:{run_id}",
     metadata={
         "source": "watchlist_audio_briefing",
         "watchlist_job_id": job_id,
         "watchlist_run_id": run_id,
-        "user_id": str(user_id),
     },
 )
 ```
 
 Do not fabricate an audio artifact at enqueue time. This task only proves the request enters Scheduler.
 
-- [x] **Step 4: Preserve skip behavior**
+- [ ] **Step 4: Preserve skip behavior**
 
 Keep existing returns of `None` for `generate_audio=false`, no ingested items, item load failure, or Scheduler submission failure. The caller already maps `None` to `skipped`; later tasks improve the visible reason.
 
-- [x] **Step 5: Run audio workflow tests**
+- [ ] **Step 5: Run audio workflow tests**
 
 Run:
 
@@ -452,7 +447,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.p
 
 Expected: PASS.
 
-- [x] **Step 6: Run endpoint metadata tests**
+- [ ] **Step 6: Run endpoint metadata tests**
 
 Run:
 
@@ -467,7 +462,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [x] **Step 7: Run audio delivery endpoint tests**
+- [ ] **Step 7: Run audio delivery endpoint tests**
 
 Run:
 
@@ -478,13 +473,12 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py 
 
 Expected: PASS.
 
-- [x] **Step 8: Commit**
+- [ ] **Step 8: Commit**
 
 Run:
 
 ```bash
 git add \
-  Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-plan.md \
   tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py \
   tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py
 git commit -m "fix: submit watchlist audio briefings through scheduler"
@@ -732,8 +726,6 @@ git commit -m "feat: surface watchlist audio briefing status"
 **Files:**
 - Modify: `tldw_Server_API/app/core/Watchlists/pipeline.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/watchlists.py`
-- Modify: `tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py`
-- Modify: `apps/packages/ui/src/types/watchlists.ts`
 - Modify: `apps/packages/ui/src/services/watchlists-overview.ts`
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/shared/WatchlistsHealthBar.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/OverviewTab.tsx`
@@ -741,7 +733,7 @@ git commit -m "feat: surface watchlist audio briefing status"
 - Test: `apps/packages/ui/src/services/__tests__/watchlists-overview.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.health.test.tsx`
 
-- [x] **Step 1: Write backend failing test for failed source with zero items**
+- [ ] **Step 1: Write backend failing test for failed source with zero items**
 
 Create or extend `test_watchlists_operator_recovery.py` with a case where one active source returns `error:403`, the run ingests zero items, and run stats include source failure information:
 
@@ -753,7 +745,7 @@ assert run["stats"]["source_statuses"][0]["status"].startswith("error:")
 
 The exact run status may remain `completed` for backward compatibility, but stats must carry warning evidence.
 
-- [x] **Step 2: Run backend test and confirm failure**
+- [ ] **Step 2: Run backend test and confirm failure**
 
 Run:
 
@@ -764,7 +756,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_operator_recov
 
 Expected: FAIL if source failures are not persisted or exposed.
 
-- [x] **Step 3: Persist source failure stats in pipeline**
+- [ ] **Step 3: Persist source failure stats in pipeline**
 
 In `pipeline.py`, add source-level stats fields when fetch/extraction fails:
 
@@ -785,11 +777,11 @@ stats["source_errors"] = sum(
 
 Keep the error message safe: no secrets, tokens, or full credentials.
 
-- [x] **Step 4: Expose stats without breaking existing run response shape**
+- [ ] **Step 4: Expose stats without breaking existing run response shape**
 
 In `watchlists.py`, ensure list/detail endpoints include the persisted stats object already returned for runs. Add schema fields only if current schemas strip unknown stats keys.
 
-- [x] **Step 5: Run backend tests**
+- [ ] **Step 5: Run backend tests**
 
 Run:
 
@@ -798,13 +790,12 @@ source .venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py \
   tldw_Server_API/tests/Watchlists/test_watchlists_pipeline.py \
-  tldw_Server_API/tests/Watchlists/test_run_detail_filters_totals.py \
   -q
 ```
 
 Expected: PASS.
 
-- [x] **Step 6: Write frontend health aggregation tests**
+- [ ] **Step 6: Write frontend health aggregation tests**
 
 In `watchlists-overview.test.ts`, add cases:
 
@@ -818,7 +809,7 @@ expect(buildWatchlistsOverviewHealth({
 
 Also assert the title is not `System healthy`.
 
-- [x] **Step 7: Implement health aggregation**
+- [ ] **Step 7: Implement health aggregation**
 
 In `watchlists-overview.ts`, count:
 
@@ -828,11 +819,11 @@ In `watchlists-overview.ts`, count:
 - outputs with `audio_briefing_status` of `enqueue_failed` or `skipped` when audio was requested
 - delivery/output errors already exposed by current metadata
 
-- [x] **Step 8: Render warning state**
+- [ ] **Step 8: Render warning state**
 
 In `WatchlistsHealthBar.tsx` and `OverviewTab.tsx`, render warning/partial state with links to affected Source, Activity, or Reports tab. Preserve the existing healthy state when no unresolved warnings exist.
 
-- [x] **Step 9: Run focused frontend tests**
+- [ ] **Step 9: Run focused frontend tests**
 
 Run:
 
@@ -846,7 +837,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [x] **Step 10: Commit**
+- [ ] **Step 10: Commit**
 
 Run:
 
@@ -854,9 +845,7 @@ Run:
 git add \
   tldw_Server_API/app/core/Watchlists/pipeline.py \
   tldw_Server_API/app/api/v1/endpoints/watchlists.py \
-  tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py \
   tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py \
-  apps/packages/ui/src/types/watchlists.ts \
   apps/packages/ui/src/services/watchlists-overview.ts \
   apps/packages/ui/src/services/__tests__/watchlists-overview.test.ts \
   apps/packages/ui/src/components/Option/Watchlists/shared/WatchlistsHealthBar.tsx \
@@ -871,9 +860,8 @@ git commit -m "fix: reflect watchlist source failures in health"
 - Create: `Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md`
 - Create: `apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts`
 - Modify: `apps/extension/tests/e2e/watchlists.spec.ts`
-- Modify: `apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx`
 
-- [x] **Step 1: Write demo runbook skeleton**
+- [ ] **Step 1: Write demo runbook skeleton**
 
 Create `Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md` with sections:
 
@@ -890,7 +878,7 @@ Create `Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md` with sections:
 ## Known Degradations
 ```
 
-- [x] **Step 2: Add source preflight commands**
+- [ ] **Step 2: Add source preflight commands**
 
 Record the source-test command shape:
 
@@ -904,14 +892,14 @@ curl -sf \
 
 The runbook must say local loopback feeds are not valid demo sources unless backend policy explicitly allows them.
 
-- [x] **Step 3: Add audio preflight distinction**
+- [ ] **Step 3: Add audio preflight distinction**
 
 Document two separate gates:
 
 - Scheduler enqueue gate: `generate_audio=true` produces a task id and `/runs/{run_id}/audio` returns a meaningful status.
 - Final playback gate: provider, model, voice, script, per-speaker audio, and final mix all complete and produce a playable/downloadable artifact.
 
-- [x] **Step 4: Write WebUI Playwright smoke**
+- [ ] **Step 4: Write WebUI Playwright smoke**
 
 Create `watchlists-demo-readiness.spec.ts` that uses mocked or live-configured endpoints to assert:
 
@@ -920,7 +908,7 @@ Create `watchlists-demo-readiness.spec.ts` that uses mocked or live-configured e
 - output creation failure renders in-app error, not a runtime overlay.
 - audio status renders pending/failed/skipped truthfully.
 
-- [x] **Step 5: Extend extension strict smoke**
+- [ ] **Step 5: Extend extension strict smoke**
 
 In `apps/extension/tests/e2e/watchlists.spec.ts`, add or update a test to verify:
 
@@ -928,7 +916,7 @@ In `apps/extension/tests/e2e/watchlists.spec.ts`, add or update a test to verify
 - the shared route can render Activity/Reports status.
 - output generation errors do not crash the extension page.
 
-- [x] **Step 6: Run WebUI smoke**
+- [ ] **Step 6: Run WebUI smoke**
 
 Run:
 
@@ -938,10 +926,6 @@ npx playwright test e2e/workflows/watchlists-demo-readiness.spec.ts --reporter=l
 ```
 
 Expected: PASS.
-
-Actual: PASS, 2 tests passed with mocked same-origin Watchlists endpoints.
-
-Review follow-up actual: PASS, 3 tests passed after adding first-time guided source preflight/create coverage, fail-closed Watchlists mocks, scoped modal actions, and strict diagnostics with only narrow expected mock-environment allowances.
 
 - [ ] **Step 7: Run extension strict watchlists smoke**
 
@@ -954,9 +938,7 @@ npx playwright test tests/e2e/watchlists.spec.ts --reporter=line
 
 Expected: PASS with no skipped watchlists tests.
 
-Actual: BLOCKED before test execution. Playwright global setup hangs in `wxt build`; an isolated `bun run build:chrome:prod` reproduced the same WXT build hang and timed out after 120 seconds after duplicate-import warnings, before `.output/chrome-mv3` was produced.
-
-- [x] **Step 8: Run backend demo-scope tests**
+- [ ] **Step 8: Run backend demo-scope tests**
 
 Run:
 
@@ -972,9 +954,7 @@ python -m pytest \
 
 Expected: PASS.
 
-Actual: PASS, 29 passed, 4 skipped, 1 xpassed.
-
-- [x] **Step 9: Run touched Python Bandit**
+- [ ] **Step 9: Run touched Python Bandit**
 
 Run:
 
@@ -989,9 +969,7 @@ python -m bandit -r \
 
 Expected: no new findings in touched code.
 
-Actual: PASS, `/tmp/bandit_watchlists_demo_rescue.json` reported no errors and no results.
-
-- [x] **Step 10: Commit**
+- [ ] **Step 10: Commit**
 
 Run:
 
@@ -999,39 +977,8 @@ Run:
 git add \
   Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md \
   apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts \
-  apps/extension/tests/e2e/watchlists.spec.ts \
-  apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx
+  apps/extension/tests/e2e/watchlists.spec.ts
 git commit -m "test: add watchlists demo readiness gate"
-```
-
-Actual: committed in `bd3db7acf`.
-
-- [x] **Step 11: Review hardening follow-up**
-
-Addressed post-commit review findings:
-
-- WebUI readiness smoke now covers the guided first-time source preflight and source/monitor creation path instead of only seeded sources.
-- Watchlists mock routing now fails closed on unmatched `/api/v1/watchlists` API calls.
-- Playwright actions use normal actionability checks and modal-scoped buttons.
-- Regenerate-error logging uses the existing sanitized server-error path plus token/key redaction instead of stringifying arbitrary error objects.
-- Runbook safe claims separate WebUI readiness from the still-blocked extension build gate.
-
-Verification:
-
-```bash
-cd apps/tldw-frontend
-npx playwright test e2e/workflows/watchlists-demo-readiness.spec.ts --reporter=line
-# 3 passed
-
-cd apps/packages/ui
-bunx vitest run \
-  src/components/Option/Watchlists/OutputsTab/__tests__/OutputsTab.regenerate-modal.test.tsx \
-  src/components/Option/Watchlists/OutputsTab/__tests__/OutputsTab.accessibility-live-region.test.tsx \
-  src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx
-# 3 files passed, 11 tests passed
-
-git diff --check
-# passed
 ```
 
 ## Task 6: First-Time Cadence And Review Cleanup
@@ -1047,7 +994,7 @@ git diff --check
 - Test: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/schedule-utils.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/SchedulePicker.help.test.tsx`
 
-- [x] **Step 1: Write schedule utility tests**
+- [ ] **Step 1: Write schedule utility tests**
 
 Add cases for:
 
@@ -1061,13 +1008,13 @@ Expected payload examples:
 
 ```ts
 expect(resolveQuickSetupSchedule({ kind: "interval", unit: "hour", every: 5 }))
-  .toMatchObject({ schedule_expr: "0 */5 * * *" })
+  .toMatchObject({ schedule_type: "interval", interval_hours: 5 })
 
 expect(resolveQuickSetupSchedule({ kind: "weekly", weekday: "mon", time: "08:00" }))
-  .toMatchObject({ schedule_expr: "0 8 * * MON" })
+  .toMatchObject({ schedule_type: "cron" })
 ```
 
-- [x] **Step 2: Write review summary tests**
+- [ ] **Step 2: Write review summary tests**
 
 In `PipelineWizard.test.tsx`, assert:
 
@@ -1075,7 +1022,7 @@ In `PipelineWizard.test.tsx`, assert:
 - audio off displays only text digest/report copy.
 - audio on displays "1 speaker", "2 speakers", "3 speakers", or "4 speakers" based on the cast, not a fixed 3-person podcast assumption.
 
-- [x] **Step 3: Run tests and confirm failure**
+- [ ] **Step 3: Run tests and confirm failure**
 
 Run:
 
@@ -1087,9 +1034,9 @@ bunx vitest run \
   --maxWorkers=1 --no-file-parallelism
 ```
 
-Observed: FAIL for unsupported cadence-draft serialization and missing weekdays/advanced cron wizard options.
+Expected: FAIL for unsupported variable cadence and existing summary contradictions.
 
-- [x] **Step 4: Extend schedule draft model**
+- [ ] **Step 4: Extend schedule draft model**
 
 In `quick-setup.ts` and `pipeline-contract.ts`, represent cadence as:
 
@@ -1103,15 +1050,15 @@ type WatchlistCadenceDraft =
   | { kind: "advanced"; cron: string }
 ```
 
-- [x] **Step 5: Implement variable cadence conversion**
+- [ ] **Step 5: Implement variable cadence conversion**
 
 Map interval and weekly drafts into the existing job schedule payload shape already accepted by `JobFormModal`/backend. Do not invent a new backend schedule contract unless current fields cannot express the cadence.
 
-- [x] **Step 6: Update wizard controls**
+- [ ] **Step 6: Update wizard controls**
 
-In `PipelineWizard.tsx`, add variable cadence controls using the existing schedule utility patterns. Keep advanced cron behind an explicit advanced cadence choice.
+In `PipelineWizard.tsx`, add variable cadence controls using the existing SchedulePicker patterns. Keep advanced cron behind an explicit advanced disclosure.
 
-- [x] **Step 7: Fix review summary**
+- [ ] **Step 7: Fix review summary**
 
 Use normalized draft state, not stale form labels, for:
 
@@ -1122,7 +1069,7 @@ Use normalized draft state, not stale form labels, for:
 - optional audio speaker count
 - first-run behavior
 
-- [x] **Step 8: Run focused tests**
+- [ ] **Step 8: Run focused tests**
 
 Run:
 
@@ -1136,9 +1083,9 @@ bunx vitest run \
   --maxWorkers=1 --no-file-parallelism
 ```
 
-Observed from `apps/packages/ui`: PASS, 6 files and 35 tests.
+Expected: PASS.
 
-- [x] **Step 9: Commit**
+- [ ] **Step 9: Commit**
 
 Run:
 
@@ -1156,8 +1103,6 @@ git add \
 git commit -m "feat: support variable watchlist cadence setup"
 ```
 
-Committed in PR #1921.
-
 ## Task 7: Digest And Newsletter Output Contract
 
 **Files:**
@@ -1172,9 +1117,7 @@ Committed in PR #1921.
 - Test: `tldw_Server_API/tests/Watchlists/test_job_output_prefs_roundtrip.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_newsletter_briefing_gaps.py`
 
-Implementation note: completed in TASK-472. `OutputsTab.tsx` was already metadata-driven, so the implementation added/kept regression coverage there without changing the component source.
-
-- [x] **Step 1: Write scheduled output contract tests**
+- [ ] **Step 1: Write scheduled output contract tests**
 
 In `pipeline-contract.test.ts`, add two cases:
 
@@ -1200,7 +1143,7 @@ expect(toPipelineJobCreatePayload({
 
 If the draft model does not yet have `createScheduledOutput`, add it in the same test as the explicit user choice.
 
-- [x] **Step 2: Write job form summary tests**
+- [ ] **Step 2: Write job form summary tests**
 
 In `JobFormModal.live-summary.test.tsx`, assert the save review distinguishes:
 
@@ -1209,7 +1152,7 @@ In `JobFormModal.live-summary.test.tsx`, assert the save review distinguishes:
 - delivery enabled versus in-app Reports only
 - audio enabled versus text digest only
 
-- [x] **Step 3: Write Reports discoverability test**
+- [ ] **Step 3: Write Reports discoverability test**
 
 In `OutputsTab.regenerate-modal.test.tsx`, assert regenerated digest/newsletter output shows:
 
@@ -1219,7 +1162,7 @@ In `OutputsTab.regenerate-modal.test.tsx`, assert regenerated digest/newsletter 
 - delivery status
 - audio status if audio requested
 
-- [x] **Step 4: Run frontend tests and confirm failure**
+- [ ] **Step 4: Run frontend tests and confirm failure**
 
 Run:
 
@@ -1235,7 +1178,7 @@ bunx vitest run \
 
 Expected: FAIL where scheduled output intent and report state are implicit or mislabeled.
 
-- [x] **Step 5: Implement explicit scheduled output preference**
+- [ ] **Step 5: Implement explicit scheduled output preference**
 
 In `pipeline-contract.ts`, set scheduled output only when requested:
 
@@ -1251,7 +1194,7 @@ if (draft.createScheduledOutput) {
 
 Keep one-off test output creation in `toPipelineOutputCreatePayload`; do not conflate it with scheduled `auto_output`.
 
-- [x] **Step 6: Update job form copy and summaries**
+- [ ] **Step 6: Update job form copy and summaries**
 
 In `JobFormModal.tsx` and `job-summaries.ts`, render explicit phrases:
 
@@ -1264,11 +1207,11 @@ In `JobFormModal.tsx` and `job-summaries.ts`, render explicit phrases:
 
 Keep raw cron, template selector, and existing advanced controls reachable.
 
-- [x] **Step 7: Keep Reports state grounded in backend artifacts**
+- [ ] **Step 7: Keep Reports state grounded in backend artifacts**
 
 In `OutputsTab.tsx`, show output state from actual output records and metadata. Do not show "newsletter sent" or "audio ready" unless the output metadata says delivery/audio succeeded.
 
-- [x] **Step 8: Run backend output contract tests**
+- [ ] **Step 8: Run backend output contract tests**
 
 Run:
 
@@ -1282,7 +1225,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [x] **Step 9: Run frontend output contract tests**
+- [ ] **Step 9: Run frontend output contract tests**
 
 Run:
 
@@ -1298,7 +1241,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [x] **Step 10: Commit**
+- [ ] **Step 10: Commit**
 
 Run:
 
@@ -1328,7 +1271,7 @@ git commit -m "feat: clarify watchlists digest output contract"
 - Test: `tldw_Server_API/tests/Watchlists/test_fetchers_scrape_rules.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_preview_endpoint.py`
 
-- [x] **Step 1: Write source settings helper tests**
+- [ ] **Step 1: Write source settings helper tests**
 
 Create tests proving unknown keys survive:
 
@@ -1341,7 +1284,7 @@ expect(merged.vendor_specific).toBe(true)
 expect(merged.scrape.selector).toBe(".article")
 ```
 
-- [x] **Step 2: Write source test UI assertions**
+- [ ] **Step 2: Write source test UI assertions**
 
 In `SourceFormModal.test-source.test.tsx`, assert a failed source test shows:
 
@@ -1350,7 +1293,7 @@ In `SourceFormModal.test-source.test.tsx`, assert a failed source test shows:
 - sample item count
 - dedupe identity preview
 
-- [x] **Step 3: Run frontend tests and confirm failure**
+- [ ] **Step 3: Run frontend tests and confirm failure**
 
 Run:
 
@@ -1364,7 +1307,7 @@ bunx vitest run \
 
 Expected: FAIL until helpers/UI are added.
 
-- [x] **Step 4: Implement source settings helpers**
+- [ ] **Step 4: Implement source settings helpers**
 
 Create `source-settings.ts` with pure helpers:
 
@@ -1383,11 +1326,11 @@ export const mergeSourceSettings = (
 
 Add typed parse/serialize helpers for scrape selectors, extraction mode, dedupe key, and advanced JSON. Invalid advanced JSON should block save with an inline error.
 
-- [x] **Step 5: Pass draft settings to source test**
+- [ ] **Step 5: Pass draft settings to source test**
 
 In `SourceFormModal.tsx`, include normalized draft `settings` in source-test calls so test results reflect what the user is saving.
 
-- [x] **Step 6: Surface diagnostics**
+- [ ] **Step 6: Surface diagnostics**
 
 Render:
 
@@ -1397,11 +1340,11 @@ Render:
 - dedupe identity preview such as "URL + canonical URL" or the configured custom identity
 - warning when no items are found
 
-- [x] **Step 7: Extend backend diagnostics only where missing**
+- [ ] **Step 7: Extend backend diagnostics only where missing**
 
 In `fetchers.py`/`watchlists.py`, expose `validate_selector_rules` diagnostics from source test responses. Do not change the stored source contract unless the UI needs a new persisted setting.
 
-- [x] **Step 8: Run backend source tests**
+- [ ] **Step 8: Run backend source tests**
 
 Run:
 
@@ -1415,7 +1358,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [x] **Step 9: Run frontend source tests**
+- [ ] **Step 9: Run frontend source tests**
 
 Run:
 
@@ -1429,7 +1372,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [x] **Step 10: Commit**
+- [ ] **Step 10: Commit**
 
 Run:
 
@@ -1829,10 +1772,9 @@ git commit -m "feat: improve watchlists power-user throughput"
 
 **Files:**
 - Modify: `Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md`
-- Modify: `Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-plan.md`
-- Modify: `backlog/tasks/task-475 - Run-Watchlists-remediation-final-verification-gate.md`
+- Modify: `backlog/tasks/task-441 - Create-implementation-plan-for-Watchlists-demo-remediation-tracks.md`
 
-- [x] **Step 1: Run full frontend watchlists gates**
+- [ ] **Step 1: Run full frontend watchlists gates**
 
 Run:
 
@@ -1845,10 +1787,7 @@ bun run test:watchlists:a11y
 
 Expected: PASS.
 
-Result on 2026-05-21 from `codex/watchlists-final-verification`: PASS.
-`test:watchlists:typecheck` passed 3 tests, `test:watchlists:scale` passed 53 tests, and `test:watchlists:a11y` passed 91 tests.
-
-- [x] **Step 2: Run full backend watchlists gate**
+- [ ] **Step 2: Run full backend watchlists gate**
 
 Run:
 
@@ -1859,9 +1798,7 @@ python -m pytest tldw_Server_API/tests/Watchlists -q
 
 Expected: PASS. Existing expected xfail/xpass behavior must be explained if present.
 
-Result on 2026-05-21: PASS. `python -m pytest tldw_Server_API/tests/Watchlists -q` reported 498 passed, 9 skipped, 1 xpassed, and 147 warnings. The skipped tests are environment-gated integration/E2E cases in the Watchlists suite.
-
-- [x] **Step 3: Run WebUI browser smoke**
+- [ ] **Step 3: Run WebUI browser smoke**
 
 Start backend and WebUI in the same-origin mode chosen in the runbook, then run:
 
@@ -1872,9 +1809,7 @@ npx playwright test e2e/workflows/watchlists-demo-readiness.spec.ts --reporter=l
 
 Expected: PASS.
 
-Result on 2026-05-21: PASS after rerunning outside the sandbox port-bind restriction. The sandboxed attempt failed with `listen EPERM: operation not permitted 0.0.0.0:8080`; the escalated Playwright rerun passed 3 tests.
-
-- [x] **Step 4: Run extension strict watchlists gate**
+- [ ] **Step 4: Run extension strict watchlists gate**
 
 Run:
 
@@ -1885,9 +1820,7 @@ npx playwright test tests/e2e/watchlists.spec.ts --reporter=line
 
 Expected: PASS with no skipped watchlists tests. If sandbox blocks Chrome launch, rerun with the already approved escalated Playwright path and record that in the runbook.
 
-Result on 2026-05-21: PASS with no skips after rerunning escalated with `TLDW_E2E_EXTENSION_HEADLESS=0`. The valid run passed 14 tests and `node scripts/assert-playwright-no-skips.mjs .watchlists-e2e-report.json` reported `passed=14 skipped=0 unexpected=0 flaky=0`. The first headless CI-mode attempt skipped all tests because Chromium could not keep the MV3 extension context alive in this environment.
-
-- [x] **Step 5: Run Bandit on touched Python scope**
+- [ ] **Step 5: Run Bandit on touched Python scope**
 
 Run:
 
@@ -1901,8 +1834,6 @@ python -m bandit -r \
 ```
 
 Expected: no new findings in touched code.
-
-Result on 2026-05-21: PASS. `/tmp/bandit_watchlists_remediation_final.json` reported `results: []` and `errors: []`.
 
 - [ ] **Step 6: Do manual live demo dry run**
 
@@ -1919,30 +1850,25 @@ Using the runbook, verify:
 - active source failure blocks `System healthy`
 - extension claim matches what was tested
 
-Result on 2026-05-21: not completed as a live manual dry run. The automated WebUI and extension gates passed with controlled API responses; live source/provider/audio proof still requires the actual demo environment and must pass the runbook's Provider And Voice Preflight before claiming final playable audio.
+- [ ] **Step 7: Update task final summary**
 
-- [x] **Step 7: Update task final summary**
-
-Update the active closeout task with:
+Update `TASK-441` with:
 
 - plan path
 - review status
-- verification commands run for the final gate
-- any manual live-demo blocker
+- verification commands run for plan-only work
+- note that Bandit is not applicable to this plan-only task unless code tasks have also been executed
 
-- [x] **Step 8: Commit final docs/task update**
+- [ ] **Step 8: Commit final docs/task update**
 
 Run:
 
 ```bash
 git add \
   Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md \
-  Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-plan.md \
-  'backlog/tasks/task-475 - Run-Watchlists-remediation-final-verification-gate.md'
+  'backlog/tasks/task-441 - Create-implementation-plan-for-Watchlists-demo-remediation-tracks.md'
 git commit -m "docs: finalize watchlists remediation verification gate"
 ```
-
-Result on 2026-05-21: prepared as the closeout branch commit for Task 12.
 
 ## Execution Notes
 

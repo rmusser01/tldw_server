@@ -47,6 +47,13 @@ export const decodeChatErrorPayload = (
   }
 }
 
+const translateErrorText = (key: string, fallback: string): string => {
+  const translated = i18n.t(key, fallback)
+  return typeof translated === "string" && translated.trim().length > 0
+    ? translated
+    : fallback
+}
+
 export const buildFriendlyErrorMessage = (rawError: unknown): string => {
   const detail = formatErrorMessage(rawError, "Request failed")
   const lower = detail.toLowerCase()
@@ -125,6 +132,18 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
     hint = i18n.t(
       "common:error.friendlyTimeoutHint",
       "The server stopped streaming responses. Try again, or open Health & diagnostics to check server status."
+    )
+  } else if (
+    lower.includes("no response text was returned") ||
+    lower.includes("empty response")
+  ) {
+    summary = translateErrorText(
+      "common:error.friendlyEmptyResponseSummary",
+      "No response was returned."
+    )
+    hint = translateErrorText(
+      "common:error.friendlyEmptyResponseHint",
+      "The model finished without text. Retry, or choose a different model."
     )
   } else if (
     lower.includes("chunkererror") ||

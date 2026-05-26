@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useComposerQueue } from "../hooks/useComposerQueue"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
+import type { QueuedRequestSnapshot } from "@/utils/chat-request-queue"
+import type { ChatDocuments } from "@/models/ChatTypes"
 
 // Mock the lower-level primitive so we can inspect the orchestration layer
 // without touching real queue mutations.
@@ -58,13 +60,13 @@ type BaseProps = {
   isConnectionReady?: boolean
   isQueuedDispatchBlocked?: boolean
   cancelCurrentAndRunDisabledReasonText?: string | null
-  onEnqueueBlocked?: ReturnType<typeof vi.fn>
-  onEnqueueSuccess?: ReturnType<typeof vi.fn>
+  onEnqueueBlocked?: (reason: string) => void
+  onEnqueueSuccess?: (isStreaming: boolean, item: QueuedRequest) => void
   resolveConversationId?: () => string | null
-  buildQueuedDocuments?: ReturnType<typeof vi.fn>
-  buildQueuedRequestSnapshot?: ReturnType<typeof vi.fn>
-  sendQueuedRequest?: ReturnType<typeof vi.fn>
-  stopStreamingRequest?: ReturnType<typeof vi.fn>
+  buildQueuedDocuments?: () => ChatDocuments
+  buildQueuedRequestSnapshot?: () => Partial<QueuedRequestSnapshot>
+  sendQueuedRequest?: (item: QueuedRequest) => Promise<void>
+  stopStreamingRequest?: (options?: { discardTurn?: boolean }) => void
 }
 
 const renderComposerQueue = (props: BaseProps = {}) => {

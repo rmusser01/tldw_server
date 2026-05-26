@@ -11,10 +11,8 @@ import {
   MODERATION_REVIEW_PATH,
   MODERATION_RULES_PATH,
   PROTOTYPE_WORKSPACES_PATH,
-  RESEARCH_STUDIO_PATH,
-  REPO2TXT_PATH,
-  WORKSPACE_PLAYGROUND_PATH,
-  WORKSPACE_STUDIO_PATH
+  RESEARCH_WORKSPACE_PATH,
+  REPO2TXT_PATH
 } from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { isHostedVisibleOptionPath } from "./option-route-visibility"
@@ -181,7 +179,7 @@ const OptionSkills = lazy(() => import("./option-skills"))
 const OptionRepo2Txt = lazy(() => import("./option-repo2txt"))
 const OptionSetup = lazy(() => import("./option-setup"))
 const OptionOnboardingTest = lazy(() => import("./option-onboarding-test"))
-const OptionWorkspacePlayground = lazy(() => import("./option-workspace-playground"))
+const OptionResearchWorkspace = lazy(() => import("./option-research-workspace"))
 const OptionChatWorkspace = lazy(() => import("./option-chat-workspace"))
 const OptionPrototypeWorkspaces = lazy(() => import("./option-prototype-workspaces"))
 const OptionSharedWithMe = lazy(() => import("./option-shared-with-me"))
@@ -474,18 +472,8 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
-    path: RESEARCH_STUDIO_PATH,
-    element: <OptionWorkspacePlayground />,
-  },
-  {
-    kind: "options",
-    path: WORKSPACE_PLAYGROUND_PATH,
-    element: <RouteAliasNavigate to={RESEARCH_STUDIO_PATH} />,
-  },
-  {
-    kind: "options",
-    path: WORKSPACE_STUDIO_PATH,
-    element: <RouteAliasNavigate to={RESEARCH_STUDIO_PATH} />,
+    path: RESEARCH_WORKSPACE_PATH,
+    element: <OptionResearchWorkspace />,
   },
   {
     kind: "options",

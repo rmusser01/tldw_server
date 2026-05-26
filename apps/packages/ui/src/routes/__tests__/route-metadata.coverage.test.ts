@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  AUDITED_ROOT_ROUTE_PATHS,
   getCanonicalRoutePath,
+  getCommandPaletteRoutes,
+  getCommandPaletteTarget,
   getRouteMetadata,
   ROUTE_METADATA
 } from "../route-metadata"
@@ -29,7 +32,7 @@ const AUDITED_ROOT_ROUTES = [
   "/knowledge",
   "/search",
   "/research",
-  "/workspace-playground",
+  "/research-workspace",
   "/document-workspace",
   "/repo2txt",
   "/model-playground",
@@ -84,8 +87,9 @@ const AUDITED_ROOT_ROUTES = [
 ] as const
 
 describe("route metadata coverage", () => {
-  it("tracks the audited root route inventory", () => {
-    expect(AUDITED_ROOT_ROUTES).toHaveLength(74)
+  it("tracks the audited 74-route bootstrap set explicitly", () => {
+    expect(AUDITED_ROOT_ROUTE_PATHS).toEqual(AUDITED_ROOT_ROUTES)
+    expect(AUDITED_ROOT_ROUTE_PATHS).toHaveLength(74)
   })
 
   it("defines metadata for every audited root route", () => {
@@ -96,26 +100,68 @@ describe("route metadata coverage", () => {
 
   it("defines required user-facing metadata fields", () => {
     for (const metadata of ROUTE_METADATA) {
-      expect(metadata.path).toMatch(/^\//)
-      expect(metadata.canonicalPath).toMatch(/^\//)
-      expect(metadata.label.trim()).not.toHaveLength(0)
-      expect(metadata.group).toBeTruthy()
-      expect(metadata.surface).toBeTruthy()
-      expect(metadata.availability.length).toBeGreaterThan(0)
-      expect(metadata.rationale.trim()).not.toHaveLength(0)
+      expect(metadata.path, metadata.path).toMatch(/^\//)
+      expect(metadata.canonicalPath, metadata.path).toMatch(/^\//)
+      expect(metadata.label.trim(), metadata.path).not.toHaveLength(0)
+      expect(metadata.group, metadata.path).toBeTruthy()
+      expect(metadata.surface, metadata.path).toBeTruthy()
+      expect(metadata.availability.length, metadata.path).toBeGreaterThan(0)
+      expect(metadata.rationale.trim(), metadata.path).not.toHaveLength(0)
     }
   })
 
-  it("keeps canonical route paths explicit for legacy or redirect routes", () => {
+  it("resolves compatibility aliases to canonical routes", () => {
+    expect(getCanonicalRoutePath("/audio")).toBe("/speech")
+    expect(getCanonicalRoutePath("/search")).toBe("/knowledge")
     expect(getCanonicalRoutePath("/prompt-studio")).toBe("/prompts")
-    expect(getRouteMetadata("/prompt-studio")?.redirectsTo).toBe(
-      "/prompts?tab=studio"
-    )
+    expect(getCanonicalRoutePath("/workspace-playground")).toBeUndefined()
   })
 
-  it("does not define duplicate route metadata paths", () => {
-    const metadataPaths = ROUTE_METADATA.map((metadata) => metadata.path)
+  it("defines research workspace as the canonical workspace research route without legacy aliases", () => {
+    const metadata = getRouteMetadata("/research-workspace")
 
-    expect(new Set(metadataPaths).size).toBe(metadataPaths.length)
+    expect(metadata).toMatchObject({
+      path: "/research-workspace",
+      canonicalPath: "/research-workspace",
+      label: "Research Workspace",
+      group: "workspace"
+    })
+    expect(metadata?.aliases).toBeUndefined()
+    expect(metadata?.redirectsTo).toBeUndefined()
+    expect(getRouteMetadata("/workspace-playground")).toBeUndefined()
+  })
+
+  it("exposes command palette routes through metadata-owned targets", () => {
+    const commandPalettePaths = getCommandPaletteRoutes().map(
+      (metadata) => metadata.path
+    )
+
+    expect(commandPalettePaths).toEqual(
+      expect.arrayContaining([
+        "/chat",
+        "/knowledge",
+        "/media",
+        "/notes",
+        "/prompts",
+        "/flashcards",
+        "/documentation",
+        "/settings",
+        "/mcp-hub"
+      ])
+    )
+    expect(getCommandPaletteTarget("/mcp-hub")).toBe("/mcp-hub")
+    expect(getCommandPaletteTarget("/prompt-studio")).toBe("/prompts")
+  })
+
+  it("keeps non-product route surfaces hidden from default navigation", () => {
+    for (const metadata of ROUTE_METADATA) {
+      if (
+        metadata.surface === "internal_qa_debug" ||
+        metadata.surface === "hosted_only" ||
+        metadata.surface === "legacy_alias"
+      ) {
+        expect(metadata.nav, metadata.path).toBe("hidden")
+      }
+    }
   })
 })

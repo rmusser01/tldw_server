@@ -1320,7 +1320,6 @@ describe("QuickIngestWizardModal session runtime", () => {
       ...createEmptyQuickIngestSession(),
       lifecycle: "completed",
       currentStep: 5,
-      highestStep: 5,
       processingState: {
         status: "complete",
         perItemProgress: [],

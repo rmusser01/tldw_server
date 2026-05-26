@@ -132,6 +132,10 @@ test.describe("MCP Hub", () => {
       const headingVisible = await mcpHub.heading.isVisible().catch(() => false)
       expect(headingVisible).toBe(true)
 
+      await expect(authedPage.getByTestId("mcp-hub-status-summary")).toBeVisible()
+      await expect(
+        authedPage.getByRole("button", { name: "Open Policy Assignments" })
+      ).toBeVisible()
       await expect(mcpHub.workflows).toBeVisible()
       await expect(mcpHub.workflowButton("setup")).toBeVisible()
       await expect(mcpHub.workflowButton("access")).toBeVisible()

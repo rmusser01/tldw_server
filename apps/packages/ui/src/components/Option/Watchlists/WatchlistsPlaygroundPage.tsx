@@ -2267,7 +2267,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
 
       {watchlistViewsAvailable && (
         <>
-          {/* Persistent health bar — replaces Overview tab in progressive layout */}
+          {/* Persistent health bar - replaces Overview tab in progressive layout */}
           <WatchlistsHealthBar onOpenSettings={() => setSettingsDrawerOpen(true)} onNavigate={navigateToTab} />
 
           <div

@@ -4,7 +4,7 @@ import { WorkspaceChatPanel } from "../WorkspaceChatPanel"
 import type { StagedWorkspaceSource } from "../types"
 
 const chatHookState = vi.hoisted(() => {
-  const onSubmit = vi.fn(async (): Promise<any> => ({ status: "submitted" }))
+  const onSubmit = vi.fn(async (_input?: any): Promise<any> => ({ status: "submitted" }))
   const stopStreamingRequest = vi.fn()
   const value: any = {
     messages: [],
@@ -16,7 +16,7 @@ const chatHookState = vi.hoisted(() => {
     selectedModel: "gpt-test",
     selectedAssistant: { kind: "persona", id: "p1", name: "Analyst" }
   }
-  const useMessageOption = vi.fn(() => value)
+  const useMessageOption = vi.fn((..._args: unknown[]) => value)
 
   return { onSubmit, stopStreamingRequest, useMessageOption, value }
 })

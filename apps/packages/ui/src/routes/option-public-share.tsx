@@ -1,11 +1,9 @@
 import React from "react"
+import { useParams } from "react-router-dom"
 import { PublicShare } from "@/components/Option/PublicShare"
 
-interface PublicShareRouteProps {
-  token: string
-}
-
-const OptionPublicShare: React.FC<PublicShareRouteProps> = ({ token }) => {
+const OptionPublicShare: React.FC = () => {
+  const { token = "" } = useParams()
   return <PublicShare token={token} />
 }
 

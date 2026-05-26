@@ -2,11 +2,11 @@
 
 ## Purpose
 
-The Workspace Playground persistence path moved from a single monolithic `localStorage` blob to a split-key model with optional IndexedDB offload for heavy payloads. This document defines the storage model, gating/rollout controls, migration behavior, and diagnostics.
+The Research Workspace persistence path moved from a single monolithic `localStorage` blob to a split-key model with optional IndexedDB offload for heavy payloads. This document defines the storage model, gating/rollout controls, migration behavior, and diagnostics.
 
 Primary implementation: `apps/packages/ui/src/store/workspace.ts`.
 
-Current first-slice decision: `WorkspacePlayground` is the canonical shell for
+Current first-slice decision: `ResearchWorkspace` is the canonical shell for
 the roadmap first slice, with `ChatWorkspace` and `DocumentWorkspace` kept as
 specialized routes during this slice. See
 `Docs/Design/Workspace_Canonical_Model_Decision_2026_05.md`. Server sync should

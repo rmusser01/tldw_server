@@ -2,10 +2,10 @@ export const FEATURE_ROLLOUT_SUBJECT_ID_STORAGE_KEY =
   "tldw:feature-rollout:subject-id:v1"
 
 export const FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS = {
-  research_studio_provenance_v1:
-    "tldw:feature-rollout:research_studio_provenance_v1:percentage",
-  research_studio_status_guardrails_v1:
-    "tldw:feature-rollout:research_studio_status_guardrails_v1:percentage",
+  research_workspace_provenance_v1:
+    "tldw:feature-rollout:research_workspace_provenance_v1:percentage",
+  research_workspace_status_guardrails_v1:
+    "tldw:feature-rollout:research_workspace_status_guardrails_v1:percentage",
   watchlists_ia_reduced_nav_v1:
     "tldw:feature-rollout:watchlists_ia_reduced_nav_v1:percentage"
 } as const

@@ -174,10 +174,10 @@ const studioTabContainerPathCandidates = [
   "../packages/ui/src/components/Option/Prompt/Studio/StudioTabContainer.tsx",
   "packages/ui/src/components/Option/Prompt/Studio/StudioTabContainer.tsx",
 ]
-const workspacePlaygroundPathCandidates = [
-  "apps/packages/ui/src/components/Option/WorkspacePlayground/index.tsx",
-  "../packages/ui/src/components/Option/WorkspacePlayground/index.tsx",
-  "packages/ui/src/components/Option/WorkspacePlayground/index.tsx",
+const researchWorkspacePathCandidates = [
+  "apps/packages/ui/src/components/Option/ResearchWorkspace/index.tsx",
+  "../packages/ui/src/components/Option/ResearchWorkspace/index.tsx",
+  "packages/ui/src/components/Option/ResearchWorkspace/index.tsx",
 ]
 const viewMediaPagePathCandidates = [
   "apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
@@ -190,9 +190,9 @@ const contentViewerPathCandidates = [
   "packages/ui/src/components/Media/ContentViewer.tsx",
 ]
 const studioPanePathCandidates = [
-  "apps/packages/ui/src/components/Option/WorkspacePlayground/StudioPane/index.tsx",
-  "../packages/ui/src/components/Option/WorkspacePlayground/StudioPane/index.tsx",
-  "packages/ui/src/components/Option/WorkspacePlayground/StudioPane/index.tsx",
+  "apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/index.tsx",
+  "../packages/ui/src/components/Option/ResearchWorkspace/StudioPane/index.tsx",
+  "packages/ui/src/components/Option/ResearchWorkspace/StudioPane/index.tsx",
 ]
 const knowledgeQaIndexPathCandidates = [
   "apps/packages/ui/src/components/Option/KnowledgeQA/index.tsx",
@@ -392,7 +392,7 @@ const promptsBodyPath = promptsBodyPathCandidates.find((candidate) =>
 const studioTabContainerPath = studioTabContainerPathCandidates.find((candidate) =>
   existsSync(candidate),
 )
-const workspacePlaygroundPath = workspacePlaygroundPathCandidates.find(
+const researchWorkspacePath = researchWorkspacePathCandidates.find(
   (candidate) => existsSync(candidate),
 )
 const viewMediaPagePath = viewMediaPagePathCandidates.find((candidate) =>
@@ -495,7 +495,7 @@ if (
   !acpWorkspacePanelPath ||
   !promptsBodyPath ||
   !studioTabContainerPath ||
-  !workspacePlaygroundPath ||
+  !researchWorkspacePath ||
   !viewMediaPagePath ||
   !contentViewerPath ||
   !studioPanePath ||
@@ -576,7 +576,7 @@ const acpPlaygroundSource = readFileSync(acpPlaygroundPath, "utf8")
 const acpWorkspacePanelSource = readFileSync(acpWorkspacePanelPath, "utf8")
 const promptsBodySource = readFileSync(promptsBodyPath, "utf8")
 const studioTabContainerSource = readFileSync(studioTabContainerPath, "utf8")
-const workspacePlaygroundSource = readFileSync(workspacePlaygroundPath, "utf8")
+const researchWorkspaceSource = readFileSync(researchWorkspacePath, "utf8")
 const viewMediaPageSource = readFileSync(viewMediaPagePath, "utf8")
 const contentViewerSource = readFileSync(contentViewerPath, "utf8")
 const studioPaneSource = readFileSync(studioPanePath, "utf8")
@@ -1350,16 +1350,16 @@ describe("extension entry shell performance contracts", () => {
   })
 
   it("defers secondary workspace playground panes behind route-local lazy boundaries", () => {
-    expect(workspacePlaygroundSource).not.toContain(
+    expect(researchWorkspaceSource).not.toContain(
       'import { SourcesPane } from "./SourcesPane"',
     )
-    expect(workspacePlaygroundSource).not.toContain(
+    expect(researchWorkspaceSource).not.toContain(
       'import { StudioPane } from "./StudioPane"',
     )
-    expect(workspacePlaygroundSource).toContain('import("./SourcesPane")')
-    expect(workspacePlaygroundSource).toContain('import("./StudioPane")')
-    expect(workspacePlaygroundSource).toContain("renderSourcesPane")
-    expect(workspacePlaygroundSource).toContain("renderStudioPane")
+    expect(researchWorkspaceSource).toContain('import("./SourcesPane")')
+    expect(researchWorkspaceSource).toContain('import("./StudioPane")')
+    expect(researchWorkspaceSource).toContain("renderSourcesPane")
+    expect(researchWorkspaceSource).toContain("renderStudioPane")
   })
 
   it("defers workspace studio artifact modal surfaces behind a lazy modal boundary", () => {

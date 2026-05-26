@@ -127,6 +127,7 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
       const plan = planRevisionApply(editorText, proposal)
       if (plan.type === "apply" || plan.type === "retarget") {
         const result = applyEditorText(plan.nextText)
+        const failureReason = "reason" in result ? result.reason : null
         updateRevisions((current) =>
           current.map((revision) => {
             if (revision.id !== proposalId) return revision
@@ -135,7 +136,7 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
             }
             return appendNote(
               { ...revision, status: "conflict" },
-              `Manual apply required: ${result.reason}`
+              `Manual apply required: ${failureReason ?? "unknown reason"}`
             )
           })
         )
@@ -196,7 +197,7 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
       updateRevisions((current) => [
         ...current.map((proposal) =>
           proposal.id === source.id
-            ? { ...proposal, status: "rejected" }
+            ? { ...proposal, status: "rejected" as const }
             : proposal
         ),
         {
@@ -206,7 +207,7 @@ export function useWritingRevisions(deps: UseWritingRevisionsDeps) {
           instruction: source.instruction,
           presetId: source.presetId,
           presetInstruction: source.presetInstruction,
-          status: "pending"
+          status: "pending" as const
         }
       ])
     },

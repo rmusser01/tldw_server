@@ -3,6 +3,12 @@
  * Generated from actual pages in the tldw-frontend/pages directory
  */
 
+import {
+  isAuditedRootRoute,
+  ROUTE_METADATA,
+  type RouteGroup
+} from "../../../packages/ui/src/routes/route-metadata"
+
 export type PageCategory =
   | "chat"
   | "media"
@@ -27,10 +33,67 @@ export interface PageEntry {
   skip?: string
 }
 
+const routeGroupToPageCategory = (group: RouteGroup): PageCategory => {
+  switch (group) {
+    case "chat":
+      return "chat"
+    case "media_library":
+      return "media"
+    case "settings":
+      return "settings"
+    case "operations":
+      return "connectors"
+    case "workspace":
+    case "study":
+    case "safety":
+    case "specialized":
+      return "workspace"
+    case "knowledge":
+      return "knowledge"
+    case "audio":
+      return "audio"
+    case "account":
+    case "documentation":
+    case "extension":
+    case "start":
+      return "other"
+  }
+}
+
+const METADATA_PAGE_OVERRIDES: Record<string, Partial<PageEntry>> = {
+  "/chat": { expectedTestId: "chat-input" },
+  "/chatbooks": {
+    skip:
+      "Covered in Stage 5 release gate; intermittently stalls all-pages webpack route traversal in CI."
+  },
+  "/writing-playground": {
+    skip:
+      "Covered in Stage 5 release gate; intermittently trips the global error boundary during full all-pages traversal in CI."
+  }
+}
+
+const METADATA_ROUTE_PATHS = new Set(ROUTE_METADATA.map((route) => route.path))
+
+const METADATA_SMOKE_PAGES: PageEntry[] = ROUTE_METADATA.filter(
+  (metadata) =>
+    isAuditedRootRoute(metadata.path) &&
+    metadata.availability.includes("web") &&
+    metadata.smoke !== "exclude"
+).map((metadata) => ({
+  path: metadata.path,
+  name: metadata.label,
+  category: routeGroupToPageCategory(metadata.group),
+  ...(metadata.smoke === "manual"
+    ? { skip: `Manual smoke: ${metadata.rationale}` }
+    : {}),
+  ...METADATA_PAGE_OVERRIDES[metadata.path]
+}))
+
 /**
- * All pages in the tldw-frontend application
+ * Extra pages in the tldw-frontend application that are outside the audited
+ * root-route metadata contract.
  */
-export const PAGES: PageEntry[] = [
+const EXTRA_PAGES: PageEntry[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   // Chat
   // ═══════════════════════════════════════════════════════════════════════════
@@ -135,7 +198,7 @@ export const PAGES: PageEntry[] = [
   { path: "/reading", name: "Reading", category: "workspace" },
   { path: "/items", name: "Items", category: "workspace" },
   { path: "/chunking-playground", name: "Chunking Playground", category: "workspace" },
-  { path: "/workspace-playground", name: "Workspace Playground", category: "workspace" },
+  { path: "/research-workspace", name: "Research Workspace", category: "workspace" },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Knowledge
@@ -172,6 +235,8 @@ export const PAGES: PageEntry[] = [
   { path: "/connectors/browse", name: "Connectors Browse", category: "connectors" },
   { path: "/connectors/jobs", name: "Connectors Jobs", category: "connectors" },
   { path: "/connectors/sources", name: "Connectors Sources", category: "connectors" },
+  { path: "/integrations", name: "Integrations", category: "connectors" },
+  { path: "/scheduled-tasks", name: "Scheduled Tasks", category: "connectors" },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Other / Core Pages
@@ -224,7 +289,7 @@ export const PAGES: PageEntry[] = [
   { path: "/presentation-studio/new", name: "New Presentation", category: "workspace" },
   { path: "/repo2txt", name: "Repo2Txt", category: "workspace" },
   { path: "/workflow-editor", name: "Workflow Editor", category: "workspace" },
-  { path: "/research-studio", name: "Research Studio", category: "workspace" },
+  { path: "/research-workspace", name: "Research Workspace", category: "workspace" },
   {
     path: "/writing-playground",
     name: "Writing Playground",
@@ -287,6 +352,19 @@ export const PAGES: PageEntry[] = [
   { path: "/billing", name: "Billing", category: "other" },
   { path: "/billing/success", name: "Billing Success", category: "other" },
   { path: "/billing/cancel", name: "Billing Cancel", category: "other" },
+
+  // Page-level `/chat/settings` remains listed once in the chat section above.
+]
+
+/**
+ * All pages in the tldw-frontend application.
+ *
+ * Audited root routes are owned by route metadata; child and special-case
+ * smoke pages remain explicit here until they get first-class metadata.
+ */
+export const PAGES: PageEntry[] = [
+  ...METADATA_SMOKE_PAGES,
+  ...EXTRA_PAGES.filter((page) => !METADATA_ROUTE_PATHS.has(page.path))
 ]
 
 /**

@@ -2161,36 +2161,21 @@ export const PlaygroundForm = ({
 
   const modelSelectButton = (
     <ChatModelSelectorDropdown
-      activeModelKey={selectedModelKey ?? selectedModel}
       apiModelLabel={apiModelLabel}
-      catalogControls={
-        <PlaygroundModelCatalogControls
-          t={t}
-          modelListScope={modelListScope}
-          setModelListScope={setModelListScope}
-          modelSearchQuery={modelSearchQuery}
-          setModelSearchQuery={setModelSearchQuery}
-          modelSortMode={modelSortMode}
-          setModelSortMode={setModelSortMode}
-        />
-      }
       connectionStatusLabel={connectionStatusLabel}
       connectionStatusWarning={
         !isConnectionReady || connectionUxState === "connected_degraded"
       }
       modelDropdownMenuItems={modelDropdownMenuItems}
       modelDropdownOpen={modelDropdownOpen}
+      modelSearchQuery={modelSearchQuery}
       modelSelectorWarning={modelSelectorWarning}
-      modelUsabilityLabel={characterChatModelUsabilityLabel}
-      modelUsabilityTitle={characterChatModelUsabilityTitle}
-      modelUsabilityWarning={Boolean(
-        characterChatModelUsabilityLabel &&
-          characterChatModelUsability?.status !== "ready",
-      )}
-      onBeforeOpen={() => closeComposerPopoversExcept("model")}
+      modelSortMode={modelSortMode}
       resolvedProviderKey={resolvedProviderKey}
+      selectedModel={selectedModel}
       setModelDropdownOpen={setModelDropdownOpen}
       setModelSearchQuery={setModelSearchQuery}
+      setModelSortMode={setModelSortMode}
     />
   );
 

@@ -154,14 +154,16 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
       </button>
     ),
     Input: Object.assign(
-      React.forwardRef<HTMLInputElement, {
+      React.forwardRef<HTMLInputElement, Omit<
+        React.InputHTMLAttributes<HTMLInputElement>,
+        "onChange" | "size"
+      > & {
         value?: string
         onChange?: (event: { target: { value: string } }) => void
         disabled?: boolean
         suffix?: React.ReactNode
         status?: string
         size?: string
-        [key: string]: unknown
       }>(({ value, onChange, disabled, suffix: _suffix, status: _status, size: _size, ...props }, ref) => (
         <input
           ref={ref}
@@ -174,13 +176,15 @@ const renderConnectionForm = async (options: RenderConnectionFormOptions = {}) =
         />
       )),
       {
-        Password: React.forwardRef<HTMLInputElement, {
+        Password: React.forwardRef<HTMLInputElement, Omit<
+          React.InputHTMLAttributes<HTMLInputElement>,
+          "onChange" | "size"
+        > & {
           value?: string
           onChange?: (event: { target: { value: string } }) => void
           disabled?: boolean
           status?: string
           size?: string
-          [key: string]: unknown
         }>(({ value, onChange, disabled, status: _status, size: _size, ...props }, ref) => (
           <input
             ref={ref}

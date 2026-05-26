@@ -2,7 +2,10 @@ import React from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { TtsProviderContext } from '@/services/tts-provider'
+import type {
+  TtsProviderContext,
+  TtsSynthesisResult
+} from '@/services/tts-provider'
 
 import type { ReadAlongSelection } from '../types'
 
@@ -693,14 +696,10 @@ describe('useMediaReadAlongSession', () => {
   })
 
   it('media/content change stops and suppresses stale completions', async () => {
-    let finishSynthesis!: (value: {
-      buffer: ArrayBuffer
-      format: string
-      mimeType: string
-    }) => void
+    let finishSynthesis!: (value: TtsSynthesisResult) => void
     providerContext.synthesize = vi.fn(
       () =>
-        new Promise((resolve) => {
+        new Promise<TtsSynthesisResult>((resolve) => {
           finishSynthesis = resolve
         })
     )

@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-17
 **Surface:** Web `/chat` main chat Playground
-**Status:** Approved in-session for spec review
+**Status:** Approved in-session, hardened after design review
 **Backlog:** TASK-402
 
 ---
@@ -129,6 +129,7 @@ Avoid using `Actor` as the primary runtime label. It may remain internal or seco
 
 **Scope:**
 
+- Introduce the first small, derived-only role-play state adapter for identity, prompt/template, scene, and generation-style state.
 - Preserve behavior template identity after applying a system prompt template.
 - Stop collapsing applied role-play behavior to only `Custom prompt`.
 - Add active-context chips for:
@@ -137,6 +138,7 @@ Avoid using `Actor` as the primary runtime label. It may remain internal or seco
   - scene context;
   - generation style;
   - role-play-relevant pinned/context state when present.
+- Keep pinned/context handling as summary and compatibility state only; do not add source management in this stage.
 - Add clear/remove actions to chips where safe.
 - Rename or clarify misleading labels:
   - `Templates` should become `System prompts` or `Behavior templates`.
@@ -193,6 +195,13 @@ Avoid using `Actor` as the primary runtime label. It may remain internal or seco
 
 Add a dedicated `Role-play setup` drawer or panel that reuses existing underlying controls:
 
+Surface placement:
+
+- Desktop with cockpit/inspector available: use the existing inspector or right rail.
+- Desktop without cockpit/inspector available: use a right-side drawer.
+- Mobile: use a full-height sheet or drawer reachable from the composer overflow and active role-play chips.
+- Avoid modal-first design for the primary setup flow unless an existing component constraint makes it unavoidable.
+
 1. Character/persona
    - choose a saved character or persona;
    - show selected name and basic identity;
@@ -215,7 +224,7 @@ Add a dedicated `Role-play setup` drawer or panel that reuses existing underlyin
 
 5. Preview and apply
    - show before/after changes;
-   - apply changes atomically to existing Playground state;
+   - apply changes as one user-confirmed commit to existing Playground state;
    - offer clear/revert.
 
 **Success Criteria:**
@@ -253,17 +262,20 @@ Add a dedicated `Role-play setup` drawer or panel that reuses existing underlyin
   - what behavior prompt changes;
   - what generation values change;
   - what context/pinned sources change.
-- Support apply, update current setup, duplicate/save as, rename, and delete where existing storage supports it.
+- MVP operations: save from current role-play state, preview/apply, rename, and delete.
+- Add update current setup and duplicate/save-as only if existing startup template storage supports them without a new persistence model.
 - Avoid auto-migrating unrelated startup templates into role-play setups unless they contain role-play-relevant fields.
 
 A startup template bundle is role-play-relevant when it has at least one of:
 
+- it was saved from the Role-play setup surface;
 - a selected character/persona;
 - a behavior template categorized as role-play;
 - scene settings;
-- a saved custom system prompt explicitly marked or named as role-play by the user.
+- a custom system prompt explicitly saved by the user as part of a role-play setup.
 
 Generation style alone is not enough to make a startup template a role-play setup.
+Do not infer role-play relevance from a template name substring alone.
 
 **Success Criteria:**
 
@@ -286,7 +298,8 @@ Generation style alone is not enough to make a startup template a role-play setu
 **Scope:**
 
 - Derive compatibility status for combinations of:
-  - selected character/persona;
+  - selected character;
+  - selected persona;
   - custom or templated system prompt;
   - scene context;
   - RAG/pinned sources;
@@ -300,6 +313,7 @@ Generation style alone is not enough to make a startup template a role-play setu
   - `Custom prompt may override character behavior`.
 - Align UI notices with the actual request-shaping/send path.
 - Add tests proving the UI status matches request behavior.
+- Treat character and persona request inclusion as separate test axes.
 
 **Success Criteria:**
 
@@ -346,6 +360,13 @@ Consumers:
 
 This avoids duplicating Playground state while giving role-play UX one shared source of readable truth.
 
+Sequencing:
+
+- Stage 2 should introduce the adapter for visible state and chip rendering.
+- Stage 4 should reuse it for setup previews.
+- Stage 5 should reuse it for saved setup previews.
+- Stage 6 should extend it with request-inclusion and compatibility status.
+
 ## Data Flow
 
 1. User changes role-play inputs through existing controls or the Role-play setup surface.
@@ -372,9 +393,11 @@ Errors should be state-specific. Avoid vague notices such as "verify intended be
 Use precise recovery language:
 
 - `Cancel` means no state has been applied yet.
-- `Revert` means restore the before-preview state after a previewed apply.
+- `Revert` means restore the before-preview snapshot after a previewed apply.
 - `Clear` means remove one active role-play layer, such as character, scene, prompt, or generation style.
 - `Reset` means return generation style or scene fields to their default values.
+
+Generation-style reset should restore the app's standard default, currently expected to be `Balanced`, unless implementation planning identifies a stronger existing model-specific default source. The exact reset target must be pinned before Stage 1 or Stage 2 implementation starts.
 
 ## Accessibility Requirements
 
@@ -391,11 +414,11 @@ Each stage should add tests proportional to risk:
 | Stage | Required Tests |
 | --- | --- |
 | Stage 1 | Character starter regression, picker selection, prompt recovery, parameter preset accessibility. |
-| Stage 2 | Template identity preservation, active chips, clear/remove actions, terminology-sensitive assertions where stable. |
+| Stage 2 | Initial role-play state adapter tests, template identity preservation, active chips, clear/remove actions, terminology-sensitive assertions where stable. |
 | Stage 3 | Mobile overflow access, narrow-width chip wrapping, mobile apply/clear flows. |
 | Stage 4 | Role-play setup preview/apply/clear, one-field updates, focus behavior. |
-| Stage 5 | Save/apply/update/delete saved role-play setup, exact preview fields, startup template compatibility. |
-| Stage 6 | Request-shaping compatibility matrix, browser/e2e smoke for included/blended/excluded states. |
+| Stage 5 | Save/apply/rename/delete saved role-play setup, optional update/duplicate coverage if included, exact preview fields, startup template compatibility. |
+| Stage 6 | Request-shaping compatibility matrix, character-vs-persona inclusion tests, browser/e2e smoke for included/blended/excluded states. |
 
 Browser verification is required before declaring the workflow fixed because the original audit found a browser-observed crash.
 
@@ -432,6 +455,8 @@ Each child task should be a reviewable PR-sized unit with:
 - Saved startup templates may contain mixed-purpose bundles; do not force all of them into role-play naming.
 - Compatibility notices must match actual request behavior or they become worse than no notice.
 - Mobile additions can overcrowd the composer if they are added as permanent visible controls instead of overflow/setup entries.
+- Role-play setup can conflict with cockpit/sidebar work if it becomes a separate permanent panel instead of reusing the active chat shell.
+- Template identity can lie after user edits the prompt; edited prompts should read as modified from a template, not as the untouched template.
 
 ## Acceptance Criteria
 

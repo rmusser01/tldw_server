@@ -8,19 +8,11 @@
 import { useStorage } from "@plasmohq/storage/hook"
 
 import { toUnreadCount } from "@/utils/notifications"
-import { safeStorageSerde } from "@/utils/safe-storage"
 
 const UNREAD_COUNT_KEY = "tldw:notifications:unreadCount"
 
 export function useNotificationCount(): number {
-  const [count] = useStorage<number>(
-    {
-      key: UNREAD_COUNT_KEY,
-      area: "local",
-      serde: safeStorageSerde
-    },
-    toUnreadCount
-  )
+  const [count] = useStorage<number>(UNREAD_COUNT_KEY, 0)
 
   return toUnreadCount(count)
 }

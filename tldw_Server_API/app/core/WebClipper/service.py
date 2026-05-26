@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import mimetypes
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,12 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.media_db.errors import (
+    ConflictError as MediaConflictError,
+    DatabaseError as MediaDatabaseError,
+    InputError as MediaInputError,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_repository import MediaRepository
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 
 _NOTES_ATTACHMENTS_DIRNAME = "notes_attachments"
@@ -55,6 +62,8 @@ _FULL_EXTRACT_SPILLOVER_THRESHOLD = 20_000
 _TRUNCATION_MARKER = "Truncated. Full extract preserved in clip metadata."
 _ENRICHMENT_SECTION_START = "<!-- web-clipper-enrichment:start -->"
 _ENRICHMENT_SECTION_END = "<!-- web-clipper-enrichment:end -->"
+_WEB_CLIPPER_SOURCE_PREFIX = "web-clipper"
+WorkspaceSourceJobEnqueuer = Callable[[str, dict[str, Any]], None]
 
 
 @dataclass(slots=True)
@@ -63,6 +72,9 @@ class WebClipperService:
 
     db: CharactersRAGDB
     user_id: int | str
+    media_db: Any | None = None
+    promote_workspace_sources: bool = False
+    workspace_source_job_enqueuer: WorkspaceSourceJobEnqueuer | None = None
 
     def save_clip(self, request: WebClipperSaveRequest) -> WebClipperSaveResponse:
         """Create or update the canonical note and optional workspace placement."""
@@ -163,6 +175,20 @@ class WebClipperService:
                 )
             except (CharactersRAGDBError, ConflictError, InputError) as exc:
                 warnings.append(f"Workspace placement failed: {exc}")
+            else:
+                if self.promote_workspace_sources:
+                    try:
+                        workspace_source = self._ensure_workspace_source(
+                            request=request,
+                            note_summary=note_summary,
+                            media_content=self._select_media_body(request),
+                        )
+                        self._notify_workspace_source_job(
+                            workspace_id=request.workspace.workspace_id,
+                            source=workspace_source,
+                        )
+                    except (CharactersRAGDBError, ConflictError, InputError) as exc:
+                        warnings.append(f"Workspace source promotion failed: {exc}")
 
         status = self._derive_save_status(
             warnings=warnings,
@@ -358,6 +384,17 @@ class WebClipperService:
             request.content.visible_body,
             request.content.selected_text,
             request.content.full_extract,
+        ):
+            text = str(candidate or "").strip()
+            if text:
+                return text
+        return ""
+
+    def _select_media_body(self, request: WebClipperSaveRequest) -> str:
+        for candidate in (
+            request.content.full_extract,
+            request.content.selected_text,
+            request.content.visible_body,
         ):
             text = str(candidate or "").strip()
             if text:
@@ -711,6 +748,111 @@ class WebClipperService:
             source_note_version=note_summary.version,
         )
         return self._placement_response_from_row(placement_row)
+
+    def _ensure_workspace_source(
+        self,
+        *,
+        request: WebClipperSaveRequest,
+        note_summary: WebClipperSavedNote,
+        media_content: str,
+    ) -> dict[str, Any]:
+        if request.workspace is None:
+            raise InputError("workspace payload is required for workspace source promotion.")  # noqa: TRY003
+        if self.media_db is None:
+            raise CharactersRAGDBError("Media DB is unavailable for workspace source promotion.")  # noqa: TRY003
+
+        content = media_content.strip()
+        if not content:
+            content = "No readable page text was captured for this browser clip."
+
+        media_id = self._upsert_workspace_clip_media(
+            request=request,
+            title=note_summary.title,
+            content=content,
+            workspace_id=request.workspace.workspace_id,
+        )
+        source_id = self._workspace_source_id(request.clip_id)
+        existing_sources = self.db.list_workspace_sources(request.workspace.workspace_id)
+        source_data = {
+            "id": source_id,
+            "media_id": media_id,
+            "title": note_summary.title,
+            "source_type": "web_clip",
+            "url": request.source_url,
+            "position": len(existing_sources),
+            "selected": True,
+        }
+        return self.db.add_workspace_source(request.workspace.workspace_id, source_data)
+
+    def _upsert_workspace_clip_media(
+        self,
+        *,
+        request: WebClipperSaveRequest,
+        title: str,
+        content: str,
+        workspace_id: str,
+    ) -> int:
+        metadata = {
+            "source": "web_clipper",
+            "clip_id": request.clip_id,
+            "clip_type": request.clip_type,
+            "source_url": request.source_url,
+            "source_title": request.source_title,
+            "workspace_id": workspace_id,
+            "capture_metadata": request.capture_metadata,
+        }
+        chunks = [
+            {
+                "text": content,
+                "start_char": 0,
+                "end_char": len(content),
+                "chunk_type": "web_clip",
+                "metadata": {
+                    "clip_id": request.clip_id,
+                    "source_url": request.source_url,
+                    "source": "web_clipper",
+                },
+            }
+        ]
+        try:
+            media_id, _media_uuid, _message = MediaRepository.from_legacy_db(self.media_db).add_text_media(
+                url=f"{_WEB_CLIPPER_SOURCE_PREFIX}://{quote(request.clip_id, safe='')}",
+                title=title,
+                media_type=request.clip_type or "web_clip",
+                content=content,
+                keywords=request.note.keywords,
+                safe_metadata=json.dumps(metadata, ensure_ascii=False),
+                source_hash=self._workspace_source_id(request.clip_id),
+                overwrite=True,
+                chunks=chunks,
+                owner_user_id=self._coerce_owner_user_id(),
+            )
+        except (MediaConflictError, MediaDatabaseError, MediaInputError) as exc:
+            raise CharactersRAGDBError("Media DB workspace clip persistence failed.") from exc  # noqa: TRY003
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            raise CharactersRAGDBError("Media DB workspace clip persistence failed.") from exc  # noqa: TRY003
+
+        if media_id is None:
+            raise CharactersRAGDBError("Media DB did not return a media id for the workspace clip.")  # noqa: TRY003
+        return int(media_id)
+
+    def _coerce_owner_user_id(self) -> int | None:
+        try:
+            return int(self.user_id)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _workspace_source_id(clip_id: str) -> str:
+        return f"{_WEB_CLIPPER_SOURCE_PREFIX}:{clip_id}"
+
+    def _notify_workspace_source_job(self, *, workspace_id: str, source: dict[str, Any]) -> None:
+        if self.workspace_source_job_enqueuer is None:
+            return
+        try:
+            self.workspace_source_job_enqueuer(workspace_id, source)
+        except Exception as exc:
+            raise CharactersRAGDBError("Workspace source job enqueue failed.") from exc  # noqa: TRY003
 
     def _sync_workspace_note(
         self,

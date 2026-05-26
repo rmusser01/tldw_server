@@ -2579,8 +2579,8 @@
   "moderationPlayground_subtitle": {
     "message": "Controlli di sicurezza familiare e barriere di sicurezza del server in un unico posto."
   },
-  "header_workspacePlayground": {
-    "message": "Model Playground"
+  "header_researchWorkspace": {
+    "message": "Research Workspace"
   },
   "omniSearch_searchError": {
     "message": "La ricerca non è riuscita. Riprova."
@@ -2634,7 +2634,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Workspace Playground"
+    "message": "Model Playground"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"

@@ -474,7 +474,7 @@ async def test_canonical_workspace_bridge_creates_linked_execution_workspace(mon
         assert response.root_path == str(workspace_root)
         assert response.metadata["existing"] == "kept"
         assert response.metadata["canonical_workspace_id"] == "workspace-alpha"
-        assert response.metadata["canonical_workspace_source"] == "workspace_playground"
+        assert response.metadata["canonical_workspace_source"] == "research_workspace"
         assert response.metadata["link_status"] == "linked"
         assert response.canonical_workspace.canonical_workspace_id == "workspace-alpha"
         assert response.canonical_workspace.acp_workspace_id == response.id
@@ -493,7 +493,7 @@ async def test_canonical_workspace_bridge_reuses_existing_link(monkeypatch, tmp_
         root_path=str(workspace_root),
         metadata={
             "canonical_workspace_id": "workspace-alpha",
-            "canonical_workspace_source": "workspace_playground",
+            "canonical_workspace_source": "research_workspace",
             "link_status": "linked",
         },
     )
@@ -627,7 +627,7 @@ async def test_canonical_workspace_bridge_rejects_root_linked_to_other_workspace
         root_path=str(workspace_root),
         metadata={
             "canonical_workspace_id": "workspace-other",
-            "canonical_workspace_source": "workspace_playground",
+            "canonical_workspace_source": "research_workspace",
             "link_status": "linked",
         },
     )
@@ -664,7 +664,7 @@ async def test_project_and_task_detail_include_canonical_workspace(monkeypatch, 
         root_path=str(tmp_path / "workspace"),
         metadata={
             "canonical_workspace_id": "workspace-alpha",
-            "canonical_workspace_source": "workspace_playground",
+            "canonical_workspace_source": "research_workspace",
             "link_status": "linked",
         },
     )
@@ -697,7 +697,7 @@ async def test_dispatch_run_inherits_trusted_root_from_canonical_bridge(monkeypa
         root_path=str(workspace_root),
         metadata={
             "canonical_workspace_id": "workspace-alpha",
-            "canonical_workspace_source": "workspace_playground",
+            "canonical_workspace_source": "research_workspace",
             "link_status": "linked",
         },
     )
@@ -1133,7 +1133,7 @@ async def test_dispatch_run_promotes_completion_artifact_to_canonical_workspace(
         root_path=str(workspace_root),
         metadata={
             "canonical_workspace_id": "workspace-alpha",
-            "canonical_workspace_source": "workspace_playground",
+            "canonical_workspace_source": "research_workspace",
             "link_status": "linked",
         },
     )
@@ -1202,7 +1202,7 @@ async def test_dispatch_run_reports_artifact_promotion_failure_without_rolling_b
         root_path=str(workspace_root),
         metadata={
             "canonical_workspace_id": "workspace-alpha",
-            "canonical_workspace_source": "workspace_playground",
+            "canonical_workspace_source": "research_workspace",
             "link_status": "linked",
         },
     )

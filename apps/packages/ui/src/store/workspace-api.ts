@@ -39,6 +39,7 @@ export interface LocalWorkspaceState {
   id: string
   name: string
   sources: WorkspaceSource[]
+  selectedSourceIds: string[]
   artifacts: GeneratedArtifact[]
   notes: any[]
   version: number
@@ -452,10 +453,14 @@ export async function hydrateWorkspaceFromServer(
   deps: { fetch: (id: string) => Promise<ServerWorkspaceState> }
 ): Promise<LocalWorkspaceState> {
   const server = await deps.fetch(workspaceId)
+  const serverSources = server.sources ?? []
   return {
     id: server.id,
     name: server.name ?? "",
-    sources: (server.sources ?? []).map(mapServerSourceToLocal),
+    sources: serverSources.map(mapServerSourceToLocal),
+    selectedSourceIds: serverSources
+      .filter((source) => source.selected === true)
+      .map((source) => source.id),
     artifacts: (server.artifacts ?? []).map(mapServerArtifactToLocal),
     notes: server.notes ?? [],
     version: server.version,

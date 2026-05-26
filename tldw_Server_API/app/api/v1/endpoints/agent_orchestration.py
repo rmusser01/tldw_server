@@ -615,7 +615,19 @@ def _resolve_dispatch_cwd(raw_cwd: str, *, workspace_root: str | None = None) ->
 
 
 _VALID_WORKSPACE_TYPES = {"manual", "discovered", "monorepo_child"}
-_VALID_CANONICAL_WORKSPACE_SOURCES = {"workspace_playground"}
+CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE = "research_workspace"
+_LEGACY_CANONICAL_WORKSPACE_SOURCES = {"workspace_playground"}
+_VALID_CANONICAL_WORKSPACE_SOURCES = {CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE}
+
+
+def _normalize_canonical_workspace_source(value: Any) -> str:
+    """Return the active public canonical workspace source label."""
+    if value in _LEGACY_CANONICAL_WORKSPACE_SOURCES:
+        return CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE
+    source = str(value or "").strip()
+    if source in _VALID_CANONICAL_WORKSPACE_SOURCES:
+        return source
+    return CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE
 
 
 class ACPWorkspaceCreateRequest(BaseModel):
@@ -654,7 +666,9 @@ class CanonicalWorkspaceBridgeRequest(BaseModel):
         default="",
         description="Optional ACP execution workspace description",
     )
-    canonical_workspace_source: str = Field(default="workspace_playground")
+    canonical_workspace_source: str = Field(
+        default=CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE
+    )
     env_vars: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -679,7 +693,7 @@ class CanonicalWorkspaceBridgeRequest(BaseModel):
 class CanonicalWorkspaceLinkResponse(BaseModel):
     acp_workspace_id: int
     canonical_workspace_id: str
-    canonical_workspace_source: str = "workspace_playground"
+    canonical_workspace_source: str = CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE
     link_status: str = CANONICAL_WORKSPACE_LINKED_STATUS
 
 
@@ -817,9 +831,8 @@ def _canonical_workspace_link_from_workspace(workspace: Any | None) -> dict[str,
     return {
         "acp_workspace_id": int(workspace_id),
         "canonical_workspace_id": str(canonical_workspace_id),
-        "canonical_workspace_source": str(
+        "canonical_workspace_source": _normalize_canonical_workspace_source(
             metadata.get(CANONICAL_WORKSPACE_SOURCE_METADATA_KEY)
-            or "workspace_playground"
         ),
         "link_status": str(
             metadata.get(CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY)
@@ -831,6 +844,14 @@ def _canonical_workspace_link_from_workspace(workspace: Any | None) -> dict[str,
 def _workspace_response_payload(workspace: Any) -> dict[str, Any]:
     """Convert an ACP workspace to an API payload with bridge metadata included."""
     payload = workspace.to_dict() if hasattr(workspace, "to_dict") else dict(workspace)
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict) and metadata.get(CANONICAL_WORKSPACE_ID_METADATA_KEY):
+        payload["metadata"] = {
+            **metadata,
+            CANONICAL_WORKSPACE_SOURCE_METADATA_KEY: _normalize_canonical_workspace_source(
+                metadata.get(CANONICAL_WORKSPACE_SOURCE_METADATA_KEY)
+            ),
+        }
     payload["canonical_workspace"] = _canonical_workspace_link_from_workspace(workspace)
     return payload
 

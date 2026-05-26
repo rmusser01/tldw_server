@@ -53,6 +53,182 @@ export interface WorkspaceSourceApiResponse {
   version: number
 }
 
+export type WorkspaceSourceLifecycleState =
+  | "queued"
+  | "ingesting"
+  | "extracting"
+  | "chunking"
+  | "indexing"
+  | "queryable"
+  | "partially_queryable"
+  | "failed"
+  | "retrying"
+  | "missing_media"
+  | "blocked_by_permissions"
+  | "unknown"
+
+export interface WorkspaceSourceReadiness {
+  metadata_ready: boolean
+  text_extracted: boolean
+  fts_ready: boolean
+  vector_ready: boolean
+  citation_ready: boolean
+  summary_ready: boolean
+  tool_accessible: boolean
+}
+
+export interface WorkspaceSourceJobStatus {
+  id: number | null
+  uuid: string | null
+  status: string | null
+  job_type: string | null
+  progress_percent: number | null
+  progress_message: string | null
+  error_message: string | null
+}
+
+export interface WorkspaceSourceStatusApiResponse {
+  id: string
+  workspace_id: string
+  media_id: number | null
+  title: string
+  source_type: string
+  selected: boolean
+  state: WorkspaceSourceLifecycleState
+  status_reason: string
+  readiness: WorkspaceSourceReadiness
+  progress_percent: number | null
+  progress_message: string | null
+  job: WorkspaceSourceJobStatus | null
+  updated_at: string | null
+}
+
+export interface WorkspaceSourceStatusSummary {
+  total: number
+  selected: number
+  queryable: number
+  partially_queryable: number
+  processing: number
+  failed: number
+  missing: number
+}
+
+export interface WorkspaceSourceStatusListResponse {
+  workspace_id: string
+  sources: WorkspaceSourceStatusApiResponse[]
+  summary: WorkspaceSourceStatusSummary
+}
+
+export type WorkspaceCapabilityServiceState =
+  | "available"
+  | "private"
+  | "not_configured"
+  | "unknown"
+  | "blocked"
+  | "degraded"
+
+export interface WorkspaceCapabilityService {
+  state: WorkspaceCapabilityServiceState
+  reason_code: string | null
+  management_surface: string | null
+}
+
+export interface WorkspaceAllowedAction {
+  allowed: boolean
+  reason_code: string | null
+}
+
+export interface WorkspaceCapabilitiesResponse {
+  workspace_id: string
+  workspace_kind: string
+  access_level: string
+  source_summary: WorkspaceSourceStatusSummary
+  workspace_services: Record<string, WorkspaceCapabilityService>
+  allowed_actions: Record<string, WorkspaceAllowedAction>
+}
+
+export interface WorkspaceSourcePreviewSummary {
+  available: boolean
+  detail_href: string | null
+  snippet_count: number | null
+  total_chars: number | null
+  unavailable_reason: string | null
+}
+
+export interface WorkspaceContextSource extends WorkspaceSourceApiResponse {
+  state: WorkspaceSourceLifecycleState
+  status_reason: string
+  readiness: WorkspaceSourceReadiness
+  progress_percent: number | null
+  progress_message: string | null
+  job: WorkspaceSourceJobStatus | null
+  updated_at: string | null
+  preview: WorkspaceSourcePreviewSummary
+}
+
+export interface WorkspaceContextPartialError {
+  scope: string
+  code: string
+  message: string
+}
+
+export interface WorkspaceContextResponse {
+  workspace_id: string
+  workspace_kind: string
+  schema_version: number
+  generated_at: string
+  workspace: WorkspaceApiResponse
+  sources: {
+    items: WorkspaceContextSource[]
+    summary: WorkspaceSourceStatusSummary
+  }
+  capabilities: WorkspaceCapabilitiesResponse
+  services: Record<string, WorkspaceCapabilityService>
+  allowed_actions: Record<string, WorkspaceAllowedAction>
+  active_jobs: WorkspaceSourceJobStatus[]
+  partial_errors: WorkspaceContextPartialError[]
+}
+
+export type WorkspaceSourcePreviewMode =
+  | "available"
+  | "pending"
+  | "failed"
+  | "missing_media"
+  | "empty"
+
+export interface WorkspaceSourcePreviewSnippet {
+  id: string
+  source_id: string
+  media_id: number | null
+  kind: "content_excerpt" | "chunk"
+  text: string
+  start_char: number | null
+  end_char: number | null
+  chunk_index: number | null
+  chunk_uuid: string | null
+  chunk_type: string | null
+}
+
+export interface WorkspaceSourcePreviewResponse {
+  workspace_id: string
+  source_id: string
+  media_id: number | null
+  title: string
+  source_type: string
+  url: string | null
+  state: WorkspaceSourceLifecycleState
+  status_reason: string
+  readiness: WorkspaceSourceReadiness
+  content_available: boolean
+  preview_mode: WorkspaceSourcePreviewMode
+  unavailable_reason: string | null
+  text_preview: string | null
+  text_total_chars: number | null
+  text_truncated: boolean
+  snippets: WorkspaceSourcePreviewSnippet[]
+  generated_at: string
+}
+
 export interface WorkspaceArtifactApiResponse {
   id: string
   workspace_id: string
@@ -364,6 +540,53 @@ export const workspaceApiMethods = {
     })
   },
 
+  async getWorkspaceSourcesStatus(
+    workspaceId: string
+  ): Promise<WorkspaceSourceStatusListResponse> {
+    return await bgRequest<WorkspaceSourceStatusListResponse>({
+      path: `/api/v1/workspaces/${workspaceId}/sources/status`,
+      method: "GET"
+    })
+  },
+
+  async getWorkspaceCapabilities(
+    workspaceId: string
+  ): Promise<WorkspaceCapabilitiesResponse> {
+    return await bgRequest<WorkspaceCapabilitiesResponse>({
+      path: `/api/v1/workspaces/${workspaceId}/capabilities`,
+      method: "GET"
+    })
+  },
+
+  async getWorkspaceContext(
+    workspaceId: string
+  ): Promise<WorkspaceContextResponse> {
+    return await bgRequest<WorkspaceContextResponse>({
+      path: `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/context`,
+      method: "GET"
+    })
+  },
+
+  async getWorkspaceSourcePreview(
+    workspaceId: string,
+    sourceId: string,
+    params?: {
+      max_chars?: number
+      chunk_limit?: number
+    }
+  ): Promise<WorkspaceSourcePreviewResponse> {
+    const query = buildQuery(params)
+    const encodedWorkspaceId = encodeURIComponent(workspaceId)
+    const encodedSourceId = encodeURIComponent(sourceId)
+    return await bgRequest<WorkspaceSourcePreviewResponse>({
+      path: appendPathQuery(
+        `/api/v1/workspaces/${encodedWorkspaceId}/sources/${encodedSourceId}/preview` as AllowedPath,
+        query
+      ),
+      method: "GET"
+    })
+  },
+
   async addWorkspaceSource(
     workspaceId: string,
     data: WorkspaceSourceCreateRequest
@@ -386,6 +609,18 @@ export const workspaceApiMethods = {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: data
+    })
+  },
+
+  async updateWorkspaceSourceSelection(
+    workspaceId: string,
+    selectedSourceIds: string[]
+  ): Promise<void> {
+    await bgRequest<unknown>({
+      path: `/api/v1/workspaces/${workspaceId}/sources/selection` as AllowedPath,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: { selected_ids: selectedSourceIds }
     })
   },
 

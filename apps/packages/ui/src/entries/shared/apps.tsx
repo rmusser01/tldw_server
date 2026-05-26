@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next"
 import { useSidepanelInit } from "~/hooks/useSidepanelInit"
 import "~/i18n"
 import { AppShell } from "./AppShell"
-import { RouteShell } from "@/routes/app-route"
+import { OptionsRouteShell } from "@/routes/options-route-shell"
+import { SidepanelRouteShell } from "@/routes/sidepanel-route-shell"
 import { platformConfig } from "@/config/platform"
 import { QuickChatHelperButton } from "@/components/Common/QuickChatHelper"
 import { WorkflowIntegrationHost } from "@/components/Common/Workflow"
@@ -91,7 +92,7 @@ export const SidepanelApp: React.FC = () => {
       includeAntdApp={platformConfig.features.includeAntdApp}
       extras={extras}
     >
-      <RouteShell kind="sidepanel" />
+      <SidepanelRouteShell />
       <WorkflowIntegrationHost justChatPath="/" autoShow={false} />
     </AppShell>
   )
@@ -124,7 +125,7 @@ export const OptionsApp: React.FC = () => {
       suspendWhenHidden={platformConfig.features.suspendOptionsWhenHidden}
       includeAntdApp={platformConfig.features.includeAntdApp}
     >
-      <RouteShell kind="options" />
+      <OptionsRouteShell />
       <WorkflowIntegrationHost autoShowPaths={["/"]} />
     </AppShell>
   )

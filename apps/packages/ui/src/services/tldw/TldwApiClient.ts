@@ -2594,9 +2594,9 @@ export class TldwApiClientBase {
   }
 
   // RAG Methods
-  async getResearchStudioCapabilities(): Promise<unknown> {
+  async getResearchWorkspaceCapabilities(): Promise<unknown> {
     return await this.request<unknown>({
-      path: '/api/v1/research-studio/capabilities',
+      path: '/api/v1/research-workspace/capabilities',
       method: 'GET'
     })
   }
@@ -5014,23 +5014,33 @@ export class TldwApiClientBase {
   }
 
   async listConversationShareLinks(
-    chat_id: string | number
+    chat_id: string | number,
+    options?: { scope?: ChatScope }
   ): Promise<ConversationShareLinksListResponse> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ConversationShareLinksListResponse>({
-      path: `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+        query
+      ),
       method: "GET",
     })
   }
 
   async revokeConversationShareLink(
     chat_id: string | number,
-    shareId: string
+    shareId: string,
+    options?: { scope?: ChatScope }
   ): Promise<{ success: boolean; share_id: string }> {
     const cid = encodeURIComponent(String(chat_id))
     const sid = encodeURIComponent(String(shareId))
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<{ success: boolean; share_id: string }>({
-      path: `/api/v1/chat/conversations/${cid}/share-links/${sid}`,
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${cid}/share-links/${sid}`,
+        query
+      ),
       method: "DELETE",
     })
   }

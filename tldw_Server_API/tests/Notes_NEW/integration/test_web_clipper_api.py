@@ -7,13 +7,25 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.endpoints import web_clipper as web_clipper_endpoint
 from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import WebClipperSaveResponse
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 
 pytestmark = pytest.mark.integration
+
+
+class _JobManagerDouble:
+    def __init__(self):
+        self.created_jobs: list[dict] = []
+
+    def create_job(self, **kwargs):
+        self.created_jobs.append(kwargs)
+        return {"id": len(self.created_jobs), **kwargs}
 
 
 @pytest.fixture()
@@ -21,6 +33,9 @@ def client_with_web_clipper_db(tmp_path):
     db_path = tmp_path / "web_clipper_integration.db"
     db = CharactersRAGDB(str(db_path), client_id="web_clipper_user")
     db.upsert_workspace("ws-1", "Research Workspace")
+    media_db = MediaDatabase(db_path=str(tmp_path / "web_clipper_media.db"), client_id="1")
+    media_db.initialize_db()
+    job_manager = _JobManagerDouble()
 
     async def override_user():
         return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
@@ -34,13 +49,20 @@ def client_with_web_clipper_db(tmp_path):
     def override_db_dep():
         return db
 
+    async def override_media_db_dep():
+        yield media_db
+
     fastapi_app = FastAPI()
     fastapi_app.include_router(web_clipper_endpoint.router, prefix="/api/v1/web-clipper")
 
     fastapi_app.dependency_overrides[get_request_user] = override_user
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_db_dep
+    fastapi_app.dependency_overrides[try_get_media_db_for_user] = override_media_db_dep
+    fastapi_app.dependency_overrides[try_get_job_manager] = lambda: job_manager
     fastapi_app.dependency_overrides[get_rate_limiter_dep] = lambda: _NoopRateLimiter()
     fastapi_app.state.web_clipper_db = db
+    fastapi_app.state.web_clipper_media_db = media_db
+    fastapi_app.state.web_clipper_job_manager = job_manager
 
     with TestClient(fastapi_app) as client:
         yield client
@@ -103,6 +125,50 @@ def test_web_clipper_save_and_status_flow(client_with_web_clipper_db: TestClient
     assert status_data["note"]["id"] == "clip-123"
     assert len(status_data["workspace_placements"]) == 1
     assert len(status_data["attachments"]) == 1
+
+
+def test_web_clipper_workspace_save_creates_media_backed_workspace_source(client_with_web_clipper_db: TestClient):
+    client = client_with_web_clipper_db
+    db = client.app.state.web_clipper_db
+
+    response = client.post(
+        "/api/v1/web-clipper/save",
+        json=_save_payload(clip_id="clip-source-api", destination_mode="workspace"),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "saved"
+
+    sources = db.list_workspace_sources("ws-1")
+    assert len(sources) == 1
+    assert sources[0]["id"] == "web-clipper:clip-source-api"
+    assert sources[0]["media_id"] > 0
+    assert sources[0]["source_type"] == "web_clip"
+
+
+def test_web_clipper_workspace_save_enqueues_workspace_source_ingest_job(client_with_web_clipper_db: TestClient):
+    client = client_with_web_clipper_db
+    db = client.app.state.web_clipper_db
+    job_manager = client.app.state.web_clipper_job_manager
+
+    response = client.post(
+        "/api/v1/web-clipper/save",
+        json=_save_payload(clip_id="clip-source-job-api", destination_mode="workspace"),
+    )
+
+    assert response.status_code == 200, response.text
+    sources = db.list_workspace_sources("ws-1")
+    assert len(sources) == 1
+    source = sources[0]
+
+    assert len(job_manager.created_jobs) == 1
+    job = job_manager.created_jobs[0]
+    assert job["job_type"] == "workspace_source_ingest"
+    assert job["domain"] == "media_ingest"
+    assert job["idempotency_key"] == f"workspace-source:ws-1:{source['id']}:{source['media_id']}"
+    assert job["payload"]["workspace_id"] == "ws-1"
+    assert job["payload"]["workspace_source_id"] == source["id"]
+    assert job["payload"]["media_id"] == source["media_id"]
 
 
 def test_web_clipper_save_retry_reuses_note_and_attachment(client_with_web_clipper_db: TestClient):

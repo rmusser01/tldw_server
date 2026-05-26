@@ -10,9 +10,13 @@ import {
   useSubmitAttemptMutation
 } from "../../hooks"
 
-vi.mock("react-router-dom", () => ({
-  Link: ({ to, children, ...props }: Record<string, unknown>) => <a href={to as string} {...props}>{children as React.ReactNode}</a>
-}))
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>()
+  return {
+    ...actual,
+    Link: ({ to, children, ...props }: Record<string, unknown>) => <a href={to as string} {...props}>{children as React.ReactNode}</a>
+  }
+})
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({

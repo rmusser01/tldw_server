@@ -16,6 +16,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.WebClipper import service as web_clipper_service_module
 from tldw_Server_API.app.core.WebClipper.service import WebClipperService
 
@@ -29,6 +31,13 @@ def clipper_db(tmp_path: Path):
     db.upsert_workspace("ws-1", "Research Workspace")
     yield db
     db.close_connection()
+
+
+@pytest.fixture()
+def media_db(tmp_path: Path):
+    db = MediaDatabase(db_path=str(tmp_path / "media_unit.db"), client_id="1")
+    db.initialize_db()
+    yield db
 
 
 def _save_request(
@@ -112,6 +121,73 @@ def test_save_clip_retry_reuses_note_workspace_and_attachment(clipper_db):
     assert len(status.workspace_placements) == 1
     assert len(status.attachments) == 1
     assert status.attachments[0].slot == "page-screenshot"
+
+
+def test_save_clip_creates_media_backed_workspace_source(clipper_db, media_db):
+    service = WebClipperService(db=clipper_db, media_db=media_db, user_id=1, promote_workspace_sources=True)
+
+    result = service.save_clip(_save_request(clip_id="clip-source", destination_mode="workspace"))
+
+    assert result.status == "saved"
+    assert result.workspace_placement is not None
+
+    sources = clipper_db.list_workspace_sources("ws-1")
+    assert len(sources) == 1
+    source = sources[0]
+    assert source["id"] == "web-clipper:clip-source"
+    assert source["title"] == "Example Story"
+    assert source["source_type"] == "web_clip"
+    assert source["url"] == "https://example.com/story"
+    assert source["selected"] == 1
+
+    media = media_db_api.get_media_by_id(media_db, int(source["media_id"]))
+    assert media is not None
+    assert media["title"] == "Example Story"
+    assert media["type"] == "article"
+    assert "Alpha paragraph." in media["content"]
+    assert "Beta paragraph." in media["content"]
+
+
+def test_save_clip_notifies_workspace_source_job_enqueuer(clipper_db, media_db):
+    calls: list[tuple[str, dict]] = []
+    service = WebClipperService(
+        db=clipper_db,
+        media_db=media_db,
+        user_id=1,
+        promote_workspace_sources=True,
+        workspace_source_job_enqueuer=lambda workspace_id, source: calls.append((workspace_id, source)),
+    )
+
+    service.save_clip(_save_request(clip_id="clip-source-job", destination_mode="workspace"))
+
+    assert len(calls) == 1
+    workspace_id, source = calls[0]
+    assert workspace_id == "ws-1"
+    assert source["id"] == "web-clipper:clip-source-job"
+    assert source["media_id"] > 0
+
+
+def test_save_clip_retry_reuses_workspace_source_and_still_attempts_job_enqueue(clipper_db, media_db):
+    calls: list[tuple[str, dict]] = []
+    service = WebClipperService(
+        db=clipper_db,
+        media_db=media_db,
+        user_id=1,
+        promote_workspace_sources=True,
+        workspace_source_job_enqueuer=lambda workspace_id, source: calls.append((workspace_id, source)),
+    )
+    request = _save_request(clip_id="clip-source-retry", destination_mode="workspace")
+
+    service.save_clip(request)
+    service.save_clip(request)
+
+    sources = clipper_db.list_workspace_sources("ws-1")
+    assert len(sources) == 1
+    assert sources[0]["id"] == "web-clipper:clip-source-retry"
+    assert len(calls) == 2
+    assert calls[0][0] == calls[1][0] == "ws-1"
+    assert calls[0][1]["id"] == calls[1][1]["id"] == "web-clipper:clip-source-retry"
+    assert calls[0][1]["media_id"] == calls[1][1]["media_id"] == sources[0]["media_id"]
 
 
 def test_save_clip_returns_partially_saved_when_workspace_creation_fails_after_note(clipper_db, monkeypatch: pytest.MonkeyPatch):

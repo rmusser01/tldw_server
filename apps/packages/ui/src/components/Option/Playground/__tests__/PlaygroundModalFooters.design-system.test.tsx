@@ -539,6 +539,18 @@ describe("Playground modal footers design-system migration", () => {
         moduleOptionsLoading={false}
         toolModules={[]}
         onModuleSelect={vi.fn()}
+        discoveredTools={[]}
+        toolCounts={{
+          discovered: 0,
+          executable: 0,
+          disabled: 0,
+          colliding: 0,
+          chatEnabled: 0
+        }}
+        toolsLoading={false}
+        mcpHealthState="unavailable"
+        onToolEnabledChange={vi.fn()}
+        onResetToolFilter={vi.fn()}
         isSmallModel={false}
         t={t}
       />

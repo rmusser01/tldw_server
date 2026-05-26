@@ -1,0 +1,219 @@
+name: UI Research Workspace Nightly
+
+on:
+  schedule:
+    - cron: "20 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-research-workspace-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  webui-research-workspace-real-backend:
+    name: WebUI Research Workspace Real Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      PYTHONPATH: .
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      DISABLE_HEAVY_STARTUP: "1"
+      MINIMAL_TEST_APP: "1"
+      PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: "0"
+      AUTH_MODE: single_user
+      SINGLE_USER_API_KEY: "research-workspace-nightly-${{ github.run_id }}-${{ github.run_attempt }}"
+      SERVER_LABEL: research-workspace-nightly-webui
+      TLDW_SERVER_URL: http://127.0.0.1:8000
+      TLDW_API_KEY: "research-workspace-nightly-${{ github.run_id }}-${{ github.run_attempt }}"
+      TLDW_WEB_URL: http://localhost:8080
+      TLDW_WEB_AUTOSTART: "true"
+      TLDW_WEB_CMD: "env NEXT_DISABLE_MEM_OVERRIDE=1 NODE_OPTIONS=--max-old-space-size=5120 bun run dev -- --webpack -p 8080"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+
+      - name: Install workspace dependencies
+        working-directory: apps
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        working-directory: apps/tldw-frontend
+        run: bunx playwright install --with-deps chromium
+
+      - name: Install FFmpeg and PortAudio (Linux)
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-portaudio: "true"
+
+      - name: Setup Python and server dependencies
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: "3.12"
+          use-uv: "true"
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev
+
+      - name: Start backend server (single-user)
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py start
+
+      - name: Backend health check
+        if: always()
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
+
+      - name: Run research workspace real-backend WebUI spec
+        working-directory: apps/tldw-frontend
+        run: bun run e2e:research-workspace:real
+
+      - name: Upload WebUI nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: research-workspace-nightly-webui-artifacts
+          if-no-files-found: ignore
+          path: |
+            apps/tldw-frontend/test-results/**
+            apps/tldw-frontend/playwright-report/**
+
+      - name: Print backend server log on failure
+        if: failure()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+
+          label = os.environ.get("SERVER_LABEL", "research-workspace-nightly-webui")
+          log_path = pathlib.Path(f"server-{label}.log")
+          if log_path.exists():
+              print("===== backend server log =====")
+              print(log_path.read_text(encoding="utf-8"))
+          PY
+
+      - name: Stop backend server
+        if: always()
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
+
+  extension-research-workspace-real-backend:
+    name: Extension Research Workspace Real Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      PYTHONPATH: .
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      DISABLE_HEAVY_STARTUP: "1"
+      MINIMAL_TEST_APP: "1"
+      PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: "0"
+      AUTH_MODE: single_user
+      SINGLE_USER_API_KEY: "research-workspace-nightly-${{ github.run_id }}-${{ github.run_attempt }}"
+      SERVER_LABEL: research-workspace-nightly-extension
+      TLDW_E2E_SERVER_URL: http://127.0.0.1:8000
+      TLDW_E2E_API_KEY: "research-workspace-nightly-${{ github.run_id }}-${{ github.run_attempt }}"
+      TLDW_E2E_EXTENSION_LAUNCH_TIMEOUT_MS: "90000"
+      TLDW_E2E_EXTENSION_TARGET_WAIT_MS: "90000"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+
+      - name: Install workspace dependencies
+        working-directory: apps
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        working-directory: apps/extension
+        run: bunx playwright install --with-deps chromium
+
+      - name: Install FFmpeg and PortAudio (Linux)
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-portaudio: "true"
+
+      - name: Setup Python and server dependencies
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: "3.12"
+          use-uv: "true"
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev
+
+      - name: Start backend server (single-user)
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py start
+
+      - name: Backend health check
+        if: always()
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
+
+      - name: Run research workspace-focused extension real-server spec (strict no-skip)
+        working-directory: apps/extension
+        run: bun run test:e2e:workspace-parity:real:strict
+
+      - name: Upload extension nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: research-workspace-nightly-extension-artifacts
+          if-no-files-found: ignore
+          path: |
+            apps/extension/test-results/**
+            apps/extension/playwright-report/**
+
+      - name: Print backend server log on failure
+        if: failure()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+
+          label = os.environ.get("SERVER_LABEL", "research-workspace-nightly-extension")
+          log_path = pathlib.Path(f"server-{label}.log")
+          if log_path.exists():
+              print("===== backend server log =====")
+              print(log_path.read_text(encoding="utf-8"))
+          PY
+
+      - name: Stop backend server
+        if: always()
+        shell: bash
+        run: |
+          python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true

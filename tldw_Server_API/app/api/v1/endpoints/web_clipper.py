@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, User
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
     WebClipperEnrichmentPayload,
     WebClipperEnrichmentResponse,
@@ -23,7 +26,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.WebClipper.service import WebClipperService
+from tldw_Server_API.app.core.Workspaces.source_jobs import enqueue_workspace_source_ingest_job
 
 router = APIRouter(tags=["web-clipper"])
 
@@ -63,12 +68,25 @@ async def save_web_clip(
     request: Request,
     payload: WebClipperSaveRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    jm: JobManager | None = Depends(try_get_job_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
     current_user: User = Depends(get_request_user),
 ) -> WebClipperSaveResponse:
     _ = request
     await _check_rate_limit(rate_limiter=rate_limiter, current_user=current_user, scope="web_clipper.save")
-    service = WebClipperService(db=db, user_id=current_user.id)
+    service = WebClipperService(
+        db=db,
+        media_db=media_db,
+        user_id=current_user.id,
+        promote_workspace_sources=True,
+        workspace_source_job_enqueuer=lambda workspace_id, src: enqueue_workspace_source_ingest_job(
+            jm=jm,
+            owner_user_id=current_user.id,
+            workspace_id=workspace_id,
+            src=src,
+        ),
+    )
     try:
         result = await asyncio.to_thread(service.save_clip, payload)
         if result.status == "failed":
