@@ -142,4 +142,128 @@ describe("workspace API status and capabilities methods", () => {
       method: "GET"
     })
   })
+
+  it("creates a Research Workspace migration session through the canonical protocol endpoint", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      id: "mig-1",
+      idempotency_key: "mig-1:aaaaaaaa",
+      target_workspace_id: "ws-1",
+      target_workspace_name: "Workspace",
+      source_product: "research-workspace-webui",
+      manifest_hash: "a".repeat(64),
+      status: "created",
+      declared_chunk_count: 0,
+      accepted_chunk_count: 0,
+      missing_chunk_ids: [],
+      client_delete_eligible: false,
+      created_at: "2026-05-26T00:00:00Z",
+      updated_at: "2026-05-26T00:00:00Z",
+      finalized_at: null,
+      recovery_manifest: {},
+      chunks: []
+    })
+
+    await workspaceApiMethods.createWorkspaceMigration({
+      id: "mig-1",
+      idempotency_key: "mig-1:aaaaaaaa",
+      target_workspace_id: "ws-1",
+      target_workspace_name: "Workspace",
+      source_product: "research-workspace-webui",
+      manifest_hash: "a".repeat(64),
+      declared_chunks: [],
+      manifest: {},
+      diagnostics: {}
+    })
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/workspaces/migrations",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        id: "mig-1",
+        idempotency_key: "mig-1:aaaaaaaa",
+        target_workspace_id: "ws-1",
+        target_workspace_name: "Workspace",
+        source_product: "research-workspace-webui",
+        manifest_hash: "a".repeat(64),
+        declared_chunks: [],
+        manifest: {},
+        diagnostics: {}
+      }
+    })
+  })
+
+  it("records Research Workspace migration chunk receipts with encoded path ids", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      id: "chunk/1",
+      migration_id: "mig/1",
+      sha256: "b".repeat(64),
+      byte_count: 12,
+      chunk_kind: "workspace_bundle",
+      metadata: {},
+      status: "accepted",
+      accepted_at: "2026-05-26T00:00:00Z"
+    })
+
+    await workspaceApiMethods.putWorkspaceMigrationChunk("mig/1", "chunk/1", {
+      sha256: "b".repeat(64),
+      byte_count: 12,
+      chunk_kind: "workspace_bundle",
+      metadata: {}
+    })
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/workspaces/migrations/mig%2F1/chunks/chunk%2F1",
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        sha256: "b".repeat(64),
+        byte_count: 12,
+        chunk_kind: "workspace_bundle",
+        metadata: {}
+      }
+    })
+  })
+
+  it("finalizes, fetches, and acknowledges Research Workspace migration sessions", async () => {
+    vi.mocked(bgRequest)
+      .mockResolvedValueOnce({
+        id: "mig-1",
+        status: "finalized",
+        client_delete_eligible: false,
+        chunks: []
+      })
+      .mockResolvedValueOnce({
+        id: "mig-1",
+        status: "finalized",
+        client_delete_eligible: false,
+        chunks: []
+      })
+      .mockResolvedValueOnce({ ok: true })
+
+    await workspaceApiMethods.finalizeWorkspaceMigration("mig-1", {
+      manifest_hash: "a".repeat(64)
+    })
+    await workspaceApiMethods.getWorkspaceMigration("mig-1")
+    await workspaceApiMethods.ackWorkspaceMigrationClientDelete("mig-1", {
+      acknowledged_manifest_hash: "a".repeat(64)
+    })
+
+    expect(bgRequest).toHaveBeenNthCalledWith(1, {
+      path: "/api/v1/workspaces/migrations/mig-1/finalize",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { manifest_hash: "a".repeat(64) }
+    })
+    expect(bgRequest).toHaveBeenNthCalledWith(2, {
+      path: "/api/v1/workspaces/migrations/mig-1",
+      method: "GET"
+    })
+    expect(bgRequest).toHaveBeenNthCalledWith(3, {
+      path: "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { acknowledged_manifest_hash: "a".repeat(64) }
+    })
+  })
 })

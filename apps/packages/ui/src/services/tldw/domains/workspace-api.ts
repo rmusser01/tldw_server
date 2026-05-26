@@ -231,6 +231,72 @@ export interface WorkspaceSourcePreviewResponse {
   generated_at: string
 }
 
+export type WorkspaceMigrationStatus = "created" | "finalized" | "failed"
+
+export interface WorkspaceMigrationChunkDeclaration {
+  id: string
+  sha256: string
+  byte_count: number
+  chunk_kind?: string
+}
+
+export interface WorkspaceMigrationCreateRequest {
+  id: string
+  idempotency_key: string
+  target_workspace_id: string
+  target_workspace_name: string
+  source_product?: string
+  manifest_hash: string
+  declared_chunks?: WorkspaceMigrationChunkDeclaration[]
+  manifest?: Record<string, unknown>
+  diagnostics?: Record<string, unknown>
+}
+
+export interface WorkspaceMigrationChunkUploadRequest {
+  sha256: string
+  byte_count: number
+  chunk_kind?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface WorkspaceMigrationFinalizeRequest {
+  manifest_hash: string
+}
+
+export interface WorkspaceMigrationClientDeleteAckRequest {
+  acknowledged_manifest_hash: string
+}
+
+export interface WorkspaceMigrationChunkReceiptResponse {
+  id: string
+  migration_id: string
+  sha256: string
+  byte_count: number
+  chunk_kind: string
+  metadata: Record<string, unknown>
+  status: "accepted"
+  accepted_at: string
+}
+
+export interface WorkspaceMigrationResponse {
+  id: string
+  idempotency_key: string
+  target_workspace_id: string
+  target_workspace_name: string
+  source_product: string
+  manifest_hash: string
+  status: WorkspaceMigrationStatus
+  declared_chunk_count: number
+  accepted_chunk_count: number
+  missing_chunk_ids: string[]
+  client_delete_eligible: boolean
+  created_at: string
+  updated_at: string
+  finalized_at: string | null
+  recovery_manifest: Record<string, unknown>
+  chunks: WorkspaceMigrationChunkReceiptResponse[]
+}
+
 export interface WorkspaceArtifactApiResponse {
   id: string
   workspace_id: string
@@ -530,6 +596,68 @@ export const workspaceApiMethods = {
     return await bgRequest<WorkspaceApiResponse>({
       path: `/api/v1/workspaces/${workspaceId}`,
       method: "GET"
+    })
+  },
+
+  async createWorkspaceMigration(
+    data: WorkspaceMigrationCreateRequest
+  ): Promise<WorkspaceMigrationResponse> {
+    return await bgRequest<WorkspaceMigrationResponse>({
+      path: "/api/v1/workspaces/migrations",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: data
+    })
+  },
+
+  async getWorkspaceMigration(
+    migrationId: string
+  ): Promise<WorkspaceMigrationResponse> {
+    const encodedMigrationId = encodeURIComponent(migrationId)
+    return await bgRequest<WorkspaceMigrationResponse>({
+      path: `/api/v1/workspaces/migrations/${encodedMigrationId}`,
+      method: "GET"
+    })
+  },
+
+  async putWorkspaceMigrationChunk(
+    migrationId: string,
+    chunkId: string,
+    data: WorkspaceMigrationChunkUploadRequest
+  ): Promise<WorkspaceMigrationChunkReceiptResponse> {
+    const encodedMigrationId = encodeURIComponent(migrationId)
+    const encodedChunkId = encodeURIComponent(chunkId)
+    return await bgRequest<WorkspaceMigrationChunkReceiptResponse>({
+      path: `/api/v1/workspaces/migrations/${encodedMigrationId}/chunks/${encodedChunkId}`,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: data
+    })
+  },
+
+  async finalizeWorkspaceMigration(
+    migrationId: string,
+    data: WorkspaceMigrationFinalizeRequest
+  ): Promise<WorkspaceMigrationResponse> {
+    const encodedMigrationId = encodeURIComponent(migrationId)
+    return await bgRequest<WorkspaceMigrationResponse>({
+      path: `/api/v1/workspaces/migrations/${encodedMigrationId}/finalize`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: data
+    })
+  },
+
+  async ackWorkspaceMigrationClientDelete(
+    migrationId: string,
+    data: WorkspaceMigrationClientDeleteAckRequest
+  ): Promise<{ ok: boolean }> {
+    const encodedMigrationId = encodeURIComponent(migrationId)
+    return await bgRequest<{ ok: boolean }>({
+      path: `/api/v1/workspaces/migrations/${encodedMigrationId}/client-delete-ack`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: data
     })
   },
 
