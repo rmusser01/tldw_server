@@ -170,14 +170,24 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     detail: promptSummary.detail,
     state: promptSummary.state === "none" ? "disabled" : "active",
   };
-  const assistantName = assistantSummary.name || "No assistant selected";
+  const assistantName =
+    assistantSummary.name ||
+    (assistantSummary.mode === "none"
+      ? "No assistant attached to next message"
+      : "No assistant selected");
+  const assistantDetail =
+    assistantSummary.mode === "none" &&
+    assistantSummary.detail === "No assistant selected"
+      ? null
+      : assistantSummary.detail === assistantName
+        ? null
+        : assistantSummary.detail;
   const assistantEntry: PlaygroundCompositionPreviewEntry = {
     id: "assistant",
     kind: "assistant",
     label: "Assistant",
     title: assistantName,
-    detail:
-      assistantSummary.detail === assistantName ? null : assistantSummary.detail,
+    detail: assistantDetail,
     state: assistantSummary.mode === "none" ? "disabled" : "active",
   };
   const modelTitle =

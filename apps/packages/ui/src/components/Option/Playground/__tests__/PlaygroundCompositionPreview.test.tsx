@@ -237,7 +237,7 @@ describe("PlaygroundCompositionPreview", () => {
               id: "assistant",
               kind: "assistant",
               label: "Assistant",
-              title: "No assistant selected",
+              title: "No assistant attached to next message",
               detail: "No persona or character will shape replies.",
               state: "disabled",
             },

@@ -38,7 +38,7 @@ describe("playground composition preview summary", () => {
     expect(summary.overallState).toBe("unavailable");
     expect(summary.entries.map((entry) => [entry.kind, entry.state, entry.title])).toEqual([
       ["prompt", "disabled", "No prompt selected"],
-      ["assistant", "disabled", "No assistant selected"],
+      ["assistant", "disabled", "No assistant attached to next message"],
       ["model", "unavailable", "No model selected"],
       ["settings", "disabled", "Default model settings"],
       ["context", "disabled", "No extra context"],

@@ -106,7 +106,12 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     ).toBeInTheDocument();
 
     const assistant = screen.getByRole("region", { name: "Assistant" });
-    expect(within(assistant).getByText("No assistant selected")).toBeInTheDocument();
+    expect(
+      within(assistant).getByText("No runtime assistant selected"),
+    ).toBeInTheDocument();
+    expect(
+      within(assistant).queryByText("No assistant selected"),
+    ).not.toBeInTheDocument();
     expect(
       within(assistant).getByText("No persona or character will shape replies."),
     ).toBeInTheDocument();

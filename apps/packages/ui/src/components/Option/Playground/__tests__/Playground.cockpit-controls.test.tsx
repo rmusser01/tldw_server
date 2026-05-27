@@ -1045,9 +1045,12 @@ describe("Playground cockpit controls", () => {
       screen.getByTestId("playground-cockpit-right-rail"),
     ).getByTestId("playground-runtime-inspector");
     expect(
-      within(updatedRuntimeInspector).getAllByText("No assistant selected")
+      within(updatedRuntimeInspector).getAllByText("No runtime assistant selected")
         .length,
     ).toBeGreaterThan(0);
+    expect(
+      within(updatedRuntimeInspector).queryByText("No assistant selected"),
+    ).toBeNull();
     expect(within(updatedRuntimeInspector).queryByText("Legacy Character")).toBeNull();
     await waitFor(() => {
       expect(document.activeElement).toBe(

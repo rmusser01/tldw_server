@@ -198,9 +198,18 @@ export const PlaygroundRuntimeInspector = ({
             "No persona or character will shape replies.",
           ),
         });
+  const noAssistantSelectedLabel = t(
+    "cockpit.noAssistantSelected",
+    "No assistant selected",
+  );
   const assistantLabel =
     effectiveAssistantSummary.name ||
-    t("cockpit.noAssistantSelected", "No assistant selected");
+    (effectiveAssistantSummary.mode === "none"
+      ? t(
+          "cockpit.noRuntimeAssistantSelected",
+          "No runtime assistant selected",
+        )
+      : noAssistantSelectedLabel);
   const noAssistantDetail = t(
     "cockpit.noAssistantDetail",
     "No persona or character will shape replies.",
@@ -213,7 +222,8 @@ export const PlaygroundRuntimeInspector = ({
         : t("cockpit.noAssistantMode", "None");
   const assistantDetail =
     effectiveAssistantSummary.mode === "none" &&
-    effectiveAssistantSummary.detail === assistantLabel
+    (effectiveAssistantSummary.detail === assistantLabel ||
+      effectiveAssistantSummary.detail === noAssistantSelectedLabel)
       ? noAssistantDetail
       : effectiveAssistantSummary.detail ||
         (effectiveAssistantSummary.mode === "none"

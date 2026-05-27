@@ -345,7 +345,7 @@ describe("Playground cockpit accessibility", () => {
     );
   });
 
-  it("does not repeat empty assistant copy inside composition and runtime rail summaries", () => {
+  it("qualifies empty assistant copy inside composition and runtime rail summaries", () => {
     const assistantSummary = {
       mode: "none" as const,
       name: null,
@@ -390,12 +390,21 @@ describe("Playground cockpit accessibility", () => {
       name: "Next message composition",
     });
     expect(
-      within(composition).getAllByText("No assistant selected"),
-    ).toHaveLength(1);
+      within(composition).getByText("No assistant attached to next message"),
+    ).toBeInTheDocument();
+    expect(
+      within(composition).queryByText("No assistant selected"),
+    ).not.toBeInTheDocument();
 
     const runtimeInspector = screen.getByTestId("playground-runtime-inspector");
     expect(
-      within(runtimeInspector).getAllByText("No assistant selected"),
-    ).toHaveLength(1);
+      within(runtimeInspector).getByText("No runtime assistant selected"),
+    ).toBeInTheDocument();
+    expect(
+      within(runtimeInspector).queryByText("No assistant selected"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryAllByText("No assistant selected"),
+    ).toHaveLength(0);
   });
 });
