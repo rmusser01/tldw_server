@@ -1230,6 +1230,9 @@ describe("Playground cockpit controls", () => {
   });
 
   it("keeps provider setup blocking consistent across empty-state and cockpit rails", async () => {
+    messageOptionState.value.messages = [];
+    messageOptionState.value.historyId = null;
+    messageOptionState.value.serverChatId = null;
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
@@ -1258,8 +1261,19 @@ describe("Playground cockpit controls", () => {
 
     render(<Playground />);
 
+    const leftRail = await screen.findByTestId("playground-cockpit-left-rail");
+    expect(leftRail).toBeInTheDocument();
+    expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
+    expect(
+      within(leftRail).getByRole("button", { name: "Expand Prompt" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    const rightRail = await screen.findByTestId("playground-cockpit-right-rail");
+    expect(
+      within(rightRail).getByRole("button", { name: "Expand Assistant" }),
+    ).toHaveAttribute("aria-expanded", "false");
+
     const runtimeInspector = within(
-      await screen.findByTestId("playground-cockpit-right-rail"),
+      rightRail,
     ).getByTestId("playground-runtime-inspector");
 
     await waitFor(() => {

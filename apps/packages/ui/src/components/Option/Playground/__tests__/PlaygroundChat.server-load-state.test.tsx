@@ -143,6 +143,18 @@ describe("PlaygroundChat selected server chat load state", () => {
   })
 
   it("uses the tighter empty-state top spacing when no messages are present", () => {
+    queryState.chatModels = [
+      {
+        api_name: "ollama",
+        model: "gemma3:1b",
+        provider: "ollama",
+        is_configured: true
+      }
+    ]
+    queryState.providersStatus = {
+      any_configured: true,
+      providers: [{ name: "ollama", configured: true, requires_api_key: false }]
+    }
     useMessageOptionState.value = {
       ...useMessageOptionState.value,
       serverChatLoadState: "idle",
@@ -247,5 +259,36 @@ describe("PlaygroundChat selected server chat load state", () => {
     )
 
     expect(screen.getByText("No LLM provider configured")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open Settings" })).toHaveAttribute(
+      "href",
+      "/settings/tldw"
+    )
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument()
+    expect(screen.queryByTestId("playground-empty")).not.toBeInTheDocument()
+  })
+
+  it("keeps model setup recovery primary when no usable models are available", () => {
+    queryState.chatModels = []
+    queryState.providersStatus = {
+      any_configured: true,
+      providers: [{ name: "openai", configured: true, requires_api_key: true }]
+    }
+    useMessageOptionState.value = {
+      ...useMessageOptionState.value,
+      serverChatLoadState: "idle",
+      serverChatLoadError: null
+    }
+
+    render(
+      <MemoryRouter>
+        <PlaygroundChat />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText("No AI models available")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "refresh models" })
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("playground-empty")).not.toBeInTheDocument()
   })
 })

@@ -2287,6 +2287,15 @@ export const Playground = () => {
       activeChatModelUsability.status !== "ready" &&
       !activeChatModelUsability.canSend,
   );
+  const setupRecoveryMode =
+    messages.length === 0 &&
+    !stableHistoryId &&
+    !serverChatId &&
+    !streaming &&
+    !isProcessing &&
+    activeChatModelUsabilityBlocks &&
+    (activeChatModelUsability?.status === "no_models" ||
+      activeChatModelUsability?.status === "provider_unconfigured");
   React.useEffect(() => {
     if (typeof setActiveSettingsScope === "function") {
       setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
@@ -2842,6 +2851,7 @@ export const Playground = () => {
       onClearMedia={() => setRagMediaIds(null)}
       onClearResearch={handleRemoveAttachedResearchContext}
       compositionPreviewSummary={compositionPreviewSummary}
+      setupRecoveryMode={setupRecoveryMode}
     />
   );
   const cockpitRightRail = (
@@ -2891,6 +2901,7 @@ export const Playground = () => {
       onToolChoiceChange={(nextChoice) => setToolChoice(nextChoice)}
       onOpenMcpSettings={openMcpSettingsFromCockpit}
       toolSummary={cockpitToolSummary}
+      setupRecoveryMode={setupRecoveryMode}
     />
   );
   const cockpitStatusStrip = (

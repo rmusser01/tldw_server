@@ -454,10 +454,11 @@ export const PlaygroundChat = ({
     !noProvidersConfigured &&
     chatModelsFetched &&
     !hasUsableChatModels
+  const showSetupRecoveryNotice = showNoProvidersNotice || showNoModelsNotice
   const showEmptyStarterRegion =
     messages.length === 0 &&
     serverChatLoadState !== "loading" &&
-    (showStarterDeck || showNoProvidersNotice || showNoModelsNotice)
+    (showStarterDeck || showSetupRecoveryNotice)
   const normalizedSearchQuery =
     typeof searchQuery === "string" ? searchQuery.trim() : ""
   const resolveSearchMatch = React.useCallback(
@@ -1109,7 +1110,7 @@ export const PlaygroundChat = ({
                 </p>
               </div>
             )}
-            {showStarterDeck && <PlaygroundEmpty />}
+            {showStarterDeck && !showSetupRecoveryNotice && <PlaygroundEmpty />}
           </div>
         )}
         <React.Suspense fallback={null}>

@@ -97,6 +97,7 @@ export type PlaygroundContextRailProps = {
   onClearMedia?: () => void;
   onClearResearch?: () => void;
   compositionPreviewSummary?: PlaygroundCompositionPreviewSummary;
+  setupRecoveryMode?: boolean;
 };
 
 const sourceIcon = (kind: PlaygroundContextSource["kind"]) => {
@@ -156,6 +157,7 @@ export const PlaygroundContextRail = ({
   onClearMedia,
   onClearResearch,
   compositionPreviewSummary,
+  setupRecoveryMode = false,
 }: PlaygroundContextRailProps) => {
   const { t } = useTranslation("playground");
   const railRef = React.useRef<HTMLDivElement | null>(null);
@@ -281,6 +283,7 @@ export const PlaygroundContextRail = ({
         : null,
     ] satisfies Array<ContextCountItem | null>
   ).filter((item): item is ContextCountItem => Boolean(item));
+  const recoveryModeKey = setupRecoveryMode ? "setup" : "standard";
 
   return (
     <div
@@ -429,8 +432,10 @@ export const PlaygroundContextRail = ({
       </PlaygroundRailSection>
 
       <PlaygroundRailSection
+        key={`prompt-${recoveryModeKey}`}
         label={t("cockpit.promptManagement", "Prompt management")}
         title={t("cockpit.prompt", "Prompt")}
+        defaultOpen={!setupRecoveryMode}
       >
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -467,8 +472,10 @@ export const PlaygroundContextRail = ({
       </PlaygroundRailSection>
 
       <PlaygroundRailSection
+        key={`search-${recoveryModeKey}`}
         label={t("cockpit.searchAndSources", "Search & sources")}
         title={t("cockpit.searchAndSources", "Search & sources")}
+        defaultOpen={!setupRecoveryMode}
       >
         <p className={cockpitRailStyles.muted}>
           {t(
@@ -535,8 +542,10 @@ export const PlaygroundContextRail = ({
       {characterSessionsPanel}
 
       <PlaygroundRailSection
+        key={`session-${recoveryModeKey}`}
         label={t("cockpit.conversationSession", "Conversation session")}
         title={t("cockpit.session", "Session")}
+        defaultOpen={!setupRecoveryMode}
       >
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">

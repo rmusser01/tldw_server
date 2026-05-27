@@ -191,6 +191,58 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(screen.getByRole("heading", { name: "Run controls" })).toBeInTheDocument();
   });
 
+  it("starts advanced runtime sections collapsed in setup recovery mode", () => {
+    renderInspector({
+      setupRecoveryMode: true,
+      runtimeStatus: "error",
+      runtimeStatusDetail: "Provider setup needed",
+      modelUsabilityStatus: "provider_unconfigured",
+      modelUsabilityCanSend: false,
+      modelUsabilityDetail: "Provider setup needed",
+      settingSummaries: [{ label: "Temperature", value: "0.7" }],
+      toolSummary: {
+        state: "unavailable",
+        label: "MCP unavailable",
+        detail: "MCP tools unavailable",
+      },
+    });
+
+    const rail = screen.getByTestId("playground-runtime-inspector");
+    expect(
+      within(rail).getByRole("button", { name: "Collapse Runtime" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      within(rail).getByRole("button", { name: "Collapse Model route" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      within(rail).getByRole("button", { name: "Expand Assistant" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(rail).getByRole("button", { name: "Expand MCP tools" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(rail).getByRole("button", { name: "Expand Run controls" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(rail).getByRole("button", { name: "Open model settings" }),
+    ).toBeInTheDocument();
+    expect(
+      within(rail).queryByRole("button", {
+        name: "Select character or persona",
+      }),
+    ).toBeNull();
+
+    fireEvent.click(
+      within(rail).getByRole("button", { name: "Expand Assistant" }),
+    );
+
+    expect(
+      within(rail).getByRole("button", {
+        name: "Select character or persona",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("preserves existing right rail actions after regrouping", () => {
     const props = renderInspector({
       streaming: true,
