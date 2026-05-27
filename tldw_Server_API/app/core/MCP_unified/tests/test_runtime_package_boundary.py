@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import ast
 import importlib
+from datetime import datetime
 from pathlib import Path
 
+import mcp_unified
+import pytest
+from pydantic import ValidationError
 
-PACKAGE_ROOT = Path("mcp_unified")
+PACKAGE_ROOT = Path(mcp_unified.__file__).resolve().parent
 
 
 def _tldw_imports_for(path: Path) -> list[str]:
@@ -60,12 +64,38 @@ def test_profile_defaults_are_safe_and_preserve_extension_metadata() -> None:
     profile = MCPProfile(
         id="architect",
         name="Architect",
+        approval_policy=None,
+        path_scopes=None,
+        external_server_grants=None,
+        credential_grants=None,
+        policy_document={
+            "allowed_tools": None,
+            "capabilities": None,
+            "resource_constraints": None,
+            "policy_extension": {"level": "experimental"},
+        },
         metadata={"agent_metadata": {"system_prompt": "review architecture"}},
+        profile_extension={"owner": "frontend"},
     )
 
     assert profile.enabled is True
     assert profile.policy_document.allowed_tools == []
     assert profile.policy_document.capabilities == []
+    assert profile.policy_document.resource_constraints == {}
     assert profile.credential_grants == []
     assert profile.external_server_grants == []
     assert profile.metadata["agent_metadata"]["system_prompt"] == "review architecture"
+    dumped = profile.model_dump()
+    assert dumped["profile_extension"] == {"owner": "frontend"}
+    assert dumped["policy_document"]["policy_extension"] == {"level": "experimental"}
+
+
+def test_profile_rejects_naive_timestamps() -> None:
+    from mcp_unified.profiles.models import MCPProfile
+
+    with pytest.raises(ValidationError):
+        MCPProfile(
+            id="architect",
+            name="Architect",
+            created_at=datetime(2026, 5, 27, 5, 0, 0),
+        )

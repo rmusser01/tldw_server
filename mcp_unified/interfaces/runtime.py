@@ -57,7 +57,11 @@ class ModuleRegistry(Protocol):
 
 
 class RbacPolicy(Protocol):
-    """RBAC permission checker used for MCP resource and tool access."""
+    """RBAC permission checker used for MCP resource and tool access.
+
+    Hosts may provide synchronous in-memory checks or asynchronous database-backed
+    checks; protocol consumers normalize either result shape.
+    """
 
     def check_permission(
         self,
