@@ -177,7 +177,7 @@ async def test_standard_runner_create_session_sends_session_env() -> None:
 
     assert session_id == "session-env"
     assert fake_client.calls == [
-        ("session/new", {"cwd": "/repo", "env": {"WORKSPACE_TOKEN": "abc"}})
+        ("session/new", {"cwd": "/repo", "mcpServers": [], "env": {"WORKSPACE_TOKEN": "abc"}})
     ]
 
 
@@ -211,6 +211,38 @@ async def test_standard_runner_create_session_sends_explicit_empty_mcp_servers()
     assert session_id == "session-empty-mcp"
     assert fake_client.calls == [
         ("session/new", {"cwd": "/repo", "mcpServers": [], "agentType": "hermes"})
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_create_session_retries_without_agent_type_for_native_acp() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            if payload.get("agentType") == "hermes":
+                raise ACPResponseError("Invalid params")
+            return _CallResult({"sessionId": "session-native-hermes"})
+
+    runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    session_id = await runner.create_session("/repo", agent_type="hermes")
+
+    assert session_id == "session-native-hermes"
+    assert fake_client.calls == [
+        ("session/new", {"cwd": "/repo", "mcpServers": [], "agentType": "hermes"}),
+        ("session/new", {"cwd": "/repo", "mcpServers": []}),
     ]
 
 

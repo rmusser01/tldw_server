@@ -1599,6 +1599,11 @@ def test_iter_core_router_specs_populates_expected_specs(monkeypatch: pytest.Mon
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.agent_orchestration",
+        path="/agent-orchestration/projects",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.llm_providers",
         path="/llm/providers",
     )
@@ -1702,6 +1707,10 @@ def test_iter_core_router_specs_populates_expected_specs(monkeypatch: pytest.Mon
     assert by_first_path["/acp/multiplex"].tags == ("acp-multiplex",)
     assert by_first_path["/acp/multiplex"].route_key == "acp"
     assert by_first_path["/acp/multiplex"].default_stable is False
+    assert by_first_path["/agent-orchestration/projects"].prefix == "/api/v1"
+    assert by_first_path["/agent-orchestration/projects"].tags == ("agent-orchestration",)
+    assert by_first_path["/agent-orchestration/projects"].route_key == "acp"
+    assert by_first_path["/agent-orchestration/projects"].default_stable is False
     assert by_first_path["/llm/providers"].prefix == "/api/v1"
     assert by_first_path["/llm/providers"].tags == ("llm",)
     assert by_first_path["/llm/providers"].route_key == "llm"

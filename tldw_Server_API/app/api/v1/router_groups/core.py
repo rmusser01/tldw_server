@@ -213,6 +213,14 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
             route_key="acp",
             default_stable=False,
         ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.agent_orchestration",
+            log_name="agent_orchestration",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("agent-orchestration",),
+            route_key="acp",
+            default_stable=False,
+        ),
     ):
         append_imported_router_spec(specs, acp_spec)
 
