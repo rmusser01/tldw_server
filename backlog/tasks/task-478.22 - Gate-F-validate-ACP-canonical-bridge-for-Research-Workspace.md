@@ -49,7 +49,11 @@ Initial steps:
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Spec and plan created:
+- Docs/superpowers/specs/2026-05-26-research-workspace-acp-canonical-bridge-design.md
+- Docs/superpowers/plans/2026-05-26-research-workspace-acp-canonical-bridge-plan.md
 
+Design reviewed locally because the available sub-agent tool requires explicit user delegation authorization; no implementation code has been changed before TDD coverage.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
