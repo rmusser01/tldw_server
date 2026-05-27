@@ -474,7 +474,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
           >
             {t("option:notesSearch.importModalHelp", {
               defaultValue:
-                "Upload JSON exports or markdown files. Choose how to handle imported IDs that already exist.",
+                "Upload JSON exports, Markdown (.md/.markdown), or plain text (.txt) files. Choose how to handle imported IDs that already exist.",
             })}
           </Typography.Text>
           <div className="space-y-1">

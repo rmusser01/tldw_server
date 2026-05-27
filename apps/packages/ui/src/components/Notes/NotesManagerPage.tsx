@@ -2424,7 +2424,7 @@ const NotesManagerPage: React.FC = () => {
           void handleCreateNotesStudio()
         }}
       />
-      <input ref={imp.importInputRef} type="file" multiple accept=".json,.md,.markdown,application/json,text/markdown,text/plain" className="hidden" data-testid="notes-import-input" onChange={(event) => { void imp.handleImportInputChange(event) }} />
+      <input ref={imp.importInputRef} type="file" multiple accept=".json,.md,.markdown,.txt,application/json,text/markdown,text/plain" className="hidden" data-testid="notes-import-input" onChange={(event) => { void imp.handleImportInputChange(event) }} />
       {hasDeferredOverlayOpen && (
         <React.Suspense fallback={null}>
           <LazyNotesManagerOverlays

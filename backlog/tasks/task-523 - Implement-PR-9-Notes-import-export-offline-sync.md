@@ -4,7 +4,7 @@ title: Implement PR 9 Notes import export offline sync
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-27 20:29'
+updated_date: '2026-05-27 21:31'
 labels:
   - notes
   - ux
@@ -31,15 +31,13 @@ Implement the PR 9 /notes UX remediation slice from the approved plan: make expo
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-RED focused Vitest failed on the new parse-error submit guard, clearer export failed-batch copy, and expanded offline conflict recovery copy. GREEN focused Vitest passed: src/components/Notes/__tests__/NotesManagerPage.stage36.import-workflow.test.tsx, NotesManagerPage.stage30.export-progress.test.tsx, NotesListPanel.stage46.export-progress-copy.test.tsx, NotesManagerPage.stage41.offline-drafting-sync.test.tsx (4 files / 9 tests). git diff --check passed before staging. UI package typecheck with NODE_OPTIONS=--max-old-space-size=8192 is blocked by unrelated baseline error in src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx:35, Type 'comfortable' is not assignable to GalleryCardDensity. Bandit skipped because this slice touches only frontend TypeScript tests/components/hooks and Backlog task metadata.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+RED/GREEN verification for original PR 9 slice: focused Vitest failed on the new parse-error submit guard, clearer export failed-batch copy, and expanded offline conflict recovery copy, then passed 4 files / 9 tests after implementation. Code review follow-up: import help now explicitly mentions JSON, Markdown, and plain text (.txt), the file input accepts .txt explicitly, and export failed-batch progress copy now goes through the option translation function. Follow-up focused Vitest passed the same 4 files / 9 tests. git diff --check passed. UI package typecheck with NODE_OPTIONS=--max-old-space-size=8192 is blocked by unrelated baseline error in src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx:35, Type 'comfortable' is not assignable to GalleryCardDensity. Bandit skipped because this slice touches only frontend TypeScript tests/components/hooks and Backlog task metadata.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR 9 focused slice complete: deterministic import parse errors are prevented before submit, partial export progress is clearer, and offline conflict copy gives a data-preserving next action.
+PR 9 focused slice complete with code-review follow-up: deterministic import parse errors are prevented before submit, import accepted-file copy matches JSON/Markdown/plain-text input, partial export progress is localized and clearer, and offline conflict copy gives a data-preserving next action.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -199,6 +199,12 @@ describe("NotesManagerPage stage 36 import workflow", () => {
     })
     expect(screen.getByTestId("notes-import-preview-summary")).toHaveTextContent("Files: 1")
     expect(screen.getByTestId("notes-import-preview-summary")).toHaveTextContent("Estimated notes: 1")
+    expect(importInput.accept).toContain(".txt")
+    expect(
+      screen.getByText(
+        "Upload JSON exports, Markdown (.md/.markdown), or plain text (.txt) files. Choose how to handle imported IDs that already exist."
+      )
+    ).toBeInTheDocument()
 
     fireEvent.change(screen.getByTestId("notes-import-duplicate-strategy"), {
       target: { value: "skip" }

@@ -15,6 +15,9 @@ vi.mock("react-i18next", () => ({
             [key: string]: unknown
           }
     ) => {
+      if (key === "option:notesSearch.exportProgressFailedBatches") {
+        return "Localized {{count}} failed batch warning"
+      }
       if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
       if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
       return key
@@ -74,7 +77,7 @@ describe("NotesListPanel stage 46 export progress copy", () => {
     )
 
     expect(screen.getByTestId("notes-export-progress")).toHaveTextContent(
-      "1 batch failed; export may be partial"
+      "Localized 1 failed batch warning"
     )
   })
 })
