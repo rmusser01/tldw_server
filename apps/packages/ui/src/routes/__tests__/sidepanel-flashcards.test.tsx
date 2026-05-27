@@ -364,6 +364,24 @@ describe("sidepanel flashcards route", () => {
     expect(screen.getByDisplayValue("Second queued answer")).toBeInTheDocument()
   })
 
+  it("ignores duplicate individual save clicks while the draft is saving", async () => {
+    flashcardMocks.createFlashcardMutateAsync.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    const saveButton = screen.getByRole("button", { name: "Save card" })
+
+    fireEvent.click(saveButton)
+    fireEvent.click(saveButton)
+
+    expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+  })
+
   it("preserves failed drafts after save-all partial failure", async () => {
     browserMocks.executeScript
       .mockResolvedValueOnce([{ result: "Saved answer" }])
@@ -390,6 +408,56 @@ describe("sidepanel flashcards route", () => {
     ).toBeInTheDocument()
     expect(screen.queryByDisplayValue("Saved answer")).not.toBeInTheDocument()
     expect(screen.getByDisplayValue("Failed answer")).toBeInTheDocument()
+  })
+
+  it("ignores duplicate save-all clicks while the queue is saving", async () => {
+    browserMocks.executeScript
+      .mockResolvedValueOnce([{ result: "First queued answer" }])
+      .mockResolvedValueOnce([{ result: "Second queued answer" }])
+    flashcardMocks.createFlashcardMutateAsync.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    const saveAllButton = screen.getByRole("button", {
+      name: "Save all cards"
+    })
+
+    fireEvent.click(saveAllButton)
+    fireEvent.click(saveAllButton)
+
+    expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+  })
+
+  it("locks draft editing and queue controls while a save is in progress", async () => {
+    flashcardMocks.createFlashcardMutateAsync.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Save card" }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Front")).toBeDisabled()
+      expect(screen.getByLabelText("Back")).toBeDisabled()
+      expect(
+        screen.getByRole("button", { name: "Capture page selection" })
+      ).toBeDisabled()
+      expect(screen.getByTestId("sidepanel-flashcards-deck-select")).toHaveClass(
+        "ant-select-disabled"
+      )
+    })
   })
 
   it("keeps the draft in place when sidepanel save fails", async () => {

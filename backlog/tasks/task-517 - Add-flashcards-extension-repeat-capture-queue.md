@@ -48,12 +48,15 @@ Touched scope: `apps/packages/ui/src/routes/sidepanel-flashcards.tsx`, `apps/pac
 
 Implementation notes: converted sidepanel Flashcards from a single selected-text draft to a repeat-capture queue; added per-draft edit/delete, save-one, save-all, and partial failure preservation; kept full Flashcards as the handoff for LLM generation, templates, imports, and review.
 
+PR review follow-up after rebasing on `origin/dev@70a230aad`: added ref-backed duplicate-save guards for save-one/save-all, disabled draft editing, deck selection, and new captures while saves are in progress, and wrapped/caught the async save-all path.
+
 Non-goals: native sidepanel LLM generation, template application, and in-extension review.
 
 Verification:
 - RED: `bunx vitest run src/routes/__tests__/sidepanel-flashcards.test.tsx` failed with 5 expected queue/save-all/preserve-on-capture-error failures after dependency setup.
-- PASS: `bunx vitest run src/routes/__tests__/sidepanel-flashcards.test.tsx src/routes/__tests__/route-registry.sidepanel-flashcards.test.ts` passed 24 tests.
-- PARTIAL: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` has only the unrelated baseline `src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx(35,3): Type '"comfortable"' is not assignable to type 'GalleryCardDensity'.`
+- PASS: `bunx vitest run src/routes/__tests__/sidepanel-flashcards.test.tsx` passed 21 tests after review fixes.
+- PASS: `bunx vitest run src/routes/__tests__/sidepanel-flashcards.test.tsx src/routes/__tests__/route-registry.sidepanel-flashcards.test.ts` passed 27 tests after review fixes.
+- PARTIAL: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still has only the unrelated baseline `src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx(35,3): Type '"comfortable"' is not assignable to type 'GalleryCardDensity'.`
 - PASS: `git diff --check`.
 - Bandit not applicable: no Python files touched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
@@ -63,7 +66,9 @@ Verification:
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added the F12 repeat-capture sidepanel queue. Users can capture multiple page selections, edit queued Front/Back drafts, remove individual drafts, save one card, or save all valid drafts. Successful saves are removed from the queue while failed drafts remain for retry, and the full Flashcards workspace remains the handoff for generation, templates, imports, and review.
 
-Focused sidepanel and route-registry tests pass. TypeScript touched scope is clean; the package-wide `tsc` command still reports the unrelated pre-existing `CharacterListContent.design-system.test.tsx` density baseline.
+PR review follow-up after rebasing on `origin/dev@70a230aad`: save-one and save-all now use a synchronous ref-backed in-flight guard so duplicate clicks cannot create duplicate cards before React disabled-state rendering catches up. Draft Front/Back fields, the deck selector, and the capture button are disabled during saves so users cannot make edits or change the apparent target/queue while an in-flight payload is being saved. The save-all button now wraps the async handler and `handleSaveAllDrafts` has an outer catch for unexpected failures.
+
+Focused sidepanel and route-registry tests pass. Package-wide TypeScript still reports the unrelated pre-existing `CharacterListContent.design-system.test.tsx` density baseline; no sidepanel TypeScript errors were reported. Bandit is not applicable because this slice touches TypeScript/docs only and no Python files.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
