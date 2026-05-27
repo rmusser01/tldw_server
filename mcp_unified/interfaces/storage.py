@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from mcp_unified.profiles.models import MCPProfile
 
 
 class ProfileStore(Protocol):
     """Store for named MCP tool and permission profiles."""
 
-    async def get_profile(self, profile_id: str) -> dict[str, Any] | None: ...
+    async def get_profile(self, profile_id: str) -> MCPProfile | None: ...
+
+    async def list_profiles(self) -> list[MCPProfile]: ...
+
+    async def upsert_profile(
+        self,
+        profile: MCPProfile | Mapping[str, Any],
+    ) -> MCPProfile: ...
+
+    async def delete_profile(self, profile_id: str) -> bool: ...
 
 
 class ExternalRegistryStore(Protocol):
