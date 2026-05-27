@@ -1112,6 +1112,10 @@ const ResearchWorkspaceBody: React.FC = () => {
     React.useState<ResearchWorkspaceMigrationRunResult | null>(null)
   const [workspaceMigrationLoading, setWorkspaceMigrationLoading] =
     React.useState(false)
+  const [workspaceMigrationDetailsOpen, setWorkspaceMigrationDetailsOpen] =
+    React.useState(false)
+  const [workspaceMigrationRetryNonce, setWorkspaceMigrationRetryNonce] =
+    React.useState(0)
   const [
     workspaceStatusProjectionReadyVersion,
     setWorkspaceStatusProjectionReadyVersion
@@ -1141,6 +1145,13 @@ const ResearchWorkspaceBody: React.FC = () => {
     signature: string
     promise: Promise<ResearchWorkspaceMigrationRunResult>
   } | null>(null)
+  const retryWorkspaceMigration = React.useCallback(() => {
+    workspaceMigrationSignatureRef.current = null
+    workspaceMigrationInFlightRef.current = null
+    setWorkspaceMigrationResult(null)
+    setWorkspaceMigrationLoading(false)
+    setWorkspaceMigrationRetryNonce((value) => value + 1)
+  }, [])
   const onboardingInitializedRef = React.useRef(false)
   const [showTutorialPrompt, setShowTutorialPrompt] = React.useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = React.useState(false)
@@ -1429,8 +1440,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       return [
         "Legacy workspace data found",
         "Server receipt saved",
-        "Local data retained until server deletion eligibility is available",
-        "Review recovery details"
+        "Local data retained until server deletion eligibility is available"
       ]
     }
 
@@ -1440,21 +1450,19 @@ const ResearchWorkspaceBody: React.FC = () => {
         ...(workspaceMigrationResult.serverMigration
           ? ["Server receipt saved"]
           : []),
-        "Local data retained",
-        "Review recovery details"
+        "Local data retained"
       ]
     }
 
     if (workspaceMigrationResult.status === "failed") {
       return [
         "Legacy workspace data found",
-        "Migration failed before local deletion",
-        "Review recovery details"
+        "Migration failed before local deletion"
       ]
     }
 
     if (workspaceMigrationResult.status === "deleted") {
-      return ["Legacy workspace data moved", "Review recovery details"]
+      return ["Legacy workspace data moved"]
     }
 
     return []
@@ -1462,6 +1470,25 @@ const ResearchWorkspaceBody: React.FC = () => {
     statusGuardrailsEnabled,
     workspaceMigrationLoading,
     workspaceMigrationResult
+  ])
+
+  const workspaceMigrationStatusAction = React.useMemo(() => {
+    if (
+      !statusGuardrailsEnabled ||
+      !workspaceMigrationResult ||
+      workspaceMigrationStatusMessages.length === 0
+    ) {
+      return undefined
+    }
+    return {
+      label: "Details",
+      ariaLabel: "Review migration recovery details",
+      onClick: () => setWorkspaceMigrationDetailsOpen(true)
+    }
+  }, [
+    statusGuardrailsEnabled,
+    workspaceMigrationResult,
+    workspaceMigrationStatusMessages.length
   ])
 
   useEffect(() => {
@@ -1524,7 +1551,8 @@ const ResearchWorkspaceBody: React.FC = () => {
     const signature = [
       workspaceId,
       discoveredLocalStorageKeys.join("|"),
-      indexedDbSignature
+      indexedDbSignature,
+      workspaceMigrationRetryNonce.toString()
     ].join("::")
     const inFlightMigration = workspaceMigrationInFlightRef.current
     const canReuseInFlightMigration =
@@ -1604,6 +1632,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     isStoreHydrated,
     statusGuardrailsEnabled,
     workspaceId,
+    workspaceMigrationRetryNonce,
     workspaceName
   ])
 
@@ -3080,6 +3109,45 @@ const ResearchWorkspaceBody: React.FC = () => {
     focusWorkspacePane(pane)
   }
 
+  const migrationUnknownSurfaces =
+    workspaceMigrationResult?.localDeletionEligibility?.unknownSurfaces ?? []
+  const migrationRetainedSurfaces =
+    workspaceMigrationResult?.localDeletionEligibility?.retainedLocalSurfaces ?? []
+  const migrationDeletedSurfaces = workspaceMigrationResult?.deletedSurfaceIds ?? []
+  const migrationCanRetry =
+    Boolean(workspaceMigrationResult) &&
+    workspaceMigrationResult?.status !== "deleted"
+  const renderMigrationSurfaceList = (
+    items: unknown[],
+    emptyLabel: string
+  ) => {
+    if (items.length === 0) {
+      return <span className="text-text-subtle">{emptyLabel}</span>
+    }
+    return (
+      <ul className="space-y-1">
+        {items.map((item, index) => {
+          const label =
+            typeof item === "string"
+              ? item
+              : item && typeof item === "object"
+                ? String(
+                    (item as { key?: unknown; id?: unknown; storeName?: unknown }).key ??
+                      (item as { id?: unknown }).id ??
+                      (item as { storeName?: unknown }).storeName ??
+                      `surface-${index + 1}`
+                  )
+                : `surface-${index + 1}`
+          return (
+            <li key={`${label}-${index}`} className="truncate">
+              {label}
+            </li>
+          )
+        })}
+      </ul>
+    )
+  }
+
   return (
     <SharedWorkspaceProvider
       shareId={sharedShareId}
@@ -3268,6 +3336,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             storageQuotaBytes={workspaceStorageUsage.quotaBytes}
             activeOperations={activeWorkspaceOperations}
             statusMessages={workspaceMigrationStatusMessages}
+            statusAction={workspaceMigrationStatusAction}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
           />
 
@@ -3459,6 +3528,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             storageQuotaBytes={workspaceStorageUsage.quotaBytes}
             activeOperations={activeWorkspaceOperations}
             statusMessages={workspaceMigrationStatusMessages}
+            statusAction={workspaceMigrationStatusAction}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
           />
         </>
@@ -3615,6 +3685,110 @@ const ResearchWorkspaceBody: React.FC = () => {
             )}
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        title="Migration recovery details"
+        open={workspaceMigrationDetailsOpen}
+        onCancel={() => setWorkspaceMigrationDetailsOpen(false)}
+        destroyOnHidden
+        footer={[
+          <Button key="close" onClick={() => setWorkspaceMigrationDetailsOpen(false)}>
+            {t("common:close", "Close")}
+          </Button>,
+          ...(migrationCanRetry
+            ? [
+                <Button
+                  key="retry"
+                  type="primary"
+                  onClick={() => {
+                    setWorkspaceMigrationDetailsOpen(false)
+                    retryWorkspaceMigration()
+                  }}
+                >
+                  {t(
+                    "playground:workspace.retryMigrationCheck",
+                    "Retry migration check"
+                  )}
+                </Button>
+              ]
+            : [])
+        ]}
+      >
+        {workspaceMigrationResult ? (
+          <div
+            data-testid="workspace-migration-recovery-details"
+            className="space-y-4 text-sm text-text"
+          >
+            <p className="text-text-muted">{workspaceMigrationResult.message}</p>
+            <dl className="grid grid-cols-[minmax(120px,0.42fr)_1fr] gap-x-3 gap-y-2">
+              <dt className="text-text-muted">Result</dt>
+              <dd>{workspaceMigrationResult.status}</dd>
+              <dt className="text-text-muted">Migration ID</dt>
+              <dd className="break-all">
+                {workspaceMigrationResult.migrationId || "Not available"}
+              </dd>
+              <dt className="text-text-muted">Manifest hash</dt>
+              <dd className="break-all">
+                {workspaceMigrationResult.manifestHash || "Not available"}
+              </dd>
+              <dt className="text-text-muted">Server receipt</dt>
+              <dd>
+                {workspaceMigrationResult.serverMigration
+                  ? "Server receipt saved"
+                  : "No server receipt"}
+              </dd>
+              <dt className="text-text-muted">Server status</dt>
+              <dd>
+                {workspaceMigrationResult.serverMigration?.status ||
+                  "No server receipt"}
+              </dd>
+              <dt className="text-text-muted">Client deletion eligible</dt>
+              <dd>
+                {workspaceMigrationResult.serverMigration?.client_delete_eligible
+                  ? "Yes"
+                  : "No"}
+              </dd>
+            </dl>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <section className="rounded-md border border-border p-3">
+                <h3 className="mb-2 text-xs font-semibold uppercase text-text-muted">
+                  Deleted surfaces
+                </h3>
+                {renderMigrationSurfaceList(
+                  migrationDeletedSurfaces,
+                  "No local content deleted"
+                )}
+              </section>
+              <section className="rounded-md border border-border p-3">
+                <h3 className="mb-2 text-xs font-semibold uppercase text-text-muted">
+                  Retained local surfaces
+                </h3>
+                {renderMigrationSurfaceList(
+                  migrationRetainedSurfaces,
+                  "No retained known surfaces"
+                )}
+              </section>
+              <section className="rounded-md border border-border p-3">
+                <h3 className="mb-2 text-xs font-semibold uppercase text-text-muted">
+                  Unknown local surfaces
+                </h3>
+                {renderMigrationSurfaceList(
+                  migrationUnknownSurfaces,
+                  "No unknown surfaces"
+                )}
+              </section>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-text-muted">
+            {t(
+              "playground:workspace.noMigrationDetails",
+              "No migration recovery details are available for this workspace."
+            )}
+          </p>
+        )}
       </Modal>
 
       <TransferSourcesModal

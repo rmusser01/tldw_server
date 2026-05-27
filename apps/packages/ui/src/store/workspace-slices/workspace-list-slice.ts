@@ -15,6 +15,7 @@ import type {
 import { DEFAULT_AUDIO_SETTINGS, DEFAULT_WORKSPACE_NOTE } from '@/types/workspace'
 import type { WorkspaceExportBundle } from '@/store/workspace-bundle'
 import {
+  LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT,
   WORKSPACE_EXPORT_BUNDLE_FORMAT,
   WORKSPACE_EXPORT_BUNDLE_SCHEMA_VERSION,
   sanitizeImportedChatSession
@@ -457,7 +458,8 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
   importWorkspaceBundle: (bundle) => {
     if (
-      bundle.format !== WORKSPACE_EXPORT_BUNDLE_FORMAT ||
+      (bundle.format !== WORKSPACE_EXPORT_BUNDLE_FORMAT &&
+        bundle.format !== LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT) ||
       bundle.schemaVersion !== WORKSPACE_EXPORT_BUNDLE_SCHEMA_VERSION
     ) {
       return null

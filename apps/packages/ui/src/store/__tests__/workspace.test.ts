@@ -16,6 +16,11 @@ import {
   WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY,
   useWorkspaceStore
 } from "../workspace"
+import {
+  LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT,
+  type WorkspaceExportBundle,
+  WORKSPACE_EXPORT_BUNDLE_FORMAT
+} from "../workspace-bundle"
 
 const STORAGE_KEY = WORKSPACE_STORAGE_KEY
 const STORAGE_SPLIT_FLAG_KEY = WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY
@@ -2468,6 +2473,41 @@ describe("workspace store snapshot persistence", () => {
       .savedWorkspaces.find((workspace) => workspace.id === importedWorkspaceId)
 
     expect(importedSavedWorkspace?.collectionId ?? null).toBeNull()
+  })
+
+  it("imports legacy workspace export bundles as a recovery input while exporting current format", () => {
+    useWorkspaceStore.getState().initializeWorkspace("Legacy Export Source")
+    const sourceWorkspaceId = useWorkspaceStore.getState().workspaceId
+    useWorkspaceStore
+      .getState()
+      .addSource({ mediaId: 9911, title: "Legacy export source", type: "pdf" })
+
+    const bundle = useWorkspaceStore
+      .getState()
+      .exportWorkspaceBundle(sourceWorkspaceId)
+    expect(bundle).not.toBeNull()
+    expect(bundle?.format).toBe(WORKSPACE_EXPORT_BUNDLE_FORMAT)
+    if (!bundle) {
+      throw new Error("Expected workspace export bundle")
+    }
+
+    const legacyBundle: WorkspaceExportBundle = {
+      ...bundle,
+      format: LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT
+    }
+
+    const importedWorkspaceId = useWorkspaceStore
+      .getState()
+      .importWorkspaceBundle(legacyBundle)
+
+    expect(importedWorkspaceId).toBeTruthy()
+    expect(importedWorkspaceId).not.toBe(sourceWorkspaceId)
+    expect(useWorkspaceStore.getState().workspaceName).toBe(
+      "Legacy Export Source (Imported)"
+    )
+    expect(useWorkspaceStore.getState().sources[0]?.title).toBe(
+      "Legacy export source"
+    )
   })
 
   it("clears invalid imported workspaceBanner image payload while preserving text", () => {

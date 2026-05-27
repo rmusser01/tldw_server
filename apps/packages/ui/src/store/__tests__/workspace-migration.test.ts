@@ -394,7 +394,68 @@ describe("Research Workspace migration manifest planning", () => {
     })
 
     expect(result.status).toBe("failed")
+    expect(result.migrationId).toMatch(/^research-workspace-ws-1-/)
+    expect(result.manifestHash).toHaveLength(64)
+    expect(result.localDeletionEligibility?.eligible).toBe(true)
     expect(result.message).toBe("Research Workspace migration failed before local deletion.")
     expect(deleteLocalStorageValue).not.toHaveBeenCalled()
+  })
+
+  it("preflights tombstone writing before deleting locally covered content", async () => {
+    const deleteLocalStorageValue = vi.fn()
+    const ackWorkspaceMigrationClientDelete = vi.fn(async () => ({ ok: true }))
+
+    const result = await runResearchWorkspaceMigration({
+      targetWorkspaceId: "ws-1",
+      targetWorkspaceName: "Workspace One",
+      discoveredLocalStorageKeys: ["tldw-workspace"],
+      readLocalStorageValue: async () => "{}",
+      api: {
+        createWorkspaceMigration: vi.fn(async (body) => ({
+          ...body,
+          status: "created",
+          declared_chunk_count: body.declared_chunks.length,
+          accepted_chunk_count: 0,
+          missing_chunk_ids: [],
+          client_delete_eligible: false,
+          created_at: "2026-05-26T00:00:00Z",
+          updated_at: "2026-05-26T00:00:00Z",
+          finalized_at: null,
+          recovery_manifest: {},
+          chunks: []
+        })),
+        putWorkspaceMigrationChunk: vi.fn(async () => ({
+          id: "chunk-1",
+          migration_id: "mig-1",
+          sha256: "b".repeat(64),
+          byte_count: 2,
+          chunk_kind: "workspace_bundle",
+          metadata: {},
+          status: "accepted",
+          accepted_at: "2026-05-26T00:00:00Z"
+        })),
+        finalizeWorkspaceMigration: vi.fn(async () => ({
+          id: "mig-1",
+          status: "finalized",
+          client_delete_eligible: true,
+          chunks: []
+        })),
+        getWorkspaceMigration: vi.fn(async () => ({
+          id: "mig-1",
+          status: "finalized",
+          client_delete_eligible: true,
+          chunks: []
+        })),
+        ackWorkspaceMigrationClientDelete
+      },
+      deleteLocalStorageValue,
+      writeLocalStorageValue: vi.fn(async () => {
+        throw new Error("local-storage-quota")
+      })
+    })
+
+    expect(result.status).toBe("failed")
+    expect(deleteLocalStorageValue).not.toHaveBeenCalled()
+    expect(ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled()
   })
 })

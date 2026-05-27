@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { getDesignSystemState } from "@/design-system"
 import { ConnectionPhase, type ConnectionState } from "@/types/connection"
@@ -138,5 +138,26 @@ describe("WorkspaceStatusBar", () => {
       registryLabels.degraded
     )
     expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
+  })
+
+  it("renders an actionable status details control when provided", () => {
+    const onClick = vi.fn()
+
+    render(
+      <WorkspaceStatusBar
+        statusMessages={["Legacy workspace data retained"]}
+        statusAction={{
+          label: "Details",
+          ariaLabel: "Review migration recovery details",
+          onClick
+        }}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review migration recovery details" })
+    )
+
+    expect(onClick).toHaveBeenCalledTimes(1)
   })
 })
