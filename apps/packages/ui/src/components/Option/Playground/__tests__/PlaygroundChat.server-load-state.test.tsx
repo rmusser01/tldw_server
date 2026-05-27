@@ -2,8 +2,17 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 
 import { PlaygroundChat } from "../PlaygroundChat"
+
+const queryState = vi.hoisted(() => ({
+  chatModels: [] as any[],
+  chatModelsFetched: true,
+  providersStatus: undefined as
+    | undefined
+    | { any_configured: boolean; providers: any[] }
+}))
 
 const useMessageOptionState = vi.hoisted(() => ({
   value: {
@@ -62,11 +71,31 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] })
+  useQuery: ({ queryKey }: { queryKey?: unknown[] }) => {
+    const key = Array.isArray(queryKey) ? queryKey[0] : undefined
+    if (key === "playground:chatModels") {
+      return {
+        data: queryState.chatModels,
+        isFetched: queryState.chatModelsFetched,
+        refetch: vi.fn()
+      }
+    }
+    if (key === "playground:providersStatus") {
+      return {
+        data: queryState.providersStatus,
+        refetch: vi.fn()
+      }
+    }
+    return { data: [] }
+  }
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: () => [false]
+}))
+
+vi.mock("@/hooks/useConnectionState", () => ({
+  useIsConnected: () => true
 }))
 
 vi.mock("@/hooks/useMessageOption", () => ({
@@ -101,6 +130,16 @@ vi.mock("@/components/Common/Playground/Message", () => ({
 describe("PlaygroundChat selected server chat load state", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    queryState.chatModels = []
+    queryState.chatModelsFetched = true
+    queryState.providersStatus = undefined
+    useMessageOptionState.value = {
+      ...useMessageOptionState.value,
+      messages: [],
+      serverChatId: "chat-1",
+      serverChatLoadState: "failed",
+      serverChatLoadError: "Failed to load conversation."
+    }
   })
 
   it("uses the tighter empty-state top spacing when no messages are present", () => {
@@ -110,7 +149,11 @@ describe("PlaygroundChat selected server chat load state", () => {
       serverChatLoadError: null
     }
 
-    render(<PlaygroundChat />)
+    render(
+      <MemoryRouter>
+        <PlaygroundChat />
+      </MemoryRouter>
+    )
 
     const emptyState = screen.getByTestId("playground-empty")
     expect(emptyState.parentElement).toHaveClass("mt-4")
@@ -138,9 +181,44 @@ describe("PlaygroundChat selected server chat load state", () => {
       serverChatLoadError: "Failed to load conversation."
     }
 
-    render(<PlaygroundChat />)
+    render(
+      <MemoryRouter>
+        <PlaygroundChat />
+      </MemoryRouter>
+    )
 
     expect(screen.getByText("Failed to load conversation.")).toBeInTheDocument()
     expect(screen.queryByTestId("playground-empty")).not.toBeInTheDocument()
+  })
+
+  it("does not show the no-provider setup banner when usable chat models are present", () => {
+    queryState.chatModels = [
+      {
+        api_name: "ollama",
+        model: "gemma3:1b",
+        provider: "ollama",
+        is_configured: true
+      }
+    ]
+    queryState.providersStatus = {
+      any_configured: false,
+      providers: [{ name: "ollama", configured: true, requires_api_key: false }]
+    }
+    useMessageOptionState.value = {
+      ...useMessageOptionState.value,
+      serverChatLoadState: "idle",
+      serverChatLoadError: null
+    }
+
+    render(
+      <MemoryRouter>
+        <PlaygroundChat />
+      </MemoryRouter>
+    )
+
+    expect(
+      screen.queryByText("No LLM provider configured")
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("playground-empty")).toBeInTheDocument()
   })
 })

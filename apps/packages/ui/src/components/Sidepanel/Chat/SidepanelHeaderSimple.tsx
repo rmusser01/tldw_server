@@ -120,7 +120,7 @@ export const SidepanelHeaderSimple = ({
   }, [notification, t])
 
   const openDashboard = React.useCallback(() => {
-    const url = browser.runtime.getURL("/options.html#/flashcards")
+    const url = browser.runtime.getURL("/options.html#/chat")
     if (browser.tabs?.create) {
       browser.tabs.create({ url }).catch(() => {
         window.open(url, "_blank")

@@ -216,6 +216,7 @@ export const PlaygroundChat = ({
   })
   const noProvidersConfigured =
     providersStatus != null && providersStatus.any_configured === false
+  const hasUsableChatModels = chatModelsFetched && chatModels.length > 0
   const selectedCharacterName =
     selectedCharacter?.name ||
     (selectedCharacter as any)?.title ||
@@ -425,7 +426,11 @@ export const PlaygroundChat = ({
       "playground:selectedServerChatLoadFailure",
       "Failed to load the selected conversation."
     ) as string)
-  const showNoProvidersNotice = isConnected && noProvidersConfigured
+  const showNoProvidersNotice =
+    isConnected &&
+    noProvidersConfigured &&
+    chatModelsFetched &&
+    !hasUsableChatModels
   const showNoModelsNotice =
     isConnected &&
     !noProvidersConfigured &&

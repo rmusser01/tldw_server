@@ -2,7 +2,7 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 const browserMocks = vi.hoisted(() => ({
@@ -46,6 +46,10 @@ vi.mock("../TtsClipsDrawer", () => ({
 import { SidepanelHeaderSimple } from "../SidepanelHeaderSimple"
 
 describe("SidepanelHeaderSimple full-screen route", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it("opens the rail-enabled full app chat route", async () => {
     const user = userEvent.setup()
 
@@ -56,6 +60,23 @@ describe("SidepanelHeaderSimple full-screen route", () => {
     )
 
     await user.click(screen.getByTestId("chat-open-full-screen"))
+
+    expect(browserMocks.getURL).toHaveBeenCalledWith("/options.html#/chat")
+    expect(browserMocks.createTab).toHaveBeenCalledWith({
+      url: "chrome-extension://tldw/options.html#/chat"
+    })
+  })
+
+  it("opens the chat dashboard route from the chat header dashboard button", async () => {
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <SidepanelHeaderSimple activeTitle="Sidepanel chat" />
+      </MemoryRouter>
+    )
+
+    await user.click(screen.getByTestId("chat-open-dashboard"))
 
     expect(browserMocks.getURL).toHaveBeenCalledWith("/options.html#/chat")
     expect(browserMocks.createTab).toHaveBeenCalledWith({
