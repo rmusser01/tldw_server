@@ -21,6 +21,44 @@ import {
 const { Text } = Typography
 type TransferTaskKey = "create" | "import" | "export"
 
+const getGenerateIntentToken = (
+  intent: FlashcardsGenerateIntent | null | undefined
+): string | null => {
+  if (!intent) return null
+  return JSON.stringify([
+    intent.text,
+    intent.sourceType ?? "",
+    intent.sourceId ?? "",
+    intent.sourceTitle ?? "",
+    intent.conversationId ?? "",
+    intent.messageId ?? ""
+  ])
+}
+
+const getStudyPackIntentToken = (
+  intent: StudyPackIntent | null | undefined
+): string | null => {
+  if (!intent) return null
+  return JSON.stringify([
+    intent.title,
+    intent.sourceItems.map((item) => [
+      item.sourceType,
+      item.sourceId,
+      item.sourceTitle ?? "",
+      item.excerptText ?? "",
+      item.locator ? JSON.stringify(item.locator) : ""
+    ])
+  ])
+}
+
+const getExportHandoffToken = (
+  deckId: number | null | undefined,
+  handoffKey: string | null | undefined
+): string | null => {
+  if (deckId == null || !handoffKey) return null
+  return `${deckId}:${handoffKey}`
+}
+
 /**
  * Import/Export tab for flashcards.
  */
@@ -45,6 +83,9 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
   const [lastTransferAction, setLastTransferAction] =
     React.useState<TransferActionSummary | null>(null)
   const [studyPackDrawerOpen, setStudyPackDrawerOpen] = React.useState(false)
+  const seenGenerateIntentTokenRef = React.useRef<string | null>(null)
+  const seenStudyPackIntentTokenRef = React.useRef<string | null>(null)
+  const seenExportHandoffTokenRef = React.useRef<string | null>(null)
   const importLimitsText = React.useMemo(() => {
     const importLimits = normalizeImportLimits(limitsQuery.data)
     if (!importLimits) return null
@@ -58,22 +99,40 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
   }, [limitsQuery.data, t])
 
   React.useEffect(() => {
-    if (studyPackIntent) {
-      setActiveTask("create")
-      setStudyPackDrawerOpen(true)
+    const token = getStudyPackIntentToken(studyPackIntent)
+    if (!token) {
+      seenStudyPackIntentTokenRef.current = null
+      return
     }
+    if (token === seenStudyPackIntentTokenRef.current) return
+
+    seenStudyPackIntentTokenRef.current = token
+    setActiveTask("create")
+    setStudyPackDrawerOpen(true)
   }, [studyPackIntent])
 
   React.useEffect(() => {
-    if (generateIntent) {
-      setActiveTask("create")
+    const token = getGenerateIntentToken(generateIntent)
+    if (!token) {
+      seenGenerateIntentTokenRef.current = null
+      return
     }
+    if (token === seenGenerateIntentTokenRef.current) return
+
+    seenGenerateIntentTokenRef.current = token
+    setActiveTask("create")
   }, [generateIntent])
 
   React.useEffect(() => {
-    if (initialExportDeckId != null && initialExportDeckHandoffKey) {
-      setActiveTask("export")
+    const token = getExportHandoffToken(initialExportDeckId, initialExportDeckHandoffKey)
+    if (!token) {
+      seenExportHandoffTokenRef.current = null
+      return
     }
+    if (token === seenExportHandoffTokenRef.current) return
+
+    seenExportHandoffTokenRef.current = token
+    setActiveTask("export")
   }, [initialExportDeckHandoffKey, initialExportDeckId])
 
   const handleTransferAction = React.useCallback((summary: TransferActionSummaryInput) => {
@@ -144,7 +203,7 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
         <Segmented
           block
           aria-label={t("option:flashcards.transferTaskSwitcherAria", {
-            defaultValue: "Create and import task"
+            defaultValue: "Create, import, or export task"
           })}
           options={transferTaskOptions}
           value={activeTask}

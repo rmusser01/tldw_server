@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
@@ -133,6 +133,20 @@ describe("ImportExportTab decomposition", () => {
     expect(screen.getByTestId("mock-image-occlusion-panel")).toBeVisible()
   })
 
+  it("labels the task switcher with all available transfer tasks", () => {
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+
+    render(<ImportExportTab />)
+
+    expect(
+      screen.getByRole("radiogroup", {
+        name: "Create, import, or export task"
+      })
+    ).toBeInTheDocument()
+  })
+
   it("switches between task-specific create, import, and export workspaces", async () => {
     const user = userEvent.setup()
     mocks.useImportLimitsQuery.mockReturnValue({
@@ -192,5 +206,69 @@ describe("ImportExportTab decomposition", () => {
       "data-initial-text",
       "Selected page notes"
     )
+  })
+
+  it("does not reset a manual task switch when an equivalent generate handoff rerenders", async () => {
+    const user = userEvent.setup()
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+    const generateIntent = {
+      text: "Selected page notes",
+      sourceType: "manual" as const,
+      sourceTitle: "Captured page"
+    }
+
+    const { rerender } = render(<ImportExportTab generateIntent={generateIntent} />)
+
+    await user.click(screen.getByText("Import file"))
+    expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass("hidden")
+
+    rerender(<ImportExportTab generateIntent={{ ...generateIntent }} />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass(
+        "hidden"
+      )
+      expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
+    })
+  })
+
+  it("does not reset a manual task switch when an equivalent study-pack handoff rerenders", async () => {
+    const user = userEvent.setup()
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+    const sourceItem = {
+      sourceType: "note" as const,
+      sourceId: "note-1",
+      sourceTitle: "Lecture notes",
+      excerptText: "Key points"
+    }
+    const studyPackIntent = {
+      title: "Biology pack",
+      sourceItems: [sourceItem]
+    }
+
+    const { rerender } = render(<ImportExportTab studyPackIntent={studyPackIntent} />)
+
+    await user.click(screen.getByText("Import file"))
+    expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass("hidden")
+
+    rerender(
+      <ImportExportTab
+        studyPackIntent={{
+          title: "Biology pack",
+          sourceItems: [{ ...sourceItem }]
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass(
+        "hidden"
+      )
+      expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
+    })
   })
 })

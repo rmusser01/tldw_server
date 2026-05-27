@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ImportExportTab } from "../ImportExportTab"
@@ -146,6 +147,14 @@ const fastAcquisitionEnvelope: DeckSchedulerSettingsEnvelope = {
   fsrs: defaultFsrsSettings
 }
 
+const openImportTask = async () => {
+  const user = userEvent.setup()
+  await user.click(screen.getByText("Import file"))
+  const panel = screen.getByTestId("flashcards-import-task-panel")
+  expect(panel).toBeVisible()
+  expect(panel).not.toHaveClass("hidden")
+}
+
 describe("ImportExportTab deck creation flows", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -258,6 +267,7 @@ describe("ImportExportTab deck creation flows", () => {
     })
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.mouseDown(screen.getByTestId("flashcards-import-format"))
     fireEvent.click(await screen.findByText("Structured Q&A"))
