@@ -1,8 +1,9 @@
 {
   "worktree": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-rails-ux-rebaseline",
   "branch": "codex/chat-rails-ux-rebaseline",
-  "head": "65357cac1",
-  "originDev": "efe42fe0c",
+  "head": "122f3af64",
+  "originDevAtBaseline": "efe42fe0c",
+  "originDevAtManualCapture": "70a230aad",
   "mergeBaseIsAncestorExitCode": 0,
   "backend": "http://127.0.0.1:8000",
   "webui": "http://localhost:18014",
@@ -48,11 +49,31 @@
     "result": "sandbox_localhost_access_failed"
   },
   "realServerPlaywright": {
-    "status": "blocked",
-    "reason": "Backend was coordinator-confirmed healthy, but the sandbox blocked the Playwright-managed Next server from binding to 127.0.0.1:18014.",
+    "status": "failed_with_nonrail_baseline_failures",
+    "reason": "The escalated real-server run reached the backend and WebUI, produced screenshots, and passed 11 of 15 tests. Four existing assertions failed outside the rail-overflow guard: stale Web search status text, character clear state, plain chat create 422, and model-list scope toggle visibility.",
     "plannedCommand": "cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY TLDW_SERVER_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_WEB_URL=http://localhost:18014 TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18014' bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line",
     "attemptExitCode": 1,
-    "failure": "Error: listen EPERM: operation not permitted 127.0.0.1:18014"
+    "testsPassed": 11,
+    "testsFailed": 4,
+    "failures": [
+      "uses the running server and keeps cockpit/focus controls working: status strip did not contain Web search on after the context-rail toggle aria-pressed changed",
+      "selects and clears a real disposable character through the runtime rail: runtime inspector did not show No assistant selected after clearing",
+      "keeps the same conversation while overlay changes and clears through the character control rail: disposable plain chat creation returned 422 instead of 201",
+      "proves model provider confidence through a real cockpit selection and conversation: model-list-scope-toggle was not visible"
+    ],
+    "previousSandboxFailure": "Error: listen EPERM: operation not permitted 127.0.0.1:18014"
+  },
+  "manualBrowserCapture": {
+    "status": "passed",
+    "tool": "Playwright browser automation against the manually started Next dev server",
+    "webui": "http://127.0.0.1:18014/chat",
+    "configSeeded": {
+      "serverUrl": "http://127.0.0.1:8000",
+      "authMode": "single-user",
+      "apiKey": "THIS-IS-A-SECURE-KEY-123-FAKE-KEY",
+      "selectedModel": "tldw:gpt-4o"
+    },
+    "result": "Captured all required /chat rail screenshots and measured no horizontal overflow in desktop cockpit, desktop focus, mobile focus, and mobile cockpit states."
   },
   "focusedStaticPlaywright": {
     "requiredCommand": "cd apps/tldw-frontend && bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep \"normalizes configured provider model IDs|does not intercept backend routes\"",
@@ -81,55 +102,67 @@
       "route": "/chat",
       "viewport": "1440x960",
       "state": "desktop-cockpit",
-      "status": "blocked",
-      "horizontalOverflow": null,
-      "reason": "Live Playwright cockpit load was not run because the sandbox blocked the WebUI server bind on 127.0.0.1:18014."
+      "status": "captured",
+      "horizontalOverflow": false,
+      "metrics": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
     },
     {
       "route": "/chat",
       "viewport": "1440x960",
       "state": "desktop-focus",
-      "status": "blocked",
-      "horizontalOverflow": null,
-      "reason": "Live Playwright focus transition was not run because the sandbox blocked the WebUI server bind on 127.0.0.1:18014."
+      "status": "captured",
+      "horizontalOverflow": false,
+      "metrics": {
+        "innerWidth": 1440,
+        "docScrollWidth": 1440,
+        "bodyScrollWidth": 1440
+      }
     },
     {
       "route": "/chat",
       "viewport": "390x844",
       "state": "mobile-focus",
-      "status": "blocked",
-      "horizontalOverflow": null,
-      "reason": "Live mobile focus viewport was not run because the sandbox blocked the WebUI server bind on 127.0.0.1:18014."
+      "status": "captured",
+      "horizontalOverflow": false,
+      "metrics": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390
+      }
     },
     {
       "route": "/chat",
       "viewport": "390x844",
       "state": "mobile-cockpit",
-      "status": "blocked",
-      "horizontalOverflow": null,
-      "reason": "Live mobile cockpit panel viewport was not run because the sandbox blocked the WebUI server bind on 127.0.0.1:18014."
+      "status": "captured",
+      "horizontalOverflow": false,
+      "metrics": {
+        "innerWidth": 390,
+        "docScrollWidth": 390,
+        "bodyScrollWidth": 390
+      }
     }
   ],
   "screenshots": [
     {
       "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-cockpit.png",
-      "status": "not_captured",
-      "reason": "WebUI server bind blocked by sandbox."
+      "status": "captured"
     },
     {
       "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-focus.png",
-      "status": "not_captured",
-      "reason": "WebUI server bind blocked by sandbox."
+      "status": "captured"
     },
     {
       "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-focus.png",
-      "status": "not_captured",
-      "reason": "WebUI server bind blocked by sandbox."
+      "status": "captured"
     },
     {
       "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit.png",
-      "status": "not_captured",
-      "reason": "WebUI server bind blocked by sandbox."
+      "status": "captured"
     }
   ]
 }

@@ -1,7 +1,7 @@
 ---
 id: TASK-517
 title: Add chat cockpit rail regression guards
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: 2026-05-27 04:05
@@ -32,7 +32,7 @@ Add focused regression coverage that proves the main /chat cockpit shell, contex
 <!-- AC:BEGIN -->
 - [x] #1 A source-level regression guard proves the /chat page still imports and renders the cockpit shell, context rail, runtime inspector, mobile rail surface, focus mode affordance, and character rail.
 - [x] #2 Existing cockpit component and real-server e2e coverage is run or updated to verify rail visibility on desktop and mobile.
-- [ ] #3 Screenshot artifacts for rail-enabled /chat are copied into the review asset directory for the refreshed UX audit.
+- [x] #3 Screenshot artifacts for rail-enabled /chat are copied into the review asset directory for the refreshed UX audit.
 - [x] #4 Verification results, skips, and any baseline failures are recorded in this task.
 <!-- AC:END -->
 
@@ -69,13 +69,16 @@ Task 3 implementation notes - 2026-05-27:
 - Wired the overflow assertion into stable desktop states after initial `/chat` cockpit render, desktop focus mode, and return to cockpit; wired it into mobile states after `/chat` load, cockpit context panel, runtime panel, return to focus, and return to cockpit.
 - Coordinator-confirmed backend health succeeded with approved localhost access: `curl -sf http://127.0.0.1:8000/api/v1/health` returned status `ok`, auth mode `single_user`, and healthy database/metrics/ChaChaNotes checks.
 - Agent-side sandboxed curl to the same health URL still failed with exit code 7 and no response body; recorded as sandbox-localhost access failure, not backend downtime.
-- Planned live real-server Playwright command was attempted with `TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18014'`; it failed before tests because the sandbox blocked Next from binding `127.0.0.1:18014` (`listen EPERM`). No live screenshots were captured.
+- Planned live real-server Playwright command was first attempted inside the sandbox with `TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18014'`; it failed before tests because the sandbox blocked Next from binding `127.0.0.1:18014` (`listen EPERM`).
+- Coordinator reran the planned live real-server Playwright command with approved localhost access. The run reached the backend and WebUI and produced 11 passing tests, with 4 existing/non-rail failures: stale Web search status-strip expectation, character clear state, disposable plain chat creation returning 422, and missing model-list scope toggle.
+- Coordinator then started the WebUI with approved localhost access and manually captured the required rail-enabled screenshots from `/chat`: `desktop-cockpit.png`, `desktop-focus.png`, `mobile-focus.png`, and `mobile-cockpit.png`.
+- Manual browser overflow metrics were clean in all four audit states: desktop cockpit, desktop focus, mobile focus, and mobile cockpit all had document/body scroll width equal to viewport width.
 - The exact required focused static/unit Playwright command also failed before tests because Playwright config autostarted Next on `0.0.0.0:8080` and hit `listen EPERM`. Re-running the same grep with `TLDW_WEB_AUTOSTART=false` and the fake e2e API key passed: 2 tests, 595 ms.
-- `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/evidence.json` now records coordinator-confirmed backend health, sandbox curl failure, blocked live Playwright run, focused static verification, and blocked viewport/screenshot entries.
+- `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/evidence.json` now records coordinator-confirmed backend health, sandbox curl failure, escalated real-server Playwright results, focused static verification, manual browser capture, and captured viewport/screenshot entries.
 
 DoD notes for Task 3:
-- AC #2 is complete for this task scope: existing component coverage was completed in Task 2, and the real-server e2e coverage is now updated with desktop/mobile overflow assertions. Live execution remains environment-blocked.
-- AC #3 remains partially complete/open: evidence JSON exists, but screenshot artifacts were not captured because the sandbox blocked WebUI server binding.
+- AC #2 is complete for this task scope: existing component coverage was completed in Task 2, and the real-server e2e coverage is now updated with desktop/mobile overflow assertions. Escalated live execution reached the real WebUI/backend and exposed four non-rail baseline failures.
+- AC #3 is complete: evidence JSON exists and the required `/chat` screenshot artifacts are present in the review asset directory.
 - Documentation was updated in the audit and evidence JSON.
 - Bandit remains not applicable for this TypeScript/evidence-only slice; no Python code was touched.
 <!-- SECTION:NOTES:END -->
@@ -85,12 +88,12 @@ DoD notes for Task 3:
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Task 2 added the source-level cockpit rail wiring guard and fixed the cockpit-controls harness blocker exposed by the restored rails. The new guard passes, the isolated controls file passes, and the existing rail component set now passes. Screenshot/evidence criteria remain open for Task 3.
 
-Task 3 hardened the real-server cockpit spec with horizontal overflow assertions and updated the audit/evidence scaffolding. Coordinator-confirmed backend health was OK, but this sandbox blocked both health curl access and Playwright-managed Next server binding, so live screenshots and viewport overflow measurements remain blocked rather than passed. Focused static/source Playwright verification passed with WebUI autostart disabled and the fake e2e API key.
+Task 3 hardened the real-server cockpit spec with horizontal overflow assertions and updated the audit/evidence scaffolding. Coordinator-confirmed backend health was OK. The full escalated real-server Playwright run reached the backend/WebUI and produced 11 passing tests with 4 existing/non-rail failures. Manual browser verification captured the four required `/chat` screenshots and measured no horizontal overflow in desktop cockpit, desktop focus, mobile focus, or mobile cockpit. Focused static/source Playwright verification passed with WebUI autostart disabled and the fake e2e API key.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip

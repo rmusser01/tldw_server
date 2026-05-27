@@ -5,11 +5,12 @@
 - Worktree: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-rails-ux-rebaseline`
 - Branch: `codex/chat-rails-ux-rebaseline`
 - Pre-artifact baseline/provenance capture commit: `69a80b4b5` (`git rev-parse --short HEAD` output captured before the audit artifact commit).
-- Task 3 evidence capture HEAD: `65357cac1`.
-- origin/dev: `efe42fe0c`
+- Task 3 evidence capture HEAD: `122f3af64`.
+- origin/dev at baseline: `efe42fe0c`
+- origin/dev at manual browser capture: `70a230aad` (branch had advanced upstream; resync is deferred until a clean task boundary).
 - Merge-base expectation: `git merge-base --is-ancestor origin/dev HEAD` produced no stdout and exited `0` during the pre-artifact baseline capture.
 - Backend: `http://127.0.0.1:8000`; coordinator-confirmed healthy with approved localhost access.
-- WebUI URL: Planned `http://localhost:18014`; Playwright-managed Next server could not start inside this sandbox because binding `127.0.0.1:18014` failed with `listen EPERM`.
+- WebUI URL: `http://127.0.0.1:18014`
 - Rail source files:
 
 ```text
@@ -36,17 +37,18 @@ apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeIns
 
 - Backend health: coordinator-confirmed OK via `curl -sf http://127.0.0.1:8000/api/v1/health`; response status was `ok`, `auth_mode` was `single_user`, and database, metrics, and ChaChaNotes checks were healthy.
 - Sandboxed backend health attempt: `curl -sf http://127.0.0.1:8000/api/v1/health` exited `7` with empty stdout/stderr from this agent context. Treat this as sandbox-localhost access failure, not backend downtime.
-- Live real-server Playwright run: attempted with `TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18014'`; it failed before tests because Next could not bind `127.0.0.1:18014` (`listen EPERM`).
+- Live real-server Playwright run: first blocked inside the sandbox on `listen EPERM`; rerun with approved localhost access reached the real backend and WebUI. Result: 11 passed, 4 failed. The failures were existing/non-rail assertions: stale Web search status-strip expectation, character clear state, disposable plain chat creation returning 422, and missing model-list scope toggle.
+- Manual browser capture: started `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run dev -- -H 127.0.0.1 -p 18014`, seeded the single-user server config, opened `/chat`, captured required desktop/mobile cockpit/focus screenshots, and measured no horizontal overflow in all four states.
 - Focused static/source Playwright verification: the exact requested command also failed before tests because Playwright config tried to autostart Next on `0.0.0.0:8080` and hit `listen EPERM`. Re-running the same grep with `TLDW_WEB_AUTOSTART=false` and the fake e2e API key passed: 2 tests, 595 ms.
 - Source/e2e hardening: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts` now includes `assertNoHorizontalOverflow(page)` and calls it at stable desktop cockpit/focus states and mobile focus/cockpit panel states.
-- Evidence JSON: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/evidence.json` records `backendAvailable: true` from coordinator-confirmed health, the sandbox curl failure, the Playwright bind failure, and viewport checks as blocked.
-- Screenshot artifacts: not captured during Task 3 because the sandbox blocked the WebUI server bind. No screenshot paths in this report should be treated as live evidence until the real-server suite can run in an environment allowed to bind localhost.
+- Evidence JSON: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/evidence.json` records `backendAvailable: true`, the sandbox curl failure, the escalated real-server run result, manual browser capture details, and captured viewport metrics.
+- Screenshot artifacts: captured at `desktop-cockpit.png`, `desktop-focus.png`, `mobile-focus.png`, and `mobile-cockpit.png`.
 
 ## Prior Finding Reclassification
 
 | ID | Prior finding | Current route/viewport | Classification | Evidence | Severity | First-plan eligible |
 | --- | --- | --- | --- | --- | --- | --- |
-| C1 | Mobile `/chat` horizontal overflow | `/chat`, `390x844` | Pending live recheck; e2e guard added in the real-server mobile cockpit/focus flow, but no live viewport result was captured because the sandbox blocked WebUI server binding. | `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`; `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/evidence.json` | Unknown until live browser run | Yes, if the next live run finds overflow |
+| C1 | Mobile `/chat` horizontal overflow | `/chat`, `390x844` mobile focus and mobile cockpit | Not reproduced on the rail-enabled page. Manual browser capture measured `innerWidth=390`, `documentElement.scrollWidth=390`, and `body.scrollWidth=390` in both mobile focus and mobile cockpit. Real-server e2e now also guards these states. | `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-focus.png`; `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit.png`; `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/evidence.json` | Prior severity reduced; no current overflow issue found | No |
 | C2 | First-run connection/setup feedback | | | | | |
 | C3 | First-run control overload | | | | | |
 | C4 | Dense settings modal | | | | | |
@@ -64,7 +66,7 @@ apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeIns
 
 ## Notes
 
-- Observed behavior: Source-level cockpit rail wiring was already covered by Task 2. Task 3 hardened the real-server spec so future successful runs assert no horizontal overflow at desktop initial cockpit, desktop focus, desktop return-to-cockpit, mobile initial focus, mobile cockpit context/runtime panels, mobile return-to-focus, and mobile return-to-cockpit.
-- First-pass cockpit rail classification: Cockpit rail presence is guarded at source level and in the existing real-server spec assertions. This pass cannot classify the rendered live cockpit as healthy because the local sandbox blocked WebUI startup before browser navigation.
-- Limitations: Backend health is coordinator-confirmed OK, but agent-side sandboxed curl and Playwright-managed Next startup are blocked. Live screenshots, live viewport overflow metrics, and full real-server pass/fail evidence were not produced.
+- Observed behavior: Source-level cockpit rail wiring was already covered by Task 2. Task 3 hardened the real-server spec so future successful runs assert no horizontal overflow at desktop initial cockpit, desktop focus, desktop return-to-cockpit, mobile initial focus, mobile cockpit context/runtime panels, mobile return-to-focus, and mobile return-to-cockpit. Manual browser capture confirmed no horizontal overflow in the four required audit states.
+- First-pass cockpit rail classification: Cockpit rail presence is restored/available on the proper `origin/dev`-based `/chat` page. Desktop cockpit, desktop focus, mobile focus, and mobile cockpit screenshots now exist in the review asset directory.
+- Limitations: The full real-server Playwright suite still has four non-rail baseline failures and should not be reported as fully passing. Agent-side sandboxed curl still fails without approved localhost access.
 - Non-goals: No product UI changes, backend setup, dependency installation, or screenshot fabrication in this Task 3 slice.
