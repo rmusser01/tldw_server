@@ -1,6 +1,6 @@
 import React from "react"
 import userEvent from "@testing-library/user-event"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SidepanelFlashcards, {
   readSelectedTextFromPage
@@ -28,6 +28,26 @@ const browserMocks = vi.hoisted(() => ({
       result: "Key concept from the active page"
     }
   ])
+}))
+
+const translationMocks = vi.hoisted(() => ({
+  t: vi.fn(
+    (
+      key: string,
+      fallbackOrOptions?:
+        | string
+        | Record<string, string | number | undefined>
+    ) => {
+      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
+      if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
+        const template = String(fallbackOrOptions.defaultValue || key)
+        return template.replace(/{{(\w+)}}/g, (_, token: string) =>
+          String(fallbackOrOptions[token] ?? "")
+        )
+      }
+      return key
+    }
+  )
 }))
 
 vi.mock("@/components/Flashcards/hooks", () => ({
@@ -60,27 +80,14 @@ vi.mock("wxt/browser", () => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (
-      key: string,
-      fallbackOrOptions?:
-        | string
-        | Record<string, string | number | undefined>
-    ) => {
-      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-      if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        const template = String(fallbackOrOptions.defaultValue || key)
-        return template.replace(/{{(\w+)}}/g, (_, token: string) =>
-          String(fallbackOrOptions[token] ?? "")
-        )
-      }
-      return key
-    }
+    t: translationMocks.t
   })
 }))
 
 describe("sidepanel flashcards route", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    translationMocks.t.mockClear()
     browserMocks.runtimeGetURL.mockReset()
     browserMocks.tabsCreate.mockReset()
     browserMocks.tabsQuery.mockReset()
@@ -357,6 +364,91 @@ describe("sidepanel flashcards route", () => {
       source_ref_type: "manual",
       source_ref_id: "https://example.test/source"
     })
+  })
+
+  it("ignores duplicate native generation clicks before disabled state rerenders", async () => {
+    flashcardMocks.generateFlashcardsMutateAsync.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    render(<SidepanelFlashcards />)
+    const generateDraftCardsButton = screen.getByRole("button", {
+      name: "Generate draft cards"
+    })
+
+    await act(async () => {
+      fireEvent.click(generateDraftCardsButton)
+      fireEvent.click(generateDraftCardsButton)
+    })
+
+    await waitFor(() => {
+      expect(flashcardMocks.generateFlashcardsMutateAsync).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("blocks the full-workspace generation handoff while native generation is in flight", async () => {
+    flashcardMocks.generateFlashcardsMutateAsync.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    render(<SidepanelFlashcards />)
+    const generateDraftCardsButton = screen.getByRole("button", {
+      name: "Generate draft cards"
+    })
+    const generateFromSelectionButton = screen.getByRole("button", {
+      name: "Generate from selection"
+    })
+
+    await act(async () => {
+      fireEvent.click(generateDraftCardsButton)
+      fireEvent.click(generateFromSelectionButton)
+    })
+
+    await waitFor(() => {
+      expect(flashcardMocks.generateFlashcardsMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
+  })
+
+  it("shows empty-generation guidance when the generation response has no flashcards", async () => {
+    flashcardMocks.generateFlashcardsMutateAsync.mockResolvedValueOnce(undefined)
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Generate draft cards" })
+    )
+
+    expect(
+      await screen.findByText(
+        "No draft cards were generated. Try selecting a longer passage."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Could not generate draft cards/)
+    ).not.toBeInTheDocument()
+  })
+
+  it("uses localized whole-message copy for generated draft counts", async () => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Generate draft cards" })
+    )
+
+    expect(await screen.findByText("Generated 2 draft cards.")).toBeInTheDocument()
+    const generatedStatusCalls = translationMocks.t.mock.calls.filter(
+      ([key]) => String(key).startsWith("sidepanel:flashcards.generateDraftsSuccess")
+    )
+    expect(generatedStatusCalls).toContainEqual([
+      "sidepanel:flashcards.generateDraftsSuccess_other",
+      expect.objectContaining({
+        count: 2,
+        defaultValue: "Generated {{count}} draft cards."
+      })
+    ])
+    for (const [, options] of generatedStatusCalls) {
+      expect(options).not.toHaveProperty("cardLabel")
+    }
   })
 
   it("appends repeated page selections into an editable draft queue", async () => {

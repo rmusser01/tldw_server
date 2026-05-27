@@ -76,6 +76,7 @@ export default function SidepanelFlashcards() {
     type: "success" | "error"
     message: string
   } | null>(null)
+  const generationInFlightRef = React.useRef(false)
   const [drafts, setDrafts] = React.useState<CaptureDraft[]>([])
   const [savingDraftIds, setSavingDraftIds] = React.useState<Set<string>>(
     () => new Set()
@@ -238,6 +239,8 @@ export default function SidepanelFlashcards() {
   }, [formatCaptureErrorMessage, readActivePageSelection])
 
   const handleGenerateFromSelection = React.useCallback(async () => {
+    if (generationInFlightRef.current) return
+    generationInFlightRef.current = true
     setCaptureError(null)
     setSaveStatus(null)
     setGenerateHandoffLoading(true)
@@ -254,6 +257,7 @@ export default function SidepanelFlashcards() {
     } catch (error) {
       setCaptureError(formatCaptureErrorMessage(error))
     } finally {
+      generationInFlightRef.current = false
       setGenerateHandoffLoading(false)
     }
   }, [formatCaptureErrorMessage, openOptionsHashRoute, readActivePageSelection])
@@ -303,7 +307,93 @@ export default function SidepanelFlashcards() {
     [captureMessages, t]
   )
 
+  const formatGeneratedDraftsSuccess = React.useCallback(
+    (count: number) =>
+      count === 1
+        ? t("sidepanel:flashcards.generateDraftsSuccess_one", {
+            defaultValue: "Generated 1 draft card.",
+            count
+          })
+        : t("sidepanel:flashcards.generateDraftsSuccess_other", {
+            defaultValue: "Generated {{count}} draft cards.",
+            count
+          }),
+    [t]
+  )
+
+  const formatDraftQueueCount = React.useCallback(
+    (count: number) =>
+      count === 1
+        ? t("sidepanel:flashcards.draftQueueCount_one", {
+            defaultValue: "1 draft card ready",
+            count
+          })
+        : t("sidepanel:flashcards.draftQueueCount_other", {
+            defaultValue: "{{count}} draft cards ready",
+            count
+          }),
+    [t]
+  )
+
+  const formatSaveAllSuccess = React.useCallback(
+    (savedCount: number, deckName: string) =>
+      savedCount === 1
+        ? t("sidepanel:flashcards.saveAllSuccess_one", {
+            defaultValue: "Saved 1 card to {{deckName}}.",
+            savedCount,
+            deckName
+          })
+        : t("sidepanel:flashcards.saveAllSuccess_other", {
+            defaultValue: "Saved {{savedCount}} cards to {{deckName}}.",
+            savedCount,
+            deckName
+          }),
+    [t]
+  )
+
+  const formatSaveAllPartial = React.useCallback(
+    (savedCount: number, failedCount: number, deckName: string) => {
+      if (savedCount === 1 && failedCount === 1) {
+        return t("sidepanel:flashcards.saveAllPartial_one_one", {
+          defaultValue:
+            "Saved 1 card to {{deckName}}. 1 draft still needs attention.",
+          savedCount,
+          failedCount,
+          deckName
+        })
+      }
+      if (savedCount === 1) {
+        return t("sidepanel:flashcards.saveAllPartial_one_other", {
+          defaultValue:
+            "Saved 1 card to {{deckName}}. {{failedCount}} drafts still need attention.",
+          savedCount,
+          failedCount,
+          deckName
+        })
+      }
+      if (failedCount === 1) {
+        return t("sidepanel:flashcards.saveAllPartial_other_one", {
+          defaultValue:
+            "Saved {{savedCount}} cards to {{deckName}}. 1 draft still needs attention.",
+          savedCount,
+          failedCount,
+          deckName
+        })
+      }
+      return t("sidepanel:flashcards.saveAllPartial_other_other", {
+        defaultValue:
+          "Saved {{savedCount}} cards to {{deckName}}. {{failedCount}} drafts still need attention.",
+        savedCount,
+        failedCount,
+        deckName
+      })
+    },
+    [t]
+  )
+
   const handleGenerateDraftCards = React.useCallback(async () => {
+    if (generationInFlightRef.current) return
+    generationInFlightRef.current = true
     setCaptureError(null)
     setSaveStatus(null)
     setDraftGenerateLoading(true)
@@ -316,7 +406,7 @@ export default function SidepanelFlashcards() {
         difficulty: "mixed"
       })
       const generatedDrafts = buildGeneratedDrafts(
-        normalizeGeneratedCards(result.flashcards),
+        normalizeGeneratedCards(result?.flashcards),
         captured
       )
       if (generatedDrafts.length === 0) {
@@ -331,20 +421,18 @@ export default function SidepanelFlashcards() {
       setDrafts((current) => [...current, ...generatedDrafts])
       setSaveStatus({
         type: "success",
-        message: t("sidepanel:flashcards.generateDraftsSuccess", {
-          defaultValue: "Generated {{count}} draft {{cardLabel}}.",
-          count: generatedDrafts.length,
-          cardLabel: generatedDrafts.length === 1 ? "card" : "cards"
-        })
+        message: formatGeneratedDraftsSuccess(generatedDrafts.length)
       })
     } catch (error) {
       setCaptureError(formatGenerateDraftErrorMessage(error))
     } finally {
+      generationInFlightRef.current = false
       setDraftGenerateLoading(false)
     }
   }, [
     buildGeneratedDrafts,
     formatGenerateDraftErrorMessage,
+    formatGeneratedDraftsSuccess,
     generateFlashcardsMutation,
     readActivePageSelection,
     t
@@ -489,25 +577,12 @@ export default function SidepanelFlashcards() {
       if (failedCount === 0) {
         setSaveStatus({
           type: "success",
-          message: t("sidepanel:flashcards.saveAllSuccess", {
-            defaultValue: "Saved {{savedCount}} {{cardLabel}} to {{deckName}}.",
-            savedCount: savedDraftIds.size,
-            cardLabel: savedDraftIds.size === 1 ? "card" : "cards",
-            deckName
-          })
+          message: formatSaveAllSuccess(savedDraftIds.size, deckName)
         })
       } else if (savedDraftIds.size > 0) {
         setSaveStatus({
           type: "error",
-          message: t("sidepanel:flashcards.saveAllPartial", {
-            defaultValue:
-              "Saved {{savedCount}} {{cardLabel}} to {{deckName}}. {{failedCount}} {{draftLabel}} still needs attention.",
-            savedCount: savedDraftIds.size,
-            cardLabel: savedDraftIds.size === 1 ? "card" : "cards",
-            deckName,
-            failedCount,
-            draftLabel: failedCount === 1 ? "draft" : "drafts"
-          })
+          message: formatSaveAllPartial(savedDraftIds.size, failedCount, deckName)
         })
       } else {
         setSaveStatus({
@@ -533,6 +608,8 @@ export default function SidepanelFlashcards() {
     buildSavePayload,
     createFlashcardMutation,
     drafts,
+    formatSaveAllPartial,
+    formatSaveAllSuccess,
     getDeckName,
     hasDeck,
     setActiveSavingDraftIds,
@@ -627,11 +704,7 @@ export default function SidepanelFlashcards() {
         >
           <div className="flex items-center justify-between gap-2">
             <Text strong>
-              {t("sidepanel:flashcards.draftQueueCount", {
-                defaultValue: "{{count}} draft {{cardLabel}} ready",
-                count: drafts.length,
-                cardLabel: drafts.length === 1 ? "card" : "cards"
-              })}
+              {formatDraftQueueCount(drafts.length)}
             </Text>
             <Button
               size="small"

@@ -3,7 +3,7 @@ id: TASK-519
 title: Add flashcards extension native generated draft queue
 status: Done
 assignee: []
-created_date: ''
+created_date: 2026-05-27 05:30
 updated_date: 2026-05-27 05:30
 labels:
 - flashcards
