@@ -7,10 +7,19 @@ export type WorkspacePickerOption = {
   name: string | null
 }
 
+export type FolderPickerOption = {
+  id: number
+  name: string | null
+  path: string
+}
+
 type ClipDestinationFieldsProps = {
   destinationMode: WebClipperDestination
   folderId: string
+  folderOptions: FolderPickerOption[]
+  folderOptionsError: string | null
   folderValidation: string | null
+  isFolderOptionsLoading: boolean
   isWorkspaceOptionsLoading: boolean
   workspaceOptions: WorkspacePickerOption[]
   workspaceOptionsError: string | null
@@ -30,7 +39,10 @@ const destinationOptions: WebClipperDestination[] = [
 const ClipDestinationFields = ({
   destinationMode,
   folderId,
+  folderOptions,
+  folderOptionsError,
   folderValidation,
+  isFolderOptionsLoading,
   isWorkspaceOptionsLoading,
   workspaceOptions,
   workspaceOptionsError,
@@ -41,7 +53,25 @@ const ClipDestinationFields = ({
   onWorkspaceIdChange
 }: ClipDestinationFieldsProps) => {
   const { t } = useTranslation()
+  const hasFolderOptions = folderOptions.length > 0
   const hasWorkspaceOptions = workspaceOptions.length > 0
+  const folderInput = (
+    <input
+      id="clip-folder-id"
+      type="number"
+      inputMode="numeric"
+      min="1"
+      step="1"
+      value={folderId}
+      onChange={(event) => onFolderIdChange(event.target.value)}
+      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-text"
+      placeholder={t(
+        "sidepanel:clipper.folderPlaceholder",
+        "42"
+      )}
+      aria-invalid={folderValidation ? "true" : "false"}
+    />
+  )
   const workspaceInput = (
     <input
       id="clip-workspace-id"
@@ -102,24 +132,60 @@ const ClipDestinationFields = ({
 
         {destinationMode !== "workspace" ? (
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-text" htmlFor="clip-folder-id">
-              {t("sidepanel:clipper.folderLabel", "Folder ID")}
-            </label>
-            <input
-              id="clip-folder-id"
-              type="number"
-              inputMode="numeric"
-              min="1"
-              step="1"
-              value={folderId}
-              onChange={(event) => onFolderIdChange(event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-text"
-              placeholder={t(
-                "sidepanel:clipper.folderPlaceholder",
-                "42"
-              )}
-              aria-invalid={folderValidation ? "true" : "false"}
-            />
+            {isFolderOptionsLoading ? (
+              <p className="text-sm text-text-muted">
+                {t("sidepanel:clipper.folderLoading", "Loading folders...")}
+              </p>
+            ) : null}
+            {folderOptionsError ? (
+              <p className="text-sm text-amber-700">
+                {folderOptionsError}
+              </p>
+            ) : null}
+            {hasFolderOptions ? (
+              <>
+                <label className="block text-sm font-medium text-text" htmlFor="clip-folder-picker">
+                  {t("sidepanel:clipper.folderPickerLabel", "Folder")}
+                </label>
+                <select
+                  id="clip-folder-picker"
+                  value={folderId}
+                  onChange={(event) => onFolderIdChange(event.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-text"
+                  aria-invalid={folderValidation ? "true" : "false"}
+                >
+                  <option value="">
+                    {t("sidepanel:clipper.folderPickerPlaceholder", "No folder")}
+                  </option>
+                  {folderOptions.map((folder) => (
+                    <option key={folder.id} value={String(folder.id)}>
+                      {folder.path || folder.name || folder.id}
+                    </option>
+                  ))}
+                </select>
+                <details className="rounded-lg border border-border bg-surface2 px-3 py-2">
+                  <summary className="cursor-pointer text-sm font-medium text-text-muted">
+                    {t(
+                      "sidepanel:clipper.folderAdvancedSummary",
+                      "Advanced: enter folder ID manually"
+                    )}
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    <label className="block text-sm font-medium text-text" htmlFor="clip-folder-id">
+                      {t("sidepanel:clipper.folderLabel", "Folder ID")}
+                    </label>
+                    {folderInput}
+                  </div>
+                </details>
+              </>
+            ) : !isFolderOptionsLoading ? (
+              <>
+                <label className="block text-sm font-medium text-text" htmlFor="clip-folder-id">
+                  {t("sidepanel:clipper.folderLabel", "Folder ID")}
+                </label>
+                {folderInput}
+              </>
+            ) : null}
             {folderValidation ? (
               <p className="text-sm text-red-600">{folderValidation}</p>
             ) : null}

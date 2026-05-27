@@ -64,6 +64,9 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NoteAttachmentsListResponse,
     NoteAttachmentResponse,
     NoteCreate,
+    NoteFolderCreate,
+    NoteFolderResponse,
+    NoteFoldersListResponse,
     NoteKeywordLinkResponse,
     NoteResponse,
     NotesExportRequest,
@@ -1509,6 +1512,90 @@ async def list_deleted_notes(
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "deleted notes list")
+
+
+@router.get(
+    "/folders",
+    response_model=NoteFoldersListResponse,
+    summary="List note folders for the current user",
+    tags=["notes"],
+)
+@router.get(
+    "/folders/",
+    response_model=NoteFoldersListResponse,
+    summary="List note folders for the current user",
+    tags=["notes"],
+)
+async def list_note_folders(
+        db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+        limit: int = Query(1000, ge=1, le=1000, description="Number of folders to return"),
+        offset: int = Query(0, ge=0, description="Offset for pagination"),
+        rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+        current_user: User = Depends(get_request_user),
+        _: None = Depends(rbac_rate_limit("notes.list")),
+):
+    try:
+        try:
+            allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.list")
+        except _NOTES_NONCRITICAL_EXCEPTIONS:
+            allowed, meta = True, {}
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded for notes.list",
+                headers={"Retry-After": str(meta.get("retry_after", 60))},
+            )
+
+        folders = await _run_db_call(db.list_note_folders, limit=limit, offset=offset)
+        return {
+            "items": folders,
+            "folders": folders,
+            "count": len(folders),
+        }
+    except _NOTES_NONCRITICAL_EXCEPTIONS as e:
+        handle_db_errors(e, "note folders list")
+
+
+@router.post(
+    "/folders",
+    response_model=NoteFolderResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create or reuse a note folder path",
+    tags=["notes"],
+)
+@router.post(
+    "/folders/",
+    response_model=NoteFolderResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create or reuse a note folder path",
+    tags=["notes"],
+)
+async def create_note_folder(
+        folder_in: NoteFolderCreate,
+        db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+        rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+        current_user: User = Depends(get_request_user),
+        _: None = Depends(rbac_rate_limit("notes.create")),
+):
+    try:
+        try:
+            allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.create")
+        except _NOTES_NONCRITICAL_EXCEPTIONS:
+            allowed, meta = True, {}
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded for notes.create",
+                headers={"Retry-After": str(meta.get("retry_after", 60))},
+            )
+
+        existing = await _run_db_call(db.get_note_folder_by_path, folder_in.path)
+        folder = await _run_db_call(db.create_note_folder_path, folder_in.path)
+        if existing is not None:
+            return JSONResponse(status_code=status.HTTP_200_OK, content=jsonable_encoder(folder))
+        return folder
+    except _NOTES_NONCRITICAL_EXCEPTIONS as e:
+        handle_db_errors(e, "note folder")
 
 
 @router.get(

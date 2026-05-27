@@ -17785,6 +17785,66 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(f"Failed to create note folder path '{normalized_path}'.")  # noqa: TRY003
         return int(created_row["id"])
 
+    def _active_note_folder_deleted_value(self) -> bool | int:
+        return False if self.backend_type == BackendType.POSTGRESQL else 0
+
+    def create_note_folder_path(self, folder_path: str) -> dict[str, Any]:
+        """Create or reuse a note folder path and return the active folder row."""
+        try:
+            with self.transaction() as conn:
+                folder_id = self._ensure_note_folder_path_locked(conn, folder_path)
+                folder_row = self._coerce_mapping_row(
+                    conn.execute(
+                        """
+                        SELECT id, name, path, parent_id
+                          FROM note_folders
+                         WHERE id = ? AND deleted = ?
+                        """,
+                        (folder_id, self._active_note_folder_deleted_value()),
+                    ).fetchone()
+                )
+                if folder_row is None:
+                    raise CharactersRAGDBError(f"Failed to reload note folder '{folder_path}'.")  # noqa: TRY003
+                return folder_row
+        except CharactersRAGDBError:
+            raise
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError(f"Failed creating note folder path: {exc}") from exc  # noqa: TRY003
+
+    def get_note_folder_by_path(self, folder_path: str) -> dict[str, Any] | None:
+        """Return an active note folder row by case-insensitive normalized path."""
+        normalized_path = self._normalize_note_folder_path(folder_path)
+        if not normalized_path:
+            return None
+        cursor = self.execute_query(
+            """
+            SELECT id, name, path, parent_id
+              FROM note_folders
+             WHERE LOWER(path) = LOWER(?) AND deleted = ?
+            """,
+            (normalized_path, self._active_note_folder_deleted_value()),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def list_note_folders(self, limit: int = 1000, offset: int = 0) -> list[dict[str, Any]]:
+        """Return active note folders ordered by path for picker UIs."""
+        if limit <= 0:
+            return []
+        path_order_expr = self._case_insensitive_order_expression("path")
+        query = (
+            "SELECT id, name, path, parent_id "
+            "FROM note_folders "
+            "WHERE deleted = ? "
+            f"ORDER BY {path_order_expr} "  # nosec B608
+            "LIMIT ? OFFSET ?"
+        )
+        cursor = self.execute_query(
+            query,
+            (self._active_note_folder_deleted_value(), limit, max(0, offset)),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def sync_note_folders(self, note_id: str, folder_paths: list[str] | tuple[str, ...]) -> list[dict[str, Any]]:
         desired_paths = self._expand_note_folder_paths(list(folder_paths or []))
         try:

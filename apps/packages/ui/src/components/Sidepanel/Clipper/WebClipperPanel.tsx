@@ -1,6 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import ClipDestinationFields, {
+  type FolderPickerOption,
   type WorkspacePickerOption
 } from "./ClipDestinationFields"
 import ClipEnhancementFields from "./ClipEnhancementFields"
@@ -172,6 +173,13 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
   const [runVlm, setRunVlm] = React.useState(false)
   const [folderValidation, setFolderValidation] =
     React.useState<string | null>(null)
+  const [folderOptions, setFolderOptions] = React.useState<
+    FolderPickerOption[]
+  >([])
+  const [isFolderOptionsLoading, setIsFolderOptionsLoading] =
+    React.useState(false)
+  const [folderOptionsError, setFolderOptionsError] =
+    React.useState<string | null>(null)
   const [workspaceOptions, setWorkspaceOptions] = React.useState<
     WorkspacePickerOption[]
   >([])
@@ -192,6 +200,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
     React.useState<SubmitAction | null>(null)
   const [isSaving, setIsSaving] = React.useState(false)
   const tRef = React.useRef(t)
+  const hasRequestedFolderOptionsRef = React.useRef(false)
   const hasRequestedWorkspaceOptionsRef = React.useRef(false)
   const isMountedRef = React.useRef(true)
   const activeClipIdRef = React.useRef(draft.clipId)
@@ -211,6 +220,10 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
     setRunOcr(false)
     setRunVlm(false)
     setFolderValidation(null)
+    setFolderOptions([])
+    setIsFolderOptionsLoading(false)
+    setFolderOptionsError(null)
+    hasRequestedFolderOptionsRef.current = false
     setWorkspaceOptions([])
     setIsWorkspaceOptionsLoading(false)
     setWorkspaceOptionsError(null)
@@ -229,6 +242,76 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
     },
     []
   )
+
+  React.useEffect(() => {
+    if (destinationMode === "workspace" || hasRequestedFolderOptionsRef.current) {
+      return
+    }
+
+    let cancelled = false
+    const submittedClipId = draft.clipId
+
+    hasRequestedFolderOptionsRef.current = true
+    setIsFolderOptionsLoading(true)
+    setFolderOptionsError(null)
+
+    void tldwClient.initialize()
+      .catch(() => undefined)
+      .then(() => tldwClient.listNoteFolders())
+      .then((response) => {
+        if (
+          cancelled ||
+          !isMountedRef.current ||
+          activeClipIdRef.current !== submittedClipId
+        ) {
+          return
+        }
+        const folderItems = Array.isArray(response.items)
+          ? response.items
+          : Array.isArray(response.folders)
+            ? response.folders
+            : []
+        setFolderOptions(
+          folderItems
+            .filter((folder) => Number.isInteger(folder.id) && folder.id > 0)
+            .map((folder) => ({
+              id: folder.id,
+              name: folder.name ?? null,
+              path: folder.path || folder.name || String(folder.id)
+            }))
+        )
+      })
+      .catch(() => {
+        if (
+          cancelled ||
+          !isMountedRef.current ||
+          activeClipIdRef.current !== submittedClipId
+        ) {
+          return
+        }
+        setFolderOptions([])
+        setFolderOptionsError(
+          tRef.current(
+            "sidepanel:clipper.folderLoadFailed",
+            "Folder picker could not load. Enter a folder ID manually."
+          )
+        )
+      })
+      .finally(() => {
+        if (
+          cancelled ||
+          !isMountedRef.current ||
+          activeClipIdRef.current !== submittedClipId
+        ) {
+          return
+        }
+        setIsFolderOptionsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [destinationMode, draft.clipId])
 
   React.useEffect(() => {
     if (destinationMode === "note" || hasRequestedWorkspaceOptionsRef.current) {
@@ -555,7 +638,10 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
       <ClipDestinationFields
         destinationMode={destinationMode}
         folderId={folderId}
+        folderOptions={folderOptions}
+        folderOptionsError={folderOptionsError}
         folderValidation={folderValidation}
+        isFolderOptionsLoading={isFolderOptionsLoading}
         isWorkspaceOptionsLoading={isWorkspaceOptionsLoading}
         workspaceOptions={workspaceOptions}
         workspaceOptionsError={workspaceOptionsError}

@@ -134,6 +134,40 @@ def test_create_get_update_delete_note(client_with_notes_db: TestClient):
     assert del_resp.status_code in (200, 204)
 
 
+def test_note_folder_list_and_create_endpoints(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    empty_response = client.get("/api/v1/notes/folders/")
+    assert empty_response.status_code == 200, empty_response.text
+    assert empty_response.json()["items"] == []
+
+    create_response = client.post(
+        "/api/v1/notes/folders/",
+        json={"path": "Inbox/Captured Articles"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    assert created["name"] == "Captured Articles"
+    assert created["path"] == "Inbox/Captured Articles"
+    assert created["parent_id"] is not None
+
+    duplicate_response = client.post(
+        "/api/v1/notes/folders/",
+        json={"path": "inbox/captured articles"},
+    )
+    assert duplicate_response.status_code == 200, duplicate_response.text
+    assert duplicate_response.json()["id"] == created["id"]
+
+    list_response = client.get("/api/v1/notes/folders/")
+    assert list_response.status_code == 200, list_response.text
+    payload = list_response.json()
+    assert payload["count"] == 2
+    assert [folder["path"] for folder in payload["items"]] == [
+        "Inbox",
+        "Inbox/Captured Articles",
+    ]
+
+
 def test_keywords_crud_and_linking(client_with_notes_db: TestClient):
     client = client_with_notes_db
 
