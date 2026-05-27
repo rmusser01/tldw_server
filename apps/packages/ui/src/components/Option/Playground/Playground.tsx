@@ -132,7 +132,6 @@ import {
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
-import { CharacterControlRail } from "./CharacterControlRail";
 
 type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
 
@@ -516,9 +515,6 @@ export const Playground = () => {
         : (selectedCharacter?.name ?? null);
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
-  );
-  const characterControlVisible = useChatSurfaceCoordinatorStore(
-    (state) => state.visiblePanels["character-control"],
   );
   const normalizedChatLayoutMode: PlaygroundCockpitMode =
     chatLayoutMode === "focus" || chatLayoutMode === "cockpit"
@@ -3434,11 +3430,6 @@ export const Playground = () => {
             </div>
           </div>
         </PlaygroundCockpitShell>
-        {characterControlVisible && !isMobileViewport && (
-          <div className="hidden h-full w-[28%] min-w-[280px] max-w-[360px] shrink-0 lg:flex">
-            <CharacterControlRail />
-          </div>
-        )}
         {artifactsOpen && (
           <>
             <div className="hidden h-full w-[36%] min-w-[280px] max-w-[520px] shrink-0 lg:flex">

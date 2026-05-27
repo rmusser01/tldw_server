@@ -11,17 +11,21 @@ const cockpitShellPath = path.resolve(
 );
 
 describe("Playground cockpit regression guard", () => {
-  it("keeps the main /chat cockpit shell and rails wired into Playground", () => {
+  it("keeps the main /chat cockpit shell and core rails wired into Playground", () => {
     const source = readFileSync(playgroundPath, "utf8");
 
     expect(source).toContain("PlaygroundCockpitShell");
     expect(source).toContain("PlaygroundContextRail");
     expect(source).toContain("PlaygroundRuntimeInspector");
-    expect(source).toContain("CharacterControlRail");
     expect(source).toContain("<PlaygroundCockpitShell");
     expect(source).toContain("<PlaygroundContextRail");
     expect(source).toContain("<PlaygroundRuntimeInspector");
-    expect(source).toContain("<CharacterControlRail");
+  });
+
+  it("does not render the standalone desktop character controls rail in /chat", () => {
+    const source = readFileSync(playgroundPath, "utf8");
+
+    expect(source).not.toContain("CharacterControlRail");
   });
 
   it("keeps cockpit shell test ids and mobile rail state available", () => {
