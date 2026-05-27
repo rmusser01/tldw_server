@@ -1,7 +1,7 @@
 ---
 id: TASK-478.22
 title: 'Gate F: validate ACP canonical bridge for Research Workspace'
-status: To Do
+status: In Progress
 labels:
 - research-workspace
 - acp
