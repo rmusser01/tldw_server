@@ -54,6 +54,34 @@ export type ModelDescriptor = {
   }
 }
 
+type ChatProviderConfigurationRecord = {
+  name?: unknown
+  provider?: unknown
+  id?: unknown
+  api_provider?: unknown
+  apiProvider?: unknown
+  configured?: unknown
+  is_configured?: unknown
+  isConfigured?: unknown
+  provider_is_configured?: unknown
+  providerIsConfigured?: unknown
+  provider_configured?: unknown
+  providerConfigured?: unknown
+  [key: string]: unknown
+}
+
+export type ChatProviderConfigurationEntry =
+  | string
+  | ChatProviderConfigurationRecord
+
+export type ChatProviderConfigurationStatus =
+  | {
+      providers?: ChatProviderConfigurationEntry[] | null
+      any_configured?: unknown
+      anyConfigured?: unknown
+    }
+  | ChatProviderConfigurationEntry[]
+
 export const AUTO_CHAT_MODEL_ID = "auto"
 export const CHARACTER_CHAT_MODEL_SETTINGS_PATH = "/settings/model"
 
@@ -295,6 +323,118 @@ const CONFIGURED_FLAG_KEYS = [
   "provider_configured",
   "providerConfigured"
 ] as const
+
+const normalizeProviderStatusKey = (
+  provider: ChatProviderConfigurationEntry
+): string | null => {
+  if (typeof provider === "string") {
+    return normalizeProviderValue(provider)
+  }
+
+  return normalizeProviderValue(
+    provider.name ??
+      provider.provider ??
+      provider.id ??
+      provider.api_provider ??
+      provider.apiProvider
+  )
+}
+
+const getChatProviderStatusEntries = (
+  providerStatus: ChatProviderConfigurationStatus | null | undefined
+): ChatProviderConfigurationEntry[] => {
+  if (!providerStatus) return []
+  if (Array.isArray(providerStatus)) return providerStatus
+  return Array.isArray(providerStatus.providers) ? providerStatus.providers : []
+}
+
+const readProviderConfiguredFlag = (
+  provider: ChatProviderConfigurationEntry
+): boolean | null => {
+  if (!provider || typeof provider !== "object") return null
+
+  for (const key of CONFIGURED_FLAG_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(provider, key)) continue
+    const flag = toBooleanFlag(provider[key])
+    if (flag != null) return flag
+  }
+
+  return null
+}
+
+const addProviderConfigurationFlag = <T extends ModelDescriptor>(
+  model: T,
+  isConfigured: boolean
+): T => {
+  const details =
+    model.details && typeof model.details === "object"
+      ? {
+          ...model.details,
+          is_configured: isConfigured,
+          provider_is_configured: isConfigured
+        }
+      : model.details
+  const metadata =
+    model.metadata && typeof model.metadata === "object"
+      ? {
+          ...model.metadata,
+          is_configured: isConfigured,
+          provider_is_configured: isConfigured
+        }
+      : model.metadata
+
+  return {
+    ...model,
+    is_configured: isConfigured,
+    provider_is_configured: isConfigured,
+    details,
+    metadata
+  } as T
+}
+
+export function mergeChatProviderStatusIntoModels<T extends ModelDescriptor>(
+  models: T[] | null | undefined,
+  providerStatus: ChatProviderConfigurationStatus | null | undefined
+): T[] | null | undefined {
+  if (!models || !providerStatus) return models
+
+  const entries = getChatProviderStatusEntries(providerStatus)
+  const providerConfiguredByKey = new Map<string, boolean>()
+
+  for (const entry of entries) {
+    const providerKey = normalizeProviderStatusKey(entry)
+    const configured = readProviderConfiguredFlag(entry)
+    if (!providerKey || configured == null) continue
+
+    const current = providerConfiguredByKey.get(providerKey)
+    if (current === false) continue
+    providerConfiguredByKey.set(providerKey, configured)
+  }
+
+  const explicitConfiguredProviderExists = [...providerConfiguredByKey.values()]
+    .some((configured) => configured === true)
+  const statusAnyConfigured = Array.isArray(providerStatus)
+    ? null
+    : toBooleanFlag(providerStatus.any_configured ?? providerStatus.anyConfigured)
+  const noProviderConfigured =
+    statusAnyConfigured === false && !explicitConfiguredProviderExists
+
+  let changed = false
+  const enrichedModels = models.map((model) => {
+    const providerKey = normalizeProviderKey(model)
+    const providerConfigured = providerKey
+      ? providerConfiguredByKey.get(providerKey)
+      : undefined
+    const effectiveConfigured =
+      providerConfigured ?? (noProviderConfigured ? false : undefined)
+
+    if (effectiveConfigured == null) return model
+    changed = true
+    return addProviderConfigurationFlag(model, effectiveConfigured)
+  })
+
+  return changed ? enrichedModels : models
+}
 
 function getChatModelDescriptorRecords(
   model: ModelDescriptor

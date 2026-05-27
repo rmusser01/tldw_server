@@ -197,13 +197,16 @@ export const PlaygroundStatusStrip = ({
     hasSelectedModel
       ? t("cockpit.degradedChatAvailable", "Chat remains available.")
       : null;
+  const serverUnavailableRecoveryReason = t(
+    "cockpit.serverUnavailableRecovery",
+    "Reconnect to the server or review server settings before sending.",
+  );
   const serverBlockedReason =
     runtimeState === "server-blocked"
-      ? (modelUsabilityStatus === "no_server" ? modelUsabilityMessage : null) ||
-        t(
-          "cockpit.serverUnavailableRecovery",
-          "Reconnect to the server or review server settings before sending.",
-        )
+      ? serverBlocked
+        ? serverUnavailableRecoveryReason
+        : (modelUsabilityStatus === "no_server" ? modelUsabilityMessage : null) ||
+          serverUnavailableRecoveryReason
       : null;
   const missingModelReason =
     runtimeState === "missing-model"

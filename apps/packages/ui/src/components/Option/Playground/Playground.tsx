@@ -128,6 +128,8 @@ import {
   buildCharacterChatReadiness,
   getCharacterChatReadinessCopy,
   getMatchingCharacterChatModelUsabilityCopy,
+  mergeChatProviderStatusIntoModels,
+  type ChatProviderConfigurationStatus,
   type CharacterChatReadinessAction,
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
@@ -232,6 +234,8 @@ export const Playground = () => {
     React.useState(0);
   const [characterChatAvailableModels, setCharacterChatAvailableModels] =
     React.useState<ChatModelCatalog | null>(null);
+  const [chatProviderStatus, setChatProviderStatus] =
+    React.useState<ChatProviderConfigurationStatus | null>(null);
   const [composerDockMetrics, setComposerDockMetrics] =
     React.useState<ComposerDockLayoutMetrics | null>(null);
   const [composerHasDraft, setComposerHasDraft] = React.useState(false);
@@ -256,16 +260,25 @@ export const Playground = () => {
   const refreshCharacterChatModels = React.useCallback(
     async (isCancelled?: () => boolean) => {
       setCharacterChatAvailableModels(null);
+      setChatProviderStatus(null);
       try {
-        const models = await fetchChatModels({
-          returnEmpty: true,
-          forceRefresh: true,
-        });
+        const [models, providerStatus] = await Promise.all([
+          fetchChatModels({
+            returnEmpty: true,
+            forceRefresh: true,
+          }),
+          tldwClient
+            .initialize()
+            .then(() => tldwClient.getProvidersStatus())
+            .catch(() => null),
+        ]);
         if (isCancelled?.()) return;
         setCharacterChatAvailableModels(Array.isArray(models) ? models : []);
+        setChatProviderStatus(providerStatus);
       } catch {
         if (isCancelled?.()) return;
         setCharacterChatAvailableModels([]);
+        setChatProviderStatus(null);
       }
     },
     [],
@@ -2135,19 +2148,27 @@ export const Playground = () => {
     selectedProvider: apiProvider,
     selectedModel,
   });
+  const readinessChatModels = React.useMemo(
+    () =>
+      mergeChatProviderStatusIntoModels(
+        characterChatAvailableModels,
+        chatProviderStatus,
+      ),
+    [characterChatAvailableModels, chatProviderStatus],
+  );
   const standardChatModelUsability = React.useMemo(
     () =>
       buildChatModelUsability({
         isServerConnected: serverReadinessState !== "blocked",
         selectedModel: providerRouteSummary.selectedModel,
-        availableModels: characterChatAvailableModels,
-        modelsLoading: !Array.isArray(characterChatAvailableModels),
+        availableModels: readinessChatModels,
+        modelsLoading: !Array.isArray(readinessChatModels),
         serverDegraded: serverReadinessState === "degraded",
-        allowDegradedSend: false,
+        allowDegradedSend: true,
       }),
     [
-      characterChatAvailableModels,
       providerRouteSummary.selectedModel,
+      readinessChatModels,
       serverReadinessState,
     ],
   );
@@ -2157,17 +2178,17 @@ export const Playground = () => {
         isServerConnected: serverReadinessState !== "blocked",
         selectedCharacter,
         selectedModel: providerRouteSummary.selectedModel,
-        availableModels: characterChatAvailableModels,
-        modelsLoading: !Array.isArray(characterChatAvailableModels),
+        availableModels: readinessChatModels,
+        modelsLoading: !Array.isArray(readinessChatModels),
         serverDegraded: serverReadinessState === "degraded",
-        allowDegradedSend: false,
+        allowDegradedSend: true,
         isSendBlocked: Boolean(streaming || isProcessing || isLoading),
       }),
     [
-      characterChatAvailableModels,
       isLoading,
       isProcessing,
       providerRouteSummary.selectedModel,
+      readinessChatModels,
       selectedCharacter,
       serverReadinessState,
       streaming,
@@ -2846,9 +2867,11 @@ export const Playground = () => {
                 : "ready"
       }
       runtimeStatusDetail={
-        activeChatModelUsabilityBlocks
-          ? activeChatModelUsabilityMessage ?? runtimeStatusDetail
-          : characterChatReadinessCopy?.title ?? runtimeStatusDetail
+        serverReadinessState === "blocked"
+          ? runtimeStatusDetail
+          : activeChatModelUsabilityBlocks
+            ? activeChatModelUsabilityMessage ?? runtimeStatusDetail
+            : characterChatReadinessCopy?.title ?? runtimeStatusDetail
       }
       messageCount={cockpitMessageCount}
       threadSearchOpen={threadSearchOpen}

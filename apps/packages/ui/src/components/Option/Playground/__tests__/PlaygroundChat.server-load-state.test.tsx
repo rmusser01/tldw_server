@@ -221,4 +221,31 @@ describe("PlaygroundChat selected server chat load state", () => {
     ).not.toBeInTheDocument()
     expect(screen.getByTestId("playground-empty")).toBeInTheDocument()
   })
+
+  it("shows the no-provider setup banner when catalog rows are provider-unconfigured", () => {
+    queryState.chatModels = [
+      {
+        api_name: "openai",
+        model: "tldw:gpt-4o",
+        provider: "openai"
+      }
+    ]
+    queryState.providersStatus = {
+      any_configured: false,
+      providers: [{ name: "openai", configured: false, requires_api_key: true }]
+    }
+    useMessageOptionState.value = {
+      ...useMessageOptionState.value,
+      serverChatLoadState: "idle",
+      serverChatLoadError: null
+    }
+
+    render(
+      <MemoryRouter>
+        <PlaygroundChat />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText("No LLM provider configured")).toBeInTheDocument()
+  })
 })

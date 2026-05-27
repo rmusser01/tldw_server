@@ -142,7 +142,7 @@ const serverChatHistoryState = vi.hoisted(() => ({
 }));
 
 const tldwServerState = vi.hoisted(() => ({
-  fetchChatModels: vi.fn(async () => [
+  fetchChatModels: vi.fn(async (): Promise<any[]> => [
     {
       model: "openai:gpt-4.1-mini",
       provider: "openai",
@@ -150,6 +150,21 @@ const tldwServerState = vi.hoisted(() => ({
       provider_is_configured: true,
     },
   ]),
+}));
+
+const tldwClientState = vi.hoisted(() => ({
+  initialize: vi.fn(async () => null),
+  getProvidersStatus: vi.fn(async () => ({
+    providers: [
+      {
+        name: "openai",
+        configured: true,
+        requires_api_key: true,
+      },
+    ],
+    any_configured: true,
+  })),
+  getResearchBundle: vi.fn(async () => ({})),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -210,6 +225,10 @@ vi.mock("@/services/chat-settings", () => ({
 
 vi.mock("@/services/tldw-server", () => ({
   fetchChatModels: tldwServerState.fetchChatModels,
+}));
+
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: tldwClientState,
 }));
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -420,6 +439,19 @@ describe("Playground cockpit controls", () => {
     sessionPersistenceState.value.clearPersistedSession = vi.fn();
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
     tldwServerState.fetchChatModels.mockClear();
+    tldwClientState.initialize.mockClear();
+    tldwClientState.getProvidersStatus.mockClear();
+    tldwClientState.getProvidersStatus.mockResolvedValue({
+      providers: [
+        {
+          name: "openai",
+          configured: true,
+          requires_api_key: true,
+        },
+      ],
+      any_configured: true,
+    });
+    tldwClientState.getResearchBundle.mockClear();
     useMcpToolsStore.setState({
       healthState: "healthy",
       toolsLoading: false,
@@ -1195,6 +1227,50 @@ describe("Playground cockpit controls", () => {
       "Reconnect to the server or review server settings before sending.",
     );
     expect(status).not.toHaveTextContent("Chat remains available.");
+  });
+
+  it("keeps provider setup blocking consistent across empty-state and cockpit rails", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
+    messageOptionState.value.selectedModel = "tldw:gpt-4o";
+    modelSettingsState.value.apiProvider = undefined;
+    modelSettingsState.value.activeSettingsScope = "tldw:gpt-4o";
+    tldwServerState.fetchChatModels.mockResolvedValueOnce([
+      {
+        id: "gpt-4o",
+        model: "tldw:gpt-4o",
+        name: "GPT-4o",
+        provider: "openai",
+        type: "chat",
+      },
+    ]);
+    tldwClientState.getProvidersStatus.mockResolvedValueOnce({
+      providers: [
+        {
+          name: "openai",
+          configured: false,
+          requires_api_key: true,
+        },
+      ],
+      any_configured: false,
+    });
+
+    render(<Playground />);
+
+    const runtimeInspector = within(
+      await screen.findByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+
+    await waitFor(() => {
+      expect(within(runtimeInspector).getByText("Error")).toBeInTheDocument();
+    });
+    expect(runtimeInspector).toHaveTextContent("Provider setup needed");
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Model setup needed");
+    expect(status).toHaveTextContent("Provider setup needed");
+    expect(status).not.toHaveTextContent("Ready");
   });
 
   it("keeps the cockpit visibly degraded when readiness details are empty", async () => {

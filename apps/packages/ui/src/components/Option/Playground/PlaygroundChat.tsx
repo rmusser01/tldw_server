@@ -17,9 +17,11 @@ import { tldwClient, type ChatLinkedResearchRun } from "@/services/tldw/TldwApiC
 import { NoProviderBanner } from "@/components/Common/NoProviderBanner"
 import { applyVariantToMessage } from "@/utils/message-variants"
 import {
+  buildAvailableChatModelIds,
   buildCharacterChatReadiness,
   CHARACTER_CHAT_MODEL_SETTINGS_PATH,
-  getCharacterChatReadinessCopy
+  getCharacterChatReadinessCopy,
+  mergeChatProviderStatusIntoModels
 } from "@/utils/chat-model-availability"
 import {
   getChatLinkedResearchActionPolicy,
@@ -216,7 +218,17 @@ export const PlaygroundChat = ({
   })
   const noProvidersConfigured =
     providersStatus != null && providersStatus.any_configured === false
-  const hasUsableChatModels = chatModelsFetched && chatModels.length > 0
+  const readinessChatModels = React.useMemo(
+    () =>
+      mergeChatProviderStatusIntoModels(
+        chatModels as any[],
+        providersStatus
+      ) as any[],
+    [chatModels, providersStatus]
+  )
+  const hasUsableChatModels =
+    chatModelsFetched &&
+    buildAvailableChatModelIds(readinessChatModels).size > 0
   const selectedCharacterName =
     selectedCharacter?.name ||
     (selectedCharacter as any)?.title ||
@@ -228,12 +240,18 @@ export const PlaygroundChat = ({
       isServerConnected: isConnected,
       selectedCharacter,
       selectedModel: null,
-      availableModels: chatModels as any[]
+      availableModels: readinessChatModels
     })
     return getCharacterChatReadinessCopy(readiness, t, {
       characterName: selectedCharacterName
     })
-  }, [chatModels, isConnected, selectedCharacter, selectedCharacterName, t])
+  }, [
+    isConnected,
+    readinessChatModels,
+    selectedCharacter,
+    selectedCharacterName,
+    t
+  ])
   const compareModeActive = compareFeatureEnabled && compareMode
   const stableHistoryId =
     temporaryChat || historyId === "temp" ? null : historyId
@@ -435,7 +453,7 @@ export const PlaygroundChat = ({
     isConnected &&
     !noProvidersConfigured &&
     chatModelsFetched &&
-    chatModels.length === 0
+    !hasUsableChatModels
   const showEmptyStarterRegion =
     messages.length === 0 &&
     serverChatLoadState !== "loading" &&
