@@ -1966,6 +1966,13 @@ export const Playground = () => {
   const clearAssistantFromCockpit = React.useCallback(() => {
     void setSelectedAssistant(null);
     setSelectedCharacter(null);
+    void applyChatSettingsPatch({
+      historyId: stableHistoryId,
+      serverChatId,
+      patch: {
+        assistantOverlay: null,
+      },
+    }).catch(() => undefined);
     setServerChatCharacterId(null);
     setServerChatAssistantKind(null);
     setServerChatAssistantId(null);
@@ -1977,6 +1984,7 @@ export const Playground = () => {
     scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
   }, [
     clearPersistedSession,
+    serverChatId,
     setChatWorkflowMode,
     setSelectedAssistant,
     setSelectedCharacter,
@@ -1985,6 +1993,7 @@ export const Playground = () => {
     setServerChatCharacterId,
     setServerChatMetaLoaded,
     setServerChatPersonaMemoryMode,
+    stableHistoryId,
   ]);
   const inspectAssistantFromCockpit = React.useCallback(() => {
     if (selectedAssistant?.kind === "persona") {

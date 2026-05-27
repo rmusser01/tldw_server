@@ -564,6 +564,12 @@ const getDesktopCompositionPreview = (page: Page): Locator =>
 const getDesktopRuntimeInspector = (page: Page): Locator =>
   page.getByTestId('playground-cockpit-right-rail').getByTestId('playground-runtime-inspector');
 
+const assertRuntimeAssistantCleared = async (runtimeInspector: Locator) => {
+  await expect(runtimeInspector.getByText('No runtime assistant selected').first()).toBeVisible();
+  await expect(runtimeInspector.getByText('No assistant selected')).toHaveCount(0);
+  await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toHaveCount(0);
+};
+
 const assertCoreComposerControls = async (
   page: Page,
   options: { mobile?: boolean; composerOnly?: boolean } = {}
@@ -2109,7 +2115,7 @@ test.describe('/chat cockpit real-server parity', () => {
 
       const runtimeInspector = getDesktopRuntimeInspector(page);
       const composerAssistant = page.getByTestId('character-select');
-      await expect(runtimeInspector.getByText('No assistant selected').first()).toBeVisible();
+      await assertRuntimeAssistantCleared(runtimeInspector);
       await expect(composerAssistant).toHaveAccessibleName(/Select character or persona/i);
 
       await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
@@ -2143,12 +2149,36 @@ test.describe('/chat cockpit real-server parity', () => {
       });
 
       await assistantContextSource.getByRole('button', { name: 'Clear assistant' }).click();
-      await expect(runtimeInspector.getByText('No assistant selected').first()).toBeVisible();
-      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toHaveCount(
-        0
-      );
+      await assertRuntimeAssistantCleared(runtimeInspector);
       await expect(assistantContextSource).toHaveCount(0);
       await expect(composerAssistant).toHaveAttribute('aria-label', /Select character or persona/i);
+
+      const plainReturnCapture = captureAllApiCalls(page);
+      const plainPrompt = `Plain return after character clear ${Date.now()}`;
+      const plainCompletionAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
+      await page.getByTestId('chat-input').fill(plainPrompt);
+      await page.getByRole('button', { name: /send message/i }).click();
+      await plainCompletionAttempt;
+      const stopStreaming = page.getByRole('button', { name: /stop streaming response/i });
+      if (await stopStreaming.isVisible({ timeout: 10_000 }).catch(() => false)) {
+        await stopStreaming.click().catch(() => undefined);
+      }
+      await page.waitForTimeout(1_500);
+      const plainReturnCalls = await plainReturnCapture.stop();
+      const plainCreateCall = findChatCreateCall(plainReturnCalls);
+      expect(plainCreateCall).toBeDefined();
+      expect(plainCreateCall?.requestBody).toEqual(
+        expect.objectContaining({
+          source: 'webui-chat',
+        })
+      );
+      const plainCreatePayload =
+        plainCreateCall?.requestBody && typeof plainCreateCall.requestBody === 'object'
+          ? (plainCreateCall.requestBody as Record<string, unknown>)
+          : {};
+      expect(plainCreatePayload).not.toHaveProperty('character_id');
+      expect(plainCreatePayload).not.toHaveProperty('assistant_kind');
+      expect(plainCreatePayload).not.toHaveProperty('assistant_id');
     } finally {
       await apiDelete(
         request,
@@ -2225,7 +2255,7 @@ test.describe('/chat cockpit real-server parity', () => {
 
       const runtimeInspector = getDesktopRuntimeInspector(page);
       const composerAssistant = page.getByTestId('character-select');
-      await expect(runtimeInspector.getByText('No assistant selected').first()).toBeVisible();
+      await assertRuntimeAssistantCleared(runtimeInspector);
 
       await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
       await page.getByRole('tab', { name: 'Personas' }).click();
@@ -2265,10 +2295,7 @@ test.describe('/chat cockpit real-server parity', () => {
 
       await runtimeInspector.getByRole('button', { name: 'Clear assistant' }).click();
       await expect(assistantTrigger).toBeFocused({ timeout: 5_000 });
-      await expect(runtimeInspector.getByText('No assistant selected').first()).toBeVisible();
-      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toHaveCount(
-        0
-      );
+      await assertRuntimeAssistantCleared(runtimeInspector);
       await expect(personaContextSource).toHaveCount(0);
       await expect(composerAssistant).toHaveAttribute('aria-label', /Select character or persona/i);
     } finally {

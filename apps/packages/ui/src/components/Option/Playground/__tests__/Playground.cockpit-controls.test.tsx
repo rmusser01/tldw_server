@@ -118,6 +118,7 @@ const modelSettingsState = vi.hoisted(() => ({
 
 const chatSettingsState = vi.hoisted(() => ({
   syncChatSettingsForServerChat: vi.fn(async (_params: unknown) => null),
+  applyChatSettingsPatch: vi.fn(async (_params: unknown) => null),
 }));
 
 const serverChatHistoryState = vi.hoisted(() => ({
@@ -219,6 +220,8 @@ vi.mock("@/services/app", () => ({
 }));
 
 vi.mock("@/services/chat-settings", () => ({
+  applyChatSettingsPatch: (params: unknown) =>
+    chatSettingsState.applyChatSettingsPatch(params),
   syncChatSettingsForServerChat: (params: unknown) =>
     chatSettingsState.syncChatSettingsForServerChat(params),
 }));
@@ -438,6 +441,7 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.setSelectedCharacter = vi.fn();
     sessionPersistenceState.value.clearPersistedSession = vi.fn();
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
+    chatSettingsState.applyChatSettingsPatch.mockClear();
     tldwServerState.fetchChatModels.mockClear();
     tldwClientState.initialize.mockClear();
     tldwClientState.getProvidersStatus.mockClear();
@@ -1108,6 +1112,44 @@ describe("Playground cockpit controls", () => {
       false,
     );
     expect(sessionPersistenceState.value.clearPersistedSession).toHaveBeenCalled();
+  });
+
+  it("clears persisted assistant overlay settings when returning to plain chat", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.historyId = "history-overlay";
+    messageOptionState.value.serverChatId = "overlay-chat";
+    messageOptionState.value.selectedAssistant = {
+      kind: "persona",
+      id: "persona-overlay",
+      name: "Overlay Persona",
+      metadata: {
+        selectionMode: "overlay",
+      },
+    } as any;
+    messageOptionState.value.selectedCharacter = null;
+
+    render(<Playground />);
+
+    const runtimeInspector = within(
+      await screen.findByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    fireEvent.click(
+      within(runtimeInspector).getByRole("button", {
+        name: "Clear assistant",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(chatSettingsState.applyChatSettingsPatch).toHaveBeenCalledWith({
+        historyId: "history-overlay",
+        serverChatId: "overlay-chat",
+        patch: {
+          assistantOverlay: null,
+        },
+      });
+    });
+    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
+    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
   });
 
   it("does not render cockpit control rails in focus mode", async () => {
