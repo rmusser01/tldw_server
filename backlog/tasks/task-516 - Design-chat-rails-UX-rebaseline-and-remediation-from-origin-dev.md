@@ -45,6 +45,8 @@ Plan review approved after fixing the SidepanelHeaderSimple Vitest hoisting snip
 
 Task 1 provenance (2026-05-27):
 
+The `HEAD` output below is the pre-artifact baseline/provenance capture commit from before the audit artifact commit, not the current branch HEAD after later documentation commits.
+
 ```text
 $ pwd
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-rails-ux-rebaseline

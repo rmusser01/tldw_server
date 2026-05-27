@@ -4,9 +4,9 @@
 
 - Worktree: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-rails-ux-rebaseline`
 - Branch: `codex/chat-rails-ux-rebaseline`
-- HEAD: `69a80b4b5`
+- Pre-artifact baseline/provenance capture commit: `69a80b4b5` (`git rev-parse --short HEAD` output captured before the audit artifact commit).
 - origin/dev: `efe42fe0c`
-- Merge-base expectation: `git merge-base --is-ancestor origin/dev HEAD` produced no stdout and exited `0`.
+- Merge-base expectation: `git merge-base --is-ancestor origin/dev HEAD` produced no stdout and exited `0` during the pre-artifact baseline capture.
 - Backend: Not captured for Task 1.
 - WebUI URL: Not captured for Task 1.
 - Rail source files:

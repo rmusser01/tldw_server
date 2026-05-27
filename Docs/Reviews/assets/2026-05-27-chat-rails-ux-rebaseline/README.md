@@ -1,6 +1,6 @@
 # Chat Rails UX Rebaseline Evidence
 
-This directory contains screenshots and browser evidence captured from the clean `origin/dev`-based `/chat` rail rebaseline.
+This directory is reserved for required future screenshots and browser evidence captured from the clean `origin/dev`-based `/chat` rail rebaseline.
 
 Required files:
 
