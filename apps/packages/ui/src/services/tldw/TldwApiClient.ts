@@ -1279,6 +1279,60 @@ export interface SandboxAdminRuntimeDiagnosticsResponse {
   startup_warning_summary?: SandboxAdminStartupWarningSummary | null
 }
 
+export type SandboxWorkspaceDiagnosticStateValue =
+  | "available"
+  | "not_configured"
+  | "unavailable"
+  | "blocked"
+  | "unknown"
+
+export interface SandboxWorkspaceDiagnosticState {
+  state: SandboxWorkspaceDiagnosticStateValue
+  reason_code?: string | null
+  message: string
+  management_surface?: string | null
+}
+
+export interface SandboxWorkspaceDiagnosticsRunSummary {
+  id: string
+  runtime?: string | null
+  runtime_version?: string | null
+  base_image?: string | null
+  phase: string
+  status_reason_code?: string | null
+  status_reason_details?: Record<string, unknown> | null
+  exit_code?: number | null
+  started_at?: string | null
+  finished_at?: string | null
+  message?: string | null
+  session_id?: string | null
+  persona_id?: string | null
+  workspace_id?: string | null
+  workspace_group_id?: string | null
+  scope_snapshot_id?: string | null
+}
+
+export interface SandboxWorkspaceDiagnosticsRunList {
+  total: number
+  limit: number
+  has_more: boolean
+  items: SandboxWorkspaceDiagnosticsRunSummary[]
+}
+
+export interface SandboxWorkspaceDiagnosticsLinks {
+  runtime_config?: string | null
+  admin_runs?: string | null
+}
+
+export interface SandboxWorkspaceDiagnosticsResponse {
+  workspace_id: string
+  source_label: "research_workspace"
+  runtime: SandboxWorkspaceDiagnosticState
+  admission: SandboxWorkspaceDiagnosticState
+  runs: SandboxWorkspaceDiagnosticsRunList
+  links: SandboxWorkspaceDiagnosticsLinks
+}
+
 export class TldwApiClientBase {
   private storage: Storage
   private config: TldwConfig | null = null
@@ -2249,6 +2303,21 @@ export class TldwApiClientBase {
   async getSandboxRuntimeDiagnostics(): Promise<SandboxAdminRuntimeDiagnosticsResponse> {
     return await bgRequest<SandboxAdminRuntimeDiagnosticsResponse>({
       path: "/api/v1/sandbox/admin/runtime-diagnostics",
+      method: "GET"
+    })
+  }
+
+  async getSandboxWorkspaceDiagnostics(
+    workspaceId: string,
+    options?: { sourceLabel?: "research_workspace"; limit?: number }
+  ): Promise<SandboxWorkspaceDiagnosticsResponse> {
+    const query = this.buildQuery({
+      source_label: options?.sourceLabel || "research_workspace",
+      limit: options?.limit
+    })
+    const encodedWorkspaceId = encodeURIComponent(workspaceId)
+    return await bgRequest<SandboxWorkspaceDiagnosticsResponse>({
+      path: `/api/v1/sandbox/workspaces/${encodedWorkspaceId}/diagnostics${query}`,
       method: "GET"
     })
   }

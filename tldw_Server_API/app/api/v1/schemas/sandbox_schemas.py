@@ -385,6 +385,67 @@ class SandboxRunStatus(BaseModel):
     scope_snapshot_id: str | None = None
 
 
+class SandboxWorkspaceDiagnosticState(BaseModel):
+    state: Literal[
+        "available",
+        "not_configured",
+        "unavailable",
+        "blocked",
+        "unknown",
+    ]
+    reason_code: str | None = None
+    message: str
+    management_surface: str | None = None
+
+
+class SandboxWorkspaceDiagnosticsRunSummary(BaseModel):
+    id: str
+    runtime: RuntimeType | None = None
+    runtime_version: str | None = None
+    base_image: str | None = None
+    phase: Literal[
+        "queued",
+        "starting",
+        "running",
+        "completed",
+        "failed",
+        "killed",
+        "timed_out",
+    ]
+    status_reason_code: RunStatusReasonCode | None = None
+    status_reason_details: SandboxRunStatusReasonDetails | None = None
+    exit_code: int | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    message: str | None = None
+    session_id: str | None = None
+    persona_id: str | None = None
+    workspace_id: str | None = None
+    workspace_group_id: str | None = None
+    scope_snapshot_id: str | None = None
+
+
+class SandboxWorkspaceDiagnosticsRunList(BaseModel):
+    total: int
+    limit: int
+    has_more: bool
+    items: list[SandboxWorkspaceDiagnosticsRunSummary]
+
+
+class SandboxWorkspaceDiagnosticsLinks(BaseModel):
+    runtime_config: str | None = None
+    admin_runs: str | None = None
+
+
+class SandboxWorkspaceDiagnosticsResponse(BaseModel):
+    workspace_id: str
+    source_label: Literal["research_workspace"]
+    runtime: SandboxWorkspaceDiagnosticState
+    admission: SandboxWorkspaceDiagnosticState
+    runs: SandboxWorkspaceDiagnosticsRunList
+    links: SandboxWorkspaceDiagnosticsLinks
+
+
 class ArtifactInfo(BaseModel):
     path: str
     size: int

@@ -35,7 +35,8 @@ import {
   Share2,
   CircleHelp,
   Bot,
-  History
+  History,
+  ShieldAlert
 } from "lucide-react"
 import type {
   SavedWorkspace,
@@ -92,6 +93,7 @@ import {
 import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
 import { WorkspaceAgentTaskHandoffModal } from "./WorkspaceAgentTaskHandoffModal"
 import { WorkspaceACPHistoryModal } from "./WorkspaceACPHistoryModal"
+import { WorkspaceSandboxDiagnosticsPanel } from "./WorkspaceSandboxDiagnosticsPanel"
 
 interface WorkspaceHeaderProps {
   leftPaneOpen: boolean
@@ -176,6 +178,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const [shortcutsModalOpen, setShortcutsModalOpen] = React.useState(false)
   const [agentTaskModalOpen, setAgentTaskModalOpen] = React.useState(false)
   const [acpHistoryModalOpen, setAcpHistoryModalOpen] = React.useState(false)
+  const [sandboxDiagnosticsOpen, setSandboxDiagnosticsOpen] = React.useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false)
   const [deleteConfirmInput, setDeleteConfirmInput] = React.useState("")
   const [deleteTargetWorkspace, setDeleteTargetWorkspace] = React.useState<{
@@ -1494,6 +1497,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             onClick: handleOpenAcpHistoryModal
           },
           {
+            key: "sandbox-diagnostics",
+            icon: <ShieldAlert className="h-4 w-4" />,
+            label: t(
+              "playground:workspace.sandboxDiagnostics",
+              "Sandbox diagnostics"
+            ),
+            onClick: () => setSandboxDiagnosticsOpen(true)
+          },
+          {
             key: "duplicate-current",
             icon: <Copy className="h-4 w-4" />,
             label: t(
@@ -1800,6 +1812,26 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         onCancel={handleCloseAcpHistoryModal}
         onOpenAgentTasks={handleOpenAgentTasksPage}
       />
+
+      <Modal
+        title={t("playground:workspace.sandboxDiagnostics", "Sandbox diagnostics")}
+        open={sandboxDiagnosticsOpen}
+        onCancel={() => setSandboxDiagnosticsOpen(false)}
+        footer={null}
+        width={720}
+        destroyOnHidden
+      >
+        {workspaceId ? (
+          <WorkspaceSandboxDiagnosticsPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-text-muted">
+            {t(
+              "playground:workspace.sandboxDiagnosticsNoWorkspace",
+              "Select or save a workspace before loading sandbox diagnostics."
+            )}
+          </p>
+        )}
+      </Modal>
 
       <input
         ref={importFileInputRef}

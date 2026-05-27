@@ -268,6 +268,14 @@ vi.mock("../workspace-banner-image", () => ({
   }
 }))
 
+vi.mock("../WorkspaceSandboxDiagnosticsPanel", () => ({
+  WorkspaceSandboxDiagnosticsPanel: ({ workspaceId }: { workspaceId: string }) => (
+    <div data-testid="workspace-sandbox-diagnostics-panel">
+      Sandbox diagnostics for {workspaceId}
+    </div>
+  )
+}))
+
 vi.mock("@/utils/research-workspace-telemetry", async () => {
   const actual =
     await vi.importActual<typeof import("@/utils/research-workspace-telemetry")>(
@@ -1513,6 +1521,28 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(mockNavigate).toHaveBeenCalledWith(
       "/acp-playground?session=sess-alpha&view=diagnostics"
     )
+  })
+
+  it("opens sandbox diagnostics from the settings menu", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Sandbox diagnostics"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Sandbox diagnostics"
+    })
+    expect(within(modal).getByTestId("workspace-sandbox-diagnostics-panel")).toHaveTextContent(
+      "Sandbox diagnostics for workspace-alpha"
+    )
+    expect(modal).not.toHaveTextContent(/workspace trust/i)
   })
 
   it("aborts ACP run history requests when the modal closes", async () => {

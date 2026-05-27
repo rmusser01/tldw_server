@@ -620,6 +620,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             tags=("prototype-workspaces",),
             route_key="prototype-workspaces",
         ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.sandbox_workspace_diagnostics",
+            log_name="sandbox_workspace_diagnostics",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("sandbox",),
+            route_key="sandbox-workspace-diagnostics",
+        ),
     ):
         append_imported_router_spec(specs, collaboration_spec)
 

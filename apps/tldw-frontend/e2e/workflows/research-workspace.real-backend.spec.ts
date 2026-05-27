@@ -578,6 +578,74 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     await assertNoCriticalErrors(diagnostics)
   })
 
+  test("passes active workspace ID into sandbox diagnostics requests", async ({
+    authedPage,
+    serverInfo,
+    diagnostics
+  }) => {
+    skipIfServerUnavailable(serverInfo)
+
+    const workspacePage = new ResearchWorkspacePage(authedPage)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await ensureNoServerReachabilityDialog(authedPage)
+
+    const workspaceId = await workspacePage.getWorkspaceId()
+    expect(workspaceId, "Expected Research Workspace to expose an active ID").toBeTruthy()
+
+    const diagnosticsRequestPromise = authedPage.waitForRequest((request) => {
+      if (request.method().toUpperCase() !== "GET") return false
+      const url = new URL(request.url())
+      return (
+        url.pathname.endsWith(
+          `/api/v1/sandbox/workspaces/${encodeURIComponent(
+            workspaceId || ""
+          )}/diagnostics`
+        ) &&
+        url.searchParams.get("source_label") === "research_workspace" &&
+        url.searchParams.get("limit") === "10"
+      )
+    })
+    const diagnosticsResponsePromise = authedPage.waitForResponse((response) => {
+      if (response.request().method().toUpperCase() !== "GET") return false
+      const url = new URL(response.url())
+      return (
+        url.pathname.endsWith(
+          `/api/v1/sandbox/workspaces/${encodeURIComponent(
+            workspaceId || ""
+          )}/diagnostics`
+        ) &&
+        url.searchParams.get("source_label") === "research_workspace" &&
+        url.searchParams.get("limit") === "10"
+      )
+    })
+
+    await clickActionable(
+      authedPage.getByRole("button", { name: /workspace settings/i })
+    )
+    await authedPage.getByText("Sandbox diagnostics").click()
+
+    const diagnosticsRequest = await diagnosticsRequestPromise
+    const diagnosticsUrl = new URL(diagnosticsRequest.url())
+    expect(diagnosticsUrl.searchParams.get("source_label")).toBe(
+      "research_workspace"
+    )
+    expect(diagnosticsUrl.searchParams.get("limit")).toBe("10")
+    const diagnosticsResponse = await diagnosticsResponsePromise
+    expect(diagnosticsResponse.status()).toBeLessThan(400)
+
+    const modal = authedPage.getByRole("dialog", { name: /Sandbox diagnostics/i })
+    await expect(modal).toBeVisible({ timeout: 10_000 })
+    const terminalState = modal
+      .getByText(
+        /No sandbox runs are linked to this workspace yet|Sandbox diagnostics are unavailable right now|You do not have permission to view sandbox diagnostics|No sandbox runtimes are available for workspace actions|Sandbox runtime discovery failed|A sandbox runtime is available for workspace actions|Sandbox readiness could not be determined/i
+      )
+      .first()
+    await expect(terminalState).toBeVisible({ timeout: 10_000 })
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
   test("boots cleanly and keeps chat bootstrap endpoints healthy", async ({
     authedPage,
     serverInfo,
