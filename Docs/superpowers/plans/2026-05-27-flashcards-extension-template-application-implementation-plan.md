@@ -100,6 +100,6 @@ Expected: PASS.
 Run: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false`
 Expected: No new sidepanel/template errors; known unrelated CharacterListContent density baseline may still fail.
 
-- [ ] **Step 4: Commit and open PR**
+- [x] **Step 4: Commit and open PR**
 
 Commit the slice and create a draft PR against `dev`.

@@ -11,6 +11,7 @@ labels:
 priority: medium
 references:
 - Flashcards-UX-Fix-List.md
+- https://github.com/rmusser01/tldw_server/pull/2081
 modified_files:
 - apps/packages/ui/src/routes/sidepanel-flashcards.tsx
 - apps/packages/ui/src/routes/__tests__/sidepanel-flashcards.test.tsx
@@ -52,6 +53,8 @@ Implemented sidepanel template application by reusing FlashcardTemplateValueModa
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Completed native sidepanel template application for the F12 Flashcards extension flow. Captured and generated draft cards now expose Apply template, reuse the existing template value modal/materialization behavior, update only the selected draft, preserve generated tags and page source provenance, and save templated model/notes/extra fields through the existing sidepanel save payload. Updated the master fix list and extension/user docs to mark template application complete while leaving in-extension review deferred.
+
+Draft PR: https://github.com/rmusser01/tldw_server/pull/2081
 
 Verification:
 - bunx vitest run src/routes/__tests__/sidepanel-flashcards.test.tsx: 33 tests passed.
