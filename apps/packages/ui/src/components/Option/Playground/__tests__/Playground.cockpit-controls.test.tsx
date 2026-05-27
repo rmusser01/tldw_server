@@ -106,9 +106,62 @@ const modelSettingsState = vi.hoisted(() => ({
   },
 }));
 
+const chatSettingsState = vi.hoisted(() => ({
+  syncChatSettingsForServerChat: vi.fn(async (_params: unknown) => null),
+}));
+
+const serverChatHistoryState = vi.hoisted(() => ({
+  value: [
+    {
+      id: "tracked-character-chat",
+      title: "Mira field notes",
+      assistant_kind: "character",
+      character_id: "character-1",
+      created_at: "2026-05-22T12:00:00.000Z",
+      updated_at: "2026-05-22T12:15:00.000Z",
+    },
+    {
+      id: "plain-chat",
+      title: "Plain chat",
+      assistant_kind: null,
+      character_id: null,
+      created_at: "2026-05-21T12:00:00.000Z",
+      updated_at: "2026-05-21T12:15:00.000Z",
+    },
+  ],
+}));
+
+const tldwServerState = vi.hoisted(() => ({
+  fetchChatModels: vi.fn(async () => [
+    {
+      model: "openai:gpt-4.1-mini",
+      provider: "openai",
+      is_configured: true,
+      provider_is_configured: true,
+    },
+  ]),
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, defaultValue?: string) => defaultValue || key,
+    t: (
+      key: string,
+      defaultValueOrOptions?: string | { defaultValue?: string },
+      interpolationOptions?: Record<string, unknown>,
+    ) => {
+      const defaultValue =
+        typeof defaultValueOrOptions === "string"
+          ? defaultValueOrOptions
+          : defaultValueOrOptions?.defaultValue || key;
+      const values =
+        typeof defaultValueOrOptions === "object" && defaultValueOrOptions
+          ? defaultValueOrOptions
+          : interpolationOptions;
+
+      return defaultValue.replace(/\{\{(\w+)\}\}/g, (_match, token) =>
+        values?.[token] == null ? `{{${token}}}` : String(values[token]),
+      );
+    },
   }),
 }));
 
@@ -138,6 +191,15 @@ vi.mock("@/hooks/playground-session-restore", () => ({
 
 vi.mock("@/services/app", () => ({
   webUIResumeLastChat: vi.fn(async () => false),
+}));
+
+vi.mock("@/services/chat-settings", () => ({
+  syncChatSettingsForServerChat: (params: unknown) =>
+    chatSettingsState.syncChatSettingsForServerChat(params),
+}));
+
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: tldwServerState.fetchChatModels,
 }));
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -235,6 +297,17 @@ vi.mock("@/hooks/useLoadLocalConversation", () => ({
   useLoadLocalConversation: () => vi.fn(async () => {}),
 }));
 
+vi.mock("@/hooks/useServerChatHistory", () => ({
+  useServerChatHistory: () => ({
+    data: serverChatHistoryState.value,
+    total: serverChatHistoryState.value.length,
+    isLoading: false,
+    sidebarRefreshState: "ready",
+    hasUsableData: true,
+    isShowingStaleData: false,
+  }),
+}));
+
 vi.mock("../playground-shortcuts", () => ({
   resolvePlaygroundShortcutAction: () => null,
 }));
@@ -319,6 +392,8 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.setRagMediaIds = vi.fn();
     messageOptionState.value.stopStreamingRequest = vi.fn();
     messageOptionState.value.regenerateLastMessage = vi.fn();
+    chatSettingsState.syncChatSettingsForServerChat.mockClear();
+    tldwServerState.fetchChatModels.mockClear();
     useMcpToolsStore.setState({
       healthState: "healthy",
       toolsLoading: false,
@@ -960,6 +1035,8 @@ describe("Playground cockpit controls", () => {
 
   it("reflects degraded server readiness in the cockpit runtime and status strip", async () => {
     messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
 
     render(<Playground />);
 
@@ -986,6 +1063,8 @@ describe("Playground cockpit controls", () => {
 
   it("keeps streaming primary when degraded readiness is warning-only", async () => {
     messageOptionState.value.streaming = true;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
 
     render(<Playground />);
 
@@ -1011,6 +1090,8 @@ describe("Playground cockpit controls", () => {
 
   it("surfaces blocked server readiness as chat-critical unavailable state", async () => {
     messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
 
     render(<Playground />);
 
@@ -1043,6 +1124,8 @@ describe("Playground cockpit controls", () => {
 
   it("keeps the cockpit visibly degraded when readiness details are empty", async () => {
     messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
 
     render(<Playground />);
 

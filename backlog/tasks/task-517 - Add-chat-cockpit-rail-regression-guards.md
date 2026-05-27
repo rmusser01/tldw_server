@@ -11,6 +11,7 @@ documentation:
 - Docs/superpowers/plans/2026-05-27-chat-rails-ux-rebaseline-implementation-plan.md
 modified_files:
 - apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts
+- apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx
 - backlog/tasks/task-517 - Add-chat-cockpit-rail-regression-guards.md
 ---
 
@@ -36,25 +37,29 @@ Task 2 implementation notes - 2026-05-27:
 - Guard asserts `Playground.tsx` still imports/uses and renders `PlaygroundCockpitShell`, `PlaygroundContextRail`, `PlaygroundRuntimeInspector`, and `CharacterControlRail`.
 - Guard asserts `PlaygroundCockpitShell.tsx` still exposes `playground-cockpit-shell`, left/right/mobile rail test ids, `Enter focus chat`, and `Show cockpit panels`.
 - Guard asserts `Playground.tsx` keeps `playgroundChatLayoutMode`, `"cockpit"`, and `"focus"`.
+- Fixed the Task 2 existing rail-suite blocker in `Playground.cockpit-controls.test.tsx` by adding focused harness mocks for `@/hooks/useServerChatHistory`, `@/services/tldw-server`, and `@/services/chat-settings`; the controls tests now cover representative tracked and plain server chat history without requiring React Query integration.
+- The cockpit server-readiness tests now clear the default selected character/assistant before rendering so they assert the cockpit health strip instead of character-chat readiness behavior.
 
 Verification:
-- `cd apps/packages/ui && bun install` completed to restore missing local Vitest dependencies after the first guard run failed to resolve `vitest/config`.
+- `cd apps/packages/ui && bun install` completed earlier to restore missing local Vitest dependencies after the first guard run failed to resolve `vitest/config`.
 - `cd apps/packages/ui && bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts`: PASS, 1 file, 3 tests.
-- `cd apps/packages/ui && bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx src/components/Option/Playground/__tests__/CharacterControlRail.test.tsx`: FAIL, 5 files passed and 1 file failed. `Playground.cockpit-controls.test.tsx` has 11 existing failures caused by `CharacterChatSessionsPanel` calling `useServerChatHistory` without a `QueryClientProvider`; the same file reproduces the same 11 failures when run alone. No Task 2 source changes touched that test or the referenced runtime files.
+- Initial existing rail-suite run failed because `Playground.cockpit-controls.test.tsx` rendered `Playground`, which now reaches `CharacterControlRail` / character sessions and `useServerChatHistory`; that test file had no `@/hooks/useServerChatHistory` mock and no `QueryClientProvider`, so React Query threw `No QueryClient set` in 11 tests.
+- `cd apps/packages/ui && bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx`: PASS, 1 file, 16 tests after the harness fix.
+- `cd apps/packages/ui && bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx src/components/Option/Playground/__tests__/CharacterControlRail.test.tsx`: PASS, 6 files, 99 tests.
 
 DoD notes:
 - AC #1 is complete for this Task 2 slice.
-- AC #2 is partially complete: the requested existing rail set was run, but `Playground.cockpit-controls.test.tsx` is not passing on this worktree.
+- AC #2 is partially complete: the existing cockpit component rail set now passes; real-server/screenshot evidence remains for Task 3.
 - AC #3 remains open for Task 3 screenshot/evidence work.
 - AC #4 is complete for this Task 2 slice.
 - Bandit is not applicable for this TypeScript test and Backlog-only slice; no Python code was touched.
-- Known blocker/concern: existing cockpit-controls React Query provider failure needs coordinator attention or a separate scoped test-harness fix.
+- The prior existing rail-suite blocker is resolved; no new production-code changes were made.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 2 added the source-level cockpit rail wiring guard and recorded focused verification. The new guard passes. The broader existing rail set was run as requested but remains blocked by pre-existing `Playground.cockpit-controls.test.tsx` React Query provider failures; screenshot/evidence criteria remain open for Task 3.
+Task 2 added the source-level cockpit rail wiring guard and fixed the cockpit-controls harness blocker exposed by the restored rails. The new guard passes, the isolated controls file passes, and the existing rail component set now passes. Screenshot/evidence criteria remain open for Task 3.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
