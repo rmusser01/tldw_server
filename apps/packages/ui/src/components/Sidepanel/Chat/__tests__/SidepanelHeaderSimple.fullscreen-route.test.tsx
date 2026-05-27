@@ -50,6 +50,26 @@ describe("SidepanelHeaderSimple full-screen route", () => {
     vi.clearAllMocks()
   })
 
+  it("states that full-screen handoff is route-only for sidepanel draft and page state", () => {
+    render(
+      <MemoryRouter>
+        <SidepanelHeaderSimple activeTitle="Sidepanel chat" />
+      </MemoryRouter>
+    )
+
+    const openFullChat = screen.getByRole("button", {
+      name: "Open full chat in WebUI"
+    })
+
+    expect(openFullChat).toHaveAccessibleDescription(
+      "Opens /chat in a new tab. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+    )
+    expect(openFullChat).toHaveAttribute(
+      "title",
+      "Opens /chat in a new tab. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+    )
+  })
+
   it("opens the rail-enabled full app chat route", async () => {
     const user = userEvent.setup()
 

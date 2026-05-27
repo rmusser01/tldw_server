@@ -103,6 +103,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     string | undefined
   >(undefined)
   const moreBtnRef = React.useRef<HTMLButtonElement>(null)
+  const fullAppHandoffDescriptionId = React.useId()
   const { capabilities } = useServerCapabilities()
   const [activePlaylistDetail, setActivePlaylistDetail] =
     React.useState<QuickIngestOpenDetail | null>(null)
@@ -343,6 +344,15 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         "Open Character Chat in full app"
       )
     : t("sidepanel:controlRow.openInFullUI", "Open full app")
+  const fullAppHandoffDescription = rolePlayActive
+    ? t(
+        "sidepanel:controlRow.openRolePlayFullAppDescription",
+        "Opens /chat in a new tab with the active role-play route. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+      )
+    : t(
+        "sidepanel:controlRow.openFullAppDescription",
+        "Opens /chat in a new tab. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+      )
   const openRolePlayPicker = React.useCallback(() => {
     if (typeof window === "undefined") return
     window.dispatchEvent(
@@ -772,12 +782,16 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
       <button
         type="button"
         onClick={openFullApp}
+        aria-describedby={fullAppHandoffDescriptionId}
         data-testid="chat-open-full-app"
         className="w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 hover:bg-surface2"
-        title={fullAppButtonLabel}
+        title={fullAppHandoffDescription}
       >
         <ExternalLink className="size-4 text-text-subtle" />
         {fullAppButtonLabel}
+        <span id={fullAppHandoffDescriptionId} className="sr-only">
+          {fullAppHandoffDescription}
+        </span>
       </button>
 
     </div>

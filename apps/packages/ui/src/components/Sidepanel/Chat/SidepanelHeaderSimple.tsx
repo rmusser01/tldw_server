@@ -43,6 +43,7 @@ export const SidepanelHeaderSimple = ({
   const [draftTitle, setDraftTitle] = React.useState(activeTitle || "")
   const titleBlurActionRef = React.useRef<"submit" | "cancel" | null>(null)
   const titleInputRef = React.useRef<HTMLInputElement>(null)
+  const fullChatHandoffDescriptionId = React.useId()
   const isControlled = typeof propSidebarOpen === "boolean"
   const sidebarOpen = isControlled
     ? (propSidebarOpen as boolean)
@@ -54,6 +55,14 @@ export const SidepanelHeaderSimple = ({
   const sidebarToggleLabel = sidebarOpen
     ? t("common:chatSidebar.collapse", "Collapse sidebar")
     : t("common:chatSidebar.expand", "Expand sidebar")
+  const openFullChatLabel = t(
+    "sidepanel:header.openFullChatWebui",
+    "Open full chat in WebUI"
+  )
+  const openFullChatDescription = t(
+    "sidepanel:header.openFullChatWebuiRouteOnlyDescription",
+    "Opens /chat in a new tab. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+  )
 
   const handleSidebarToggle = React.useCallback(() => {
     const next = !sidebarOpen
@@ -266,18 +275,22 @@ export const SidepanelHeaderSimple = ({
             <LayoutDashboard className="size-4" aria-hidden="true" />
           </button>
         </Tooltip>
-        <Tooltip title={t("sidepanel:header.openFullScreen", "Open Full-Screen")}>
+        <Tooltip title={openFullChatDescription}>
           <button
             type="button"
             onClick={openFullScreen}
-            aria-label={t("sidepanel:header.openFullScreen", "Open Full-Screen")}
+            aria-describedby={fullChatHandoffDescriptionId}
+            aria-label={openFullChatLabel}
             className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
-            title={t("sidepanel:header.openFullScreen", "Open Full-Screen")}
+            title={openFullChatDescription}
             data-testid="chat-open-full-screen"
           >
             <ExternalLink className="size-4" aria-hidden="true" />
           </button>
         </Tooltip>
+        <span id={fullChatHandoffDescriptionId} className="sr-only">
+          {openFullChatDescription}
+        </span>
         <Tooltip title={t("sidepanel:header.settingsShortLabel", "Settings")}>
           <Link
             to="/settings"

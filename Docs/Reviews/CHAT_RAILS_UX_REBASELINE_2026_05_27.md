@@ -8,7 +8,7 @@ Top 5 UX risks after re-auditing the corrected rail-enabled `/chat` page:
 2. The extension sidepanel chat debug surface has horizontal overflow at a 390 px mobile-width viewport, so the directly connected chat entry surface is not as stable as the WebUI `/chat` page.
 3. The main `/chat` cockpit rails are restored and the removed standalone character-control rail remains absent, but the first-run cockpit still presents setup, rail, empty-state, and composer controls all at once.
 4. Send controls and hidden/secondary controls are not fully unambiguous to automation or assistive tech: exact `Send` role lookup returns two matches, while the primary send has a clearer `Send message` accessible name.
-5. Advanced chat workflows still need separate remediation and green-path proof: provider/model readiness, Web search status feedback, character/persona clear state, and extension-to-WebUI state preservation are not fully validated by this slice.
+5. Advanced chat workflows still need separate remediation and green-path proof: provider/model readiness, Web search status feedback, character/persona clear state, and richer extension-to-WebUI transfer beyond the current route-only handoff are not fully validated by this slice.
 
 ## Evidence Notes
 
@@ -45,6 +45,7 @@ Top 5 UX risks after re-auditing the corrected rail-enabled `/chat` page:
 - Attempted the mobile first-send path; the UI was blocked by `No LLM provider configured`, so streaming, stop, retry, and final response actions were not revalidated in this pass.
 - Opened the sidepanel chat debug route at 390 x 844 and measured horizontal overflow.
 - Reused existing regression-test evidence for rail wiring and sidepanel full-screen handoff to `/chat`.
+- TASK-531 added focused regression coverage and accessible copy for the sidepanel-to-WebUI handoff contract: it opens `/chat`, carries role-play route intent only where applicable, and keeps sidepanel draft/current-page/unsaved chat state in the sidepanel.
 
 ## First-Time User Walkthrough
 
@@ -55,7 +56,7 @@ Top 5 UX risks after re-auditing the corrected rail-enabled `/chat` page:
 | Handles setup/model requirements | The page shows `No LLM provider configured` with `Open Settings` and `Refresh`, but the rails also show `Ready`, provider `tldw`, model `gpt-4o`, and route `tldw:gpt-4o`. | Confusing and unreliable feedback: the user cannot tell whether setup is incomplete or the selected route is usable. | `first-time-unseeded.png`; `mobile-send-state.png` |
 | Starts first conversation | Composer is reachable in focus and cockpit states. On mobile, the composer remains below the rail panel and no WebUI `/chat` horizontal overflow was observed. | First send could not be completed in the current audit state because provider readiness blocked the path. Exact `Send` role lookup also produced two matches, which makes the action less clear for tests and assistive tech. | `mobile-focus.png`; `mobile-cockpit.png`; `mobile-send-state.png`; `evidence.json` |
 | Understands loading, streaming, errors, response actions | The provider error card is visible and actionable. Streaming, stop, retry, regenerate, and response actions were not revalidated because no message was successfully sent. | The first-run green path remains unproven until provider readiness is made internally consistent or a known working local provider is seeded. | `mobile-send-state.png`; scope limitation |
-| Discovers history/save/resume/context/persona/tools | Cockpit rails expose context and runtime/tool state. Header shows saved-state affordances. Sidepanel starter state includes save-to-history and composer controls. | Discovery exists, but setup failure competes with rail discovery. The sidepanel handoff route is fixed to `/chat`, but state transfer is not proven. | `desktop-cockpit.png`; `extension-sidepanel.png`; sidepanel route tests |
+| Discovers history/save/resume/context/persona/tools | Cockpit rails expose context and runtime/tool state. Header shows saved-state affordances. Sidepanel starter state includes save-to-history and composer controls. | Discovery exists, but setup failure competes with rail discovery. The sidepanel handoff route is fixed to `/chat` and now explicitly states that sidepanel draft/current-page/unsaved chat state stay in the sidepanel. | `desktop-cockpit.png`; `extension-sidepanel.png`; sidepanel route tests |
 
 ## Power-User Walkthrough
 
@@ -66,7 +67,7 @@ Top 5 UX risks after re-auditing the corrected rail-enabled `/chat` page:
 | Uses personas/characters/prompts/RAG/context/tools | Context and runtime rails are back. Runtime panel clearly says no persona or character will shape replies. | The corrected mobile runtime copy is better, but advanced state transitions still need live regression coverage for select/clear and Web search status feedback. | `mobile-cockpit-runtime.png`; prior real-server failures in `evidence.json` |
 | Compares outputs or iterates across settings | Not reached in this corrected pass. | Compare/parallel-output and deep model-settings iteration should stay follow-up scope unless provider readiness becomes the same root blocker. | Scope limitation |
 | Manages long sessions, failures, retries, context limits | Run controls and timeline sections are visible in the runtime rail. | Long-session behavior, context limits, retries, and recovery after provider errors were not exercised. | `mobile-cockpit-runtime.png`; scope limitation |
-| Moves between extension and WebUI | Sidepanel full-screen handoff is covered by focused tests and targets `/chat`. The sidepanel starter UI renders. | Sidepanel has horizontal overflow at 390 px, and route target is the only proven handoff contract. Draft/thread/state preservation is not proven. | `extension-sidepanel.png`; `SidepanelHeaderSimple.fullscreen-route.test.tsx`; `evidence.json` |
+| Moves between extension and WebUI | Sidepanel full-screen handoff is covered by focused tests and targets `/chat`. The sidepanel starter UI renders. TASK-531 makes the route-only handoff explicit in the header and ControlRow affordances. | Sidepanel still has horizontal overflow at 390 px. Draft/thread/state preservation remains out of scope for the current handoff and should not be implied. | `extension-sidepanel.png`; `SidepanelHeaderSimple.fullscreen-route.test.tsx`; `ControlRow.role-play-handoff.test.tsx`; `evidence.json` |
 
 ## Severity-Ranked Findings
 
@@ -79,7 +80,7 @@ Top 5 UX risks after re-auditing the corrected rail-enabled `/chat` page:
 | F5 | P2 | Power user | Prior real-server evidence retained in `evidence.json`: Web search status assertion failed after toggle | Weak feedback: context source state can change without an obvious status-strip confirmation. | Users can send with Web search or context state different from what they believe is active. | Add a composer/status-strip chip for active context sources and keep the real-server Web search status test as a gate. | S | Medium-high |
 | F6 | P2 | Power user | Prior real-server evidence retained in `evidence.json`: model-list scope toggle was not visible | Hard to discover / missing: configured-vs-catalog model scope is not consistently exposed. | Users cannot confidently switch between configured models and broader provider/catalog entries. | Restore the scope toggle or replace it with an explicit segmented control, then update tests to the intended contract. | S | Medium-high |
 | F7 | P2 | Power user; persona/character users | Prior real-server evidence retained in `evidence.json`: character clear state did not settle as expected; plain-chat create returned 422 | Unreliable: assistant/persona state transitions and plain-chat continuity are not proven stable. | Users may believe a persona is cleared when it is not, or hit a failed transition when returning to plain chat. | Unify assistant clear/select state across runtime rail, chat creation payloads, and overlay flows. Add one real-server green path for select, clear, and plain-chat return. | M | Medium |
-| F8 | P2 | Extension handoff | `SidepanelHeaderSimple.fullscreen-route.test.tsx`; `extension-sidepanel.png` | Missing: full-screen route target is proven, but draft/thread/state transfer is not. | Users can move from sidepanel to `/chat` without knowing whether context, draft, or conversation state was preserved. | Define the `/chat` handoff contract: route-only, draft transfer, or thread resume. Show a confirmation or recovery affordance on arrival. | M | Medium |
+| F8 | P3 | Extension handoff | `SidepanelHeaderSimple.fullscreen-route.test.tsx`; `ControlRow.role-play-handoff.test.tsx`; `extension-sidepanel.png` | Weak feedback, addressed in TASK-531: the handoff is route-only, with role-play route intent preserved when applicable; sidepanel draft/current-page/unsaved chat state stay in the sidepanel. | Users now get the contract from the handoff affordance, but richer transfer remains unavailable. | Keep the route-only copy/test guard for this release. Treat draft transfer, current-page context transfer, or thread resume as a larger product/architecture follow-up. | S | High |
 | F9 | P3 | First-time; screen-reader users | Desktop cockpit still contains `No assistant selected` in more than one rail surface; mobile runtime copy now clarifies `No persona or character will shape replies.` | Weak visual hierarchy / inaccessible: repeated empty assistant labels are better than before but still scan-heavy on desktop. | Users hear/read similar empty states without clear priority. | Qualify repeated labels by region, for example `No runtime assistant selected` vs `No assistant attached to context`. | S | Medium |
 | F10 | P3 | Mobile first-time | `mobile-cockpit.png`; `mobile-cockpit-runtime.png`; mobile rail panel and composer do not overlap, but rail panels occupy most of the viewport | Inefficient: mobile cockpit is usable but still dense. | Users can inspect rails, but chat content and composer context are visually compressed. | Keep cockpit available, but default mobile first-run to focus mode with a compact rail summary and explicit `Open cockpit` affordance. | S | Medium |
 
@@ -96,7 +97,7 @@ Top 5 UX risks after re-auditing the corrected rail-enabled `/chat` page:
 
 - Define a first-run `/chat` readiness model: no provider, provider configured, model selected, ready to send, streaming, errored, recoverable.
 - Build one real-server green-path suite for `/chat`: configured provider, first send, streaming/stop/retry, Web search toggle, model switch, assistant select/clear, and sidepanel full-screen entry.
-- Define extension-to-WebUI handoff semantics beyond URL target: route-only, draft transfer, current page context transfer, or conversation resume.
+- Preserve the explicit route-only extension-to-WebUI handoff contract and decide later whether draft transfer, current-page context transfer, or conversation resume is worth the architecture work.
 - Simplify mobile cockpit information architecture so focus mode is the default working mode and cockpit mode is the inspection/configuration mode.
 - Unify persona/assistant state ownership so runtime rail, context rail, overlays, and chat create payloads cannot disagree.
 
@@ -116,11 +117,11 @@ Power user:
 2. Switch provider/model scope with a visible configured/catalog control and immediate readiness feedback.
 3. Toggle context sources, RAG, tools, and Web search with status-strip confirmation before sending.
 4. Select, clear, or swap assistants/personas with a deterministic runtime rail state.
-5. Move from sidepanel to WebUI `/chat` with an explicit statement of what carried over: route only, draft, page context, or conversation.
+5. Move from sidepanel to WebUI `/chat` with an explicit statement that the current release carries route intent only; sidepanel draft, page context, and unsaved state remain in the sidepanel.
 
 ## Open Questions, Assumptions, And Non-Goals
 
-- Open question: Should sidepanel-to-WebUI handoff preserve draft/context/thread state, or is URL routing to `/chat` sufficient for this release?
+- Assumption: Sidepanel-to-WebUI handoff is route-only for this release. Draft/context/thread transfer would be a separate product and storage-contract decision.
 - Open question: Should mobile `/chat` default to focus mode for first-time users even when cockpit rails are available?
 - Open question: Which provider/model should the local default use when `tldw:gpt-4o` appears selected but no provider is configured?
 - Assumption: The current provider-readiness mismatch is a frontend state/contract problem until proven otherwise by backend config evidence.
