@@ -32,7 +32,7 @@ Why the 8 KB field limit did not increase:
 
 ## Extension Selected-Text Capture
 
-Use this path when you find useful passages while browsing and want to save editable basic flashcards, generate a small draft batch without leaving the sidepanel, or send selected text directly to full Flashcards generation.
+Use this path when you find useful passages while browsing and want to save editable flashcards, generate a small draft batch without leaving the sidepanel, apply existing templates to drafts, or send selected text directly to full Flashcards generation.
 
 Workflow:
 
@@ -40,17 +40,19 @@ Workflow:
 2. Open the extension sidepanel and choose `Flashcards`.
 3. Choose `Capture page selection` to add the selection to the sidepanel draft queue.
 4. Choose `Generate draft cards` to generate a small editable draft batch in the sidepanel from the selected text.
-5. Select a deck, edit each draft's `Front` and `Back`, then choose `Save card` or `Save all`.
-6. Choose `Generate from selection` to open full Flashcards generation with the selected text and source page context.
-7. Use `Open full Flashcards` for imports, templates, review, or broader deck management.
+5. Choose `Apply template` on a queued draft when an existing template should fill or reshape the card fields before saving.
+6. Select a deck, edit each draft's `Front` and `Back`, then choose `Save card` or `Save all`.
+7. Choose `Generate from selection` to open full Flashcards generation with the selected text and source page context.
+8. Use `Open full Flashcards` for imports, review, or broader deck management.
 
 Important behavior:
 
 - The sidepanel Flashcards route saves queued captured and generated drafts and keeps the source page URL as provenance.
+- `Apply template` uses templates from full Flashcards and can be applied per draft before saving.
 - Create the deck in full Flashcards first if the sidepanel shows no deck options.
 - The browser context menu path still works: choose `tldw` -> `Save` -> `Save to Notes`, review the selection in the sidepanel dialog, then choose `Generate flashcards`.
 - Use `Generate from selection`, the context-menu path, or full Web UI `/flashcards` -> `Create & Import` -> `Generate` when you want the fuller generation workflow instead of the sidepanel's compact generated draft batch.
-- Native sidepanel template application and in-sidepanel review remain deferred to the full Flashcards workspace.
+- In-sidepanel review remains deferred to the full Flashcards workspace.
 - If the sidepanel cannot capture on the current site, use full Web UI `/flashcards` and paste text into `Create & Import`.
 
 ## Study Assistant Conflict Recovery
