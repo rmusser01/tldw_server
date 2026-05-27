@@ -13,6 +13,7 @@ type NotesListPanelEmptyStatesProps = {
   errorMessage?: string | null
   onOpenSettings: () => void
   onOpenHealth: () => void
+  onCreateNote: () => void
   onResetEditor: () => void
   onRetry?: () => void
   onClearFilters?: () => void
@@ -25,6 +26,7 @@ const NotesListPanelEmptyStates: React.FC<NotesListPanelEmptyStatesProps> = ({
   errorMessage,
   onOpenSettings,
   onOpenHealth,
+  onCreateNote,
   onResetEditor,
   onRetry,
   onClearFilters,
@@ -303,7 +305,7 @@ const NotesListPanelEmptyStates: React.FC<NotesListPanelEmptyStatesProps> = ({
         : t('option:notesEmpty.primaryCta', {
             defaultValue: 'Create note'
           })}
-      onPrimaryAction={onResetEditor}
+      onPrimaryAction={isTrashView ? onResetEditor : onCreateNote}
     />
   )
 }

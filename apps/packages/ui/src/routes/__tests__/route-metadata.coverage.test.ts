@@ -131,6 +131,17 @@ describe("route metadata coverage", () => {
     expect(getRouteMetadata("/workspace-playground")).toBeUndefined()
   })
 
+  it("labels /notes as the primary Notes workspace destination", () => {
+    expect(getRouteMetadata("/notes")).toMatchObject({
+      path: "/notes",
+      canonicalPath: "/notes",
+      label: "Notes",
+      group: "media_library",
+      nav: "primary",
+      commandPalette: "show"
+    })
+  })
+
   it("exposes command palette routes through metadata-owned targets", () => {
     const commandPalettePaths = getCommandPaletteRoutes().map(
       (metadata) => metadata.path

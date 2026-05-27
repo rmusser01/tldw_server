@@ -105,6 +105,7 @@ type NotesListPanelProps = {
   onToggleBulkSelection?: (id: string | number, checked: boolean, shiftKey: boolean) => void
   onTogglePinned?: (id: string | number) => void
   onChangePage: (page: number, pageSize: number) => void
+  onCreateNote: () => void
   onResetEditor: () => void
   onRetry?: () => void
   onClearFilters?: () => void
@@ -149,6 +150,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onToggleBulkSelection,
   onTogglePinned,
   onChangePage,
+  onCreateNote,
   onResetEditor,
   onRetry,
   onClearFilters,
@@ -235,6 +237,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
         errorMessage={errorMessage}
         onOpenSettings={onOpenSettings}
         onOpenHealth={onOpenHealth}
+        onCreateNote={onCreateNote}
         onResetEditor={onResetEditor}
         onRetry={onRetry}
         onClearFilters={onClearFilters}

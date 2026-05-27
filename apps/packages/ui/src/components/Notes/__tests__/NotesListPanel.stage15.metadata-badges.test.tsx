@@ -66,6 +66,7 @@ describe("NotesListPanel stage 15 metadata badges", () => {
         selectedId={null}
         onSelectNote={vi.fn()}
         onChangePage={vi.fn()}
+        onCreateNote={vi.fn()}
         onResetEditor={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenHealth={vi.fn()}

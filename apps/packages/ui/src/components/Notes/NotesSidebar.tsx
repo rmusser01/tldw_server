@@ -1176,6 +1176,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 }}
                 onRetry={retryList}
                 onClearFilters={handleClearFilters}
+                onCreateNote={() => {
+                  void handleNewNote()
+                }}
                 onResetEditor={() => {
                   if (listMode === 'trash') {
                     void switchListMode('active')
