@@ -94,7 +94,7 @@ export const SidepanelHeaderSimple = ({
   }, [activeTitle, draftTitle, onRenameTitle])
 
   const openFullScreen = React.useCallback(() => {
-    const url = browser.runtime.getURL("/options.html#/")
+    const url = browser.runtime.getURL("/options.html#/chat")
     const showFailure = () => {
       notification.error({
         message: t(

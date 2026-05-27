@@ -1,0 +1,65 @@
+// @vitest-environment jsdom
+import React from "react"
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
+
+const browserMocks = vi.hoisted(() => ({
+  createTab: vi.fn(() => Promise.resolve({ id: 1 })),
+  getURL: vi.fn((path: string) => `chrome-extension://tldw${path}`)
+}))
+
+vi.mock("wxt/browser", () => ({
+  browser: {
+    runtime: { getURL: browserMocks.getURL },
+    tabs: { create: browserMocks.createTab }
+  }
+}))
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string) => fallback || _key
+  })
+}))
+
+vi.mock("antd", () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
+}))
+
+vi.mock("@/hooks/useMessage", () => ({
+  useMessage: () => ({ temporaryChat: false })
+}))
+
+vi.mock("@/hooks/useAntdNotification", () => ({
+  useAntdNotification: () => ({ error: vi.fn() })
+}))
+
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => ({ capabilities: { hasPersona: false } })
+}))
+
+vi.mock("../TtsClipsDrawer", () => ({
+  TtsClipsDrawer: () => <div data-testid="tts-clips-drawer" />
+}))
+
+import { SidepanelHeaderSimple } from "../SidepanelHeaderSimple"
+
+describe("SidepanelHeaderSimple full-screen route", () => {
+  it("opens the rail-enabled full app chat route", async () => {
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <SidepanelHeaderSimple activeTitle="Sidepanel chat" />
+      </MemoryRouter>
+    )
+
+    await user.click(screen.getByTestId("chat-open-full-screen"))
+
+    expect(browserMocks.getURL).toHaveBeenCalledWith("/options.html#/chat")
+    expect(browserMocks.createTab).toHaveBeenCalledWith({
+      url: "chrome-extension://tldw/options.html#/chat"
+    })
+  })
+})

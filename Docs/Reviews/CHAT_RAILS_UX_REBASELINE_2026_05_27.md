@@ -44,6 +44,13 @@ apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeIns
 - Evidence JSON: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/evidence.json` records `backendAvailable: true`, the sandbox curl failure, the escalated real-server run result, manual browser capture details, and captured viewport metrics.
 - Screenshot artifacts: captured at `desktop-cockpit.png`, `desktop-focus.png`, `mobile-focus.png`, and `mobile-cockpit.png`.
 
+## Task 4 Evidence Status
+
+- Pre-fix focused regression: `bunx vitest run src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx` failed because `browser.runtime.getURL` was called with `/options.html#/` instead of `/options.html#/chat`.
+- Fix: `apps/packages/ui/src/components/Sidepanel/Chat/SidepanelHeaderSimple.tsx` now routes the sidepanel full-screen action to `browser.runtime.getURL("/options.html#/chat")`.
+- Verification: `bunx vitest run src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.tts-clips-lazy-mount.test.ts` passed with 2 test files and 2 tests.
+- Scope note: dashboard route cleanup remains outside this Task 4 fix. The existing dashboard button still targets `/options.html#/flashcards` and needs separate audit evidence before any change.
+
 ## Prior Finding Reclassification
 
 | ID | Prior finding | Current route/viewport | Classification | Evidence | Severity | First-plan eligible |
@@ -56,7 +63,7 @@ apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeIns
 | C6 | Compare disabled without reason | | | | | |
 | C7 | Character/persona timeline ambiguity | | | | | |
 | C8 | Search & Context preview opacity | | | | | |
-| C9 | Extension full-screen/dashboard handoff | | | | | |
+| C9 | Extension full-screen/dashboard handoff | Extension sidepanel full-screen button | Still reproduced before Task 4: the full-screen action generated `/options.html#/`, landing at the options root instead of `/chat`. Fixed by Task 4: focused component coverage now proves the action opens `/options.html#/chat`. Dashboard route cleanup is not part of this immediate fix and remains separately unaudited. | `apps/packages/ui/src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx`; `apps/packages/ui/src/components/Sidepanel/Chat/SidepanelHeaderSimple.tsx`; focused Vitest command in Task 4 Evidence Status | Fixed for full-screen handoff; dashboard portion remains unclassified pending separate audit | No for full-screen handoff; dashboard cleanup requires separate scope |
 | C10 | Duplicate accessible sidebar labels | | | | | |
 
 ## Refreshed Findings
@@ -69,4 +76,4 @@ apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeIns
 - Observed behavior: Source-level cockpit rail wiring was already covered by Task 2. Task 3 hardened the real-server spec so future successful runs assert no horizontal overflow at desktop initial cockpit, desktop focus, desktop return-to-cockpit, mobile initial focus, mobile cockpit context/runtime panels, mobile return-to-focus, and mobile return-to-cockpit. Manual browser capture confirmed no horizontal overflow in the four required audit states.
 - First-pass cockpit rail classification: Cockpit rail presence is restored/available on the proper `origin/dev`-based `/chat` page. Desktop cockpit, desktop focus, mobile focus, and mobile cockpit screenshots now exist in the review asset directory.
 - Limitations: The full real-server Playwright suite still has four non-rail baseline failures and should not be reported as fully passing. Agent-side sandboxed curl still fails without approved localhost access.
-- Non-goals: No product UI changes, backend setup, dependency installation, or screenshot fabrication in this Task 3 slice.
+- Non-goals: No product UI changes, backend setup, dependency installation, or screenshot fabrication in the Task 3 slice. Task 4 does not change the `/flashcards` dashboard route; that cleanup remains separate unless later evidence confirms it belongs in a follow-up fix.
