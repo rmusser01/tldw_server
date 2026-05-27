@@ -14,6 +14,8 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-05-27-chat-rails-ux-rebaseline-design.md
 - Docs/superpowers/plans/2026-05-27-chat-rails-ux-rebaseline-implementation-plan.md
+- Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md
+- Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/README.md
 ---
 
 ## Description
@@ -40,6 +42,38 @@ Approved design moved to implementation planning. Plan prioritizes rail restorat
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan review approved after fixing the SidepanelHeaderSimple Vitest hoisting snippet. This is a non-code planning task; Bandit is not applicable.
+
+Task 1 provenance (2026-05-27):
+
+```text
+$ pwd
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-rails-ux-rebaseline
+
+$ git branch --show-current
+codex/chat-rails-ux-rebaseline
+
+$ git rev-parse --short HEAD
+69a80b4b5
+
+$ git rev-parse --short origin/dev
+efe42fe0c
+
+$ git merge-base --is-ancestor origin/dev HEAD
+# no stdout
+exit status: 0
+
+$ git ls-files apps/packages/ui/src/components/Option/Playground | rg 'Cockpit|Rail|Inspector|CharacterControl'
+apps/packages/ui/src/components/Option/Playground/CharacterControlRail.tsx
+apps/packages/ui/src/components/Option/Playground/PlaygroundCockpitShell.tsx
+apps/packages/ui/src/components/Option/Playground/PlaygroundContextRail.tsx
+apps/packages/ui/src/components/Option/Playground/PlaygroundRailSection.tsx
+apps/packages/ui/src/components/Option/Playground/PlaygroundRuntimeInspector.tsx
+apps/packages/ui/src/components/Option/Playground/__tests__/CharacterControlRail.test.tsx
+apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx
+apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx
+```
+
+Audit artifact path: `Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md`; evidence directory README: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/README.md`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
