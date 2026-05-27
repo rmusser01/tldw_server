@@ -524,7 +524,9 @@ git commit -m "fix(chat): open sidepanel full screen to chat"
 - Modify: `Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md`
 - Add/update artifacts under: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/`
 
-- [ ] **Step 1: Re-run desktop first-time journey**
+Completion note: this task records each requested subflow as either directly observed or explicitly not revalidated with the blocking evidence. The full real-server cockpit suite still has non-rail baseline failures, so the refreshed audit must not claim green-path coverage for first-send/streaming, retry, prompt picker, long sessions, or compare/export/share unless those flows are separately rerun and pass.
+
+- [x] **Step 1: Re-run desktop first-time journey**
 
 Use the browser on `/chat` at desktop width. Record:
 
@@ -539,7 +541,9 @@ Required viewport and artifact:
 - `1440x960`
 - `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-cockpit.png`
 
-- [ ] **Step 2: Re-run desktop power-user journey**
+Status: completed as an evidence-limited rebaseline. Rails, focus reachability, readiness, composer reachability, and discoverability were recorded. First-send, streaming, stop, queue, retry, and save/title were recorded as not newly revalidated because the live cockpit suite is blocked by captured non-rail baseline failures.
+
+- [x] **Step 2: Re-run desktop power-user journey**
 
 Record:
 
@@ -555,7 +559,9 @@ Required artifact:
 
 - `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-focus.png`
 
-- [ ] **Step 3: Re-run mobile journey**
+Status: completed as an evidence-limited rebaseline. Model/provider, context/runtime, character, and focus/cockpit observations were recorded. Prompt picker, history/sidebar, long-session controls, and compare/export/share were recorded as not newly revalidated in this slice.
+
+- [x] **Step 3: Re-run mobile journey**
 
 At `390x844`, record:
 
@@ -572,7 +578,7 @@ Required viewport and artifacts:
 - `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-focus.png`
 - `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit.png`
 
-- [ ] **Step 4: Re-run extension handoff journey**
+- [x] **Step 4: Re-run extension handoff journey**
 
 Use `http://localhost:<port>/__debug__/sidepanel-chat` when the packaged extension is not being driven directly. Record:
 
@@ -603,7 +609,7 @@ bunx playwright screenshot \
 
 Expected: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel.png` exists. If the packaged extension is used instead, record the browser/profile and save the screenshot to the same path.
 
-- [ ] **Step 5: Fill all audit tables**
+- [x] **Step 5: Fill all audit tables**
 
 Every finding must include:
 

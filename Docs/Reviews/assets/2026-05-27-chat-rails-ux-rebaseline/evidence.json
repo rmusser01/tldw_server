@@ -1,9 +1,12 @@
 {
   "worktree": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-rails-ux-rebaseline",
   "branch": "codex/chat-rails-ux-rebaseline",
-  "head": "122f3af64",
+  "task3EvidenceHead": "122f3af64",
+  "task5PreCommitHead": "c5e20d4dd",
   "originDevAtBaseline": "efe42fe0c",
   "originDevAtManualCapture": "70a230aad",
+  "localOriginDevAtTask5Review": "64c27d18b",
+  "task5ReviewMergeBaseIsAncestorExitCode": 1,
   "mergeBaseIsAncestorExitCode": 0,
   "backend": "http://127.0.0.1:8000",
   "webui": "http://localhost:18014",
@@ -74,6 +77,54 @@
       "selectedModel": "tldw:gpt-4o"
     },
     "result": "Captured all required /chat rail screenshots and measured no horizontal overflow in desktop cockpit, desktop focus, mobile focus, and mobile cockpit states."
+  },
+  "extensionSidepanelCapture": {
+    "status": "captured_with_debug_route_limitations",
+    "tool": "Playwright browser automation against the manually started Next dev server",
+    "route": "http://127.0.0.1:18014/__debug__/sidepanel-chat?nextgenComposer=1",
+    "viewport": "390x844",
+    "screenshotDimensions": "390x1139 full-page PNG from 390x844 viewport",
+    "configSeeded": {
+      "serverUrl": "http://127.0.0.1:8000",
+      "authMode": "single-user",
+      "apiKey": "THIS-IS-A-SECURE-KEY-123-FAKE-KEY",
+      "demoModeForced": true,
+      "nextgenComposer": true
+    },
+    "rawScreenshotCommandResult": "A plain bunx playwright screenshot of /__debug__/sidepanel-chat without auth/config seeding produced an all-background/setup-gated capture, so the committed evidence uses the same seeded debug-route pattern as the sidepanel smoke tests.",
+    "result": "Captured the sidepanel chat starter state with header actions, connected/demo status, starter prompts, save-history toggle, composer controls, and no horizontal overflow.",
+    "metrics": {
+      "innerWidth": 390,
+      "docScrollWidth": 390,
+      "bodyScrollWidth": 390,
+      "horizontalOverflow": false
+    },
+    "visibleTestIds": [
+      "chat-header-sidebar-toggle",
+      "chat-toggle-shortcuts",
+      "chat-header-notifications-bell",
+      "chat-header-theme-toggle",
+      "chat-workspace",
+      "chat-main",
+      "chat-header",
+      "status-dot",
+      "status-dot-badge",
+      "chat-open-tts-clips",
+      "chat-open-persona",
+      "chat-open-dashboard",
+      "chat-open-full-screen",
+      "chat-dropzone",
+      "chat-messages",
+      "chat-empty-connected",
+      "chat-suggestion-1",
+      "chat-suggestion-2",
+      "chat-suggestion-3",
+      "nextgen-composer-wrapper",
+      "v1-textarea-region",
+      "chat-input",
+      "v1-bottom-bar",
+      "chat-character-controls-trigger"
+    ]
   },
   "focusedStaticPlaywright": {
     "requiredCommand": "cd apps/tldw-frontend && bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep \"normalizes configured provider model IDs|does not intercept backend routes\"",
@@ -163,6 +214,10 @@
     {
       "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit.png",
       "status": "captured"
+    },
+    {
+      "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel.png",
+      "status": "captured_with_seeded_debug_route"
     }
   ]
 }
