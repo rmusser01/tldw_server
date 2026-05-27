@@ -35,11 +35,11 @@ from tldw_Server_API.app.services.shutdown_transport_registry import (
     register_shutdown_transport_family,
 )
 
-from .auth.authnz_rbac import get_rbac_policy
 from .auth.jwt_manager import JWTManager, get_jwt_manager
-from .auth.rate_limiter import RateLimitExceeded, get_rate_limiter
+from .auth.rate_limiter import RateLimitExceeded
+from .adapters.tldw_runtime import build_default_runtime_dependencies
 from .config import get_config, validate_config
-from .modules.registry import get_module_registry
+from .interfaces.runtime import MCPRuntimeDependencies
 from .monitoring.metrics import get_metrics_collector
 from .protocol import MCPProtocol, MCPRequest, MCPResponse, RequestContext
 from .security.ip_filter import get_ip_access_controller
@@ -239,13 +239,14 @@ class MCPServer:
     - Metrics collection
     """
 
-    def __init__(self):
+    def __init__(self, dependencies: MCPRuntimeDependencies | None = None):
+        self.dependencies = dependencies or build_default_runtime_dependencies()
         self.config = get_config()
-        self.protocol = MCPProtocol()
-        self.module_registry = get_module_registry()
+        self.protocol = MCPProtocol(dependencies=self.dependencies)
+        self.module_registry = self.dependencies.module_registry
         self.jwt_manager = _JWTManagerProxy(get_jwt_manager())
-        self.rbac_policy = get_rbac_policy()
-        self.rate_limiter = get_rate_limiter()
+        self.rbac_policy = self.dependencies.rbac_policy
+        self.rate_limiter = self.dependencies.rate_limiter
         self._ws_auth_required_initial = self.config.ws_auth_required
 
         # Connection management
@@ -272,6 +273,12 @@ class MCPServer:
         )
 
         logger.info("MCP Server created")
+
+    def _resolve_user_db_paths(self, user_id: Optional[str]) -> dict[str, str]:
+        try:
+            return self.dependencies.database_path_resolver.resolve_user_db_paths(user_id)
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            return {}
 
     def get_active_connection_count(self) -> int:
         return len(self.connections)
@@ -1203,7 +1210,8 @@ class MCPServer:
                 user_id=connection.user_id,
                 client_id=connection.client_id,
                 session_id=connection.session_id,
-                metadata=context_metadata
+                metadata=context_metadata,
+                db_paths=self._resolve_user_db_paths(connection.user_id),
             )
 
             # Process MCP request (supports single, notification, and batch)
@@ -1339,7 +1347,8 @@ class MCPServer:
             user_id=user_id,
             client_id=client_id,
             session_id=session_id,
-            metadata=metadata_map
+            metadata=metadata_map,
+            db_paths=self._resolve_user_db_paths(user_id),
         )
 
         # Process request
@@ -1437,7 +1446,8 @@ class MCPServer:
             user_id=user_id,
             client_id=client_id,
             session_id=session_id,
-            metadata=metadata_map
+            metadata=metadata_map,
+            db_paths=self._resolve_user_db_paths(user_id),
         )
 
         # Process batch request

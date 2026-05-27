@@ -65,7 +65,7 @@ Do not modify:
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py`
 
-- [ ] **Step 1: Write failing import-boundary tests**
+- [x] **Step 1: Write failing import-boundary tests**
 
 Add tests that describe the intended Stage 1 contract before implementation.
 
@@ -138,7 +138,7 @@ def test_protocol_instances_do_not_share_prepared_call_secrets() -> None:
     assert first._prepared_call_secret != second._prepared_call_secret  # noqa: SLF001
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -148,7 +148,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unifi
 
 Expected: failures for missing `interfaces`, missing `adapters.tldw_runtime`, and unsupported `dependencies=` constructor arguments.
 
-- [ ] **Step 3: Commit only the failing tests if using strict TDD checkpoints**
+- [x] **Step 3: Commit only the failing tests if using strict TDD checkpoints**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py
@@ -168,7 +168,7 @@ If the team prefers one commit per complete task, leave this unstaged until Task
 - Create: `tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py`
 - Create: `tldw_Server_API/app/core/MCP_unified/adapters/tldw_policy.py`
 
-- [ ] **Step 1: Create runtime interfaces**
+- [x] **Step 1: Create runtime interfaces**
 
 Create `interfaces/runtime.py` with small protocols and dataclasses. Keep this file free of `tldw_Server_API` imports. The contracts should describe only behavior used by MCP Unified in this slice; do not mirror the full host service APIs.
 
@@ -226,7 +226,7 @@ class MCPRuntimeDependencies:
     circuit_breaker_factory: CircuitBreakerFactory
 ```
 
-- [ ] **Step 2: Create policy interfaces**
+- [x] **Step 2: Create policy interfaces**
 
 Create `interfaces/policy.py`.
 
@@ -278,7 +278,7 @@ class ExternalAccessEvaluator(Protocol):
     ) -> dict[str, Any]: ...
 ```
 
-- [ ] **Step 3: Create storage interfaces**
+- [x] **Step 3: Create storage interfaces**
 
 Create `interfaces/storage.py`.
 
@@ -300,7 +300,7 @@ class AuditStore(Protocol):
     async def append_event(self, event: dict[str, Any]) -> None: ...
 ```
 
-- [ ] **Step 4: Export interfaces**
+- [x] **Step 4: Export interfaces**
 
 Create `interfaces/__init__.py`.
 
@@ -321,7 +321,7 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 5: Create default runtime adapters**
+- [x] **Step 5: Create default runtime adapters**
 
 Create `adapters/tldw_runtime.py`. This file may import `tldw_Server_API`; it is the host adapter.
 
@@ -395,7 +395,7 @@ def build_default_runtime_dependencies() -> MCPRuntimeDependencies:
     )
 ```
 
-- [ ] **Step 6: Create default policy adapters**
+- [x] **Step 6: Create default policy adapters**
 
 Create `adapters/tldw_policy.py` with thin wrappers around the existing MCP Hub services. Do not change behavior yet.
 
@@ -449,7 +449,7 @@ class TldwExternalAccessEvaluator:
 
 These wrapper names intentionally match the current service APIs used by `protocol.py`: `McpHubPolicyResolver.resolve_for_context`, `McpHubApprovalService.evaluate_tool_call`, `McpHubPathEnforcementService.evaluate_tool_call`, and `McpHubExternalAccessResolver.resolve_for_sources`.
 
-- [ ] **Step 7: Export adapters**
+- [x] **Step 7: Export adapters**
 
 Create `adapters/__init__.py`.
 
@@ -459,7 +459,7 @@ from .tldw_runtime import build_default_runtime_dependencies
 __all__ = ["build_default_runtime_dependencies"]
 ```
 
-- [ ] **Step 8: Run boundary test**
+- [x] **Step 8: Run boundary test**
 
 Run:
 
@@ -476,7 +476,7 @@ Expected: PASS.
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py`
 
-- [ ] **Step 1: Update `MCPProtocol.__init__`**
+- [x] **Step 1: Update `MCPProtocol.__init__`**
 
 Change constructor to accept optional dependencies while preserving current default behavior.
 
@@ -495,7 +495,7 @@ class MCPProtocol:
         ...
 ```
 
-- [ ] **Step 2: Move DB path resolution through dependency**
+- [x] **Step 2: Move DB path resolution through dependency**
 
 In `RequestContext`, avoid direct `DatabasePaths` import by accepting optional `db_paths` or a resolver call from `MCPProtocol` context construction.
 
@@ -510,11 +510,11 @@ class RequestContext:
 
 Then update protocol/server call sites that create `RequestContext` to pass `dependencies.database_path_resolver.resolve_user_db_paths(user_id)` where available.
 
-- [ ] **Step 3: Move API key scope normalization through dependency**
+- [x] **Step 3: Move API key scope normalization through dependency**
 
 Replace direct imports of `normalize_scope` in `protocol.py` with `self.dependencies.api_key_scope_normalizer.normalize(raw)`.
 
-- [ ] **Step 4: Move MCP Hub policy service lookups through dependency**
+- [x] **Step 4: Move MCP Hub policy service lookups through dependency**
 
 Replace direct imports in:
 
@@ -540,11 +540,11 @@ external_access = await self.dependencies.external_access_evaluator.resolve_for_
 
 Keep the existing fail-closed fallback behavior in each method. If an adapter raises where the old direct service lookup raised, the returned reasons must remain `policy_resolution_failed`, `approval_unavailable`, `path_scope_unavailable`, or `external_access_unavailable` as today.
 
-- [ ] **Step 5: Move Redis idempotency factory behind dependency or constructor**
+- [x] **Step 5: Move Redis idempotency factory behind dependency or constructor**
 
 If changing `IdempotencyManager` is low risk, allow it to accept `redis_client_factory`. If that is too broad for this slice, leave direct Redis wiring in place and record it in the module ownership inventory as remaining extraction debt.
 
-- [ ] **Step 6: Run extraction contract tests**
+- [x] **Step 6: Run extraction contract tests**
 
 Run:
 
@@ -554,7 +554,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unifi
 
 Expected: PASS.
 
-- [ ] **Step 7: Run policy compatibility tests**
+- [x] **Step 7: Run policy compatibility tests**
 
 Run:
 

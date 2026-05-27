@@ -38,12 +38,12 @@ from tldw_Server_API.app.core.Infrastructure.redis_factory import create_async_r
 from tldw_Server_API.app.core.Metrics.telemetry import get_telemetry_manager
 from tldw_Server_API.app.core.testing import is_truthy
 
-from .auth.authnz_rbac import Action, Resource, get_rbac_policy
-from .auth.rate_limiter import RateLimitExceeded, get_rate_limiter
+from .auth.authnz_rbac import Action, Resource
+from .auth.rate_limiter import RateLimitExceeded
+from .adapters.tldw_runtime import build_default_runtime_dependencies
 from .config import get_config
+from .interfaces.runtime import MCPRuntimeDependencies
 from .modules.base import BaseModule
-from .modules.registry import get_module_registry
-from .monitoring.metrics import get_metrics_collector
 
 try:  # pragma: no cover - optional dependency
     from redis.exceptions import RedisError
@@ -179,7 +179,8 @@ class RequestContext:
         user_id: Optional[str] = None,
         client_id: Optional[str] = None,
         session_id: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None,
+        db_paths: Optional[dict[str, str]] = None,
     ):
         self.request_id = request_id
         self.user_id = user_id
@@ -188,18 +189,10 @@ class RequestContext:
         self.metadata = metadata or {}
         self.start_time = datetime.now(timezone.utc)
         # Derive per-user db paths (read-only) if possible
-        self.db_paths: dict[str, str] = {}
-        try:
-            if self.user_id is not None:
-                # Attempt to parse an integer user id (expected by DatabasePaths)
-                uid_int = int(str(self.user_id))
-                from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-                paths = DatabasePaths.get_all_user_db_paths(uid_int)
-                # Convert Paths to strings for downstream use
-                self.db_paths = {k: str(v) for k, v in paths.items()}
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as _e:
-            # Non-fatal: leave db_paths empty when user id is not numeric or any failure occurs
-            pass
+        if db_paths is not None:
+            self.db_paths = dict(db_paths)
+        else:
+            self.db_paths = self._derive_default_db_paths(user_id)
         # Build a bound logger for this request
         self.logger = logger.bind(
             request_id=request_id,
@@ -207,6 +200,18 @@ class RequestContext:
             client_id=client_id,
             session_id=session_id,
         )
+
+    @staticmethod
+    def _derive_default_db_paths(user_id: Optional[str]) -> dict[str, str]:
+        """Preserve legacy RequestContext construction through the host adapter."""
+        if user_id is None:
+            return {}
+        try:
+            from .adapters.tldw_runtime import TldwDatabasePathResolver
+
+            return TldwDatabasePathResolver().resolve_user_db_paths(user_id)
+        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+            return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,7 +235,7 @@ class PreparedToolCall:
 class IdempotencyManager:
     """Idempotency manager with Redis backing and local lock fallback."""
 
-    def __init__(self) -> None:
+    def __init__(self, redis_client_factory: Optional[Callable[..., Any]] = None) -> None:
         self._local_cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
         self._local_bindings: OrderedDict[str, tuple[float, str]] = OrderedDict()
         self._local_locks: dict[str, asyncio.Lock] = {}
@@ -239,6 +244,7 @@ class IdempotencyManager:
         self._redis_ready = False
         self._redis_attempted = False
         self._redis_guard = asyncio.Lock()
+        self._redis_client_factory = redis_client_factory or create_async_redis_client
 
     def _prune_local_locks(self) -> None:
         """Drop stale local locks once their cache/binding entries are gone."""
@@ -266,7 +272,7 @@ class IdempotencyManager:
                 return False
             url = params.pop("url", None)
             try:
-                self._redis_client = await create_async_redis_client(
+                self._redis_client = await self._redis_client_factory(
                     preferred_url=url,
                     decode_responses=True,
                     fallback_to_fake=False,
@@ -530,16 +536,20 @@ class MCPProtocol:
     - Request tracing
     """
 
-    def __init__(self):
-        self.module_registry = get_module_registry()
-        self.rbac_policy = get_rbac_policy()
-        self.rate_limiter = get_rate_limiter()
+    def __init__(self, dependencies: MCPRuntimeDependencies | None = None):
+        self._uses_default_telemetry_manager = dependencies is None
+        self.dependencies = dependencies or build_default_runtime_dependencies()
+        self.module_registry = self.dependencies.module_registry
+        self.rbac_policy = self.dependencies.rbac_policy
+        self.rate_limiter = self.dependencies.rate_limiter
         self.protocol_version = "2024-11-05"
-        self.metrics = get_metrics_collector()
+        self.metrics = self.dependencies.metrics_collector
         # Strict tool name validation regex
         self._tool_name_re = re.compile(r'^[A-Za-z0-9_.:-]{1,100}$')
         # Idempotency manager for write-capable tools
-        self._idempotency = IdempotencyManager()
+        self._idempotency = IdempotencyManager(
+            redis_client_factory=self.dependencies.redis_client_factory,
+        )
         # Integrity secret for prepared tool call execution
         self._prepared_call_secret = secrets.token_bytes(32)
         # Governance preflight state
@@ -568,7 +578,9 @@ class MCPProtocol:
     def telemetry(self):
         """Always return the *current* global telemetry manager so that a
         shutdown/re-init cycle is picked up automatically."""
-        return get_telemetry_manager()
+        if self._uses_default_telemetry_manager:
+            return get_telemetry_manager()
+        return self.dependencies.telemetry_provider
 
     async def _rbac_check(self, user_id: Optional[str], resource: Resource, action: Action, resource_id: Optional[str] = None) -> bool:
         if not user_id:
@@ -613,21 +625,34 @@ class MCPProtocol:
         if raw is None:
             return None
         try:
-            from tldw_Server_API.app.core.AuthNZ.api_key_manager import normalize_scope
+            return set(self.dependencies.api_key_scope_normalizer.normalize(raw))
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            normalize_scope = None  # type: ignore
-
-        if normalize_scope is not None:
-            try:
-                return set(normalize_scope(raw))
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                pass
+            pass
 
         if isinstance(raw, str):
-            return {raw.strip().lower()} if raw.strip() else set()
-        if isinstance(raw, list):
+            stripped = raw.strip()
+            if stripped.startswith("["):
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    if isinstance(parsed, list):
+                        return {
+                            item.strip().lower()
+                            for item in parsed
+                            if isinstance(item, str) and item.strip()
+                        }
+            return {stripped.lower()} if stripped else set()
+        if isinstance(raw, (list, tuple, set)):
             return {str(item).strip().lower() for item in raw if str(item).strip()}
         return set()
+
+    def _resolve_user_db_paths(self, user_id: Optional[str]) -> dict[str, str]:
+        try:
+            return self.dependencies.database_path_resolver.resolve_user_db_paths(user_id)
+        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+            return {}
 
     def _api_key_scope_level(self, context: RequestContext) -> Optional[str]:
         scopes = self._api_key_scopes(context)
@@ -1226,7 +1251,8 @@ class MCPProtocol:
         if context is None:
             context = RequestContext(
                 request_id=str(uuid.uuid4()),
-                client_id="unknown"
+                client_id="unknown",
+                db_paths=self._resolve_user_db_paths(None),
             )
 
         # Bound logger for this request
@@ -1936,12 +1962,7 @@ class MCPProtocol:
         if isinstance(cached, dict):
             return cached
         try:
-            from tldw_Server_API.app.services.mcp_hub_policy_resolver import (
-                get_mcp_hub_policy_resolver,
-            )
-
-            resolver = await get_mcp_hub_policy_resolver()
-            policy = await resolver.resolve_for_context(
+            policy = await self.dependencies.effective_policy_resolver.resolve_for_context(
                 user_id=context.user_id,
                 metadata=metadata,
             )
@@ -2005,12 +2026,7 @@ class MCPProtocol:
         if str(policy.get("resolution_error") or "").strip():
             return {"status": "deny", "reason": "policy_unavailable"}
         try:
-            from tldw_Server_API.app.services.mcp_hub_approval_service import (
-                get_mcp_hub_approval_service,
-            )
-
-            approval_service = await get_mcp_hub_approval_service()
-            return await approval_service.evaluate_tool_call(
+            return await self.dependencies.approval_evaluator.evaluate_tool_call(
                 effective_policy=policy,
                 tool_name=tool_name,
                 tool_args=tool_args,
@@ -2059,12 +2075,7 @@ class MCPProtocol:
                 "scope_payload": {"path_scope_mode": path_scope_mode, "reason": "policy_unavailable"},
             }
         try:
-            from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
-                get_mcp_hub_path_enforcement_service,
-            )
-
-            path_service = await get_mcp_hub_path_enforcement_service()
-            return await path_service.evaluate_tool_call(
+            return await self.dependencies.path_scope_enforcer.evaluate_tool_call(
                 effective_policy=policy,
                 context=context,
                 tool_name=tool_name,
@@ -2149,12 +2160,7 @@ class MCPProtocol:
         cached = metadata.get("_mcp_effective_external_access")
         if not isinstance(cached, dict):
             try:
-                from tldw_Server_API.app.services.mcp_hub_external_access_resolver import (
-                    get_mcp_hub_external_access_resolver,
-                )
-
-                resolver = await get_mcp_hub_external_access_resolver()
-                cached = await resolver.resolve_for_sources(
+                cached = await self.dependencies.external_access_evaluator.resolve_for_sources(
                     sources=[dict(item) for item in sources if isinstance(item, dict)],
                     effective_policy=policy,
                 )

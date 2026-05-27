@@ -331,8 +331,10 @@ async def test_protocol_tools_call_allows_tool_matching_effective_policy_pattern
 async def test_protocol_tools_call_blocks_when_policy_resolution_fails(monkeypatch):
     os.environ["TEST_MODE"] = "true"
 
+    from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
+        build_default_runtime_dependencies,
+    )
     from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
-    from tldw_Server_API.app.services import mcp_hub_policy_resolver as resolver_module
 
     class _ModuleStub:
         name = "Shell"
@@ -368,13 +370,14 @@ async def test_protocol_tools_call_blocks_when_policy_resolution_fails(monkeypat
     async def _allow_tool(ctx, name, **_kwargs):
         return True
 
-    async def _fail_resolver():
-        raise RuntimeError("resolver unavailable")
+    class _FailingPolicyResolver:
+        async def resolve_for_context(self, *, user_id, metadata):
+            raise RuntimeError("resolver unavailable")
 
-    monkeypatch.setattr(resolver_module, "get_mcp_hub_policy_resolver", _fail_resolver)
-
-    proto = MCPProtocol()
-    proto.module_registry = _RegistryStub()
+    deps = build_default_runtime_dependencies()
+    deps.module_registry = _RegistryStub()
+    deps.effective_policy_resolver = _FailingPolicyResolver()
+    proto = MCPProtocol(dependencies=deps)
     proto._has_module_permission = _allow_mod  # type: ignore
     proto._has_tool_permission = _allow_tool  # type: ignore
 
