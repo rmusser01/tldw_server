@@ -484,11 +484,11 @@ Only stage files that changed.
 - Add or update screenshots under: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/`
 - Modify: `backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md`
 
-- [ ] **Step 1: Start local backend and WebUI**
+- [x] **Step 1: Start local backend and WebUI**
 
 Use the established project startup commands for this worktree. Record exact ports in the review document.
 
-- [ ] **Step 2: Capture required evidence**
+- [x] **Step 2: Capture required evidence**
 
 Capture:
 
@@ -500,7 +500,7 @@ Capture:
 - Mobile send success or recoverable error state.
 - Extension sidepanel handoff into `/chat`.
 
-- [ ] **Step 3: Walk first-time journey**
+- [x] **Step 3: Walk first-time journey**
 
 Evaluate:
 
@@ -511,7 +511,7 @@ Evaluate:
 - Loading/streaming/error/retry.
 - Discovering history, context/RAG, persona/tools, and save/resume behavior.
 
-- [ ] **Step 4: Walk power-user journey**
+- [x] **Step 4: Walk power-user journey**
 
 Evaluate:
 
@@ -522,7 +522,7 @@ Evaluate:
 - Failure/retry handling.
 - Extension-to-WebUI continuity.
 
-- [ ] **Step 5: Update findings**
+- [x] **Step 5: Update findings**
 
 In `Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md`, include:
 
@@ -538,7 +538,16 @@ In `Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md`, include:
 
 Mark sidebar/history and model-selector data-contract work as follow-up tasks unless they remain direct P1 blockers after Tasks 2-4.
 
-- [ ] **Step 6: Verify no local servers remain running**
+Task 5 evidence update:
+
+- WebUI was audited at `http://127.0.0.1:18015` against the existing healthy backend on `http://127.0.0.1:8000`.
+- Current `/chat` screenshots now include first-time unseeded, desktop cockpit, desktop focus, mobile focus, mobile cockpit context, mobile cockpit runtime, mobile send blocked state, and extension sidepanel debug route.
+- The corrected page has context/runtime cockpit rails restored and the removed standalone `CharacterControlRail` remains absent from captured UI evidence.
+- The current first-send path is blocked by inconsistent provider readiness: the page reports `No LLM provider configured` while runtime/model rails still show `tldw:gpt-4o` as ready/active.
+- The directly connected sidepanel debug chat route horizontally overflows at 390 px (`documentElement.scrollWidth=420`, `body.scrollWidth=420`).
+- Findings were refreshed in `Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md`; structured evidence was refreshed in `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/evidence.json`.
+
+- [x] **Step 6: Verify no local servers remain running**
 
 Run:
 
@@ -548,6 +557,8 @@ lsof -nP -iTCP:18016 -sTCP:LISTEN
 ```
 
 Expected: no listeners after shutdown.
+
+Actual: after stopping the temporary WebUI process, final recheck showed no listeners on `18015` or `18016`. During cleanup, `18016` was briefly occupied by an unrelated Next dev server from `.worktrees/notes-list-reliability` (`node .../notes-list-reliability/apps/tldw-frontend/node_modules/.bin/next dev -p 18016`), so it was left untouched.
 
 - [ ] **Step 7: Commit**
 
@@ -590,6 +601,14 @@ NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --project tsconfig.json
 Expected current baseline caveat:
 
 - May fail only on `src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx(35,3)` with `Type '"comfortable"' is not assignable to type 'GalleryCardDensity'.`
+
+Current Task 5 verification:
+
+- `bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Option/Playground/hooks/__tests__/usePlaygroundPersistence.test.tsx` passed: 5 files, 52 tests.
+- `git diff --check` passed.
+- `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --project tsconfig.json --pretty false` failed only on the known unrelated baseline at `src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx(35,3)`: `Type '"comfortable"' is not assignable to type 'GalleryCardDensity'.`
+- Port cleanup: the audit-owned `18015` server was stopped, and final recheck showed no listeners on `18015` or `18016`. An intermediate unrelated `.worktrees/notes-list-reliability` Next dev server was observed on `18016` and left untouched.
+- Bandit skipped: this slice touched Markdown, JSON, PNG screenshots, and frontend/Backlog metadata only; no Python files were changed.
 
 Bandit:
 

@@ -1,257 +1,155 @@
 {
+  "audit": "chat-rails-ux-rebaseline",
+  "date": "2026-05-27",
   "worktree": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-rails-ux-rebaseline",
   "branch": "codex/chat-rails-ux-rebaseline",
-  "task3EvidenceHead": "122f3af64",
-  "task5PreCommitHead": "c5e20d4dd",
-  "originDevAtBaseline": "efe42fe0c",
-  "originDevAtManualCapture": "70a230aad",
-  "localOriginDevAtTask5Review": "64c27d18b",
-  "task5ReviewMergeBaseIsAncestorExitCode": 1,
-  "mergeBaseIsAncestorExitCode": 0,
+  "auditPreDocHead": "477744b47",
+  "localOriginDev": "7659953cf",
   "backend": "http://127.0.0.1:8000",
-  "webui": "http://localhost:18014",
-  "backendAvailable": true,
+  "webui": "http://127.0.0.1:18015",
   "backendHealth": {
-    "command": "curl -sf http://127.0.0.1:8000/api/v1/health",
-    "source": "coordinator_confirmed_with_approved_localhost_access",
-    "exitCode": 0,
-    "body": {
-      "status": "ok",
-      "checks": {
-        "database": {
-          "status": "healthy",
-          "type": "sqlite",
-          "database_size_mb": 4.75
-        },
-        "metrics": {
-          "status": "healthy"
-        },
-        "chacha_notes": {
-          "status": "healthy",
-          "init_attempts": 1,
-          "init_failures": 0,
-          "last_init_ms": 262.1378330513835,
-          "last_error": null,
-          "cached_instances": 1,
-          "default_char_ensures": 3445,
-          "default_char_failures": 0
-        }
-      },
-      "timestamp": "2026-05-27T04:02:58.037714",
-      "auth_mode": "single_user",
-      "rg_policy_version": 1,
-      "rg_policy_store": "file",
-      "rg_policy_count": 38
+    "status": "ok",
+    "authMode": "single_user",
+    "source": "approved localhost curl before browser capture"
+  },
+  "scopeLimitations": [
+    "Captured dev WebUI and debug sidepanel route, not packaged extension.",
+    "First-time state cleared localStorage but reused the local backend and server config.",
+    "First-send streaming path was not completed because the observed page reported No LLM provider configured.",
+    "Prior real-server workflow failures are retained as follow-up evidence but were not rerun in this final browser pass."
+  ],
+  "whyEarlierNoRailsCaptureWasWrong": {
+    "finding": "Current /chat evidence shows context and runtime cockpit rails present.",
+    "likelyCause": "Earlier missing-siderails observation came from stale or wrong branch/page evidence.",
+    "currentGuard": "Playground.cockpit-regression.guard.test.ts asserts cockpit shell/context/runtime rail wiring and absence of the removed standalone CharacterControlRail."
+  },
+  "screenshots": {
+    "firstTimeUnseeded": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/first-time-unseeded.png",
+    "desktopCockpit": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-cockpit.png",
+    "desktopFocus": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-focus.png",
+    "mobileFocus": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-focus.png",
+    "mobileCockpitContext": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit.png",
+    "mobileCockpitRuntime": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit-runtime.png",
+    "mobileSendState": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-send-state.png",
+    "extensionSidepanel": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel.png"
+  },
+  "currentBrowserObservations": [
+    {
+      "state": "first-time-unseeded-desktop-cockpit",
+      "route": "/chat",
+      "viewport": "1440x960",
+      "railsPresent": true,
+      "removedStandaloneCharacterControlRailPresent": false,
+      "providerBlockerVisible": true,
+      "providerBlockerText": "No LLM provider configured",
+      "runtimeRoute": "tldw:gpt-4o",
+      "issue": "Setup blocker conflicts with visible ready/model route state."
+    },
+    {
+      "state": "desktop-cockpit",
+      "route": "/chat",
+      "viewport": "1440x960",
+      "cockpitMode": "cockpit",
+      "horizontalOverflow": false,
+      "contextRailPresent": true,
+      "runtimeRailPresent": true,
+      "noAssistantSelectedCount": 2,
+      "providerBlockerVisible": true
+    },
+    {
+      "state": "desktop-focus",
+      "route": "/chat",
+      "viewport": "1440x960",
+      "cockpitMode": "focus",
+      "horizontalOverflow": false,
+      "contextRailPresent": false,
+      "runtimeRailPresent": false
+    },
+    {
+      "state": "mobile-focus",
+      "route": "/chat",
+      "viewport": "390x844",
+      "horizontalOverflow": false,
+      "composerVisible": true,
+      "providerBlockerVisible": true
+    },
+    {
+      "state": "mobile-cockpit-context",
+      "route": "/chat",
+      "viewport": "390x844",
+      "cockpitMode": "cockpit",
+      "mobilePanel": "context",
+      "horizontalOverflow": false,
+      "railAndComposerOverlap": false,
+      "providerBlockerVisible": true
+    },
+    {
+      "state": "mobile-cockpit-runtime",
+      "route": "/chat",
+      "viewport": "390x844",
+      "cockpitMode": "cockpit",
+      "mobilePanel": "runtime",
+      "horizontalOverflow": false,
+      "runtimeAssistantCopy": "No persona or character will shape replies.",
+      "providerBlockerVisible": true
+    },
+    {
+      "state": "mobile-send-state",
+      "route": "/chat",
+      "viewport": "390x844",
+      "messageTyped": "Say hello in one short sentence.",
+      "sendCompleted": false,
+      "reasonSendNotCompleted": "No LLM provider configured was visible, and exact Send role lookup matched two buttons.",
+      "roleCounts": {
+        "exactSend": 2,
+        "sendMessage": 1
+      }
+    },
+    {
+      "state": "extension-sidepanel-debug",
+      "route": "/__debug__/sidepanel-chat?nextgenComposer=1",
+      "viewport": "390x844",
+      "innerWidth": 390,
+      "documentElementScrollWidth": 420,
+      "bodyScrollWidth": 420,
+      "horizontalOverflow": true,
+      "visibleState": [
+        "Connected",
+        "Start a conversation below",
+        "Save chat to history",
+        "Image",
+        "Voice",
+        "Config",
+        "Dictate",
+        "Character",
+        "SEND"
+      ]
     }
-  },
-  "sandboxHealthCheck": {
-    "command": "curl -sf http://127.0.0.1:8000/api/v1/health",
-    "exitCode": 7,
-    "stdout": "",
-    "stderr": "",
-    "result": "sandbox_localhost_access_failed"
-  },
-  "realServerPlaywright": {
-    "status": "failed_with_nonrail_baseline_failures",
-    "reason": "The escalated real-server run reached the backend and WebUI, produced screenshots, and passed 11 of 15 tests. Four existing assertions failed outside the rail-overflow guard: stale Web search status text, character clear state, plain chat create 422, and model-list scope toggle visibility.",
-    "plannedCommand": "cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY TLDW_SERVER_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_WEB_URL=http://localhost:18014 TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18014' bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line",
-    "attemptExitCode": 1,
+  ],
+  "retainedPriorRealServerFailures": {
+    "status": "not rerun in final browser pass; retained as follow-up evidence",
     "testsPassed": 11,
     "testsFailed": 4,
     "failures": [
-      "uses the running server and keeps cockpit/focus controls working: status strip did not contain Web search on after the context-rail toggle aria-pressed changed",
-      "selects and clears a real disposable character through the runtime rail: runtime inspector did not show No assistant selected after clearing",
-      "keeps the same conversation while overlay changes and clears through the character control rail: disposable plain chat creation returned 422 instead of 201",
-      "proves model provider confidence through a real cockpit selection and conversation: model-list-scope-toggle was not visible"
-    ],
-    "previousSandboxFailure": "Error: listen EPERM: operation not permitted 127.0.0.1:18014"
-  },
-  "manualBrowserCapture": {
-    "status": "passed",
-    "tool": "Playwright browser automation against the manually started Next dev server",
-    "webui": "http://127.0.0.1:18014/chat",
-    "configSeeded": {
-      "serverUrl": "http://127.0.0.1:8000",
-      "authMode": "single-user",
-      "apiKey": "THIS-IS-A-SECURE-KEY-123-FAKE-KEY",
-      "selectedModel": "tldw:gpt-4o"
-    },
-    "result": "Captured all required /chat rail screenshots and measured no horizontal overflow in desktop cockpit, desktop focus, mobile focus, and mobile cockpit states."
-  },
-  "extensionSidepanelCapture": {
-    "status": "captured_with_debug_route_limitations",
-    "tool": "Playwright browser automation against the manually started Next dev server",
-    "route": "http://127.0.0.1:18014/__debug__/sidepanel-chat?nextgenComposer=1",
-    "viewport": "390x844",
-    "screenshotDimensions": "390x1139 full-page PNG from 390x844 viewport",
-    "configSeeded": {
-      "serverUrl": "http://127.0.0.1:8000",
-      "authMode": "single-user",
-      "apiKey": "THIS-IS-A-SECURE-KEY-123-FAKE-KEY",
-      "demoModeForced": true,
-      "nextgenComposer": true
-    },
-    "rawScreenshotCommandResult": "A plain bunx playwright screenshot of /__debug__/sidepanel-chat without auth/config seeding produced an all-background/setup-gated capture, so the committed evidence uses the same seeded debug-route pattern as the sidepanel smoke tests.",
-    "result": "Captured the sidepanel chat starter state with header actions, connected/demo status, starter prompts, save-history toggle, composer controls, and no horizontal overflow.",
-    "metrics": {
-      "innerWidth": 390,
-      "docScrollWidth": 390,
-      "bodyScrollWidth": 390,
-      "horizontalOverflow": false
-    },
-    "visibleTestIds": [
-      "chat-header-sidebar-toggle",
-      "chat-toggle-shortcuts",
-      "chat-header-notifications-bell",
-      "chat-header-theme-toggle",
-      "chat-workspace",
-      "chat-main",
-      "chat-header",
-      "status-dot",
-      "status-dot-badge",
-      "chat-open-tts-clips",
-      "chat-open-persona",
-      "chat-open-dashboard",
-      "chat-open-full-screen",
-      "chat-dropzone",
-      "chat-messages",
-      "chat-empty-connected",
-      "chat-suggestion-1",
-      "chat-suggestion-2",
-      "chat-suggestion-3",
-      "nextgen-composer-wrapper",
-      "v1-textarea-region",
-      "chat-input",
-      "v1-bottom-bar",
-      "chat-character-controls-trigger"
+      "Web search status strip did not show the expected active state after the context rail toggle.",
+      "Runtime inspector did not show the expected cleared assistant state after clearing a character.",
+      "Disposable plain-chat creation returned 422 instead of 201 in a character-overlay continuity flow.",
+      "Model-list scope toggle was not visible in the provider/model selection workflow."
     ]
   },
-  "focusedStaticPlaywright": {
-    "requiredCommand": "cd apps/tldw-frontend && bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep \"normalizes configured provider model IDs|does not intercept backend routes\"",
-    "requiredCommandStatus": "blocked",
-    "requiredCommandExitCode": 1,
-    "requiredCommandFailure": "Playwright config attempted to start Next on 0.0.0.0:8080 and failed with listen EPERM.",
-    "executedCommand": "cd apps/tldw-frontend && TLDW_WEB_AUTOSTART=false TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep \"normalizes configured provider model IDs|does not intercept backend routes\"",
-    "status": "passed",
-    "tests": 2,
-    "duration": "595ms"
-  },
-  "finalVerificationAfterRebase": {
-    "status": "completed_with_known_real_server_failures",
-    "headAfterRebase": "13b8e5e61",
-    "originDevAtRebase": "64c27d18b",
-    "mergeBaseIsAncestorExitCode": 0,
-    "focusedVitest": {
-      "command": "cd apps/packages/ui && bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx src/components/Option/Playground/__tests__/CharacterControlRail.test.tsx src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.tts-clips-lazy-mount.test.ts",
-      "exitCode": 0,
-      "testFilesPassed": 9,
-      "testsPassed": 104
-    },
-    "backendHealth": {
-      "command": "curl -sf http://127.0.0.1:8000/api/v1/health",
-      "exitCode": 0,
-      "status": "ok",
-      "authMode": "single_user"
-    },
-    "realServerPlaywright": {
-      "command": "cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY TLDW_SERVER_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_WEB_URL=http://localhost:18014 TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18014' bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line",
-      "exitCode": 1,
-      "testsPassed": 11,
-      "testsFailed": 4,
-      "failures": [
-        "uses the running server and keeps cockpit/focus controls working: status strip did not contain Web search on after the context-rail toggle aria-pressed changed",
-        "selects and clears a real disposable character through the runtime rail: runtime inspector did not show No assistant selected after clearing",
-        "keeps the same conversation while overlay changes and clears through the character control rail: disposable plain chat creation returned 422 instead of 201",
-        "proves model provider confidence through a real cockpit selection and conversation: model-list-scope-toggle was not visible"
-      ]
-    },
-    "bandit": {
-      "status": "skipped",
-      "reason": "Final slice changed Markdown, JSON evidence, a screenshot artifact, and Backlog metadata only."
-    }
-  },
-  "sourceEvidence": [
-    {
-      "file": "apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts",
-      "status": "updated",
-      "evidence": "Added assertNoHorizontalOverflow(page) and wired it into stable desktop and mobile cockpit/focus states."
-    },
-    {
-      "file": "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts",
-      "status": "previously_verified_task_2",
-      "evidence": "Source guard proves the cockpit shell, context rail, runtime inspector, mobile rail surface, focus mode affordance, and character rail remain wired."
-    }
+  "currentTopFindings": [
+    "Provider readiness and selected model state contradict each other.",
+    "Extension sidepanel debug chat route horizontally overflows at 390 px.",
+    "Exact Send role lookup is ambiguous even though the primary submit has Send message.",
+    "First-run cockpit remains dense when setup is blocked.",
+    "Extension handoff proves only /chat route target, not draft/thread state preservation."
   ],
-  "viewportChecks": [
-    {
-      "route": "/chat",
-      "viewport": "1440x960",
-      "state": "desktop-cockpit",
-      "status": "captured",
-      "horizontalOverflow": false,
-      "metrics": {
-        "innerWidth": 1440,
-        "docScrollWidth": 1440,
-        "bodyScrollWidth": 1440
-      }
-    },
-    {
-      "route": "/chat",
-      "viewport": "1440x960",
-      "state": "desktop-focus",
-      "status": "captured",
-      "horizontalOverflow": false,
-      "metrics": {
-        "innerWidth": 1440,
-        "docScrollWidth": 1440,
-        "bodyScrollWidth": 1440
-      }
-    },
-    {
-      "route": "/chat",
-      "viewport": "390x844",
-      "state": "mobile-focus",
-      "status": "captured",
-      "horizontalOverflow": false,
-      "metrics": {
-        "innerWidth": 390,
-        "docScrollWidth": 390,
-        "bodyScrollWidth": 390
-      }
-    },
-    {
-      "route": "/chat",
-      "viewport": "390x844",
-      "state": "mobile-cockpit",
-      "status": "captured",
-      "horizontalOverflow": false,
-      "metrics": {
-        "innerWidth": 390,
-        "docScrollWidth": 390,
-        "bodyScrollWidth": 390
-      }
-    }
-  ],
-  "screenshots": [
-    {
-      "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-cockpit.png",
-      "status": "captured"
-    },
-    {
-      "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-focus.png",
-      "status": "captured"
-    },
-    {
-      "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-focus.png",
-      "status": "captured"
-    },
-    {
-      "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit.png",
-      "status": "captured"
-    },
-    {
-      "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel.png",
-      "status": "captured_with_seeded_debug_route"
-    }
-  ]
+  "verificationCommands": {
+    "plannedPostDocVerification": [
+      "git diff --check",
+      "bunx vitest run focused chat rail/persistence/sidepanel tests",
+      "NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --project tsconfig.json --pretty false"
+    ],
+    "bandit": "Skipped for TS/Markdown/JSON/PNG-only slice unless Python files are touched."
+  }
 }
