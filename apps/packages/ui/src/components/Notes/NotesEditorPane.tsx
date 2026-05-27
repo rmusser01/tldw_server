@@ -19,6 +19,7 @@ import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
 import type {
   SaveIndicatorState,
+  SaveRecoveryNotice,
   NotesEditorMode,
   NotesInputMode,
   NotesAssistAction,
@@ -101,6 +102,7 @@ export interface NotesEditorPaneProps {
   keywordOptions: string[]
   saveIndicator: SaveIndicatorState
   saveIndicatorText: string | null
+  saveRecoveryNotice: SaveRecoveryNotice | null
   selectedLastSavedAt: string | null
   offlineStatusText: string | null
   currentOfflineDraft: OfflineDraftEntry | null
@@ -190,6 +192,7 @@ export interface NotesEditorPaneProps {
   handleOpenNotesStudio: () => void
   exportSelected: (format: SingleNoteExportFormat) => void
   saveNote: () => Promise<void>
+  reloadSelectedNoteAfterConflict: () => Promise<void>
   deleteNote: () => Promise<void>
   handleSelectNote: (id: string | number) => Promise<void>
   openGraphModal: () => void
@@ -250,6 +253,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   keywordOptions,
   saveIndicator,
   saveIndicatorText,
+  saveRecoveryNotice,
   selectedLastSavedAt,
   offlineStatusText,
   currentOfflineDraft,
@@ -315,6 +319,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   handleOpenNotesStudio,
   exportSelected,
   saveNote,
+  reloadSelectedNoteAfterConflict,
   deleteNote,
   handleSelectNote,
   openGraphModal,
@@ -409,6 +414,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         hasContent={content.trim().length > 0}
         canSave={
           !editorDisabled &&
+          !saving &&
           (title.trim().length > 0 || content.trim().length > 0)
         }
         canGenerateFlashcards={!editorDisabled && content.trim().length > 0}
@@ -662,10 +668,52 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             <Typography.Text
               type={saveIndicator === 'error' ? 'danger' : 'secondary'}
               className="block text-[11px] mt-1 text-text-muted"
+              role="status"
               aria-live="polite"
+              aria-atomic="true"
+              data-testid="notes-save-feedback"
             >
               {saveIndicatorText}
             </Typography.Text>
+          )}
+          {saveRecoveryNotice && (
+            <div
+              className={`mt-2 flex flex-wrap items-center gap-2 rounded border px-2 py-2 text-[12px] ${
+                saveRecoveryNotice.kind === 'conflict'
+                  ? 'border-warn/50 bg-warn/10 text-warn'
+                  : 'border-danger/50 bg-danger/10 text-danger'
+              }`}
+              role="alert"
+              aria-live="assertive"
+              aria-atomic="true"
+              data-testid="notes-save-recovery-notice"
+            >
+              <span>{saveRecoveryNotice.message}</span>
+              <Button
+                size="small"
+                onClick={() => {
+                  void saveNote()
+                }}
+                disabled={saving || editorDisabled}
+                data-testid="notes-save-recovery-retry"
+              >
+                {t('option:notesSearch.saveStatusRetry', { defaultValue: 'Retry' })}
+              </Button>
+              {saveRecoveryNotice.kind === 'conflict' && selectedId != null ? (
+                <Button
+                  size="small"
+                  onClick={() => {
+                    void reloadSelectedNoteAfterConflict()
+                  }}
+                  disabled={saving || editorDisabled}
+                  data-testid="notes-save-conflict-reload"
+                >
+                  {t('option:notesSearch.reloadConflictAction', {
+                    defaultValue: 'Reload server version'
+                  })}
+                </Button>
+              ) : null}
+            </div>
           )}
           {offlineStatusText && (
             <Typography.Text

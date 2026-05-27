@@ -2226,6 +2226,7 @@ const NotesManagerPage: React.FC = () => {
         keywordOptions={kw.keywordOptions}
         saveIndicator={ed.saveIndicator}
         saveIndicatorText={ed.saveIndicatorText}
+        saveRecoveryNotice={ed.saveRecoveryNotice}
         selectedLastSavedAt={ed.selectedLastSavedAt}
         offlineStatusText={ed.offlineStatusText}
         currentOfflineDraft={ed.currentOfflineDraft}
@@ -2295,6 +2296,7 @@ const NotesManagerPage: React.FC = () => {
         handleOpenNotesStudio={handleOpenNotesStudio}
         exportSelected={exp.exportSelected}
         saveNote={ed.saveNote}
+        reloadSelectedNoteAfterConflict={ed.reloadSelectedNoteAfterConflict}
         deleteNote={async () => {
           await deleteNote()
         }}

@@ -122,6 +122,12 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
           defaultValue: 'Conversation ID'
         })}: ${backlinkConversationId}`
       : null
+  const displayedSaveState =
+    saveIndicator === 'saving' || saveIndicator === 'error'
+      ? saveIndicator
+      : isDirty
+        ? 'dirty'
+        : saveIndicator
 
   const overflowMenuItems: MenuProps['items'] = useMemo(() => {
     const items: MenuProps['items'] = []
@@ -411,7 +417,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
             </span>
           ) : null}
           <NotesSaveStatus
-            state={isDirty ? 'dirty' : saveIndicator}
+            state={displayedSaveState}
             lastSavedAt={lastSavedAt}
             onRetry={onSave}
           />
@@ -480,7 +486,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
             size={toolbarButtonSize}
             onClick={onSave}
             loading={isSaving}
-            disabled={!canSave}
+            disabled={!canSave || isSaving}
             icon={(<SaveIcon className="w-4 h-4" />)}
             className={touchTargetClass}
             aria-label={t('option:notesSearch.toolbarSaveTooltip', {

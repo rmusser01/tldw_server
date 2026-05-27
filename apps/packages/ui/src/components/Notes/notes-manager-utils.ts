@@ -320,6 +320,10 @@ export type SaveNoteOptions = {
 }
 
 export type SaveIndicatorState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
+export type SaveRecoveryNotice = {
+  kind: 'error' | 'conflict'
+  message: string
+}
 export type NotesEditorMode = 'edit' | 'split' | 'preview'
 export type NotesInputMode = 'markdown' | 'wysiwyg'
 export type NotesSortOption = 'modified_desc' | 'created_desc' | 'title_asc' | 'title_desc'
