@@ -57,13 +57,15 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
       key: string,
-      fallbackOrOptions?: string | { defaultValue?: string; deckName?: string }
+      fallbackOrOptions?:
+        | string
+        | Record<string, string | number | undefined>
     ) => {
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions
       if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        return (fallbackOrOptions.defaultValue || key).replace(
-          "{{deckName}}",
-          fallbackOrOptions.deckName || ""
+        const template = String(fallbackOrOptions.defaultValue || key)
+        return template.replace(/{{(\w+)}}/g, (_, token: string) =>
+          String(fallbackOrOptions[token] ?? "")
         )
       }
       return key
@@ -74,6 +76,27 @@ vi.mock("react-i18next", () => ({
 describe("sidepanel flashcards route", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    browserMocks.runtimeGetURL.mockReset()
+    browserMocks.tabsCreate.mockReset()
+    browserMocks.tabsQuery.mockReset()
+    browserMocks.executeScript.mockReset()
+    flashcardMocks.createFlashcardMutateAsync.mockReset()
+    browserMocks.runtimeGetURL.mockImplementation(
+      (path: string) => `chrome-extension://flashcards${path}`
+    )
+    browserMocks.tabsCreate.mockResolvedValue(undefined)
+    browserMocks.tabsQuery.mockResolvedValue([
+      {
+        id: 42,
+        title: "Selection Source",
+        url: "https://example.test/source"
+      }
+    ])
+    browserMocks.executeScript.mockResolvedValue([
+      {
+        result: "Key concept from the active page"
+      }
+    ])
     flashcardMocks.createFlashcardMutateAsync.mockResolvedValue({
       uuid: "card-1",
       deck_id: 7
@@ -210,6 +233,65 @@ describe("sidepanel flashcards route", () => {
     )
   })
 
+  it("appends repeated page selections into an editable draft queue", async () => {
+    browserMocks.executeScript
+      .mockResolvedValueOnce([{ result: "First captured concept" }])
+      .mockResolvedValueOnce([{ result: "Second captured concept" }])
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+
+    expect(screen.getByText("2 draft cards ready")).toBeInTheDocument()
+    expect(
+      screen.getAllByRole("heading", { name: "Draft flashcard" })
+    ).toHaveLength(2)
+    expect(screen.getAllByLabelText("Front")[0]).toHaveValue(
+      "Selection Source"
+    )
+    expect(screen.getAllByLabelText("Back")[0]).toHaveValue(
+      "First captured concept"
+    )
+    expect(screen.getAllByLabelText("Back")[1]).toHaveValue(
+      "Second captured concept"
+    )
+  })
+
+  it("edits one queued draft and removes another draft", async () => {
+    browserMocks.executeScript
+      .mockResolvedValueOnce([{ result: "Keep this answer" }])
+      .mockResolvedValueOnce([{ result: "Remove this answer" }])
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    fireEvent.change(screen.getAllByLabelText("Front")[0], {
+      target: { value: "Edited retained question" }
+    })
+    await user.click(screen.getByRole("button", { name: "Remove draft 2" }))
+
+    expect(
+      screen.getAllByRole("heading", { name: "Draft flashcard" })
+    ).toHaveLength(1)
+    expect(screen.getByLabelText("Front")).toHaveValue(
+      "Edited retained question"
+    )
+    expect(screen.getByLabelText("Back")).toHaveValue("Keep this answer")
+    expect(
+      screen.queryByDisplayValue("Remove this answer")
+    ).not.toBeInTheDocument()
+  })
+
   it("saves the edited sidepanel draft with deck and page provenance", async () => {
     const user = userEvent.setup()
     render(<SidepanelFlashcards />)
@@ -245,6 +327,137 @@ describe("sidepanel flashcards route", () => {
     expect(
       screen.getByRole("button", { name: "Open full Flashcards" })
     ).toBeInTheDocument()
+  })
+
+  it("saves one queued draft without discarding unsaved drafts", async () => {
+    browserMocks.executeScript
+      .mockResolvedValueOnce([{ result: "First queued answer" }])
+      .mockResolvedValueOnce([{ result: "Second queued answer" }])
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    await user.click(screen.getAllByRole("button", { name: "Save card" })[0])
+
+    await waitFor(() => {
+      expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      deck_id: 7,
+      front: "Selection Source",
+      back: "First queued answer",
+      model_type: "basic",
+      is_cloze: false,
+      reverse: false,
+      source_ref_type: "manual",
+      source_ref_id: "https://example.test/source"
+    })
+    expect(screen.getByText("Saved to Biology.")).toBeInTheDocument()
+    expect(
+      screen.queryByDisplayValue("First queued answer")
+    ).not.toBeInTheDocument()
+    expect(screen.getByDisplayValue("Second queued answer")).toBeInTheDocument()
+  })
+
+  it("ignores duplicate individual save clicks while the draft is saving", async () => {
+    flashcardMocks.createFlashcardMutateAsync.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    const saveButton = screen.getByRole("button", { name: "Save card" })
+
+    fireEvent.click(saveButton)
+    fireEvent.click(saveButton)
+
+    expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+  })
+
+  it("preserves failed drafts after save-all partial failure", async () => {
+    browserMocks.executeScript
+      .mockResolvedValueOnce([{ result: "Saved answer" }])
+      .mockResolvedValueOnce([{ result: "Failed answer" }])
+    flashcardMocks.createFlashcardMutateAsync
+      .mockResolvedValueOnce({ uuid: "card-1", deck_id: 7 })
+      .mockRejectedValueOnce(new Error("save failed"))
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    await user.click(screen.getByRole("button", { name: "Save all cards" }))
+
+    await waitFor(() => {
+      expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(2)
+    })
+    expect(
+      screen.getByText("Saved 1 card to Biology. 1 draft still needs attention.")
+    ).toBeInTheDocument()
+    expect(screen.queryByDisplayValue("Saved answer")).not.toBeInTheDocument()
+    expect(screen.getByDisplayValue("Failed answer")).toBeInTheDocument()
+  })
+
+  it("ignores duplicate save-all clicks while the queue is saving", async () => {
+    browserMocks.executeScript
+      .mockResolvedValueOnce([{ result: "First queued answer" }])
+      .mockResolvedValueOnce([{ result: "Second queued answer" }])
+    flashcardMocks.createFlashcardMutateAsync.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    const saveAllButton = screen.getByRole("button", {
+      name: "Save all cards"
+    })
+
+    fireEvent.click(saveAllButton)
+    fireEvent.click(saveAllButton)
+
+    expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+  })
+
+  it("locks draft editing and queue controls while a save is in progress", async () => {
+    flashcardMocks.createFlashcardMutateAsync.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Save card" }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Front")).toBeDisabled()
+      expect(screen.getByLabelText("Back")).toBeDisabled()
+      expect(
+        screen.getByRole("button", { name: "Capture page selection" })
+      ).toBeDisabled()
+      expect(screen.getByTestId("sidepanel-flashcards-deck-select")).toHaveClass(
+        "ant-select-disabled"
+      )
+    })
   })
 
   it("keeps the draft in place when sidepanel save fails", async () => {
@@ -355,7 +568,7 @@ describe("sidepanel flashcards route", () => {
     expect(screen.getByRole("button", { name: "Save card" })).toBeDisabled()
   })
 
-  it("clears a previous draft when a later capture attempt fails", async () => {
+  it("keeps queued drafts when a later capture attempt fails", async () => {
     const user = userEvent.setup()
     render(<SidepanelFlashcards />)
 
@@ -375,8 +588,11 @@ describe("sidepanel flashcards route", () => {
       screen.getByText("Select text on the page first.")
     ).toBeInTheDocument()
     expect(
-      screen.queryByRole("heading", { name: "Draft flashcard" })
-    ).not.toBeInTheDocument()
+      screen.getByRole("heading", { name: "Draft flashcard" })
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Back")).toHaveValue(
+      "Key concept from the active page"
+    )
   })
 
   it("uses capture wording when no active page tab is available", async () => {

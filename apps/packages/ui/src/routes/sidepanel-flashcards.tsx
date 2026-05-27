@@ -1,6 +1,12 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { ExternalLink, Layers, MessageSquareText, Save } from "lucide-react"
+import {
+  ExternalLink,
+  Layers,
+  MessageSquareText,
+  Save,
+  Trash2
+} from "lucide-react"
 import { Button, Input, Select, Typography } from "antd"
 import { browser } from "wxt/browser"
 import {
@@ -8,11 +14,13 @@ import {
   useDecksQuery,
   useFlashcardsEnabled
 } from "@/components/Flashcards/hooks"
+import type { FlashcardCreate } from "@/services/flashcards"
 
 const { Text, Title } = Typography
 const { TextArea } = Input
 
 type CaptureDraft = {
+  id: string
   front: string
   back: string
   sourceId: string
@@ -40,13 +48,18 @@ export const readSelectedTextFromPage = () => {
 
 export default function SidepanelFlashcards() {
   const { t } = useTranslation()
+  const draftIdRef = React.useRef(0)
   const [captureError, setCaptureError] = React.useState<string | null>(null)
   const [captureLoading, setCaptureLoading] = React.useState(false)
   const [saveStatus, setSaveStatus] = React.useState<{
     type: "success" | "error"
     message: string
   } | null>(null)
-  const [draft, setDraft] = React.useState<CaptureDraft | null>(null)
+  const [drafts, setDrafts] = React.useState<CaptureDraft[]>([])
+  const [savingDraftIds, setSavingDraftIds] = React.useState<Set<string>>(
+    () => new Set()
+  )
+  const savingDraftIdsRef = React.useRef<Set<string>>(new Set())
   const [selectedDeckId, setSelectedDeckId] = React.useState<number | null>(null)
   const flashcardsAvailability = useFlashcardsEnabled()
   const decksQuery = useDecksQuery()
@@ -112,7 +125,6 @@ export default function SidepanelFlashcards() {
   const handleCapturePageSelection = React.useCallback(async () => {
     setCaptureError(null)
     setSaveStatus(null)
-    setDraft(null)
     setCaptureLoading(true)
     const captureUnavailableMessage = t(
       "sidepanel:flashcards.selectionCaptureUnavailable",
@@ -154,7 +166,9 @@ export default function SidepanelFlashcards() {
         throw new Error(noSelectionMessage)
       }
 
-      setDraft({
+      draftIdRef.current += 1
+      const nextDraft: CaptureDraft = {
+        id: `capture-${draftIdRef.current}`,
         front:
           activeTab.title ||
           activeTab.url ||
@@ -162,7 +176,8 @@ export default function SidepanelFlashcards() {
         back: selectedText,
         sourceId: activeTab.url || String(tabId),
         sourceTitle: activeTab.title || activeTab.url || undefined
-      })
+      }
+      setDrafts((current) => [...current, nextDraft])
     } catch (error) {
       const message =
         error instanceof Error && error.message.trim() ? error.message : ""
@@ -179,16 +194,29 @@ export default function SidepanelFlashcards() {
     }
   }, [t])
 
-  const handleSaveDraft = React.useCallback(async () => {
-    if (!draft || selectedDeckId == null) return
+  const getDeckName = React.useCallback(
+    () => selectedDeck?.name || t("sidepanel:flashcards.defaultDeck", "deck"),
+    [selectedDeck?.name, t]
+  )
 
-    const front = draft.front.trim()
-    const back = draft.back.trim()
-    if (!front || !back) return
+  const setActiveSavingDraftIds = React.useCallback(
+    (draftIds: Iterable<string>) => {
+      const nextDraftIds = new Set(draftIds)
+      savingDraftIdsRef.current = nextDraftIds
+      setSavingDraftIds(nextDraftIds)
+    },
+    []
+  )
 
-    setSaveStatus(null)
-    try {
-      await createFlashcardMutation.mutateAsync({
+  const buildSavePayload = React.useCallback(
+    (draft: CaptureDraft): FlashcardCreate | null => {
+      if (selectedDeckId == null) return null
+
+      const front = draft.front.trim()
+      const back = draft.back.trim()
+      if (!front || !back) return null
+
+      return {
         deck_id: selectedDeckId,
         front,
         back,
@@ -197,31 +225,170 @@ export default function SidepanelFlashcards() {
         reverse: false,
         source_ref_type: "manual",
         source_ref_id: draft.sourceId
-      })
-      setSaveStatus({
-        type: "success",
-        message: t("sidepanel:flashcards.saveSuccess", {
-          defaultValue: "Saved to {{deckName}}.",
-          deckName:
-            selectedDeck?.name || t("sidepanel:flashcards.defaultDeck", "deck")
+      }
+    },
+    [selectedDeckId]
+  )
+
+  const hasDeck = selectedDeckId != null && hasSelectableDecks
+
+  const handleUpdateDraft = React.useCallback(
+    (draftId: string, field: "front" | "back", value: string) => {
+      setDrafts((current) =>
+        current.map((draft) =>
+          draft.id === draftId ? { ...draft, [field]: value } : draft
+        )
+      )
+    },
+    []
+  )
+
+  const handleRemoveDraft = React.useCallback((draftId: string) => {
+    setSaveStatus(null)
+    setDrafts((current) => current.filter((draft) => draft.id !== draftId))
+  }, [])
+
+  const handleSaveDraft = React.useCallback(
+    async (draftId: string) => {
+      if (!hasDeck || savingDraftIdsRef.current.size > 0) return
+
+      const draft = drafts.find((candidate) => candidate.id === draftId)
+      if (!draft) return
+
+      const payload = buildSavePayload(draft)
+      if (!payload) return
+
+      setSaveStatus(null)
+      setActiveSavingDraftIds([draftId])
+      try {
+        await createFlashcardMutation.mutateAsync(payload)
+        setSaveStatus({
+          type: "success",
+          message: t("sidepanel:flashcards.saveSuccess", {
+            defaultValue: "Saved to {{deckName}}.",
+            deckName: getDeckName()
+          })
         })
-      })
-      setDraft(null)
+        setDrafts((current) =>
+          current.filter((candidate) => candidate.id !== draftId)
+        )
+      } catch {
+        setSaveStatus({
+          type: "error",
+          message: t(
+            "sidepanel:flashcards.saveFailed",
+            "Could not save flashcard. Check your connection and try again."
+          )
+        })
+      } finally {
+        setActiveSavingDraftIds([])
+      }
+    },
+    [
+      buildSavePayload,
+      createFlashcardMutation,
+      drafts,
+      getDeckName,
+      hasDeck,
+      setActiveSavingDraftIds,
+      t
+    ]
+  )
+
+  const handleSaveAllDrafts = React.useCallback(async () => {
+    if (!hasDeck || savingDraftIdsRef.current.size > 0) return
+
+    const savedDraftIds = new Set<string>()
+
+    try {
+      const validDrafts = drafts.filter((draft) => buildSavePayload(draft))
+      if (!validDrafts.length) return
+
+      setSaveStatus(null)
+      setActiveSavingDraftIds(validDrafts.map((draft) => draft.id))
+
+      for (const draft of validDrafts) {
+        const payload = buildSavePayload(draft)
+        if (!payload) continue
+
+        try {
+          await createFlashcardMutation.mutateAsync(payload)
+          savedDraftIds.add(draft.id)
+        } catch {
+          // Keep saving the queue so users get a precise partial-success state.
+        }
+      }
+
+      if (savedDraftIds.size > 0) {
+        setDrafts((current) =>
+          current.filter((draft) => !savedDraftIds.has(draft.id))
+        )
+      }
+
+      const failedCount = validDrafts.length - savedDraftIds.size
+      const deckName = getDeckName()
+      if (failedCount === 0) {
+        setSaveStatus({
+          type: "success",
+          message: t("sidepanel:flashcards.saveAllSuccess", {
+            defaultValue: "Saved {{savedCount}} {{cardLabel}} to {{deckName}}.",
+            savedCount: savedDraftIds.size,
+            cardLabel: savedDraftIds.size === 1 ? "card" : "cards",
+            deckName
+          })
+        })
+      } else if (savedDraftIds.size > 0) {
+        setSaveStatus({
+          type: "error",
+          message: t("sidepanel:flashcards.saveAllPartial", {
+            defaultValue:
+              "Saved {{savedCount}} {{cardLabel}} to {{deckName}}. {{failedCount}} {{draftLabel}} still needs attention.",
+            savedCount: savedDraftIds.size,
+            cardLabel: savedDraftIds.size === 1 ? "card" : "cards",
+            deckName,
+            failedCount,
+            draftLabel: failedCount === 1 ? "draft" : "drafts"
+          })
+        })
+      } else {
+        setSaveStatus({
+          type: "error",
+          message: t(
+            "sidepanel:flashcards.saveAllFailed",
+            "Could not save any flashcards. Check your connection and try again."
+          )
+        })
+      }
     } catch {
       setSaveStatus({
         type: "error",
         message: t(
-          "sidepanel:flashcards.saveFailed",
-          "Could not save flashcard. Check your connection and try again."
+          "sidepanel:flashcards.saveAllUnexpectedFailed",
+          "Could not finish saving flashcards. Check your connection and try again."
         )
       })
+    } finally {
+      setActiveSavingDraftIds([])
     }
-  }, [createFlashcardMutation, draft, selectedDeck?.name, selectedDeckId, t])
+  }, [
+    buildSavePayload,
+    createFlashcardMutation,
+    drafts,
+    getDeckName,
+    hasDeck,
+    setActiveSavingDraftIds,
+    t
+  ])
 
-  const hasDraftContent = !!draft?.front.trim() && !!draft?.back.trim()
-  const hasDeck = selectedDeckId != null && hasSelectableDecks
-  const canSaveDraft =
-    !!draft && hasDraftContent && hasDeck && !createFlashcardMutation.isPending
+  const isSaving = createFlashcardMutation.isPending || savingDraftIds.size > 0
+  const canSaveDraft = React.useCallback(
+    (draft: CaptureDraft) => !!buildSavePayload(draft) && hasDeck && !isSaving,
+    [buildSavePayload, hasDeck, isSaving]
+  )
+  const validDraftCount = drafts.filter(
+    (draft) => buildSavePayload(draft)
+  ).length
+  const canSaveAllDrafts = validDraftCount > 0 && hasDeck && !isSaving
 
   return (
     <main className="flex min-h-full flex-col gap-4 p-4 text-left">
@@ -253,6 +420,7 @@ export default function SidepanelFlashcards() {
         <Button
           block
           loading={captureLoading}
+          disabled={isSaving}
           icon={<MessageSquareText className="size-4" aria-hidden="true" />}
           onClick={handleCapturePageSelection}
         >
@@ -268,18 +436,28 @@ export default function SidepanelFlashcards() {
           "Create one editable card in the sidepanel. Use full Flashcards for generation, imports, and review."
         )}
       </Text>
-      {draft ? (
+      {drafts.length > 0 ? (
         <section
-          className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-3"
-          aria-label={t("sidepanel:flashcards.draftSection", "Draft flashcard")}
+          className="flex flex-col gap-3"
+          aria-label={t("sidepanel:flashcards.draftQueue", "Draft queue")}
         >
-          <div>
-            <Title level={5} className="!mb-1">
-              {t("sidepanel:flashcards.draftTitle", "Draft flashcard")}
-            </Title>
-            <Text type="secondary" className="text-xs">
-              {draft.sourceTitle || draft.sourceId}
+          <div className="flex items-center justify-between gap-2">
+            <Text strong>
+              {t("sidepanel:flashcards.draftQueueCount", {
+                defaultValue: "{{count}} draft {{cardLabel}} ready",
+                count: drafts.length,
+                cardLabel: drafts.length === 1 ? "card" : "cards"
+              })}
             </Text>
+            <Button
+              size="small"
+              icon={<Save className="size-4" aria-hidden="true" />}
+              loading={isSaving}
+              disabled={!canSaveAllDrafts}
+              onClick={() => void handleSaveAllDrafts()}
+            >
+              {t("sidepanel:flashcards.saveAllCards", "Save all cards")}
+            </Button>
           </div>
           <label className="flex flex-col gap-1 text-sm font-medium">
             {t("sidepanel:flashcards.deckLabel", "Deck")}
@@ -287,7 +465,7 @@ export default function SidepanelFlashcards() {
               data-testid="sidepanel-flashcards-deck-select"
               aria-label={t("sidepanel:flashcards.deckLabel", "Deck")}
               loading={decksLoading}
-              disabled={!hasSelectableDecks}
+              disabled={!hasSelectableDecks || isSaving}
               placeholder={t(
                 "sidepanel:flashcards.deckPlaceholder",
                 "Choose a deck"
@@ -326,42 +504,71 @@ export default function SidepanelFlashcards() {
               )}
             </Text>
           ) : null}
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            {t("sidepanel:flashcards.frontLabel", "Front")}
-            <TextArea
-              aria-label={t("sidepanel:flashcards.frontLabel", "Front")}
-              autoSize={{ minRows: 2, maxRows: 4 }}
-              value={draft.front}
-              onChange={(event) =>
-                setDraft((current) =>
-                  current ? { ...current, front: event.target.value } : current
-                )
-              }
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            {t("sidepanel:flashcards.backLabel", "Back")}
-            <TextArea
-              aria-label={t("sidepanel:flashcards.backLabel", "Back")}
-              autoSize={{ minRows: 4, maxRows: 8 }}
-              value={draft.back}
-              onChange={(event) =>
-                setDraft((current) =>
-                  current ? { ...current, back: event.target.value } : current
-                )
-              }
-            />
-          </label>
-          <Button
-            type="primary"
-            block
-            icon={<Save className="size-4" aria-hidden="true" />}
-            loading={createFlashcardMutation.isPending}
-            disabled={!canSaveDraft}
-            onClick={handleSaveDraft}
-          >
-            {t("sidepanel:flashcards.saveCard", "Save card")}
-          </Button>
+          {drafts.map((draft, index) => (
+            <section
+              key={draft.id}
+              className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-3"
+              aria-label={t("sidepanel:flashcards.draftSection", {
+                defaultValue: "Draft flashcard {{index}}",
+                index: index + 1
+              })}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <Title level={5} className="!mb-1">
+                    {t("sidepanel:flashcards.draftTitle", "Draft flashcard")}
+                  </Title>
+                  <Text type="secondary" className="text-xs">
+                    {draft.sourceTitle || draft.sourceId}
+                  </Text>
+                </div>
+                <Button
+                  size="small"
+                  icon={<Trash2 className="size-4" aria-hidden="true" />}
+                  aria-label={t("sidepanel:flashcards.removeDraft", {
+                    defaultValue: "Remove draft {{index}}",
+                    index: index + 1
+                  })}
+                  disabled={isSaving}
+                  onClick={() => handleRemoveDraft(draft.id)}
+                />
+              </div>
+              <label className="flex flex-col gap-1 text-sm font-medium">
+                {t("sidepanel:flashcards.frontLabel", "Front")}
+                <TextArea
+                  aria-label={t("sidepanel:flashcards.frontLabel", "Front")}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  disabled={isSaving}
+                  value={draft.front}
+                  onChange={(event) =>
+                    handleUpdateDraft(draft.id, "front", event.target.value)
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm font-medium">
+                {t("sidepanel:flashcards.backLabel", "Back")}
+                <TextArea
+                  aria-label={t("sidepanel:flashcards.backLabel", "Back")}
+                  autoSize={{ minRows: 4, maxRows: 8 }}
+                  disabled={isSaving}
+                  value={draft.back}
+                  onChange={(event) =>
+                    handleUpdateDraft(draft.id, "back", event.target.value)
+                  }
+                />
+              </label>
+              <Button
+                type="primary"
+                block
+                icon={<Save className="size-4" aria-hidden="true" />}
+                loading={savingDraftIds.has(draft.id)}
+                disabled={!canSaveDraft(draft)}
+                onClick={() => void handleSaveDraft(draft.id)}
+              >
+                {t("sidepanel:flashcards.saveCard", "Save card")}
+              </Button>
+            </section>
+          ))}
         </section>
       ) : null}
       {saveStatus ? (
