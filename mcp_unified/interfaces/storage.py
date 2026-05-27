@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -10,7 +9,11 @@ if TYPE_CHECKING:
 
 
 class ProfileStore(Protocol):
-    """Store for named MCP tool and permission profiles."""
+    """Store for named MCP tool and permission profiles.
+
+    Implementations return caller-owned ``MCPProfile`` instances so callers may
+    inspect or mutate returned models without changing persisted state.
+    """
 
     async def get_profile(self, profile_id: str) -> MCPProfile | None: ...
 
@@ -18,7 +21,7 @@ class ProfileStore(Protocol):
 
     async def upsert_profile(
         self,
-        profile: MCPProfile | Mapping[str, Any],
+        profile: MCPProfile,
     ) -> MCPProfile: ...
 
     async def delete_profile(self, profile_id: str) -> bool: ...

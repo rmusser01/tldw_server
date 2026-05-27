@@ -56,4 +56,4 @@ class InMemoryProfileStore:
         """Validate and deep-copy a profile-like object for storage."""
         if isinstance(profile, MCPProfile):
             return profile.model_copy(deep=True)
-        return MCPProfile.model_validate(dict(profile)).model_copy(deep=True)
+        return MCPProfile.model_validate(profile)

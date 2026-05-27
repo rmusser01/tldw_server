@@ -3,7 +3,7 @@ id: TASK-521
 title: Implement MCP Unified Stage 2 profile registry resolver primitives
 status: Done
 assignee: []
-created_date: ''
+created_date: '2026-05-27T07:20:16Z'
 updated_date: '2026-05-27 07:19'
 labels:
   - mcp

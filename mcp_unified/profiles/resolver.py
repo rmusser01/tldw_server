@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
 from mcp_unified.interfaces.storage import ProfileStore
 
 from .models import MCPProfile
 from .store import ProfileStoreUnavailableError
+
+logger = logging.getLogger(__name__)
 
 
 class ProfileResolver(Protocol):
@@ -48,8 +51,13 @@ class StoreBackedProfileResolver:
         try:
             profile = await self.profile_store.get_profile(resolved_id)
         except ProfileStoreUnavailableError:
+            logger.warning(
+                "Profile store unavailable while resolving MCP profile %r",
+                resolved_id,
+                exc_info=True,
+            )
             return None
 
         if profile is None or not profile.enabled:
             return None
-        return profile.model_copy(deep=True)
+        return profile

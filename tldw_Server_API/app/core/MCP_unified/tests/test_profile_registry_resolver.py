@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Mapping
+import logging
 from pathlib import Path
-from typing import Any
 
-import mcp_unified.profiles.resolver as profile_resolver
-import mcp_unified.profiles.store as profile_store
+import mcp_unified.profiles as profiles_pkg
 import pytest
 from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.profiles.resolver import StoreBackedProfileResolver
@@ -34,8 +32,7 @@ def _tldw_imports_for(path: Path) -> list[str]:
 
 
 def test_profile_store_and_resolver_modules_have_no_tldw_server_imports() -> None:
-    package_root = Path(profile_store.__file__).resolve().parent
-    assert Path(profile_resolver.__file__).resolve().parent == package_root
+    package_root = Path(profiles_pkg.__file__).resolve().parent
 
     offenders: dict[str, list[str]] = {}
     for path in package_root.rglob("*.py"):
@@ -129,7 +126,9 @@ async def test_store_backed_resolver_returns_none_for_disabled_profiles() -> Non
 
 
 @pytest.mark.asyncio
-async def test_store_backed_resolver_fails_closed_when_store_unavailable() -> None:
+async def test_store_backed_resolver_fails_closed_when_store_unavailable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     class UnavailableStore:
         async def get_profile(self, profile_id: str) -> MCPProfile | None:
             raise ProfileStoreUnavailableError(
@@ -141,7 +140,7 @@ async def test_store_backed_resolver_fails_closed_when_store_unavailable() -> No
 
         async def upsert_profile(
             self,
-            profile: MCPProfile | Mapping[str, Any],
+            profile: MCPProfile,
         ) -> MCPProfile:
             raise ProfileStoreUnavailableError("profile store unavailable")
 
@@ -151,6 +150,9 @@ async def test_store_backed_resolver_fails_closed_when_store_unavailable() -> No
             )
 
     resolver = StoreBackedProfileResolver(UnavailableStore(), default_profile_id="default")
+    caplog.set_level(logging.WARNING, logger="mcp_unified.profiles.resolver")
 
     assert await resolver.resolve_profile("explicit") is None
     assert await resolver.resolve_profile(None) is None
+    assert "MCP profile 'explicit'" in caplog.text
+    assert "MCP profile 'default'" in caplog.text
