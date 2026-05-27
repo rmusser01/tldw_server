@@ -188,6 +188,32 @@ test.describe("MCP Hub", () => {
 
       await assertNoCriticalErrors(diagnostics)
     })
+
+    test("should hydrate Research Workspace context in Workspace Sets", async ({
+      authedPage,
+      serverInfo,
+      diagnostics,
+    }) => {
+      skipIfServerUnavailable(serverInfo)
+
+      mcpHub = new MCPHubPage(authedPage)
+      await mcpHub.goto(
+        "/mcp-hub?workflow=setup&view=workspace-sets&workspace_id=rw-e2e-context&source=research-workspace"
+      )
+      await mcpHub.assertPageReady()
+
+      await mcpHub.expectWorkflowSelected("workspaces")
+      await mcpHub.expectViewSelected("workspace-sets")
+
+      const contextStatus = authedPage.getByTestId("mcp-workspace-context-status")
+      await expect(contextStatus).toBeVisible({ timeout: 15_000 })
+      await expect(contextStatus).toContainText(/rw-e2e-context/)
+      await expect(contextStatus).toContainText(
+        /included in .* MCP workspace set|No MCP workspace set includes/i
+      )
+
+      await assertNoCriticalErrors(diagnostics)
+    })
   })
 
   // =========================================================================

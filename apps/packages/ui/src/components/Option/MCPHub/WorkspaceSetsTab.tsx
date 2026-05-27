@@ -21,11 +21,15 @@ import { parseLineList } from "./policyHelpers"
 
 type WorkspaceSetsTabProps = {
   drillTarget?: McpHubDrillTarget | null
+  focusSource?: string | null
+  focusWorkspaceId?: string | null
   onDrillHandled?: (requestId: number) => void
 }
 
 export const WorkspaceSetsTab = ({
   drillTarget = null,
+  focusSource = null,
+  focusWorkspaceId = null,
   onDrillHandled
 }: WorkspaceSetsTabProps) => {
   const handledDrillRequestRef = useRef<number | null>(null)
@@ -204,6 +208,21 @@ export const WorkspaceSetsTab = ({
     }
   }
 
+  const normalizedFocusWorkspaceId = String(focusWorkspaceId ?? "").trim()
+  const matchingWorkspaceSets = normalizedFocusWorkspaceId
+    ? objects.filter((workspaceSet) =>
+        (membersByObjectId[workspaceSet.id] || []).some(
+          (member) => member.workspace_id === normalizedFocusWorkspaceId
+        )
+      )
+    : []
+  const shouldShowFocusState =
+    Boolean(normalizedFocusWorkspaceId) && objectsLoaded && !loading && !errorMessage
+  const focusTitle =
+    matchingWorkspaceSets.length === 1
+      ? `${normalizedFocusWorkspaceId} is included in 1 MCP workspace set.`
+      : `${normalizedFocusWorkspaceId} is included in ${matchingWorkspaceSets.length} MCP workspace sets.`
+
   return (
     <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
       <Typography.Text type="secondary">
@@ -211,6 +230,28 @@ export const WorkspaceSetsTab = ({
         duplicating inline ids.
       </Typography.Text>
       {errorMessage ? <Alert type="error" title={errorMessage} showIcon /> : null}
+      {shouldShowFocusState && matchingWorkspaceSets.length > 0 ? (
+        <Alert
+          data-testid="mcp-workspace-context-status"
+          type="info"
+          showIcon
+          title={focusTitle}
+          description={
+            focusSource === "research-workspace"
+              ? "This context came from Research Workspace. MCP Hub owns the workspace-set membership and policy assignment."
+              : "MCP Hub owns workspace-set membership and policy assignment."
+          }
+        />
+      ) : null}
+      {shouldShowFocusState && matchingWorkspaceSets.length === 0 ? (
+        <Alert
+          data-testid="mcp-workspace-context-status"
+          type="warning"
+          showIcon
+          title={`No MCP workspace set includes ${normalizedFocusWorkspaceId} yet.`}
+          description="Create or edit a workspace set here to make this workspace available to MCP policy assignments."
+        />
+      ) : null}
 
       <Button type="primary" onClick={() => setCreateOpen(true)}>
         New Workspace Set

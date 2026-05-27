@@ -84,7 +84,10 @@ describe("WorkspaceCapabilityRemediation", () => {
     ).toBeInTheDocument()
     expect(
       within(panel).getByRole("link", { name: "Open MCP Hub" })
-    ).toHaveAttribute("href", "/mcp-hub")
+    ).toHaveAttribute(
+      "href",
+      "/mcp-hub?workflow=workspaces&view=workspace-sets&workspace_id=workspace-1&source=research-workspace"
+    )
 
     expect(within(panel).getByText("ACP Agents")).toBeInTheDocument()
     expect(
@@ -128,6 +131,23 @@ describe("WorkspaceCapabilityRemediation", () => {
         expect.stringContaining("workspace-playground")
       )
     }
+  })
+
+  it("encodes the active workspace id in the MCP Hub handoff link", () => {
+    renderRemediation(
+      makeCapabilities({
+        workspace_id: "workspace one/with spaces"
+      })
+    )
+
+    const panel = screen.getByTestId("workspace-capability-remediation")
+
+    expect(
+      within(panel).getByRole("link", { name: "Open MCP Hub" })
+    ).toHaveAttribute(
+      "href",
+      "/mcp-hub?workflow=workspaces&view=workspace-sets&workspace_id=workspace+one%2Fwith+spaces&source=research-workspace"
+    )
   })
 
   it("renders grounded-answer remediation when selected sources are not queryable", () => {
