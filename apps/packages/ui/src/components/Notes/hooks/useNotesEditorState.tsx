@@ -1748,7 +1748,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     }
     if (currentOfflineDraft?.syncState === 'conflict') {
       return t('option:notesSearch.offlineConflictStatus', {
-        defaultValue: 'Offline sync conflict: server has a newer version.'
+        defaultValue:
+          'Offline sync conflict: server has a newer version. Your local draft is still saved; copy it before reloading.'
       })
     }
     if (currentOfflineDraft?.syncState === 'error') {

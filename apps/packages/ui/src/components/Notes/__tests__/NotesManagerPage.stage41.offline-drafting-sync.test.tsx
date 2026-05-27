@@ -340,7 +340,7 @@ describe('NotesManagerPage stage 41 offline drafting and sync', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('notes-offline-sync-status')).toHaveTextContent(
-        'Offline sync conflict: server has a newer version.'
+        'Offline sync conflict: server has a newer version. Your local draft is still saved; copy it before reloading.'
       )
     })
 

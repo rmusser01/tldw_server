@@ -379,7 +379,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
             </span>
             {exportProgress.failedBatches > 0 && (
               <span>
-                {` · ${exportProgress.failedBatches} failed`}
+                {` · ${exportProgress.failedBatches} batch${
+                  exportProgress.failedBatches === 1 ? '' : 'es'
+                } failed; export may be partial`}
               </span>
             )}
           </div>
