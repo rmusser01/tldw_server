@@ -1063,6 +1063,7 @@ const NotesManagerPage: React.FC = () => {
         method: 'DELETE' as any,
         headers: { "expected-version": String(expectedVersion) }
       })
+      ed.removeRecentNotes([targetId])
       showDeleteUndoToast(targetId)
       if (ed.selectedId != null && String(ed.selectedId) === targetId) resetEditorToEmptyState()
       await list.refetch()
@@ -1148,6 +1149,7 @@ const NotesManagerPage: React.FC = () => {
 
     if (deleted > 0) {
       message.success(`Deleted ${deleted} selected note${deleted === 1 ? '' : 's'}`)
+      ed.removeRecentNotes(Array.from(deletedIds))
       if (ed.selectedId != null && deletedIds.has(String(ed.selectedId))) {
         resetEditorToEmptyState()
       }
@@ -2125,6 +2127,8 @@ const NotesManagerPage: React.FC = () => {
         searchTipsContent={searchTipsContent}
         query={list.query}
         isFetching={list.isFetching}
+        hasListError={list.isError}
+        listErrorMessage={list.listErrorMessage}
         isOnline={isOnline}
         demoEnabled={demoEnabled}
         capsLoading={capsLoading}
@@ -2144,6 +2148,9 @@ const NotesManagerPage: React.FC = () => {
         setSelectedMoodboardId={list.setSelectedMoodboardId}
         setSelectedNotebookId={list.setSelectedNotebookId}
         setSearchTipsQuery={list.setSearchTipsQuery}
+        retryList={() => {
+          void list.refetch()
+        }}
         handleNewNote={handleNewNote}
         switchListMode={ed.switchListMode}
         handleSelectNote={async (id) => {

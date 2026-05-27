@@ -270,7 +270,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     return sortNoteRows(items, sortOption).map(mapNoteListItem)
   }, [effectiveKeywordTokens, fetchFilteredNotesRaw, listMode, listViewMode, page, pageSize, query, selectedMoodboardId, sortOption])
 
-  const { data, isFetching, refetch } = useQuery({
+  const { data, isFetching, refetch, isError, error } = useQuery({
     queryKey: [
       'notes',
       listMode,
@@ -287,6 +287,13 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     placeholderData: keepPreviousData,
     enabled: isOnline
   })
+  const listErrorMessage = React.useMemo(() => {
+    if (!isError) return null
+    const messageText = String((error as any)?.message || error || '').trim()
+    return messageText || t('option:notesSearch.loadErrorDescription', {
+      defaultValue: 'The notes list failed to load. Retry the request or check server health.'
+    })
+  }, [error, isError, t])
 
   /** Raw notes from the query - pinning is applied at the component level */
   const rawNotes = React.useMemo(() => {
@@ -917,7 +924,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     bulkSelectedIdSet, selectedBulkNotes,
     hasActiveFilters,
     // query data
-    data, isFetching, refetch,
+    data, isFetching, refetch, isError, error, listErrorMessage,
     // helpers
     fetchFilteredNotesRaw,
     clearSearchQueryTimeout,

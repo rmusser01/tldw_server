@@ -91,6 +91,8 @@ type NotesListPanelProps = {
   pinnedNoteIds?: string[]
   isOnline: boolean
   isFetching: boolean
+  hasError?: boolean
+  errorMessage?: string | null
   demoEnabled: boolean
   capsLoading: boolean
   capabilities: ServerCapabilities | null
@@ -104,6 +106,8 @@ type NotesListPanelProps = {
   onTogglePinned?: (id: string | number) => void
   onChangePage: (page: number, pageSize: number) => void
   onResetEditor: () => void
+  onRetry?: () => void
+  onClearFilters?: () => void
   onOpenSettings: () => void
   onOpenHealth: () => void
   onRestoreNote: (id: string | number, version?: number) => void
@@ -112,6 +116,7 @@ type NotesListPanelProps = {
   onExportAllJson: () => void
   onImportNotes?: () => void
   onSyncFolder?: () => void
+  hasActiveFilters?: boolean
   importInProgress?: boolean
   syncFolderInProgress?: boolean
   exportProgress?: {
@@ -130,6 +135,8 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   pinnedNoteIds = [],
   isOnline,
   isFetching,
+  hasError = false,
+  errorMessage = null,
   demoEnabled,
   capsLoading,
   capabilities,
@@ -143,6 +150,8 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onTogglePinned,
   onChangePage,
   onResetEditor,
+  onRetry,
+  onClearFilters,
   onOpenSettings,
   onOpenHealth,
   onRestoreNote,
@@ -151,6 +160,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onExportAllJson,
   onImportNotes,
   onSyncFolder,
+  hasActiveFilters = false,
   importInProgress = false,
   syncFolderInProgress = false,
   exportProgress = null
@@ -215,15 +225,19 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   })()
 
   const renderEmptyStateSurface = (
-    variant: 'demo' | 'connect' | 'unsupported' | 'empty',
+    variant: 'demo' | 'connect' | 'unsupported' | 'empty' | 'no-results' | 'error',
   ) => (
     <React.Suspense fallback={null}>
       <LazyNotesListPanelEmptyStates
         variant={variant}
         isTrashView={isTrashView}
+        searchQuery={searchQuery}
+        errorMessage={errorMessage}
         onOpenSettings={onOpenSettings}
         onOpenHealth={onOpenHealth}
         onResetEditor={onResetEditor}
+        onRetry={onRetry}
+        onClearFilters={onClearFilters}
       />
     </React.Suspense>
   )
@@ -372,8 +386,18 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
       {/* Content area */}
       <div className="flex-1 overflow-auto p-4">
       {isFetching ? (
-        <div className="flex items-center justify-center py-10">
+        <div
+          className="flex items-center justify-center gap-2 py-10 text-sm text-text-muted"
+          role="status"
+          aria-live="polite"
+          data-testid="notes-list-loading"
+        >
           <Spin />
+          <span>
+            {t('option:notesSearch.loadingNotes', {
+              defaultValue: 'Loading notes...'
+            })}
+          </span>
         </div>
       ) : !isOnline ? (
         demoEnabled ? (
@@ -383,6 +407,8 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
         )
       ) : !capsLoading && capabilities && !capabilities.hasNotes ? (
         renderEmptyStateSurface('unsupported')
+      ) : hasError ? (
+        renderEmptyStateSurface('error')
       ) : Array.isArray(notes) && notes.length > 0 ? (
         <>
           <div className="divide-y divide-border" role="listbox">
@@ -645,7 +671,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
           </div>
         </>
       ) : (
-        renderEmptyStateSurface('empty')
+        renderEmptyStateSurface(hasActiveFilters && !isTrashView ? 'no-results' : 'empty')
       )}
       </div>
 

@@ -1,28 +1,38 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
+import { AlertTriangle as AlertTriangleIcon, SearchX as SearchXIcon } from 'lucide-react'
 import FeatureEmptyState from '@/components/Common/FeatureEmptyState'
 import ConnectionProblemBanner from '@/components/Common/ConnectionProblemBanner'
 import { useConnectionActions } from '@/hooks/useConnectionState'
 import { getDemoNotes } from '@/utils/demo-content'
 
 type NotesListPanelEmptyStatesProps = {
-  variant: 'demo' | 'connect' | 'unsupported' | 'empty'
+  variant: 'demo' | 'connect' | 'unsupported' | 'empty' | 'no-results' | 'error'
   isTrashView: boolean
+  searchQuery?: string
+  errorMessage?: string | null
   onOpenSettings: () => void
   onOpenHealth: () => void
   onResetEditor: () => void
+  onRetry?: () => void
+  onClearFilters?: () => void
 }
 
 const NotesListPanelEmptyStates: React.FC<NotesListPanelEmptyStatesProps> = ({
   variant,
   isTrashView,
+  searchQuery,
+  errorMessage,
   onOpenSettings,
   onOpenHealth,
   onResetEditor,
+  onRetry,
+  onClearFilters,
 }) => {
   const { t } = useTranslation(['option', 'settings'])
   const { checkOnce } = useConnectionActions()
   const demoNotes = React.useMemo(() => getDemoNotes(t), [t])
+  const normalizedSearchQuery = String(searchQuery || '').trim()
 
   if (variant === 'demo') {
     return (
@@ -148,6 +158,96 @@ const NotesListPanelEmptyStates: React.FC<NotesListPanelEmptyStatesProps> = ({
         })}
         onPrimaryAction={onOpenHealth}
       />
+    )
+  }
+
+  if (variant === 'error') {
+    return (
+      <div data-testid="notes-list-error-state">
+        <FeatureEmptyState
+          title={
+            <span className="inline-flex items-center gap-2">
+              <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger">
+                Load error
+              </span>
+              <span>
+                {t('option:notesSearch.loadErrorTitle', {
+                  defaultValue: 'Could not load notes'
+                })}
+              </span>
+            </span>
+          }
+          description={
+            errorMessage ||
+            t('option:notesSearch.loadErrorDescription', {
+              defaultValue: 'The notes list failed to load. Retry the request or check server health.'
+            })
+          }
+          examples={[
+            t('option:notesSearch.loadErrorExampleRetry', {
+              defaultValue: 'Retry keeps your current search and filters.'
+            }),
+            t('option:notesSearch.loadErrorExampleHealth', {
+              defaultValue: 'Open diagnostics if the server keeps returning errors.'
+            })
+          ]}
+          primaryActionLabel={t('option:buttonRetry', 'Retry')}
+          onPrimaryAction={onRetry}
+          secondaryActionLabel={t('settings:healthSummary.diagnostics', {
+            defaultValue: 'Health & diagnostics'
+          })}
+          onSecondaryAction={onOpenHealth}
+          icon={AlertTriangleIcon}
+          iconClassName="text-danger"
+        />
+      </div>
+    )
+  }
+
+  if (variant === 'no-results') {
+    return (
+      <div data-testid="notes-list-no-results-state">
+        <FeatureEmptyState
+          title={
+            <span className="inline-flex items-center gap-2">
+              <span className="rounded-full bg-surface2 px-2 py-0.5 text-[11px] font-medium text-text">
+                No results
+              </span>
+              <span>
+                {t('option:notesSearch.noResultsTitle', {
+                  defaultValue: 'No notes match your filters'
+                })}
+              </span>
+            </span>
+          }
+          description={
+            normalizedSearchQuery
+              ? t('option:notesSearch.noResultsDescriptionWithQuery', {
+                  defaultValue: 'No notes match "{{query}}".'
+                }).replace('{{query}}', normalizedSearchQuery)
+              : t('option:notesSearch.noResultsDescription', {
+                  defaultValue: 'No notes match the current tags or saved filter.'
+                })
+          }
+          examples={[
+            t('option:notesSearch.noResultsExampleSearch', {
+              defaultValue: 'Try a broader phrase or remove exact-match quotes.'
+            }),
+            t('option:notesSearch.noResultsExampleTags', {
+              defaultValue: 'Clear tag filters to return to all notes.'
+            })
+          ]}
+          primaryActionLabel={t('option:notesSearch.clear', {
+            defaultValue: 'Clear search & filters'
+          })}
+          onPrimaryAction={onClearFilters}
+          secondaryActionLabel={t('option:notesSearch.emptyCreateSecondary', {
+            defaultValue: 'Create note'
+          })}
+          onSecondaryAction={onResetEditor}
+          icon={SearchXIcon}
+        />
+      </div>
     )
   }
 

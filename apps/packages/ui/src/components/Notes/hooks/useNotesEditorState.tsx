@@ -369,6 +369,21 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     })
   }, [])
 
+  const removeRecentNotes = React.useCallback((noteIds: Array<string | number>) => {
+    const removedIds = new Set(
+      noteIds
+        .map((noteId) => String(noteId || '').trim())
+        .filter(Boolean)
+    )
+    if (removedIds.size === 0) return
+    setRecentNotes((current) => {
+      const next = current.filter((entry) => !removedIds.has(String(entry.id)))
+      if (next.length === current.length) return current
+      void setSetting(NOTES_RECENT_OPENED_SETTING, next)
+      return next
+    })
+  }, [])
+
   const loadDetail = React.useCallback(async (id: string | number): Promise<boolean> => {
     clearAssistUndoState()
     setLoadingDetail(true)
@@ -1821,6 +1836,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     resizeEditorTextarea,
     loadDetail,
     resetEditor,
+    removeRecentNotes,
     confirmDiscardIfDirty,
     switchListMode,
     handleSelectNote,

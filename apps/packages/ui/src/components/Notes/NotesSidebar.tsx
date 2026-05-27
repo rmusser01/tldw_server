@@ -96,6 +96,8 @@ export interface NotesSidebarProps {
 
   // Fetching / online
   isFetching: boolean
+  hasListError?: boolean
+  listErrorMessage?: string | null
   isOnline: boolean
   demoEnabled: boolean
   capsLoading: boolean
@@ -123,6 +125,7 @@ export interface NotesSidebarProps {
   setSelectedMoodboardId: (id: number | null) => void
   setSelectedNotebookId: (id: number | null) => void
   setSearchTipsQuery: (query: string) => void
+  retryList: () => void
 
   // Callbacks - actions
   handleNewNote: () => Promise<void>
@@ -225,6 +228,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
 
   // Fetching / online
   isFetching,
+  hasListError = false,
+  listErrorMessage = null,
   isOnline,
   demoEnabled,
   capsLoading,
@@ -252,6 +257,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   setSelectedMoodboardId,
   setSelectedNotebookId,
   setSearchTipsQuery,
+  retryList,
 
   // Callbacks - actions
   handleNewNote,
@@ -1144,6 +1150,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 bulkSelectedIds={bulkSelectedIds}
                 isOnline={isOnline}
                 isFetching={isFetching}
+                hasError={hasListError}
+                errorMessage={listErrorMessage}
                 demoEnabled={demoEnabled}
                 capsLoading={capsLoading}
                 capabilities={capabilities || null}
@@ -1166,6 +1174,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   setPageSize(normalizedPageSize)
                   setPage(sizeChanged ? 1 : nextPage)
                 }}
+                onRetry={retryList}
+                onClearFilters={handleClearFilters}
                 onResetEditor={() => {
                   if (listMode === 'trash') {
                     void switchListMode('active')
@@ -1189,6 +1199,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 }}
                 onImportNotes={openImportPicker}
                 onSyncFolder={onSyncFolder}
+                hasActiveFilters={hasActiveFilters}
                 importInProgress={importSubmitting}
                 exportProgress={exportProgress}
               />
