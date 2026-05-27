@@ -56,14 +56,6 @@ type DisposablePersona = {
   version: number;
 };
 
-type DisposablePlainChat = {
-  id: string;
-  title: string;
-  version: number;
-  userMessage: string;
-  assistantMessage: string;
-};
-
 const apiHeaders = () => ({
   'x-api-key': apiKey,
 });
@@ -787,9 +779,6 @@ const selectConfiguredCockpitModel = async (
   return modelKey;
 };
 
-const getCharacterControlRail = (page: Page): Locator =>
-  page.getByTestId('character-control-rail');
-
 const openDesktopChatCockpit = async (
   page: Page,
   selection: RealChatModelSelection,
@@ -806,7 +795,7 @@ const openDesktopChatCockpit = async (
   });
   await assertNoBlockingServerDialog(page);
   await assertCoreComposerControls(page);
-  await expect(getCharacterControlRail(page)).toBeVisible();
+  await expect(page.getByTestId('character-control-rail')).toHaveCount(0);
 };
 
 const createDisposableCharacter = async (
@@ -908,77 +897,17 @@ const cleanupDisposablePersona = async (
   ).catch(() => ({ status: 0 }));
 };
 
-const createDisposablePlainChat = async (
-  request: APIRequestContext,
-  title: string,
-  userMessage: string,
-  assistantMessage: string
-): Promise<DisposablePlainChat> => {
-  const created = await apiPostWithRetry<any>(request, '/api/v1/chats/', {
-    title,
-    state: 'in-progress',
-    source: 'webui',
-  }, {
-    attempts: 6,
-    retryDelayMs: 2_000,
-  });
-
-  expect(created.status).toBe(201);
-  expect(created.body?.id).toBeTruthy();
-
-  const chatId = String(created.body?.id);
-  await apiPostWithRetry<any>(request, `/api/v1/chats/${encodeURIComponent(chatId)}/messages`, {
-    role: 'user',
-    content: userMessage,
-  });
-  await apiPostWithRetry<any>(request, `/api/v1/chats/${encodeURIComponent(chatId)}/messages`, {
-    role: 'assistant',
-    content: assistantMessage,
-  });
-
-  return {
-    id: chatId,
-    title,
-    version: Number(created.body?.version ?? 1),
-    userMessage,
-    assistantMessage,
-  };
-};
-
-const cleanupDisposablePlainChat = async (
-  request: APIRequestContext,
-  chat: DisposablePlainChat | null
-) => {
-  if (!chat) return;
-  const details = await getChatDetails(request, chat.id).catch(() => null);
-  const expectedVersion =
-    details?.status === 200 && typeof details.body?.version === 'number'
-      ? details.body.version
-      : chat.version;
-  const expectedVersionQuery =
-    typeof expectedVersion === 'number'
-      ? `?expected_version=${encodeURIComponent(String(expectedVersion))}&hard_delete=true`
-      : '?hard_delete=true';
-  await apiDelete(
-    request,
-    `/api/v1/chats/${encodeURIComponent(chat.id)}${expectedVersionQuery}`
-  ).catch(() => ({ status: 0 }));
-};
-
-const selectAssistantFromRail = async (
+const selectAssistantFromRuntimeRail = async (
   page: Page,
   options: {
-    triggerLabel:
-      | 'Apply overlay'
-      | 'Change overlay'
-      | 'Start tracked character chat'
-      | 'Start tracked persona chat';
     tab: 'Characters' | 'Personas';
     assistantName: string;
   }
 ) => {
-  const rail = getCharacterControlRail(page);
-  await rail.getByRole('button', { name: options.triggerLabel }).click();
+  const runtimeInspector = getDesktopRuntimeInspector(page);
+  await runtimeInspector
+    .getByRole('button', { name: 'Select character or persona' })
+    .click();
   const panel = page.getByTestId('assistant-select-panel');
   await expect(panel).toBeVisible();
   await page.getByRole('tab', { name: options.tab }).click();
@@ -1150,78 +1079,6 @@ const waitForSuccessfulChatMessagesLoad = (
     },
     { timeout }
   );
-};
-
-const clearOverlayWithRetry = async (page: Page, options: {
-  chatId: string;
-  expectedOverlayName: string;
-  maxAttempts?: number;
-}) => {
-  const backendOrigin = new URL(serverUrl).origin;
-  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const rail = getCharacterControlRail(page);
-    await expect(rail.getByRole('button', { name: 'Clear overlay' })).toBeVisible();
-    await page.waitForTimeout(3_000);
-
-    const clearOverlayResponsePromise = page.waitForResponse(
-      (response) => {
-        const url = new URL(response.url());
-        return (
-          response.request().method() === 'PUT' &&
-          url.origin === backendOrigin &&
-          url.pathname === `/api/v1/chats/${encodeURIComponent(options.chatId)}/settings`
-        );
-      },
-      { timeout: 30_000 }
-    );
-
-    await rail.getByRole('button', { name: 'Clear overlay' }).click();
-    const clearOverlayResponse = await clearOverlayResponsePromise;
-    expect(clearOverlayResponse.request().postDataJSON()).toMatchObject({
-      settings: {
-        assistantOverlay: null,
-      },
-    });
-
-    const clearPayload = (await clearOverlayResponse.json().catch(() => null)) as
-      | { settings?: { assistantOverlay?: unknown } }
-      | null;
-
-    if (
-      clearOverlayResponse.status() === 200 &&
-      (clearPayload?.settings?.assistantOverlay ?? null) === null
-    ) {
-      await expect(rail).toContainText('Plain chat');
-      await expect(rail.getByRole('button', { name: 'Apply overlay' })).toBeVisible();
-      return;
-    }
-
-    if (clearOverlayResponse.status() !== 429 || attempt === maxAttempts) {
-      expect(clearOverlayResponse.status()).toBe(200);
-      expect(clearPayload?.settings?.assistantOverlay ?? null).toBeNull();
-      return;
-    }
-
-    const retryAfterHeader = clearOverlayResponse.headers()['retry-after'];
-    const retryAfterSeconds = Number.parseInt(retryAfterHeader ?? '', 10);
-    const backoffMs =
-      Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-        ? retryAfterSeconds * 1_000
-        : 5_000 * attempt;
-    await page.waitForTimeout(backoffMs);
-    const reloadMessagesPromise = waitForSuccessfulChatMessagesLoad(page, options.chatId);
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await reloadMessagesPromise;
-    await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
-      timeout: 60_000,
-    });
-    await assertNoBlockingServerDialog(page);
-    await assertCoreComposerControls(page);
-    await expect(rail).toContainText('Overlay personality');
-    await expect(rail).toContainText(options.expectedOverlayName);
-  }
 };
 
 const getChatDetails = async (
@@ -2397,97 +2254,7 @@ test.describe('/chat cockpit real-server parity', () => {
     }
   });
 
-  test('keeps the same conversation while overlay changes and clears through the character control rail', async ({
-    page,
-    request,
-  }) => {
-    test.setTimeout(180_000);
-
-    const health = await apiGet<any>(request, '/api/v1/health');
-    assertHealthResponse(health);
-    const chatModelSelection = await getConfiguredChatModelSelection(request);
-
-    const timestamp = Date.now();
-    let character: DisposableCharacter | null = null;
-    let persona: DisposablePersona | null = null;
-    let plainChat: DisposablePlainChat | null = null;
-
-    try {
-      character = await createDisposableCharacter(
-        request,
-        `Overlay Character ${timestamp}`
-      );
-      persona = await createDisposablePersona(
-        request,
-        `overlay_persona_${timestamp}`,
-        `Overlay Persona ${timestamp}`
-      );
-      plainChat = await createDisposablePlainChat(
-        request,
-        `Overlay continuity ${timestamp}`,
-        `Overlay continuity user seed ${timestamp}`,
-        `Overlay continuity assistant seed ${timestamp}`
-      );
-
-      await openDesktopChatCockpit(page, chatModelSelection, {
-        persistedServerChatId: plainChat.id,
-      });
-      expect(await waitForPersistedServerChatId(page)).toBe(plainChat.id);
-
-      const rail = getCharacterControlRail(page);
-      await expect(rail).toContainText('Plain chat');
-      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(
-        plainChat.userMessage
-      );
-      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(
-        plainChat.assistantMessage
-      );
-
-      await selectAssistantFromRail(page, {
-        triggerLabel: 'Apply overlay',
-        tab: 'Characters',
-        assistantName: character.name,
-      });
-      await expect(rail).toContainText('Overlay personality');
-      await expect(rail).toContainText(character.name);
-      expect(await waitForPersistedServerChatId(page)).toBe(plainChat.id);
-
-      await selectAssistantFromRail(page, {
-        triggerLabel: 'Change overlay',
-        tab: 'Personas',
-        assistantName: persona.name,
-      });
-      await expect(rail).toContainText('Overlay personality');
-      await expect(rail).toContainText(persona.name);
-      expect(await waitForPersistedServerChatId(page)).toBe(plainChat.id);
-
-      const firstReloadMessagesPromise = waitForSuccessfulChatMessagesLoad(page, plainChat.id);
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await firstReloadMessagesPromise;
-      await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
-        timeout: 60_000,
-      });
-      await assertNoBlockingServerDialog(page);
-      await assertCoreComposerControls(page);
-
-      const reloadedRail = getCharacterControlRail(page);
-      await expect(reloadedRail).toContainText('Overlay personality');
-      await expect(reloadedRail).toContainText(persona.name);
-      await expect(reloadedRail.getByRole('button', { name: 'Clear overlay' })).toBeVisible();
-      expect(await waitForPersistedServerChatId(page)).toBe(plainChat.id);
-      await clearOverlayWithRetry(page, {
-        chatId: plainChat.id,
-        expectedOverlayName: persona.name,
-      });
-      expect(await waitForPersistedServerChatId(page)).toBe(plainChat.id);
-    } finally {
-      await cleanupDisposablePlainChat(request, plainChat);
-      await cleanupDisposableCharacter(request, character);
-      await cleanupDisposablePersona(request, persona);
-    }
-  });
-
-  test('starts a tracked character chat from the character control rail and restores tracked mode after reload', async ({
+  test('starts a tracked character chat from the runtime rail and restores tracked mode after reload', async ({
     page,
     request,
   }) => {
@@ -2509,8 +2276,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await openDesktopChatCockpit(page, chatModelSelection);
 
       const trackedStartCapture = captureAllApiCalls(page);
-      await selectAssistantFromRail(page, {
-        triggerLabel: 'Start tracked character chat',
+      await selectAssistantFromRuntimeRail(page, {
         tab: 'Characters',
         assistantName: character.name,
       });
@@ -2543,20 +2309,19 @@ test.describe('/chat cockpit real-server parity', () => {
       await assertNoBlockingServerDialog(page);
       await assertCoreComposerControls(page);
 
-      const rail = getCharacterControlRail(page);
-      await expect(rail).toContainText('Tracked character chat', {
+      const runtimeInspector = getDesktopRuntimeInspector(page);
+      await expect(runtimeInspector).toContainText('Character selected', {
         timeout: 60_000,
       });
-      await expect(rail).toContainText(character.name);
-      await expect(rail.getByRole('button', { name: 'Apply overlay' })).toHaveCount(0);
-      await expect(rail.getByRole('button', { name: 'Change overlay' })).toHaveCount(0);
-      await expect(rail.getByRole('button', { name: 'Clear overlay' })).toHaveCount(0);
+      await expect(runtimeInspector).toContainText(character.name);
+      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toBeVisible();
+      await expect(page.getByTestId('character-control-rail')).toHaveCount(0);
     } finally {
       await cleanupDisposableCharacter(request, character);
     }
   });
 
-  test('starts a tracked persona chat from the character control rail and restores tracked mode after reload', async ({
+  test('starts a tracked persona chat from the runtime rail and restores tracked mode after reload', async ({
     page,
     request,
   }) => {
@@ -2578,8 +2343,7 @@ test.describe('/chat cockpit real-server parity', () => {
 
       await openDesktopChatCockpit(page, chatModelSelection);
 
-      await selectAssistantFromRail(page, {
-        triggerLabel: 'Start tracked persona chat',
+      await selectAssistantFromRuntimeRail(page, {
         tab: 'Personas',
         assistantName: persona.name,
       });
@@ -2617,14 +2381,13 @@ test.describe('/chat cockpit real-server parity', () => {
       await assertNoBlockingServerDialog(page);
       await assertCoreComposerControls(page);
 
-      const rail = getCharacterControlRail(page);
-      await expect(rail).toContainText('Tracked persona chat', {
+      const runtimeInspector = getDesktopRuntimeInspector(page);
+      await expect(runtimeInspector).toContainText('Persona selected', {
         timeout: 60_000,
       });
-      await expect(rail).toContainText(persona.name);
-      await expect(rail.getByRole('button', { name: 'Apply overlay' })).toHaveCount(0);
-      await expect(rail.getByRole('button', { name: 'Change overlay' })).toHaveCount(0);
-      await expect(rail.getByRole('button', { name: 'Clear overlay' })).toHaveCount(0);
+      await expect(runtimeInspector).toContainText(persona.name);
+      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toBeVisible();
+      await expect(page.getByTestId('character-control-rail')).toHaveCount(0);
     } finally {
       await cleanupDisposablePersona(request, persona);
     }

@@ -7,22 +7,22 @@ import {
 } from "@/store/chat-surface-coordinator"
 
 describe("chat-surface-coordinator", () => {
-  it("tracks the character control panel alongside the existing optional panels", () => {
+  it("tracks optional panels only after they are visible and engaged", () => {
     const store = createChatSurfaceCoordinatorStore()
 
-    expect(store.getState().visiblePanels).toHaveProperty("character-control", false)
-    expect(store.getState().engagedPanels).toHaveProperty("character-control", false)
+    expect(store.getState().visiblePanels).toHaveProperty("model-catalog", false)
+    expect(store.getState().engagedPanels).toHaveProperty("model-catalog", false)
 
-    store.getState().setPanelVisible("character-control", true)
+    store.getState().setPanelVisible("model-catalog", true)
 
     expect(
-      shouldEnableOptionalResource(store.getState(), "character-control")
+      shouldEnableOptionalResource(store.getState(), "model-catalog")
     ).toBe(false)
 
-    store.getState().markPanelEngaged("character-control")
+    store.getState().markPanelEngaged("model-catalog")
 
     expect(
-      shouldEnableOptionalResource(store.getState(), "character-control")
+      shouldEnableOptionalResource(store.getState(), "model-catalog")
     ).toBe(true)
   })
 

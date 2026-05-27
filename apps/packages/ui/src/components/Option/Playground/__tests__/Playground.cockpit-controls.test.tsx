@@ -35,6 +35,14 @@ const messageOptionState = vi.hoisted(() => ({
     serverChatState: "active" as string | null,
     serverChatTopic: "Research" as string | null,
     serverChatSource: "webui" as string | null,
+    serverChatCharacterId: null as string | number | null,
+    setServerChatCharacterId: vi.fn(),
+    serverChatAssistantKind: null as "character" | "persona" | null,
+    setServerChatAssistantKind: vi.fn(),
+    serverChatAssistantId: null as string | number | null,
+    setServerChatAssistantId: vi.fn(),
+    serverChatMetaLoaded: true,
+    setServerChatMetaLoaded: vi.fn(),
     isLoading: false,
     setHistoryId: vi.fn(),
     setHistory: vi.fn(),
@@ -58,6 +66,7 @@ const messageOptionState = vi.hoisted(() => ({
       name: "Mira Vale",
     } as { kind: "character" | "persona"; id: string; name: string } | null,
     serverChatPersonaMemoryMode: null as "read_only" | "read_write" | null,
+    setServerChatPersonaMemoryMode: vi.fn(),
     setSelectedAssistant: vi.fn(),
     compareMode: false,
     compareFeatureEnabled: false,
@@ -77,6 +86,7 @@ const messageOptionState = vi.hoisted(() => ({
 const sessionPersistenceState = vi.hoisted(() => ({
   value: {
     restoreSession: vi.fn(async () => false),
+    clearPersistedSession: vi.fn(),
     sessionScopeReady: true,
     hasPersistedSession: false,
     persistedHistoryId: null as string | null,
@@ -362,6 +372,18 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.serverChatState = "active";
     messageOptionState.value.serverChatTopic = "Research";
     messageOptionState.value.serverChatSource = "webui";
+    messageOptionState.value.serverChatCharacterId = null;
+    messageOptionState.value.setServerChatCharacterId = vi.fn();
+    messageOptionState.value.serverChatAssistantKind = null;
+    messageOptionState.value.setServerChatAssistantKind = vi.fn();
+    messageOptionState.value.serverChatAssistantId = null;
+    messageOptionState.value.setServerChatAssistantId = vi.fn();
+    messageOptionState.value.serverChatMetaLoaded = true;
+    messageOptionState.value.setServerChatMetaLoaded = vi.fn();
+    messageOptionState.value.setServerChatId = vi.fn();
+    messageOptionState.value.setHistoryId = vi.fn();
+    messageOptionState.value.setHistory = vi.fn();
+    messageOptionState.value.setMessages = vi.fn();
     messageOptionState.value.streaming = true;
     messageOptionState.value.selectedSystemPrompt = "";
     messageOptionState.value.setSelectedSystemPrompt = vi.fn();
@@ -378,6 +400,7 @@ describe("Playground cockpit controls", () => {
       name: "Mira Vale",
     };
     messageOptionState.value.serverChatPersonaMemoryMode = null;
+    messageOptionState.value.setServerChatPersonaMemoryMode = vi.fn();
     messageOptionState.value.temporaryChat = true;
     messageOptionState.value.webSearch = true;
     messageOptionState.value.toolChoice = "auto";
@@ -392,6 +415,9 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.setRagMediaIds = vi.fn();
     messageOptionState.value.stopStreamingRequest = vi.fn();
     messageOptionState.value.regenerateLastMessage = vi.fn();
+    messageOptionState.value.setSelectedAssistant = vi.fn();
+    messageOptionState.value.setSelectedCharacter = vi.fn();
+    sessionPersistenceState.value.clearPersistedSession = vi.fn();
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
     tldwServerState.fetchChatModels.mockClear();
     useMcpToolsStore.setState({
@@ -988,6 +1014,55 @@ describe("Playground cockpit controls", () => {
         }),
       );
     });
+  });
+
+  it("clears tracked server-chat assistant metadata from the runtime rail", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = {
+      kind: "character",
+      id: "character-1",
+      name: "Mira Vale",
+    };
+    messageOptionState.value.selectedCharacter = {
+      id: "character-1",
+      name: "Mira Vale",
+    };
+    messageOptionState.value.serverChatId = "tracked-character-chat";
+    messageOptionState.value.serverChatCharacterId = "character-1";
+    messageOptionState.value.serverChatAssistantKind = "character";
+    messageOptionState.value.serverChatAssistantId = "character-1";
+    messageOptionState.value.serverChatPersonaMemoryMode = null;
+    messageOptionState.value.serverChatMetaLoaded = true;
+
+    render(<Playground />);
+
+    const runtimeInspector = within(
+      await screen.findByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    fireEvent.click(
+      within(runtimeInspector).getByRole("button", {
+        name: "Clear assistant",
+      }),
+    );
+
+    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
+    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
+    expect(messageOptionState.value.setServerChatCharacterId).toHaveBeenCalledWith(
+      null,
+    );
+    expect(messageOptionState.value.setServerChatAssistantKind).toHaveBeenCalledWith(
+      null,
+    );
+    expect(messageOptionState.value.setServerChatAssistantId).toHaveBeenCalledWith(
+      null,
+    );
+    expect(
+      messageOptionState.value.setServerChatPersonaMemoryMode,
+    ).toHaveBeenCalledWith(null);
+    expect(messageOptionState.value.setServerChatMetaLoaded).toHaveBeenCalledWith(
+      false,
+    );
+    expect(sessionPersistenceState.value.clearPersistedSession).toHaveBeenCalled();
   });
 
   it("does not render cockpit control rails in focus mode", async () => {

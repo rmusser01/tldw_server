@@ -335,6 +335,11 @@ export const Playground = () => {
     selectedAssistant,
     setSelectedAssistant,
     serverChatPersonaMemoryMode,
+    setServerChatCharacterId,
+    setServerChatAssistantKind,
+    setServerChatAssistantId,
+    setServerChatPersonaMemoryMode,
+    setServerChatMetaLoaded,
   } = useMessageOption();
   const {
     systemPrompt,
@@ -474,6 +479,7 @@ export const Playground = () => {
   const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
   const {
     restoreSession,
+    clearPersistedSession,
     sessionScopeReady,
     hasPersistedSession,
     persistedHistoryId,
@@ -1947,8 +1953,26 @@ export const Playground = () => {
   const clearAssistantFromCockpit = React.useCallback(() => {
     void setSelectedAssistant(null);
     setSelectedCharacter(null);
+    setServerChatCharacterId(null);
+    setServerChatAssistantKind(null);
+    setServerChatAssistantId(null);
+    setServerChatPersonaMemoryMode(null);
+    setServerChatMetaLoaded(false);
+    clearPersistedSession();
+    setCharacterModeIntentActive(false);
+    void setChatWorkflowMode("standard");
     scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
-  }, [setSelectedAssistant, setSelectedCharacter]);
+  }, [
+    clearPersistedSession,
+    setChatWorkflowMode,
+    setSelectedAssistant,
+    setSelectedCharacter,
+    setServerChatAssistantId,
+    setServerChatAssistantKind,
+    setServerChatCharacterId,
+    setServerChatMetaLoaded,
+    setServerChatPersonaMemoryMode,
+  ]);
   const inspectAssistantFromCockpit = React.useCallback(() => {
     if (selectedAssistant?.kind === "persona") {
       navigate(
