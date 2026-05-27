@@ -32,22 +32,24 @@ Why the 8 KB field limit did not increase:
 
 ## Extension Selected-Text Capture
 
-Use this path when you find a useful passage while browsing and want to save one editable basic flashcard without leaving the sidepanel.
+Use this path when you find useful passages while browsing and want to save editable basic flashcards without leaving the sidepanel, or send selected text directly to full Flashcards generation.
 
 Workflow:
 
 1. Select text on the source page.
 2. Open the extension sidepanel and choose `Flashcards`.
-3. Choose `Capture page selection`.
-4. Select a deck, edit `Front` and `Back`, then choose `Save card`.
-5. Use `Open full Flashcards` for generation, imports, templates, review, or broader deck management.
+3. Choose `Capture page selection` to add the selection to the sidepanel draft queue.
+4. Select a deck, edit each draft's `Front` and `Back`, then choose `Save card` or `Save all`.
+5. Choose `Generate from selection` to open full Flashcards generation with the selected text and source page context.
+6. Use `Open full Flashcards` for imports, templates, review, or broader deck management.
 
 Important behavior:
 
-- The sidepanel Flashcards route saves one basic card at a time and keeps the source page URL as provenance.
+- The sidepanel Flashcards route saves queued basic-card drafts and keeps the source page URL as provenance.
 - Create the deck in full Flashcards first if the sidepanel shows no deck options.
 - The browser context menu path still works: choose `tldw` -> `Save` -> `Save to Notes`, review the selection in the sidepanel dialog, then choose `Generate flashcards`.
-- Use the context-menu path or full Web UI `/flashcards` -> `Create & Import` -> `Generate` when you want generated drafts instead of a single captured card.
+- Use `Generate from selection`, the context-menu path, or full Web UI `/flashcards` -> `Create & Import` -> `Generate` when you want generated drafts instead of native sidepanel basic-card drafts.
+- Native sidepanel generation templates and in-sidepanel review remain deferred to the full Flashcards workspace.
 - If the sidepanel cannot capture on the current site, use full Web UI `/flashcards` and paste text into `Create & Import`.
 
 ## Study Assistant Conflict Recovery

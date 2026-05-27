@@ -5,6 +5,7 @@ import {
   Layers,
   MessageSquareText,
   Save,
+  Sparkles,
   Trash2
 } from "lucide-react"
 import { Button, Input, Select, Typography } from "antd"
@@ -15,6 +16,7 @@ import {
   useFlashcardsEnabled
 } from "@/components/Flashcards/hooks"
 import type { FlashcardCreate } from "@/services/flashcards"
+import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
 
 const { Text, Title } = Typography
 const { TextArea } = Input
@@ -25,6 +27,13 @@ type CaptureDraft = {
   back: string
   sourceId: string
   sourceTitle?: string
+}
+
+type CapturedPageSelection = {
+  selectedText: string
+  sourceId: string
+  sourceTitle?: string
+  draftFront: string
 }
 
 export const readSelectedTextFromPage = () => {
@@ -51,6 +60,7 @@ export default function SidepanelFlashcards() {
   const draftIdRef = React.useRef(0)
   const [captureError, setCaptureError] = React.useState<string | null>(null)
   const [captureLoading, setCaptureLoading] = React.useState(false)
+  const [generateLoading, setGenerateLoading] = React.useState(false)
   const [saveStatus, setSaveStatus] = React.useState<{
     type: "success" | "error"
     message: string
@@ -122,77 +132,119 @@ export default function SidepanelFlashcards() {
     void openOptionsHashRoute("/flashcards")
   }, [openOptionsHashRoute])
 
+  const captureMessages = React.useMemo(() => ({
+    unavailable: t(
+      "sidepanel:flashcards.selectionCaptureUnavailable",
+      "Page selection capture is unavailable in this browser."
+    ),
+    activeTabUnavailable: t(
+      "sidepanel:flashcards.activeTabUnavailable",
+      "Open a page tab before capturing page selection."
+    ),
+    noSelection: t(
+      "sidepanel:flashcards.noPageSelection",
+      "Select text on the page first."
+    ),
+    failed: t(
+      "sidepanel:flashcards.selectionCaptureFailed",
+      "Could not read the current page selection. Use the Save to Notes context menu or paste text into Create & Import."
+    )
+  }), [t])
+
+  const formatCaptureErrorMessage = React.useCallback(
+    (error: unknown) => {
+      const message =
+        error instanceof Error && error.message.trim() ? error.message : ""
+      const validationMessages = [
+        captureMessages.unavailable,
+        captureMessages.activeTabUnavailable,
+        captureMessages.noSelection
+      ]
+      return validationMessages.includes(message) ? message : captureMessages.failed
+    },
+    [captureMessages]
+  )
+
+  const readActivePageSelection = React.useCallback(async (): Promise<CapturedPageSelection> => {
+    if (!browser.tabs?.query || !browser.scripting?.executeScript) {
+      throw new Error(captureMessages.unavailable)
+    }
+
+    const activeTabs = await browser.tabs.query({
+      active: true,
+      currentWindow: true
+    })
+    const activeTab = activeTabs[0]
+    const tabId = activeTab?.id
+    if (typeof tabId !== "number") {
+      throw new Error(captureMessages.activeTabUnavailable)
+    }
+
+    const results = await browser.scripting.executeScript({
+      target: { tabId },
+      func: readSelectedTextFromPage
+    })
+    const selectedText = String(results?.[0]?.result ?? "").trim()
+    if (!selectedText) {
+      throw new Error(captureMessages.noSelection)
+    }
+
+    const sourceId = activeTab.url || String(tabId)
+    const sourceTitle = activeTab.title || activeTab.url || undefined
+    return {
+      selectedText,
+      sourceId,
+      sourceTitle,
+      draftFront:
+        activeTab.title ||
+        activeTab.url ||
+        t("sidepanel:flashcards.defaultFront", "Page selection")
+    }
+  }, [captureMessages, t])
+
   const handleCapturePageSelection = React.useCallback(async () => {
     setCaptureError(null)
     setSaveStatus(null)
     setCaptureLoading(true)
-    const captureUnavailableMessage = t(
-      "sidepanel:flashcards.selectionCaptureUnavailable",
-      "Page selection capture is unavailable in this browser."
-    )
-    const activeTabUnavailableMessage = t(
-      "sidepanel:flashcards.activeTabUnavailable",
-      "Open a page tab before capturing page selection."
-    )
-    const noSelectionMessage = t(
-      "sidepanel:flashcards.noPageSelection",
-      "Select text on the page first."
-    )
-    const captureFailedMessage = t(
-      "sidepanel:flashcards.selectionCaptureFailed",
-      "Could not read the current page selection. Use the Save to Notes context menu or paste text into Create & Import."
-    )
     try {
-      if (!browser.tabs?.query || !browser.scripting?.executeScript) {
-        throw new Error(captureUnavailableMessage)
-      }
-
-      const activeTabs = await browser.tabs.query({
-        active: true,
-        currentWindow: true
-      })
-      const activeTab = activeTabs[0]
-      const tabId = activeTab?.id
-      if (typeof tabId !== "number") {
-        throw new Error(activeTabUnavailableMessage)
-      }
-
-      const results = await browser.scripting.executeScript({
-        target: { tabId },
-        func: readSelectedTextFromPage
-      })
-      const selectedText = String(results?.[0]?.result ?? "").trim()
-      if (!selectedText) {
-        throw new Error(noSelectionMessage)
-      }
+      const captured = await readActivePageSelection()
 
       draftIdRef.current += 1
       const nextDraft: CaptureDraft = {
         id: `capture-${draftIdRef.current}`,
-        front:
-          activeTab.title ||
-          activeTab.url ||
-          t("sidepanel:flashcards.defaultFront", "Page selection"),
-        back: selectedText,
-        sourceId: activeTab.url || String(tabId),
-        sourceTitle: activeTab.title || activeTab.url || undefined
+        front: captured.draftFront,
+        back: captured.selectedText,
+        sourceId: captured.sourceId,
+        sourceTitle: captured.sourceTitle
       }
       setDrafts((current) => [...current, nextDraft])
     } catch (error) {
-      const message =
-        error instanceof Error && error.message.trim() ? error.message : ""
-      const validationMessages = [
-        captureUnavailableMessage,
-        activeTabUnavailableMessage,
-        noSelectionMessage
-      ]
-      setCaptureError(
-        validationMessages.includes(message) ? message : captureFailedMessage
-      )
+      setCaptureError(formatCaptureErrorMessage(error))
     } finally {
       setCaptureLoading(false)
     }
-  }, [t])
+  }, [formatCaptureErrorMessage, readActivePageSelection])
+
+  const handleGenerateFromSelection = React.useCallback(async () => {
+    setCaptureError(null)
+    setSaveStatus(null)
+    setGenerateLoading(true)
+    try {
+      const captured = await readActivePageSelection()
+      await openOptionsHashRoute(
+        buildFlashcardsGenerateRoute({
+          text: captured.selectedText,
+          sourceType: "manual",
+          sourceId: captured.sourceId,
+          sourceTitle: captured.sourceTitle
+        })
+      )
+    } catch (error) {
+      setCaptureError(formatCaptureErrorMessage(error))
+    } finally {
+      setGenerateLoading(false)
+    }
+  }, [formatCaptureErrorMessage, openOptionsHashRoute, readActivePageSelection])
 
   const getDeckName = React.useCallback(
     () => selectedDeck?.name || t("sidepanel:flashcards.defaultDeck", "deck"),
@@ -420,13 +472,25 @@ export default function SidepanelFlashcards() {
         <Button
           block
           loading={captureLoading}
-          disabled={isSaving}
+          disabled={isSaving || generateLoading}
           icon={<MessageSquareText className="size-4" aria-hidden="true" />}
           onClick={handleCapturePageSelection}
         >
           {t(
             "sidepanel:flashcards.capturePageSelection",
             "Capture page selection"
+          )}
+        </Button>
+        <Button
+          block
+          loading={generateLoading}
+          disabled={isSaving || captureLoading}
+          icon={<Sparkles className="size-4" aria-hidden="true" />}
+          onClick={() => void handleGenerateFromSelection()}
+        >
+          {t(
+            "sidepanel:flashcards.generateFromSelection",
+            "Generate from selection"
           )}
         </Button>
       </div>
