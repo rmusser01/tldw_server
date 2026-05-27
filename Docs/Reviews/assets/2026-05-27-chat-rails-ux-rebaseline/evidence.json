@@ -136,6 +136,40 @@
     "tests": 2,
     "duration": "595ms"
   },
+  "finalVerificationAfterRebase": {
+    "status": "completed_with_known_real_server_failures",
+    "headAfterRebase": "13b8e5e61",
+    "originDevAtRebase": "64c27d18b",
+    "mergeBaseIsAncestorExitCode": 0,
+    "focusedVitest": {
+      "command": "cd apps/packages/ui && bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx src/components/Option/Playground/__tests__/CharacterControlRail.test.tsx src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.tts-clips-lazy-mount.test.ts",
+      "exitCode": 0,
+      "testFilesPassed": 9,
+      "testsPassed": 104
+    },
+    "backendHealth": {
+      "command": "curl -sf http://127.0.0.1:8000/api/v1/health",
+      "exitCode": 0,
+      "status": "ok",
+      "authMode": "single_user"
+    },
+    "realServerPlaywright": {
+      "command": "cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY TLDW_SERVER_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_WEB_URL=http://localhost:18014 TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18014' bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line",
+      "exitCode": 1,
+      "testsPassed": 11,
+      "testsFailed": 4,
+      "failures": [
+        "uses the running server and keeps cockpit/focus controls working: status strip did not contain Web search on after the context-rail toggle aria-pressed changed",
+        "selects and clears a real disposable character through the runtime rail: runtime inspector did not show No assistant selected after clearing",
+        "keeps the same conversation while overlay changes and clears through the character control rail: disposable plain chat creation returned 422 instead of 201",
+        "proves model provider confidence through a real cockpit selection and conversation: model-list-scope-toggle was not visible"
+      ]
+    },
+    "bandit": {
+      "status": "skipped",
+      "reason": "Final slice changed Markdown, JSON evidence, a screenshot artifact, and Backlog metadata only."
+    }
+  },
   "sourceEvidence": [
     {
       "file": "apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts",

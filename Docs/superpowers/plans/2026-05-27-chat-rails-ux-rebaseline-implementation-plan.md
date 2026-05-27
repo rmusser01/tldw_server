@@ -636,7 +636,7 @@ git commit -m "docs(chat): rebaseline rail-enabled UX audit"
 **Files:**
 - Modify: `backlog/tasks/task-516 - Design-chat-rails-UX-rebaseline-and-remediation-from-origin-dev.md`
 
-- [ ] **Step 1: Run focused verification**
+- [x] **Step 1: Run focused verification**
 
 ```bash
 cd apps/packages/ui
@@ -654,7 +654,7 @@ bunx vitest run \
 
 Expected: all focused tests pass.
 
-- [ ] **Step 2: Run real-server Playwright if backend is available**
+- [x] **Step 2: Run real-server Playwright if backend is available**
 
 ```bash
 cd apps/tldw-frontend
@@ -669,7 +669,7 @@ bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=ch
 
 Expected: passes, or audit records backend unavailability/degradation as a limitation.
 
-- [ ] **Step 3: Run Markdown/static checks**
+- [x] **Step 3: Run Markdown/static checks**
 
 ```bash
 git diff --check
@@ -678,11 +678,11 @@ git diff --cached --check
 
 Expected: no output.
 
-- [ ] **Step 4: Bandit decision**
+- [x] **Step 4: Bandit decision**
 
 Skip Bandit for this slice if only frontend TypeScript, Markdown, and screenshots are touched. Record the skip in `TASK-516`.
 
-- [ ] **Step 5: Update Backlog final summary**
+- [x] **Step 5: Update Backlog final summary**
 
 Record:
 

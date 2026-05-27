@@ -174,10 +174,18 @@ Power user:
 - Assumption: The sidepanel debug route is acceptable fallback evidence when clearly labeled; packaged extension validation was not performed in Task 5.
 - Non-goal: No broad WebUI redesign, no backend API changes, no prompt picker redesign, and no compare/export/share remediation in this audit slice.
 
+## Task 6 Final Verification Status
+
+- Rebased the branch onto `origin/dev` at `64c27d18b`; post-rebase branch HEAD was `13b8e5e61`, and `git merge-base --is-ancestor origin/dev HEAD` exited `0`.
+- Focused rail/sidepanel verification passed after the rebase: 9 Vitest files, 104 tests.
+- Backend health check passed against `http://127.0.0.1:8000/api/v1/health` with status `ok` and `auth_mode=single_user`.
+- Real-server Playwright rerun reached the backend and WebUI after the rebase: 11 tests passed, 4 failed. The failures matched the audit findings: Web search status feedback, runtime character clear state, disposable plain-chat creation returning 422, and missing model-list scope toggle.
+- Bandit is skipped for this final slice because the touched files are Markdown, JSON evidence, a screenshot artifact, and Backlog metadata.
+
 ## Notes and Limitations
 
 - Observed behavior: Source-level cockpit rail wiring was already covered by Task 2. Task 3 hardened the real-server spec so future successful runs assert no horizontal overflow at desktop initial cockpit, desktop focus, desktop return-to-cockpit, mobile initial focus, mobile cockpit context/runtime panels, mobile return-to-focus, and mobile return-to-cockpit. Manual browser capture confirmed no horizontal overflow in the four required audit states.
-- First-pass cockpit rail classification: Cockpit rail presence is restored/available on the proper `origin/dev`-based `/chat` page. Desktop cockpit, desktop focus, mobile focus, and mobile cockpit screenshots now exist in the review asset directory.
+- First-pass cockpit rail classification: Cockpit rail presence is restored/available on the captured origin/dev-based `/chat` page, and focused tests still pass after rebasing onto latest `origin/dev`. Desktop cockpit, desktop focus, mobile focus, and mobile cockpit screenshots now exist in the review asset directory.
 - Why the earlier audit saw no siderails: this branch's source/evidence shows the cockpit rails were present on the captured origin/dev-based `/chat` page. The missing-rails observation came from stale/wrong branch or wrong page evidence rather than the rail-enabled development branch state captured here.
 - Limitations: The full real-server Playwright suite still has four non-rail baseline failures and should not be reported as fully passing. Agent-side sandboxed curl still fails without approved localhost access. The sidepanel screenshot is debug-route evidence with seeded auth/config, not a packaged-extension browser session.
 - Non-goals: No product UI changes, backend setup, dependency installation, or screenshot fabrication in the Task 3 slice. Task 4 does not change the `/flashcards` dashboard route; that cleanup remains separate unless later evidence confirms it belongs in a follow-up fix.

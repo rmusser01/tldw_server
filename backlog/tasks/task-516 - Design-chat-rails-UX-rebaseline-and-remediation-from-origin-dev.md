@@ -16,6 +16,11 @@ modified_files:
 - Docs/superpowers/plans/2026-05-27-chat-rails-ux-rebaseline-implementation-plan.md
 - Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md
 - Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/README.md
+- Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/evidence.json
+- Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel.png
+- backlog/tasks/task-517 - Add-chat-cockpit-rail-regression-guards.md
+- backlog/tasks/task-518 - Route-sidepanel-full-screen-chat-handoff-to-chat.md
+- backlog/tasks/task-519 - Refresh-rail-enabled-chat-UX-audit.md
 ---
 
 ## Description
@@ -76,12 +81,22 @@ apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeIns
 ```
 
 Audit artifact path: `Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md`; evidence directory README: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/README.md`.
+
+Task 6 final verification (2026-05-27):
+
+- Rebasing onto latest `origin/dev` completed cleanly. After rebase, `HEAD=13b8e5e61`, `origin/dev=64c27d18b`, and `git merge-base --is-ancestor origin/dev HEAD` exited `0`.
+- Focused Vitest rail/sidepanel set passed: 9 files, 104 tests.
+- Backend health check passed with `status=ok` and `auth_mode=single_user`.
+- Real-server Playwright rerun reached the backend and WebUI after the rebase: 11 passed, 4 failed. The four failures match the refreshed audit findings: Web search status feedback, runtime character clear state, disposable plain-chat creation returning 422, and missing model-list scope toggle.
+- Static checks passed: `git diff --check` and `git diff --cached --check` produced no output.
+- Bandit skipped because the final slice changes Markdown, JSON evidence, screenshots, and Backlog metadata only.
+- First eligible remediation slice after the rebaseline should address the P1 character/persona continuity path, including runtime clear state and the plain-chat creation 422; the P2 Web search status and model-scope toggle issues are small follow-on candidates.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the chat rails UX rebaseline design. The spec records the branch-provenance cause for the missing-siderails observation, defines the clean origin/dev branch/worktree workflow, requires exact git provenance evidence, requires screenshot-backed rail-enabled /chat verification, and gates implementation fixes on a refreshed audit artifact.
+Completed the chat rails UX rebaseline design and execution pass. The branch was rebased onto latest `origin/dev`, rail restoration guards and focused rail/sidepanel tests pass, sidepanel full-screen now targets `/chat`, and the refreshed audit explains that the earlier no-siderails finding was provenance-related. The remaining verified risks are captured in `Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md`; the live cockpit suite still has four non-rail failures that should be handled as follow-up remediation rather than hidden in this rebaseline branch.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
