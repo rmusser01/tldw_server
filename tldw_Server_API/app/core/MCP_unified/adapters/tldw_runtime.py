@@ -1,7 +1,17 @@
+"""Default host adapters for running MCP Unified inside tldw_server.
+
+The interfaces package defines the extraction boundary in host-neutral terms.
+This module binds those contracts back to the current tldw_server services so
+the in-repo server keeps its legacy behavior while embedders can provide their
+own dependency bundle.
+"""
+
 from __future__ import annotations
 
 import json
 from typing import Any
+
+from loguru import logger
 
 from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
     CircuitBreaker,
@@ -16,22 +26,15 @@ from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_
 from tldw_Server_API.app.core.Metrics.telemetry import get_telemetry_manager
 
 
-_SCOPE_NORMALIZATION_FALLBACK_EXCEPTIONS = (
-    AssertionError,
-    AttributeError,
-    ImportError,
-    LookupError,
-    OSError,
-    RuntimeError,
-    TimeoutError,
-    TypeError,
-    UnicodeDecodeError,
-    ValueError,
-)
-
-
 class TldwDatabasePathResolver:
+    """Resolve per-user database paths through the tldw_server DB path helper."""
+
     def resolve_user_db_paths(self, user_id: str | int | None) -> dict[str, str]:
+        """Return string paths for the user's MCP-visible databases.
+
+        Invalid user identifiers or host DB path failures fall back to an empty
+        mapping so standalone callers can continue without tldw_server storage.
+        """
         if user_id is None:
             return {}
         try:
@@ -39,23 +42,38 @@ class TldwDatabasePathResolver:
         except (TypeError, ValueError):
             return {}
 
-        from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+        try:
+            from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
-        paths = DatabasePaths.get_all_user_db_paths(normalized_user_id)
-        return {key: str(value) for key, value in paths.items()}
+            paths = DatabasePaths.get_all_user_db_paths(normalized_user_id)
+            return {key: str(value) for key, value in paths.items()}
+        except Exception as exc:
+            logger.debug(
+                "MCP user database path resolution failed; returning empty paths: {}",
+                exc.__class__.__name__,
+            )
+            return {}
 
 
 class TldwApiKeyScopeNormalizer:
+    """Normalize tldw_server API-key scope payloads for MCP authorization."""
+
     def normalize(self, raw_scopes: Any) -> set[str]:
+        """Return normalized scope strings, falling back to local parsing."""
         try:
             from tldw_Server_API.app.core.AuthNZ.api_key_manager import normalize_scope
 
             return set(normalize_scope(raw_scopes))
-        except _SCOPE_NORMALIZATION_FALLBACK_EXCEPTIONS:
+        except Exception as exc:
+            logger.debug(
+                "MCP API key scope normalizer failed; using local fallback: {}",
+                exc.__class__.__name__,
+            )
             return self._manual_normalize(raw_scopes)
 
     @staticmethod
     def _manual_normalize(raw_scopes: Any) -> set[str]:
+        """Normalize simple string and collection payloads without AuthNZ imports."""
         if isinstance(raw_scopes, str):
             stripped = raw_scopes.strip()
             if stripped.startswith("["):
@@ -81,6 +99,7 @@ class TldwApiKeyScopeNormalizer:
 
 
 def _to_tldw_circuit_breaker_config(config: Any) -> CircuitBreakerConfig:
+    """Convert a host-neutral circuit-breaker config to tldw_server config."""
     if isinstance(config, CircuitBreakerConfig):
         return config
     return CircuitBreakerConfig(
@@ -96,10 +115,12 @@ def _to_tldw_circuit_breaker_config(config: Any) -> CircuitBreakerConfig:
 
 
 def create_tldw_circuit_breaker(*, name: str, config: Any) -> CircuitBreaker:
+    """Create a tldw_server circuit breaker for an MCP module."""
     return CircuitBreaker(name=name, config=_to_tldw_circuit_breaker_config(config))
 
 
 def build_default_runtime_dependencies() -> MCPRuntimeDependencies:
+    """Build the default dependency bundle for the in-repo MCP server."""
     from tldw_Server_API.app.core.MCP_unified.adapters.tldw_policy import (
         TldwApprovalEvaluator,
         TldwEffectivePolicyResolver,

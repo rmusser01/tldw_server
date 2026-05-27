@@ -1,7 +1,7 @@
 ---
 id: TASK-480
 title: Design MCP Unified standalone library and gateway extraction
-status: In Progress
+status: Done
 labels:
 - design
 - mcp
@@ -55,15 +55,15 @@ Docs/superpowers/plans/2026-05-26-mcp-unified-stage1-adapter-seams-implementatio
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Stage 1 adapter-seam implementation added runtime/policy/storage interface contracts, tldw host adapters, protocol/server dependency injection seams, BaseModule circuit-breaker factory injection, extraction boundary tests, and module ownership inventory. Verification recorded on 2026-05-27 against the dev-based PR branch: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py -v` passed 38 tests; `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py tldw_Server_API/tests/MCP_unified/test_mcp_protocol_path_scope.py tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py -v` passed 47 tests; Bandit on touched MCP scope wrote `/tmp/bandit_mcp_unified_stage1_adapter_seams_dev_pr.json` with 0 findings. Known note: the source worktree commit operation reported an existing Git GC warning about unreachable loose objects; no feature tests failed.
+Stage 1 adapter-seam implementation added runtime/policy/storage interface contracts, tldw host adapters, protocol/server dependency injection seams, BaseModule circuit-breaker factory injection, extraction boundary tests, and module ownership inventory. Review fixes on 2026-05-27 rebased the PR branch onto latest `origin/dev`, kept default server telemetry on the current global manager, routed server metrics through the injected collector, removed RequestContext host DB path fallback, added adapter/interface docstrings, logged scope-normalizer fallback failures without secrets, and cleaned the portable verification record. Verification: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py tldw_Server_API/app/core/MCP_unified/tests/test_stage2_context_session.py tldw_Server_API/app/core/MCP_unified/tests/test_scope_and_fallbacks.py -v` passed 46 tests; `python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py tldw_Server_API/tests/MCP_unified/test_mcp_protocol_path_scope.py tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py -v` passed 47 tests; Bandit on touched MCP scope reported 0 findings. Known note: git fetch/rebase reported an existing GC warning about unreachable loose objects; no feature tests failed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

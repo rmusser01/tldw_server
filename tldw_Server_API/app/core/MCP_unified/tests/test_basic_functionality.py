@@ -204,7 +204,7 @@ class TestRBACPolicy:
 class TestBaseModule:
     """Test shared module base behavior."""
 
-    def test_module_config_preserves_positional_settings_argument(self):
+    def test_module_config_preserves_positional_settings_argument(self) -> None:
         """Test the new factory field does not shift legacy positional settings."""
         config = ModuleConfig(
             "positional_module",
@@ -225,7 +225,7 @@ class TestBaseModule:
         assert config.settings == {"mode": "legacy"}
         assert config.circuit_breaker_factory is None
 
-    def test_module_config_accepts_circuit_breaker_factory(self):
+    def test_module_config_accepts_circuit_breaker_factory(self) -> None:
         """Test module construction can inject circuit breaker creation."""
         fake_breaker = object()
         calls: list[tuple[str, Any]] = []

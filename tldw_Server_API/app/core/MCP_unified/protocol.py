@@ -172,7 +172,13 @@ class MCPResponse(BaseModel):
 
 
 class RequestContext:
-    """Context for request processing"""
+    """Context for request processing.
+
+    Request contexts store caller metadata and explicit database path mappings
+    only. Host-specific database path resolution is owned by MCPProtocol or
+    MCPServer dependencies so standalone callers do not import tldw_server
+    adapters through this neutral context object.
+    """
     def __init__(
         self,
         request_id: str,
@@ -188,11 +194,7 @@ class RequestContext:
         self.session_id = session_id
         self.metadata = metadata or {}
         self.start_time = datetime.now(timezone.utc)
-        # Derive per-user db paths (read-only) if possible
-        if db_paths is not None:
-            self.db_paths = dict(db_paths)
-        else:
-            self.db_paths = self._derive_default_db_paths(user_id)
+        self.db_paths = dict(db_paths or {})
         # Build a bound logger for this request
         self.logger = logger.bind(
             request_id=request_id,
@@ -200,18 +202,6 @@ class RequestContext:
             client_id=client_id,
             session_id=session_id,
         )
-
-    @staticmethod
-    def _derive_default_db_paths(user_id: Optional[str]) -> dict[str, str]:
-        """Preserve legacy RequestContext construction through the host adapter."""
-        if user_id is None:
-            return {}
-        try:
-            from .adapters.tldw_runtime import TldwDatabasePathResolver
-
-            return TldwDatabasePathResolver().resolve_user_db_paths(user_id)
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -576,8 +566,7 @@ class MCPProtocol:
 
     @property
     def telemetry(self):
-        """Always return the *current* global telemetry manager so that a
-        shutdown/re-init cycle is picked up automatically."""
+        """Return current global telemetry by default, or the injected provider."""
         if self._uses_default_telemetry_manager:
             return get_telemetry_manager()
         return self.dependencies.telemetry_provider
@@ -626,8 +615,11 @@ class MCPProtocol:
             return None
         try:
             return set(self.dependencies.api_key_scope_normalizer.normalize(raw))
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            pass
+        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(
+                "MCP API key scope normalization failed; using local fallback: {}",
+                exc.__class__.__name__,
+            )
 
         if isinstance(raw, str):
             stripped = raw.strip()

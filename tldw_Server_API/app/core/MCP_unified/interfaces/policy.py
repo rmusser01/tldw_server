@@ -1,9 +1,13 @@
+"""Policy dependency protocols for MCP Hub governance integration."""
+
 from __future__ import annotations
 
 from typing import Any, Protocol
 
 
 class EffectivePolicyResolver(Protocol):
+    """Resolve policy documents that apply to an MCP request context."""
+
     async def resolve_for_context(
         self,
         *,
@@ -13,6 +17,8 @@ class EffectivePolicyResolver(Protocol):
 
 
 class ApprovalEvaluator(Protocol):
+    """Evaluate whether a tool call is allowed, denied, or needs approval."""
+
     async def evaluate_tool_call(
         self,
         *,
@@ -30,6 +36,8 @@ class ApprovalEvaluator(Protocol):
 
 
 class PathScopeEnforcer(Protocol):
+    """Enforce filesystem and resource path scopes for MCP tool calls."""
+
     async def evaluate_tool_call(
         self,
         *,
@@ -42,6 +50,8 @@ class PathScopeEnforcer(Protocol):
 
 
 class ExternalAccessEvaluator(Protocol):
+    """Evaluate external server/source access against effective policy."""
+
     async def resolve_for_sources(
         self,
         *,

@@ -37,10 +37,8 @@ from tldw_Server_API.app.services.shutdown_transport_registry import (
 
 from .auth.jwt_manager import JWTManager, get_jwt_manager
 from .auth.rate_limiter import RateLimitExceeded
-from .adapters.tldw_runtime import build_default_runtime_dependencies
 from .config import get_config, validate_config
 from .interfaces.runtime import MCPRuntimeDependencies
-from .monitoring.metrics import get_metrics_collector
 from .protocol import MCPProtocol, MCPRequest, MCPResponse, RequestContext
 from .security.ip_filter import get_ip_access_controller
 from .security.request_guards import enforce_client_certificate_headers
@@ -240,13 +238,18 @@ class MCPServer:
     """
 
     def __init__(self, dependencies: MCPRuntimeDependencies | None = None):
-        self.dependencies = dependencies or build_default_runtime_dependencies()
         self.config = get_config()
-        self.protocol = MCPProtocol(dependencies=self.dependencies)
+        if dependencies is None:
+            self.protocol = MCPProtocol()
+            self.dependencies = self.protocol.dependencies
+        else:
+            self.dependencies = dependencies
+            self.protocol = MCPProtocol(dependencies=self.dependencies)
         self.module_registry = self.dependencies.module_registry
         self.jwt_manager = _JWTManagerProxy(get_jwt_manager())
         self.rbac_policy = self.dependencies.rbac_policy
         self.rate_limiter = self.dependencies.rate_limiter
+        self.metrics_collector = self.dependencies.metrics_collector
         self._ws_auth_required_initial = self.config.ws_auth_required
 
         # Connection management
@@ -351,7 +354,7 @@ class MCPServer:
                 # Start metrics collection
                 if self.config.metrics_enabled:
                     try:
-                        await get_metrics_collector().start_collection()
+                        await self.metrics_collector.start_collection()
                     except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
                         logger.warning(f"MCP metrics collector start failed: {self._mask_secrets(str(e))}")
 
@@ -622,7 +625,7 @@ class MCPServer:
                 del self.connections[conn_id]
             # Update connection gauge
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                get_metrics_collector().update_connection_count("websocket", len(self.connections))
+                self.metrics_collector.update_connection_count("websocket", len(self.connections))
 
     async def _metrics_collection_loop(self):
         """Periodically collect and log metrics"""
@@ -997,7 +1000,7 @@ class MCPServer:
                     # Record rejection metric
                     try:
                         bucket = self._ip_bucket(client_ip)
-                        get_metrics_collector().record_ws_rejection("per_ip_cap", bucket)
+                        self.metrics_collector.record_ws_rejection("per_ip_cap", bucket)
                     except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
                         pass
                     await websocket.close(code=1013, reason="Too many connections from IP")
@@ -1022,7 +1025,7 @@ class MCPServer:
             # per-IP count already reserved; nothing to do here
             # Update connection gauge
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                get_metrics_collector().update_connection_count("websocket", len(self.connections))
+                self.metrics_collector.update_connection_count("websocket", len(self.connections))
 
         logger.bind(connection_id=connection_id, user_id=user_id, client_id=client_id, client_ip=client_ip).info(
             f"WebSocket connected: {connection_id} (client={client_id}, user={user_id}, ip={client_ip})"
@@ -1050,7 +1053,7 @@ class MCPServer:
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                 await connection.close(code=1011, reason="Internal error")
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                get_metrics_collector().record_connection_error("websocket", "exception")
+                self.metrics_collector.record_connection_error("websocket", "exception")
         finally:
             # Stop WS background tasks (ping/idle loops) to avoid leaks
             if stream is not None:
@@ -1072,7 +1075,7 @@ class MCPServer:
             logger.bind(connection_id=connection_id).info(f"WebSocket cleanup complete: {connection_id}")
             # Update connection gauge
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                get_metrics_collector().update_connection_count("websocket", len(self.connections))
+                self.metrics_collector.update_connection_count("websocket", len(self.connections))
 
     async def _handle_websocket_messages(self, connection: WebSocketConnection, stream: WebSocketStream):
         """Handle incoming WebSocket messages"""
@@ -1130,7 +1133,7 @@ class MCPServer:
                         "id": data.get("id") if isinstance(data, dict) else None
                     })
                     with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                        get_metrics_collector().record_ws_session_closure("session_rate")
+                        self.metrics_collector.record_ws_session_closure("session_rate")
                     # Close with 1013 (try again later), matching prior behavior
                     try:
                         await stream.ws.close(code=1013, reason="Session rate limit exceeded")

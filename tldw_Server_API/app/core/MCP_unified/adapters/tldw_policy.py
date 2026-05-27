@@ -1,9 +1,13 @@
+"""Default policy adapters that delegate MCP decisions to tldw_server services."""
+
 from __future__ import annotations
 
 from typing import Any
 
 
 class TldwEffectivePolicyResolver:
+    """Resolve the effective MCP Hub policy for a request context."""
+
     async def resolve_for_context(
         self,
         *,
@@ -19,6 +23,8 @@ class TldwEffectivePolicyResolver:
 
 
 class TldwApprovalEvaluator:
+    """Evaluate MCP tool-call approval requirements through the host service."""
+
     async def evaluate_tool_call(
         self,
         *,
@@ -53,6 +59,8 @@ class TldwApprovalEvaluator:
 
 
 class TldwPathScopeEnforcer:
+    """Apply tldw_server path-scope policy checks to MCP tool calls."""
+
     async def evaluate_tool_call(
         self,
         *,
@@ -77,6 +85,8 @@ class TldwPathScopeEnforcer:
 
 
 class TldwExternalAccessEvaluator:
+    """Resolve external access policy for MCP federated source metadata."""
+
     async def resolve_for_sources(
         self,
         *,

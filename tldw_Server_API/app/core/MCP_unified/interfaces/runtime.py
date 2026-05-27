@@ -1,3 +1,11 @@
+"""Runtime dependency protocols for the MCP Unified extraction boundary.
+
+These protocols describe the host services that MCP Unified needs without
+requiring imports from tldw_server internals. The in-repo adapters implement
+them for the current application; standalone servers can provide compatible
+objects with the same behavior.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Awaitable
@@ -13,6 +21,8 @@ from .policy import (
 
 
 class ModuleRegistry(Protocol):
+    """Registry operations needed by protocol and server request routing."""
+
     async def start_health_monitoring(self) -> Any: ...
 
     async def register_module(
@@ -48,6 +58,8 @@ class ModuleRegistry(Protocol):
 
 
 class RbacPolicy(Protocol):
+    """RBAC permission checker used for MCP resource and tool access."""
+
     def check_permission(
         self,
         user_id: str | None,
@@ -58,10 +70,14 @@ class RbacPolicy(Protocol):
 
 
 class RateLimiter(Protocol):
+    """Rate-limit gate for MCP protocol operations."""
+
     async def check_rate_limit(self, key: str, *, category: str = "default") -> None: ...
 
 
 class MetricsCollector(Protocol):
+    """Metrics sink used by MCP protocol and server lifecycle paths."""
+
     async def start_collection(self) -> None: ...
 
     async def stop_collection(self) -> None: ...
@@ -104,6 +120,8 @@ class MetricsCollector(Protocol):
 
 
 class TelemetryProvider(Protocol):
+    """Tracing provider that yields span-like context managers."""
+
     def trace_context(
         self,
         operation_name: str,
@@ -112,23 +130,38 @@ class TelemetryProvider(Protocol):
 
 
 class DatabasePathResolver(Protocol):
+    """Resolver for per-user database paths visible to MCP modules."""
+
     def resolve_user_db_paths(self, user_id: str | int | None) -> dict[str, str]: ...
 
 
 class ApiKeyScopeNormalizer(Protocol):
+    """Normalizer for API-key scope payloads from the host AuthNZ layer."""
+
     def normalize(self, raw_scopes: Any) -> set[str]: ...
 
 
 class RedisClientFactory(Protocol):
+    """Factory for creating Redis-compatible async clients."""
+
     def __call__(self, **kwargs: Any) -> Awaitable[Any]: ...
 
 
 class CircuitBreakerFactory(Protocol):
+    """Factory for creating module circuit breakers from neutral configs."""
+
     def __call__(self, *, name: str, config: Any) -> Any: ...
 
 
 @dataclass(slots=True)
 class MCPRuntimeDependencies:
+    """Concrete dependency bundle passed into MCPProtocol and MCPServer.
+
+    Each field is a host-provided implementation of an MCP boundary protocol.
+    Default tldw_server construction builds this bundle from local services,
+    while extracted packages can replace any field with their own integration.
+    """
+
     module_registry: ModuleRegistry
     rbac_policy: RbacPolicy
     rate_limiter: RateLimiter

@@ -4,6 +4,8 @@ import ast
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 MCP_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_INTERFACE_FILES = {"runtime.py", "policy.py", "storage.py"}
@@ -99,6 +101,30 @@ def test_mcp_server_accepts_runtime_dependencies() -> None:
     assert server.protocol.rbac_policy is deps.rbac_policy
     assert server.module_registry is deps.module_registry
     assert server.rbac_policy is deps.rbac_policy
+    assert server.metrics_collector is deps.metrics_collector
+
+
+def test_default_server_protocol_uses_current_telemetry_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified import protocol as protocol_mod
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    first_manager = object()
+    second_manager = object()
+    deps = _fake_runtime_dependencies()
+    deps.telemetry_provider = first_manager
+    current = {"manager": first_manager}
+
+    monkeypatch.setattr(protocol_mod, "build_default_runtime_dependencies", lambda: deps)
+    monkeypatch.setattr(protocol_mod, "get_telemetry_manager", lambda: current["manager"])
+
+    server = MCPServer()
+
+    assert server.dependencies is deps
+    assert server.protocol.telemetry is first_manager
+    current["manager"] = second_manager
+    assert server.protocol.telemetry is second_manager
 
 
 def test_protocol_instances_do_not_share_prepared_call_secrets() -> None:
