@@ -441,7 +441,7 @@ export type ExportProgressState = {
   fetchedPages: number
   failedBatches: number
 }
-export type NotesListViewMode = 'list' | 'timeline' | 'moodboard'
+export type NotesListViewMode = 'list' | 'timeline' | 'inbox' | 'moodboard'
 export type MoodboardSummary = {
   id: number
   name: string

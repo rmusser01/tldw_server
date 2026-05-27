@@ -309,9 +309,18 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
 
   // Compute active filter count for badge
   const activeFilterCount =
+    (listViewMode === 'inbox' ? 1 : 0) +
     keywordTokens.length +
     (selectedNotebookId != null ? 1 : 0) +
     (queryInput.trim() ? 1 : 0)
+
+  const switchViewMode = React.useCallback(
+    (mode: NotesListViewMode) => {
+      setListViewMode(mode)
+      setPage(1)
+    },
+    [setListViewMode, setPage]
+  )
 
   return (
       <aside
@@ -429,11 +438,11 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     })}
                   </Button>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <Button
                     size="small"
                     type={listViewMode === 'list' ? 'primary' : 'default'}
-                    onClick={() => setListViewMode('list')}
+                    onClick={() => switchViewMode('list')}
                     disabled={listMode !== 'active'}
                     data-testid="notes-view-mode-list"
                   >
@@ -444,7 +453,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   <Button
                     size="small"
                     type={listViewMode === 'timeline' ? 'primary' : 'default'}
-                    onClick={() => setListViewMode('timeline')}
+                    onClick={() => switchViewMode('timeline')}
                     disabled={listMode !== 'active'}
                     data-testid="notes-view-mode-timeline"
                   >
@@ -454,10 +463,20 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   </Button>
                   <Button
                     size="small"
+                    type={listViewMode === 'inbox' ? 'primary' : 'default'}
+                    onClick={() => switchViewMode('inbox')}
+                    disabled={listMode !== 'active'}
+                    data-testid="notes-view-mode-inbox"
+                  >
+                    {t('option:notesSearch.viewModeInbox', {
+                      defaultValue: 'Inbox'
+                    })}
+                  </Button>
+                  <Button
+                    size="small"
                     type={listViewMode === 'moodboard' ? 'primary' : 'default'}
                     onClick={() => {
-                      setListViewMode('moodboard')
-                      setPage(1)
+                      switchViewMode('moodboard')
                     }}
                     disabled={listMode !== 'active'}
                     data-testid="notes-view-mode-moodboard"

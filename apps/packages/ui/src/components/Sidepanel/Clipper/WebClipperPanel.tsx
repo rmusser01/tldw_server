@@ -14,6 +14,7 @@ import {
   writePendingWebClipAnalyzeRequest,
   type WebClipperEnrichmentRunResult
 } from "@/services/web-clipper/enrichment"
+import { ensureCapturedNoteKeyword } from "@/services/note-capture"
 import { buildWebClipSaveRuntime } from "@/services/web-clipper/save-runtime"
 import type {
   WebClipperDestination,
@@ -279,7 +280,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         title: title.trim() || draft.pageTitle,
         comment: comment.trim() || null,
         folder_id: parsedFolderId,
-        keywords: splitKeywords(tags)
+        keywords: ensureCapturedNoteKeyword(splitKeywords(tags))
       },
       workspace: needsWorkspace
         ? { workspace_id: trimmedWorkspaceId }

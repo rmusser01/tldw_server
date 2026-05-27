@@ -343,21 +343,22 @@ describe("WebClipperPanel save flow", () => {
     expect(apiMocks.saveWebClip).not.toHaveBeenCalled()
   })
 
-  it("submits entered tags through the keywords payload contract", async () => {
+  it("adds the durable captured tag while preserving user-entered tags", async () => {
     const user = userEvent.setup()
 
     render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
 
-    await user.type(screen.getByLabelText("Tags"), "research, summary")
+    await user.type(screen.getByLabelText("Tags"), "research, source")
     await user.click(screen.getByRole("button", { name: "Save clip" }))
 
     await waitFor(() => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
     })
+
     expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
       expect.objectContaining({
         note: expect.objectContaining({
-          keywords: ["research", "summary"]
+          keywords: expect.arrayContaining(["research", "source", "captured"])
         })
       })
     )

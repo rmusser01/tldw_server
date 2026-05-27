@@ -1821,6 +1821,11 @@ const NotesManagerPage: React.FC = () => {
     if (!list.hasActiveFilters || list.listMode !== 'active') return null
     const effectiveQuery = list.query.trim() || list.queryInput.trim()
     const details: string[] = []
+    if (list.listViewMode === 'inbox') {
+      details.push(
+        `${t('option:notesSearch.summaryViewLabel', { defaultValue: 'View' })}: ${t('option:notesSearch.viewModeInbox', { defaultValue: 'Inbox' })}`
+      )
+    }
     if (effectiveQuery) details.push(`${t('option:notesSearch.summaryQueryLabel', { defaultValue: 'Query' })}: "${effectiveQuery}"`)
     if (list.selectedNotebook != null) details.push(`${t('option:notesSearch.summaryNotebookLabel', { defaultValue: 'Saved filter' })}: ${list.selectedNotebook.name}`)
     if (kw.keywordTokens.length > 0) details.push(`${t('option:notesSearch.summaryKeywordsLabel', { defaultValue: 'Tags' })}: ${kw.keywordTokens.join(', ')}`)
