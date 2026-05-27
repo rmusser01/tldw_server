@@ -10,6 +10,7 @@ type ChatModelSelectorDropdownProps = {
   apiModelLabel: string
   connectionStatusLabel: string
   connectionStatusWarning?: boolean
+  catalogControls?: React.ReactNode
   modelUsabilityLabel?: string
   modelUsabilityTitle?: string
   modelUsabilityWarning?: boolean
@@ -29,6 +30,7 @@ type ChatModelSelectorDropdownProps = {
 export const ChatModelSelectorDropdown = React.memo(
   function ChatModelSelectorDropdown({
     apiModelLabel,
+    catalogControls,
     connectionStatusLabel,
     connectionStatusWarning = false,
     modelUsabilityLabel,
@@ -68,51 +70,53 @@ export const ChatModelSelectorDropdown = React.memo(
         }}
         popupRender={(menu) => (
           <div className="rounded-lg border border-border bg-surface shadow-lg">
-            <div className="flex items-center gap-2 border-b border-border p-2">
-              <Input
-                size="small"
-                placeholder={t(
-                  "playground:composer.modelSearchPlaceholder",
-                  "Search models"
-                )}
-                value={modelSearchQuery}
-                allowClear
-                className="flex-1"
-                onChange={(event) => setModelSearchQuery(event.target.value)}
-                onKeyDown={(event) => event.stopPropagation()}
-              />
-              <Select
-                size="small"
-                value={modelSortMode}
-                onChange={(value) => setModelSortMode(value as ModelSortMode)}
-                options={[
-                  {
-                    value: "favorites",
-                    label: t(
-                      "playground:composer.sort.favorites",
-                      "Favorites"
-                    )
-                  },
-                  {
-                    value: "az",
-                    label: t("playground:composer.sort.az", "A-Z")
-                  },
-                  {
-                    value: "provider",
-                    label: t("playground:composer.sort.provider", "Provider")
-                  },
-                  {
-                    value: "localFirst",
-                    label: t(
-                      "playground:composer.sort.localFirst",
-                      "Local-first"
-                    )
-                  }
-                ]}
-                className="min-w-[120px]"
-                onKeyDown={(event) => event.stopPropagation()}
-              />
-            </div>
+            {catalogControls ?? (
+              <div className="flex items-center gap-2 border-b border-border p-2">
+                <Input
+                  size="small"
+                  placeholder={t(
+                    "playground:composer.modelSearchPlaceholder",
+                    "Search models"
+                  )}
+                  value={modelSearchQuery}
+                  allowClear
+                  className="flex-1"
+                  onChange={(event) => setModelSearchQuery(event.target.value)}
+                  onKeyDown={(event) => event.stopPropagation()}
+                />
+                <Select
+                  size="small"
+                  value={modelSortMode}
+                  onChange={(value) => setModelSortMode(value as ModelSortMode)}
+                  options={[
+                    {
+                      value: "favorites",
+                      label: t(
+                        "playground:composer.sort.favorites",
+                        "Favorites"
+                      )
+                    },
+                    {
+                      value: "az",
+                      label: t("playground:composer.sort.az", "A-Z")
+                    },
+                    {
+                      value: "provider",
+                      label: t("playground:composer.sort.provider", "Provider")
+                    },
+                    {
+                      value: "localFirst",
+                      label: t(
+                        "playground:composer.sort.localFirst",
+                        "Local-first"
+                      )
+                    }
+                  ]}
+                  className="min-w-[120px]"
+                  onKeyDown={(event) => event.stopPropagation()}
+                />
+              </div>
+            )}
             <div className="no-scrollbar max-h-[400px] overflow-y-auto">
               {menu}
             </div>

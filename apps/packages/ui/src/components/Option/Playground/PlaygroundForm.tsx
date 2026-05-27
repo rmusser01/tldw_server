@@ -2142,10 +2142,27 @@ export const PlaygroundForm = ({
     imageBackendMenuItems,
     imageBackendBadgeLabel,
   } = useImageBackend({ imageModels });
+  const translateModelCatalogControl = React.useCallback(
+    (key: string, defaultValueOrOptions?: unknown, options?: unknown) =>
+      toText(t(key, defaultValueOrOptions as never, options as never)),
+    [t],
+  );
+  const modelCatalogControls = (
+    <PlaygroundModelCatalogControls
+      t={translateModelCatalogControl}
+      modelListScope={modelListScope}
+      setModelListScope={setModelListScope}
+      modelSearchQuery={modelSearchQuery}
+      setModelSearchQuery={setModelSearchQuery}
+      modelSortMode={modelSortMode}
+      setModelSortMode={setModelSortMode}
+    />
+  );
 
   const modelSelectButton = (
     <ChatModelSelectorDropdown
       apiModelLabel={apiModelLabel}
+      catalogControls={modelCatalogControls}
       connectionStatusLabel={connectionStatusLabel}
       connectionStatusWarning={
         !isConnectionReady || connectionUxState === "connected_degraded"

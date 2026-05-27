@@ -9,6 +9,7 @@ const cockpitShellPath = path.resolve(
   testDir,
   "../PlaygroundCockpitShell.tsx",
 );
+const playgroundFormPath = path.resolve(testDir, "../PlaygroundForm.tsx");
 
 describe("Playground cockpit regression guard", () => {
   it("keeps the main /chat cockpit shell and core rails wired into Playground", () => {
@@ -45,5 +46,12 @@ describe("Playground cockpit regression guard", () => {
     expect(source).toContain("playgroundChatLayoutMode");
     expect(source).toContain('"cockpit"');
     expect(source).toContain('"focus"');
+  });
+
+  it("keeps configured and catalog model scope controls wired into the selector", () => {
+    const source = readFileSync(playgroundFormPath, "utf8");
+
+    expect(source).toContain("<PlaygroundModelCatalogControls");
+    expect(source).toContain("catalogControls={modelCatalogControls}");
   });
 });
