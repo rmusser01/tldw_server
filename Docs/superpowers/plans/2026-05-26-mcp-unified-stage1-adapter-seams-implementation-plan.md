@@ -564,7 +564,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unifi
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add \
@@ -583,7 +583,7 @@ git commit -m "feat: add mcp runtime dependency seam"
 - Modify: `tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py`
 
-- [ ] **Step 1: Add optional circuit breaker factory to `ModuleConfig`**
+- [x] **Step 1: Add optional circuit breaker factory to `ModuleConfig`**
 
 Add a field that defaults to `None` so current callers are unchanged.
 
@@ -596,7 +596,7 @@ class ModuleConfig:
     circuit_breaker_factory: Any | None = None
 ```
 
-- [ ] **Step 2: Create a default local fallback factory**
+- [x] **Step 2: Create a default local fallback factory**
 
 In `modules/base.py`, move the current direct import into a small function.
 
@@ -608,7 +608,7 @@ def _default_circuit_breaker_factory(name: str, config: Any) -> Any:
 
 This still imports `tldw_Server_API`, but isolates the remaining dependency to one hook for the later package move.
 
-- [ ] **Step 3: Use the configured factory in `BaseModule.__init__`**
+- [x] **Step 3: Use the configured factory in `BaseModule.__init__`**
 
 ```python
 factory = config.circuit_breaker_factory or _default_circuit_breaker_factory
@@ -620,7 +620,7 @@ self._circuit_breaker = factory(
 
 If `CircuitBreakerConfig` is still imported directly, either wrap it in the factory input or record it as extraction debt. Prefer keeping behavior unchanged in Stage 1.
 
-- [ ] **Step 4: Add a test with a fake factory**
+- [x] **Step 4: Add a test with a fake factory**
 
 Add to `test_basic_functionality.py`:
 
@@ -641,7 +641,7 @@ def test_module_config_accepts_circuit_breaker_factory():
     assert module._circuit_breaker.__class__ is FakeBreaker  # noqa: SLF001
 ```
 
-- [ ] **Step 5: Run module tests**
+- [x] **Step 5: Run module tests**
 
 Run:
 
@@ -651,7 +651,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unifi
 
 Expected: PASS.
 
-- [ ] **Step 6: Run focused registry/module tests**
+- [x] **Step 6: Run focused registry/module tests**
 
 Run:
 

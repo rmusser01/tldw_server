@@ -80,8 +80,23 @@ class TldwApiKeyScopeNormalizer:
         return set()
 
 
-def create_tldw_circuit_breaker(*, name: str, config: CircuitBreakerConfig) -> CircuitBreaker:
-    return CircuitBreaker(name=name, config=config)
+def _to_tldw_circuit_breaker_config(config: Any) -> CircuitBreakerConfig:
+    if isinstance(config, CircuitBreakerConfig):
+        return config
+    return CircuitBreakerConfig(
+        failure_threshold=config.failure_threshold,
+        recovery_timeout=config.recovery_timeout,
+        backoff_factor=config.backoff_factor,
+        max_recovery_timeout=config.max_recovery_timeout,
+        half_open_max_calls=config.half_open_max_calls,
+        success_threshold=config.success_threshold,
+        category=config.category,
+        service=config.service,
+    )
+
+
+def create_tldw_circuit_breaker(*, name: str, config: Any) -> CircuitBreaker:
+    return CircuitBreaker(name=name, config=_to_tldw_circuit_breaker_config(config))
 
 
 def build_default_runtime_dependencies() -> MCPRuntimeDependencies:
