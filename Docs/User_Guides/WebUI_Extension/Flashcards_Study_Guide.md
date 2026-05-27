@@ -30,24 +30,25 @@ Why the 8 KB field limit did not increase:
 5. Use `Manage` when you want to inspect queue state on expanded cards or document rows while cleaning up a deck.
 6. Repeat daily. The scheduler adjusts next due dates from your ratings.
 
-## Extension Selected-Text Handoff
+## Extension Selected-Text Capture
 
-Use this path when you find a useful passage while browsing and want it to become editable flashcard drafts.
+Use this path when you find a useful passage while browsing and want to save one editable basic flashcard without leaving the sidepanel.
 
 Workflow:
 
 1. Select text on the source page.
 2. Open the extension sidepanel and choose `Flashcards`.
-3. Choose `Generate from page selection`.
-4. The Web UI opens Flashcards on `Create & Import` with the selected text prefilled in the generate workflow.
-5. Generate cards, edit the drafts, choose an existing deck or create a new one, then save.
+3. Choose `Capture page selection`.
+4. Select a deck, edit `Front` and `Back`, then choose `Save card`.
+5. Use `Open full Flashcards` for generation, imports, templates, review, or broader deck management.
 
 Important behavior:
 
-- The sidepanel Flashcards route is a bridge. Use `Open full Flashcards` for study/manage work, or `Generate from page selection` to turn the current page selection into drafts.
+- The sidepanel Flashcards route saves one basic card at a time and keeps the source page URL as provenance.
+- Create the deck in full Flashcards first if the sidepanel shows no deck options.
 - The browser context menu path still works: choose `tldw` -> `Save` -> `Save to Notes`, review the selection in the sidepanel dialog, then choose `Generate flashcards`.
-- Neither sidepanel path creates flashcards automatically. Cards are only saved after you review and save generated drafts in `Create & Import`.
-- If the sidepanel cannot open on the current site, use full Web UI `/flashcards` and paste text into `Create & Import` -> `Generate`.
+- Use the context-menu path or full Web UI `/flashcards` -> `Create & Import` -> `Generate` when you want generated drafts instead of a single captured card.
+- If the sidepanel cannot capture on the current site, use full Web UI `/flashcards` and paste text into `Create & Import`.
 
 ## Study Assistant Conflict Recovery
 

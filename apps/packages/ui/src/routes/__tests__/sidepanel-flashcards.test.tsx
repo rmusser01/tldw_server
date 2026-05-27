@@ -1,10 +1,15 @@
 import React from "react"
 import userEvent from "@testing-library/user-event"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SidepanelFlashcards, {
   readSelectedTextFromPage
 } from "../sidepanel-flashcards"
+
+const flashcardMocks = vi.hoisted(() => ({
+  createFlashcardMutateAsync: vi.fn(),
+  useDecksQuery: vi.fn()
+}))
 
 const browserMocks = vi.hoisted(() => ({
   runtimeGetURL: vi.fn((path: string) => `chrome-extension://flashcards${path}`),
@@ -21,6 +26,14 @@ const browserMocks = vi.hoisted(() => ({
       result: "Key concept from the active page"
     }
   ])
+}))
+
+vi.mock("@/components/Flashcards/hooks", () => ({
+  useCreateFlashcardMutation: () => ({
+    mutateAsync: flashcardMocks.createFlashcardMutateAsync,
+    isPending: false
+  }),
+  useDecksQuery: (...args: unknown[]) => flashcardMocks.useDecksQuery(...args)
 }))
 
 vi.mock("wxt/browser", () => ({
@@ -42,11 +55,14 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
       key: string,
-      fallbackOrOptions?: string | { defaultValue?: string }
+      fallbackOrOptions?: string | { defaultValue?: string; deckName?: string }
     ) => {
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions
       if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        return fallbackOrOptions.defaultValue || key
+        return (fallbackOrOptions.defaultValue || key).replace(
+          "{{deckName}}",
+          fallbackOrOptions.deckName || ""
+        )
       }
       return key
     }
@@ -56,6 +72,24 @@ vi.mock("react-i18next", () => ({
 describe("sidepanel flashcards route", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    flashcardMocks.createFlashcardMutateAsync.mockResolvedValue({
+      uuid: "card-1",
+      deck_id: 7
+    })
+    flashcardMocks.useDecksQuery.mockReturnValue({
+      data: [
+        {
+          id: 7,
+          name: "Biology",
+          description: null,
+          deleted: false,
+          client_id: "test",
+          version: 1
+        }
+      ],
+      isLoading: false,
+      isError: false
+    })
   })
 
   afterEach(() => {
@@ -70,7 +104,7 @@ describe("sidepanel flashcards route", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Study, manage, and create cards in the full Flashcards workspace."
+        "Capture selected page text into a deck, or open the full Flashcards workspace."
       )
     ).toBeInTheDocument()
     expect(
@@ -78,11 +112,11 @@ describe("sidepanel flashcards route", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Turn the current page selection into editable flashcard drafts."
+        "Create one editable card in the sidepanel. Use full Flashcards for generation, imports, and review."
       )
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Generate from page selection" })
+      screen.getByRole("button", { name: "Capture page selection" })
     ).toBeInTheDocument()
     expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
   })
@@ -139,12 +173,12 @@ describe("sidepanel flashcards route", () => {
     }
   })
 
-  it("captures the active page selection into the Flashcards generate workflow", async () => {
+  it("captures the active page selection into an editable sidepanel draft", async () => {
     const user = userEvent.setup()
     render(<SidepanelFlashcards />)
 
     await user.click(
-      screen.getByRole("button", { name: "Generate from page selection" })
+      screen.getByRole("button", { name: "Capture page selection" })
     )
 
     expect(browserMocks.tabsQuery).toHaveBeenCalledWith({
@@ -155,17 +189,90 @@ describe("sidepanel flashcards route", () => {
       target: { tabId: 42 },
       func: expect.any(Function)
     })
-    const openedUrl = browserMocks.tabsCreate.mock.calls.at(-1)?.[0]?.url
-    expect(openedUrl).toBeDefined()
-    const url = new URL(openedUrl as string)
-    expect(url.pathname).toBe("/options.html")
-    expect(url.hash).toContain("/flashcards?")
-    const hashSearch = url.hash.slice(url.hash.indexOf("?") + 1)
-    const params = new URLSearchParams(hashSearch)
-    expect(params.get("generate")).toBe("1")
-    expect(params.get("generate_text")).toBe("Key concept from the active page")
-    expect(params.get("generate_source_id")).toBe("https://example.test/source")
-    expect(params.get("generate_source_title")).toBe("Selection Source")
+    expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole("heading", { name: "Draft flashcard" })
+    ).toBeInTheDocument()
+    expect(screen.getByTestId("sidepanel-flashcards-deck-select")).toHaveTextContent(
+      "Biology"
+    )
+    expect(screen.getByLabelText("Front")).toHaveValue("Selection Source")
+    expect(screen.getByLabelText("Back")).toHaveValue(
+      "Key concept from the active page"
+    )
+  })
+
+  it("saves the edited sidepanel draft with deck and page provenance", async () => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    fireEvent.change(screen.getByLabelText("Front"), {
+      target: { value: "Edited question" }
+    })
+    fireEvent.change(screen.getByLabelText("Back"), {
+      target: { value: "Edited answer" }
+    })
+    await user.click(screen.getByRole("button", { name: "Save card" }))
+
+    await waitFor(() => {
+      expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      deck_id: 7,
+      front: "Edited question",
+      back: "Edited answer",
+      model_type: "basic",
+      is_cloze: false,
+      reverse: false,
+      source_ref_type: "manual",
+      source_ref_id: "https://example.test/source"
+    })
+    expect(screen.getByText("Saved to Biology.")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Open full Flashcards" })
+    ).toBeInTheDocument()
+  })
+
+  it("keeps the draft in place when sidepanel save fails", async () => {
+    flashcardMocks.createFlashcardMutateAsync.mockRejectedValueOnce(
+      new Error("save failed")
+    )
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    await user.click(screen.getByRole("button", { name: "Save card" }))
+
+    expect(
+      await screen.findByText("Could not save flashcard. Check your connection and try again.")
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Back")).toHaveValue(
+      "Key concept from the active page"
+    )
+  })
+
+  it("requires a deck before saving a sidepanel draft", async () => {
+    flashcardMocks.useDecksQuery.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false
+    })
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+
+    expect(
+      screen.getByText("Create a deck in full Flashcards before saving here.")
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save card" })).toBeDisabled()
   })
 
   it("keeps the user in place when no page text is selected", async () => {
@@ -174,7 +281,7 @@ describe("sidepanel flashcards route", () => {
     render(<SidepanelFlashcards />)
 
     await user.click(
-      screen.getByRole("button", { name: "Generate from page selection" })
+      screen.getByRole("button", { name: "Capture page selection" })
     )
 
     expect(
