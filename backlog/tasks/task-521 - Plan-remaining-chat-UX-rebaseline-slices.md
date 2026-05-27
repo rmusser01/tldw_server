@@ -4,20 +4,15 @@ title: Plan remaining chat UX rebaseline slices
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-05-27 07:12
+updated_date: '2026-05-27 15:24'
 labels:
-- chat
-- ux
-- planning
+  - chat
+  - ux
+  - planning
 dependencies: []
 documentation:
-- docs/superpowers/plans/2026-05-27-chat-remaining-ux-rebaseline.md
+  - docs/superpowers/plans/2026-05-27-chat-remaining-ux-rebaseline.md
 priority: high
-modified_files:
-- docs/superpowers/plans/2026-05-27-chat-remaining-ux-rebaseline.md
-- apps/packages/ui/src/components/Option/Playground/PlaygroundCockpitShell.tsx
-- apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx
-- apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts
 ---
 
 ## Description
@@ -46,6 +41,8 @@ Formal plan saved at docs/superpowers/plans/2026-05-27-chat-remaining-ux-rebasel
 Task 1 guardrail inspection completed. Existing Playground.cockpit-regression.guard.test.ts already asserts cockpit shell/context/runtime rail wiring and absence of CharacterControlRail in Playground.tsx. Existing SidepanelHeaderSimple.fullscreen-route.test.tsx already asserts both full-screen and dashboard handoffs open /options.html#/chat. Fresh verification: bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx passed with 2 files and 6 tests. Node localStorage ExperimentalWarning observed as baseline.
 
 Task 2 mobile density TDD started. Added a failing a11y/shell test proving the mobile cockpit panel still used max-h-[42vh], then changed PlaygroundCockpitShell mobile panel caps to max-h-[30vh] and made the mobile panel summary sr-only while preserving aria-describedby text. Added real-server Playwright assertions for mobile rail/composer non-overlap and bounded panel height. Fresh focused Vitest passed: Playground.cockpit-a11y, Playground.cockpit-shell, Playground.cockpit-regression.guard, and SidepanelHeaderSimple.fullscreen-route (4 files, 43 tests). Browser probe at http://127.0.0.1:18015/chat with 390x844 viewport confirmed mobile context panel class max-h-[30vh], panel height about 253px, sr-only summary text present, composer below rails, and no standalone CharacterControlRail text. Real-server backend startup exited before health binding in this sandbox run, so the real-server Playwright grep remains pending.
+
+Task 3 server-save feedback TDD completed. Added a failing usePlaygroundPersistence hook test proving first server save still opened notificationApi.success with 'Chat now saved on server'. Removed only that success notification call while preserving serverPersistenceHintSeenRef, setServerPersistenceHintSeen(true), setShowServerPersistenceHint(true), and existing error notifications. Added a real-server Playwright assertion to the mobile send flow that no .ant-notification-notice contains 'Chat now saved on server' and the chat input remains visible. Focused verification passed: bunx vitest run src/components/Option/Playground/hooks/__tests__/usePlaygroundPersistence.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx (5 files, 51 tests). git diff --check passed. Real-server Playwright remains pending because the prior backend startup exited before health binding in this sandbox.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

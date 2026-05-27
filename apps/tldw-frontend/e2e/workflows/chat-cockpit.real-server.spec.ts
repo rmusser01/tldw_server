@@ -2028,6 +2028,12 @@ test.describe('/chat cockpit real-server parity', () => {
       mobileSmokePrompt
     );
     await assertChatCompletionRenderedOrRecoverable(page, null);
+    await expect(
+      page.locator('.ant-notification-notice').filter({
+        hasText: 'Chat now saved on server',
+      })
+    ).toHaveCount(0);
+    await expect(page.getByTestId('chat-input')).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-conversation.png'),
       fullPage: true,

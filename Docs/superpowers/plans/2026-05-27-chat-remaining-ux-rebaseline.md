@@ -296,7 +296,7 @@ git commit -m "fix(chat): reduce mobile cockpit rail density"
 - Modify: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
 - Modify: `backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md`
 
-- [ ] **Step 1: Write failing persistence hook test**
+- [x] **Step 1: Write failing persistence hook test**
 
 In `usePlaygroundPersistence.test.tsx`, add or update a test for first server save:
 
@@ -313,7 +313,7 @@ expect(setServerPersistenceHintSeen).toHaveBeenCalledWith(true)
 
 Expected RED: current hook calls `notificationApi.success` with "Chat now saved on server".
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -324,7 +324,7 @@ bunx vitest run src/components/Option/Playground/hooks/__tests__/usePlaygroundPe
 
 Expected: the new notification suppression assertion fails.
 
-- [ ] **Step 3: Implement minimal feedback change**
+- [x] **Step 3: Implement minimal feedback change**
 
 In `usePlaygroundPersistence.tsx`, remove the `notificationApi.success({ message: "Chat now saved on server", ... })` call from the first-save path. Keep:
 
@@ -336,7 +336,7 @@ setShowServerPersistenceHint(true)
 
 Do not remove error notifications in the catch path.
 
-- [ ] **Step 4: Keep inline hint concise on mobile**
+- [x] **Step 4: Keep inline hint concise on mobile**
 
 If the inline hint in `ComposerToolbar.tsx` still creates mobile crowding, change only the copy length or responsive visibility:
 
@@ -346,7 +346,7 @@ If the inline hint in `ComposerToolbar.tsx` still creates mobile crowding, chang
 
 Avoid adding a new toast, modal, or second persistence banner.
 
-- [ ] **Step 5: Add real-server visibility assertion**
+- [x] **Step 5: Add real-server visibility assertion**
 
 In the mobile send test in `chat-cockpit.real-server.spec.ts`, after `assertChatCompletionRenderedOrRecoverable(page, null)`, assert that the composer and any error/recovery card are not covered by an Ant Design notification:
 
