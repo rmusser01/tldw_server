@@ -96,6 +96,32 @@ describe("WorkspaceSandboxDiagnosticsPanel", () => {
     expect(screen.queryByText(/\/api\/v1\/sandbox/)).toBeNull()
   })
 
+  it("shows route-policy blocked admission without implying sandbox actions can run", async () => {
+    mockGetSandboxWorkspaceDiagnostics.mockResolvedValue(
+      makeDiagnostics({
+        admission: {
+          state: "blocked",
+          reason_code: "sandbox_route_disabled",
+          message:
+            "Sandboxed workspace actions are blocked because the sandbox API route is disabled by route policy.",
+          management_surface: "sandbox_settings"
+        }
+      })
+    )
+
+    render(<WorkspaceSandboxDiagnosticsPanel workspaceId="workspace-alpha" />)
+
+    expect(
+      await screen.findByText(
+        "Sandboxed workspace actions are blocked because the sandbox API route is disabled by route policy."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText("Blocked")).toBeInTheDocument()
+    expect(
+      screen.queryByText("Sandboxed workspace actions may run.")
+    ).not.toBeInTheDocument()
+  })
+
   it("distinguishes forbidden diagnostics from temporary backend failure", async () => {
     mockGetSandboxWorkspaceDiagnostics.mockRejectedValueOnce(
       new Error(

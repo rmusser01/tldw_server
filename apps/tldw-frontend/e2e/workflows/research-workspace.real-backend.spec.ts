@@ -115,6 +115,72 @@ const canReachChatBootstrapEndpoint = async (): Promise<{
   }
 }
 
+const tryCreateWorkspaceSandboxRun = async (
+  workspaceId: string
+): Promise<{
+  created: boolean
+  reason?: string
+  run?: {
+    id: string
+    phase?: string | null
+    workspace_id?: string | null
+  }
+}> => {
+  const idempotencyKey = generateTestId("research-workspace-sandbox-run")
+  const response = await fetchWithApiKey(
+    `${TEST_CONFIG.serverUrl.replace(/\/$/, "")}/api/v1/sandbox/runs`,
+    TEST_CONFIG.apiKey,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey
+      },
+      body: JSON.stringify({
+        spec_version: "1.0",
+        runtime: "docker",
+        base_image: "python:3.11-slim",
+        command: ["python", "-c", "print('research workspace sandbox run')"],
+        timeout_sec: 5,
+        workspace_id: workspaceId,
+        workspace_group_id: "research-workspace",
+        scope_snapshot_id: idempotencyKey
+      })
+    }
+  )
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "")
+    return {
+      created: false,
+      reason: `POST /api/v1/sandbox/runs returned HTTP ${response.status}${
+        text ? `: ${text.slice(0, 240)}` : ""
+      }`
+    }
+  }
+
+  const run = (await response.json()) as {
+    id?: string
+    phase?: string | null
+    workspace_id?: string | null
+  }
+  if (!run.id) {
+    return {
+      created: false,
+      reason: "POST /api/v1/sandbox/runs succeeded without returning a run id"
+    }
+  }
+
+  return {
+    created: true,
+    run: {
+      id: run.id,
+      phase: run.phase ?? null,
+      workspace_id: run.workspace_id ?? null
+    }
+  }
+}
+
 const ensureNoServerReachabilityDialog = async (page: Page): Promise<void> => {
   const serverDialog = page
     .getByRole("dialog")
@@ -638,10 +704,76 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     await expect(modal).toBeVisible({ timeout: 10_000 })
     const terminalState = modal
       .getByText(
-        /No sandbox runs are linked to this workspace yet|Sandbox diagnostics are unavailable right now|You do not have permission to view sandbox diagnostics|No sandbox runtimes are available for workspace actions|Sandbox runtime discovery failed|A sandbox runtime is available for workspace actions|Sandbox readiness could not be determined/i
+        /No sandbox runs are linked to this workspace yet|Sandbox diagnostics are unavailable right now|You do not have permission to view sandbox diagnostics|No sandbox runtimes are available for workspace actions|Sandbox runtime discovery failed|A sandbox runtime is available for workspace actions|Sandboxed workspace actions are blocked because the sandbox API route is disabled by route policy|Sandbox readiness could not be determined/i
       )
       .first()
     await expect(terminalState).toBeVisible({ timeout: 10_000 })
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("shows workspace-linked sandbox run in diagnostics when sandbox run API is available", async ({
+    authedPage,
+    serverInfo,
+    diagnostics
+  }) => {
+    skipIfServerUnavailable(serverInfo)
+
+    const workspacePage = new ResearchWorkspacePage(authedPage)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await ensureNoServerReachabilityDialog(authedPage)
+
+    const workspaceId = await workspacePage.getWorkspaceId()
+    expect(workspaceId, "Expected Research Workspace to expose an active ID").toBeTruthy()
+
+    const createResult = await tryCreateWorkspaceSandboxRun(workspaceId || "")
+    test.skip(
+      !createResult.created,
+      createResult.reason ||
+        "Skipping workspace sandbox run diagnostics proof: sandbox run API unavailable"
+    )
+
+    const runId = createResult.run?.id
+    expect(runId, "Expected sandbox run creation to return a run ID").toBeTruthy()
+    expect(createResult.run?.workspace_id).toBe(workspaceId)
+
+    const diagnosticsResponsePromise = authedPage.waitForResponse((response) => {
+      if (response.request().method().toUpperCase() !== "GET") return false
+      const url = new URL(response.url())
+      return (
+        url.pathname.endsWith(
+          `/api/v1/sandbox/workspaces/${encodeURIComponent(
+            workspaceId || ""
+          )}/diagnostics`
+        ) &&
+        url.searchParams.get("source_label") === "research_workspace" &&
+        url.searchParams.get("limit") === "10"
+      )
+    })
+
+    await clickActionable(
+      authedPage.getByRole("button", { name: /workspace settings/i })
+    )
+    await authedPage.getByText("Sandbox diagnostics").click()
+
+    const diagnosticsResponse = await diagnosticsResponsePromise
+    expect(diagnosticsResponse.status()).toBeLessThan(400)
+    const diagnosticsBody = (await diagnosticsResponse.json()) as {
+      runs?: { items?: Array<{ id?: string; workspace_id?: string | null }> }
+    }
+    expect(diagnosticsBody.runs?.items || []).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: runId,
+          workspace_id: workspaceId
+        })
+      ])
+    )
+
+    const modal = authedPage.getByRole("dialog", { name: /Sandbox diagnostics/i })
+    await expect(modal).toBeVisible({ timeout: 10_000 })
+    await expect(modal.getByText(runId || "")).toBeVisible({ timeout: 10_000 })
 
     await assertNoCriticalErrors(diagnostics)
   })

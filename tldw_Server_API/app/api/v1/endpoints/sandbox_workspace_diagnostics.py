@@ -93,6 +93,16 @@ def _coerce_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _sandbox_run_route_enabled() -> bool:
+    try:
+        from tldw_Server_API.app.core import config as app_config
+
+        return bool(app_config.route_enabled("sandbox", default_stable=False))
+    except _SANDBOX_WORKSPACE_DIAGNOSTICS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Sandbox workspace diagnostics could not read route policy: {}", exc)
+        return False
+
+
 def _sandbox_workspace_runtime_state() -> tuple[SandboxWorkspaceDiagnosticState, SandboxWorkspaceDiagnosticState]:
     try:
         diagnostics = _service.runtime_diagnostics_summary()
@@ -125,6 +135,18 @@ def _sandbox_workspace_runtime_state() -> tuple[SandboxWorkspaceDiagnosticState,
             message="A sandbox runtime is available for workspace actions.",
             management_surface="sandbox_settings",
         )
+        if not _sandbox_run_route_enabled():
+            admission = SandboxWorkspaceDiagnosticState(
+                state="blocked",
+                reason_code="sandbox_route_disabled",
+                message=(
+                    "Sandboxed workspace actions are blocked because the sandbox "
+                    "API route is disabled by route policy."
+                ),
+                management_surface="sandbox_settings",
+            )
+            return runtime, admission
+
         admission = SandboxWorkspaceDiagnosticState(
             state="available",
             reason_code=None,
