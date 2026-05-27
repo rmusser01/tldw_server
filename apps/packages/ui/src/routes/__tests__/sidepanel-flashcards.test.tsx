@@ -149,6 +149,9 @@ describe("sidepanel flashcards route", () => {
     expect(
       screen.getByRole("button", { name: "Capture page selection" })
     ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Generate from selection" })
+    ).toBeInTheDocument()
     expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
   })
 
@@ -231,6 +234,35 @@ describe("sidepanel flashcards route", () => {
     expect(screen.getByLabelText("Back")).toHaveValue(
       "Key concept from the active page"
     )
+  })
+
+  it("opens full Flashcards generation with selected page text and source context", async () => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Generate from selection" })
+    )
+
+    const generatePath = browserMocks.runtimeGetURL.mock.calls
+      .map(([path]) => path)
+      .find((path) => path.includes("generate=1"))
+    expect(generatePath).toBeTruthy()
+    expect(generatePath).toContain("/options.html#/flashcards?")
+
+    const query = generatePath?.slice(generatePath.indexOf("?") + 1) ?? ""
+    const params = new URLSearchParams(query)
+    expect(params.get("tab")).toBe("importExport")
+    expect(params.get("generate")).toBe("1")
+    expect(params.get("generate_text")).toBe("Key concept from the active page")
+    expect(params.get("generate_source_id")).toBe("https://example.test/source")
+    expect(params.get("generate_source_title")).toBe("Selection Source")
+    expect(browserMocks.tabsCreate).toHaveBeenCalledWith({
+      url: `chrome-extension://flashcards${generatePath}`
+    })
+    expect(
+      screen.queryByRole("heading", { name: "Draft flashcard" })
+    ).not.toBeInTheDocument()
   })
 
   it("appends repeated page selections into an editable draft queue", async () => {
@@ -582,6 +614,33 @@ describe("sidepanel flashcards route", () => {
     browserMocks.executeScript.mockResolvedValueOnce([{ result: "" }])
     await user.click(
       screen.getByRole("button", { name: "Capture page selection" })
+    )
+
+    expect(
+      screen.getByText("Select text on the page first.")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Draft flashcard" })
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Back")).toHaveValue(
+      "Key concept from the active page"
+    )
+  })
+
+  it("keeps queued drafts when generate-from-selection capture fails", async () => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    expect(
+      screen.getByRole("heading", { name: "Draft flashcard" })
+    ).toBeInTheDocument()
+
+    browserMocks.executeScript.mockResolvedValueOnce([{ result: "" }])
+    await user.click(
+      screen.getByRole("button", { name: "Generate from selection" })
     )
 
     expect(
