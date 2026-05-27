@@ -1,16 +1,40 @@
 import React from "react"
 import userEvent from "@testing-library/user-event"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SidepanelFlashcards, {
   readSelectedTextFromPage
 } from "../sidepanel-flashcards"
 
+type TemplateFixture = {
+  id: number
+  name: string
+  model_type: "basic" | "basic_reverse" | "cloze"
+  front_template: string
+  back_template?: string | null
+  notes_template?: string | null
+  extra_template?: string | null
+  placeholder_definitions: Array<{
+    key: string
+    label: string
+    help_text?: string | null
+    default_value?: string | null
+    required?: boolean
+    targets: string[]
+  }>
+  created_at?: string | null
+  last_modified?: string | null
+  deleted: boolean
+  client_id: string
+  version: number
+}
+
 const flashcardMocks = vi.hoisted(() => ({
   createFlashcardMutateAsync: vi.fn(),
   generateFlashcardsMutateAsync: vi.fn(),
   useFlashcardsEnabled: vi.fn(),
-  useDecksQuery: vi.fn()
+  useDecksQuery: vi.fn(),
+  useFlashcardTemplatesQuery: vi.fn()
 }))
 
 const browserMocks = vi.hoisted(() => ({
@@ -60,7 +84,9 @@ vi.mock("@/components/Flashcards/hooks", () => ({
     isPending: false
   }),
   useFlashcardsEnabled: () => flashcardMocks.useFlashcardsEnabled(),
-  useDecksQuery: (...args: unknown[]) => flashcardMocks.useDecksQuery(...args)
+  useDecksQuery: (...args: unknown[]) => flashcardMocks.useDecksQuery(...args),
+  useFlashcardTemplatesQuery: (...args: unknown[]) =>
+    flashcardMocks.useFlashcardTemplatesQuery(...args)
 }))
 
 vi.mock("wxt/browser", () => ({
@@ -85,6 +111,8 @@ vi.mock("react-i18next", () => ({
 }))
 
 describe("sidepanel flashcards route", () => {
+  let currentTemplates: TemplateFixture[]
+
   beforeEach(() => {
     vi.clearAllMocks()
     translationMocks.t.mockClear()
@@ -94,6 +122,49 @@ describe("sidepanel flashcards route", () => {
     browserMocks.executeScript.mockReset()
     flashcardMocks.createFlashcardMutateAsync.mockReset()
     flashcardMocks.generateFlashcardsMutateAsync.mockReset()
+    flashcardMocks.useFlashcardTemplatesQuery.mockReset()
+    currentTemplates = [
+      {
+        id: 21,
+        name: "Source vocabulary",
+        model_type: "basic_reverse",
+        front_template: "What does {{term}} mean?",
+        back_template: "{{definition}}",
+        notes_template: "From {{source}}",
+        extra_template: "Review after reading.",
+        placeholder_definitions: [
+          {
+            key: "term",
+            label: "Term",
+            help_text: null,
+            default_value: null,
+            required: true,
+            targets: ["front_template"]
+          },
+          {
+            key: "definition",
+            label: "Definition",
+            help_text: null,
+            default_value: null,
+            required: true,
+            targets: ["back_template"]
+          },
+          {
+            key: "source",
+            label: "Source",
+            help_text: null,
+            default_value: "selected page",
+            required: false,
+            targets: ["notes_template"]
+          }
+        ],
+        created_at: "2026-05-27T00:00:00Z",
+        last_modified: "2026-05-27T00:00:00Z",
+        deleted: false,
+        client_id: "test-client",
+        version: 1
+      }
+    ]
     browserMocks.runtimeGetURL.mockImplementation(
       (path: string) => `chrome-extension://flashcards${path}`
     )
@@ -152,6 +223,15 @@ describe("sidepanel flashcards route", () => {
       isLoading: false,
       isError: false
     })
+    flashcardMocks.useFlashcardTemplatesQuery.mockImplementation(() => ({
+      data: {
+        items: currentTemplates,
+        count: currentTemplates.length,
+        total: currentTemplates.length
+      },
+      isLoading: false,
+      error: null
+    }))
   })
 
   afterEach(() => {
@@ -265,6 +345,156 @@ describe("sidepanel flashcards route", () => {
       "Biology"
     )
     expect(screen.getByLabelText("Front")).toHaveValue("Selection Source")
+    expect(screen.getByLabelText("Back")).toHaveValue(
+      "Key concept from the active page"
+    )
+  })
+
+  const openTemplateModal = async (buttonName: string | RegExp) => {
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: buttonName })
+    )
+
+    return await waitFor(() => {
+      const dialog = screen.getAllByRole("dialog").find((candidate) =>
+        within(candidate).queryByLabelText("Template")
+      )
+      expect(dialog).toBeDefined()
+      return dialog as HTMLElement
+    })
+  }
+
+  const fillAndApplyTemplate = async (
+    dialog: HTMLElement,
+    values: {
+      term: string
+      definition: string
+    }
+  ) => {
+    fireEvent.change(within(dialog).getByLabelText("Term"), {
+      target: { value: values.term }
+    })
+    fireEvent.change(within(dialog).getByLabelText("Definition"), {
+      target: { value: values.definition }
+    })
+
+    await waitFor(() => {
+      expect(within(dialog).getByRole("button", { name: "Apply" })).not.toBeDisabled()
+    })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
+  }
+
+  it("applies an existing template to a captured sidepanel draft before saving", async () => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    const modal = await openTemplateModal("Apply template to draft 1")
+    await fillAndApplyTemplate(modal, {
+      term: "ATP",
+      definition: "The cell's energy currency"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Front")).toHaveValue("What does ATP mean?")
+    })
+    expect(screen.getByLabelText("Back")).toHaveValue("The cell's energy currency")
+    await user.click(screen.getByRole("button", { name: "Save card" }))
+
+    await waitFor(() => {
+      expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      deck_id: 7,
+      front: "What does ATP mean?",
+      back: "The cell's energy currency",
+      notes: "From selected page",
+      extra: "Review after reading.",
+      model_type: "basic_reverse",
+      is_cloze: false,
+      reverse: true,
+      source_ref_type: "manual",
+      source_ref_id: "https://example.test/source"
+    })
+  })
+
+  it("applies a template only to the selected queued draft", async () => {
+    browserMocks.executeScript
+      .mockResolvedValueOnce([{ result: "First captured concept" }])
+      .mockResolvedValueOnce([{ result: "Second captured concept" }])
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    const modal = await openTemplateModal("Apply template to draft 2")
+    await fillAndApplyTemplate(modal, {
+      term: "Respiration",
+      definition: "ATP production from nutrients"
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByLabelText("Back")[1]).toHaveValue(
+        "ATP production from nutrients"
+      )
+    })
+    expect(screen.getAllByLabelText("Back")[0]).toHaveValue("First captured concept")
+  })
+
+  it("applies templates to generated drafts without losing generated tags", async () => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Generate draft cards" })
+    )
+    const modal = await openTemplateModal("Apply template to draft 1")
+    await fillAndApplyTemplate(modal, {
+      term: "ATP",
+      definition: "The cell's energy currency"
+    })
+    await user.click(screen.getAllByRole("button", { name: "Save card" })[0])
+
+    await waitFor(() => {
+      expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      deck_id: 7,
+      front: "What does ATP mean?",
+      back: "The cell's energy currency",
+      tags: ["biology", "energy"],
+      notes: "From selected page",
+      extra: "Review after reading.",
+      model_type: "basic_reverse",
+      is_cloze: false,
+      reverse: true,
+      source_ref_type: "manual",
+      source_ref_id: "https://example.test/source"
+    })
+  })
+
+  it("keeps queued drafts visible when no templates exist", async () => {
+    currentTemplates = []
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Apply template to draft 1" })
+    )
+
+    expect(await screen.findByText("No templates yet")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Draft flashcard" })
+    ).toBeInTheDocument()
     expect(screen.getByLabelText("Back")).toHaveValue(
       "Key concept from the active page"
     )

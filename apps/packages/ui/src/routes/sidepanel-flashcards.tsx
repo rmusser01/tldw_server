@@ -2,6 +2,7 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import {
   ExternalLink,
+  LayoutTemplate,
   Layers,
   MessageSquareText,
   Save,
@@ -17,8 +18,10 @@ import {
   useFlashcardsEnabled,
   useGenerateFlashcardsMutation
 } from "@/components/Flashcards/hooks"
+import { FlashcardTemplateValueModal } from "@/components/Flashcards/components/FlashcardTemplateValueModal"
 import type { GeneratedCardDraft } from "@/components/Flashcards/tabs/ImportExport/shared"
 import { normalizeGeneratedCards } from "@/components/Flashcards/tabs/ImportExport/shared"
+import { normalizeFlashcardTemplateFields } from "@/components/Flashcards/utils/template-helpers"
 import type { FlashcardCreate } from "@/services/flashcards"
 import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
 
@@ -78,6 +81,9 @@ export default function SidepanelFlashcards() {
   } | null>(null)
   const generationInFlightRef = React.useRef(false)
   const [drafts, setDrafts] = React.useState<CaptureDraft[]>([])
+  const [templateDraftId, setTemplateDraftId] = React.useState<string | null>(
+    null
+  )
   const [savingDraftIds, setSavingDraftIds] = React.useState<Set<string>>(
     () => new Set()
   )
@@ -495,6 +501,45 @@ export default function SidepanelFlashcards() {
     setDrafts((current) => current.filter((draft) => draft.id !== draftId))
   }, [])
 
+  const handleOpenTemplateDraft = React.useCallback((draftId: string) => {
+    setCaptureError(null)
+    setSaveStatus(null)
+    setTemplateDraftId(draftId)
+  }, [])
+
+  const handleCloseTemplateDraft = React.useCallback(() => {
+    setTemplateDraftId(null)
+  }, [])
+
+  const handleApplyTemplateDraft = React.useCallback(
+    (
+      templateDraft: Pick<
+        FlashcardCreate,
+        "deck_id" | "tags" | "model_type" | "front" | "back" | "notes" | "extra"
+      >
+    ) => {
+      setSaveStatus(null)
+      setDrafts((current) =>
+        current.map((draft) => {
+          if (draft.id !== templateDraftId) return draft
+
+          const normalized = normalizeFlashcardTemplateFields(templateDraft)
+          return {
+            ...draft,
+            front: normalized.front ?? "",
+            back: normalized.back ?? "",
+            modelType: normalized.model_type,
+            tags: normalized.tags ?? draft.tags,
+            notes: normalized.notes ?? null,
+            extra: normalized.extra ?? null
+          }
+        })
+      )
+      setTemplateDraftId(null)
+    },
+    [templateDraftId]
+  )
+
   const handleSaveDraft = React.useCallback(
     async (draftId: string) => {
       if (!hasDeck || savingDraftIdsRef.current.size > 0) return
@@ -618,6 +663,8 @@ export default function SidepanelFlashcards() {
 
   const isSaving = createFlashcardMutation.isPending || savingDraftIds.size > 0
   const isGenerating = generateHandoffLoading || draftGenerateLoading
+  const templateTargetDraft =
+    drafts.find((draft) => draft.id === templateDraftId) ?? null
   const canSaveDraft = React.useCallback(
     (draft: CaptureDraft) => !!buildSavePayload(draft) && hasDeck && !isSaving,
     [buildSavePayload, hasDeck, isSaving]
@@ -779,16 +826,30 @@ export default function SidepanelFlashcards() {
                     {draft.sourceTitle || draft.sourceId}
                   </Text>
                 </div>
-                <Button
-                  size="small"
-                  icon={<Trash2 className="size-4" aria-hidden="true" />}
-                  aria-label={t("sidepanel:flashcards.removeDraft", {
-                    defaultValue: "Remove draft {{index}}",
-                    index: index + 1
-                  })}
-                  disabled={isSaving}
-                  onClick={() => handleRemoveDraft(draft.id)}
-                />
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    size="small"
+                    icon={<LayoutTemplate className="size-4" aria-hidden="true" />}
+                    aria-label={t("sidepanel:flashcards.applyTemplateToDraft", {
+                      defaultValue: "Apply template to draft {{index}}",
+                      index: index + 1
+                    })}
+                    disabled={isSaving}
+                    onClick={() => handleOpenTemplateDraft(draft.id)}
+                  >
+                    {t("sidepanel:flashcards.applyTemplate", "Apply template")}
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<Trash2 className="size-4" aria-hidden="true" />}
+                    aria-label={t("sidepanel:flashcards.removeDraft", {
+                      defaultValue: "Remove draft {{index}}",
+                      index: index + 1
+                    })}
+                    disabled={isSaving}
+                    onClick={() => handleRemoveDraft(draft.id)}
+                  />
+                </div>
               </div>
               <label className="flex flex-col gap-1 text-sm font-medium">
                 {t("sidepanel:flashcards.frontLabel", "Front")}
@@ -841,6 +902,13 @@ export default function SidepanelFlashcards() {
         <Text type="danger" className="text-xs" role="status">
           {captureError}
         </Text>
+      ) : null}
+      {templateTargetDraft ? (
+        <FlashcardTemplateValueModal
+          open
+          onClose={handleCloseTemplateDraft}
+          onApply={handleApplyTemplateDraft}
+        />
       ) : null}
     </main>
   )
