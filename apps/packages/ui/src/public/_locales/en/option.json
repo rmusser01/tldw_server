@@ -1146,7 +1146,7 @@
     "message": "Clear search & filters"
   },
   "notesSearch_keywordsPlaceholder": {
-    "message": "Filter by keyword"
+    "message": "Filter by tag"
   },
   "notesSearch_new": {
     "message": "New note"
@@ -1227,10 +1227,10 @@
     "message": "Title"
   },
   "notesSearch_keywordsEditorPlaceholder": {
-    "message": "Keywords (tags)"
+    "message": "Tags"
   },
   "notesSearch_tagsHelp": {
-    "message": "Keywords help you find this note using the keyword filter on the left."
+    "message": "Tags help you find this note using the tag filter on the left."
   },
   "notesSearch_notesStudioAction": {
     "message": "Notes Studio"
@@ -2712,19 +2712,19 @@
     "message": "No matches in this source."
   },
   "notesSearch_keywordsBrowse": {
-    "message": "Browse keywords"
+    "message": "Browse tags"
   },
   "notesSearch_keywordsBrowseCount": {
     "message": "{{count}} available"
   },
   "notesSearch_keywordPickerTitle": {
-    "message": "Browse keywords"
+    "message": "Browse tags"
   },
   "notesSearch_keywordPickerSearch": {
-    "message": "Search keywords"
+    "message": "Search tags"
   },
   "notesSearch_keywordPickerCount": {
-    "message": "{{count}} keywords"
+    "message": "{{count}} tags"
   },
   "notesSearch_keywordPickerSelectAll": {
     "message": "Select all"
@@ -2736,7 +2736,7 @@
     "message": "Apply filters"
   },
   "notesSearch_keywordPickerEmpty": {
-    "message": "No keywords found"
+    "message": "No tags found"
   },
   "characters_openCharactersPage": {
     "message": "Characters"
