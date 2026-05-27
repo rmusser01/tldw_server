@@ -92,6 +92,7 @@ export const PlaygroundStatusStrip = ({
   sessionDetail,
   sessionError,
   hasContext,
+  contextSummary = [],
   temporaryChat,
   characterChatActive = false,
   degraded = false,
@@ -264,6 +265,20 @@ export const PlaygroundStatusStrip = ({
           ? t("cockpit.characterSaved", "Saved character chat")
           : t("cockpit.characterLocalDraft", "Local character chat draft")
     : null;
+  const activeContextSummary = hasContext
+    ? contextSummary
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+    : [];
+  const visibleContextSummary = activeContextSummary.slice(0, 4);
+  const hiddenContextSummaryCount = Math.max(
+    0,
+    activeContextSummary.length - visibleContextSummary.length,
+  );
+  const hiddenContextSummaryLabel =
+    hiddenContextSummaryCount > 0
+      ? t("cockpit.moreContextSources", `+${hiddenContextSummaryCount} more`)
+      : null;
 
   return (
     <footer
@@ -310,6 +325,24 @@ export const PlaygroundStatusStrip = ({
         </span>
         {characterPersistenceLabel ? (
           <span className={pillClass}>{characterPersistenceLabel}</span>
+        ) : null}
+        {visibleContextSummary.map((summary, index) => (
+          <span
+            className={`${pillClass} gap-1 border-info/40 bg-info/10 text-info`}
+            key={`context-summary-${index}-${summary}`}
+          >
+            {index === 0 ? (
+              <Search className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : null}
+            {summary}
+          </span>
+        ))}
+        {hiddenContextSummaryLabel ? (
+          <span
+            className={`${pillClass} border-info/40 bg-info/10 text-info`}
+          >
+            {hiddenContextSummaryLabel}
+          </span>
         ) : null}
         {hasCriticalSessionState ? (
           <>

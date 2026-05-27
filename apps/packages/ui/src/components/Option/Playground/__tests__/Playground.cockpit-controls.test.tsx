@@ -507,6 +507,16 @@ describe("Playground cockpit controls", () => {
         within(contextRail).getByText("1 knowledge item"),
       ).toBeInTheDocument();
       expect(within(contextRail).getByText("2 media scopes")).toBeInTheDocument();
+      const statusStrip = screen.getByRole("status", { name: "Chat status" });
+      expect(statusStrip).toHaveTextContent("Web search on");
+      expect(statusStrip).toHaveTextContent("1 file");
+      expect(statusStrip).toHaveTextContent("1 knowledge item");
+      expect(statusStrip).toHaveTextContent("+1 more");
+      expect(
+        within(statusStrip).getByRole("button", {
+          name: /open search & context/i,
+        }),
+      ).toBeInTheDocument();
       expect(within(contextRail).getByText("Temporary chat")).toBeInTheDocument();
       expect(within(contextRail).getByText("History linked")).toBeInTheDocument();
       expect(

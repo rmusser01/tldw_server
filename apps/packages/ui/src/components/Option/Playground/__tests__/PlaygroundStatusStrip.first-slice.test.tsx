@@ -12,7 +12,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("PlaygroundStatusStrip first-slice state", () => {
-  it("keeps the ready status strip limited to critical route and count state", () => {
+  it("shows active context source chips without routine session noise", () => {
     render(
       <PlaygroundStatusStrip
         mode="cockpit"
@@ -29,6 +29,7 @@ describe("PlaygroundStatusStrip first-slice state", () => {
         temporaryChat={false}
         degradedChecks={[]}
         errorMessage={null}
+        onOpenSearchContext={vi.fn()}
       />,
     );
 
@@ -42,8 +43,33 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     expect(status).not.toHaveTextContent("History linked");
     expect(status).not.toHaveTextContent("Saved");
     expect(status).not.toHaveTextContent("Context active");
+    expect(status).toHaveTextContent("Web search on");
+    expect(status).toHaveTextContent("2 files");
+  });
+
+  it("does not render stale context source chips when context is inactive", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={3}
+        sessionLabel="Server chat"
+        sessionStatus="loaded"
+        hasContext={false}
+        contextSummary={["Web search on"]}
+        temporaryChat={false}
+        degradedChecks={[]}
+        errorMessage={null}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
     expect(status).not.toHaveTextContent("Web search on");
-    expect(status).not.toHaveTextContent("2 files");
+    expect(
+      screen.queryByRole("button", { name: "Open Search & Context" }),
+    ).toBeNull();
   });
 
   it("does not treat routine temporary-session labels as critical status", () => {
