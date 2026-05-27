@@ -1,6 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import {
+  BookOpenCheck,
   ExternalLink,
   LayoutTemplate,
   Layers,
@@ -16,7 +17,9 @@ import {
   useCreateFlashcardMutation,
   useDecksQuery,
   useFlashcardsEnabled,
-  useGenerateFlashcardsMutation
+  useGenerateFlashcardsMutation,
+  useReviewFlashcardMutation,
+  useReviewQuery
 } from "@/components/Flashcards/hooks"
 import { FlashcardTemplateValueModal } from "@/components/Flashcards/components/FlashcardTemplateValueModal"
 import type { GeneratedCardDraft } from "@/components/Flashcards/tabs/ImportExport/shared"
@@ -81,6 +84,12 @@ export default function SidepanelFlashcards() {
   } | null>(null)
   const generationInFlightRef = React.useRef(false)
   const [drafts, setDrafts] = React.useState<CaptureDraft[]>([])
+  const [reviewOpen, setReviewOpen] = React.useState(false)
+  const [reviewAnswerRevealed, setReviewAnswerRevealed] =
+    React.useState(false)
+  const [sidepanelReviewedCount, setSidepanelReviewedCount] = React.useState(0)
+  const reviewAnswerStartRef = React.useRef<number | null>(null)
+  const reviewSubmitInFlightRef = React.useRef(false)
   const [templateDraftId, setTemplateDraftId] = React.useState<string | null>(
     null
   )
@@ -93,6 +102,7 @@ export default function SidepanelFlashcards() {
   const decksQuery = useDecksQuery()
   const createFlashcardMutation = useCreateFlashcardMutation()
   const generateFlashcardsMutation = useGenerateFlashcardsMutation()
+  const reviewFlashcardMutation = useReviewFlashcardMutation()
   const decks = React.useMemo(() => decksQuery.data ?? [], [decksQuery.data])
   const selectedDeck = decks.find((deck) => deck.id === selectedDeckId) ?? null
   const flashcardsUnavailable =
@@ -110,6 +120,34 @@ export default function SidepanelFlashcards() {
     !decksLoading &&
     !decksLoadFailed &&
     decks.length === 0
+  const hasDeck = selectedDeckId != null && hasSelectableDecks
+  const reviewQuery = useReviewQuery(selectedDeckId, {
+    enabled: reviewOpen && hasDeck
+  })
+  const reviewCard = reviewQuery.data ?? null
+  const isReviewLoading = reviewQuery.isLoading || reviewQuery.isFetching
+
+  const sidepanelRatingOptions = React.useMemo(
+    () => [
+      {
+        value: 0,
+        label: t("option:flashcards.ratingAgain", { defaultValue: "Again" })
+      },
+      {
+        value: 2,
+        label: t("option:flashcards.ratingHard", { defaultValue: "Hard" })
+      },
+      {
+        value: 3,
+        label: t("option:flashcards.ratingGood", { defaultValue: "Good" })
+      },
+      {
+        value: 5,
+        label: t("option:flashcards.ratingEasy", { defaultValue: "Easy" })
+      }
+    ],
+    [t]
+  )
 
   React.useEffect(() => {
     if (
@@ -120,6 +158,11 @@ export default function SidepanelFlashcards() {
     }
     setSelectedDeckId(decks[0]?.id ?? null)
   }, [decks, selectedDeckId])
+
+  React.useEffect(() => {
+    setReviewAnswerRevealed(false)
+    reviewAnswerStartRef.current = null
+  }, [reviewCard?.uuid, selectedDeckId])
 
   const openOptionsHashRoute = React.useCallback(async (route: string) => {
     setCaptureError(null)
@@ -397,6 +440,21 @@ export default function SidepanelFlashcards() {
     [t]
   )
 
+  const formatSidepanelReviewProgress = React.useCallback(
+    (reviewedCount: number) =>
+      reviewedCount === 1
+        ? t("sidepanel:flashcards.sidepanelReviewProgress_one", {
+            defaultValue: "Reviewed 1 card in this sidepanel session.",
+            reviewedCount
+          })
+        : t("sidepanel:flashcards.sidepanelReviewProgress_other", {
+            defaultValue:
+              "Reviewed {{reviewedCount}} cards in this sidepanel session.",
+            reviewedCount
+          }),
+    [t]
+  )
+
   const handleGenerateDraftCards = React.useCallback(async () => {
     if (generationInFlightRef.current) return
     generationInFlightRef.current = true
@@ -483,8 +541,6 @@ export default function SidepanelFlashcards() {
     [selectedDeckId]
   )
 
-  const hasDeck = selectedDeckId != null && hasSelectableDecks
-
   const handleUpdateDraft = React.useCallback(
     (draftId: string, field: "front" | "back", value: string) => {
       setDrafts((current) =>
@@ -506,6 +562,77 @@ export default function SidepanelFlashcards() {
     setSaveStatus(null)
     setTemplateDraftId(draftId)
   }, [])
+
+  const handleToggleReview = React.useCallback(() => {
+    setCaptureError(null)
+    setSaveStatus(null)
+    setReviewAnswerRevealed(false)
+    reviewAnswerStartRef.current = null
+    if (!reviewOpen) {
+      setSidepanelReviewedCount(0)
+    }
+    setReviewOpen((current) => !current)
+  }, [reviewOpen])
+
+  const handleRevealReviewAnswer = React.useCallback(() => {
+    setCaptureError(null)
+    setSaveStatus(null)
+    setReviewAnswerRevealed(true)
+    reviewAnswerStartRef.current = Date.now()
+  }, [])
+
+  const handleSubmitSidepanelReview = React.useCallback(
+    async (rating: number) => {
+      if (
+        !reviewCard ||
+        reviewFlashcardMutation.isPending ||
+        reviewSubmitInFlightRef.current
+      ) {
+        return
+      }
+      reviewSubmitInFlightRef.current = true
+
+      const answerTimeMs =
+        reviewAnswerStartRef.current == null
+          ? undefined
+          : Math.max(0, Date.now() - reviewAnswerStartRef.current)
+
+      try {
+        await reviewFlashcardMutation.mutateAsync({
+          cardUuid: reviewCard.uuid,
+          rating,
+          answerTimeMs
+        })
+        const nextReviewedCount = sidepanelReviewedCount + 1
+        setSidepanelReviewedCount(nextReviewedCount)
+        setSaveStatus({
+          type: "success",
+          message: formatSidepanelReviewProgress(nextReviewedCount)
+        })
+        setReviewAnswerRevealed(false)
+        reviewAnswerStartRef.current = null
+        await reviewQuery.refetch()
+      } catch {
+        setSaveStatus({
+          type: "error",
+          message: t(
+            "sidepanel:flashcards.sidepanelReviewSubmitFailed",
+            "Could not submit review. Check your connection and try again."
+          )
+        })
+      } finally {
+        reviewSubmitInFlightRef.current = false
+      }
+    },
+    [
+      formatSidepanelReviewProgress,
+      reviewCard,
+      reviewFlashcardMutation,
+      reviewQuery,
+      sidepanelReviewedCount,
+      t
+    ]
+  )
 
   const handleCloseTemplateDraft = React.useCallback(() => {
     setTemplateDraftId(null)
@@ -703,6 +830,16 @@ export default function SidepanelFlashcards() {
         </Button>
         <Button
           block
+          disabled={isSaving || isGenerating}
+          icon={<BookOpenCheck className="size-4" aria-hidden="true" />}
+          onClick={handleToggleReview}
+        >
+          {reviewOpen
+            ? t("sidepanel:flashcards.closeSidepanelReview", "Close review")
+            : t("sidepanel:flashcards.reviewDueCard", "Review due card")}
+        </Button>
+        <Button
+          block
           loading={captureLoading}
           disabled={isSaving || isGenerating}
           icon={<MessageSquareText className="size-4" aria-hidden="true" />}
@@ -741,9 +878,159 @@ export default function SidepanelFlashcards() {
       <Text type="secondary" className="text-xs">
         {t(
           "sidepanel:flashcards.selectionHint",
-          "Create one editable card, generate a small draft batch, apply templates to queued drafts, or use full Flashcards for imports, review, and management."
+          "Create one editable card, generate a small draft batch, apply templates to queued drafts, review due cards here, or use full Flashcards for imports and management."
         )}
       </Text>
+      {reviewOpen ? (
+        <section
+          className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-3"
+          aria-label={t(
+            "sidepanel:flashcards.sidepanelReviewSection",
+            "Sidepanel flashcard review"
+          )}
+        >
+          <div>
+            <Title level={5} className="!mb-1">
+              {t("sidepanel:flashcards.reviewDueCard", "Review due card")}
+            </Title>
+            <Text type="secondary" className="text-xs">
+              {t(
+                "sidepanel:flashcards.sidepanelReviewDescription",
+                "Review the next due card from the selected deck."
+              )}
+            </Text>
+          </div>
+          <label className="flex flex-col gap-1 text-sm font-medium">
+            {t("sidepanel:flashcards.deckLabel", "Deck")}
+            <Select
+              data-testid="sidepanel-flashcards-review-deck-select"
+              aria-label={t("sidepanel:flashcards.reviewDeckLabel", "Review deck")}
+              loading={decksLoading}
+              disabled={
+                !hasSelectableDecks || reviewFlashcardMutation.isPending
+              }
+              placeholder={t(
+                "sidepanel:flashcards.deckPlaceholder",
+                "Choose a deck"
+              )}
+              value={selectedDeckId ?? undefined}
+              options={decks.map((deck) => ({
+                label: deck.name,
+                value: deck.id
+              }))}
+              onChange={(value) => setSelectedDeckId(value)}
+            />
+          </label>
+          {flashcardsUnavailable ? (
+            <Text type="danger" className="text-xs" role="status">
+              {t(
+                "sidepanel:flashcards.unavailable",
+                "Flashcards are unavailable. Check the server connection and try again."
+              )}
+            </Text>
+          ) : decksLoadFailed ? (
+            <Text type="danger" className="text-xs" role="status">
+              {t(
+                "sidepanel:flashcards.decksLoadFailed",
+                "Could not load decks. Check your connection and try again."
+              )}
+            </Text>
+          ) : decksLoading ? (
+            <Text type="secondary" className="text-xs" role="status">
+              {t("sidepanel:flashcards.decksLoading", "Loading decks...")}
+            </Text>
+          ) : showNoDecksMessage ? (
+            <Text type="warning" className="text-xs" role="status">
+              {t(
+                "sidepanel:flashcards.noDecks",
+                "Create a deck in full Flashcards before saving here."
+              )}
+            </Text>
+          ) : reviewQuery.isError ? (
+            <Text type="danger" className="text-xs" role="status">
+              {t(
+                "sidepanel:flashcards.sidepanelReviewLoadFailed",
+                "Could not load the next review card. Check your connection and try again."
+              )}
+            </Text>
+          ) : hasDeck && isReviewLoading ? (
+            <Text type="secondary" className="text-xs" role="status">
+              {t(
+                "sidepanel:flashcards.sidepanelReviewLoading",
+                "Loading review card..."
+              )}
+            </Text>
+          ) : hasDeck && reviewCard ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <Text type="secondary" className="text-xs">
+                  {t("sidepanel:flashcards.frontLabel", "Front")}
+                </Text>
+                <div className="whitespace-pre-wrap rounded-md border border-border bg-surface2 p-3 text-sm">
+                  {reviewCard.front}
+                </div>
+              </div>
+              {reviewAnswerRevealed ? (
+                <>
+                  <div className="flex flex-col gap-1">
+                    <Text type="secondary" className="text-xs">
+                      {t("sidepanel:flashcards.backLabel", "Back")}
+                    </Text>
+                    <div className="whitespace-pre-wrap rounded-md border border-border bg-surface2 p-3 text-sm">
+                      {reviewCard.back}
+                    </div>
+                  </div>
+                  <div
+                    className="grid grid-cols-2 gap-2"
+                    role="group"
+                    aria-label={t(
+                      "sidepanel:flashcards.ratingOptions",
+                      "Rating options"
+                    )}
+                  >
+                    {sidepanelRatingOptions.map((option) => (
+                      <Button
+                        key={option.value}
+                        loading={reviewFlashcardMutation.isPending}
+                        disabled={reviewFlashcardMutation.isPending}
+                        onClick={() =>
+                          void handleSubmitSidepanelReview(option.value)
+                        }
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <Button
+                  type="primary"
+                  block
+                  disabled={reviewFlashcardMutation.isPending}
+                  onClick={handleRevealReviewAnswer}
+                >
+                  {t("sidepanel:flashcards.revealAnswer", "Reveal answer")}
+                </Button>
+              )}
+            </div>
+          ) : hasDeck ? (
+            <div className="flex flex-col gap-1" role="status">
+              <Text>
+                {t(
+                  "sidepanel:flashcards.sidepanelReviewCaughtUp",
+                  "No due cards right now."
+                )}
+              </Text>
+              <Text type="secondary" className="text-xs">
+                {t(
+                  "sidepanel:flashcards.sidepanelReviewFullWorkspaceHint",
+                  "Use full Flashcards for imports, management, and richer review controls."
+                )}
+              </Text>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       {drafts.length > 0 ? (
         <section
           className="flex flex-col gap-3"

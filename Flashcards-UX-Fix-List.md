@@ -1,6 +1,6 @@
 # Flashcards UX Fix List
 
-Status: closeout update after Phase 0 through Phase 5 remediation plus F06 task-first split, F12 native sidepanel capture queue, F12 generate-from-selection handoff, native generated-draft batches, and native sidepanel template application follow-ups.
+Status: closeout update after Phase 0 through Phase 5 remediation plus F06 task-first split, F12 native sidepanel capture queue, F12 generate-from-selection handoff, native generated-draft batches, native sidepanel template application, and native sidepanel review follow-ups.
 
 Scope: `/flashcards` plus directly connected WebUI and extension flashcard workflows. This file is the master UX audit and fix-list source referenced by `Docs/superpowers/plans/2026-05-25-flashcards-ux-fixes-implementation-plan.md`.
 
@@ -47,7 +47,7 @@ Actual flow after Phase 0-5 remediation plus the F06 and F12 follow-ups:
 9. Recent sessions show user-facing deck/mode/count/timing labels where data is available.
 10. Deck dashboard rows expose direct Review, Cram, Edit, Scheduler, and Export actions.
 11. Generated-card save recovery distinguishes success, partial success, failure, fatal validation errors, and retry state.
-12. Extension sidepanel offers explicit full Flashcards, Capture page selection, Generate draft cards, and Generate from selection actions; selected page text can append one captured draft, generate a small editable draft batch natively, or open full Flashcards generation with source context. Native sidepanel drafts include deck picker, Front/Back fields, per-draft template application, per-draft delete, save-one, save-all, partial failure recovery, and page URL provenance.
+12. Extension sidepanel offers explicit full Flashcards, Review due card, Capture page selection, Generate draft cards, and Generate from selection actions; selected page text can append one captured draft, generate a small editable draft batch natively, or open full Flashcards generation with source context. Native sidepanel drafts include deck picker, Front/Back fields, per-draft template application, per-draft delete, save-one, save-all, partial failure recovery, and page URL provenance. The sidepanel review loop fetches the next due card for the selected deck, supports reveal-first review, submits Again/Hard/Good/Easy ratings, advances/refetches, and keeps the current card visible on rating failure.
 13. Documentation describes the stabilized WebUI/extension capture and handoff behavior using current tab names.
 
 ## Phase Coverage
@@ -64,11 +64,12 @@ Actual flow after Phase 0-5 remediation plus the F06 and F12 follow-ups:
 | Phase 5: Extension capture and docs | TASK-513 | F12 support, F13 | Completed as an extension bridge and WebUI generate handoff. |
 | Closeout source restoration | TASK-514 | Planning traceability | Completed. Restores this tracked source file on `dev`. |
 | F06 follow-up: Task-first Create & Import split | TASK-515 | F06 | Completed. Adds Create cards, Import file, and Export backup task workspaces while preserving existing route keys and panel handoffs. |
-| F12 follow-up: Native extension capture MVP | TASK-516 | F12 | Completed. Adds native sidepanel deck picker, editable Front/Back draft, one-card save, and page provenance. Later F12 follow-ups added repeat capture, generated drafts, and template application; in-extension review remains deferred. |
-| F12 follow-up: Extension repeat-capture queue | TASK-517 | F12 | Completed. Converts native sidepanel capture from one draft to a repeat-capture queue with edit/delete, save-one, save-all, and partial failure recovery. Later F12 follow-ups added generated drafts and template application; in-extension review remains deferred. |
-| F12 follow-up: Extension generate-from-selection handoff | TASK-518 | F12 | Completed. Adds a sidepanel action that captures selected page text and opens full Flashcards generation with source URL/title context. Later F12 follow-ups added native generated drafts and template application; in-extension review remains deferred. |
-| F12 follow-up: Native extension generated drafts | TASK-519 | F12 | Completed. Adds native sidepanel generated draft batches from selected page text, preserving edit/save queue behavior and source provenance. Later F12 follow-up added native template application; in-extension review remains deferred. |
-| F12 follow-up: Native extension template application | TASK-521 | F12 | Completed. Adds native sidepanel template application for captured and generated drafts while preserving selected draft scope, generated tags, model fields, and page provenance. In-extension review remains deferred. |
+| F12 follow-up: Native extension capture MVP | TASK-516 | F12 | Completed. Adds native sidepanel deck picker, editable Front/Back draft, one-card save, and page provenance. Later F12 follow-ups added repeat capture, generated drafts, template application, and compact native review. |
+| F12 follow-up: Extension repeat-capture queue | TASK-517 | F12 | Completed. Converts native sidepanel capture from one draft to a repeat-capture queue with edit/delete, save-one, save-all, and partial failure recovery. Later F12 follow-ups added generated drafts, template application, and compact native review. |
+| F12 follow-up: Extension generate-from-selection handoff | TASK-518 | F12 | Completed. Adds a sidepanel action that captures selected page text and opens full Flashcards generation with source URL/title context. Later F12 follow-ups added native generated drafts, template application, and compact native review. |
+| F12 follow-up: Native extension generated drafts | TASK-519 | F12 | Completed. Adds native sidepanel generated draft batches from selected page text, preserving edit/save queue behavior and source provenance. Later F12 follow-ups added native template application and compact native review. |
+| F12 follow-up: Native extension template application | TASK-521 | F12 | Completed. Adds native sidepanel template application for captured and generated drafts while preserving selected draft scope, generated tags, model fields, and page provenance. Later F12 follow-up added compact native review. |
+| F12 follow-up: Native extension review loop | TASK-522 | F12 | Completed. Adds compact sidepanel due-card review with selected deck, reveal answer, Again/Hard/Good/Easy ratings, progress status, caught-up guidance, and failure recovery that keeps the current card visible. |
 
 ## Severity-Ranked Findings
 
@@ -85,7 +86,7 @@ Actual flow after Phase 0-5 remediation plus the F06 and F12 follow-ups:
 | F09 | Medium | History comprehension | Recent sessions used labels like `Session #1`, `Deck 1`, or raw scope keys. | Progress/history was present but hard to trust. | Backend identifiers leaked into user-facing history. | Addressed in TASK-509. |
 | F10 | Medium | Progress semantics | Due/new/current queue labels could appear contradictory. | Users could misunderstand whether cards were available to study. | Scheduler labels were technically accurate but not explained in queue context. | Addressed in TASK-508. |
 | F11 | Medium | Expert workflow | Manage was card-first with no deck-first dashboard for quick study decisions. | Experienced users spent time filtering cards instead of selecting a deck action. | The model privileged card management over deck review. | Addressed in TASK-510/TASK-511. |
-| F12 | Medium | Extension workflow | Extension sidepanel behaved mainly as a link-out path. | Capturing web content into cards was slower and could lose context. | Extension was treated as navigation, not capture workflow. | Addressed in TASK-513/TASK-516/TASK-517/TASK-518/TASK-519/TASK-521. Sidepanel now supports native selected-text repeat capture, native generated draft batches, native template application, draft edit/delete, save-one, save-all, partial failure recovery, page provenance, and full-Flashcards generation handoff from selected text; in-extension review remains deferred. |
+| F12 | Medium | Extension workflow | Extension sidepanel behaved mainly as a link-out path. | Capturing web content into cards was slower and could lose context. | Extension was treated as navigation, not capture workflow. | Addressed in TASK-513/TASK-516/TASK-517/TASK-518/TASK-519/TASK-521/TASK-522. Sidepanel now supports native selected-text repeat capture, native generated draft batches, native template application, draft edit/delete, save-one, save-all, partial failure recovery, page provenance, full-Flashcards generation handoff from selected text, and compact native due-card review. |
 | F13 | Medium | Docs mismatch | Extension and flashcards docs lagged current UI tab names and workflows. | Users could not rely on docs to understand current behavior. | Docs had not tracked UI evolution. | Addressed in TASK-513. |
 | F14 | Low | Empty-state hierarchy | Manage empty state showed expert filters before any cards existed. | New users saw advanced management chrome before first action. | Empty state inherited full management layout. | Addressed in TASK-506. |
 | F15 | Low | Scheduler discoverability | Scheduler was hidden until a deck existed. | New users could not learn scheduling exists until after setup. | Progressive disclosure hid a core concept too completely. | Addressed in TASK-506. |
@@ -105,7 +106,7 @@ Create & Import now separates setup into task-specific workspaces, so first-time
 
 The strongest power-user improvement is the deck dashboard. It gives experienced users deck-level counts and direct Review/Cram/Edit/Scheduler/Export actions, replacing a card-filter-first starting point for common study decisions. Review recovery and recent-session labels also make repeat review safer and easier to resume.
 
-Remaining weakness: extension capture now supports repeated native capture, native generated draft batches, template application, bulk save, and full-workspace generation handoff, but in-extension review remains deferred.
+Remaining weakness: extension review is intentionally compact. Full Flashcards remains the path for richer review controls such as cram, assistant support, analytics, and broader deck management.
 
 ## Improvement Backlog
 
@@ -134,10 +135,11 @@ Remaining weakness: extension capture now supports repeated native capture, nati
 - Add extension Generate from selection handoff into the full Flashcards Generate workflow.
 - Add native extension generated draft batches from selected page text.
 - Add native sidepanel template application for captured and generated drafts.
+- Add compact native sidepanel review for due cards.
 
 ### Deferred Larger Product Improvements
 
-- Extend the native extension capture flow with in-extension review.
+- Consider richer sidepanel review controls only if future evidence shows users need more than the compact due-card loop in the extension.
 - Add broader import result normalization if future evidence shows unresolved partial/fatal import ambiguity outside generated-card save.
 - Run a full browser accessibility audit beyond the focused keyboard e2e coverage.
 
@@ -160,14 +162,14 @@ Remaining weakness: extension capture now supports repeated native capture, nati
 3. Review supports keyboard reveal/rate/undo/edit flows with visible equivalents.
 4. Completion supports repeat workflows.
 5. History uses meaningful session labels instead of raw ids.
-6. Extension selected-text capture appends editable sidepanel drafts, can generate a small native draft batch, lets the user apply existing templates, delete drafts, or save one/all drafts with partial failure recovery, preserves page provenance, and can send selected text directly to full Flashcards generation with source context.
+6. Extension selected-text capture appends editable sidepanel drafts, can generate a small native draft batch, lets the user apply existing templates, delete drafts, or save one/all drafts with partial failure recovery, preserves page provenance, can send selected text directly to full Flashcards generation with source context, and supports compact due-card review without leaving the sidepanel.
 
 ## Open Questions And Non-Goals
 
 - Scheduler algorithm correctness and backend spaced-repetition math were not audited beyond visible UX effects.
 - Quiz surfaces were out of scope except for the direct Flashcards handoff.
 - Multi-user permission, workspace sharing, and collaboration states need separate testing.
-- Native extension in-extension review remains a future product improvement beyond the F12 capture queue, native generated drafts, template application, and full-workspace generation handoff.
+- Richer extension review capabilities such as cram, undo/re-rate, assistant actions, and analytics were intentionally left in full Flashcards for this slice.
 
 ## Master Checklist
 
@@ -205,7 +207,7 @@ Remaining weakness: extension capture now supports repeated native capture, nati
 - [x] F12 Extension Generate from selection handoff opens full Flashcards generation with selected text and page provenance.
 - [x] F12 Native sidepanel generated draft batches completed for selected page text.
 - [x] F12 Native sidepanel template application completed for captured and generated drafts.
-- [ ] F12 In-extension review remains deferred.
+- [x] F12 Compact in-extension due-card review completed for the sidepanel.
 - [x] F13 WebUI and extension flashcards docs updated.
 - [x] F17 Quiz handoff made state-aware.
 

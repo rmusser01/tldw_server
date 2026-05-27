@@ -29,9 +29,36 @@ type TemplateFixture = {
   version: number
 }
 
+type ReviewCardFixture = {
+  uuid: string
+  deck_id?: number | null
+  front: string
+  back: string
+  notes?: string | null
+  extra?: string | null
+  is_cloze: boolean
+  tags?: string[] | null
+  ef: number
+  interval_days: number
+  repetitions: number
+  lapses: number
+  due_at?: string | null
+  created_at?: string | null
+  last_reviewed_at?: string | null
+  queue_state: "new" | "learning" | "review" | "relearning" | "suspended"
+  last_modified?: string | null
+  deleted: boolean
+  client_id: string
+  version: number
+  model_type: "basic" | "basic_reverse" | "cloze"
+  reverse: boolean
+}
+
 const flashcardMocks = vi.hoisted(() => ({
   createFlashcardMutateAsync: vi.fn(),
   generateFlashcardsMutateAsync: vi.fn(),
+  reviewFlashcardMutateAsync: vi.fn(),
+  useReviewQuery: vi.fn(),
   useFlashcardsEnabled: vi.fn(),
   useDecksQuery: vi.fn(),
   useFlashcardTemplatesQuery: vi.fn()
@@ -83,8 +110,13 @@ vi.mock("@/components/Flashcards/hooks", () => ({
     mutateAsync: flashcardMocks.generateFlashcardsMutateAsync,
     isPending: false
   }),
+  useReviewFlashcardMutation: () => ({
+    mutateAsync: flashcardMocks.reviewFlashcardMutateAsync,
+    isPending: false
+  }),
   useFlashcardsEnabled: () => flashcardMocks.useFlashcardsEnabled(),
   useDecksQuery: (...args: unknown[]) => flashcardMocks.useDecksQuery(...args),
+  useReviewQuery: (...args: unknown[]) => flashcardMocks.useReviewQuery(...args),
   useFlashcardTemplatesQuery: (...args: unknown[]) =>
     flashcardMocks.useFlashcardTemplatesQuery(...args)
 }))
@@ -112,6 +144,8 @@ vi.mock("react-i18next", () => ({
 
 describe("sidepanel flashcards route", () => {
   let currentTemplates: TemplateFixture[]
+  let currentReviewCard: ReviewCardFixture | null
+  let reviewRefetchMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -122,7 +156,34 @@ describe("sidepanel flashcards route", () => {
     browserMocks.executeScript.mockReset()
     flashcardMocks.createFlashcardMutateAsync.mockReset()
     flashcardMocks.generateFlashcardsMutateAsync.mockReset()
+    flashcardMocks.reviewFlashcardMutateAsync.mockReset()
+    flashcardMocks.useReviewQuery.mockReset()
     flashcardMocks.useFlashcardTemplatesQuery.mockReset()
+    currentReviewCard = {
+      uuid: "review-card-1",
+      deck_id: 7,
+      front: "What does ATP do?",
+      back: "ATP stores and transfers cellular energy.",
+      notes: null,
+      extra: null,
+      is_cloze: false,
+      tags: ["biology"],
+      ef: 2.5,
+      interval_days: 0,
+      repetitions: 0,
+      lapses: 0,
+      due_at: "2026-05-27T00:00:00Z",
+      created_at: "2026-05-27T00:00:00Z",
+      last_reviewed_at: null,
+      queue_state: "new",
+      last_modified: "2026-05-27T00:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 1,
+      model_type: "basic",
+      reverse: false
+    }
+    reviewRefetchMock = vi.fn(async () => ({ data: currentReviewCard }))
     currentTemplates = [
       {
         id: 21,
@@ -203,6 +264,25 @@ describe("sidepanel flashcards route", () => {
         }
       ]
     })
+    flashcardMocks.reviewFlashcardMutateAsync.mockResolvedValue({
+      uuid: "review-card-1",
+      ef: 2.5,
+      interval_days: 1,
+      repetitions: 1,
+      lapses: 0,
+      due_at: "2026-05-28T00:00:00Z",
+      last_reviewed_at: "2026-05-27T01:00:00Z",
+      last_modified: "2026-05-27T01:00:00Z",
+      version: 2,
+      scheduler_type: "sm2_plus",
+      queue_state: "review",
+      next_intervals: {
+        again: "< 1 min",
+        hard: "< 10 min",
+        good: "1 day",
+        easy: "4 days"
+      }
+    })
     flashcardMocks.useFlashcardsEnabled.mockReturnValue({
       isOnline: true,
       capsLoading: false,
@@ -223,6 +303,13 @@ describe("sidepanel flashcards route", () => {
       isLoading: false,
       isError: false
     })
+    flashcardMocks.useReviewQuery.mockImplementation(() => ({
+      data: currentReviewCard,
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      refetch: reviewRefetchMock
+    }))
     flashcardMocks.useFlashcardTemplatesQuery.mockImplementation(() => ({
       data: {
         items: currentTemplates,
@@ -254,7 +341,7 @@ describe("sidepanel flashcards route", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Create one editable card, generate a small draft batch, apply templates to queued drafts, or use full Flashcards for imports, review, and management."
+        "Create one editable card, generate a small draft batch, apply templates to queued drafts, review due cards here, or use full Flashcards for imports and management."
       )
     ).toBeInTheDocument()
     expect(
@@ -283,6 +370,92 @@ describe("sidepanel flashcards route", () => {
     expect(browserMocks.tabsCreate).toHaveBeenCalledWith({
       url: "chrome-extension://flashcards/options.html#/flashcards"
     })
+  })
+
+  it("reviews a due card inside the sidepanel without opening full Flashcards", async () => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(screen.getByRole("button", { name: "Review due card" }))
+
+    expect(screen.getByRole("heading", { name: "Review due card" })).toBeInTheDocument()
+    expect(screen.getByTestId("sidepanel-flashcards-review-deck-select")).toHaveTextContent(
+      "Biology"
+    )
+    expect(screen.getByText("What does ATP do?")).toBeInTheDocument()
+    expect(
+      screen.queryByText("ATP stores and transfers cellular energy.")
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Reveal answer" }))
+
+    expect(
+      screen.getByText("ATP stores and transfers cellular energy.")
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Good" }))
+
+    await waitFor(() => {
+      expect(flashcardMocks.reviewFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(flashcardMocks.reviewFlashcardMutateAsync).toHaveBeenCalledWith({
+      cardUuid: "review-card-1",
+      rating: 3,
+      answerTimeMs: expect.any(Number)
+    })
+    expect(reviewRefetchMock).toHaveBeenCalledTimes(1)
+    expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
+    expect(screen.getByText("Reviewed 1 card in this sidepanel session.")).toBeInTheDocument()
+  })
+
+  it("shows caught-up guidance when no sidepanel review card is due", async () => {
+    currentReviewCard = null
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(screen.getByRole("button", { name: "Review due card" }))
+
+    expect(screen.getByText("No due cards right now.")).toBeInTheDocument()
+    expect(
+      screen.getByText("Use full Flashcards for imports, management, and richer review controls.")
+    ).toBeInTheDocument()
+    expect(flashcardMocks.reviewFlashcardMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it("keeps the review card visible when sidepanel rating submit fails", async () => {
+    flashcardMocks.reviewFlashcardMutateAsync.mockRejectedValueOnce(
+      new Error("review failed")
+    )
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(screen.getByRole("button", { name: "Review due card" }))
+    await user.click(screen.getByRole("button", { name: "Reveal answer" }))
+    await user.click(screen.getByRole("button", { name: "Good" }))
+
+    expect(
+      await screen.findByText(
+        "Could not submit review. Check your connection and try again."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText("What does ATP do?")).toBeInTheDocument()
+    expect(
+      screen.getByText("ATP stores and transfers cellular energy.")
+    ).toBeInTheDocument()
+  })
+
+  it("ignores duplicate sidepanel review ratings before disabled state rerenders", async () => {
+    flashcardMocks.reviewFlashcardMutateAsync.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    render(<SidepanelFlashcards />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Review due card" }))
+    fireEvent.click(screen.getByRole("button", { name: "Reveal answer" }))
+    const goodButton = screen.getByRole("button", { name: "Good" })
+    fireEvent.click(goodButton)
+    fireEvent.click(goodButton)
+
+    expect(flashcardMocks.reviewFlashcardMutateAsync).toHaveBeenCalledTimes(1)
   })
 
   it("shows an inline error when tab and fallback window opening fail", async () => {
@@ -390,6 +563,7 @@ describe("sidepanel flashcards route", () => {
     expect(
       screen.getByText(/apply templates to queued drafts/)
     ).toBeInTheDocument()
+    expect(screen.getByText(/review due cards here/)).toBeInTheDocument()
     expect(
       screen.queryByText(/for templates, imports, and review/)
     ).not.toBeInTheDocument()
