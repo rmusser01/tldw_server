@@ -1,6 +1,6 @@
 import React from "react"
 import userEvent from "@testing-library/user-event"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SidepanelFlashcards, {
   readSelectedTextFromPage
@@ -8,6 +8,7 @@ import SidepanelFlashcards, {
 
 const flashcardMocks = vi.hoisted(() => ({
   createFlashcardMutateAsync: vi.fn(),
+  generateFlashcardsMutateAsync: vi.fn(),
   useFlashcardsEnabled: vi.fn(),
   useDecksQuery: vi.fn()
 }))
@@ -29,9 +30,33 @@ const browserMocks = vi.hoisted(() => ({
   ])
 }))
 
+const translationMocks = vi.hoisted(() => ({
+  t: vi.fn(
+    (
+      key: string,
+      fallbackOrOptions?:
+        | string
+        | Record<string, string | number | undefined>
+    ) => {
+      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
+      if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
+        const template = String(fallbackOrOptions.defaultValue || key)
+        return template.replace(/{{(\w+)}}/g, (_, token: string) =>
+          String(fallbackOrOptions[token] ?? "")
+        )
+      }
+      return key
+    }
+  )
+}))
+
 vi.mock("@/components/Flashcards/hooks", () => ({
   useCreateFlashcardMutation: () => ({
     mutateAsync: flashcardMocks.createFlashcardMutateAsync,
+    isPending: false
+  }),
+  useGenerateFlashcardsMutation: () => ({
+    mutateAsync: flashcardMocks.generateFlashcardsMutateAsync,
     isPending: false
   }),
   useFlashcardsEnabled: () => flashcardMocks.useFlashcardsEnabled(),
@@ -55,32 +80,20 @@ vi.mock("wxt/browser", () => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (
-      key: string,
-      fallbackOrOptions?:
-        | string
-        | Record<string, string | number | undefined>
-    ) => {
-      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-      if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        const template = String(fallbackOrOptions.defaultValue || key)
-        return template.replace(/{{(\w+)}}/g, (_, token: string) =>
-          String(fallbackOrOptions[token] ?? "")
-        )
-      }
-      return key
-    }
+    t: translationMocks.t
   })
 }))
 
 describe("sidepanel flashcards route", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    translationMocks.t.mockClear()
     browserMocks.runtimeGetURL.mockReset()
     browserMocks.tabsCreate.mockReset()
     browserMocks.tabsQuery.mockReset()
     browserMocks.executeScript.mockReset()
     flashcardMocks.createFlashcardMutateAsync.mockReset()
+    flashcardMocks.generateFlashcardsMutateAsync.mockReset()
     browserMocks.runtimeGetURL.mockImplementation(
       (path: string) => `chrome-extension://flashcards${path}`
     )
@@ -100,6 +113,24 @@ describe("sidepanel flashcards route", () => {
     flashcardMocks.createFlashcardMutateAsync.mockResolvedValue({
       uuid: "card-1",
       deck_id: 7
+    })
+    flashcardMocks.generateFlashcardsMutateAsync.mockResolvedValue({
+      flashcards: [
+        {
+          front: "What does ATP do?",
+          back: "ATP stores and transfers cellular energy.",
+          tags: ["biology", "energy"],
+          model_type: "basic",
+          notes: "Generated from selected source text",
+          extra: "Review with the source page open"
+        },
+        {
+          front: "What is {{c1::mitochondrial respiration}}?",
+          back: "A process that produces ATP from nutrients.",
+          tags: ["biology"],
+          model_type: "cloze"
+        }
+      ]
     })
     flashcardMocks.useFlashcardsEnabled.mockReturnValue({
       isOnline: true,
@@ -143,7 +174,7 @@ describe("sidepanel flashcards route", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Create one editable card in the sidepanel. Use full Flashcards for generation, imports, and review."
+        "Create one editable card, generate a small draft batch, or use full Flashcards for templates, imports, and review."
       )
     ).toBeInTheDocument()
     expect(
@@ -151,6 +182,9 @@ describe("sidepanel flashcards route", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByRole("button", { name: "Generate from selection" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Generate draft cards" })
     ).toBeInTheDocument()
     expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
   })
@@ -263,6 +297,158 @@ describe("sidepanel flashcards route", () => {
     expect(
       screen.queryByRole("heading", { name: "Draft flashcard" })
     ).not.toBeInTheDocument()
+  })
+
+  it("generates selected page text into editable sidepanel drafts", async () => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Generate draft cards" })
+    )
+
+    await waitFor(() => {
+      expect(flashcardMocks.generateFlashcardsMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(flashcardMocks.generateFlashcardsMutateAsync).toHaveBeenCalledWith({
+      text: "Key concept from the active page",
+      numCards: 3,
+      cardType: "basic",
+      difficulty: "mixed"
+    })
+    expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
+    expect(screen.getByText("Generated 2 draft cards.")).toBeInTheDocument()
+    expect(screen.getByText("2 draft cards ready")).toBeInTheDocument()
+    expect(screen.getAllByLabelText("Front")[0]).toHaveValue(
+      "What does ATP do?"
+    )
+    expect(screen.getAllByLabelText("Back")[0]).toHaveValue(
+      "ATP stores and transfers cellular energy."
+    )
+    expect(screen.getAllByLabelText("Front")[1]).toHaveValue(
+      "What is {{c1::mitochondrial respiration}}?"
+    )
+
+    await user.click(screen.getAllByRole("button", { name: "Save card" })[0])
+
+    await waitFor(() => {
+      expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      deck_id: 7,
+      front: "What does ATP do?",
+      back: "ATP stores and transfers cellular energy.",
+      tags: ["biology", "energy"],
+      notes: "Generated from selected source text",
+      extra: "Review with the source page open",
+      model_type: "basic",
+      is_cloze: false,
+      reverse: false,
+      source_ref_type: "manual",
+      source_ref_id: "https://example.test/source"
+    })
+
+    await user.click(screen.getByRole("button", { name: "Save card" }))
+
+    await waitFor(() => {
+      expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(2)
+    })
+    expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenLastCalledWith({
+      deck_id: 7,
+      front: "What is {{c1::mitochondrial respiration}}?",
+      back: "A process that produces ATP from nutrients.",
+      tags: ["biology"],
+      model_type: "cloze",
+      is_cloze: true,
+      reverse: false,
+      source_ref_type: "manual",
+      source_ref_id: "https://example.test/source"
+    })
+  })
+
+  it("ignores duplicate native generation clicks before disabled state rerenders", async () => {
+    flashcardMocks.generateFlashcardsMutateAsync.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    render(<SidepanelFlashcards />)
+    const generateDraftCardsButton = screen.getByRole("button", {
+      name: "Generate draft cards"
+    })
+
+    await act(async () => {
+      fireEvent.click(generateDraftCardsButton)
+      fireEvent.click(generateDraftCardsButton)
+    })
+
+    await waitFor(() => {
+      expect(flashcardMocks.generateFlashcardsMutateAsync).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("blocks the full-workspace generation handoff while native generation is in flight", async () => {
+    flashcardMocks.generateFlashcardsMutateAsync.mockImplementation(
+      () => new Promise(() => undefined)
+    )
+    render(<SidepanelFlashcards />)
+    const generateDraftCardsButton = screen.getByRole("button", {
+      name: "Generate draft cards"
+    })
+    const generateFromSelectionButton = screen.getByRole("button", {
+      name: "Generate from selection"
+    })
+
+    await act(async () => {
+      fireEvent.click(generateDraftCardsButton)
+      fireEvent.click(generateFromSelectionButton)
+    })
+
+    await waitFor(() => {
+      expect(flashcardMocks.generateFlashcardsMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
+  })
+
+  it("shows empty-generation guidance when the generation response has no flashcards", async () => {
+    flashcardMocks.generateFlashcardsMutateAsync.mockResolvedValueOnce(undefined)
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Generate draft cards" })
+    )
+
+    expect(
+      await screen.findByText(
+        "No draft cards were generated. Try selecting a longer passage."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Could not generate draft cards/)
+    ).not.toBeInTheDocument()
+  })
+
+  it("uses localized whole-message copy for generated draft counts", async () => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Generate draft cards" })
+    )
+
+    expect(await screen.findByText("Generated 2 draft cards.")).toBeInTheDocument()
+    const generatedStatusCalls = translationMocks.t.mock.calls.filter(
+      ([key]) => String(key).startsWith("sidepanel:flashcards.generateDraftsSuccess")
+    )
+    expect(generatedStatusCalls).toContainEqual([
+      "sidepanel:flashcards.generateDraftsSuccess_other",
+      expect.objectContaining({
+        count: 2,
+        defaultValue: "Generated {{count}} draft cards."
+      })
+    ])
+    for (const [, options] of generatedStatusCalls) {
+      expect(options).not.toHaveProperty("cardLabel")
+    }
   })
 
   it("appends repeated page selections into an editable draft queue", async () => {
@@ -645,6 +831,37 @@ describe("sidepanel flashcards route", () => {
 
     expect(
       screen.getByText("Select text on the page first.")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Draft flashcard" })
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Back")).toHaveValue(
+      "Key concept from the active page"
+    )
+  })
+
+  it("keeps queued drafts when native generation fails", async () => {
+    flashcardMocks.generateFlashcardsMutateAsync.mockRejectedValueOnce(
+      new Error("Generation failed")
+    )
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture page selection" })
+    )
+    expect(
+      screen.getByRole("heading", { name: "Draft flashcard" })
+    ).toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole("button", { name: "Generate draft cards" })
+    )
+
+    expect(
+      await screen.findByText(
+        "Could not generate draft cards. Generation failed"
+      )
     ).toBeInTheDocument()
     expect(
       screen.getByRole("heading", { name: "Draft flashcard" })
