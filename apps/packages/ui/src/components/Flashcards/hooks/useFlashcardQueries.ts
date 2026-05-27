@@ -60,6 +60,7 @@ export interface DueCounts {
 
 export interface UseFlashcardQueriesOptions {
   enabled?: boolean
+  refetchOnWindowFocus?: boolean
   includeWorkspaceItems?: boolean
   workspaceId?: string | null
 }
@@ -186,7 +187,8 @@ export function useReviewQuery(deckId: number | null | undefined, options?: UseF
       const response = await getNextReviewCard(deckId ?? undefined, visibilityParams)
       return response.card ?? null
     },
-    enabled: options?.enabled ?? flashcardsEnabled
+    enabled: options?.enabled ?? flashcardsEnabled,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus
   })
 }
 
