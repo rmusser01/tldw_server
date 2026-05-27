@@ -70,8 +70,9 @@ Operating rule: do not close or move past a gate without live backend + WebUI va
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Post-original-plan follow-ups are tracked as TASK-478.14 through TASK-478.18. These cover backend startup restore, parity workflow naming, smoke metadata governance, model metadata allowlist ownership, and the migration true-move matrix refresh.
-- TASK-515 and TASK-516 moved migration true-move deletion from server-ineligible/retained to live-verified delete eligibility plus durable tombstone suppression. TASK-478.18 refreshed RW-UAT-025 with that evidence while keeping broader import/export recovery walkthrough scope marked Partial.
-- Remaining explicit matrix gaps after the migration refresh: keyboard-only source-to-chat walkthrough coverage, live Shared Workspaces/MCP workspace-set binding, live ACP run history/filter UAT keyed by canonical workspace ID, Research Workspace to sandbox admission/diagnostics flow, long-running vector completion with real embeddings, and broader migration import/export recovery.
+- TASK-515 and TASK-516 moved migration true-move deletion from server-ineligible/retained to live-verified delete eligibility plus durable tombstone suppression. TASK-478.18 refreshed RW-UAT-025 with that evidence, and TASK-478.25 later closed the guided migration import/export recovery walkthrough with live WebUI evidence.
+- TASK-478.19, TASK-478.21, TASK-478.22, TASK-478.23, TASK-478.24, and TASK-478.25 closed the keyboard, MCP handoff, ACP bridge, sandbox diagnostics, sandbox execution-contract, and migration import/export recovery slices as far as live evidence supports.
+- TASK-478.26 reconciled the remaining risks into fixture-backed follow-ups rather than overclaiming the matrix. TASK-478 remains In Progress because the remaining Partial/Watch items require real fixture-backed execution: TASK-478.27 for MCP workspace-set policy/tool execution, TASK-478.28 for ACP workspace-scoped run diagnostics, TASK-478.29 for sandbox enabled-runtime workspace runs, TASK-478.30 for long-running vector completion with real embeddings, and TASK-478.31 for the frontend TypeScript baseline verification blocker.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
