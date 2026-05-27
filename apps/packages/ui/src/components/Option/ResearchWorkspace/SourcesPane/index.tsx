@@ -30,7 +30,12 @@ import {
 } from "antd"
 import { getDesignSystemState } from "@/design-system"
 import { useWorkspaceStore } from "@/store/workspace"
-import type { WorkspaceSourceType } from "@/types/workspace"
+import type {
+  WorkspaceSource,
+  WorkspaceSourceReadiness,
+  WorkspaceSourceStatusDetails,
+  WorkspaceSourceType
+} from "@/types/workspace"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { WorkspaceSourcePreviewResponse } from "@/services/tldw/domains/workspace-api"
 import {
@@ -117,6 +122,150 @@ const formatDuration = (seconds?: number): string | null => {
   }
   return `${secs}s`
 }
+
+const READINESS_LABELS: Array<{
+  key: keyof WorkspaceSourceReadiness
+  label: string
+}> = [
+  { key: "metadata_ready", label: "Metadata" },
+  { key: "text_extracted", label: "Text" },
+  { key: "fts_ready", label: "Search" },
+  { key: "vector_ready", label: "Vector" },
+  { key: "citation_ready", label: "Citations" },
+  { key: "summary_ready", label: "Summary" },
+  { key: "tool_accessible", label: "Tools" }
+]
+
+const humanizeStatusToken = (value?: string | null): string | null => {
+  if (!value) return null
+  const normalized = value.replace(/[_-]+/g, " ").trim()
+  if (!normalized) return null
+  return normalized.replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+const describeSourceOfTruth = (sourceOfTruth?: string): string =>
+  sourceOfTruth === "workspace-status-projection"
+    ? "Server workspace status projection"
+    : sourceOfTruth === "local-cache" || !sourceOfTruth
+      ? "Local workspace cache"
+      : humanizeStatusToken(sourceOfTruth) || sourceOfTruth
+
+const formatStatusDateTime = (date?: Date): string =>
+  date instanceof Date && !Number.isNaN(date.getTime())
+    ? date.toLocaleString()
+    : "Not reported"
+
+const getProgressPercent = (
+  details: WorkspaceSourceStatusDetails | undefined
+): number | null => {
+  const progressPercent =
+    details?.progressPercent ?? details?.job?.progressPercent ?? null
+  return typeof progressPercent === "number" && Number.isFinite(progressPercent)
+    ? Math.max(0, Math.min(100, Math.round(progressPercent)))
+    : null
+}
+
+const getProgressMessage = (
+  details: WorkspaceSourceStatusDetails | undefined
+): string | null =>
+  details?.progressMessage?.trim() ||
+  details?.job?.progressMessage?.trim() ||
+  details?.job?.errorMessage?.trim() ||
+  null
+
+const hasIncompleteReadiness = (
+  readiness: WorkspaceSourceReadiness | undefined
+): boolean =>
+  Boolean(readiness && READINESS_LABELS.some(({ key }) => readiness[key] === false))
+
+const hasSourceStatusDrilldown = (
+  source: WorkspaceSource,
+  sourceStatus: string
+): boolean =>
+  sourceStatus !== "ready" ||
+  Boolean(source.statusMessage?.trim()) ||
+  Boolean(source.statusDetails) ||
+  hasIncompleteReadiness(source.readiness)
+
+const describeRetryEligibility = (
+  sourceStatus: string,
+  details: WorkspaceSourceStatusDetails | undefined
+): string => {
+  if (details?.retryEligible === true) {
+    return "Retry eligible after reviewing the failure."
+  }
+  if (sourceStatus === "processing" || details?.lifecycleState === "retrying") {
+    return "Retry not available while processing."
+  }
+  if (sourceStatus === "error") {
+    return "Retry state not reported. Re-add or refresh the source if the error persists."
+  }
+  return "Retry not needed."
+}
+
+const describeStaleState = (
+  details: WorkspaceSourceStatusDetails | undefined
+): string => {
+  if (details?.stale === true) return "Stale status. Refresh workspace status."
+  if (details?.stale === false) return "Fresh status"
+  return "No stale flag reported"
+}
+
+const describeNextStatusAction = (
+  sourceStatus: string,
+  details: WorkspaceSourceStatusDetails | undefined
+): string => {
+  if (details?.stale) {
+    return "Refresh workspace status before relying on this source."
+  }
+
+  switch (details?.lifecycleState) {
+    case "queued":
+      return "Wait for ingestion to start."
+    case "ingesting":
+      return "Wait for ingestion to finish."
+    case "extracting":
+      return "Wait for text extraction to finish."
+    case "chunking":
+      return "Wait for chunking to finish."
+    case "indexing":
+      return "Wait for indexing to finish before asking grounded questions."
+    case "retrying":
+      return "Wait for the retry attempt to finish."
+    case "partially_queryable":
+      return "You can inspect extracted text, but wait for full indexing before relying on citations."
+    case "failed":
+      return "Review the failure message, then retry ingestion or re-add the source."
+    case "missing_media":
+      return "Restore or re-add the missing media item."
+    case "blocked_by_permissions":
+      return "Check workspace permissions or source access, then refresh status."
+    case "queryable":
+      return "Source is ready for grounded questions and citations."
+    default:
+      if (sourceStatus === "processing") {
+        return "Wait for processing to finish, then refresh status if it appears stuck."
+      }
+      if (sourceStatus === "error") {
+        return "Review the status message, then re-add or retry the source."
+      }
+      return "No action needed."
+  }
+}
+
+const StatusDetailRow: React.FC<{
+  label: string
+  children: React.ReactNode
+}> = ({ label, children }) => (
+  <>
+    <dt className="rounded-t border border-border bg-surface/60 px-2 pt-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-text-subtle sm:rounded-l sm:rounded-tr-none sm:border-r-0 sm:py-2">
+      {label}
+    </dt>
+    <dd className="min-w-0 rounded-b border border-t-0 border-border bg-surface/60 px-2 pb-2 text-sm text-text sm:rounded-r sm:rounded-bl-none sm:border-l-0 sm:border-t sm:py-2">
+      {children}
+    </dd>
+  </>
+)
 
 type SourceAnnotation = {
   id: string
@@ -302,6 +451,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     React.useState<string | null>(null)
   const [draggedSourceId, setDraggedSourceId] = React.useState<string | null>(null)
   const [previewSourceId, setPreviewSourceId] = React.useState<string | null>(null)
+  const [statusDetailsSourceId, setStatusDetailsSourceId] = React.useState<
+    string | null
+  >(null)
   const [previewReloadNonce, setPreviewReloadNonce] = React.useState(0)
   const [sourceAnnotations, setSourceAnnotations] = React.useState<
     Record<string, SourceAnnotation[]>
@@ -733,6 +885,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   const previewSource = previewSourceId
     ? sources.find((source) => source.id === previewSourceId) || null
     : null
+  const statusDetailsSource = statusDetailsSourceId
+    ? sources.find((source) => source.id === statusDetailsSourceId) || null
+    : null
   const previewAnnotations = previewSourceId
     ? sourceAnnotations[previewSourceId] || []
     : []
@@ -898,6 +1053,14 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     setPreviewSourceId(null)
     resetAnnotationEditor()
   }, [resetAnnotationEditor])
+
+  const handleOpenStatusDetails = React.useCallback((sourceId: string) => {
+    setStatusDetailsSourceId(sourceId)
+  }, [])
+
+  const handleCloseStatusDetails = React.useCallback(() => {
+    setStatusDetailsSourceId(null)
+  }, [])
 
   const handleSaveAnnotation = React.useCallback(() => {
     if (!previewSourceId) return
@@ -1235,6 +1398,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     const sourceStatus = statusGuardrailsEnabled
       ? source.status || "ready"
       : "ready"
+    const showStatusDrilldown =
+      statusGuardrailsEnabled && hasSourceStatusDrilldown(source, sourceStatus)
     const isReady = sourceStatus === "ready"
     const isProcessing = sourceStatus === "processing"
     const isError = sourceStatus === "error"
@@ -1343,6 +1508,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           className="mt-0.5 flex items-center justify-center [@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11"
         >
           <Checkbox
+            aria-label={t("playground:sources.selectSource", "Select {{title}}", {
+              title: source.title
+            })}
             checked={isSelected}
             disabled={!isReady}
             onChange={() => {
@@ -1478,6 +1646,28 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               <Eye className="h-3.5 w-3.5" />
             </button>
           </Tooltip>
+          {showStatusDrilldown && (
+            <Tooltip
+              title={t(
+                "playground:sources.viewStatusDetails",
+                "View source status details"
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => handleOpenStatusDetails(source.id)}
+                data-testid={`source-status-details-${source.id}`}
+                className="rounded p-1 text-text-muted transition hover:bg-surface hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                aria-label={t(
+                  "playground:sources.viewStatusDetailsForSource",
+                  "View source status details for {{title}}",
+                  { title: source.title }
+                )}
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </Tooltip>
+          )}
           <div className="flex flex-col">
             <button
               type="button"
@@ -1861,7 +2051,209 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
         </div>
       )}
 
-      {/* Add Source Modal */}
+      {/* Source status details modal */}
+      <Modal
+        open={Boolean(statusDetailsSource)}
+        title={t(
+          "playground:sources.statusDetailsModalTitle",
+          "Source status details"
+        )}
+        onCancel={handleCloseStatusDetails}
+        footer={null}
+        width={560}
+      >
+        {statusDetailsSource &&
+          (() => {
+            const details = statusDetailsSource.statusDetails
+            const sourceStatus = statusGuardrailsEnabled
+              ? statusDetailsSource.status || "ready"
+              : "ready"
+            const lifecycleLabel =
+              humanizeStatusToken(details?.lifecycleState) ||
+              (sourceStatus === "processing"
+                ? t("playground:sources.statusProcessing", "Processing")
+                : sourceStatus === "error"
+                  ? t("playground:sources.statusErrorShort", "Error")
+                  : t("playground:sources.statusReady", "Ready"))
+            const statusReason =
+              details?.statusReason ||
+              details?.progressMessage ||
+              statusDetailsSource.statusMessage ||
+              t("playground:sources.notReported", "Not reported")
+            const readiness = statusDetailsSource.readiness
+            const readinessReadyCount = readiness
+              ? READINESS_LABELS.filter(({ key }) => readiness[key]).length
+              : null
+            const progressPercent = getProgressPercent(details)
+            const progressMessage = getProgressMessage(details)
+            const progressSummary =
+              progressPercent !== null && progressMessage
+                ? `${progressPercent}% - ${progressMessage}`
+                : progressPercent !== null
+                  ? `${progressPercent}%`
+                  : progressMessage ||
+                    t("playground:sources.noProgressReported", "No progress reported")
+            const jobLabel =
+              details?.job?.uuid ||
+              (typeof details?.job?.id === "number"
+                ? String(details.job.id)
+                : null)
+
+            return (
+              <div
+                data-testid="source-status-details-dialog"
+                className="space-y-3"
+              >
+                <div className="rounded border border-border bg-surface2/50 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-text">
+                        {statusDetailsSource.title}
+                      </p>
+                      <p className="mt-1 text-xs text-text-muted">
+                        {t(
+                          "playground:sources.statusDetailsSummary",
+                          "{{type}} source currently marked {{status}}.",
+                          {
+                            type: statusDetailsSource.type,
+                            status: lifecycleLabel
+                          }
+                        )}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                        sourceStatus === "error"
+                          ? "border-error/30 bg-error/10 text-error"
+                          : sourceStatus === "processing"
+                            ? "border-primary/30 bg-primary/10 text-primary"
+                            : "border-success/30 bg-success/10 text-success"
+                      }`}
+                    >
+                      {lifecycleLabel}
+                    </span>
+                  </div>
+                </div>
+
+                <dl className="grid gap-2 sm:grid-cols-[8rem_1fr]">
+                  <StatusDetailRow
+                    label={t("playground:sources.lifecycleLabel", "Lifecycle")}
+                  >
+                    {lifecycleLabel}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t(
+                      "playground:sources.statusReasonLabel",
+                      "Status reason"
+                    )}
+                  >
+                    <span className="font-mono text-xs">{statusReason}</span>
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t(
+                      "playground:sources.sourceOfTruthLabel",
+                      "Source of truth"
+                    )}
+                  >
+                    {describeSourceOfTruth(details?.sourceOfTruth)}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.lastRefreshLabel", "Last refresh")}
+                  >
+                    {formatStatusDateTime(details?.updatedAt)}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.progressLabel", "Progress")}
+                  >
+                    {progressSummary}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t(
+                      "playground:sources.retryEligibilityLabel",
+                      "Retry eligibility"
+                    )}
+                  >
+                    {describeRetryEligibility(sourceStatus, details)}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.staleStateLabel", "Stale state")}
+                  >
+                    {describeStaleState(details)}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.readinessLabel", "Readiness")}
+                  >
+                    {readinessReadyCount === null ? (
+                      t(
+                        "playground:sources.readinessNotReported",
+                        "No readiness checklist reported"
+                      )
+                    ) : (
+                      <div className="space-y-2">
+                        <p>
+                          {t(
+                            "playground:sources.readinessSummary",
+                            "{{ready}} of {{total}} checks ready",
+                            {
+                              ready: readinessReadyCount,
+                              total: READINESS_LABELS.length
+                            }
+                          )}
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          {READINESS_LABELS.map(({ key, label }) => (
+                            <span
+                              key={key}
+                              className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                                readiness[key]
+                                  ? "border-success/30 bg-success/10 text-success"
+                                  : "border-warning/30 bg-warning/10 text-warning"
+                              }`}
+                            >
+                              {label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.identifiersLabel", "Identifiers")}
+                  >
+                    <div className="space-y-1 font-mono text-xs">
+                      <p>
+                        {t("playground:sources.mediaIdLabel", "Media ID")}:{" "}
+                        {statusDetailsSource.mediaId}
+                      </p>
+                      <p>
+                        {t("playground:sources.sourceIdLabel", "Source ID")}:{" "}
+                        {statusDetailsSource.id}
+                      </p>
+                      {jobLabel && (
+                        <p>
+                          {t("playground:sources.jobIdLabel", "Job")}: {jobLabel}
+                        </p>
+                      )}
+                      {details?.job?.jobType && (
+                        <p>
+                          {t("playground:sources.jobTypeLabel", "Job type")}:{" "}
+                          {details.job.jobType}
+                        </p>
+                      )}
+                    </div>
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.nextActionLabel", "Next action")}
+                  >
+                    {describeNextStatusAction(sourceStatus, details)}
+                  </StatusDetailRow>
+                </dl>
+              </div>
+            )
+          })()}
+      </Modal>
+
+      {/* Source preview modal */}
       <Modal
         open={Boolean(previewSource)}
         title={t(

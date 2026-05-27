@@ -20,6 +20,8 @@ import {
 const STORAGE_KEY = WORKSPACE_STORAGE_KEY
 const STORAGE_SPLIT_FLAG_KEY = WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY
 const STORAGE_INDEXEDDB_FLAG_KEY = WORKSPACE_STORAGE_INDEXEDDB_FLAG_STORAGE_KEY
+const MIGRATION_TOMBSTONE_PREFIX =
+  "tldw:research-workspace:migration:tombstone:"
 const snapshotKey = (workspaceId: string) =>
   `${STORAGE_KEY}:workspace:${encodeURIComponent(workspaceId)}:snapshot`
 const chatKey = (workspaceId: string) =>
@@ -29,6 +31,12 @@ const resetWorkspaceStore = () => {
   localStorage.removeItem(STORAGE_KEY)
   localStorage.removeItem(STORAGE_SPLIT_FLAG_KEY)
   localStorage.removeItem(STORAGE_INDEXEDDB_FLAG_KEY)
+  for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+    const key = localStorage.key(index)
+    if (key?.startsWith(MIGRATION_TOMBSTONE_PREFIX)) {
+      localStorage.removeItem(key)
+    }
+  }
   delete window.__tldwWorkspacePersistenceMetrics
   useWorkspaceStore.setState({
     workspaceId: "",
@@ -673,6 +681,136 @@ describe("workspace store snapshot persistence", () => {
 
     expect(indexedDbAdapter.putChatRecord).not.toHaveBeenCalled()
     expect(indexedDbAdapter.putArtifactPayloadRecord).not.toHaveBeenCalled()
+  })
+
+  it("does not re-persist covered workspace content after a migration tombstone exists", async () => {
+    localStorage.setItem(STORAGE_SPLIT_FLAG_KEY, "1")
+    localStorage.setItem(STORAGE_INDEXEDDB_FLAG_KEY, "0")
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-tombstoned",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-tombstoned",
+        serverWorkspaceId: "workspace-tombstoned",
+        migrationId: "research-workspace-workspace-tombstoned-abc123",
+        deletedAt: "2026-05-26T00:00:00.000Z",
+        contentRetained: false
+      })
+    )
+
+    const storage = createWorkspaceStorage()
+    const payload = JSON.stringify({
+      state: {
+        workspaceId: "workspace-tombstoned",
+        workspaceName: "Tombstoned Workspace",
+        workspaceTag: "workspace:tombstoned",
+        workspaceCreatedAt: "2026-05-26T00:00:00.000Z",
+        workspaceChatReferenceId: "workspace-tombstoned",
+        savedWorkspaces: [],
+        archivedWorkspaces: [],
+        workspaceSnapshots: {
+          "workspace-tombstoned": {
+            workspaceId: "workspace-tombstoned",
+            workspaceName: "Tombstoned Workspace",
+            workspaceTag: "workspace:tombstoned",
+            workspaceCreatedAt: "2026-05-26T00:00:00.000Z",
+            workspaceChatReferenceId: "workspace-tombstoned",
+            sources: [
+              {
+                id: "source-tombstoned",
+                mediaId: 42,
+                title: "Tombstoned Source",
+                type: "note",
+                addedAt: "2026-05-26T00:01:00.000Z"
+              }
+            ],
+            selectedSourceIds: ["source-tombstoned"],
+            generatedArtifacts: [],
+            notes: "Tombstoned notes",
+            currentNote: { ...DEFAULT_WORKSPACE_NOTE },
+            leftPaneCollapsed: false,
+            rightPaneCollapsed: false,
+            audioSettings: { ...DEFAULT_AUDIO_SETTINGS }
+          }
+        },
+        workspaceChatSessions: {
+          "workspace-tombstoned": {
+            messages: [
+              {
+                isBot: false,
+                name: "You",
+                message: "Tombstoned chat message",
+                sources: []
+              }
+            ],
+            historyId: "tombstoned-history",
+            serverChatId: null
+          }
+        }
+      },
+      version: 1
+    })
+
+    await storage.setItem(STORAGE_KEY, payload)
+
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+    expect(localStorage.getItem(snapshotKey("workspace-tombstoned"))).toBeNull()
+    expect(localStorage.getItem(chatKey("workspace-tombstoned"))).toBeNull()
+  })
+
+  it("cleans migrated workspace split keys only once per session", async () => {
+    const workspaceId = "workspace-cleanup-cache"
+    localStorage.setItem(STORAGE_SPLIT_FLAG_KEY, "1")
+    localStorage.setItem(STORAGE_INDEXEDDB_FLAG_KEY, "0")
+    localStorage.setItem(
+      `tldw:research-workspace:migration:tombstone:${workspaceId}`,
+      JSON.stringify({
+        legacyWorkspaceId: workspaceId,
+        serverWorkspaceId: workspaceId,
+        migrationId: "research-workspace-workspace-cleanup-cache-abc123",
+        deletedAt: "2026-05-26T00:00:00.000Z",
+        contentRetained: false
+      })
+    )
+
+    const storage = createWorkspaceStorage()
+    const payload = JSON.stringify({
+      state: {
+        workspaceId,
+        workspaceName: "Cached Cleanup Workspace",
+        workspaceTag: "workspace:cleanup-cache",
+        workspaceCreatedAt: "2026-05-26T00:00:00.000Z",
+        workspaceChatReferenceId: workspaceId,
+        savedWorkspaces: [],
+        archivedWorkspaces: [],
+        workspaceSnapshots: {
+          [workspaceId]: {
+            workspaceId,
+            workspaceName: "Cached Cleanup Workspace",
+            workspaceTag: "workspace:cleanup-cache",
+            workspaceCreatedAt: "2026-05-26T00:00:00.000Z",
+            workspaceChatReferenceId: workspaceId,
+            sources: [],
+            selectedSourceIds: [],
+            generatedArtifacts: [],
+            notes: "Cached cleanup notes",
+            currentNote: { ...DEFAULT_WORKSPACE_NOTE },
+            leftPaneCollapsed: false,
+            rightPaneCollapsed: false,
+            audioSettings: { ...DEFAULT_AUDIO_SETTINGS }
+          }
+        },
+        workspaceChatSessions: {}
+      },
+      version: 1
+    })
+
+    await storage.setItem(STORAGE_KEY, payload)
+    expect(localStorage.getItem(snapshotKey(workspaceId))).toBeNull()
+
+    localStorage.setItem(snapshotKey(workspaceId), "{\"stale\":true}")
+    await storage.setItem(STORAGE_KEY, payload)
+
+    expect(localStorage.getItem(snapshotKey(workspaceId))).toBe("{\"stale\":true}")
   })
 
   it("estimates persistence payload section sizes", () => {
@@ -1899,6 +2037,78 @@ describe("workspace store snapshot persistence", () => {
     state = useWorkspaceStore.getState()
     expect(state.selectedSourceIds).toEqual([])
     expect(state.getSelectedMediaIds()).toEqual([])
+  })
+
+  it("stores source status drilldown details from workspace status projection", () => {
+    useWorkspaceStore.getState().initializeWorkspace("Status Detail Workspace")
+
+    const source = useWorkspaceStore.getState().addSource({
+      mediaId: 444,
+      title: "Indexed Source",
+      type: "pdf",
+      status: "processing"
+    })
+    const updatedAt = new Date("2026-05-23T12:01:00.000Z")
+
+    useWorkspaceStore.getState().setSourceStatusByMediaId(
+      444,
+      "processing",
+      "Indexing chunks",
+      {
+        metadata_ready: true,
+        text_extracted: true,
+        fts_ready: true,
+        vector_ready: false,
+        citation_ready: false,
+        summary_ready: false,
+        tool_accessible: true
+      },
+      {
+        lifecycleState: "indexing",
+        statusReason: "job_indexing",
+        sourceOfTruth: "workspace-status-projection",
+        updatedAt,
+        stale: false,
+        retryEligible: false,
+        progressPercent: 42,
+        progressMessage: "Indexing chunks",
+        job: {
+          id: 7,
+          uuid: "job-7",
+          status: "running",
+          jobType: "workspace_source_index",
+          progressPercent: 42,
+          progressMessage: "Indexing chunks",
+          errorMessage: null
+        }
+      }
+    )
+
+    const updatedSource = useWorkspaceStore
+      .getState()
+      .sources.find((entry) => entry.id === source.id)
+
+    expect(updatedSource?.statusDetails).toMatchObject({
+      lifecycleState: "indexing",
+      statusReason: "job_indexing",
+      sourceOfTruth: "workspace-status-projection",
+      updatedAt,
+      stale: false,
+      retryEligible: false,
+      progressPercent: 42,
+      progressMessage: "Indexing chunks",
+      job: expect.objectContaining({
+        uuid: "job-7",
+        jobType: "workspace_source_index"
+      })
+    })
+
+    useWorkspaceStore.getState().setSourceStatusByMediaId(444, "ready")
+
+    const readySource = useWorkspaceStore
+      .getState()
+      .sources.find((entry) => entry.id === source.id)
+    expect(readySource?.statusDetails).toBeUndefined()
   })
 
   it("creates, renames, moves, and deletes source folders safely", () => {

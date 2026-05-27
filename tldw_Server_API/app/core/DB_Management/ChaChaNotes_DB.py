@@ -15497,6 +15497,68 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if str(chunk.get("id")) not in accepted
         ]
 
+    def _verify_workspace_migration_delete_eligibility(self, session: dict[str, Any]) -> dict[str, Any]:
+        """Verify accepted chunk receipts match declarations before browser-local deletion."""
+        declared = self._declared_workspace_migration_chunks(session)
+        accepted_chunks = session.get("_chunks", [])
+        accepted = {str(chunk.get("id")): chunk for chunk in accepted_chunks}
+        if not declared:
+            return {
+                "eligible": False,
+                "status": "no_declared_chunks",
+                "missing_chunk_ids": [],
+                "mismatch_chunk_ids": [],
+                "undeclared_chunk_ids": sorted(accepted.keys()),
+            }
+
+        declared_by_id = {str(chunk.get("id")): chunk for chunk in declared}
+        missing = [
+            chunk_id
+            for chunk_id in declared_by_id
+            if chunk_id not in accepted
+        ]
+        undeclared = [
+            chunk_id
+            for chunk_id in accepted
+            if chunk_id not in declared_by_id
+        ]
+        mismatched: list[str] = []
+        for chunk_id, expected in declared_by_id.items():
+            receipt = accepted.get(chunk_id)
+            if receipt is None:
+                continue
+            try:
+                expected_byte_count = int(expected.get("byte_count"))
+                receipt_byte_count = int(receipt.get("byte_count"))
+            except (TypeError, ValueError):
+                mismatched.append(chunk_id)
+                continue
+            expected_kind = str(expected.get("chunk_kind") or "workspace_bundle")
+            receipt_kind = str(receipt.get("chunk_kind") or "workspace_bundle")
+            expected_hash = str(expected.get("sha256") or "").lower()
+            receipt_hash = str(receipt.get("sha256") or "").lower()
+            if (
+                expected_hash != receipt_hash
+                or expected_byte_count != receipt_byte_count
+                or expected_kind != receipt_kind
+            ):
+                mismatched.append(chunk_id)
+
+        eligible = not missing and not mismatched and not undeclared
+        if eligible:
+            status = "verified"
+        elif missing:
+            status = "missing_chunks"
+        else:
+            status = "verification_failed"
+        return {
+            "eligible": eligible,
+            "status": status,
+            "missing_chunk_ids": sorted(missing),
+            "mismatch_chunk_ids": sorted(mismatched),
+            "undeclared_chunk_ids": sorted(undeclared),
+        }
+
     def add_workspace_migration_chunk(
         self,
         migration_id: str,
@@ -15641,6 +15703,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         declared_count = len(self._declared_workspace_migration_chunks(session))
         accepted_count = len(session.get("_chunks", []))
+        verification = self._verify_workspace_migration_delete_eligibility(session)
+        client_delete_eligible = bool(verification["eligible"])
         recovery_manifest = {
             "migration_id": normalized_migration_id,
             "target_workspace_id": session["target_workspace_id"],
@@ -15649,9 +15713,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "status": "finalized",
             "declared_chunk_count": declared_count,
             "accepted_chunk_count": accepted_count,
-            "missing_chunk_ids": [],
-            "client_delete_eligible": False,
-            "can_delete_legacy_storage": False,
+            "missing_chunk_ids": verification["missing_chunk_ids"],
+            "client_delete_eligible": client_delete_eligible,
+            "can_delete_legacy_storage": client_delete_eligible,
+            "server_readback_verified": client_delete_eligible,
+            "verification_status": verification["status"],
+            "mismatch_chunk_ids": verification["mismatch_chunk_ids"],
+            "undeclared_chunk_ids": verification["undeclared_chunk_ids"],
             "next_step": "enqueue_workspace_source_ingestion_jobs",
             "finalized_at": now,
         }
@@ -15660,14 +15728,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "recovery_manifest",
             default={},
         )
-        false_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        eligible_value = client_delete_eligible if self.backend_type == BackendType.POSTGRESQL else int(client_delete_eligible)
         with self.transaction() as conn:
             conn.execute(
                 "UPDATE workspace_migration_sessions "
                 "SET status = ?, finalized_at = ?, recovery_manifest_json = ?, "
                 "client_delete_eligible = ?, updated_at = ?, version = version + 1 "
                 "WHERE id = ?",
-                ("finalized", now, recovery_json, false_value, now, normalized_migration_id),
+                ("finalized", now, recovery_json, eligible_value, now, normalized_migration_id),
             )
         finalized = self.get_workspace_migration_session(normalized_migration_id)
         if finalized is None:
@@ -15694,6 +15762,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if session["manifest_hash"] != manifest_hash:
             raise ConflictError(  # noqa: TRY003
                 "Workspace migration manifest hash mismatch.",
+                entity="workspace_migration_sessions",
+                entity_id=normalized_migration_id,
+            )
+        if session.get("status") != "finalized":
+            raise ConflictError(  # noqa: TRY003
+                "Workspace migration must be finalized before client deletion can be acknowledged.",
                 entity="workspace_migration_sessions",
                 entity_id=normalized_migration_id,
             )

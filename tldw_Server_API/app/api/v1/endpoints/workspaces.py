@@ -58,6 +58,9 @@ from tldw_Server_API.app.core.Workspaces.source_jobs import (
     WORKSPACE_SOURCE_JOB_TYPE,
     enqueue_workspace_source_ingest_job,
 )
+from tldw_Server_API.app.core.Workspaces.service_capabilities import (
+    collect_workspace_service_capabilities,
+)
 from tldw_Server_API.app.core.Workspaces.status_projection import (
     build_source_status_projection,
     build_workspace_capability_projection,
@@ -780,6 +783,10 @@ async def get_workspace_capabilities(
     payload = build_workspace_capability_projection(
         workspace=workspace,
         status_projection=status_payload,
+        service_capabilities=await collect_workspace_service_capabilities(
+            workspace_id=workspace_id,
+            user_id=getattr(current_user, "id", None),
+        ),
     )
     return WorkspaceCapabilitiesResponse(**payload)
 
@@ -814,6 +821,10 @@ async def get_workspace_context(
     capability_payload = build_workspace_capability_projection(
         workspace=workspace,
         status_projection=status_payload,
+        service_capabilities=await collect_workspace_service_capabilities(
+            workspace_id=workspace_id,
+            user_id=getattr(current_user, "id", None),
+        ),
     )
     statuses_by_id = {
         str(source_status.get("id")): source_status

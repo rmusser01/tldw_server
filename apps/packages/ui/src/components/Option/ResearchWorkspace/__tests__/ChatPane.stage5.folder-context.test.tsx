@@ -193,7 +193,9 @@ vi.mock("@/components/Common/FeatureEmptyState", () => ({
 
 vi.mock("../source-location-copy", () => ({
   getWorkspaceChatNoSourcesHint: () =>
-    "Select sources from the Sources pane, then ask questions."
+    "Select sources from the Sources pane, then ask questions.",
+  getWorkspaceChatSourcesExplainer: () =>
+    "Selected sources keep answers grounded in this workspace."
 }))
 
 vi.mock("../undo-manager", () => ({
@@ -213,6 +215,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
       size: 8
     }))
   }
+}))
+
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: vi.fn(async () => [])
 }))
 
 vi.mock("antd", async () => {

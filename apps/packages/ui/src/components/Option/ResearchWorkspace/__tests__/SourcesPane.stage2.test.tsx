@@ -453,6 +453,77 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     ).toBeInTheDocument()
   })
 
+  it("opens a compact source status drilldown for processing diagnostics", () => {
+    workspaceStoreState.sources = [
+      {
+        ...defaultSources[1],
+        status: "processing" as const,
+        statusMessage: "Indexing chunks 45/120",
+        readiness: {
+          metadata_ready: true,
+          text_extracted: true,
+          fts_ready: true,
+          vector_ready: false,
+          citation_ready: false,
+          summary_ready: false,
+          tool_accessible: true
+        },
+        statusDetails: {
+          lifecycleState: "indexing",
+          statusReason: "job_indexing",
+          sourceOfTruth: "workspace-status-projection",
+          updatedAt: new Date("2026-05-23T12:01:00.000Z"),
+          stale: false,
+          retryEligible: false,
+          progressPercent: 38,
+          progressMessage: "Indexing chunks 45/120",
+          job: {
+            id: 44,
+            uuid: "job-index-44",
+            status: "running",
+            jobType: "workspace_source_index",
+            progressPercent: 38,
+            progressMessage: "Indexing chunks 45/120",
+            errorMessage: null
+          }
+        }
+      } as WorkspaceSource
+    ]
+
+    render(<SourcesPane />)
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "View source status details for Source Two"
+      })
+    )
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Source status details"
+    })
+    expect(dialog).toHaveTextContent("Source Two")
+    expect(dialog).toHaveTextContent("Lifecycle")
+    expect(dialog).toHaveTextContent("Indexing")
+    expect(dialog).toHaveTextContent("Status reason")
+    expect(dialog).toHaveTextContent("job_indexing")
+    expect(dialog).toHaveTextContent("Source of truth")
+    expect(dialog).toHaveTextContent("Server workspace status projection")
+    expect(dialog).toHaveTextContent("Last refresh")
+    expect(dialog).toHaveTextContent("Progress")
+    expect(dialog).toHaveTextContent("38%")
+    expect(dialog).toHaveTextContent("Retry eligibility")
+    expect(dialog).toHaveTextContent("Retry not available while processing")
+    expect(dialog).toHaveTextContent("Stale state")
+    expect(dialog).toHaveTextContent("Fresh status")
+    expect(dialog).toHaveTextContent("Media ID")
+    expect(dialog).toHaveTextContent("2")
+    expect(dialog).toHaveTextContent("Source ID")
+    expect(dialog).toHaveTextContent("s2")
+    expect(dialog).toHaveTextContent("Next action")
+    expect(dialog).toHaveTextContent("Wait for indexing to finish")
+    expect(dialog).not.toHaveTextContent("workspace-playground")
+  })
+
   it("surfaces source metadata preview when metadata is available", () => {
     workspaceStoreState.sources = [
       {

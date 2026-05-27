@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import { ChatPane } from "../ChatPane"
@@ -160,12 +161,25 @@ vi.mock("@/components/Common/FeatureEmptyState", () => ({
 
 vi.mock("../source-location-copy", () => ({
   getWorkspaceChatNoSourcesHint: () =>
-    "Select sources from the Sources pane, then ask questions."
+    "Select sources from the Sources pane, then ask questions.",
+  getWorkspaceChatSourcesExplainer: () =>
+    "Selected sources keep answers grounded in this workspace."
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientMock
 }))
+
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: vi.fn(async () => [])
+}))
+
+const renderChatPane = () =>
+  render(
+    <MemoryRouter>
+      <ChatPane />
+    </MemoryRouter>
+  )
 
 describe("ChatPane Stage 4 lorebook activity", () => {
   beforeEach(() => {
@@ -220,7 +234,7 @@ describe("ChatPane Stage 4 lorebook activity", () => {
       size: 8
     })
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(await screen.findByText("Lorebook Activity")).toBeInTheDocument()
     expect(await screen.findByText("Turn 12: 2 entries fired")).toBeInTheDocument()
@@ -235,7 +249,7 @@ describe("ChatPane Stage 4 lorebook activity", () => {
       new Error("403 forbidden")
     )
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(
       await screen.findByText("Lorebook activity is unavailable for this account.")
@@ -255,7 +269,7 @@ describe("ChatPane Stage 4 lorebook activity", () => {
       size: 8
     })
 
-    render(<ChatPane />)
+    renderChatPane()
 
     await waitFor(() => {
       expect(tldwClientMock.getChatLorebookDiagnostics).toHaveBeenCalled()

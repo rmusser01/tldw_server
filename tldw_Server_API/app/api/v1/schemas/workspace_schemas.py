@@ -139,6 +139,7 @@ WorkspaceCapabilityServiceState = Literal[
     "available",
     "private",
     "not_configured",
+    "needs_approval",
     "unknown",
     "blocked",
     "degraded",

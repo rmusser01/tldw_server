@@ -1,7 +1,7 @@
 ---
 id: TASK-469
 title: Address PR 2018 Research Workspace source Jobs review feedback
-status: In Progress
+status: Done
 references:
 - https://github.com/rmusser01/tldw_server/pull/2018
 modified_files:
@@ -27,21 +27,21 @@ Address unresolved reviewer feedback on PR 2018 for Research Workspace source st
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Reconciled stale active tracker state on 2026-05-26. GitHub PR #2018 (Add Research Workspace source status and Jobs tracking) is merged as of 2026-05-24T01:45:39Z. The review-feedback implementation is already represented in the completed TASK-469 records for source Jobs enqueueing and follow-up review feedback. No additional code changes are required from this stale active record.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Closed stale active TASK-469 record after verifying PR #2018 is merged. The implemented source status and Jobs review-feedback work is already captured in the completed TASK-469 entries; this record no longer represents remaining implementation work.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

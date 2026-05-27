@@ -1,7 +1,7 @@
 ---
 id: TASK-478
 title: Research Workspace UAT remediation workstream
-status: To Do
+status: In Progress
 labels:
 - research-workspace
 - uat
@@ -69,7 +69,9 @@ Operating rule: do not close or move past a gate without live backend + WebUI va
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+- Post-original-plan follow-ups are tracked as TASK-478.14 through TASK-478.18. These cover backend startup restore, parity workflow naming, smoke metadata governance, model metadata allowlist ownership, and the migration true-move matrix refresh.
+- TASK-515 and TASK-516 moved migration true-move deletion from server-ineligible/retained to live-verified delete eligibility plus durable tombstone suppression. TASK-478.18 refreshed RW-UAT-025 with that evidence while keeping broader import/export recovery walkthrough scope marked Partial.
+- Remaining explicit matrix gaps after the migration refresh: keyboard-only source-to-chat walkthrough coverage, live Shared Workspaces/MCP workspace-set binding, live ACP run history/filter UAT keyed by canonical workspace ID, Research Workspace to sandbox admission/diagnostics flow, long-running vector completion with real embeddings, and broader migration import/export recovery.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

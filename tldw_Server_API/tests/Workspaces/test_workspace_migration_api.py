@@ -181,7 +181,7 @@ def test_workspace_migration_chunk_receipt_is_idempotent_and_conflict_checked(wo
 
 
 @pytest.mark.integration
-def test_workspace_migration_finalize_requires_all_chunks_and_keeps_delete_ineligible(workspace_client):
+def test_workspace_migration_finalize_requires_all_chunks_and_enables_verified_delete(workspace_client):
     _create_session(
         workspace_client,
         declared_chunks=[
@@ -230,8 +230,150 @@ def test_workspace_migration_finalize_requires_all_chunks_and_keeps_delete_ineli
     assert body["status"] == "finalized"
     assert body["accepted_chunk_count"] == 2
     assert body["missing_chunk_ids"] == []
+    assert body["client_delete_eligible"] is True
+    assert body["recovery_manifest"]["can_delete_legacy_storage"] is True
+    assert body["recovery_manifest"]["server_readback_verified"] is True
+    assert body["recovery_manifest"]["verification_status"] == "verified"
+
+    delete_ack = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
+        json={"acknowledged_manifest_hash": _MANIFEST_HASH},
+    )
+    assert delete_ack.status_code == 200, delete_ack.text
+    assert delete_ack.json() == {"ok": True}
+
+    duplicate_ack = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
+        json={"acknowledged_manifest_hash": _MANIFEST_HASH},
+    )
+    assert duplicate_ack.status_code == 200, duplicate_ack.text
+    assert duplicate_ack.json() == {"ok": True}
+
+
+@pytest.mark.integration
+def test_workspace_migration_delete_verification_reports_missing_chunks(workspace_client, db):
+    _create_session(
+        workspace_client,
+        declared_chunks=[
+            {
+                "id": "chunk-1",
+                "sha256": _CHUNK_HASH,
+                "byte_count": 64,
+                "chunk_kind": "workspace_bundle",
+            },
+            {
+                "id": "chunk-2",
+                "sha256": _OTHER_CHUNK_HASH,
+                "byte_count": 32,
+                "chunk_kind": "artifact_payloads",
+            },
+        ],
+    )
+    accepted = workspace_client.put(
+        "/api/v1/workspaces/migrations/mig-1/chunks/chunk-1",
+        json={
+            "sha256": _CHUNK_HASH,
+            "byte_count": 64,
+            "chunk_kind": "workspace_bundle",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    session = db.get_workspace_migration_session("mig-1")
+    assert session is not None
+    verification = db._verify_workspace_migration_delete_eligibility(session)
+
+    assert verification["eligible"] is False
+    assert verification["status"] == "missing_chunks"
+    assert verification["missing_chunk_ids"] == ["chunk-2"]
+
+
+@pytest.mark.integration
+def test_workspace_migration_zero_chunk_finalize_remains_delete_ineligible(workspace_client):
+    _create_session(workspace_client, declared_chunks=[])
+
+    finalized = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/finalize",
+        json={"manifest_hash": _MANIFEST_HASH},
+    )
+    assert finalized.status_code == 200, finalized.text
+    body = finalized.json()
+    assert body["status"] == "finalized"
+    assert body["declared_chunk_count"] == 0
+    assert body["accepted_chunk_count"] == 0
+    assert body["missing_chunk_ids"] == []
     assert body["client_delete_eligible"] is False
     assert body["recovery_manifest"]["can_delete_legacy_storage"] is False
+    assert body["recovery_manifest"]["server_readback_verified"] is False
+    assert body["recovery_manifest"]["verification_status"] == "no_declared_chunks"
+
+    delete_ack = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
+        json={"acknowledged_manifest_hash": _MANIFEST_HASH},
+    )
+    assert delete_ack.status_code == 409, delete_ack.text
+
+
+@pytest.mark.integration
+def test_workspace_migration_client_delete_ack_requires_matching_manifest(workspace_client):
+    _create_session(workspace_client)
+
+    accepted = workspace_client.put(
+        "/api/v1/workspaces/migrations/mig-1/chunks/chunk-1",
+        json={
+            "sha256": _CHUNK_HASH,
+            "byte_count": 64,
+            "chunk_kind": "workspace_bundle",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    finalized = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/finalize",
+        json={"manifest_hash": _MANIFEST_HASH},
+    )
+    assert finalized.status_code == 200, finalized.text
+    assert finalized.json()["client_delete_eligible"] is True
+
+    delete_ack = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
+        json={"acknowledged_manifest_hash": "d" * 64},
+    )
+    assert delete_ack.status_code == 409, delete_ack.text
+
+
+@pytest.mark.integration
+def test_workspace_migration_failed_readback_verification_remains_recoverable(workspace_client, db):
+    _create_session(workspace_client)
+
+    accepted = workspace_client.put(
+        "/api/v1/workspaces/migrations/mig-1/chunks/chunk-1",
+        json={
+            "sha256": _CHUNK_HASH,
+            "byte_count": 64,
+            "chunk_kind": "workspace_bundle",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE workspace_migration_chunks SET sha256 = ? WHERE migration_id = ? AND id = ?",
+            ("e" * 64, "mig-1", "chunk-1"),
+        )
+
+    finalized = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/finalize",
+        json={"manifest_hash": _MANIFEST_HASH},
+    )
+    assert finalized.status_code == 200, finalized.text
+    body = finalized.json()
+    assert body["status"] == "finalized"
+    assert body["client_delete_eligible"] is False
+    assert body["recovery_manifest"]["can_delete_legacy_storage"] is False
+    assert body["recovery_manifest"]["server_readback_verified"] is False
+    assert body["recovery_manifest"]["verification_status"] == "verification_failed"
+    assert body["recovery_manifest"]["mismatch_chunk_ids"] == ["chunk-1"]
 
     delete_ack = workspace_client.post(
         "/api/v1/workspaces/migrations/mig-1/client-delete-ack",

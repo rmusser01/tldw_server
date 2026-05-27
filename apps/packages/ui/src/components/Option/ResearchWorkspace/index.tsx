@@ -25,6 +25,16 @@ import {
   shouldSurfaceWorkspaceConflictNotice,
   type WorkspaceStorageQuotaEventDetail
 } from "@/store/workspace-events"
+import {
+  runResearchWorkspaceMigration,
+  type ResearchWorkspaceIndexedDbStoreRef,
+  type ResearchWorkspaceMigrationRunResult
+} from "@/store/workspace-migration"
+import {
+  RESEARCH_WORKSPACE_INDEXEDDB_ARTIFACT_STORE,
+  RESEARCH_WORKSPACE_INDEXEDDB_CHAT_STORE,
+  RESEARCH_WORKSPACE_INDEXEDDB_NAME
+} from "@/store/research-workspace-legacy-storage-inventory"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
@@ -35,7 +45,10 @@ import type {
   WorkspaceSourceStatusApiResponse,
   WorkspaceSourceStatusListResponse
 } from "@/services/tldw/domains/workspace-api"
-import type { WorkspaceSourceStatus } from "@/types/workspace"
+import type {
+  WorkspaceSourceStatus,
+  WorkspaceSourceStatusDetails
+} from "@/types/workspace"
 import {
   buildKnowledgeQaSeedNote,
   consumeResearchWorkspacePrefill
@@ -143,6 +156,93 @@ const WORKSPACE_CONFLICT_FIELD_LABELS: Record<string, string> = {
   currentNote: "quick note",
   workspaceChatSessions: "chat history",
   audioSettings: "audio settings"
+}
+const WORKSPACE_CHAT_OFFLOAD_POINTER_KIND = "workspace_chat_session_v1"
+const WORKSPACE_ARTIFACT_OFFLOAD_POINTER_KIND = "workspace_artifact_payload_v1"
+
+const collectResearchWorkspaceLegacyLocalStorageKeys = (): string[] => {
+  if (typeof window === "undefined") return []
+  const keys: string[] = []
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index)
+      if (!key) continue
+      if (
+        key === WORKSPACE_STORAGE_KEY ||
+        key.startsWith(WORKSPACE_STORAGE_SPLIT_KEY_PREFIX) ||
+        key.startsWith("tldw:research-workspace:") ||
+        key.startsWith("tldw:workspace:playground:")
+      ) {
+        keys.push(key)
+      }
+    }
+  } catch {
+    return []
+  }
+  return keys.sort()
+}
+
+const jsonValueContainsOffloadPointer = (
+  value: unknown,
+  offloadType: string
+): boolean => {
+  if (Array.isArray(value)) {
+    return value.some((item) => jsonValueContainsOffloadPointer(item, offloadType))
+  }
+  if (typeof value !== "object" || value === null) return false
+
+  const record = value as Record<string, unknown>
+  if (record.offloadType === offloadType) return true
+  return Object.values(record).some((item) =>
+    jsonValueContainsOffloadPointer(item, offloadType)
+  )
+}
+
+const collectResearchWorkspaceLegacyIndexedDbStores = (
+  localStorageKeys: string[]
+): ResearchWorkspaceIndexedDbStoreRef[] => {
+  if (typeof window === "undefined") return []
+  let hasChatStorePointer = false
+  let hasArtifactStorePointer = false
+
+  for (const key of localStorageKeys) {
+    let parsedPayload: unknown
+    try {
+      const payload = window.localStorage.getItem(key)
+      if (!payload) continue
+      parsedPayload = JSON.parse(payload)
+    } catch {
+      continue
+    }
+
+    hasChatStorePointer =
+      hasChatStorePointer ||
+      jsonValueContainsOffloadPointer(
+        parsedPayload,
+        WORKSPACE_CHAT_OFFLOAD_POINTER_KIND
+      )
+    hasArtifactStorePointer =
+      hasArtifactStorePointer ||
+      jsonValueContainsOffloadPointer(
+        parsedPayload,
+        WORKSPACE_ARTIFACT_OFFLOAD_POINTER_KIND
+      )
+  }
+
+  const stores: ResearchWorkspaceIndexedDbStoreRef[] = []
+  if (hasChatStorePointer) {
+    stores.push({
+      databaseName: RESEARCH_WORKSPACE_INDEXEDDB_NAME,
+      storeName: RESEARCH_WORKSPACE_INDEXEDDB_CHAT_STORE
+    })
+  }
+  if (hasArtifactStorePointer) {
+    stores.push({
+      databaseName: RESEARCH_WORKSPACE_INDEXEDDB_NAME,
+      storeName: RESEARCH_WORKSPACE_INDEXEDDB_ARTIFACT_STORE
+    })
+  }
+  return stores
 }
 
 const normalizeVectorProcessingStatus = (
@@ -662,6 +762,41 @@ const getWorkspaceSourceStatusMessage = (
 ): string | undefined =>
   source.progress_message || source.status_reason || undefined
 
+const parseWorkspaceSourceStatusUpdatedAt = (
+  updatedAt: string | null
+): Date | undefined => {
+  if (!updatedAt) return undefined
+  const parsed = new Date(updatedAt)
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed
+}
+
+const buildWorkspaceSourceStatusDetails = (
+  source: WorkspaceSourceStatusApiResponse
+): WorkspaceSourceStatusDetails => ({
+  lifecycleState: source.state,
+  statusReason: source.status_reason || undefined,
+  sourceOfTruth: "workspace-status-projection",
+  updatedAt: parseWorkspaceSourceStatusUpdatedAt(source.updated_at),
+  stale: false,
+  retryEligible:
+    source.state === "failed" ||
+    source.state === "missing_media" ||
+    source.state === "blocked_by_permissions",
+  progressPercent: source.progress_percent,
+  progressMessage: source.progress_message,
+  job: source.job
+    ? {
+        id: source.job.id,
+        uuid: source.job.uuid,
+        status: source.job.status,
+        jobType: source.job.job_type,
+        progressPercent: source.job.progress_percent,
+        progressMessage: source.job.progress_message,
+        errorMessage: source.job.error_message
+      }
+    : null
+})
+
 const describeWorkspaceStatusProjectionError = (error: unknown): string => {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message
@@ -968,11 +1103,15 @@ const ResearchWorkspaceBody: React.FC = () => {
   })
   const [, setWorkspaceSourceStatus] =
     React.useState<WorkspaceSourceStatusListResponse | null>(null)
-  const [, setWorkspaceCapabilities] =
+  const [workspaceCapabilities, setWorkspaceCapabilities] =
     React.useState<WorkspaceCapabilitiesResponse | null>(null)
   const [, setWorkspaceStatusProjectionLoading] = React.useState(false)
   const [workspaceStatusProjectionError, setWorkspaceStatusProjectionError] =
     React.useState<string | null>(null)
+  const [workspaceMigrationResult, setWorkspaceMigrationResult] =
+    React.useState<ResearchWorkspaceMigrationRunResult | null>(null)
+  const [workspaceMigrationLoading, setWorkspaceMigrationLoading] =
+    React.useState(false)
   const [
     workspaceStatusProjectionReadyVersion,
     setWorkspaceStatusProjectionReadyVersion
@@ -997,6 +1136,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     storageUsagePercent >= 80
 
   const lastCrossTabSyncWarningRef = React.useRef(0)
+  const workspaceMigrationSignatureRef = React.useRef<string | null>(null)
+  const workspaceMigrationInFlightRef = React.useRef<{
+    signature: string
+    promise: Promise<ResearchWorkspaceMigrationRunResult>
+  } | null>(null)
   const onboardingInitializedRef = React.useRef(false)
   const [showTutorialPrompt, setShowTutorialPrompt] = React.useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = React.useState(false)
@@ -1274,6 +1418,52 @@ const ResearchWorkspaceBody: React.FC = () => {
     return operations
   }, [generatingOutputType, isGeneratingOutput, processingMediaIds.length, t])
 
+  const workspaceMigrationStatusMessages = React.useMemo(() => {
+    if (!statusGuardrailsEnabled) return []
+    if (workspaceMigrationLoading) {
+      return ["Legacy workspace data found"]
+    }
+    if (!workspaceMigrationResult) return []
+
+    if (workspaceMigrationResult.status === "finalized_not_delete_eligible") {
+      return [
+        "Legacy workspace data found",
+        "Server receipt saved",
+        "Local data retained until server deletion eligibility is available",
+        "Review recovery details"
+      ]
+    }
+
+    if (workspaceMigrationResult.status === "blocked") {
+      return [
+        "Legacy workspace data found",
+        ...(workspaceMigrationResult.serverMigration
+          ? ["Server receipt saved"]
+          : []),
+        "Local data retained",
+        "Review recovery details"
+      ]
+    }
+
+    if (workspaceMigrationResult.status === "failed") {
+      return [
+        "Legacy workspace data found",
+        "Migration failed before local deletion",
+        "Review recovery details"
+      ]
+    }
+
+    if (workspaceMigrationResult.status === "deleted") {
+      return ["Legacy workspace data moved", "Review recovery details"]
+    }
+
+    return []
+  }, [
+    statusGuardrailsEnabled,
+    workspaceMigrationLoading,
+    workspaceMigrationResult
+  ])
+
   useEffect(() => {
     if (!statusGuardrailsEnabled) {
       lastStatusViewSignatureRef.current = null
@@ -1297,6 +1487,125 @@ const ResearchWorkspaceBody: React.FC = () => {
       status: signature
     })
   }, [activeWorkspaceOperations, statusGuardrailsEnabled, workspaceId])
+
+  useEffect(() => {
+    if (!statusGuardrailsEnabled) {
+      workspaceMigrationSignatureRef.current = null
+      workspaceMigrationInFlightRef.current = null
+      setWorkspaceMigrationLoading(false)
+      setWorkspaceMigrationResult(null)
+      return
+    }
+    if (!isStoreHydrated || !workspaceId) return
+    if (typeof window === "undefined") return
+
+    const discoveredLocalStorageKeys =
+      collectResearchWorkspaceLegacyLocalStorageKeys()
+    const discoveredIndexedDbStores =
+      collectResearchWorkspaceLegacyIndexedDbStores(discoveredLocalStorageKeys)
+    const hasLegacyContent = discoveredLocalStorageKeys.some(
+      (key) =>
+        key === WORKSPACE_STORAGE_KEY ||
+        key.startsWith(WORKSPACE_STORAGE_SPLIT_KEY_PREFIX)
+    )
+
+    if (!hasLegacyContent) {
+      workspaceMigrationSignatureRef.current = null
+      workspaceMigrationInFlightRef.current = null
+      setWorkspaceMigrationLoading(false)
+      setWorkspaceMigrationResult(null)
+      return
+    }
+
+    const indexedDbSignature = discoveredIndexedDbStores
+      .map((store) => `${store.databaseName}:${store.storeName}`)
+      .sort()
+      .join("|")
+    const signature = [
+      workspaceId,
+      discoveredLocalStorageKeys.join("|"),
+      indexedDbSignature
+    ].join("::")
+    const inFlightMigration = workspaceMigrationInFlightRef.current
+    const canReuseInFlightMigration =
+      inFlightMigration?.signature === signature
+    if (
+      workspaceMigrationSignatureRef.current === signature &&
+      !canReuseInFlightMigration
+    ) {
+      return
+    }
+    workspaceMigrationSignatureRef.current = signature
+
+    let cancelled = false
+    setWorkspaceMigrationLoading(true)
+
+    const migrationPromise =
+      canReuseInFlightMigration && inFlightMigration
+        ? inFlightMigration.promise
+        : runResearchWorkspaceMigration({
+            targetWorkspaceId: workspaceId,
+            targetWorkspaceName: workspaceName || "Research Workspace",
+            discoveredLocalStorageKeys,
+            discoveredIndexedDbStores,
+            readLocalStorageValue: async (key) => window.localStorage.getItem(key),
+            api: {
+              createWorkspaceMigration: tldwClient.createWorkspaceMigration,
+              putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
+              finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
+              getWorkspaceMigration: tldwClient.getWorkspaceMigration,
+              ackWorkspaceMigrationClientDelete:
+                tldwClient.ackWorkspaceMigrationClientDelete
+            },
+            deleteLocalStorageValue: (key) => window.localStorage.removeItem(key),
+            writeLocalStorageValue: (key, value) =>
+              window.localStorage.setItem(key, value),
+            now: () => new Date().toISOString()
+          })
+
+    if (!canReuseInFlightMigration) {
+      workspaceMigrationInFlightRef.current = {
+        signature,
+        promise: migrationPromise
+      }
+    }
+
+    void migrationPromise
+      .then((result) => {
+        if (cancelled) return
+        setWorkspaceMigrationResult(result)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setWorkspaceMigrationResult({
+          status: "failed",
+          migrationId: null,
+          manifestHash: null,
+          serverMigration: null,
+          localDeletionEligibility: null,
+          deletedSurfaceIds: [],
+          message: "Research Workspace migration failed before local deletion.",
+          error
+        })
+      })
+      .finally(() => {
+        if (workspaceMigrationInFlightRef.current?.signature === signature) {
+          workspaceMigrationInFlightRef.current = null
+        }
+        if (!cancelled) {
+          setWorkspaceMigrationLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    isStoreHydrated,
+    statusGuardrailsEnabled,
+    workspaceId,
+    workspaceName
+  ])
 
   useEffect(() => {
     if (!statusGuardrailsEnabled) {
@@ -1393,7 +1702,8 @@ const ResearchWorkspaceBody: React.FC = () => {
             source.media_id,
             mappedStatus,
             getWorkspaceSourceStatusMessage(source),
-            source.readiness
+            source.readiness,
+            buildWorkspaceSourceStatusDetails(source)
           )
         }
         workspaceProjectedSourceStatusByMediaIdRef.current = {
@@ -2653,6 +2963,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           statusGuardrailsEnabled={statusGuardrailsEnabled}
           contentWidthMode="full"
           researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+          workspaceCapabilities={workspaceCapabilities}
           researchWorkspaceCapabilitiesStale={isResearchWorkspaceCapabilitiesStale(
             researchWorkspaceCapabilities,
             researchWorkspaceCapabilitiesFetchedAt
@@ -2761,6 +3072,14 @@ const ResearchWorkspaceBody: React.FC = () => {
     </div>
   ) : null
 
+  const focusSkipTarget = (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    pane: WorkspaceTabKey
+  ) => {
+    event.preventDefault()
+    focusWorkspacePane(pane)
+  }
+
   return (
     <SharedWorkspaceProvider
       shareId={sharedShareId}
@@ -2772,18 +3091,21 @@ const ResearchWorkspaceBody: React.FC = () => {
       {messageContextHolder}
       <a
         href="#workspace-main-content"
+        onClick={(event) => focusSkipTarget(event, "chat")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-2 focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToMain", "Skip to chat content")}
       </a>
       <a
         href="#workspace-sources-panel"
+        onClick={(event) => focusSkipTarget(event, "sources")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-12 focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToSources", "Skip to sources panel")}
       </a>
       <a
         href="#workspace-studio-panel"
+        onClick={(event) => focusSkipTarget(event, "studio")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-[5.5rem] focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToStudio", "Skip to studio panel")}
@@ -2945,6 +3267,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             storageUsedBytes={workspaceStorageUsage.usedBytes}
             storageQuotaBytes={workspaceStorageUsage.quotaBytes}
             activeOperations={activeWorkspaceOperations}
+            statusMessages={workspaceMigrationStatusMessages}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
           />
 
@@ -3007,6 +3330,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                   id="workspace-sources-panel"
                   role="complementary"
                   aria-label={t("playground:workspace.sourcesPanel", "Sources panel")}
+                  tabIndex={-1}
                   className="hidden shrink-0 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card lg:flex lg:flex-col"
                   style={{ width: leftPaneWidth }}
                 >
@@ -3051,6 +3375,7 @@ const ResearchWorkspaceBody: React.FC = () => {
 
             <main
               id="workspace-main-content"
+              tabIndex={-1}
               className="flex min-w-0 flex-1 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card"
             >
               <ChatPane
@@ -3058,6 +3383,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                 statusGuardrailsEnabled={statusGuardrailsEnabled}
                 contentWidthMode={desktopChatContentWidthMode}
                 researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+                workspaceCapabilities={workspaceCapabilities}
                 researchWorkspaceCapabilitiesStale={isResearchWorkspaceCapabilitiesStale(
                   researchWorkspaceCapabilities,
                   researchWorkspaceCapabilitiesFetchedAt
@@ -3090,6 +3416,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                   id="workspace-studio-panel"
                   role="complementary"
                   aria-label={t("playground:workspace.studioPanel", "Studio panel")}
+                  tabIndex={-1}
                   className="hidden min-h-0 shrink-0 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card lg:flex lg:flex-col"
                   style={{ width: rightPaneWidth }}
                 >
@@ -3131,6 +3458,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             storageUsedBytes={workspaceStorageUsage.usedBytes}
             storageQuotaBytes={workspaceStorageUsage.quotaBytes}
             activeOperations={activeWorkspaceOperations}
+            statusMessages={workspaceMigrationStatusMessages}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
           />
         </>

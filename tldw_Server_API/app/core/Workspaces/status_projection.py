@@ -71,65 +71,104 @@ def build_workspace_capability_projection(
     *,
     workspace: dict[str, Any],
     status_projection: dict[str, Any],
+    service_capabilities: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build conservative capability gates for Research Workspace clients."""
     summary = dict(status_projection.get("summary") or {})
-    has_queryable_sources = int(summary.get("queryable") or 0) > 0
+    has_queryable_sources = _has_queryable_selected_sources(status_projection)
+    workspace_services = {
+        "migration": {
+            "state": "available",
+            "reason_code": None,
+            "management_surface": "research_workspace_import",
+        },
+        "sharing": {
+            "state": "private",
+            "reason_code": None,
+            "management_surface": "shared_workspaces",
+        },
+        "mcp": {
+            "state": "not_configured",
+            "reason_code": "no_workspace_mcp_binding",
+            "management_surface": "mcp_hub",
+        },
+        "acp": {
+            "state": "not_configured",
+            "reason_code": "no_workspace_acp_binding",
+            "management_surface": "acp_workspace",
+        },
+        "sandbox": {
+            "state": "not_configured",
+            "reason_code": "no_workspace_sandbox_binding",
+            "management_surface": "sandbox_settings",
+        },
+        "provider": {
+            "state": "unknown",
+            "reason_code": "provider_not_evaluated",
+            "management_surface": "model_settings",
+        },
+    }
+    service_actions: dict[str, dict[str, Any]] = {}
+    if isinstance(service_capabilities, dict):
+        dynamic_services = service_capabilities.get("workspace_services")
+        if isinstance(dynamic_services, dict):
+            workspace_services.update(
+                {
+                    key: value
+                    for key, value in dynamic_services.items()
+                    if isinstance(value, dict)
+                }
+            )
+        dynamic_actions = service_capabilities.get("allowed_actions")
+        if isinstance(dynamic_actions, dict):
+            service_actions = {
+                key: value
+                for key, value in dynamic_actions.items()
+                if isinstance(value, dict)
+            }
+    ask_action = _grounded_question_action(
+        has_queryable_sources=has_queryable_sources,
+        provider_service=workspace_services.get("provider") or {},
+    )
+    allowed_actions = {
+        "add_sources": _allowed(True),
+        "inspect_sources": _allowed(
+            int(summary.get("total") or 0) > 0,
+            "no_sources",
+        ),
+        "ask_grounded_questions": ask_action,
+        "export_workspace": _allowed(True),
+        "manage_tools": _allowed(True),
+        "run_mcp_tools": _allowed(False, "mcp_not_configured"),
+        "use_acp_agents": _allowed(False, "acp_not_configured"),
+        "use_sandbox": _allowed(False, "sandbox_not_configured"),
+    }
+    allowed_actions.update(service_actions)
+    allowed_actions["ask_grounded_questions"] = ask_action
 
     return {
         "workspace_id": workspace["id"],
         "workspace_kind": "research_workspace",
         "access_level": "owner",
         "source_summary": summary,
-        "workspace_services": {
-            "migration": {
-                "state": "available",
-                "reason_code": None,
-                "management_surface": "research_workspace_import",
-            },
-            "sharing": {
-                "state": "private",
-                "reason_code": None,
-                "management_surface": "shared_workspaces",
-            },
-            "mcp": {
-                "state": "not_configured",
-                "reason_code": "no_workspace_mcp_binding",
-                "management_surface": "mcp_hub",
-            },
-            "acp": {
-                "state": "not_configured",
-                "reason_code": "no_workspace_acp_binding",
-                "management_surface": "acp_workspace",
-            },
-            "sandbox": {
-                "state": "not_configured",
-                "reason_code": "no_workspace_sandbox_binding",
-                "management_surface": "sandbox_settings",
-            },
-            "provider": {
-                "state": "unknown",
-                "reason_code": "provider_not_evaluated",
-                "management_surface": "model_settings",
-            },
-        },
-        "allowed_actions": {
-            "add_sources": _allowed(True),
-            "inspect_sources": _allowed(
-                int(summary.get("total") or 0) > 0,
-                "no_sources",
-            ),
-            "ask_grounded_questions": _allowed(
-                has_queryable_sources,
-                "no_queryable_sources",
-            ),
-            "export_workspace": _allowed(True),
-            "manage_tools": _allowed(True),
-            "run_mcp_tools": _allowed(False, "mcp_not_configured"),
-            "use_acp_agents": _allowed(False, "acp_not_configured"),
-            "use_sandbox": _allowed(False, "sandbox_not_configured"),
-        },
+        "workspace_services": workspace_services,
+        "allowed_actions": allowed_actions,
     }
+
+
+def _has_queryable_selected_sources(status_projection: dict[str, Any]) -> bool:
+    """Return whether the user's selected source scope contains queryable sources."""
+    statuses = status_projection.get("sources")
+    if isinstance(statuses, list):
+        return any(
+            isinstance(status, dict)
+            and bool(status.get("selected"))
+            and str(status.get("state") or "").strip().lower() == "queryable"
+            for status in statuses
+        )
+
+    summary = dict(status_projection.get("summary") or {})
+    return int(summary.get("queryable") or 0) > 0
 
 
 def _build_source_status(
@@ -391,6 +430,22 @@ def _allowed(allowed: bool, reason_code: str | None = None) -> dict[str, Any]:
         "allowed": allowed,
         "reason_code": None if allowed else reason_code,
     }
+
+
+def _grounded_question_action(
+    *,
+    has_queryable_sources: bool,
+    provider_service: dict[str, Any],
+) -> dict[str, Any]:
+    if not has_queryable_sources:
+        return _allowed(False, "no_queryable_sources")
+    provider_state = str(provider_service.get("state") or "").strip().lower()
+    if provider_state in {"not_configured", "unknown", "blocked"}:
+        return _allowed(
+            False,
+            str(provider_service.get("reason_code") or "provider_not_available"),
+        )
+    return _allowed(True)
 
 
 def _build_job_index(jobs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
