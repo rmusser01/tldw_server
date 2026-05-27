@@ -3296,13 +3296,13 @@ export const SidepanelForm = ({
                                       aria-label={
                                         t(
                                           "playground:composer.sendOptions",
-                                          "Open send options"
+                                          "Open message delivery options"
                                         ) as string
                                       }
                                       title={
                                         t(
                                           "playground:composer.sendOptions",
-                                          "Open send options"
+                                          "Open message delivery options"
                                         ) as string
                                       }
                                       className="inline-flex min-h-[44px] items-center rounded-r-md border border-l-0 border-border bg-surface px-2 text-text transition-colors hover:bg-surface2"

@@ -72,6 +72,11 @@ describe("sidepanel chat compact toolbar contract", () => {
     expect(chatFormSource).toContain("playground:composer.stopShort")
   })
 
+  it("keeps the split send-options trigger named separately from send", () => {
+    expect(chatFormSource).toContain("Open message delivery options")
+    expect(chatFormSource).not.toContain("Open send options")
+  })
+
   it("keeps pro composer image attachment visible and accessible", () => {
     expect(controlRowSource).toContain('data-testid="chat-attach-image"')
     expect(controlRowSource).toContain('sidepanel:controlRow.attachImage", "Attach image"')
