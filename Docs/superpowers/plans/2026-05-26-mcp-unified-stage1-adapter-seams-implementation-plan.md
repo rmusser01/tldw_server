@@ -664,7 +664,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add \
@@ -682,7 +682,7 @@ git commit -m "feat: add mcp module runtime factory seam"
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_websocket_smoke.py`
 
-- [ ] **Step 1: Add optional dependencies to `MCPServer.__init__`**
+- [x] **Step 1: Add optional dependencies to `MCPServer.__init__`**
 
 ```python
 from .adapters.tldw_runtime import build_default_runtime_dependencies
@@ -700,15 +700,15 @@ class MCPServer:
         ...
 ```
 
-- [ ] **Step 2: Keep singleton API unchanged**
+- [x] **Step 2: Keep singleton API unchanged**
 
 Ensure `get_mcp_server()` and `reset_mcp_server()` signatures remain unchanged. Add an internal helper only if tests need it.
 
-- [ ] **Step 3: Ensure `MCPServer` creates `RequestContext` with resolved db paths**
+- [x] **Step 3: Ensure `MCPServer` creates `RequestContext` with resolved db paths**
 
 When `server.py` constructs `RequestContext`, pass `db_paths=self.dependencies.database_path_resolver.resolve_user_db_paths(user_id)`.
 
-- [ ] **Step 4: Run server seam test**
+- [x] **Step 4: Run server seam test**
 
 Run:
 
@@ -718,7 +718,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unifi
 
 Expected: PASS.
 
-- [ ] **Step 5: Run focused HTTP/WS tests**
+- [x] **Step 5: Run focused HTTP/WS tests**
 
 Run:
 
@@ -732,7 +732,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS or document environment-limited websocket failures separately if local socket binding is blocked.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add \
@@ -748,7 +748,7 @@ git commit -m "feat: add mcp server dependency seam"
 - Create: `Docs/MCP/mcp_unified_module_ownership_inventory.md`
 - Modify: `backlog/tasks/task-480 - Design-MCP-Unified-standalone-library-and-gateway-extraction.md`
 
-- [ ] **Step 1: Create inventory document header**
+- [x] **Step 1: Create inventory document header**
 
 ```markdown
 # MCP Unified Module Ownership Inventory
@@ -768,7 +768,7 @@ Classification:
 | --- | --- | --- | --- | --- | --- | --- |
 ```
 
-- [ ] **Step 2: Inventory each module implementation**
+- [x] **Step 2: Inventory each module implementation**
 
 Add one table row for each file under `tldw_Server_API/app/core/MCP_unified/modules/implementations/`.
 
@@ -783,7 +783,7 @@ Initial recommended classification:
 
 Use `rg -n "from tldw_Server_API|import tldw_Server_API" <module-file>` to ground each classification.
 
-- [ ] **Step 3: Add extraction debt section**
+- [x] **Step 3: Add extraction debt section**
 
 ```markdown
 ## Extraction Debt
@@ -794,11 +794,11 @@ Use `rg -n "from tldw_Server_API|import tldw_Server_API" <module-file>` to groun
 - module rows classified as `adapter-backed`: one future plan per module family before migration.
 ```
 
-- [ ] **Step 4: Update Backlog task modified files**
+- [x] **Step 4: Update Backlog task modified files**
 
 Use MCP task edit to include the inventory file in `TASK-480` modified files and implementation notes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add \

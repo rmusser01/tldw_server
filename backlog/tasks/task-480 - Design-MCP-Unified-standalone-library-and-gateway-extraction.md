@@ -9,9 +9,24 @@ labels:
 documentation:
 - Docs/superpowers/specs/2026-05-26-mcp-unified-standalone-library-gateway-design.md
 - Docs/superpowers/plans/2026-05-26-mcp-unified-stage1-adapter-seams-implementation-plan.md
+- Docs/MCP/mcp_unified_module_ownership_inventory.md
 modified_files:
 - Docs/superpowers/specs/2026-05-26-mcp-unified-standalone-library-gateway-design.md
 - Docs/superpowers/plans/2026-05-26-mcp-unified-stage1-adapter-seams-implementation-plan.md
+- Docs/MCP/mcp_unified_module_ownership_inventory.md
+- tldw_Server_API/app/core/MCP_unified/interfaces/__init__.py
+- tldw_Server_API/app/core/MCP_unified/interfaces/runtime.py
+- tldw_Server_API/app/core/MCP_unified/interfaces/policy.py
+- tldw_Server_API/app/core/MCP_unified/interfaces/storage.py
+- tldw_Server_API/app/core/MCP_unified/adapters/__init__.py
+- tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py
+- tldw_Server_API/app/core/MCP_unified/adapters/tldw_policy.py
+- tldw_Server_API/app/core/MCP_unified/protocol.py
+- tldw_Server_API/app/core/MCP_unified/server.py
+- tldw_Server_API/app/core/MCP_unified/modules/base.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py
 - backlog/tasks/task-480 - Design-MCP-Unified-standalone-library-and-gateway-extraction.md
 ---
 
