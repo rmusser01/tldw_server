@@ -650,6 +650,15 @@ const assertNoHorizontalOverflow = async (page: Page) => {
   expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1);
 };
 
+const assertNoVerticalOverlap = async (first: Locator, second: Locator, label: string) => {
+  const firstBox = await first.boundingBox();
+  const secondBox = await second.boundingBox();
+
+  expect(firstBox, `${label}: first element is measurable`).not.toBeNull();
+  expect(secondBox, `${label}: second element is measurable`).not.toBeNull();
+  expect(firstBox!.y + firstBox!.height).toBeLessThanOrEqual(secondBox!.y + 1);
+};
+
 const assertHealthResponse = (health: { status: number; body: any }) => {
   expect([200, 206]).toContain(health.status);
   expect(['ok', 'healthy', 'degraded']).toContain(health.body?.status);
@@ -1817,6 +1826,14 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(initialContextPanel).toBeVisible();
     await expect(initialRuntimePanel).toBeHidden();
     await assertNoHorizontalOverflow(page);
+    await assertNoVerticalOverlap(
+      mobileRails,
+      page.getByTestId('chat-input'),
+      'mobile cockpit context rails should not overlap composer'
+    );
+    const initialContextPanelBox = await initialContextPanel.boundingBox();
+    expect(initialContextPanelBox, 'mobile context panel is measurable').not.toBeNull();
+    expect(initialContextPanelBox!.height).toBeLessThanOrEqual(260);
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-context.png'),
       fullPage: true,
@@ -1898,6 +1915,14 @@ test.describe('/chat cockpit real-server parity', () => {
     ).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
     await assertNoHorizontalOverflow(page);
+    await assertNoVerticalOverlap(
+      mobileRails,
+      page.getByTestId('chat-input'),
+      'mobile cockpit runtime rails should not overlap composer'
+    );
+    const runtimePanelBox = await runtimePanel.boundingBox();
+    expect(runtimePanelBox, 'mobile runtime panel is measurable').not.toBeNull();
+    expect(runtimePanelBox!.height).toBeLessThanOrEqual(260);
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-runtime.png'),
       fullPage: true,

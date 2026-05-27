@@ -390,7 +390,7 @@ export const PlaygroundCockpitShell = ({
           <p
             id={mobilePanelSummaryId}
             data-testid="playground-cockpit-mobile-panel-summary"
-            className="rounded-md border border-border bg-bg px-2.5 py-2 text-[11px] leading-4 text-text-muted"
+            className="sr-only"
           >
             {mobilePanelSummary}
           </p>
@@ -402,7 +402,7 @@ export const PlaygroundCockpitShell = ({
               aria-describedby={mobilePanelSummaryId}
               hidden={visibleMobilePanel !== "context"}
               aria-hidden={visibleMobilePanel !== "context"}
-              className={`max-h-[42vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
+              className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
                 visibleMobilePanel !== "context" ? "hidden" : ""
               }`}
             >
@@ -417,7 +417,7 @@ export const PlaygroundCockpitShell = ({
               aria-describedby={mobilePanelSummaryId}
               hidden={visibleMobilePanel !== "runtime"}
               aria-hidden={visibleMobilePanel !== "runtime"}
-              className={`max-h-[42vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
+              className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
                 visibleMobilePanel !== "runtime" ? "hidden" : ""
               }`}
             >

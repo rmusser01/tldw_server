@@ -94,6 +94,39 @@ describe("Playground cockpit accessibility", () => {
     expect(onModeChange).toHaveBeenCalledWith("focus");
   });
 
+  it("keeps the mobile cockpit panel compact while preserving its accessible summary", () => {
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        onModeChange={vi.fn()}
+        leftRailVisible
+        rightRailVisible
+        onLeftRailVisibleChange={vi.fn()}
+        onRightRailVisibleChange={vi.fn()}
+        leftRail={<div>Context tools</div>}
+        rightRail={<div>Runtime tools</div>}
+        statusStrip={<div>Ready</div>}
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>,
+    );
+
+    const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "context");
+
+    const contextPanel = screen.getByRole("tabpanel", { name: "Context" });
+    expect(contextPanel.className).toContain("max-h-[30vh]");
+    expect(contextPanel.className).not.toContain("max-h-[42vh]");
+
+    const summary = screen.getByTestId(
+      "playground-cockpit-mobile-panel-summary",
+    );
+    expect(summary).toHaveClass("sr-only");
+    expect(summary).toHaveTextContent(
+      "Context panel active. Composer draft remains available below.",
+    );
+  });
+
   it("labels independent rail visibility controls", () => {
     const onLeftRailVisibleChange = vi.fn();
     const onRightRailVisibleChange = vi.fn();
