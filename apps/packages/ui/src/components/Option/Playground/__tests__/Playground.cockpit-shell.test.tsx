@@ -409,6 +409,30 @@ describe("Playground cockpit shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("does not report standard chat runtime ready when no chat models are usable", async () => {
+    messageOptionState.value.selectedModel = "tldw:gpt-4o";
+    tldwServerState.fetchChatModels.mockResolvedValue([]);
+
+    render(<Playground />);
+
+    await waitFor(() => {
+      expect(tldwServerState.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true,
+        forceRefresh: true,
+      });
+    });
+
+    const runtimeRail = screen.getByTestId("playground-cockpit-right-rail");
+    expect(runtimeRail).toHaveTextContent("Error");
+    expect(runtimeRail).toHaveTextContent("No chat models configured");
+    expect(runtimeRail).not.toHaveTextContent("Ready");
+
+    const statusStrip = screen.getByRole("status", { name: "Chat status" });
+    expect(statusStrip).toHaveTextContent("Model unavailable");
+    expect(statusStrip).toHaveTextContent("No chat models configured");
+    expect(statusStrip).not.toHaveTextContent("Ready");
+  });
+
   it("honors first-class character route intent in the chat shell", async () => {
     window.history.replaceState(
       {},

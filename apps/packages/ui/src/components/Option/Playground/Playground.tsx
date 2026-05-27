@@ -2135,7 +2135,7 @@ export const Playground = () => {
     selectedProvider: apiProvider,
     selectedModel,
   });
-  const characterChatModelUsability = React.useMemo(
+  const standardChatModelUsability = React.useMemo(
     () =>
       buildChatModelUsability({
         isServerConnected: serverReadinessState !== "blocked",
@@ -2188,25 +2188,26 @@ export const Playground = () => {
     [activeCharacterModeLabel, characterChatBlocked, characterChatReadiness, t],
   );
   const activeCharacterChatModelUsability = characterWorkflowActive
-    ? characterChatModelUsability
+    ? standardChatModelUsability
     : null;
+  const activeChatModelUsability = standardChatModelUsability;
   const characterChatModelUsabilityMessage =
     getMatchingCharacterChatModelUsabilityCopy({
       modelUsability: activeCharacterChatModelUsability,
       readiness: characterChatReadiness,
       readinessTitle: characterChatReadinessCopy?.title ?? null,
     });
-  const characterChatModelSelectorLabel = React.useMemo(() => {
+  const activeChatModelSelectorLabel = React.useMemo(() => {
     if (
-      !activeCharacterChatModelUsability ||
-      activeCharacterChatModelUsability.status === "ready" ||
-      (activeCharacterChatModelUsability.status === "degraded" &&
-        activeCharacterChatModelUsability.canSend)
+      !activeChatModelUsability ||
+      activeChatModelUsability.status === "ready" ||
+      (activeChatModelUsability.status === "degraded" &&
+        activeChatModelUsability.canSend)
     ) {
       return null;
     }
 
-    switch (activeCharacterChatModelUsability.status) {
+    switch (activeChatModelUsability.status) {
       case "loading":
         return toText(
           t(
@@ -2254,14 +2255,16 @@ export const Playground = () => {
       default:
         return null;
     }
-  }, [activeCharacterChatModelUsability, t]);
-  const characterChatModelSelectorTitle = characterChatModelSelectorLabel
-    ? characterChatModelUsabilityMessage ?? characterChatModelSelectorLabel
+  }, [activeChatModelUsability, t]);
+  const activeChatModelUsabilityMessage =
+    characterChatModelUsabilityMessage ?? activeChatModelSelectorLabel;
+  const activeChatModelSelectorTitle = activeChatModelSelectorLabel
+    ? activeChatModelUsabilityMessage ?? activeChatModelSelectorLabel
     : null;
-  const characterChatModelUsabilityBlocks = Boolean(
-    activeCharacterChatModelUsability &&
-      activeCharacterChatModelUsability.status !== "ready" &&
-      !activeCharacterChatModelUsability.canSend,
+  const activeChatModelUsabilityBlocks = Boolean(
+    activeChatModelUsability &&
+      activeChatModelUsability.status !== "ready" &&
+      !activeChatModelUsability.canSend,
   );
   React.useEffect(() => {
     if (typeof setActiveSettingsScope === "function") {
@@ -2625,9 +2628,9 @@ export const Playground = () => {
     toolSummary: cockpitToolSummary,
     compositionStatus,
     composition: null,
-    modelUsabilityStatus: activeCharacterChatModelUsability?.status ?? null,
-    modelUsabilityCanSend: activeCharacterChatModelUsability?.canSend ?? null,
-    modelUsabilityDetail: characterChatModelUsabilityMessage,
+    modelUsabilityStatus: activeChatModelUsability?.status ?? null,
+    modelUsabilityCanSend: activeChatModelUsability?.canSend ?? null,
+    modelUsabilityDetail: activeChatModelUsabilityMessage,
     modelUnavailable: characterChatModelUnavailable,
     modelUnavailableDetail: characterChatModelUnavailable
       ? characterChatReadinessCopy?.title ?? null
@@ -2826,24 +2829,26 @@ export const Playground = () => {
       selectedProvider={providerRouteSummary.selectedProvider}
       selectedModel={providerRouteSummary.selectedModel}
       providerRouteLabel={providerRouteSummary.providerRouteLabel}
-      modelUsabilityStatus={activeCharacterChatModelUsability?.status ?? null}
-      modelUsabilityCanSend={activeCharacterChatModelUsability?.canSend ?? null}
-      modelUsabilityDetail={characterChatModelUsabilityMessage}
+      modelUsabilityStatus={activeChatModelUsability?.status ?? null}
+      modelUsabilityCanSend={activeChatModelUsability?.canSend ?? null}
+      modelUsabilityDetail={activeChatModelUsabilityMessage}
       runtimeStatus={
         serverReadinessState === "blocked"
           ? "error"
           : streaming
             ? "streaming"
-            : activeCharacterChatModelUsability?.status === "loading"
+            : activeChatModelUsability?.status === "loading"
               ? "loading"
-            : characterChatModelUsabilityBlocks
+            : activeChatModelUsabilityBlocks
               ? "error"
               : serverReadinessState === "degraded"
                 ? "degraded"
                 : "ready"
       }
       runtimeStatusDetail={
-        characterChatReadinessCopy?.title ?? runtimeStatusDetail
+        activeChatModelUsabilityBlocks
+          ? activeChatModelUsabilityMessage ?? runtimeStatusDetail
+          : characterChatReadinessCopy?.title ?? runtimeStatusDetail
       }
       messageCount={cockpitMessageCount}
       threadSearchOpen={threadSearchOpen}
@@ -2886,9 +2891,9 @@ export const Playground = () => {
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
       serverBlocked={serverReadinessState === "blocked"}
-      modelUsabilityStatus={activeCharacterChatModelUsability?.status ?? null}
-      modelUsabilityCanSend={activeCharacterChatModelUsability?.canSend ?? null}
-      modelUsabilityMessage={characterChatModelUsabilityMessage}
+      modelUsabilityStatus={activeChatModelUsability?.status ?? null}
+      modelUsabilityCanSend={activeChatModelUsability?.canSend ?? null}
+      modelUsabilityMessage={activeChatModelUsabilityMessage}
       modelUnavailable={characterChatModelUnavailable}
       modelUnavailableMessage={
         characterChatModelUnavailable ? characterChatReadinessCopy?.title ?? null : null
@@ -3443,12 +3448,12 @@ export const Playground = () => {
                 }
                 onDraftPresenceChange={handleComposerDraftPresenceChange}
                 characterChatSendBlocker={characterChatSendBlocker}
-                characterChatModelUsability={activeCharacterChatModelUsability}
+                characterChatModelUsability={activeChatModelUsability}
                 characterChatModelUsabilityLabel={
-                  characterChatModelSelectorLabel
+                  activeChatModelSelectorLabel
                 }
                 characterChatModelUsabilityTitle={
-                  characterChatModelSelectorTitle
+                  activeChatModelSelectorTitle
                 }
               />
             </div>
