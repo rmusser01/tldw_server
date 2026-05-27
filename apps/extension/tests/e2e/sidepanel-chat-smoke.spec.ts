@@ -11,7 +11,9 @@ import {
 } from "./utils/connection"
 import { grantHostPermission } from "./utils/permissions"
 
-const EXT_PATH = path.resolve("build/chrome-mv3")
+const EXT_PATH = path.resolve(
+  process.env.TLDW_E2E_EXTENSION_PATH || "build/chrome-mv3"
+)
 const MODEL_ID = "mock-model"
 const MODEL_KEY = `tldw:${MODEL_ID}`
 
@@ -146,6 +148,92 @@ const ensureChatInput = async (page: Page) => {
 }
 
 test.describe("Sidepanel chat smoke", () => {
+  test("keeps the 390px sidepanel chat layout inside the viewport", async () => {
+    test.setTimeout(90000)
+    const { server, baseUrl } = await startChatMockServer()
+
+    const { context, page, openSidepanel, extensionId } =
+      (await launchWithExtensionOrSkip(test, EXT_PATH, {
+        seedConfig: {
+          __tldw_first_run_complete: true,
+          __tldw_allow_offline: true,
+          tldwConfig: {
+            serverUrl: baseUrl,
+            authMode: "single-user",
+            apiKey: "test-key"
+          }
+        }
+      })) as any
+
+    try {
+      const origin = new URL(baseUrl).origin + "/*"
+      const granted = await grantHostPermission(
+        context,
+        extensionId,
+        origin
+      )
+      test.skip(
+        !granted,
+        "Host permission not granted; allow it in chrome://extensions > tldw Assistant > Site access, then re-run."
+      )
+
+      await setSelectedModel(page, MODEL_KEY)
+
+      const sidepanel = await openSidepanel("/chat")
+      await sidepanel.setViewportSize({ width: 390, height: 780 })
+      await waitForConnectionStore(sidepanel, "sidepanel-chat:narrow-store")
+      await forceConnected(
+        sidepanel,
+        { serverUrl: baseUrl },
+        "sidepanel-chat:narrow-connected"
+      )
+
+      await ensureChatInput(sidepanel)
+      await expect(sidepanel.getByTestId("chat-main")).toBeVisible()
+      await expect(
+        sidepanel.getByRole("button", { name: /Send message|Queue request/i })
+      ).toBeVisible()
+
+      const metrics = await sidepanel.evaluate(() => {
+        const rectFor = (selector: string) => {
+          const node = document.querySelector(selector)
+          if (!node) return null
+          const rect = node.getBoundingClientRect()
+          return {
+            left: Math.round(rect.left),
+            right: Math.round(rect.right),
+            width: Math.round(rect.width)
+          }
+        }
+
+        return {
+          innerWidth: window.innerWidth,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+          workspace: rectFor('[data-testid="chat-workspace"]'),
+          main: rectFor('[data-testid="chat-main"]'),
+          messages: rectFor('[data-testid="chat-messages"]'),
+          input: rectFor('[data-testid="chat-input"]'),
+          send: rectFor(
+            '[data-testid="chat-send"], [aria-label="Send message"], [aria-label="Queue request"]'
+          )
+        }
+      })
+
+      expect(metrics.innerWidth).toBe(390)
+      expect(metrics.documentScrollWidth).toBeLessThanOrEqual(390)
+      expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(390)
+      expect(metrics.workspace?.width).toBeLessThanOrEqual(390)
+      expect(metrics.main?.right).toBeLessThanOrEqual(390)
+      expect(metrics.messages?.right).toBeLessThanOrEqual(390)
+      expect(metrics.input?.right).toBeLessThanOrEqual(390)
+      expect(metrics.send?.right).toBeLessThanOrEqual(390)
+    } finally {
+      await context.close()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
   test("sends and renders a reply", async () => {
     test.setTimeout(90000)
     const { server, baseUrl } = await startChatMockServer()

@@ -2697,13 +2697,13 @@ export const SidepanelForm = ({
     <React.Profiler id="sidepanel-form-root" onRender={onComposerRenderProfile}>
       <div
         ref={formContainerRef}
-        className={`flex w-full flex-col items-center ${composerPadding}`}>
+        className={`flex w-full min-w-0 flex-col items-center ${composerPadding}`}>
       <div
-        className={`relative z-10 flex w-full flex-col items-center justify-center ${composerGap} text-body`}>
-        <div className="relative flex w-full flex-row justify-center gap-2">
+        className={`relative z-10 flex w-full min-w-0 flex-col items-center justify-center ${composerGap} text-body`}>
+        <div className="relative flex w-full min-w-0 flex-row justify-center gap-2">
           <div
             aria-disabled={!isConnectionReady}
-            className={`relative w-full max-w-[64rem] rounded-3xl border border-border/80 bg-surface/95 shadow-card backdrop-blur-lg duration-100 ${cardPadding}`}>
+            className={`relative w-full min-w-0 max-w-[64rem] rounded-3xl border border-border/80 bg-surface/95 shadow-card backdrop-blur-lg duration-100 ${cardPadding}`}>
             <div>
               {/* Inline Model Parameters Panel (Pro mode only) */}
               {wrapComposerProfile(
@@ -2719,7 +2719,8 @@ export const SidepanelForm = ({
                     event.preventDefault()
                     void submitForm()
                   }}
-                  className="shrink-0 flex-grow  flex flex-col items-center ">
+                  className="min-w-0 flex-1 flex flex-col items-center"
+                >
                   <input
                     id="file-upload"
                     name="file-upload"
@@ -2746,7 +2747,7 @@ export const SidepanelForm = ({
                     onChange={handleContextFileChange}
                   />
                   <div
-                    className={`w-full flex flex-col px-1 ${
+                    className={`flex w-full min-w-0 flex-col px-1 ${
                       !isConnectionReady
                         ? "rounded-md border border-dashed border-warn bg-warn/10"
                         : ""
@@ -2818,10 +2819,10 @@ export const SidepanelForm = ({
                     )}
                     {(() => {
                       const composerTextareaShellNode = (
-                        <div className="relative">
+                        <div className="relative min-w-0">
                       {wrapComposerProfile(
                         "sidepanel-textarea-shell",
-                        <div className="relative rounded-2xl border border-border/70 bg-surface/80 px-1 py-1.5 transition focus-within:border-focus/60 focus-within:ring-2 focus-within:ring-focus/30">
+                        <div className="relative min-w-0 rounded-2xl border border-border/70 bg-surface/80 px-1 py-1.5 transition focus-within:border-focus/60 focus-within:ring-2 focus-within:ring-focus/30">
                           <SlashCommandMenu
                             open={showSlashMenu}
                             commands={filteredSlashCommands}
@@ -2964,7 +2965,7 @@ export const SidepanelForm = ({
                       )
 
                       const composerControlAreaNode = (
-                        <div className="mt-2 flex flex-col gap-2">
+                        <div className="mt-2 flex min-w-0 flex-col gap-2">
                       <Tooltip title={persistenceTooltip}>
                         <div className="flex items-center gap-2">
                           <Switch
@@ -2981,7 +2982,7 @@ export const SidepanelForm = ({
                           </span>
                         </div>
                       </Tooltip>
-                      <div className="flex w-full flex-row items-center justify-between gap-1.5">
+                      <div className="flex w-full min-w-0 flex-row flex-wrap items-center justify-between gap-1.5">
                       {isProMode ? (
                         <>
                           {/* Control Row - contains Prompt, Model, RAG, and More tools */}
@@ -3017,14 +3018,14 @@ export const SidepanelForm = ({
                               runningToolCount={chatLoopState.inflightToolCallIds.length}
                             />
                           )}
-                          <div className="flex flex-wrap items-center justify-end gap-2">
+                          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
                             <div
                               role="group"
                               aria-label={t(
                                 "playground:composer.actions",
                                 "Send options"
                               )}
-                              className="flex items-center gap-2">
+                              className="flex min-w-0 flex-wrap items-center gap-2">
                               {/* L15: gap-2 provides visual separation */}
                               <>
                                 {!streaming ? (

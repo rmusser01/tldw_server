@@ -2270,7 +2270,10 @@ const SidepanelChat = () => {
   const closeArtifacts = useArtifactsStore((state) => state.closeArtifact)
 
   return (
-    <div className="flex h-dvh w-full" data-testid="chat-workspace">
+    <div
+      className="flex h-dvh w-full min-w-0 overflow-x-hidden"
+      data-testid="chat-workspace"
+    >
       {isSidebarVisible && (
         <Suspense fallback={null}>
           <LazySidepanelChatSidebar
@@ -2298,7 +2301,10 @@ const SidepanelChat = () => {
           aria-hidden="true"
         />
       )}
-      <main className="relative flex h-dvh flex-1 flex-col bg-bg" data-testid="chat-main">
+      <main
+        className="relative flex h-dvh min-w-0 flex-1 flex-col overflow-x-hidden bg-bg"
+        data-testid="chat-main"
+      >
         <div className="relative z-20 w-full">
           <SidepanelHeaderSimple
             sidebarOpen={sidebarOpen}
@@ -2311,7 +2317,7 @@ const SidepanelChat = () => {
         <div
           ref={drop}
           data-testid="chat-dropzone"
-          className={`relative flex min-h-0 flex-1 flex-col items-center bg-bg ${
+          className={`relative flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-x-hidden bg-bg ${
             dropState === "dragging" ? "bg-surface2" : ""
           }`}
           style={
@@ -2366,7 +2372,7 @@ const SidepanelChat = () => {
             aria-relevant="additions"
             aria-label={t("playground:aria.chatTranscript", "Chat messages")}
             data-testid="chat-messages"
-            className={`custom-scrollbar relative z-10 flex flex-1 w-full flex-col items-center overflow-x-hidden overflow-y-auto ${messagePadding}`}
+            className={`custom-scrollbar relative z-10 flex min-w-0 flex-1 w-full flex-col items-center overflow-x-hidden overflow-y-auto ${messagePadding}`}
             style={
               {
                 "--composer-padding": composerPadding,
@@ -2518,7 +2524,7 @@ const SidepanelChat = () => {
               />
             )}
             {!stickyChatInput && (
-              <div className="w-full pt-4 pb-6">
+              <div className="w-full min-w-0 pt-4 pb-6">
                 <SidepanelForm
                   key={activeTabId || "sidepanel-chat"}
                   dropedFile={dropedFile}
@@ -2547,7 +2553,7 @@ const SidepanelChat = () => {
           )}
           {stickyChatInput && (
             <div
-              className="absolute bottom-0 w-full z-10"
+              className="absolute bottom-0 left-0 right-0 z-10 w-full min-w-0"
               style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
             >
               <SidepanelForm

@@ -784,7 +784,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   )
 
   return (
-    <div data-testid="control-row" className="flex items-center gap-2 flex-wrap">
+    <div data-testid="control-row" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         {rolePlayActive && (
           <div
             data-testid="sidepanel-character-chat-chip"
