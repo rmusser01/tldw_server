@@ -15,6 +15,7 @@ documentation:
 modified_files:
 - apps/packages/ui/src/routes/sidepanel-flashcards.tsx
 - apps/packages/ui/src/routes/__tests__/sidepanel-flashcards.test.tsx
+- apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts
 - Flashcards-UX-Fix-List.md
 - apps/extension/docs/features/flashcards.md
 - Docs/User_Guides/WebUI_Extension/Flashcards_Study_Guide.md
@@ -24,6 +25,7 @@ modified_files:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Add a compact native flashcard review loop to the extension sidepanel so users can review due cards without opening the full Flashcards workspace.
 
 <!-- SECTION:DESCRIPTION:END -->
 
@@ -52,13 +54,20 @@ Implementation added a compact sidepanel review panel instead of duplicating ful
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented a compact native sidepanel review loop for F12. The sidepanel now exposes Review due card, reuses the existing next-review query and review mutation, lets users select a deck, reveal a due card, submit Again/Hard/Good/Easy ratings, refetch the next due card, and see inline session progress. Rating failures keep the current card and answer visible with recovery copy, and rapid duplicate rating clicks are guarded synchronously. Updated the master UX fix list plus extension/user docs to remove the deferred in-sidepanel review claim and keep richer review controls scoped to full Flashcards.
+Implemented a compact native sidepanel review loop for F12. The sidepanel now exposes Review due card, reuses the existing next-review query and review mutation, lets users select a deck, reveal a due card, submit Again/Hard/Good/Easy ratings, and see inline session progress. Rating failures keep the current card and answer visible with recovery copy, rapid duplicate rating clicks are guarded synchronously, successful ratings hide the already-rated card while invalidation-driven next-card loading advances, and next-card loading failures show distinct retry UI without allowing duplicate re-rating. Updated the master UX fix list plus extension/user docs to remove the deferred in-sidepanel review claim and keep richer review controls scoped to full Flashcards.
+
+PR review fixes:
+- Added `refetchOnWindowFocus` support for review queries and disabled it in the sidepanel review panel.
+- Switched sidepanel review loading display to initial `isLoading` only so background refetches do not blank the active card.
+- Removed the normal explicit post-submit `reviewQuery.refetch()` path to avoid redundant next-card fetches; retry still uses `refetch` after an advance failure.
+- Logged review submission and retry-load errors with safe card/rating context.
+- Added all-four rating mapping tests, next-card-load failure tests, and backlog/doc copy fixes requested on PR #2083.
 
 Verification:
 - RED: `bunx vitest run src/routes/__tests__/sidepanel-flashcards.test.tsx` failed on the missing Review due card action after dependency install.
 - RED duplicate guard: `bunx vitest run src/routes/__tests__/sidepanel-flashcards.test.tsx -t "ignores duplicate sidepanel review ratings"` failed with two mutation calls before the synchronous guard.
-- GREEN focused: `bunx vitest run src/routes/__tests__/sidepanel-flashcards.test.tsx` passed 39 tests.
-- Related regression: `bunx vitest run src/components/Flashcards/hooks/__tests__/useFlashcardQueries.review-next.test.tsx src/routes/__tests__/sidepanel-flashcards.test.tsx src/routes/__tests__/route-registry.sidepanel-flashcards.test.ts` passed 49 tests.
+- GREEN focused after review fixes: `bunx vitest run src/routes/__tests__/sidepanel-flashcards.test.tsx` passed 44 tests.
+- Related regression after review fixes: `bunx vitest run src/components/Flashcards/hooks/__tests__/useFlashcardQueries.review-next.test.tsx src/routes/__tests__/sidepanel-flashcards.test.tsx src/routes/__tests__/route-registry.sidepanel-flashcards.test.ts` passed 54 tests.
 - Typecheck: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still fails on unrelated baseline `CharacterListContent.design-system.test.tsx(35,3)` (`"comfortable"` not assignable to `GalleryCardDensity`).
 - Diff hygiene: `git diff --check` passed.
 - Bandit: not applicable; no Python files touched.

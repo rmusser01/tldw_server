@@ -86,11 +86,11 @@
 
 - [x] **Step 1: Focused tests**
   Run: `bunx vitest run src/routes/__tests__/sidepanel-flashcards.test.tsx`
-  Result: PASS, 39 tests.
+  Result: PASS, 44 tests after PR review fixes.
 
 - [x] **Step 2: Related regression tests**
   Run: `bunx vitest run src/components/Flashcards/hooks/__tests__/useFlashcardQueries.review-next.test.tsx src/routes/__tests__/sidepanel-flashcards.test.tsx src/routes/__tests__/route-registry.sidepanel-flashcards.test.ts`
-  Result: PASS, 49 tests.
+  Result: PASS, 54 tests after PR review fixes.
 
 - [x] **Step 3: Typecheck**
   Run: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false`

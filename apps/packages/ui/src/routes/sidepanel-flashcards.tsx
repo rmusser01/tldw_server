@@ -88,6 +88,9 @@ export default function SidepanelFlashcards() {
   const [reviewAnswerRevealed, setReviewAnswerRevealed] =
     React.useState(false)
   const [sidepanelReviewedCount, setSidepanelReviewedCount] = React.useState(0)
+  const [submittedReviewUuid, setSubmittedReviewUuid] = React.useState<
+    string | null
+  >(null)
   const reviewAnswerStartRef = React.useRef<number | null>(null)
   const reviewSubmitInFlightRef = React.useRef(false)
   const [templateDraftId, setTemplateDraftId] = React.useState<string | null>(
@@ -122,10 +125,20 @@ export default function SidepanelFlashcards() {
     decks.length === 0
   const hasDeck = selectedDeckId != null && hasSelectableDecks
   const reviewQuery = useReviewQuery(selectedDeckId, {
-    enabled: reviewOpen && hasDeck
+    enabled: reviewOpen && hasDeck,
+    refetchOnWindowFocus: false
   })
   const reviewCard = reviewQuery.data ?? null
-  const isReviewLoading = reviewQuery.isLoading || reviewQuery.isFetching
+  const isReviewLoading = reviewQuery.isLoading
+  const isReviewFetching = reviewQuery.isFetching
+  const isReviewSubmitting = reviewFlashcardMutation.isPending
+  const submitReviewFlashcard = reviewFlashcardMutation.mutateAsync
+  const refetchReviewCard = reviewQuery.refetch
+  const reviewCardUuid = reviewCard?.uuid ?? null
+  const isReviewAdvancePending =
+    submittedReviewUuid != null && reviewCardUuid === submittedReviewUuid
+  const isReviewAdvanceFailed =
+    submittedReviewUuid != null && reviewQuery.isError
 
   const sidepanelRatingOptions = React.useMemo(
     () => [
@@ -163,6 +176,22 @@ export default function SidepanelFlashcards() {
     setReviewAnswerRevealed(false)
     reviewAnswerStartRef.current = null
   }, [reviewCard?.uuid, selectedDeckId])
+
+  React.useEffect(() => {
+    if (submittedReviewUuid == null) return
+    if (reviewCardUuid != null && reviewCardUuid !== submittedReviewUuid) {
+      setSubmittedReviewUuid(null)
+      return
+    }
+    if (!reviewCardUuid && !isReviewFetching && !reviewQuery.isError) {
+      setSubmittedReviewUuid(null)
+    }
+  }, [
+    isReviewFetching,
+    reviewCardUuid,
+    reviewQuery.isError,
+    submittedReviewUuid
+  ])
 
   const openOptionsHashRoute = React.useCallback(async (route: string) => {
     setCaptureError(null)
@@ -567,6 +596,7 @@ export default function SidepanelFlashcards() {
     setCaptureError(null)
     setSaveStatus(null)
     setReviewAnswerRevealed(false)
+    setSubmittedReviewUuid(null)
     reviewAnswerStartRef.current = null
     if (!reviewOpen) {
       setSidepanelReviewedCount(0)
@@ -584,8 +614,9 @@ export default function SidepanelFlashcards() {
   const handleSubmitSidepanelReview = React.useCallback(
     async (rating: number) => {
       if (
-        !reviewCard ||
-        reviewFlashcardMutation.isPending ||
+        !reviewCardUuid ||
+        isReviewSubmitting ||
+        submittedReviewUuid === reviewCardUuid ||
         reviewSubmitInFlightRef.current
       ) {
         return
@@ -598,21 +629,17 @@ export default function SidepanelFlashcards() {
           : Math.max(0, Date.now() - reviewAnswerStartRef.current)
 
       try {
-        await reviewFlashcardMutation.mutateAsync({
-          cardUuid: reviewCard.uuid,
+        await submitReviewFlashcard({
+          cardUuid: reviewCardUuid,
           rating,
           answerTimeMs
         })
-        const nextReviewedCount = sidepanelReviewedCount + 1
-        setSidepanelReviewedCount(nextReviewedCount)
-        setSaveStatus({
-          type: "success",
-          message: formatSidepanelReviewProgress(nextReviewedCount)
+      } catch (error) {
+        console.error("Failed to submit sidepanel flashcard review:", {
+          cardUuid: reviewCardUuid,
+          rating,
+          error
         })
-        setReviewAnswerRevealed(false)
-        reviewAnswerStartRef.current = null
-        await reviewQuery.refetch()
-      } catch {
         setSaveStatus({
           type: "error",
           message: t(
@@ -620,19 +647,58 @@ export default function SidepanelFlashcards() {
             "Could not submit review. Check your connection and try again."
           )
         })
+        return
       } finally {
         reviewSubmitInFlightRef.current = false
       }
+
+      const nextReviewedCount = sidepanelReviewedCount + 1
+      setSidepanelReviewedCount(nextReviewedCount)
+      setSubmittedReviewUuid(reviewCardUuid)
+      setSaveStatus({
+        type: "success",
+        message: formatSidepanelReviewProgress(nextReviewedCount)
+      })
+      setReviewAnswerRevealed(false)
+      reviewAnswerStartRef.current = null
     },
     [
       formatSidepanelReviewProgress,
-      reviewCard,
-      reviewFlashcardMutation,
-      reviewQuery,
+      isReviewSubmitting,
+      reviewCardUuid,
       sidepanelReviewedCount,
+      submitReviewFlashcard,
+      submittedReviewUuid,
       t
     ]
   )
+
+  const handleRetryLoadReviewCard = React.useCallback(async () => {
+    setCaptureError(null)
+    setSaveStatus(null)
+    try {
+      const result = await refetchReviewCard()
+      if (result.error) {
+        throw result.error
+      }
+      const nextCard = result.data ?? null
+      if (!nextCard || nextCard.uuid !== submittedReviewUuid) {
+        setSubmittedReviewUuid(null)
+      }
+    } catch (error) {
+      console.error("Failed to retry sidepanel flashcard review load:", {
+        cardUuid: submittedReviewUuid,
+        error
+      })
+      setSaveStatus({
+        type: "error",
+        message: t(
+          "sidepanel:flashcards.sidepanelReviewAdvanceFailed",
+          "Review saved, but could not load the next card. Try again."
+        )
+      })
+    }
+  }, [refetchReviewCard, submittedReviewUuid, t])
 
   const handleCloseTemplateDraft = React.useCallback(() => {
     setTemplateDraftId(null)
@@ -907,7 +973,7 @@ export default function SidepanelFlashcards() {
               aria-label={t("sidepanel:flashcards.reviewDeckLabel", "Review deck")}
               loading={decksLoading}
               disabled={
-                !hasSelectableDecks || reviewFlashcardMutation.isPending
+                !hasSelectableDecks || isReviewSubmitting
               }
               placeholder={t(
                 "sidepanel:flashcards.deckPlaceholder",
@@ -944,6 +1010,28 @@ export default function SidepanelFlashcards() {
               {t(
                 "sidepanel:flashcards.noDecks",
                 "Create a deck in full Flashcards before saving here."
+              )}
+            </Text>
+          ) : isReviewAdvanceFailed ? (
+            <div className="flex flex-col gap-2" role="status">
+              <Text type="warning">
+                {t(
+                  "sidepanel:flashcards.sidepanelReviewAdvanceFailed",
+                  "Review saved, but could not load the next card. Try again."
+                )}
+              </Text>
+              <Button onClick={() => void handleRetryLoadReviewCard()}>
+                {t(
+                  "sidepanel:flashcards.retryLoadNextReviewCard",
+                  "Retry loading next card"
+                )}
+              </Button>
+            </div>
+          ) : isReviewAdvancePending ? (
+            <Text type="secondary" className="text-xs" role="status">
+              {t(
+                "sidepanel:flashcards.sidepanelReviewAdvanceLoading",
+                "Review saved. Loading next card..."
               )}
             </Text>
           ) : reviewQuery.isError ? (
@@ -991,8 +1079,8 @@ export default function SidepanelFlashcards() {
                     {sidepanelRatingOptions.map((option) => (
                       <Button
                         key={option.value}
-                        loading={reviewFlashcardMutation.isPending}
-                        disabled={reviewFlashcardMutation.isPending}
+                        loading={isReviewSubmitting}
+                        disabled={isReviewSubmitting}
                         onClick={() =>
                           void handleSubmitSidepanelReview(option.value)
                         }
@@ -1006,7 +1094,7 @@ export default function SidepanelFlashcards() {
                 <Button
                   type="primary"
                   block
-                  disabled={reviewFlashcardMutation.isPending}
+                  disabled={isReviewSubmitting}
                   onClick={handleRevealReviewAnswer}
                 >
                   {t("sidepanel:flashcards.revealAnswer", "Reveal answer")}

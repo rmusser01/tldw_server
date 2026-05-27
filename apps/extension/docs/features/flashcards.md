@@ -6,7 +6,7 @@ title: Flashcards (Experimental)
 
 The Flashcards page lets you create, review, and manage spaced-repetition cards backed by your tldw_server. It also supports CSV/TSV import and export, plus optional .apkg export where supported by the server.
 
-Access it from the Web UI header by clicking the Layers icon, or navigate to `/flashcards`. In the extension sidepanel, the Flashcards entry opens a compact flashcards tool with actions for the full Flashcards workspace, selected-text card creation, native generated drafts, native template application, compact due-card review, and selected-text generation handoff.
+Access it from the Web UI header by clicking the Layers icon, or navigate to `/flashcards`. In the extension sidepanel, the Flashcards entry opens a compact flashcards tool with actions for the full Flashcards workspace, selected-text card creation, natively generated drafts, native template application, compact due-card review, and selected-text generation handoff.
 
 ## Prerequisites
 

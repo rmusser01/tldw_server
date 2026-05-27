@@ -145,6 +145,7 @@ vi.mock("react-i18next", () => ({
 describe("sidepanel flashcards route", () => {
   let currentTemplates: TemplateFixture[]
   let currentReviewCard: ReviewCardFixture | null
+  let reviewQueryError: boolean
   let reviewRefetchMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
@@ -159,6 +160,7 @@ describe("sidepanel flashcards route", () => {
     flashcardMocks.reviewFlashcardMutateAsync.mockReset()
     flashcardMocks.useReviewQuery.mockReset()
     flashcardMocks.useFlashcardTemplatesQuery.mockReset()
+    reviewQueryError = false
     currentReviewCard = {
       uuid: "review-card-1",
       deck_id: 7,
@@ -307,7 +309,7 @@ describe("sidepanel flashcards route", () => {
       data: currentReviewCard,
       isLoading: false,
       isFetching: false,
-      isError: false,
+      isError: reviewQueryError,
       refetch: reviewRefetchMock
     }))
     flashcardMocks.useFlashcardTemplatesQuery.mockImplementation(() => ({
@@ -379,6 +381,13 @@ describe("sidepanel flashcards route", () => {
     await user.click(screen.getByRole("button", { name: "Review due card" }))
 
     expect(screen.getByRole("heading", { name: "Review due card" })).toBeInTheDocument()
+    expect(flashcardMocks.useReviewQuery).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({
+        enabled: true,
+        refetchOnWindowFocus: false
+      })
+    )
     expect(screen.getByTestId("sidepanel-flashcards-review-deck-select")).toHaveTextContent(
       "Biology"
     )
@@ -402,9 +411,35 @@ describe("sidepanel flashcards route", () => {
       rating: 3,
       answerTimeMs: expect.any(Number)
     })
-    expect(reviewRefetchMock).toHaveBeenCalledTimes(1)
+    expect(reviewRefetchMock).not.toHaveBeenCalled()
     expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
     expect(screen.getByText("Reviewed 1 card in this sidepanel session.")).toBeInTheDocument()
+    expect(screen.getByText("Review saved. Loading next card...")).toBeInTheDocument()
+  })
+
+  it.each([
+    { label: "Again", rating: 0 },
+    { label: "Hard", rating: 2 },
+    { label: "Good", rating: 3 },
+    { label: "Easy", rating: 5 }
+  ])("submits $label with the correct rating value", async ({ label, rating }) => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(screen.getByRole("button", { name: "Review due card" }))
+    await user.click(screen.getByRole("button", { name: "Reveal answer" }))
+    await user.click(screen.getByRole("button", { name: label }))
+
+    await waitFor(() => {
+      expect(flashcardMocks.reviewFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(flashcardMocks.reviewFlashcardMutateAsync).toHaveBeenCalledWith({
+      cardUuid: "review-card-1",
+      rating,
+      answerTimeMs: expect.any(Number)
+    })
+    expect(reviewRefetchMock).not.toHaveBeenCalled()
+    expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
   })
 
   it("shows caught-up guidance when no sidepanel review card is due", async () => {
@@ -422,6 +457,9 @@ describe("sidepanel flashcards route", () => {
   })
 
   it("keeps the review card visible when sidepanel rating submit fails", async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined)
     flashcardMocks.reviewFlashcardMutateAsync.mockRejectedValueOnce(
       new Error("review failed")
     )
@@ -441,6 +479,53 @@ describe("sidepanel flashcards route", () => {
     expect(
       screen.getByText("ATP stores and transfers cellular energy.")
     ).toBeInTheDocument()
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Failed to submit sidepanel flashcard review:",
+      expect.objectContaining({
+        cardUuid: "review-card-1",
+        rating: 3,
+        error: expect.any(Error)
+      })
+    )
+  })
+
+  it("keeps a saved review from being rated again when next-card loading fails", async () => {
+    flashcardMocks.reviewFlashcardMutateAsync.mockImplementation(async () => {
+      reviewQueryError = true
+      return {
+        uuid: "review-card-1",
+        ef: 2.5,
+        interval_days: 1,
+        repetitions: 1,
+        lapses: 0,
+        version: 2,
+        scheduler_type: "sm2_plus",
+        queue_state: "review",
+        next_intervals: {
+          again: "< 1 min",
+          hard: "< 10 min",
+          good: "1 day",
+          easy: "4 days"
+        }
+      }
+    })
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(screen.getByRole("button", { name: "Review due card" }))
+    await user.click(screen.getByRole("button", { name: "Reveal answer" }))
+    await user.click(screen.getByRole("button", { name: "Good" }))
+
+    expect(
+      await screen.findByText(
+        "Review saved, but could not load the next card. Try again."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Retry loading next card" })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Good" })).not.toBeInTheDocument()
+    expect(flashcardMocks.reviewFlashcardMutateAsync).toHaveBeenCalledTimes(1)
   })
 
   it("ignores duplicate sidepanel review ratings before disabled state rerenders", async () => {
