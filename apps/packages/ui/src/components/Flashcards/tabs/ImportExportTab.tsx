@@ -134,7 +134,7 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
   }, [lastTransferAction, t])
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <Card
         title={t("option:flashcards.transferTaskSwitcherTitle", {
           defaultValue: "Task"
@@ -206,7 +206,6 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
         </div>
       </Card>
       <section
-        hidden={activeTask !== "create"}
         className={
           activeTask === "create" ? "grid gap-4 grid-cols-1 xl:grid-cols-2" : "hidden"
         }
@@ -239,7 +238,10 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
           <ImageOcclusionTransferPanel onTransferAction={handleTransferAction} />
         </Card>
       </section>
-      <section hidden={activeTask !== "import"} data-testid="flashcards-import-task-panel">
+      <section
+        className={activeTask === "import" ? "" : "hidden"}
+        data-testid="flashcards-import-task-panel"
+      >
         <Card
           title={t("option:flashcards.importTitle", {
             defaultValue: "Import Flashcards"
@@ -248,7 +250,10 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
           <ImportPanel onTransferAction={handleTransferAction} />
         </Card>
       </section>
-      <section hidden={activeTask !== "export"} data-testid="flashcards-export-task-panel">
+      <section
+        className={activeTask === "export" ? "" : "hidden"}
+        data-testid="flashcards-export-task-panel"
+      >
         <Card
           title={t("option:flashcards.exportTitle", {
             defaultValue: "Export Flashcards"

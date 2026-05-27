@@ -125,8 +125,9 @@ describe("ImportExportTab decomposition", () => {
     expect(taskSwitcher).toHaveTextContent("Import file")
     expect(taskSwitcher).toHaveTextContent("Export backup")
     expect(screen.getByTestId("flashcards-create-task-panel")).toBeVisible()
-    expect(screen.getByTestId("flashcards-import-task-panel")).not.toBeVisible()
-    expect(screen.getByTestId("flashcards-export-task-panel")).not.toBeVisible()
+    expect(screen.getByTestId("flashcards-create-task-panel")).not.toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-import-task-panel")).toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-export-task-panel")).toHaveClass("hidden")
     expect(screen.getByTestId("mock-study-pack-panel")).toBeVisible()
     expect(screen.getByTestId("mock-generate-panel")).toBeVisible()
     expect(screen.getByTestId("mock-image-occlusion-panel")).toBeVisible()
@@ -142,15 +143,15 @@ describe("ImportExportTab decomposition", () => {
 
     await user.click(screen.getByText("Import file"))
     expect(screen.getByTestId("flashcards-import-task-panel")).toBeVisible()
-    expect(screen.getByTestId("flashcards-create-task-panel")).not.toBeVisible()
+    expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass("hidden")
     expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
-    expect(screen.getByTestId("flashcards-export-task-panel")).not.toBeVisible()
+    expect(screen.getByTestId("flashcards-export-task-panel")).toHaveClass("hidden")
 
     await user.click(screen.getByText("Export backup"))
     expect(screen.getByTestId("flashcards-export-task-panel")).toBeVisible()
-    expect(screen.getByTestId("flashcards-create-task-panel")).not.toBeVisible()
+    expect(screen.getByTestId("flashcards-export-task-panel")).not.toHaveClass("hidden")
     expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
-    expect(screen.getByTestId("flashcards-import-task-panel")).not.toBeVisible()
+    expect(screen.getByTestId("flashcards-import-task-panel")).toHaveClass("hidden")
   })
 
   it("opens the export task when a deck export handoff is present", () => {
@@ -161,7 +162,8 @@ describe("ImportExportTab decomposition", () => {
     render(<ImportExportTab initialExportDeckId={42} initialExportDeckHandoffKey="deck-42" />)
 
     expect(screen.getByTestId("flashcards-export-task-panel")).toBeVisible()
-    expect(screen.getByTestId("flashcards-create-task-panel")).not.toBeVisible()
+    expect(screen.getByTestId("flashcards-export-task-panel")).not.toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
     expect(screen.getByTestId("mock-export-panel")).toHaveAttribute(
       "data-initial-deck-id",
       "42"
@@ -184,7 +186,8 @@ describe("ImportExportTab decomposition", () => {
     )
 
     expect(screen.getByTestId("flashcards-create-task-panel")).toBeVisible()
-    expect(screen.getByTestId("flashcards-export-task-panel")).not.toBeVisible()
+    expect(screen.getByTestId("flashcards-create-task-panel")).not.toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-export-task-panel")).toHaveClass("hidden")
     expect(screen.getByTestId("mock-generate-panel")).toHaveAttribute(
       "data-initial-text",
       "Selected page notes"
