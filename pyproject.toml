@@ -514,7 +514,7 @@ include-package-data = false
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["tldw_Server_API", "tldw_Server_API.*"]
+include = ["tldw_Server_API", "tldw_Server_API.*", "mcp_unified", "mcp_unified.*"]
 namespaces = false
 exclude = [
   "tests*",

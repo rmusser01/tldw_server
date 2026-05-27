@@ -1,6 +1,12 @@
-"""Compatibility re-exports for MCP Unified runtime interfaces."""
+"""Host-neutral MCP Unified interface contracts."""
 
-from mcp_unified.interfaces.runtime import (
+from .policy import (
+    ApprovalEvaluator,
+    EffectivePolicyResolver,
+    ExternalAccessEvaluator,
+    PathScopeEnforcer,
+)
+from .runtime import (
     ApiKeyScopeNormalizer,
     CircuitBreakerFactory,
     DatabasePathResolver,
@@ -12,14 +18,22 @@ from mcp_unified.interfaces.runtime import (
     RedisClientFactory,
     TelemetryProvider,
 )
+from .storage import AuditStore, ExternalRegistryStore, ProfileStore
 
 __all__ = [
     "ApiKeyScopeNormalizer",
+    "ApprovalEvaluator",
+    "AuditStore",
     "CircuitBreakerFactory",
     "DatabasePathResolver",
+    "EffectivePolicyResolver",
+    "ExternalAccessEvaluator",
+    "ExternalRegistryStore",
     "MCPRuntimeDependencies",
     "MetricsCollector",
     "ModuleRegistry",
+    "PathScopeEnforcer",
+    "ProfileStore",
     "RateLimiter",
     "RbacPolicy",
     "RedisClientFactory",
