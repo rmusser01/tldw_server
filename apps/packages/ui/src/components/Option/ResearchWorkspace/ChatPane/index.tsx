@@ -116,8 +116,13 @@ type SourceFolderMembershipRecord = {
   folderId: string
 }
 
-const getChatWorkspaceSourceStatus = (source: WorkspaceSource) =>
-  source.status || "ready"
+const getChatWorkspaceSourceStatus = (
+  source: WorkspaceSource,
+  statusGuardrailsEnabled = true
+) => {
+  if (!statusGuardrailsEnabled) return source.status || "ready"
+  return source.status || "processing"
+}
 
 const collectSelectedFolderSourceIds = (
   selectedFolderIds: string[],
@@ -131,18 +136,22 @@ const collectSelectedFolderSourceIds = (
   for (const folder of sourceFolders) {
     const parentFolderId = folder.parentFolderId
     if (!parentFolderId || parentFolderId === folder.id) continue
-    childFolderIdsByParent.set(parentFolderId, [
-      ...(childFolderIdsByParent.get(parentFolderId) || []),
-      folder.id
-    ])
+    let children = childFolderIdsByParent.get(parentFolderId)
+    if (!children) {
+      children = []
+      childFolderIdsByParent.set(parentFolderId, children)
+    }
+    children.push(folder.id)
   }
 
   const sourceIdsByFolder = new Map<string, string[]>()
   for (const membership of sourceFolderMemberships) {
-    sourceIdsByFolder.set(membership.folderId, [
-      ...(sourceIdsByFolder.get(membership.folderId) || []),
-      membership.sourceId
-    ])
+    let sourceIds = sourceIdsByFolder.get(membership.folderId)
+    if (!sourceIds) {
+      sourceIds = []
+      sourceIdsByFolder.set(membership.folderId, sourceIds)
+    }
+    sourceIds.push(membership.sourceId)
   }
 
   const visitedFolderIds = new Set<string>()
@@ -162,31 +171,6 @@ const collectSelectedFolderSourceIds = (
   }
 
   return selectedSourceIds
-}
-
-const useEffectiveSelectedSources = (): WorkspaceSource[] => {
-  const selectedSourceIds = useWorkspaceStore((s) => s.selectedSourceIds)
-  const selectedSourceFolderIds =
-    useWorkspaceStore((s) => s.selectedSourceFolderIds) ?? EMPTY_STRING_ARRAY
-  const sources = useWorkspaceStore((s) => s.sources)
-  const getSelectedSources = useWorkspaceStore((s) => s.getSelectedSources)
-  const getEffectiveSelectedSources = useWorkspaceStore(
-    (s) => s.getEffectiveSelectedSources
-  )
-
-  return React.useMemo(
-    () =>
-      typeof getEffectiveSelectedSources === "function"
-        ? getEffectiveSelectedSources()
-        : getSelectedSources(),
-    [
-      getEffectiveSelectedSources,
-      getSelectedSources,
-      selectedSourceFolderIds,
-      selectedSourceIds,
-      sources
-    ]
-  )
 }
 
 const useSelectedSourceScopeSources = (): WorkspaceSource[] => {
@@ -239,18 +223,27 @@ const useSelectedSourceScopeSources = (): WorkspaceSource[] => {
   ])
 }
 
-const isQueryableWorkspaceSource = (source: WorkspaceSource): boolean =>
-  getChatWorkspaceSourceStatus(source) === "ready"
+const isQueryableWorkspaceSource = (
+  source: WorkspaceSource,
+  statusGuardrailsEnabled = true
+): boolean =>
+  getChatWorkspaceSourceStatus(source, statusGuardrailsEnabled) === "ready"
 
-const getSourceStatusLabel = (source: WorkspaceSource): string => {
-  const status = getChatWorkspaceSourceStatus(source)
+const getSourceStatusLabel = (
+  source: WorkspaceSource,
+  statusGuardrailsEnabled = true
+): string => {
+  const status = getChatWorkspaceSourceStatus(source, statusGuardrailsEnabled)
   if (status === "processing") return "Processing"
   if (status === "error") return "Failed"
   return "Queryable"
 }
 
-const getSourceTagColor = (source: WorkspaceSource): string => {
-  const status = getChatWorkspaceSourceStatus(source)
+const getSourceTagColor = (
+  source: WorkspaceSource,
+  statusGuardrailsEnabled = true
+): string => {
+  const status = getChatWorkspaceSourceStatus(source, statusGuardrailsEnabled)
   if (status === "processing") return "gold"
   if (status === "error") return "red"
   return "blue"
@@ -683,7 +676,9 @@ const buildRetrievalDiagnostics = (
 /**
  * ChatContextIndicator - Shows sources as horizontally scrollable tags
  */
-const ChatContextIndicator: React.FC = () => {
+const ChatContextIndicator: React.FC<{
+  statusGuardrailsEnabled?: boolean
+}> = ({ statusGuardrailsEnabled = true }) => {
   const { t } = useTranslation(["playground"])
   const selectedSourceIds = useWorkspaceStore((s) => s.selectedSourceIds)
   const selectedSourceFolderIds =
@@ -695,8 +690,11 @@ const ChatContextIndicator: React.FC = () => {
     [selectedSources]
   )
   const queryableSourceCount = React.useMemo(
-    () => selectedSources.filter(isQueryableWorkspaceSource).length,
-    [selectedSources]
+    () =>
+      selectedSources.filter((source) =>
+        isQueryableWorkspaceSource(source, statusGuardrailsEnabled)
+      ).length,
+    [selectedSources, statusGuardrailsEnabled]
   )
   const nonQueryableSourceCount = selectedSources.length - queryableSourceCount
   const partialScopeHint =
@@ -707,7 +705,8 @@ const ChatContextIndicator: React.FC = () => {
         )
       : t(
           "playground:chat.partialQueryableSourcesHintCount",
-          `Answers will use ${queryableSourceCount} queryable source(s); ${nonQueryableSourceCount} selected source(s) are still processing or failed.`
+          "Answers will use {{queryableSourceCount}} queryable source(s); {{nonQueryableSourceCount}} selected source(s) are still processing or failed.",
+          { queryableSourceCount, nonQueryableSourceCount }
         )
 
   React.useEffect(() => {
@@ -736,13 +735,13 @@ const ChatContextIndicator: React.FC = () => {
           {visibleSources.map((source) => (
             <Tooltip key={source.id} title={source.title}>
               <Tag
-                color={getSourceTagColor(source)}
+                color={getSourceTagColor(source, statusGuardrailsEnabled)}
                 className="shrink-0 cursor-default !m-0 max-w-[150px] truncate"
               >
                 <span>{source.title}</span>
-                {!isQueryableWorkspaceSource(source) && (
+                {!isQueryableWorkspaceSource(source, statusGuardrailsEnabled) && (
                   <span className="ml-1 opacity-80">
-                    {getSourceStatusLabel(source)}
+                    {getSourceStatusLabel(source, statusGuardrailsEnabled)}
                   </span>
                 )}
               </Tag>
@@ -1449,10 +1448,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const selectedSourceFolderIds =
     useWorkspaceStore((s) => s.selectedSourceFolderIds) ?? EMPTY_STRING_ARRAY
   const sources = useWorkspaceStore((s) => s.sources)
-  const getSelectedMediaIds = useWorkspaceStore((s) => s.getSelectedMediaIds)
-  const getEffectiveSelectedMediaIds = useWorkspaceStore(
-    (s) => s.getEffectiveSelectedMediaIds
-  )
   const setSelectedSourceIds = useWorkspaceStore((s) => s.setSelectedSourceIds)
   const focusSourceById = useWorkspaceStore((s) => s.focusSourceById)
   const focusSourceByMediaId = useWorkspaceStore((s) => s.focusSourceByMediaId)
@@ -1610,16 +1605,28 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     useSmartScroll(messages, streaming, 120)
 
   const sourceScopeSources = useSelectedSourceScopeSources()
-  const selectedSources = useEffectiveSelectedSources()
+  const queryableSelectedSources = React.useMemo(
+    () =>
+      sourceScopeSources.filter((source) =>
+        isQueryableWorkspaceSource(source, statusGuardrailsEnabled)
+      ),
+    [sourceScopeSources, statusGuardrailsEnabled]
+  )
   const effectiveSelectedSourceIds = React.useMemo(
-    () => selectedSources.map((source) => source.id),
-    [selectedSources]
+    () => queryableSelectedSources.map((source) => source.id),
+    [queryableSelectedSources]
+  )
+  const effectiveSelectedMediaIds = React.useMemo(
+    () => queryableSelectedSources.map((source) => source.mediaId),
+    [queryableSelectedSources]
   )
   const hasMessages = messages.length > 0
   const hasSelectedSources = sourceScopeSources.length > 0
-  const hasQueryableSelectedSources = selectedSources.length > 0
-  const nonQueryableSelectedSourceCount =
-    sourceScopeSources.length - selectedSources.length
+  const hasQueryableSelectedSources = queryableSelectedSources.length > 0
+  const nonQueryableSelectedSourceCount = Math.max(
+    0,
+    sourceScopeSources.length - queryableSelectedSources.length
+  )
   const sourceQueryabilityMessage =
     hasSelectedSources && !hasQueryableSelectedSources
       ? t(
@@ -1627,14 +1634,19 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           "Selected sources are not queryable yet. You can keep chatting generally while extraction and indexing finish."
         )
       : hasQueryableSelectedSources && nonQueryableSelectedSourceCount > 0
-        ? selectedSources.length === 1 && nonQueryableSelectedSourceCount === 1
+        ? queryableSelectedSources.length === 1 &&
+          nonQueryableSelectedSourceCount === 1
           ? t(
               "playground:chat.partialQueryableSourcesOneOne",
               "Grounded chat will use 1 queryable source. 1 selected source is still processing or failed."
             )
           : t(
               "playground:chat.partialQueryableSources",
-              `Grounded chat will use ${selectedSources.length} queryable source(s). ${nonQueryableSelectedSourceCount} selected source(s) are still processing or failed.`
+              "Grounded chat will use {{queryableSelectedSourceCount}} queryable source(s). {{nonQueryableSelectedSourceCount}} selected source(s) are still processing or failed.",
+              {
+                queryableSelectedSourceCount: queryableSelectedSources.length,
+                nonQueryableSelectedSourceCount
+              }
             )
         : null
 
@@ -1883,10 +1895,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   // Sync selected sources + user mode preference with RAG context
   React.useEffect(() => {
-    const mediaIds =
-      typeof getEffectiveSelectedMediaIds === "function"
-        ? getEffectiveSelectedMediaIds()
-        : getSelectedMediaIds()
+    const mediaIds = effectiveSelectedMediaIds
     const hasScopedMediaIds = mediaIds.length > 0
     const autoMode: ChatModePreference = hasScopedMediaIds ? "rag" : "normal"
     const resolvedMode = preferredChatMode ?? autoMode
@@ -1903,10 +1912,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       setFileRetrievalEnabled(false)
     }
   }, [
-    effectiveSelectedSourceIds,
+    effectiveSelectedMediaIds,
     preferredChatMode,
-    getEffectiveSelectedMediaIds,
-    getSelectedMediaIds,
     setChatMode,
     setFileRetrievalEnabled,
     setRagMediaIds
@@ -2007,7 +2014,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const buildFullSourceContextPrompt = React.useCallback(
     async (message: string): Promise<string> => {
-      if (!includeFullSourceContents || selectedSources.length === 0) {
+      if (!includeFullSourceContents || queryableSelectedSources.length === 0) {
         return message
       }
 
@@ -2015,7 +2022,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
       try {
         const detailResults = await Promise.allSettled(
-          selectedSources.map(async (source) => {
+          queryableSelectedSources.map(async (source) => {
             const detail = await tldwClient.getMediaDetails(source.mediaId, {
               include_content: true,
               include_versions: false,
@@ -2105,7 +2112,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         setPreparingSourceContext(false)
       }
     },
-    [includeFullSourceContents, messageApi, selectedSources, t]
+    [includeFullSourceContents, messageApi, queryableSelectedSources, t]
   )
 
   const handleSubmit = async (message: string): Promise<boolean> => {
@@ -2899,7 +2906,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       {messageContextHolder}
 
       {/* Context indicator */}
-      <ChatContextIndicator />
+      <ChatContextIndicator statusGuardrailsEnabled={statusGuardrailsEnabled} />
 
       {/* Connection banner */}
       {showConnectionBanner && (
@@ -3146,9 +3153,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               <div className="flex min-h-full flex-col justify-end">
                 <WorkspaceChatEmpty
                   hasSelectedSources={hasQueryableSelectedSources}
-                  sourceCount={selectedSources.length}
+                  sourceCount={queryableSelectedSources.length}
                   totalSourceCount={sources.length}
-                  selectedSourceTypes={selectedSources.map((source) => source.type)}
+                  selectedSourceTypes={queryableSelectedSources.map(
+                    (source) => source.type
+                  )}
                   isMobile={isMobile}
                   layoutMode={contentWidthMode}
                   onExamplePromptSelect={(prompt) => setSeededPrompt(prompt)}

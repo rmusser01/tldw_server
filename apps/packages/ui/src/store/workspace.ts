@@ -878,6 +878,8 @@ const hasResearchWorkspaceMigrationTombstone = (workspaceId: string): boolean =>
   )
 }
 
+const cleanedUpMigrationTombstoneWorkspaceIds = new Set<string>()
+
 const parseWorkspaceFeatureFlagCandidate = (
   candidate: unknown
 ): boolean | null => {
@@ -1556,10 +1558,13 @@ const writeSplitWorkspacePersistence = async (
 
   for (const workspaceStorageId of nextWorkspaceIds) {
     if (tombstonedWorkspaceIds.has(workspaceStorageId)) {
-      await removeWorkspaceLocalPersistenceForId(
-        workspaceStorageId,
-        indexedDbAdapter
-      )
+      if (!cleanedUpMigrationTombstoneWorkspaceIds.has(workspaceStorageId)) {
+        await removeWorkspaceLocalPersistenceForId(
+          workspaceStorageId,
+          indexedDbAdapter
+        )
+        cleanedUpMigrationTombstoneWorkspaceIds.add(workspaceStorageId)
+      }
       continue
     }
 

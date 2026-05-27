@@ -233,7 +233,7 @@ def test_workspace_context_combines_sources_readiness_capabilities_and_preview_r
         workspaces_endpoint,
         "collect_workspace_service_capabilities",
         _provider_ready_service_capabilities,
-        raising=False,
+        raising=True,
     )
     _install_overrides(workspace_preview_app, workspace_preview_db, _media_db())
     try:

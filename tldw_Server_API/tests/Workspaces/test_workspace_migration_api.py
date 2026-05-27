@@ -251,6 +251,44 @@ def test_workspace_migration_finalize_requires_all_chunks_and_enables_verified_d
 
 
 @pytest.mark.integration
+def test_workspace_migration_delete_verification_reports_missing_chunks(workspace_client, db):
+    _create_session(
+        workspace_client,
+        declared_chunks=[
+            {
+                "id": "chunk-1",
+                "sha256": _CHUNK_HASH,
+                "byte_count": 64,
+                "chunk_kind": "workspace_bundle",
+            },
+            {
+                "id": "chunk-2",
+                "sha256": _OTHER_CHUNK_HASH,
+                "byte_count": 32,
+                "chunk_kind": "artifact_payloads",
+            },
+        ],
+    )
+    accepted = workspace_client.put(
+        "/api/v1/workspaces/migrations/mig-1/chunks/chunk-1",
+        json={
+            "sha256": _CHUNK_HASH,
+            "byte_count": 64,
+            "chunk_kind": "workspace_bundle",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    session = db.get_workspace_migration_session("mig-1")
+    assert session is not None
+    verification = db._verify_workspace_migration_delete_eligibility(session)
+
+    assert verification["eligible"] is False
+    assert verification["status"] == "missing_chunks"
+    assert verification["missing_chunk_ids"] == ["chunk-2"]
+
+
+@pytest.mark.integration
 def test_workspace_migration_zero_chunk_finalize_remains_delete_ineligible(workspace_client):
     _create_session(workspace_client, declared_chunks=[])
 

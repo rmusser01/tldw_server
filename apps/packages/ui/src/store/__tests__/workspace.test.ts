@@ -757,6 +757,62 @@ describe("workspace store snapshot persistence", () => {
     expect(localStorage.getItem(chatKey("workspace-tombstoned"))).toBeNull()
   })
 
+  it("cleans migrated workspace split keys only once per session", async () => {
+    const workspaceId = "workspace-cleanup-cache"
+    localStorage.setItem(STORAGE_SPLIT_FLAG_KEY, "1")
+    localStorage.setItem(STORAGE_INDEXEDDB_FLAG_KEY, "0")
+    localStorage.setItem(
+      `tldw:research-workspace:migration:tombstone:${workspaceId}`,
+      JSON.stringify({
+        legacyWorkspaceId: workspaceId,
+        serverWorkspaceId: workspaceId,
+        migrationId: "research-workspace-workspace-cleanup-cache-abc123",
+        deletedAt: "2026-05-26T00:00:00.000Z",
+        contentRetained: false
+      })
+    )
+
+    const storage = createWorkspaceStorage()
+    const payload = JSON.stringify({
+      state: {
+        workspaceId,
+        workspaceName: "Cached Cleanup Workspace",
+        workspaceTag: "workspace:cleanup-cache",
+        workspaceCreatedAt: "2026-05-26T00:00:00.000Z",
+        workspaceChatReferenceId: workspaceId,
+        savedWorkspaces: [],
+        archivedWorkspaces: [],
+        workspaceSnapshots: {
+          [workspaceId]: {
+            workspaceId,
+            workspaceName: "Cached Cleanup Workspace",
+            workspaceTag: "workspace:cleanup-cache",
+            workspaceCreatedAt: "2026-05-26T00:00:00.000Z",
+            workspaceChatReferenceId: workspaceId,
+            sources: [],
+            selectedSourceIds: [],
+            generatedArtifacts: [],
+            notes: "Cached cleanup notes",
+            currentNote: { ...DEFAULT_WORKSPACE_NOTE },
+            leftPaneCollapsed: false,
+            rightPaneCollapsed: false,
+            audioSettings: { ...DEFAULT_AUDIO_SETTINGS }
+          }
+        },
+        workspaceChatSessions: {}
+      },
+      version: 1
+    })
+
+    await storage.setItem(STORAGE_KEY, payload)
+    expect(localStorage.getItem(snapshotKey(workspaceId))).toBeNull()
+
+    localStorage.setItem(snapshotKey(workspaceId), "{\"stale\":true}")
+    await storage.setItem(STORAGE_KEY, payload)
+
+    expect(localStorage.getItem(snapshotKey(workspaceId))).toBe("{\"stale\":true}")
+  })
+
   it("estimates persistence payload section sizes", () => {
     const metrics = estimateWorkspacePersistenceMetrics({
       state: {

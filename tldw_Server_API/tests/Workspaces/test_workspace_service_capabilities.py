@@ -226,9 +226,9 @@ def test_service_projection_warns_when_only_external_providers_are_ready() -> No
     }
 
 
-def test_service_projection_requires_configured_provider_subset() -> None:
+def test_service_projection_falls_back_to_runtime_providers_when_configured_subset_empty() -> None:
     projection = build_workspace_service_capability_projection(
-        workspace_id="ws-unconfigured-provider",
+        workspace_id="ws-runtime-provider",
         provider_health={
             "initialized": True,
             "providers": ["openai", "llama.cpp"],
@@ -242,8 +242,8 @@ def test_service_projection_requires_configured_provider_subset() -> None:
     )
 
     assert projection["workspace_services"]["provider"] == {
-        "state": "not_configured",
-        "reason_code": "provider_not_configured",
+        "state": "available",
+        "reason_code": None,
         "management_surface": "model_settings",
     }
 
@@ -295,4 +295,47 @@ def test_workspace_capabilities_block_grounded_questions_when_provider_is_unavai
     assert capability_projection["allowed_actions"]["ask_grounded_questions"] == {
         "allowed": False,
         "reason_code": "provider_not_configured",
+    }
+
+
+def test_workspace_capabilities_require_selected_queryable_sources() -> None:
+    capability_projection = build_workspace_capability_projection(
+        workspace={"id": "ws-selection"},
+        status_projection={
+            "summary": {
+                "total": 2,
+                "selected": 1,
+                "queryable": 1,
+                "partially_queryable": 0,
+                "processing": 1,
+                "failed": 0,
+                "missing": 0,
+            },
+            "sources": [
+                {
+                    "id": "unselected-ready",
+                    "selected": False,
+                    "state": "queryable",
+                },
+                {
+                    "id": "selected-indexing",
+                    "selected": True,
+                    "state": "indexing",
+                },
+            ],
+        },
+        service_capabilities={
+            "workspace_services": {
+                "provider": {
+                    "state": "available",
+                    "reason_code": None,
+                    "management_surface": "model_settings",
+                }
+            }
+        },
+    )
+
+    assert capability_projection["allowed_actions"]["ask_grounded_questions"] == {
+        "allowed": False,
+        "reason_code": "no_queryable_sources",
     }

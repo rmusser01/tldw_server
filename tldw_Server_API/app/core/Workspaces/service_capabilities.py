@@ -77,9 +77,24 @@ async def collect_workspace_service_capabilities(
         workspace_id=workspace_id,
         user_id=user_id,
     )
-    acp_summary, acp_error = await _to_thread_result(_collect_acp_summary)
-    sandbox_runtimes, sandbox_error = await _to_thread_result(_collect_sandbox_runtimes)
-    provider_health, provider_error = await _to_thread_result(_collect_provider_health)
+    acp_summary, acp_error = await _to_thread_result(
+        _collect_acp_summary,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        probe_name="acp_summary",
+    )
+    sandbox_runtimes, sandbox_error = await _to_thread_result(
+        _collect_sandbox_runtimes,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        probe_name="sandbox_runtimes",
+    )
+    provider_health, provider_error = await _to_thread_result(
+        _collect_provider_health,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        probe_name="provider_health",
+    )
 
     return build_workspace_service_capability_projection(
         workspace_id=workspace_id,
@@ -161,7 +176,13 @@ async def _collect_mcp_policy(
         )
         return dict(policy or {}), None
     except Exception as exc:  # noqa: BLE001 - capability probes fail closed.
-        logger.debug("Workspace MCP capability resolution failed: {}", exc)
+        logger.debug(
+            "Workspace service capability probe failed: probe={} workspace_id={} user_id={} error={}",
+            "mcp_policy",
+            workspace_id,
+            user_id,
+            exc,
+        )
         return None, "mcp_policy_resolution_failed"
 
 
@@ -204,11 +225,24 @@ def _collect_provider_health() -> dict[str, Any]:
     }
 
 
-async def _to_thread_result(callable_obj: Any) -> tuple[Any | None, str | None]:
+async def _to_thread_result(
+    callable_obj: Any,
+    *,
+    workspace_id: str,
+    user_id: int | str | None,
+    probe_name: str | None = None,
+) -> tuple[Any | None, str | None]:
     try:
         return await asyncio.to_thread(callable_obj), None
     except Exception as exc:  # noqa: BLE001 - capability probes fail closed.
-        logger.debug("Workspace service capability probe failed: {}", exc)
+        resolved_probe_name = probe_name or _callable_name(callable_obj)
+        logger.debug(
+            "Workspace service capability probe failed: probe={} workspace_id={} user_id={} error={}",
+            resolved_probe_name,
+            workspace_id,
+            user_id,
+            exc,
+        )
         return None, f"{_callable_name(callable_obj)}_failed"
 
 
@@ -325,12 +359,8 @@ def _provider_service(
     if not isinstance(health, Mapping):
         return _service("not_configured", "provider_not_configured", "model_settings")
 
-    has_configured_subset = "configured_providers" in health
-    providers = (
-        _string_list(health.get("configured_providers"))
-        if has_configured_subset
-        else _string_list(health.get("providers"))
-    )
+    configured_subset = _string_list(health.get("configured_providers"))
+    providers = configured_subset or _string_list(health.get("providers"))
     if not providers:
         return _service("not_configured", "provider_not_configured", "model_settings")
     if not bool(health.get("initialized")):

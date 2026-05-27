@@ -15506,6 +15506,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return {
                 "eligible": False,
                 "status": "no_declared_chunks",
+                "missing_chunk_ids": [],
                 "mismatch_chunk_ids": [],
                 "undeclared_chunk_ids": sorted(accepted.keys()),
             }
@@ -15553,6 +15554,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return {
             "eligible": eligible,
             "status": status,
+            "missing_chunk_ids": sorted(missing),
             "mismatch_chunk_ids": sorted(mismatched),
             "undeclared_chunk_ids": sorted(undeclared),
         }
@@ -15711,7 +15713,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "status": "finalized",
             "declared_chunk_count": declared_count,
             "accepted_chunk_count": accepted_count,
-            "missing_chunk_ids": [],
+            "missing_chunk_ids": verification["missing_chunk_ids"],
             "client_delete_eligible": client_delete_eligible,
             "can_delete_legacy_storage": client_delete_eligible,
             "server_readback_verified": client_delete_eligible,

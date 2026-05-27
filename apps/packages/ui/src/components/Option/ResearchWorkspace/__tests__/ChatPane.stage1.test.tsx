@@ -370,7 +370,13 @@ describe("ChatPane Stage 1 reliability and controls", () => {
   it("keeps selected-source RAG context intact when model selection blocks send", () => {
     messageOptionStoreState.selectedModel = null
     workspaceStoreState.sources = [
-      { id: "source-1", mediaId: 42, title: "NotebookLM export", type: "pdf" }
+      {
+        id: "source-1",
+        mediaId: 42,
+        title: "NotebookLM export",
+        type: "pdf",
+        status: "ready"
+      }
     ]
     workspaceStoreState.selectedSourceIds = ["source-1"]
     workspaceStoreState.getSelectedSources = () => [
@@ -517,7 +523,13 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       errorMessage: "no_provider_configured"
     })
     workspaceStoreState.sources = [
-      { id: "source-1", mediaId: 42, title: "NotebookLM export", type: "pdf" }
+      {
+        id: "source-1",
+        mediaId: 42,
+        title: "NotebookLM export",
+        type: "pdf",
+        status: "ready"
+      }
     ]
     workspaceStoreState.selectedSourceIds = ["source-1"]
     workspaceStoreState.getSelectedSources = () => [

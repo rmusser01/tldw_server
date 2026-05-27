@@ -373,6 +373,23 @@ const deleteCoveredLocalPayloads = async ({
     store: ResearchWorkspaceIndexedDbStoreRef
   ) => Promise<void> | void
 }): Promise<string[] | null> => {
+  for (const chunk of chunks) {
+    if (chunk.storageKind === "local_storage") {
+      if (!chunk.key || !deleteLocalStorageValue) return null
+      continue
+    }
+
+    if (chunk.storageKind === "indexeddb_store") {
+      if (
+        !chunk.databaseName ||
+        !chunk.storeName ||
+        !deleteIndexedDbStorePayload
+      ) {
+        return null
+      }
+    }
+  }
+
   const deletedSurfaceIds: string[] = []
 
   for (const chunk of chunks) {
@@ -477,20 +494,32 @@ export const runResearchWorkspaceMigration = async ({
       }
     }
 
-    const deletedSurfaceIds = await deleteCoveredLocalPayloads({
-      chunks: plan.chunks,
-      deleteLocalStorageValue,
-      deleteIndexedDbStorePayload
-    })
-
-    if (!deletedSurfaceIds || !writeLocalStorageValue) {
+    if (!writeLocalStorageValue) {
       return {
         status: "blocked",
         migrationId: plan.migrationId,
         manifestHash: plan.manifestHash,
         serverMigration,
         localDeletionEligibility: plan.localDeletionEligibility,
-        deletedSurfaceIds: deletedSurfaceIds || [],
+        deletedSurfaceIds: [],
+        message: "Server deletion eligibility is available, but local deletion dependencies are not configured."
+      }
+    }
+
+    const deletedSurfaceIds = await deleteCoveredLocalPayloads({
+      chunks: plan.chunks,
+      deleteLocalStorageValue,
+      deleteIndexedDbStorePayload
+    })
+
+    if (!deletedSurfaceIds) {
+      return {
+        status: "blocked",
+        migrationId: plan.migrationId,
+        manifestHash: plan.manifestHash,
+        serverMigration,
+        localDeletionEligibility: plan.localDeletionEligibility,
+        deletedSurfaceIds: [],
         message: "Server deletion eligibility is available, but local deletion dependencies are not configured."
       }
     }

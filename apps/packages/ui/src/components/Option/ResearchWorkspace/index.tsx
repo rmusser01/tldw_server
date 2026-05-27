@@ -1517,7 +1517,15 @@ const ResearchWorkspaceBody: React.FC = () => {
       return
     }
 
-    const signature = `${workspaceId}:${discoveredLocalStorageKeys.join("|")}`
+    const indexedDbSignature = discoveredIndexedDbStores
+      .map((store) => `${store.databaseName}:${store.storeName}`)
+      .sort()
+      .join("|")
+    const signature = [
+      workspaceId,
+      discoveredLocalStorageKeys.join("|"),
+      indexedDbSignature
+    ].join("::")
     const inFlightMigration = workspaceMigrationInFlightRef.current
     const canReuseInFlightMigration =
       inFlightMigration?.signature === signature
@@ -3066,13 +3074,10 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   const focusSkipTarget = (
     event: React.MouseEvent<HTMLAnchorElement>,
-    targetId: string
+    pane: WorkspaceTabKey
   ) => {
-    const target = document.getElementById(targetId)
-    if (!target) return
     event.preventDefault()
-    target.focus()
-    target.scrollIntoView({ block: "nearest" })
+    focusWorkspacePane(pane)
   }
 
   return (
@@ -3086,21 +3091,21 @@ const ResearchWorkspaceBody: React.FC = () => {
       {messageContextHolder}
       <a
         href="#workspace-main-content"
-        onClick={(event) => focusSkipTarget(event, "workspace-main-content")}
+        onClick={(event) => focusSkipTarget(event, "chat")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-2 focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToMain", "Skip to chat content")}
       </a>
       <a
         href="#workspace-sources-panel"
-        onClick={(event) => focusSkipTarget(event, "workspace-sources-panel")}
+        onClick={(event) => focusSkipTarget(event, "sources")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-12 focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToSources", "Skip to sources panel")}
       </a>
       <a
         href="#workspace-studio-panel"
-        onClick={(event) => focusSkipTarget(event, "workspace-studio-panel")}
+        onClick={(event) => focusSkipTarget(event, "studio")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-[5.5rem] focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToStudio", "Skip to studio panel")}

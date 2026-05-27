@@ -75,7 +75,7 @@ def build_workspace_capability_projection(
 ) -> dict[str, Any]:
     """Build conservative capability gates for Research Workspace clients."""
     summary = dict(status_projection.get("summary") or {})
-    has_queryable_sources = int(summary.get("queryable") or 0) > 0
+    has_queryable_sources = _has_queryable_selected_sources(status_projection)
     workspace_services = {
         "migration": {
             "state": "available",
@@ -154,6 +154,21 @@ def build_workspace_capability_projection(
         "workspace_services": workspace_services,
         "allowed_actions": allowed_actions,
     }
+
+
+def _has_queryable_selected_sources(status_projection: dict[str, Any]) -> bool:
+    """Return whether the user's selected source scope contains queryable sources."""
+    statuses = status_projection.get("sources")
+    if isinstance(statuses, list):
+        return any(
+            isinstance(status, dict)
+            and bool(status.get("selected"))
+            and str(status.get("state") or "").strip().lower() == "queryable"
+            for status in statuses
+        )
+
+    summary = dict(status_projection.get("summary") or {})
+    return int(summary.get("queryable") or 0) > 0
 
 
 def _build_source_status(

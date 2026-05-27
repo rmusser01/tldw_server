@@ -257,12 +257,14 @@ const StatusDetailRow: React.FC<{
   label: string
   children: React.ReactNode
 }> = ({ label, children }) => (
-  <div className="grid gap-1 rounded border border-border bg-surface/60 p-2 sm:grid-cols-[8rem_1fr] sm:items-start">
-    <dt className="text-[11px] font-semibold uppercase tracking-[0.04em] text-text-subtle">
+  <>
+    <dt className="rounded-t border border-border bg-surface/60 px-2 pt-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-text-subtle sm:rounded-l sm:rounded-tr-none sm:border-r-0 sm:py-2">
       {label}
     </dt>
-    <dd className="min-w-0 break-words text-sm text-text">{children}</dd>
-  </div>
+    <dd className="min-w-0 rounded-b border border-t-0 border-border bg-surface/60 px-2 pb-2 text-sm text-text sm:rounded-r sm:rounded-bl-none sm:border-l-0 sm:border-t sm:py-2">
+      {children}
+    </dd>
+  </>
 )
 
 type SourceAnnotation = {
@@ -1509,7 +1511,6 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             aria-label={t("playground:sources.selectSource", "Select {{title}}", {
               title: source.title
             })}
-            tabIndex={0}
             checked={isSelected}
             disabled={!isReady}
             onChange={() => {
@@ -2134,7 +2135,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                   </div>
                 </div>
 
-                <dl className="space-y-2">
+                <dl className="grid gap-2 sm:grid-cols-[8rem_1fr]">
                   <StatusDetailRow
                     label={t("playground:sources.lifecycleLabel", "Lifecycle")}
                   >
