@@ -1506,6 +1506,10 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           className="mt-0.5 flex items-center justify-center [@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11"
         >
           <Checkbox
+            aria-label={t("playground:sources.selectSource", "Select {{title}}", {
+              title: source.title
+            })}
+            tabIndex={0}
             checked={isSelected}
             disabled={!isReady}
             onChange={() => {

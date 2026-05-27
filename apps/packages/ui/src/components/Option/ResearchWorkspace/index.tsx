@@ -3064,6 +3064,17 @@ const ResearchWorkspaceBody: React.FC = () => {
     </div>
   ) : null
 
+  const focusSkipTarget = (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    targetId: string
+  ) => {
+    const target = document.getElementById(targetId)
+    if (!target) return
+    event.preventDefault()
+    target.focus()
+    target.scrollIntoView({ block: "nearest" })
+  }
+
   return (
     <SharedWorkspaceProvider
       shareId={sharedShareId}
@@ -3075,18 +3086,21 @@ const ResearchWorkspaceBody: React.FC = () => {
       {messageContextHolder}
       <a
         href="#workspace-main-content"
+        onClick={(event) => focusSkipTarget(event, "workspace-main-content")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-2 focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToMain", "Skip to chat content")}
       </a>
       <a
         href="#workspace-sources-panel"
+        onClick={(event) => focusSkipTarget(event, "workspace-sources-panel")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-12 focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToSources", "Skip to sources panel")}
       </a>
       <a
         href="#workspace-studio-panel"
+        onClick={(event) => focusSkipTarget(event, "workspace-studio-panel")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-[5.5rem] focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToStudio", "Skip to studio panel")}
@@ -3311,6 +3325,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                   id="workspace-sources-panel"
                   role="complementary"
                   aria-label={t("playground:workspace.sourcesPanel", "Sources panel")}
+                  tabIndex={-1}
                   className="hidden shrink-0 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card lg:flex lg:flex-col"
                   style={{ width: leftPaneWidth }}
                 >
@@ -3355,6 +3370,7 @@ const ResearchWorkspaceBody: React.FC = () => {
 
             <main
               id="workspace-main-content"
+              tabIndex={-1}
               className="flex min-w-0 flex-1 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card"
             >
               <ChatPane
@@ -3395,6 +3411,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                   id="workspace-studio-panel"
                   role="complementary"
                   aria-label={t("playground:workspace.studioPanel", "Studio panel")}
+                  tabIndex={-1}
                   className="hidden min-h-0 shrink-0 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card lg:flex lg:flex-col"
                   style={{ width: rightPaneWidth }}
                 >

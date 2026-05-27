@@ -6,6 +6,7 @@
 import { test, expect, assertNoCriticalErrors } from "../utils/fixtures"
 import { seedAuth } from "../utils/helpers"
 import { ResearchWorkspacePage } from "../utils/page-objects"
+import type { Locator, Page } from "@playwright/test"
 
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 }
 const SUMMARY_TEST_MODEL = "gpt-4o-mini"
@@ -33,6 +34,66 @@ const setWorkspaceSelectedModel = async (page: Parameters<typeof seedAuth>[0]) =
     }
     store.setState({ selectedModel: modelId })
   }, SUMMARY_TEST_MODEL)
+}
+
+const locatorContainsFocus = async (locator: Locator): Promise<boolean> =>
+  (await locator.count()) > 0
+    ? locator
+        .evaluate((element) => {
+          const active = document.activeElement
+          const activeIsDocumentRoot =
+            active === document.body || active === document.documentElement
+          const activeIsCheckboxWrapper =
+            active instanceof HTMLElement &&
+            active.matches("label, .ant-checkbox-wrapper, [role='checkbox']")
+          return (
+            active === element ||
+            (active instanceof Node && element.contains(active)) ||
+            (active instanceof HTMLElement &&
+              !activeIsDocumentRoot &&
+              activeIsCheckboxWrapper &&
+              active.contains(element))
+          )
+        })
+        .catch(() => false)
+    : false
+
+const describeActiveElement = async (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null
+    if (!active) return "none"
+    const label = active.getAttribute("aria-label")
+    const role = active.getAttribute("role")
+    const testId = active.getAttribute("data-testid")
+    const text = active.textContent?.replace(/\s+/g, " ").trim().slice(0, 80)
+    return [
+      active.tagName.toLowerCase(),
+      role ? `role=${role}` : null,
+      label ? `aria-label=${label}` : null,
+      testId ? `data-testid=${testId}` : null,
+      text ? `text=${text}` : null
+    ]
+      .filter(Boolean)
+      .join(" ")
+  })
+
+const pressTabUntilFocused = async (
+  page: Page,
+  locator: Locator,
+  maxTabs = 40
+): Promise<void> => {
+  for (let attempt = 0; attempt < maxTabs; attempt += 1) {
+    if (await locatorContainsFocus(locator)) {
+      return
+    }
+    await page.keyboard.press("Tab")
+  }
+
+  throw new Error(
+    `Expected keyboard focus to reach target after ${maxTabs} Tab presses; active=${await describeActiveElement(
+      page
+    )}`
+  )
 }
 
 test.describe("Research Workspace Workflow", () => {
@@ -558,6 +619,143 @@ test.describe("Research Workspace Workflow", () => {
         timeout: 10_000
       })
       .toContain("ring-2")
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("supports keyboard-only source selection and grounded chat submission", async ({
+    authedPage,
+    diagnostics
+  }) => {
+    const sourceMediaId = 8_844_903
+    const sourceTitle = "Keyboard Grounded Source"
+    const userQuestion = "What evidence does the keyboard-selected source provide?"
+    const groundedAnswer = "Keyboard selected source evidence is cited and ready."
+    const ragRequests: Array<Record<string, unknown>> = []
+    const streamChunk = (text: string) =>
+      `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`
+
+    await authedPage.route("**/api/v1/rag/search/stream", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        body: ""
+      })
+    })
+
+    await authedPage.route("**/api/v1/rag/search", async (route) => {
+      ragRequests.push((route.request().postDataJSON() as Record<string, unknown>) || {})
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          results: [
+            {
+              id: "keyboard-source-result",
+              content: "Evidence from the keyboard-selected source.",
+              metadata: {
+                title: sourceTitle,
+                source: sourceTitle,
+                source_type: "media_db",
+                media_id: sourceMediaId
+              },
+              score: 0.92
+            }
+          ],
+          generated_answer: groundedAnswer,
+          answer: groundedAnswer,
+          citations: [{ source: sourceTitle, media_id: sourceMediaId }]
+        })
+      })
+    })
+
+    await authedPage.route("**/api/v1/chat/completions", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        headers: {
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive"
+        },
+        body: streamChunk(groundedAnswer) + "data: [DONE]\n\n"
+      })
+    })
+
+    const workspacePage = new ResearchWorkspacePage(authedPage)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await setWorkspaceSelectedModel(authedPage)
+
+    await workspacePage.seedSources([
+      {
+        mediaId: sourceMediaId,
+        title: sourceTitle,
+        type: "document",
+        status: "ready"
+      }
+    ])
+
+    await expect
+      .poll(async () => (await workspacePage.getSourceIds()).length, {
+        timeout: 10_000
+      })
+      .toBe(1)
+    const [sourceId] = await workspacePage.getSourceIds()
+    const sourceCheckbox = workspacePage.sourcesPanel.getByRole("checkbox", {
+      name: `Select ${sourceTitle}`
+    })
+
+    await expect(sourceCheckbox).toHaveCount(1, { timeout: 5_000 })
+    const skipToSourcesLink = authedPage.getByRole("link", {
+      name: /skip to sources panel/i
+    })
+    await pressTabUntilFocused(authedPage, skipToSourcesLink, 40)
+    await skipToSourcesLink.press("Enter")
+    await expect
+      .poll(
+        () =>
+          workspacePage.sourcesPanel.evaluate((panel) =>
+            panel.contains(document.activeElement)
+          ),
+        { timeout: 5_000 }
+      )
+      .toBe(true)
+    await pressTabUntilFocused(authedPage, sourceCheckbox)
+    await expect
+      .poll(() => locatorContainsFocus(sourceCheckbox), { timeout: 5_000 })
+      .toBe(true)
+    await expect
+      .poll(
+        async () =>
+          authedPage.evaluate(() => {
+            const active = document.activeElement as HTMLElement | null
+            return active
+              ?.closest("[data-source-id]")
+              ?.getAttribute("data-source-id") ?? null
+          }),
+        { timeout: 5_000 }
+      )
+      .toBe(sourceId)
+
+    await authedPage.keyboard.press("Space")
+    await workspacePage.expectSourceSelected(sourceId)
+    await expect(workspacePage.getSelectedSourceTag(sourceTitle)).toBeVisible()
+
+    const chatInput = workspacePage.chatPanel.getByPlaceholder(/ask about your sources/i)
+    await pressTabUntilFocused(authedPage, chatInput, 80)
+    await expect(chatInput).toBeFocused({ timeout: 5_000 })
+    await authedPage.keyboard.type(userQuestion)
+    await expect(chatInput).toHaveValue(userQuestion)
+    await authedPage.keyboard.press("Enter")
+
+    await expect
+      .poll(() => ragRequests.length, { timeout: 10_000 })
+      .toBe(1)
+    expect(ragRequests[0]?.query).toBe(userQuestion)
+    expect(ragRequests[0]?.include_media_ids).toEqual([sourceMediaId])
+    await expect(workspacePage.chatPanel.getByText(groundedAnswer)).toBeVisible({
+      timeout: 10_000
+    })
 
     await assertNoCriticalErrors(diagnostics)
   })
