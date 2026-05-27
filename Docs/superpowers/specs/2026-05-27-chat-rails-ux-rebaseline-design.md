@@ -119,7 +119,7 @@ The refreshed audit should explicitly revisit the earlier findings:
 - The rail components are verified as present in the clean checkout.
 - A live `/chat` audit is completed against the rail-enabled page.
 - Findings are separated into fixed-by-baseline, still-reproducing, and new rail-specific issues.
-- The first implementation plan after this spec targets only verified current issues.
+- The first implementation plan after this spec prioritizes rail restoration/regression tests before user-facing UX fixes if the rails already pass.
 - No code implementation starts from the stale `codex/chat-sidebar-tools-first` branch.
 
 ## Verification Plan
@@ -149,5 +149,7 @@ Rail-enabled audit verification:
 
 ## Open Questions
 
-- Should implementation prioritize rail restoration/regression tests first, or user-facing UX fixes first if the rails already pass?
-- Should full-screen extension handoff target `/chat`, an options hash route, or a dedicated chat-resume URL contract?
+Resolved decisions:
+
+- Implementation should prioritize rail restoration/regression tests first, then user-facing UX fixes after the rail-enabled baseline is proven.
+- Full-screen extension handoff should target `/chat`, not an options hash route and not a new dedicated chat-resume URL contract for this slice.
