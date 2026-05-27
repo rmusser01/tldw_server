@@ -4,22 +4,14 @@ title: Flashcards UX F12 native extension capture MVP
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-05-27 01:45
+updated_date: '2026-05-27 02:28'
 labels:
-- ux
-- flashcards
-- extension
-- webui
+  - ux
+  - flashcards
+  - extension
+  - webui
 dependencies: []
 priority: medium
-modified_files:
-- Docs/superpowers/plans/2026-05-26-flashcards-extension-native-capture-mvp-plan.md
-- apps/packages/ui/src/routes/sidepanel-flashcards.tsx
-- apps/packages/ui/src/routes/__tests__/sidepanel-flashcards.test.tsx
-- Flashcards-UX-Fix-List.md
-- apps/extension/docs/features/flashcards.md
-- Docs/User_Guides/WebUI_Extension/Flashcards_Study_Guide.md
-- Docs/Published/User_Guides/WebUI_Extension/Flashcards_Study_Guide.md
 ---
 
 ## Description
@@ -46,12 +38,14 @@ Docs/superpowers/plans/2026-05-26-flashcards-extension-native-capture-mvp-plan.m
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented native sidepanel selected-text capture with deck picker, editable Front/Back draft fields, one-card save, manual page URL provenance, no-deck guard, no-selection validation, save-failure recovery, and full Flashcards continuation. Updated tests, master UX checklist, extension feature docs, and WebUI study guide copies. Non-goals remain generated drafts, templates, bulk editing, repeat capture queues, and in-extension review.
+
+PR #2073 review-fix pass: addressed Gemini/Qodo/CodeRabbit findings by clearing stale drafts on new capture attempts, clearing drafts after successful save while keeping success status visible outside the draft section, differentiating deck loading/error/unavailable states from true empty decks, and replacing stale active-tab generate wording with capture wording. Added regression coverage for each behavior.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Native F12 sidepanel capture MVP completed. The Flashcards sidepanel now supports Capture page selection -> editable draft -> deck picker -> Save card with manual page URL provenance, while keeping Open full Flashcards for generation/import/review. Docs and the master Flashcards UX fix list now describe the completed MVP and deferred richer extension workflows. Verification: focused sidepanel/registry Vitest passed; git diff --check passed; UI typecheck reached one unrelated baseline CharacterListContent density diagnostic; no Python files touched, so Bandit is not applicable.
+Native F12 sidepanel capture MVP completed, with PR #2073 review fixes applied. The sidepanel now prevents stale draft saves after failed recapture, prevents duplicate save submissions after success, preserves success feedback after clearing the draft, distinguishes deck load/unavailable states from true empty deck state, and uses capture-specific recovery copy. Verification: focused sidepanel/registry Vitest passed 20 tests; git diff --check passed; UI typecheck still reports only unrelated baseline CharacterListContent density diagnostic; no Python files touched, so Bandit is not applicable.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

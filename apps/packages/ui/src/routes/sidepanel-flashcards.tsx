@@ -5,7 +5,8 @@ import { Button, Input, Select, Typography } from "antd"
 import { browser } from "wxt/browser"
 import {
   useCreateFlashcardMutation,
-  useDecksQuery
+  useDecksQuery,
+  useFlashcardsEnabled
 } from "@/components/Flashcards/hooks"
 
 const { Text, Title } = Typography
@@ -47,10 +48,26 @@ export default function SidepanelFlashcards() {
   } | null>(null)
   const [draft, setDraft] = React.useState<CaptureDraft | null>(null)
   const [selectedDeckId, setSelectedDeckId] = React.useState<number | null>(null)
+  const flashcardsAvailability = useFlashcardsEnabled()
   const decksQuery = useDecksQuery()
   const createFlashcardMutation = useCreateFlashcardMutation()
   const decks = React.useMemo(() => decksQuery.data ?? [], [decksQuery.data])
   const selectedDeck = decks.find((deck) => deck.id === selectedDeckId) ?? null
+  const flashcardsUnavailable =
+    !flashcardsAvailability.isOnline ||
+    flashcardsAvailability.flashcardsUnsupported
+  const decksLoading = decksQuery.isLoading || flashcardsAvailability.capsLoading
+  const decksLoadFailed = decksQuery.isError
+  const hasSelectableDecks =
+    !flashcardsUnavailable &&
+    !decksLoading &&
+    !decksLoadFailed &&
+    decks.length > 0
+  const showNoDecksMessage =
+    !flashcardsUnavailable &&
+    !decksLoading &&
+    !decksLoadFailed &&
+    decks.length === 0
 
   React.useEffect(() => {
     if (
@@ -95,6 +112,7 @@ export default function SidepanelFlashcards() {
   const handleCapturePageSelection = React.useCallback(async () => {
     setCaptureError(null)
     setSaveStatus(null)
+    setDraft(null)
     setCaptureLoading(true)
     const captureUnavailableMessage = t(
       "sidepanel:flashcards.selectionCaptureUnavailable",
@@ -102,7 +120,7 @@ export default function SidepanelFlashcards() {
     )
     const activeTabUnavailableMessage = t(
       "sidepanel:flashcards.activeTabUnavailable",
-      "Open a page tab before generating flashcards."
+      "Open a page tab before capturing page selection."
     )
     const noSelectionMessage = t(
       "sidepanel:flashcards.noPageSelection",
@@ -188,6 +206,7 @@ export default function SidepanelFlashcards() {
             selectedDeck?.name || t("sidepanel:flashcards.defaultDeck", "deck")
         })
       })
+      setDraft(null)
     } catch {
       setSaveStatus({
         type: "error",
@@ -200,7 +219,7 @@ export default function SidepanelFlashcards() {
   }, [createFlashcardMutation, draft, selectedDeck?.name, selectedDeckId, t])
 
   const hasDraftContent = !!draft?.front.trim() && !!draft?.back.trim()
-  const hasDeck = selectedDeckId != null
+  const hasDeck = selectedDeckId != null && hasSelectableDecks
   const canSaveDraft =
     !!draft && hasDraftContent && hasDeck && !createFlashcardMutation.isPending
 
@@ -267,8 +286,8 @@ export default function SidepanelFlashcards() {
             <Select
               data-testid="sidepanel-flashcards-deck-select"
               aria-label={t("sidepanel:flashcards.deckLabel", "Deck")}
-              loading={decksQuery.isLoading}
-              disabled={decks.length === 0}
+              loading={decksLoading}
+              disabled={!hasSelectableDecks}
               placeholder={t(
                 "sidepanel:flashcards.deckPlaceholder",
                 "Choose a deck"
@@ -281,7 +300,25 @@ export default function SidepanelFlashcards() {
               onChange={(value) => setSelectedDeckId(value)}
             />
           </label>
-          {decks.length === 0 ? (
+          {flashcardsUnavailable ? (
+            <Text type="danger" className="text-xs" role="status">
+              {t(
+                "sidepanel:flashcards.unavailable",
+                "Flashcards are unavailable. Check the server connection and try again."
+              )}
+            </Text>
+          ) : decksLoadFailed ? (
+            <Text type="danger" className="text-xs" role="status">
+              {t(
+                "sidepanel:flashcards.decksLoadFailed",
+                "Could not load decks. Check your connection and try again."
+              )}
+            </Text>
+          ) : decksLoading ? (
+            <Text type="secondary" className="text-xs" role="status">
+              {t("sidepanel:flashcards.decksLoading", "Loading decks...")}
+            </Text>
+          ) : showNoDecksMessage ? (
             <Text type="warning" className="text-xs" role="status">
               {t(
                 "sidepanel:flashcards.noDecks",
@@ -325,16 +362,16 @@ export default function SidepanelFlashcards() {
           >
             {t("sidepanel:flashcards.saveCard", "Save card")}
           </Button>
-          {saveStatus ? (
-            <Text
-              type={saveStatus.type === "error" ? "danger" : "success"}
-              className="text-xs"
-              role="status"
-            >
-              {saveStatus.message}
-            </Text>
-          ) : null}
         </section>
+      ) : null}
+      {saveStatus ? (
+        <Text
+          type={saveStatus.type === "error" ? "danger" : "success"}
+          className="text-xs"
+          role="status"
+        >
+          {saveStatus.message}
+        </Text>
       ) : null}
       {captureError ? (
         <Text type="danger" className="text-xs" role="status">
