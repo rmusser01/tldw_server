@@ -1,5 +1,5 @@
 import React from "react"
-import { Card, Typography } from "antd"
+import { Card, Segmented, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 
 import type { FlashcardsGenerateIntent } from "@/services/tldw/flashcards-generate-handoff"
@@ -19,6 +19,45 @@ import {
 } from "./ImportExport/shared"
 
 const { Text } = Typography
+type TransferTaskKey = "create" | "import" | "export"
+
+const getGenerateIntentToken = (
+  intent: FlashcardsGenerateIntent | null | undefined
+): string | null => {
+  if (!intent) return null
+  return JSON.stringify([
+    intent.text,
+    intent.sourceType ?? "",
+    intent.sourceId ?? "",
+    intent.sourceTitle ?? "",
+    intent.conversationId ?? "",
+    intent.messageId ?? ""
+  ])
+}
+
+const getStudyPackIntentToken = (
+  intent: StudyPackIntent | null | undefined
+): string | null => {
+  if (!intent) return null
+  return JSON.stringify([
+    intent.title,
+    intent.sourceItems.map((item) => [
+      item.sourceType,
+      item.sourceId,
+      item.sourceTitle ?? "",
+      item.excerptText ?? "",
+      item.locator ? JSON.stringify(item.locator) : ""
+    ])
+  ])
+}
+
+const getExportHandoffToken = (
+  deckId: number | null | undefined,
+  handoffKey: string | null | undefined
+): string | null => {
+  if (deckId == null || !handoffKey) return null
+  return `${deckId}:${handoffKey}`
+}
 
 /**
  * Import/Export tab for flashcards.
@@ -38,9 +77,15 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
 }) => {
   const { t } = useTranslation(["option", "common"])
   const limitsQuery = useImportLimitsQuery()
+  const [activeTask, setActiveTask] = React.useState<TransferTaskKey>(() =>
+    initialExportDeckId != null && initialExportDeckHandoffKey ? "export" : "create"
+  )
   const [lastTransferAction, setLastTransferAction] =
     React.useState<TransferActionSummary | null>(null)
   const [studyPackDrawerOpen, setStudyPackDrawerOpen] = React.useState(false)
+  const seenGenerateIntentTokenRef = React.useRef<string | null>(null)
+  const seenStudyPackIntentTokenRef = React.useRef<string | null>(null)
+  const seenExportHandoffTokenRef = React.useRef<string | null>(null)
   const importLimitsText = React.useMemo(() => {
     const importLimits = normalizeImportLimits(limitsQuery.data)
     if (!importLimits) return null
@@ -54,10 +99,41 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
   }, [limitsQuery.data, t])
 
   React.useEffect(() => {
-    if (studyPackIntent) {
-      setStudyPackDrawerOpen(true)
+    const token = getStudyPackIntentToken(studyPackIntent)
+    if (!token) {
+      seenStudyPackIntentTokenRef.current = null
+      return
     }
+    if (token === seenStudyPackIntentTokenRef.current) return
+
+    seenStudyPackIntentTokenRef.current = token
+    setActiveTask("create")
+    setStudyPackDrawerOpen(true)
   }, [studyPackIntent])
+
+  React.useEffect(() => {
+    const token = getGenerateIntentToken(generateIntent)
+    if (!token) {
+      seenGenerateIntentTokenRef.current = null
+      return
+    }
+    if (token === seenGenerateIntentTokenRef.current) return
+
+    seenGenerateIntentTokenRef.current = token
+    setActiveTask("create")
+  }, [generateIntent])
+
+  React.useEffect(() => {
+    const token = getExportHandoffToken(initialExportDeckId, initialExportDeckHandoffKey)
+    if (!token) {
+      seenExportHandoffTokenRef.current = null
+      return
+    }
+    if (token === seenExportHandoffTokenRef.current) return
+
+    seenExportHandoffTokenRef.current = token
+    setActiveTask("export")
+  }, [initialExportDeckHandoffKey, initialExportDeckId])
 
   const handleTransferAction = React.useCallback((summary: TransferActionSummaryInput) => {
     setLastTransferAction({
@@ -65,6 +141,30 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
       at: new Date().toISOString()
     })
   }, [])
+
+  const transferTaskOptions = React.useMemo(
+    () => [
+      {
+        label: t("option:flashcards.transferTaskCreate", {
+          defaultValue: "Create cards"
+        }),
+        value: "create" as const
+      },
+      {
+        label: t("option:flashcards.transferTaskImport", {
+          defaultValue: "Import file"
+        }),
+        value: "import" as const
+      },
+      {
+        label: t("option:flashcards.transferTaskExport", {
+          defaultValue: "Export backup"
+        }),
+        value: "export" as const
+      }
+    ],
+    [t]
+  )
 
   const lastTransferActionText = React.useMemo(() => {
     if (!lastTransferAction) {
@@ -93,18 +193,24 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
   }, [lastTransferAction, t])
 
   return (
-    <div className="grid gap-4 grid-cols-1 xl:grid-cols-4">
+    <div className="flex flex-col gap-4">
       <Card
-        className="xl:col-span-4"
-        title={t("option:flashcards.studyPackLauncherTitle", {
-          defaultValue: "Study packs"
+        title={t("option:flashcards.transferTaskSwitcherTitle", {
+          defaultValue: "Task"
         })}
-        data-testid="flashcards-study-pack-launcher"
+        data-testid="flashcards-transfer-task-switcher"
       >
-        <StudyPackPanel onLaunch={() => setStudyPackDrawerOpen(true)} />
+        <Segmented
+          block
+          aria-label={t("option:flashcards.transferTaskSwitcherAria", {
+            defaultValue: "Create, import, or export task"
+          })}
+          options={transferTaskOptions}
+          value={activeTask}
+          onChange={(value) => setActiveTask(value as TransferTaskKey)}
+        />
       </Card>
       <Card
-        className="xl:col-span-4"
         title={t("option:flashcards.transferSummaryTitle", {
           defaultValue: "Transfer summary"
         })}
@@ -158,41 +264,67 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
           </div>
         </div>
       </Card>
-      <Card
-        title={t("option:flashcards.importTitle", {
-          defaultValue: "Import Flashcards"
-        })}
+      <section
+        className={
+          activeTask === "create" ? "grid gap-4 grid-cols-1 xl:grid-cols-2" : "hidden"
+        }
+        data-testid="flashcards-create-task-panel"
       >
-        <ImportPanel onTransferAction={handleTransferAction} />
-      </Card>
-      <Card
-        title={t("option:flashcards.exportTitle", {
-          defaultValue: "Export Flashcards"
-        })}
+        <Card
+          className="xl:col-span-2"
+          title={t("option:flashcards.studyPackLauncherTitle", {
+            defaultValue: "Study packs"
+          })}
+          data-testid="flashcards-study-pack-launcher"
+        >
+          <StudyPackPanel onLaunch={() => setStudyPackDrawerOpen(true)} />
+        </Card>
+        <Card
+          title={t("option:flashcards.generateTitle", {
+            defaultValue: "Generate Flashcards"
+          })}
+        >
+          <GeneratePanel
+            initialIntent={generateIntent || null}
+            onTransferAction={handleTransferAction}
+          />
+        </Card>
+        <Card
+          title={t("option:flashcards.occlusionTitle", {
+            defaultValue: "Image Occlusion"
+          })}
+        >
+          <ImageOcclusionTransferPanel onTransferAction={handleTransferAction} />
+        </Card>
+      </section>
+      <section
+        className={activeTask === "import" ? "" : "hidden"}
+        data-testid="flashcards-import-task-panel"
       >
-        <ExportPanel
-          onTransferAction={handleTransferAction}
-          initialDeckId={initialExportDeckId}
-          initialDeckHandoffKey={initialExportDeckHandoffKey}
-        />
-      </Card>
-      <Card
-        title={t("option:flashcards.generateTitle", {
-          defaultValue: "Generate Flashcards"
-        })}
+        <Card
+          title={t("option:flashcards.importTitle", {
+            defaultValue: "Import Flashcards"
+          })}
+        >
+          <ImportPanel onTransferAction={handleTransferAction} />
+        </Card>
+      </section>
+      <section
+        className={activeTask === "export" ? "" : "hidden"}
+        data-testid="flashcards-export-task-panel"
       >
-        <GeneratePanel
-          initialIntent={generateIntent || null}
-          onTransferAction={handleTransferAction}
-        />
-      </Card>
-      <Card
-        title={t("option:flashcards.occlusionTitle", {
-          defaultValue: "Image Occlusion"
-        })}
-      >
-        <ImageOcclusionTransferPanel onTransferAction={handleTransferAction} />
-      </Card>
+        <Card
+          title={t("option:flashcards.exportTitle", {
+            defaultValue: "Export Flashcards"
+          })}
+        >
+          <ExportPanel
+            onTransferAction={handleTransferAction}
+            initialDeckId={initialExportDeckId}
+            initialDeckHandoffKey={initialExportDeckHandoffKey}
+          />
+        </Card>
+      </section>
       <StudyPackCreateDrawer
         open={studyPackDrawerOpen}
         onClose={() => setStudyPackDrawerOpen(false)}

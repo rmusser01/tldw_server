@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ImportExportTab } from "../ImportExportTab"
 import { FLASHCARDS_HELP_LINKS, FLASHCARDS_LAYOUT_GUARDRAILS } from "../../constants"
@@ -149,6 +150,23 @@ const createApkgFile = (
   return file
 }
 
+const openTransferTask = async (
+  label: string,
+  panelTestId: "flashcards-import-task-panel" | "flashcards-export-task-panel"
+) => {
+  const user = userEvent.setup()
+  await user.click(screen.getByText(label))
+  const panel = screen.getByTestId(panelTestId)
+  expect(panel).toBeVisible()
+  expect(panel).not.toHaveClass("hidden")
+  return panel
+}
+
+const openImportTask = () => openTransferTask("Import file", "flashcards-import-task-panel")
+
+const openExportTask = () =>
+  openTransferTask("Export backup", "flashcards-export-task-panel")
+
 describe("ImportExportTab import result details", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -255,6 +273,7 @@ describe("ImportExportTab import result details", () => {
 
   it("shows expandable import help references for columns/delimiter/json mapping", async () => {
     render(<ImportExportTab />)
+    await openImportTask()
 
     expect(screen.getByTestId("flashcards-import-help-accordion")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-import-help-columns")).toBeInTheDocument()
@@ -295,6 +314,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {
@@ -334,6 +354,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {
@@ -354,6 +375,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {
@@ -383,6 +405,7 @@ describe("ImportExportTab import result details", () => {
     const rows = Array.from({ length: 301 }, (_, idx) => `Deck\tFront ${idx}\tBack ${idx}`).join("\n")
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {
@@ -423,6 +446,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -475,6 +499,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -537,6 +562,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -613,6 +639,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -668,6 +695,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -708,6 +736,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -745,6 +774,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -787,6 +817,7 @@ describe("ImportExportTab import result details", () => {
     vi.mocked(exportFlashcards).mockResolvedValue("Deck,Front,Back\nBiology,Q,A")
 
     render(<ImportExportTab />)
+    await openExportTask()
 
     const deckSelect = screen.getByTestId("flashcards-export-deck")
     fireEvent.mouseDown(deckSelect.querySelector(".ant-select-selector") ?? deckSelect)
@@ -861,6 +892,7 @@ describe("ImportExportTab import result details", () => {
     ;(URL as any).createObjectURL = createObjectURLMock
 
     render(<ImportExportTab />)
+    await openExportTask()
 
     const formatSelect = screen.getByTestId("flashcards-export-format")
     fireEvent.mouseDown(formatSelect.querySelector(".ant-select-selector") ?? formatSelect)
@@ -914,6 +946,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {
@@ -1422,6 +1455,7 @@ describe("ImportExportTab import result details", () => {
     vi.mocked(deleteFlashcard).mockResolvedValue(undefined as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {

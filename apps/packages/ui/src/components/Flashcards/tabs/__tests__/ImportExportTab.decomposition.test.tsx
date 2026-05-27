@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import { ImportExportTab } from "../ImportExportTab"
@@ -43,11 +44,19 @@ vi.mock("../ImportExport/ImportPanel", () => ({
 }))
 
 vi.mock("../ImportExport/ExportPanel", () => ({
-  ExportPanel: () => <div data-testid="mock-export-panel" />
+  ExportPanel: ({ initialDeckId }: { initialDeckId?: number | null }) => (
+    <div data-testid="mock-export-panel" data-initial-deck-id={initialDeckId ?? ""} />
+  )
 }))
 
 vi.mock("../ImportExport/GeneratePanel", () => ({
-  GeneratePanel: () => <div data-testid="mock-generate-panel" />
+  GeneratePanel: ({
+    initialIntent
+  }: {
+    initialIntent?: { text?: string | null } | null
+  }) => (
+    <div data-testid="mock-generate-panel" data-initial-text={initialIntent?.text ?? ""} />
+  )
 }))
 
 vi.mock("../ImportExport/StudyPackPanel", () => ({
@@ -102,5 +111,164 @@ describe("ImportExportTab decomposition", () => {
 
     const limits = screen.getByTestId("flashcards-transfer-summary-limits")
     expect(limits).toHaveTextContent("Limits unavailable")
+  })
+
+  it("starts with a task-first create workspace instead of exposing every transfer panel", () => {
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+
+    render(<ImportExportTab />)
+
+    const taskSwitcher = screen.getByTestId("flashcards-transfer-task-switcher")
+    expect(taskSwitcher).toHaveTextContent("Create cards")
+    expect(taskSwitcher).toHaveTextContent("Import file")
+    expect(taskSwitcher).toHaveTextContent("Export backup")
+    expect(screen.getByTestId("flashcards-create-task-panel")).toBeVisible()
+    expect(screen.getByTestId("flashcards-create-task-panel")).not.toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-import-task-panel")).toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-export-task-panel")).toHaveClass("hidden")
+    expect(screen.getByTestId("mock-study-pack-panel")).toBeVisible()
+    expect(screen.getByTestId("mock-generate-panel")).toBeVisible()
+    expect(screen.getByTestId("mock-image-occlusion-panel")).toBeVisible()
+  })
+
+  it("labels the task switcher with all available transfer tasks", () => {
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+
+    render(<ImportExportTab />)
+
+    expect(
+      screen.getByRole("radiogroup", {
+        name: "Create, import, or export task"
+      })
+    ).toBeInTheDocument()
+  })
+
+  it("switches between task-specific create, import, and export workspaces", async () => {
+    const user = userEvent.setup()
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+
+    render(<ImportExportTab />)
+
+    await user.click(screen.getByText("Import file"))
+    expect(screen.getByTestId("flashcards-import-task-panel")).toBeVisible()
+    expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-export-task-panel")).toHaveClass("hidden")
+
+    await user.click(screen.getByText("Export backup"))
+    expect(screen.getByTestId("flashcards-export-task-panel")).toBeVisible()
+    expect(screen.getByTestId("flashcards-export-task-panel")).not.toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-import-task-panel")).toHaveClass("hidden")
+  })
+
+  it("opens the export task when a deck export handoff is present", () => {
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+
+    render(<ImportExportTab initialExportDeckId={42} initialExportDeckHandoffKey="deck-42" />)
+
+    expect(screen.getByTestId("flashcards-export-task-panel")).toBeVisible()
+    expect(screen.getByTestId("flashcards-export-task-panel")).not.toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
+    expect(screen.getByTestId("mock-export-panel")).toHaveAttribute(
+      "data-initial-deck-id",
+      "42"
+    )
+  })
+
+  it("keeps generated-card handoffs in the create task", () => {
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+
+    render(
+      <ImportExportTab
+        generateIntent={{
+          text: "Selected page notes",
+          sourceType: "manual",
+          sourceTitle: "Captured page"
+        }}
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-create-task-panel")).toBeVisible()
+    expect(screen.getByTestId("flashcards-create-task-panel")).not.toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-export-task-panel")).toHaveClass("hidden")
+    expect(screen.getByTestId("mock-generate-panel")).toHaveAttribute(
+      "data-initial-text",
+      "Selected page notes"
+    )
+  })
+
+  it("does not reset a manual task switch when an equivalent generate handoff rerenders", async () => {
+    const user = userEvent.setup()
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+    const generateIntent = {
+      text: "Selected page notes",
+      sourceType: "manual" as const,
+      sourceTitle: "Captured page"
+    }
+
+    const { rerender } = render(<ImportExportTab generateIntent={generateIntent} />)
+
+    await user.click(screen.getByText("Import file"))
+    expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass("hidden")
+
+    rerender(<ImportExportTab generateIntent={{ ...generateIntent }} />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass(
+        "hidden"
+      )
+      expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
+    })
+  })
+
+  it("does not reset a manual task switch when an equivalent study-pack handoff rerenders", async () => {
+    const user = userEvent.setup()
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+    const sourceItem = {
+      sourceType: "note" as const,
+      sourceId: "note-1",
+      sourceTitle: "Lecture notes",
+      excerptText: "Key points"
+    }
+    const studyPackIntent = {
+      title: "Biology pack",
+      sourceItems: [sourceItem]
+    }
+
+    const { rerender } = render(<ImportExportTab studyPackIntent={studyPackIntent} />)
+
+    await user.click(screen.getByText("Import file"))
+    expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass("hidden")
+
+    rerender(
+      <ImportExportTab
+        studyPackIntent={{
+          title: "Biology pack",
+          sourceItems: [{ ...sourceItem }]
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass(
+        "hidden"
+      )
+      expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
+    })
   })
 })
