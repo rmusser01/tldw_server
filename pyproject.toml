@@ -514,7 +514,7 @@ include-package-data = false
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["tldw_Server_API", "tldw_Server_API.*"]
+include = ["tldw_Server_API", "tldw_Server_API.*", "mcp_unified", "mcp_unified.*"]
 namespaces = false
 exclude = [
   "tests*",
@@ -630,7 +630,7 @@ markers = [
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-testpaths = ["tldw_Server_API/tests"]
+testpaths = ["tldw_Server_API/tests", "tldw_Server_API/app/core/MCP_unified/tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -690,7 +690,7 @@ extend-exclude = '''
 [tool.ruff]
 line-length = 120
 target-version = "py39"
-src = ["tldw_Server_API"]
+src = ["tldw_Server_API", "mcp_unified"]
 extend-include = ["*.ipynb"]
 exclude = [
   "migrations",
@@ -1823,7 +1823,7 @@ warn_no_return = true
 follow_imports = "silent"
 show_error_codes = true
 strict_equality = true
-files = ["tldw_Server_API"]
+files = ["tldw_Server_API", "mcp_unified"]
 exclude = [
     "tests",
     "migrations",

@@ -1,24 +1,24 @@
-from __future__ import annotations
+"""Compatibility re-exports for MCP Unified interface contracts."""
 
-from .policy import (
-    ApprovalEvaluator,
-    EffectivePolicyResolver,
-    ExternalAccessEvaluator,
-    PathScopeEnforcer,
-)
-from .runtime import (
+from mcp_unified.interfaces import (
     ApiKeyScopeNormalizer,
+    ApprovalEvaluator,
+    AuditStore,
     CircuitBreakerFactory,
     DatabasePathResolver,
+    EffectivePolicyResolver,
+    ExternalAccessEvaluator,
+    ExternalRegistryStore,
     MCPRuntimeDependencies,
     MetricsCollector,
     ModuleRegistry,
+    PathScopeEnforcer,
+    ProfileStore,
     RateLimiter,
     RbacPolicy,
     RedisClientFactory,
     TelemetryProvider,
 )
-from .storage import AuditStore, ExternalRegistryStore, ProfileStore
 
 __all__ = [
     "ApiKeyScopeNormalizer",
