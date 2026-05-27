@@ -6,6 +6,8 @@ This matrix is the current acceptance ledger for the Research Workspace remediat
 stream. It is intentionally tied to live backend/WebUI validation, not only code
 inspection. Rows owned by completed child tasks retain their recorded live evidence;
 rows marked `Current run` were rechecked during TASK-478.13.
+TASK-478.18 refreshed the migration row with TASK-515/TASK-516 live true-move
+evidence without changing broader unvalidated recovery/import/export scope.
 
 ## Validation Rules
 
@@ -57,8 +59,8 @@ rows marked `Current run` were rechecked during TASK-478.13.
 | RW-UAT-022 | ACP canonical bridge uses Research Workspace IDs/source labels | TASK-478.7 | ACP | Partial | Contract defines `/api/v1/agent-orchestration/workspaces/canonical-bridge` with `canonical_workspace_source: research_workspace`; focused ACP canonical tests passed. | Agent orchestration canonical/workspace DB/artifact promotion tests. | Add live ACP run history/filter UAT keyed by canonical workspace ID. |
 | RW-UAT-023 | Sandbox diagnostics/admission are part of workspace handoff model | TASK-478.7 | Sandbox | Gap | Contract defines sandbox ownership and deferred diagnostics filters; no live Research Workspace -> sandbox admission/diagnostics flow is exposed yet. | None specific to a live Research Workspace flow. | Create a sandbox handoff task before claiming agent/tool workspace completeness. |
 | RW-UAT-024 | Browser extension capture targets canonical workspace/source IDs | TASK-478.12 | Browser extension, WebUI | Pass | TASK-478.12 live Chrome MV3/CDP run saved a Web Clipper workspace clip against `http://127.0.0.1:18002`, opened canonical `#/research-workspace`, verified `GET /api/v1/web-clipper/{clip_id}` workspace placement, verified the clipped body through `GET /api/v1/workspaces/{workspace_id}/notes`, and verified `GET /api/v1/workspaces/{workspace_id}/sources/status` contains `web-clipper:{clip_id}` as a first-class `web_clip` source with a non-null `media_id`, `state: partially_queryable`, FTS/citation readiness, and progress messaging. CDP also loaded `/research-workspace` in the WebUI against the live backend after clearing stale local state with no new warnings/errors. | `apps/extension/tests/e2e/research-workspace.real-backend.spec.ts` now requires the promoted source row/status projection; focused Web Clipper service/API tests cover Media DB promotion, idempotent retry reuse, and job enqueue attempts. | Vector readiness remains pending until embeddings/indexing completes; this is surfaced as `partially_queryable` rather than hidden failure. |
-| RW-UAT-025 | Migration/import/export recovery is clear and resumable | TASK-478.3, migration API work | Migration APIs/UI | Partial | Migration API idempotency and conflict handling were fixed in prior PR review cycles; current WebUI migration wizard/recovery walkthrough is not part of this live pass. | Backend migration tests from earlier workspace migration work. | Add a dedicated migration recovery UAT row/task if migration UI is in release scope. |
-| RW-UAT-026 | Maintained matrix and regression gate exist | TASK-478.13 | Docs, E2E | Pass | Current matrix exists in this document. Live probe passed route, empty-state copy, rejected-copy absence, tour overlay, and critical console/page-error checks. Focused Playwright route regression passed: `1 passed (2.4s)`. | `research-workspace.real-backend.spec.ts` route contract test. | TASK-478.12 still owns extension handoff once the extension build is available. |
+| RW-UAT-025 | Migration/import/export recovery is clear and resumable | TASK-478.3, TASK-515, TASK-516 | Migration APIs/UI | Partial | TASK-515 live/backend work made finalized, server-readback-verified migration sessions `client_delete_eligible=true` only after declared chunks and manifest hash match. TASK-516 live Playwright/CDP validation confirmed the eligible path posts `client-delete-ack`, writes a `contentRetained:false` tombstone, and leaves no covered `tldw-workspace` or matching split workspace content keys after page activity. The blocked inventory path retained local content, wrote no tombstone, and sent no ack. Broader import/export recovery and a guided migration-recovery walkthrough are still not fully live-validated. | `tldw_Server_API/tests/Workspaces/test_workspace_migration_api.py`; `src/store/__tests__/workspace-migration.test.ts`; `src/store/__tests__/workspace.test.ts` tombstone no-repersist regression; live TASK-516 CDP evidence. | Keep true-move deletion as a high-risk regression path; add a dedicated import/export and recovery walkthrough task if migration UI is in release scope. |
+| RW-UAT-026 | Maintained matrix and regression gate exist | TASK-478.13, TASK-478.18 | Docs, E2E | Pass | Current matrix exists in this document. Live probe passed route, empty-state copy, rejected-copy absence, tour overlay, and critical console/page-error checks. Focused Playwright route regression passed: `1 passed (2.4s)`. TASK-478.18 refreshed the migration row after TASK-515/TASK-516 live true-move validation. | `research-workspace.real-backend.spec.ts` route contract test; task-linked matrix updates after high-risk follow-ups. | Keep this matrix current as remaining keyboard, MCP/ACP/Sandbox, vector completion, and migration recovery gaps close. |
 
 ## Current High-Risk Remainders
 
@@ -70,6 +72,9 @@ rows marked `Current run` were rechecked during TASK-478.13.
    but this remains a release hygiene risk outside TASK-478.13.
 3. Long-running vector indexing with real embedding completion should remain a
    Watch row even though the Jobs/status projection is now first-class.
+4. Migration true-move deletion is now live-verified, but import/export recovery
+   and guided recovery walkthroughs remain `Partial` until covered by a current
+   end-to-end run.
 
 ## How To Update This Matrix
 
