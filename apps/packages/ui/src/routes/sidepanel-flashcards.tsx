@@ -526,12 +526,12 @@ export default function SidepanelFlashcards() {
           const normalized = normalizeFlashcardTemplateFields(templateDraft)
           return {
             ...draft,
-            front: normalized.front ?? "",
-            back: normalized.back ?? "",
+            front: normalized.front ?? draft.front,
+            back: normalized.back ?? draft.back,
             modelType: normalized.model_type,
             tags: normalized.tags ?? draft.tags,
-            notes: normalized.notes ?? null,
-            extra: normalized.extra ?? null
+            notes: normalized.notes ?? draft.notes ?? null,
+            extra: normalized.extra ?? draft.extra ?? null
           }
         })
       )
@@ -741,7 +741,7 @@ export default function SidepanelFlashcards() {
       <Text type="secondary" className="text-xs">
         {t(
           "sidepanel:flashcards.selectionHint",
-          "Create one editable card, generate a small draft batch, or use full Flashcards for templates, imports, and review."
+          "Create one editable card, generate a small draft batch, apply templates to queued drafts, or use full Flashcards for imports, review, and management."
         )}
       </Text>
       {drafts.length > 0 ? (
@@ -836,9 +836,7 @@ export default function SidepanelFlashcards() {
                     })}
                     disabled={isSaving}
                     onClick={() => handleOpenTemplateDraft(draft.id)}
-                  >
-                    {t("sidepanel:flashcards.applyTemplate", "Apply template")}
-                  </Button>
+                  />
                   <Button
                     size="small"
                     icon={<Trash2 className="size-4" aria-hidden="true" />}
@@ -908,6 +906,14 @@ export default function SidepanelFlashcards() {
           open
           onClose={handleCloseTemplateDraft}
           onApply={handleApplyTemplateDraft}
+          draftDefaults={{
+            deck_id: selectedDeckId ?? undefined,
+            front: templateTargetDraft.front,
+            back: templateTargetDraft.back,
+            tags: templateTargetDraft.tags,
+            notes: templateTargetDraft.notes ?? null,
+            extra: templateTargetDraft.extra ?? null
+          }}
         />
       ) : null}
     </main>

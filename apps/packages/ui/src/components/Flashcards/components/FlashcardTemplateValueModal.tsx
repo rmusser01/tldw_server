@@ -18,7 +18,7 @@ interface FlashcardTemplateValueModalProps {
   onApply: (
     draft: Pick<FlashcardCreate, "deck_id" | "tags" | "model_type" | "front" | "back" | "notes" | "extra">
   ) => void
-  draftDefaults?: Pick<FlashcardCreate, "deck_id" | "tags">
+  draftDefaults?: Partial<Pick<FlashcardCreate, "deck_id" | "tags" | "front" | "back" | "notes" | "extra">>
 }
 
 type TemplateValueModalFormValues = {

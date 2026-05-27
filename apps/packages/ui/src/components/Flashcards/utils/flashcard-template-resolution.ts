@@ -3,7 +3,9 @@ import type { FlashcardCreate, FlashcardTemplate } from "@/services/flashcards"
 const PLACEHOLDER_TOKEN_RE = /\{\{\s*([^\s{}]+)\s*\}\}/g
 const CLOZE_TOKEN_SEPARATOR = "::"
 
-type FlashcardTemplateDraftDefaults = Pick<FlashcardCreate, "deck_id" | "tags">
+type FlashcardTemplateDraftDefaults = Partial<
+  Pick<FlashcardCreate, "deck_id" | "tags" | "front" | "back" | "notes" | "extra">
+>
 
 const normalizePlaceholderValue = (value: string | null | undefined): string => value?.trim() ?? ""
 const isClozeToken = (token: string): boolean => token.includes(CLOZE_TOKEN_SEPARATOR)
@@ -57,9 +59,9 @@ export function materializeFlashcardTemplateDraft(
     deck_id: defaults?.deck_id ?? undefined,
     tags: defaults?.tags ? [...defaults.tags] : undefined,
     model_type: template.model_type,
-    front: resolveTemplateText(template.front_template) ?? "",
-    back: resolveTemplateText(template.back_template) ?? "",
-    notes: resolveTemplateText(template.notes_template),
-    extra: resolveTemplateText(template.extra_template)
+    front: resolveTemplateText(template.front_template) ?? defaults?.front ?? "",
+    back: resolveTemplateText(template.back_template) ?? defaults?.back ?? "",
+    notes: resolveTemplateText(template.notes_template) ?? defaults?.notes ?? null,
+    extra: resolveTemplateText(template.extra_template) ?? defaults?.extra ?? null
   }
 }

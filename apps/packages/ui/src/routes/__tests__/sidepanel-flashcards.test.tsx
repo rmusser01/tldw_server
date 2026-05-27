@@ -254,7 +254,7 @@ describe("sidepanel flashcards route", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Create one editable card, generate a small draft batch, or use full Flashcards for templates, imports, and review."
+        "Create one editable card, generate a small draft batch, apply templates to queued drafts, or use full Flashcards for imports, review, and management."
       )
     ).toBeInTheDocument()
     expect(
@@ -384,6 +384,17 @@ describe("sidepanel flashcards route", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
   }
 
+  it("describes native template application in the sidepanel hint", () => {
+    render(<SidepanelFlashcards />)
+
+    expect(
+      screen.getByText(/apply templates to queued drafts/)
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/for templates, imports, and review/)
+    ).not.toBeInTheDocument()
+  })
+
   it("applies an existing template to a captured sidepanel draft before saving", async () => {
     const user = userEvent.setup()
     render(<SidepanelFlashcards />)
@@ -471,6 +482,50 @@ describe("sidepanel flashcards route", () => {
       tags: ["biology", "energy"],
       notes: "From selected page",
       extra: "Review after reading.",
+      model_type: "basic_reverse",
+      is_cloze: false,
+      reverse: true,
+      source_ref_type: "manual",
+      source_ref_id: "https://example.test/source"
+    })
+  })
+
+  it("preserves generated notes and extra when a template omits those fields", async () => {
+    currentTemplates = [
+      {
+        ...currentTemplates[0],
+        id: 22,
+        name: "Sparse source vocabulary",
+        notes_template: null,
+        extra_template: null,
+        placeholder_definitions: currentTemplates[0].placeholder_definitions.filter(
+          (definition) => definition.key !== "source"
+        )
+      }
+    ]
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Generate draft cards" })
+    )
+    const modal = await openTemplateModal("Apply template to draft 1")
+    await fillAndApplyTemplate(modal, {
+      term: "ATP",
+      definition: "The cell's energy currency"
+    })
+    await user.click(screen.getAllByRole("button", { name: "Save card" })[0])
+
+    await waitFor(() => {
+      expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(flashcardMocks.createFlashcardMutateAsync).toHaveBeenCalledWith({
+      deck_id: 7,
+      front: "What does ATP mean?",
+      back: "The cell's energy currency",
+      tags: ["biology", "energy"],
+      notes: "Generated from selected source text",
+      extra: "Review with the source page open",
       model_type: "basic_reverse",
       is_cloze: false,
       reverse: true,
