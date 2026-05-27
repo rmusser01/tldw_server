@@ -27,6 +27,20 @@ Out of scope:
 - Built-in preset mutation or automatic preset-as-runtime-profile behavior.
 - External MCP registry lifecycle or gateway transport work.
 
+## Post-Review Continuation Gates
+
+This plan completes only the Stage 2B profile-document primitive slice. It must not be used as an execution-enforcement plan. Before continuing into runtime wiring, create a follow-up implementation plan for Stage 2C structured resolution with these gates:
+
+- Add `ProfileResolutionResult` and `EffectivePolicyResult` contracts with machine-readable reason codes and provenance. Execution code must branch on structured status/reason fields, not infer from `None`.
+- Preserve `tldw_server` no-profile compatibility separately from standalone gateway default-profile behavior.
+- Enforce deny-over-allow/default-deny precedence in tests before any runtime tool execution uses profiles.
+- Require effective workspace/path binding before any write-capable duplicated profile can execute mutating tools; missing binding denies with `workspace_scope_required`.
+- Keep `ProfileStore` as a profile-document primitive until dedicated assignment, approval policy, credential grant, external registry, and audit stores are planned.
+- Treat `mcp_unified` as internal/experimental until minimal-install, extras, and license/publishing metadata are verified.
+- Keep real upstream external stdio process spawning out of scope until registry storage, credential broker, audit sink, path/workspace policy, executable allowlist, environment allowlist, and process-policy adapters are present and tested.
+
+The next executable slice should be Stage 2C structured profile/effective-policy resolution, not FastAPI route wiring, SQLite persistence, external-server lifecycle, or gateway entrypoints.
+
 ## Files
 
 - Create: `mcp_unified/profiles/store.py`
@@ -271,4 +285,4 @@ git commit -m "feat: add mcp profile registry resolver primitives"
 
 Expected: Commit succeeds.
 
-Result: Commit `b9f1100a3` created with message `feat: add mcp profile registry resolver primitives`.
+Result: Commit `b9f1100a3` was created and then amended to `207aecef7` with message `feat: add mcp profile registry resolver primitives`.
