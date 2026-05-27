@@ -1,6 +1,8 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import ClipDestinationFields from "./ClipDestinationFields"
+import ClipDestinationFields, {
+  type WorkspacePickerOption
+} from "./ClipDestinationFields"
 import ClipEnhancementFields from "./ClipEnhancementFields"
 import ClipPreview from "./ClipPreview"
 import {
@@ -170,6 +172,13 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
   const [runVlm, setRunVlm] = React.useState(false)
   const [folderValidation, setFolderValidation] =
     React.useState<string | null>(null)
+  const [workspaceOptions, setWorkspaceOptions] = React.useState<
+    WorkspacePickerOption[]
+  >([])
+  const [isWorkspaceOptionsLoading, setIsWorkspaceOptionsLoading] =
+    React.useState(false)
+  const [workspaceOptionsError, setWorkspaceOptionsError] =
+    React.useState<string | null>(null)
   const [workspaceValidation, setWorkspaceValidation] =
     React.useState<string | null>(null)
   const [submissionError, setSubmissionError] =
@@ -182,8 +191,14 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
   const [activeAction, setActiveAction] =
     React.useState<SubmitAction | null>(null)
   const [isSaving, setIsSaving] = React.useState(false)
+  const tRef = React.useRef(t)
+  const hasRequestedWorkspaceOptionsRef = React.useRef(false)
   const isMountedRef = React.useRef(true)
   const activeClipIdRef = React.useRef(draft.clipId)
+
+  React.useEffect(() => {
+    tRef.current = t
+  }, [t])
 
   React.useEffect(() => {
     activeClipIdRef.current = draft.clipId
@@ -196,6 +211,10 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
     setRunOcr(false)
     setRunVlm(false)
     setFolderValidation(null)
+    setWorkspaceOptions([])
+    setIsWorkspaceOptionsLoading(false)
+    setWorkspaceOptionsError(null)
+    hasRequestedWorkspaceOptionsRef.current = false
     setWorkspaceValidation(null)
     setSubmissionError(null)
     setSaveRuntime(null)
@@ -210,6 +229,70 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
     },
     []
   )
+
+  React.useEffect(() => {
+    if (destinationMode === "note" || hasRequestedWorkspaceOptionsRef.current) {
+      return
+    }
+
+    let cancelled = false
+    const submittedClipId = draft.clipId
+
+    hasRequestedWorkspaceOptionsRef.current = true
+    setIsWorkspaceOptionsLoading(true)
+    setWorkspaceOptionsError(null)
+
+    void tldwClient.initialize()
+      .catch(() => undefined)
+      .then(() => tldwClient.listWorkspaces())
+      .then((response) => {
+        if (
+          cancelled ||
+          !isMountedRef.current ||
+          activeClipIdRef.current !== submittedClipId
+        ) {
+          return
+        }
+        setWorkspaceOptions(
+          response.items
+            .filter((workspace) => !workspace.deleted)
+            .map((workspace) => ({
+              id: workspace.id,
+              name: workspace.name
+            }))
+        )
+      })
+      .catch(() => {
+        if (
+          cancelled ||
+          !isMountedRef.current ||
+          activeClipIdRef.current !== submittedClipId
+        ) {
+          return
+        }
+        setWorkspaceOptions([])
+        setWorkspaceOptionsError(
+          tRef.current(
+            "sidepanel:clipper.workspaceLoadFailed",
+            "Workspace picker could not load. Enter a workspace ID manually."
+          )
+        )
+      })
+      .finally(() => {
+        if (
+          cancelled ||
+          !isMountedRef.current ||
+          activeClipIdRef.current !== submittedClipId
+        ) {
+          return
+        }
+        setIsWorkspaceOptionsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [destinationMode, draft.clipId])
 
   const enrichmentStatuses = React.useMemo<EnrichmentStatusItem[]>(() => {
     if (!enrichmentResults) return []
@@ -473,6 +556,9 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         destinationMode={destinationMode}
         folderId={folderId}
         folderValidation={folderValidation}
+        isWorkspaceOptionsLoading={isWorkspaceOptionsLoading}
+        workspaceOptions={workspaceOptions}
+        workspaceOptionsError={workspaceOptionsError}
         workspaceId={workspaceId}
         workspaceValidation={workspaceValidation}
         onDestinationChange={(nextValue) => {

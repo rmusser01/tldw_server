@@ -2,10 +2,18 @@ import type { ChangeEvent } from "react"
 import type { WebClipperDestination } from "@/services/web-clipper/types"
 import { useTranslation } from "react-i18next"
 
+export type WorkspacePickerOption = {
+  id: string
+  name: string | null
+}
+
 type ClipDestinationFieldsProps = {
   destinationMode: WebClipperDestination
   folderId: string
   folderValidation: string | null
+  isWorkspaceOptionsLoading: boolean
+  workspaceOptions: WorkspacePickerOption[]
+  workspaceOptionsError: string | null
   workspaceId: string
   workspaceValidation: string | null
   onDestinationChange: (nextValue: WebClipperDestination) => void
@@ -23,6 +31,9 @@ const ClipDestinationFields = ({
   destinationMode,
   folderId,
   folderValidation,
+  isWorkspaceOptionsLoading,
+  workspaceOptions,
+  workspaceOptionsError,
   workspaceId,
   workspaceValidation,
   onDestinationChange,
@@ -30,6 +41,21 @@ const ClipDestinationFields = ({
   onWorkspaceIdChange
 }: ClipDestinationFieldsProps) => {
   const { t } = useTranslation()
+  const hasWorkspaceOptions = workspaceOptions.length > 0
+  const workspaceInput = (
+    <input
+      id="clip-workspace-id"
+      type="text"
+      value={workspaceId}
+      onChange={(event) => onWorkspaceIdChange(event.target.value)}
+      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-text"
+      placeholder={t(
+        "sidepanel:clipper.workspacePlaceholder",
+        "workspace-alpha"
+      )}
+      aria-invalid={workspaceValidation ? "true" : "false"}
+    />
+  )
 
   return (
     <section className="panel-card p-3">
@@ -102,21 +128,62 @@ const ClipDestinationFields = ({
 
         {destinationMode !== "note" ? (
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-text" htmlFor="clip-workspace-id">
-              {t("sidepanel:clipper.workspaceLabel", "Workspace ID")}
-            </label>
-            <input
-              id="clip-workspace-id"
-              type="text"
-              value={workspaceId}
-              onChange={(event) => onWorkspaceIdChange(event.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-text"
-              placeholder={t(
-                "sidepanel:clipper.workspacePlaceholder",
-                "workspace-alpha"
-              )}
-              aria-invalid={workspaceValidation ? "true" : "false"}
-            />
+            {isWorkspaceOptionsLoading ? (
+              <p className="text-sm text-text-muted">
+                {t("sidepanel:clipper.workspaceLoading", "Loading workspaces...")}
+              </p>
+            ) : null}
+            {workspaceOptionsError ? (
+              <p className="text-sm text-amber-700">
+                {workspaceOptionsError}
+              </p>
+            ) : null}
+            {hasWorkspaceOptions ? (
+              <>
+                <label className="block text-sm font-medium text-text" htmlFor="clip-workspace-picker">
+                  {t("sidepanel:clipper.workspacePickerLabel", "Workspace")}
+                </label>
+                <select
+                  id="clip-workspace-picker"
+                  value={workspaceId}
+                  onChange={(event) => onWorkspaceIdChange(event.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-text"
+                  aria-invalid={workspaceValidation ? "true" : "false"}
+                >
+                  <option value="">
+                    {t("sidepanel:clipper.workspacePickerPlaceholder", "Select a workspace")}
+                  </option>
+                  {workspaceOptions.map((workspace) => (
+                    <option key={workspace.id} value={workspace.id}>
+                      {workspace.name
+                        ? `${workspace.name} (${workspace.id})`
+                        : workspace.id}
+                    </option>
+                  ))}
+                </select>
+                <details className="rounded-lg border border-border bg-surface2 px-3 py-2">
+                  <summary className="cursor-pointer text-sm font-medium text-text-muted">
+                    {t(
+                      "sidepanel:clipper.workspaceAdvancedSummary",
+                      "Advanced: enter workspace ID manually"
+                    )}
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    <label className="block text-sm font-medium text-text" htmlFor="clip-workspace-id">
+                      {t("sidepanel:clipper.workspaceLabel", "Workspace ID")}
+                    </label>
+                    {workspaceInput}
+                  </div>
+                </details>
+              </>
+            ) : !isWorkspaceOptionsLoading ? (
+              <>
+                <label className="block text-sm font-medium text-text" htmlFor="clip-workspace-id">
+                  {t("sidepanel:clipper.workspaceLabel", "Workspace ID")}
+                </label>
+                {workspaceInput}
+              </>
+            ) : null}
             {workspaceValidation ? (
               <p className="text-sm text-red-600">{workspaceValidation}</p>
             ) : null}

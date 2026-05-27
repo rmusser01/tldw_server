@@ -11,6 +11,33 @@ describe("workspace API status and capabilities methods", () => {
     vi.clearAllMocks()
   })
 
+  it("lists workspaces from the canonical collection endpoint", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      items: [
+        {
+          id: "workspace-alpha",
+          name: "Alpha Workspace",
+          archived: false,
+          study_materials_policy: "general",
+          deleted: false,
+          created_at: "2026-05-27T00:00:00Z",
+          last_modified: "2026-05-27T00:00:00Z",
+          version: 1
+        }
+      ],
+      total: 1
+    })
+
+    const result = await workspaceApiMethods.listWorkspaces()
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/workspaces/",
+      method: "GET"
+    })
+    expect(result.items).toHaveLength(1)
+    expect(result.total).toBe(1)
+  })
+
   it("fetches workspace source status from the authoritative endpoint", async () => {
     vi.mocked(bgRequest).mockResolvedValueOnce({
       workspace_id: "ws-1",
