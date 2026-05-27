@@ -125,7 +125,7 @@ bunx vitest run \
 
 Expected: both focused guard files pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -400,11 +400,12 @@ Only stage `ComposerToolbar.tsx` if it was changed.
 
 - Modify if needed: `apps/packages/ui/src/components/Option/Playground/PlaygroundContextRail.tsx`
 - Modify if needed: `apps/packages/ui/src/components/Option/Playground/PlaygroundRuntimeInspector.tsx`
+- Modify if needed: `apps/packages/ui/src/components/Option/Playground/playground-composition-preview.ts`
 - Modify: `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx`
 - Modify: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
 - Modify: `backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md`
 
-- [ ] **Step 1: Write failing accessible-name tests for the duplicated content only**
+- [x] **Step 1: Write failing accessible-name tests for the duplicated content only**
 
 Use `Playground.cockpit-a11y.test.tsx` to add targeted assertions for the actual duplicated labels still observed after Tasks 2 and 3. Do not duplicate existing shell tests for:
 
@@ -422,7 +423,7 @@ expect(screen.getAllByRole("heading", { name: "MCP tools" })).toHaveLength(1)
 
 Expected RED only if those duplicates still exist. If live inspection shows the duplicates have already been resolved by other branch changes, skip this task and record the no-op.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -433,7 +434,7 @@ bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-a1
 
 Expected: the new duplicate assertion fails if duplicates remain.
 
-- [ ] **Step 3: Implement copy/label cleanup**
+- [x] **Step 3: Implement copy/label cleanup**
 
 Prefer these fixes:
 
@@ -448,7 +449,7 @@ Avoid:
 - Reusing the same label for multiple different controls.
 - Moving rail content to a modal.
 
-- [ ] **Step 4: Run GREEN**
+- [x] **Step 4: Run GREEN**
 
 Run:
 
@@ -459,7 +460,7 @@ bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-a1
 
 Expected: focused a11y tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 

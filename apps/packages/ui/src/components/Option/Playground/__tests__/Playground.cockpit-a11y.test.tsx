@@ -5,8 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
+import { PlaygroundCompositionPreview } from "../PlaygroundCompositionPreview";
 import { PlaygroundModelCatalogControls } from "../PlaygroundModelCatalogControls";
+import { PlaygroundRuntimeInspector } from "../PlaygroundRuntimeInspector";
 import { PlaygroundStatusStrip } from "../PlaygroundStatusStrip";
+import { buildPlaygroundCompositionPreviewSummary } from "../playground-composition-preview";
 
 const translate = vi.hoisted(
   () =>
@@ -340,5 +343,59 @@ describe("Playground cockpit accessibility", () => {
       "placeholder",
       "Search all known models",
     );
+  });
+
+  it("does not repeat empty assistant copy inside composition and runtime rail summaries", () => {
+    const assistantSummary = {
+      mode: "none" as const,
+      name: null,
+      detail: "No assistant selected",
+    };
+    const compositionSummary = buildPlaygroundCompositionPreviewSummary({
+      promptSummary: {
+        state: "none",
+        label: "No prompt selected",
+        detail: "No system prompt will be added.",
+      },
+      assistantSummary,
+      providerRoute: {
+        selectedProvider: "openai",
+        selectedModel: "gpt-4o-mini",
+        providerRouteLabel: "openai:gpt-4o-mini",
+      },
+      settingSummaries: [],
+      contextSources: [],
+      toolSummary: null,
+      compositionStatus: "idle",
+      composition: null,
+    });
+
+    render(
+      <>
+        <PlaygroundCompositionPreview summary={compositionSummary} />
+        <PlaygroundRuntimeInspector
+          streaming={false}
+          selectedProvider="openai"
+          selectedModel="gpt-4o-mini"
+          messageCount={0}
+          threadSearchOpen={false}
+          assistantSummary={assistantSummary}
+          onOpenModelSettings={vi.fn()}
+          onOpenAssistantSelect={vi.fn()}
+        />
+      </>,
+    );
+
+    const composition = screen.getByRole("region", {
+      name: "Next message composition",
+    });
+    expect(
+      within(composition).getAllByText("No assistant selected"),
+    ).toHaveLength(1);
+
+    const runtimeInspector = screen.getByTestId("playground-runtime-inspector");
+    expect(
+      within(runtimeInspector).getAllByText("No assistant selected"),
+    ).toHaveLength(1);
   });
 });

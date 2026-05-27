@@ -199,6 +199,10 @@ export const PlaygroundRuntimeInspector = ({
   const assistantLabel =
     effectiveAssistantSummary.name ||
     t("cockpit.noAssistantSelected", "No assistant selected");
+  const noAssistantDetail = t(
+    "cockpit.noAssistantDetail",
+    "No persona or character will shape replies.",
+  );
   const assistantModeLabel =
     effectiveAssistantSummary.mode === "persona"
       ? t("cockpit.personaMode", "Persona")
@@ -206,13 +210,13 @@ export const PlaygroundRuntimeInspector = ({
         ? t("cockpit.characterMode", "Character")
         : t("cockpit.noAssistantMode", "None");
   const assistantDetail =
-    effectiveAssistantSummary.detail ||
-    (effectiveAssistantSummary.mode === "none"
-      ? t(
-          "cockpit.noAssistantDetail",
-          "No persona or character will shape replies.",
-        )
-      : assistantModeLabel);
+    effectiveAssistantSummary.mode === "none" &&
+    effectiveAssistantSummary.detail === assistantLabel
+      ? noAssistantDetail
+      : effectiveAssistantSummary.detail ||
+        (effectiveAssistantSummary.mode === "none"
+          ? noAssistantDetail
+          : assistantModeLabel);
   const openAssistant = onOpenAssistantSelect || onOpenCharacterSettings;
   const openSceneDirector = onOpenSceneDirector || onOpenCharacterSettings;
   const toolChoices: Array<{ value: RuntimeToolChoice; label: string }> = [

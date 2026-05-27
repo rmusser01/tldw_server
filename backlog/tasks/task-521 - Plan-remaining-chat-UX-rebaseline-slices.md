@@ -4,7 +4,7 @@ title: Plan remaining chat UX rebaseline slices
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-27 15:24'
+updated_date: '2026-05-27 15:34'
 labels:
   - chat
   - ux
@@ -43,6 +43,10 @@ Task 1 guardrail inspection completed. Existing Playground.cockpit-regression.gu
 Task 2 mobile density TDD started. Added a failing a11y/shell test proving the mobile cockpit panel still used max-h-[42vh], then changed PlaygroundCockpitShell mobile panel caps to max-h-[30vh] and made the mobile panel summary sr-only while preserving aria-describedby text. Added real-server Playwright assertions for mobile rail/composer non-overlap and bounded panel height. Fresh focused Vitest passed: Playground.cockpit-a11y, Playground.cockpit-shell, Playground.cockpit-regression.guard, and SidepanelHeaderSimple.fullscreen-route (4 files, 43 tests). Browser probe at http://127.0.0.1:18015/chat with 390x844 viewport confirmed mobile context panel class max-h-[30vh], panel height about 253px, sr-only summary text present, composer below rails, and no standalone CharacterControlRail text. Real-server backend startup exited before health binding in this sandbox run, so the real-server Playwright grep remains pending.
 
 Task 3 server-save feedback TDD completed. Added a failing usePlaygroundPersistence hook test proving first server save still opened notificationApi.success with 'Chat now saved on server'. Removed only that success notification call while preserving serverPersistenceHintSeenRef, setServerPersistenceHintSeen(true), setShowServerPersistenceHint(true), and existing error notifications. Added a real-server Playwright assertion to the mobile send flow that no .ant-notification-notice contains 'Chat now saved on server' and the chat input remains visible. Focused verification passed: bunx vitest run src/components/Option/Playground/hooks/__tests__/usePlaygroundPersistence.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx (5 files, 51 tests). git diff --check passed. Real-server Playwright remains pending because the prior backend startup exited before health binding in this sandbox.
+
+Task 4 rail-label cleanup TDD completed. Added a failing cockpit a11y test for duplicated empty assistant copy in the composition preview and runtime rail: both rendered 'No assistant selected' as title/value and repeated detail text. Suppressed only duplicate detail text by omitting identical assistant composition detail and by showing the runtime no-assistant explanatory detail when upstream summary detail repeats the empty label. Focused verification passed: bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx src/components/Option/Playground/__tests__/PlaygroundCompositionPreview.test.tsx src/components/Option/Playground/__tests__/playground-composition-preview.test.ts src/components/Option/Playground/__tests__/playground-cockpit-summaries.test.ts src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx (6 files, 75 tests). git diff --check passed.
+
+Additional Task 4 verification: env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --project tsconfig.json --pretty false still fails on the unrelated baseline Characters design-system test at src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx:35 because 'comfortable' is not assignable to GalleryCardDensity. Bandit is not applicable for this frontend TypeScript-only slice.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

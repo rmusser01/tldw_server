@@ -176,7 +176,8 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     kind: "assistant",
     label: "Assistant",
     title: assistantName,
-    detail: assistantSummary.detail,
+    detail:
+      assistantSummary.detail === assistantName ? null : assistantSummary.detail,
     state: assistantSummary.mode === "none" ? "disabled" : "active",
   };
   const modelTitle =
