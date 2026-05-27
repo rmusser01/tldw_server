@@ -54,12 +54,29 @@ Verification:
 - git diff --check -> clean
 
 Known skips/blockers: none for this slice.
+
+PR review follow-up:
+- Rebased branch on latest origin/dev after PR #2079 merged.
+- Made duplicated built-in preset ids unique by default and refreshed duplicate created_at/updated_at timestamps.
+- Hardened preset safety checks so process_execution approval requires explicit process_execution coverage or a globally required approval policy.
+- Made approval required_for normalization defensive for null and unexpected values.
+- Added docstrings requested by review comments and narrowed the preset import-boundary scan to the profile package.
+- Added regression tests for duplicate id uniqueness, duplicate timestamp refresh, explicit process_execution approval, and null required_for handling.
+
+Review follow-up verification:
+- python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -v -> 13 passed, 3 warnings
+- python -m ruff check mcp_unified tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py -> passed
+- python -m mypy mcp_unified --config-file pyproject.toml -> passed
+- python -m bandit -r mcp_unified -f json -o /tmp/bandit_mcp_unified_profile_presets.json -> 0 findings
+- git diff --check -> clean
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added package-local built-in MCP profile preset primitives for the initial front-end role/mode set. Presets are conservative templates with stable ids/versioning, safety-baseline validation, and duplication into editable MCPProfile objects with preset provenance preserved. No tldw_server host MCP route, policy, approval, credential, or execution behavior changed.
+
+PR review follow-up tightened duplicate profile creation and preset safety validation. Duplicates now get unique default ids plus fresh timestamps, process execution approval must be explicit unless approval is globally required, malformed required_for policies fail closed, and the package-boundary test now scans only the profile package seam under review.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

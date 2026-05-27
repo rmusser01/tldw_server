@@ -1,6 +1,9 @@
+"""Tests for package-local MCP profile preset primitives."""
+
 from __future__ import annotations
 
 import ast
+from datetime import datetime, timezone
 from pathlib import Path
 
 import mcp_unified.profiles.presets as presets
@@ -25,6 +28,7 @@ EXPECTED_PRESET_IDS = {
 
 
 def _tldw_imports_for(path: Path) -> list[str]:
+    """Return imports from a Python file that cross into the host package."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imports: list[str] = []
     for node in ast.walk(tree):
@@ -42,7 +46,7 @@ def _tldw_imports_for(path: Path) -> list[str]:
 
 
 def test_profile_presets_module_has_no_tldw_server_imports() -> None:
-    package_root = Path(presets.__file__).resolve().parents[1]
+    package_root = Path(presets.__file__).resolve().parent
     offenders: dict[str, list[str]] = {}
     for path in package_root.rglob("*.py"):
         imports = _tldw_imports_for(path)
@@ -98,6 +102,28 @@ def test_duplicate_builtin_preset_returns_editable_profile_with_provenance() -> 
     assert "custom.search" not in original.profile.policy_document.allowed_tools
 
 
+def test_duplicate_builtin_preset_default_ids_are_unique() -> None:
+    first = presets.duplicate_builtin_preset("architect")
+    second = presets.duplicate_builtin_preset("architect")
+
+    assert first.id != second.id
+    assert first.id.startswith("architect-")
+    assert second.id.startswith("architect-")
+
+
+def test_duplicate_builtin_preset_refreshes_timestamps() -> None:
+    template = presets.get_builtin_preset("architect")
+    assert template is not None
+
+    before_duplicate = datetime.now(timezone.utc)
+    profile = presets.duplicate_builtin_preset("architect")
+
+    assert profile.created_at >= before_duplicate
+    assert profile.updated_at >= before_duplicate
+    assert profile.created_at != template.profile.created_at
+    assert profile.updated_at != template.profile.updated_at
+
+
 def test_safety_validation_rejects_unsafe_unapproved_process_capability() -> None:
     unsafe_profile = MCPProfile(
         id="unsafe",
@@ -117,3 +143,60 @@ def test_safety_validation_rejects_unsafe_unapproved_process_capability() -> Non
 
     assert "process_execution_requires_approval" in violations
     assert "high_risk_capability_requires_provenance" in violations
+
+
+def test_safety_validation_requires_explicit_process_execution_approval() -> None:
+    unsafe_profile = MCPProfile(
+        id="unsafe-process",
+        name="Unsafe Process",
+        policy_document={
+            "capabilities": ["process.execute"],
+            "risk_classes": ["process_execution"],
+        },
+        approval_policy={
+            "required_for": ["mutating", "write"],
+        },
+        provenance={
+            "high_risk": {
+                "process_execution": "Process execution is intentionally present.",
+            },
+        },
+    )
+    unsafe_preset = presets.ProfilePreset(
+        id="unsafe-process",
+        version="test",
+        profile=unsafe_profile,
+    )
+
+    violations = presets.validate_preset_safety(unsafe_preset)
+
+    assert "process_execution_requires_approval" in violations
+    assert "high_risk_capability_requires_provenance" not in violations
+
+
+def test_safety_validation_handles_null_required_for_policy() -> None:
+    unsafe_profile = MCPProfile(
+        id="unsafe-null-required-for",
+        name="Unsafe Null Required For",
+        policy_document={
+            "capabilities": ["process.execute"],
+            "risk_classes": ["process_execution"],
+        },
+        approval_policy={
+            "required_for": None,
+        },
+        provenance={
+            "high_risk": {
+                "process_execution": "Process execution is intentionally present.",
+            },
+        },
+    )
+    unsafe_preset = presets.ProfilePreset(
+        id="unsafe-null-required-for",
+        version="test",
+        profile=unsafe_profile,
+    )
+
+    violations = presets.validate_preset_safety(unsafe_preset)
+
+    assert "process_execution_requires_approval" in violations

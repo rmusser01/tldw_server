@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
@@ -49,6 +51,7 @@ def _policy(
     tool_patterns: list[str] | None = None,
     module_patterns: list[str] | None = None,
 ) -> ProfilePolicy:
+    """Build a conservative package-local policy document for a preset."""
     return ProfilePolicy(
         allowed_tools=allowed_tools or [],
         capabilities=capabilities,
@@ -71,6 +74,7 @@ def _profile(
     provenance: dict[str, Any] | None = None,
     agent_metadata: dict[str, Any] | None = None,
 ) -> MCPProfile:
+    """Build an MCP profile template with preset provenance metadata."""
     metadata = {
         "agent_metadata": {
             "ui_label": name,
@@ -112,6 +116,7 @@ def _preset(
     provenance: dict[str, Any] | None = None,
     agent_metadata: dict[str, Any] | None = None,
 ) -> ProfilePreset:
+    """Build an immutable preset wrapper for a bundled MCP profile template."""
     return ProfilePreset(
         id=preset_id,
         version=PRESET_VERSION,
@@ -288,11 +293,14 @@ def duplicate_builtin_preset(
         raise ValueError(f"Unknown MCP profile preset: {preset_id}")
 
     profile = preset.profile.model_copy(deep=True)
-    profile.id = profile_id or f"{preset.id}-copy"
+    now = datetime.now(timezone.utc)
+    profile.id = profile_id or f"{preset.id}-{uuid4().hex[:8]}"
     if name is not None:
         profile.name = name
     profile.preset_id = preset.id
     profile.preset_version = preset.version
+    profile.created_at = now
+    profile.updated_at = now
     profile.provenance = {
         **profile.provenance,
         "source": "builtin_preset",
@@ -341,16 +349,29 @@ def validate_preset_safety(preset: ProfilePreset) -> list[str]:
 
 
 def _approval_required_for(profile: MCPProfile, risk_class: str) -> bool:
+    """Return whether a profile requires approval for the given risk class."""
     approval_policy = profile.approval_policy
-    required_for = approval_policy.get("required_for", [])
     if approval_policy.get("required") is True:
         return True
-    if isinstance(required_for, str):
-        required_for = [required_for]
+
+    raw_required_for = approval_policy.get("required_for", [])
+    if raw_required_for is None:
+        required_for: list[str] = []
+    elif isinstance(raw_required_for, str):
+        required_for = [raw_required_for]
+    elif isinstance(raw_required_for, (list, tuple, set)):
+        required_for = [item for item in raw_required_for if isinstance(item, str)]
+    else:
+        required_for = []
+
+    if risk_class == "process_execution":
+        return "process_execution" in required_for
+
     return risk_class in required_for or "mutating" in required_for or "write" in required_for
 
 
 def _has_high_risk_provenance(profile: MCPProfile, risk_class: str) -> bool:
+    """Return whether high-risk capability provenance is recorded."""
     high_risk = profile.provenance.get("high_risk")
     if isinstance(high_risk, dict) and high_risk.get(risk_class):
         return True
