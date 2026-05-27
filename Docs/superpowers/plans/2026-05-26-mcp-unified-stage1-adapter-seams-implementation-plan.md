@@ -815,7 +815,7 @@ git commit -m "docs: inventory mcp module extraction ownership"
   - `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py`
   - `tldw_Server_API/app/core/MCP_unified/tests/test_scope_and_fallbacks.py`
 
-- [ ] **Step 1: Run all new and directly touched tests**
+- [x] **Step 1: Run all new and directly touched tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -828,7 +828,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run host MCP compatibility tests**
+- [x] **Step 2: Run host MCP compatibility tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -840,7 +840,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS or document any pre-existing/environment-limited failures with exact failure text.
 
-- [ ] **Step 3: Run Bandit on touched code**
+- [x] **Step 3: Run Bandit on touched code**
 
 ```bash
 source .venv/bin/activate && python -m bandit -r \
@@ -854,7 +854,7 @@ source .venv/bin/activate && python -m bandit -r \
 
 Expected: no new findings in touched code. If baseline findings appear, document them separately and fix any new issue introduced by this slice.
 
-- [ ] **Step 4: Record verification in Backlog**
+- [x] **Step 4: Record verification in Backlog**
 
 Update `TASK-480` with:
 
@@ -863,7 +863,7 @@ Update `TASK-480` with:
 - Bandit output path
 - any known skips or environment constraints
 
-- [ ] **Step 5: Final commit**
+- [x] **Step 5: Final commit**
 
 ```bash
 git add \
