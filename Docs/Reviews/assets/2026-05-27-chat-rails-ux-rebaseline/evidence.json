@@ -1,0 +1,135 @@
+{
+  "worktree": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-rails-ux-rebaseline",
+  "branch": "codex/chat-rails-ux-rebaseline",
+  "head": "65357cac1",
+  "originDev": "efe42fe0c",
+  "mergeBaseIsAncestorExitCode": 0,
+  "backend": "http://127.0.0.1:8000",
+  "webui": "http://localhost:18014",
+  "backendAvailable": true,
+  "backendHealth": {
+    "command": "curl -sf http://127.0.0.1:8000/api/v1/health",
+    "source": "coordinator_confirmed_with_approved_localhost_access",
+    "exitCode": 0,
+    "body": {
+      "status": "ok",
+      "checks": {
+        "database": {
+          "status": "healthy",
+          "type": "sqlite",
+          "database_size_mb": 4.75
+        },
+        "metrics": {
+          "status": "healthy"
+        },
+        "chacha_notes": {
+          "status": "healthy",
+          "init_attempts": 1,
+          "init_failures": 0,
+          "last_init_ms": 262.1378330513835,
+          "last_error": null,
+          "cached_instances": 1,
+          "default_char_ensures": 3445,
+          "default_char_failures": 0
+        }
+      },
+      "timestamp": "2026-05-27T04:02:58.037714",
+      "auth_mode": "single_user",
+      "rg_policy_version": 1,
+      "rg_policy_store": "file",
+      "rg_policy_count": 38
+    }
+  },
+  "sandboxHealthCheck": {
+    "command": "curl -sf http://127.0.0.1:8000/api/v1/health",
+    "exitCode": 7,
+    "stdout": "",
+    "stderr": "",
+    "result": "sandbox_localhost_access_failed"
+  },
+  "realServerPlaywright": {
+    "status": "blocked",
+    "reason": "Backend was coordinator-confirmed healthy, but the sandbox blocked the Playwright-managed Next server from binding to 127.0.0.1:18014.",
+    "plannedCommand": "cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY TLDW_SERVER_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_WEB_URL=http://localhost:18014 TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18014' bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line",
+    "attemptExitCode": 1,
+    "failure": "Error: listen EPERM: operation not permitted 127.0.0.1:18014"
+  },
+  "focusedStaticPlaywright": {
+    "requiredCommand": "cd apps/tldw-frontend && bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep \"normalizes configured provider model IDs|does not intercept backend routes\"",
+    "requiredCommandStatus": "blocked",
+    "requiredCommandExitCode": 1,
+    "requiredCommandFailure": "Playwright config attempted to start Next on 0.0.0.0:8080 and failed with listen EPERM.",
+    "executedCommand": "cd apps/tldw-frontend && TLDW_WEB_AUTOSTART=false TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep \"normalizes configured provider model IDs|does not intercept backend routes\"",
+    "status": "passed",
+    "tests": 2,
+    "duration": "595ms"
+  },
+  "sourceEvidence": [
+    {
+      "file": "apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts",
+      "status": "updated",
+      "evidence": "Added assertNoHorizontalOverflow(page) and wired it into stable desktop and mobile cockpit/focus states."
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts",
+      "status": "previously_verified_task_2",
+      "evidence": "Source guard proves the cockpit shell, context rail, runtime inspector, mobile rail surface, focus mode affordance, and character rail remain wired."
+    }
+  ],
+  "viewportChecks": [
+    {
+      "route": "/chat",
+      "viewport": "1440x960",
+      "state": "desktop-cockpit",
+      "status": "blocked",
+      "horizontalOverflow": null,
+      "reason": "Live Playwright cockpit load was not run because the sandbox blocked the WebUI server bind on 127.0.0.1:18014."
+    },
+    {
+      "route": "/chat",
+      "viewport": "1440x960",
+      "state": "desktop-focus",
+      "status": "blocked",
+      "horizontalOverflow": null,
+      "reason": "Live Playwright focus transition was not run because the sandbox blocked the WebUI server bind on 127.0.0.1:18014."
+    },
+    {
+      "route": "/chat",
+      "viewport": "390x844",
+      "state": "mobile-focus",
+      "status": "blocked",
+      "horizontalOverflow": null,
+      "reason": "Live mobile focus viewport was not run because the sandbox blocked the WebUI server bind on 127.0.0.1:18014."
+    },
+    {
+      "route": "/chat",
+      "viewport": "390x844",
+      "state": "mobile-cockpit",
+      "status": "blocked",
+      "horizontalOverflow": null,
+      "reason": "Live mobile cockpit panel viewport was not run because the sandbox blocked the WebUI server bind on 127.0.0.1:18014."
+    }
+  ],
+  "screenshots": [
+    {
+      "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-cockpit.png",
+      "status": "not_captured",
+      "reason": "WebUI server bind blocked by sandbox."
+    },
+    {
+      "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-focus.png",
+      "status": "not_captured",
+      "reason": "WebUI server bind blocked by sandbox."
+    },
+    {
+      "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-focus.png",
+      "status": "not_captured",
+      "reason": "WebUI server bind blocked by sandbox."
+    },
+    {
+      "path": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit.png",
+      "status": "not_captured",
+      "reason": "WebUI server bind blocked by sandbox."
+    }
+  ]
+}

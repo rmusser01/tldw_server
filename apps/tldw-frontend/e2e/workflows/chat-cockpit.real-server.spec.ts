@@ -647,6 +647,17 @@ const assertNoBlockingServerDialog = async (page: Page) => {
   ).toBeHidden({ timeout: 5_000 });
 };
 
+const assertNoHorizontalOverflow = async (page: Page) => {
+  const metrics = await page.evaluate(() => ({
+    innerWidth: window.innerWidth,
+    docScrollWidth: document.documentElement.scrollWidth,
+    bodyScrollWidth: document.body.scrollWidth,
+  }));
+
+  expect(metrics.docScrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1);
+  expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1);
+};
+
 const assertHealthResponse = (health: { status: number; body: any }) => {
   expect([200, 206]).toContain(health.status);
   expect(['ok', 'healthy', 'degraded']).toContain(health.body?.status);
@@ -1456,6 +1467,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await assertNoBlockingServerDialog(page);
     await expect(page.getByRole('log', { name: /chat messages/i })).toBeVisible();
     await assertCoreComposerControls(page, { composerOnly: true });
+    await assertNoHorizontalOverflow(page);
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-desktop-initial.png'),
       fullPage: true,
@@ -1628,6 +1640,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
     await assertCoreComposerControls(page, { composerOnly: true });
+    await assertNoHorizontalOverflow(page);
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-desktop-focus.png'),
       fullPage: true,
@@ -1640,6 +1653,7 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await assertNoHorizontalOverflow(page);
     await expect(
       getDesktopContextRail(page).getByRole('button', { name: 'Web search', exact: true })
     ).toHaveAttribute('aria-pressed', 'true');
@@ -1889,6 +1903,7 @@ test.describe('/chat cockpit real-server parity', () => {
     });
     await assertNoBlockingServerDialog(page);
     await assertCoreComposerControls(page, { mobile: true });
+    await assertNoHorizontalOverflow(page);
 
     const mobileDraft = `mobile cockpit draft ${Date.now()}`;
     const expectMobileDraftPreserved = async () => {
@@ -1944,6 +1959,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(initialRuntimeTab).toHaveAttribute('aria-selected', 'false');
     await expect(initialContextPanel).toBeVisible();
     await expect(initialRuntimePanel).toBeHidden();
+    await assertNoHorizontalOverflow(page);
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-context.png'),
       fullPage: true,
@@ -2024,6 +2040,7 @@ test.describe('/chat cockpit real-server parity', () => {
       runtimePanel.getByRole('button', { name: 'Select character or persona' })
     ).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
+    await assertNoHorizontalOverflow(page);
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-runtime.png'),
       fullPage: true,
@@ -2066,6 +2083,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('playground-cockpit-mobile-rails')).toHaveCount(0);
     await assertCoreComposerControls(page, { mobile: true, composerOnly: true });
     await expectMobileDraftReachable();
+    await assertNoHorizontalOverflow(page);
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-focus.png'),
       fullPage: true,
@@ -2079,6 +2097,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'runtime');
     await expectMobileDraftPreserved();
     await expect(runtimePanelTarget).toBeVisible();
+    await assertNoHorizontalOverflow(page);
   });
 
   test('sends a real mobile focus conversation against the live server', async ({
