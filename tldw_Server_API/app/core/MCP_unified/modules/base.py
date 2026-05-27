@@ -87,6 +87,55 @@ class ModuleConfig:
     circuit_breaker_backoff_factor: float = 2.0
     circuit_breaker_max_timeout: int = 300
     settings: dict[str, Any] = field(default_factory=dict)
+    circuit_breaker_factory: Any | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleCircuitBreakerConfig:
+    """Host-neutral circuit breaker settings used by MCP modules."""
+
+    failure_threshold: int
+    recovery_timeout: float
+    backoff_factor: float
+    max_recovery_timeout: float
+    half_open_max_calls: int = 1
+    success_threshold: int = 1
+    category: str = "mcp"
+    service: str = ""
+
+
+def _build_module_circuit_breaker_config(config: ModuleConfig) -> ModuleCircuitBreakerConfig:
+    return ModuleCircuitBreakerConfig(
+        failure_threshold=config.circuit_breaker_threshold,
+        recovery_timeout=float(config.circuit_breaker_timeout),
+        backoff_factor=config.circuit_breaker_backoff_factor,
+        max_recovery_timeout=float(config.circuit_breaker_max_timeout),
+        half_open_max_calls=1,
+        success_threshold=1,
+        category="mcp",
+        service=config.name,
+    )
+
+
+def _default_circuit_breaker_factory(*, name: str, config: Any) -> Any:
+    from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
+        CircuitBreaker,
+        CircuitBreakerConfig,
+    )
+
+    return CircuitBreaker(
+        name=name,
+        config=CircuitBreakerConfig(
+            failure_threshold=config.failure_threshold,
+            recovery_timeout=config.recovery_timeout,
+            backoff_factor=config.backoff_factor,
+            max_recovery_timeout=config.max_recovery_timeout,
+            half_open_max_calls=config.half_open_max_calls,
+            success_threshold=config.success_threshold,
+            category=config.category,
+            service=config.service,
+        ),
+    )
 
 
 class BaseModule(ABC):
@@ -108,24 +157,13 @@ class BaseModule(ABC):
         self._metrics = ModuleMetrics()
 
         # Circuit breaker (unified)
-        from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
-            CircuitBreaker as _UnifiedCB,
+        circuit_breaker_factory = (
+            config.circuit_breaker_factory
+            or _default_circuit_breaker_factory
         )
-        from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
-            CircuitBreakerConfig as _CBCfg,
-        )
-        self._circuit_breaker = _UnifiedCB(
+        self._circuit_breaker = circuit_breaker_factory(
             name=f"mcp_{config.name}",
-            config=_CBCfg(
-                failure_threshold=config.circuit_breaker_threshold,
-                recovery_timeout=float(config.circuit_breaker_timeout),
-                backoff_factor=config.circuit_breaker_backoff_factor,
-                max_recovery_timeout=float(config.circuit_breaker_max_timeout),
-                half_open_max_calls=1,
-                success_threshold=1,
-                category="mcp",
-                service=config.name,
-            ),
+            config=_build_module_circuit_breaker_config(config),
         )
 
         # Initialization state

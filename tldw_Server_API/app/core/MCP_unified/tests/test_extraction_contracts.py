@@ -1,0 +1,136 @@
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+
+MCP_ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_INTERFACE_FILES = {"runtime.py", "policy.py", "storage.py"}
+
+
+def _fake_runtime_dependencies() -> SimpleNamespace:
+    return SimpleNamespace(
+        module_registry=object(),
+        rbac_policy=object(),
+        rate_limiter=object(),
+        metrics_collector=object(),
+        telemetry_provider=object(),
+        database_path_resolver=object(),
+        api_key_scope_normalizer=object(),
+        effective_policy_resolver=object(),
+        approval_evaluator=object(),
+        path_scope_enforcer=object(),
+        external_access_evaluator=object(),
+        redis_client_factory=object(),
+        circuit_breaker_factory=object(),
+    )
+
+
+def _interface_boundary_violations_for(path: Path, interface_dir: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    relative_parent = path.parent.relative_to(interface_dir)
+    relative_depth = 0 if relative_parent == Path(".") else len(relative_parent.parts)
+    max_interface_relative_level = relative_depth + 1
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            violations.extend(
+                alias.name
+                for alias in node.names
+                if alias.name == "tldw_Server_API"
+                or alias.name.startswith("tldw_Server_API.")
+            )
+        elif isinstance(node, ast.ImportFrom):
+            if node.level > max_interface_relative_level:
+                violations.append(
+                    f"relative import escapes interfaces package: level={node.level}"
+                )
+            elif (
+                node.module
+                and node.level == 0
+                and (
+                    node.module == "tldw_Server_API"
+                    or node.module.startswith("tldw_Server_API.")
+                )
+            ):
+                violations.append(node.module)
+    return violations
+
+
+def test_new_interface_modules_do_not_import_tldw_server_api() -> None:
+    interface_dir = MCP_ROOT / "interfaces"
+    assert interface_dir.exists()
+    interface_files = {path.name for path in interface_dir.rglob("*.py")}
+    assert EXPECTED_INTERFACE_FILES.issubset(interface_files)
+    offenders: dict[str, list[str]] = {}
+    for path in interface_dir.rglob("*.py"):
+        violations = _interface_boundary_violations_for(path, interface_dir)
+        if violations:
+            offenders[str(path)] = violations
+    assert offenders == {}
+
+
+def test_default_runtime_dependency_builder_exposes_core_dependencies() -> None:
+    from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
+        build_default_runtime_dependencies,
+    )
+
+    deps = build_default_runtime_dependencies()
+    assert hasattr(deps, "module_registry")
+    assert hasattr(deps, "rbac_policy")
+
+
+def test_mcp_protocol_accepts_runtime_dependencies() -> None:
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
+
+    deps = _fake_runtime_dependencies()
+    protocol = MCPProtocol(dependencies=deps)
+    assert protocol.module_registry is deps.module_registry
+    assert protocol.rbac_policy is deps.rbac_policy
+
+
+def test_mcp_server_accepts_runtime_dependencies() -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    deps = _fake_runtime_dependencies()
+    server = MCPServer(dependencies=deps)
+    assert server.protocol.module_registry is deps.module_registry
+    assert server.protocol.rbac_policy is deps.rbac_policy
+    assert server.module_registry is deps.module_registry
+    assert server.rbac_policy is deps.rbac_policy
+    assert server.metrics_collector is deps.metrics_collector
+
+
+def test_default_server_protocol_uses_current_telemetry_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified import protocol as protocol_mod
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    first_manager = object()
+    second_manager = object()
+    deps = _fake_runtime_dependencies()
+    deps.telemetry_provider = first_manager
+    current = {"manager": first_manager}
+
+    monkeypatch.setattr(protocol_mod, "build_default_runtime_dependencies", lambda: deps)
+    monkeypatch.setattr(protocol_mod, "get_telemetry_manager", lambda: current["manager"])
+
+    server = MCPServer()
+
+    assert server.dependencies is deps
+    assert server.protocol.telemetry is first_manager
+    current["manager"] = second_manager
+    assert server.protocol.telemetry is second_manager
+
+
+def test_protocol_instances_do_not_share_prepared_call_secrets() -> None:
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
+
+    first = MCPProtocol()
+    second = MCPProtocol()
+    assert first is not second
+    assert first._prepared_call_secret != second._prepared_call_secret  # noqa: SLF001
