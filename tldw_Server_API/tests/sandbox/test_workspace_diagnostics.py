@@ -297,3 +297,52 @@ def test_workspace_diagnostics_blocks_admission_when_sandbox_route_disabled(
     assert data["admission"]["state"] == "blocked"
     assert data["admission"]["reason_code"] == "sandbox_route_disabled"
     assert "route policy" in data["admission"]["message"]
+
+
+@pytest.mark.unit
+@pytest.mark.sandbox_no_auth
+def test_workspace_diagnostics_blocks_admission_when_execution_disabled(
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb
+
+    monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "0")
+    monkeypatch.setattr(
+        sb._service,
+        "runtime_diagnostics_summary",
+        lambda: {
+            "source": "feature_discovery",
+            "summary": {
+                "total": 1,
+                "ready": 1,
+                "unavailable": 0,
+                "host_gated": 0,
+                "scaffold": 0,
+            },
+            "runtimes": [
+                {
+                    "name": "docker",
+                    "readiness": "available",
+                    "normalized_reasons": [],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.config.route_enabled",
+        lambda route_key, default_stable=True: True
+        if route_key == "sandbox"
+        else default_stable,
+    )
+
+    with _client(monkeypatch, user_id=1, is_admin=False) as client:
+        response = client.get(
+            "/api/v1/sandbox/workspaces/workspace-execution-disabled/diagnostics"
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["runtime"]["state"] == "available"
+    assert data["admission"]["state"] == "blocked"
+    assert data["admission"]["reason_code"] == "sandbox_execution_disabled"
+    assert "execution is disabled" in data["admission"]["message"]

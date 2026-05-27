@@ -29,6 +29,10 @@ import { FlashcardsPage } from "../utils/page-objects/FlashcardsPage"
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 }
 const CHAT_BOOTSTRAP_ENDPOINT =
   /\/api\/v1\/(?:chats(?:\/|\?|$)|chat\/conversations(?:\/|\?|$))/i
+const REQUIRE_SANDBOX_WORKSPACE_RUN =
+  process.env.TLDW_E2E_REQUIRE_SANDBOX_WORKSPACE_RUN === "1"
+const EXPECTED_SANDBOX_RUN_PHASE =
+  process.env.TLDW_E2E_EXPECT_SANDBOX_RUN_PHASE?.trim() || ""
 
 type BootstrapResponse = {
   url: string
@@ -704,7 +708,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     await expect(modal).toBeVisible({ timeout: 10_000 })
     const terminalState = modal
       .getByText(
-        /No sandbox runs are linked to this workspace yet|Sandbox diagnostics are unavailable right now|You do not have permission to view sandbox diagnostics|No sandbox runtimes are available for workspace actions|Sandbox runtime discovery failed|A sandbox runtime is available for workspace actions|Sandboxed workspace actions are blocked because the sandbox API route is disabled by route policy|Sandbox readiness could not be determined/i
+        /No sandbox runs are linked to this workspace yet|Sandbox diagnostics are unavailable right now|You do not have permission to view sandbox diagnostics|No sandbox runtimes are available for workspace actions|Sandbox runtime discovery failed|A sandbox runtime is available for workspace actions|Sandboxed workspace actions are blocked because the sandbox API route is disabled by route policy|Sandboxed workspace actions are blocked because sandbox execution is disabled|Sandbox readiness could not be determined/i
       )
       .first()
     await expect(terminalState).toBeVisible({ timeout: 10_000 })
@@ -728,6 +732,13 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     expect(workspaceId, "Expected Research Workspace to expose an active ID").toBeTruthy()
 
     const createResult = await tryCreateWorkspaceSandboxRun(workspaceId || "")
+    if (!createResult.created && REQUIRE_SANDBOX_WORKSPACE_RUN) {
+      expect(
+        createResult.created,
+        createResult.reason ||
+          "Required workspace sandbox run was not created"
+      ).toBe(true)
+    }
     test.skip(
       !createResult.created,
       createResult.reason ||
@@ -737,6 +748,9 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     const runId = createResult.run?.id
     expect(runId, "Expected sandbox run creation to return a run ID").toBeTruthy()
     expect(createResult.run?.workspace_id).toBe(workspaceId)
+    if (EXPECTED_SANDBOX_RUN_PHASE) {
+      expect(createResult.run?.phase).toBe(EXPECTED_SANDBOX_RUN_PHASE)
+    }
 
     const diagnosticsResponsePromise = authedPage.waitForResponse((response) => {
       if (response.request().method().toUpperCase() !== "GET") return false

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any
@@ -28,6 +29,8 @@ from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import (
     run_status_reason_details,
 )
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
+from tldw_Server_API.app.core.config import settings as app_settings
+from tldw_Server_API.app.core.testing import is_truthy
 
 router = APIRouter(prefix="/sandbox", tags=["sandbox"])
 
@@ -103,6 +106,17 @@ def _sandbox_run_route_enabled() -> bool:
         return False
 
 
+def _sandbox_execution_enabled() -> bool:
+    try:
+        env_exec = os.getenv("SANDBOX_ENABLE_EXECUTION")
+        if env_exec is not None:
+            return is_truthy(env_exec)
+        return bool(getattr(app_settings, "SANDBOX_ENABLE_EXECUTION", False))
+    except _SANDBOX_WORKSPACE_DIAGNOSTICS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Sandbox workspace diagnostics could not read execution gate: {}", exc)
+        return False
+
+
 def _sandbox_workspace_runtime_state() -> tuple[SandboxWorkspaceDiagnosticState, SandboxWorkspaceDiagnosticState]:
     try:
         diagnostics = _service.runtime_diagnostics_summary()
@@ -142,6 +156,18 @@ def _sandbox_workspace_runtime_state() -> tuple[SandboxWorkspaceDiagnosticState,
                 message=(
                     "Sandboxed workspace actions are blocked because the sandbox "
                     "API route is disabled by route policy."
+                ),
+                management_surface="sandbox_settings",
+            )
+            return runtime, admission
+
+        if not _sandbox_execution_enabled():
+            admission = SandboxWorkspaceDiagnosticState(
+                state="blocked",
+                reason_code="sandbox_execution_disabled",
+                message=(
+                    "Sandboxed workspace actions are blocked because sandbox "
+                    "execution is disabled."
                 ),
                 management_surface="sandbox_settings",
             )
