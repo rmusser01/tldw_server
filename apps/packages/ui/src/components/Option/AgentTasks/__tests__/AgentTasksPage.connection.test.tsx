@@ -37,6 +37,15 @@ vi.mock("@/services/tldw/deployment-mode", () => ({
   isHostedTldwDeployment: () => deploymentMocks.isHostedTldwDeployment()
 }))
 
+const PROJECTS_URL =
+  "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+const PROJECTS_FOR_ALPHA_URL =
+  `${PROJECTS_URL}?canonical_workspace_id=workspace-alpha&canonical_workspace_source=research_workspace`
+const PROJECTS_FOR_BETA_URL =
+  `${PROJECTS_URL}?canonical_workspace_id=workspace-beta&canonical_workspace_source=research_workspace`
+const PROJECTS_FOR_MISSING_URL =
+  `${PROJECTS_URL}?canonical_workspace_id=workspace-missing&canonical_workspace_source=research_workspace`
+
 vi.mock("antd", () => {
   const formApi = {
     resetFields: vi.fn(),
@@ -469,7 +478,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
-      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+      if (url === PROJECTS_URL) {
         return {
           ok: true,
           json: async () => [
@@ -614,7 +623,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
-      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+      if (url === PROJECTS_FOR_ALPHA_URL) {
         return {
           ok: true,
           json: async () => [
@@ -636,6 +645,13 @@ describe("AgentTasksPage connection and payload normalization", () => {
                 }
               }
             },
+          ]
+        }
+      }
+      if (url === PROJECTS_FOR_BETA_URL) {
+        return {
+          ok: true,
+          json: async () => [
             {
               id: 8,
               name: "Beta Project",
@@ -652,6 +668,37 @@ describe("AgentTasksPage connection and payload normalization", () => {
                 status_counts: {
                   todo: 1
                 }
+              }
+            }
+          ]
+        }
+      }
+      if (url === PROJECTS_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 7,
+              name: "Alpha Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 33,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
+              }
+            },
+            {
+              id: 8,
+              name: "Beta Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 34,
+                canonical_workspace_id: "workspace-beta",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
               }
             }
           ]
@@ -699,6 +746,15 @@ describe("AgentTasksPage connection and payload normalization", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Workspace filter"), {
+      target: { value: "__all_workspaces__" }
+    })
+
+    expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(
+      "/agent-tasks"
+    )
+    expect(await screen.findByText("Beta Project")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("Workspace filter"), {
       target: { value: "workspace-beta" }
     })
 
@@ -732,7 +788,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
-      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+      if (url === PROJECTS_FOR_MISSING_URL) {
         return {
           ok: true,
           json: async () => []
@@ -788,7 +844,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
-      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+      if (url === PROJECTS_FOR_ALPHA_URL) {
         return {
           ok: false,
           status: 503,
@@ -833,7 +889,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
-      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+      if (url === PROJECTS_FOR_ALPHA_URL) {
         return {
           ok: true,
           json: async () => [

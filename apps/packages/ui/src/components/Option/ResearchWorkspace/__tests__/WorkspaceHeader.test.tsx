@@ -174,6 +174,8 @@ const registryStateOverrides = {
 const fetchMockState = {
   fetch: vi.fn()
 }
+const ACP_PROJECTS_FOR_ALPHA_URL =
+  "http://127.0.0.1:8000/api/v1/agent-orchestration/projects?canonical_workspace_id=workspace-alpha&canonical_workspace_source=research_workspace"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -1387,7 +1389,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
       if (
         url ===
-        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+        ACP_PROJECTS_FOR_ALPHA_URL
       ) {
         return {
           ok: true,
@@ -1553,7 +1555,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
       if (
         url ===
-        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+        ACP_PROJECTS_FOR_ALPHA_URL
       ) {
         return {
           ok: true,
@@ -1731,7 +1733,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
       if (
         url ===
-        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+        ACP_PROJECTS_FOR_ALPHA_URL
       ) {
         return {
           ok: true,

@@ -134,6 +134,7 @@ const AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION =
 const AGENT_ORCHESTRATION_UNSUPPORTED_CODE = "AGENT_ORCHESTRATION_UNSUPPORTED"
 const AGENT_ORCHESTRATION_PROJECTS_PATH = "/api/v1/agent-orchestration/projects"
 const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
+const CANONICAL_WORKSPACE_SOURCE = "research_workspace"
 const ALL_WORKSPACES_FILTER_VALUE = "__all_workspaces__"
 const LINKED_CANONICAL_WORKSPACE_STATUS = "linked"
 
@@ -200,6 +201,20 @@ const normalizeListPayload = <T,>(payload: unknown, key: string): T[] => {
     return (payload as Record<string, T[]>)[key]
   }
   return []
+}
+
+const buildProjectsRequestUrl = (
+  apiBase: string,
+  workspaceFilterId: string | null
+): string => {
+  if (!workspaceFilterId) {
+    return `${apiBase}/projects`
+  }
+  const params = new URLSearchParams({
+    canonical_workspace_id: workspaceFilterId,
+    canonical_workspace_source: CANONICAL_WORKSPACE_SOURCE
+  })
+  return `${apiBase}/projects?${params.toString()}`
 }
 
 const createUnsupportedError = (): Error & { code: string } =>
@@ -397,7 +412,9 @@ export const AgentTasksPage: React.FC = () => {
         return
       }
       const headers = getHeaders(apiTransport)
-      const res = await fetch(`${apiBase}/projects`, { headers })
+      const res = await fetch(buildProjectsRequestUrl(apiBase, workspaceFilterId), {
+        headers
+      })
       await ensureOrchestrationResponse(res)
       const data = await res.json()
       setIsUnsupported(false)
@@ -413,7 +430,14 @@ export const AgentTasksPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [apiBase, apiTransport, getHeaders, hasOrchestrationSupport, markUnsupported])
+  }, [
+    apiBase,
+    apiTransport,
+    getHeaders,
+    hasOrchestrationSupport,
+    markUnsupported,
+    workspaceFilterId
+  ])
 
   const fetchTasks = useCallback(
     async (projectId: number) => {

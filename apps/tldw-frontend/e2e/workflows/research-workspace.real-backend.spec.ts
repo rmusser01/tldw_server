@@ -531,6 +531,53 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     await assertNoCriticalErrors(diagnostics)
   })
 
+  test("passes active workspace ID into ACP run history requests", async ({
+    authedPage,
+    serverInfo,
+    diagnostics
+  }) => {
+    skipIfServerUnavailable(serverInfo)
+
+    const workspacePage = new ResearchWorkspacePage(authedPage)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await ensureNoServerReachabilityDialog(authedPage)
+
+    const workspaceId = await workspacePage.getWorkspaceId()
+    expect(workspaceId, "Expected Research Workspace to expose an active ID").toBeTruthy()
+
+    const projectsRequestPromise = authedPage.waitForRequest((request) => {
+      if (request.method().toUpperCase() !== "GET") return false
+      const url = new URL(request.url())
+      return (
+        url.pathname.endsWith("/api/v1/agent-orchestration/projects") &&
+        url.searchParams.get("canonical_workspace_id") === workspaceId &&
+        url.searchParams.get("canonical_workspace_source") === "research_workspace"
+      )
+    })
+
+    await authedPage.getByRole("button", { name: /workspace settings/i }).click()
+    await authedPage.getByText("ACP run history").click()
+
+    const projectsRequest = await projectsRequestPromise
+    const projectsUrl = new URL(projectsRequest.url())
+    expect(projectsUrl.searchParams.get("canonical_workspace_id")).toBe(workspaceId)
+    expect(projectsUrl.searchParams.get("canonical_workspace_source")).toBe(
+      "research_workspace"
+    )
+
+    const modal = authedPage.getByRole("dialog", { name: /ACP run history/i })
+    await expect(modal).toBeVisible({ timeout: 10_000 })
+    const terminalState = modal
+      .getByText(
+        /No ACP runs linked to this workspace yet|Agent orchestration is not available on this server\.|Could not load ACP run history/i
+      )
+      .first()
+    await expect(terminalState).toBeVisible({ timeout: 10_000 })
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
   test("boots cleanly and keeps chat bootstrap endpoints healthy", async ({
     authedPage,
     serverInfo,

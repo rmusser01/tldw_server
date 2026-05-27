@@ -24,11 +24,11 @@
 
 ## Task 1: Backend Canonical Project Filter
 
-- [ ] **Step 1: Write failing backend tests**
+- [x] **Step 1: Write failing backend tests**
 
 Add tests proving `list_projects` can filter by `canonical_workspace_id` and `canonical_workspace_source`, including one project linked through ACP workspace metadata and one unrelated project that must not appear.
 
-- [ ] **Step 2: Run backend test and verify RED**
+- [x] **Step 2: Run backend test and verify RED**
 
 Run:
 
@@ -39,17 +39,17 @@ python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_orchestration_ap
 
 Expected: fail because `list_projects` has no canonical query params yet.
 
-- [ ] **Step 3: Implement minimal endpoint filtering**
+- [x] **Step 3: Implement minimal endpoint filtering**
 
 Add query params to `list_projects`, enrich projects with workspace canonical links as it already does, and filter rows using a helper that matches `canonical_workspace` or project metadata.
 
-- [ ] **Step 4: Run backend test and verify GREEN**
+- [x] **Step 4: Run backend test and verify GREEN**
 
 Run the same focused pytest command and expect pass.
 
 ## Task 2: Research Workspace History Uses ACP Filter
 
-- [ ] **Step 1: Write failing Vitest assertion**
+- [x] **Step 1: Write failing Vitest assertion**
 
 Update the existing `WorkspaceHeader.test.tsx` ACP history test so the expected first project request is:
 
@@ -57,7 +57,7 @@ Update the existing `WorkspaceHeader.test.tsx` ACP history test so the expected 
 /api/v1/agent-orchestration/projects?canonical_workspace_id=workspace-alpha&canonical_workspace_source=research_workspace
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -67,21 +67,21 @@ bunx vitest run src/components/Option/ResearchWorkspace/__tests__/WorkspaceHeade
 
 Expected: fail because the modal currently fetches all projects.
 
-- [ ] **Step 3: Implement filtered request path**
+- [x] **Step 3: Implement filtered request path**
 
 Build the project query path from the canonical workspace ID and call `fetchJson` with that path.
 
-- [ ] **Step 4: Run the test and verify GREEN**
+- [x] **Step 4: Run the test and verify GREEN**
 
 Run the same Vitest file and expect pass.
 
 ## Task 3: Agent Tasks Uses ACP Filter
 
-- [ ] **Step 1: Write failing Vitest assertion**
+- [x] **Step 1: Write failing Vitest assertion**
 
 Update `AgentTasksPage.connection.test.tsx` so route `/agent-tasks?workspace=workspace-alpha` expects the projects request to include canonical filter params.
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -91,31 +91,31 @@ bunx vitest run src/components/Option/AgentTasks/__tests__/AgentTasksPage.connec
 
 Expected: fail because Agent Tasks currently fetches all projects.
 
-- [ ] **Step 3: Implement filtered request URL**
+- [x] **Step 3: Implement filtered request URL**
 
 When `workspaceFilterId` is present, append `canonical_workspace_id` and `canonical_workspace_source=research_workspace` to the projects request. Preserve existing client-side filtering and URL behavior.
 
-- [ ] **Step 4: Run the test and verify GREEN**
+- [x] **Step 4: Run the test and verify GREEN**
 
 Run the same Vitest file and expect pass.
 
 ## Task 4: Live WebUI Validation And Matrix
 
-- [ ] **Step 1: Add or update a focused Playwright scenario**
+- [x] **Step 1: Add or update a focused Playwright scenario**
 
 Validate the Research Workspace ACP history entry point against a live backend and WebUI, capturing the canonical-filtered projects request and modal terminal state.
 
-- [ ] **Step 2: Run live backend + WebUI Playwright**
+- [x] **Step 2: Run live backend + WebUI Playwright**
 
 Use a real backend and WebUI. Use Playwright/CDP only.
 
-- [ ] **Step 3: Update `RW-UAT-022`**
+- [x] **Step 3: Update `RW-UAT-022`**
 
 Record the live route/request/state evidence. Keep status `Partial` unless real run history and diagnostics are proven live.
 
 ## Task 5: Final Verification And Commit
 
-- [ ] **Step 1: Run route-label guard**
+- [x] **Step 1: Run route-label guard**
 
 Search active code/tests/docs for forbidden route aliases:
 
@@ -125,7 +125,7 @@ rg -n "workspace-playground|workspace_playground|Workspace Playground" apps tldw
 
 Expected: only legacy/historical references allowed by the active replacement policy; no new aliases or redirects from this slice.
 
-- [ ] **Step 2: Run Bandit for touched backend Python**
+- [x] **Step 2: Run Bandit for touched backend Python**
 
 Run:
 
@@ -134,14 +134,14 @@ source .venv/bin/activate
 python -m bandit -r tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py -f json -o /tmp/bandit_task47822.json
 ```
 
-- [ ] **Step 3: Run `git diff --check`**
+- [x] **Step 3: Run `git diff --check`**
 
 Expected: no whitespace errors.
 
-- [ ] **Step 4: Update Backlog task**
+- [x] **Step 4: Update Backlog task**
 
 Record verification results, matrix status, known skips, and final summary.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit with a message scoped to TASK-478.22.
