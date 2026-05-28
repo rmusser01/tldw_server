@@ -1,5 +1,6 @@
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,6 +48,33 @@ def _override_user(admin=False, uid="u1"):
     return _f
 
 
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_backpressure_ignores_default_local_redis_when_redis_disabled(monkeypatch):
+    """Disabled Redis config must not let a stray localhost Redis block embeddings."""
+
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as ep
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    import redis.asyncio as aioredis
+
+    stale = FakeRedisBP(depth=1, age_first_ms=1000)
+
+    async def fake_from_url(url, decode_responses=True):  # noqa: ARG001
+        return stale
+
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_REDIS_URL", raising=False)
+    monkeypatch.setenv("EMB_BACKPRESSURE_MAX_AGE_SECONDS", "0.1")
+    monkeypatch.setitem(ep.settings, "REDIS_ENABLED", False)
+    monkeypatch.setitem(ep.settings, "REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setattr(aioredis, "from_url", fake_from_url)
+
+    user = User(id="u1", username="u1", email="u1@example.test", is_active=True, is_admin=False)
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    assert await ep._check_backpressure_and_quotas(request, user) is None
+
+
 @pytest.mark.unit
 def test_backpressure_by_age_returns_429(monkeypatch):
     client = TestClient(app)
@@ -60,6 +88,7 @@ def test_backpressure_by_age_returns_429(monkeypatch):
         return fake
 
     monkeypatch.setenv("EMB_BACKPRESSURE_MAX_AGE_SECONDS", "0.1")
+    monkeypatch.setenv("REDIS_ENABLED", "true")
     monkeypatch.setattr(aioredis, "from_url", fake_from_url)
     r = client.post("/api/v1/embeddings", json={"input": "hello", "model": "text-embedding-3-small"})
     assert r.status_code == 429
@@ -67,10 +96,12 @@ def test_backpressure_by_age_returns_429(monkeypatch):
     app.dependency_overrides.pop(get_request_user, None)
 
 
+@pytest.mark.asyncio
 @pytest.mark.unit
-def test_tenant_quota_429(monkeypatch):
-    client = TestClient(app)
-    app.dependency_overrides[get_request_user] = _override_user(admin=False, uid="tenant1")
+async def test_tenant_quota_429(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as ep
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
     fake = FakeRedisBP(depth=0, age_first_ms=0)
     import redis.asyncio as aioredis
 
@@ -81,13 +112,15 @@ def test_tenant_quota_429(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("EMBEDDINGS_TENANT_RPS", "1")
 
-    r1 = client.post("/api/v1/embeddings", json={"input": "hello", "model": "text-embedding-3-small"})
-    # First should pass through to provider path; in CI it may 503 if providers missing; allow 200-503
-    assert r1.status_code in (200, 503, 429)
-    r2 = client.post("/api/v1/embeddings", json={"input": "hello", "model": "text-embedding-3-small"})
-    assert r2.status_code == 429
-    assert r2.headers.get("Retry-After") == "1"
-    app.dependency_overrides.pop(get_request_user, None)
+    user = User(id="tenant1", username="tenant1", email="tenant1@example.test", is_active=True, is_admin=False)
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    assert await ep._check_backpressure_and_quotas(request, user) is None
+    second = await ep._check_backpressure_and_quotas(request, user)
+
+    assert second is not None
+    assert second.status_code == 429
+    assert second.headers.get("Retry-After") == "1"
 
 
 @pytest.mark.unit

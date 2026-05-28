@@ -214,6 +214,50 @@ def test_workspace_sources_status_reports_readiness_and_missing_media(
 
 
 @pytest.mark.integration
+def test_workspace_source_status_treats_vector_ready_media_as_queryable_when_chunking_marker_is_stale(
+    workspace_status_app,
+    tmp_path,
+):
+    db = CharactersRAGDB(db_path=str(tmp_path / "stale-chunking.db"), client_id="user-1")
+    db.upsert_workspace("ws-stale", "Stale Chunking")
+    db.add_workspace_source(
+        "ws-stale",
+        {
+            "id": "src-stale",
+            "media_id": 10,
+            "title": "Vector-ready source",
+            "source_type": "document",
+            "position": 0,
+            "selected": True,
+        },
+    )
+    media_db = _MediaStatusDB(
+        {
+            10: {
+                "id": 10,
+                "title": "Vector-ready source",
+                "type": "document",
+                "content": "Indexed evidence text.",
+                "chunking_status": "pending",
+                "vector_processing": 1,
+            },
+        }
+    )
+    _install_overrides(workspace_status_app, db, media_db)
+    try:
+        with TestClient(workspace_status_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-stale/sources/status")
+    finally:
+        _clear_overrides(workspace_status_app)
+
+    assert response.status_code == 200, response.text
+    source = response.json()["sources"][0]
+    assert source["state"] == "queryable"
+    assert source["status_reason"] == "source_queryable"
+    assert source["readiness"]["vector_ready"] is True
+
+
+@pytest.mark.integration
 def test_workspace_capabilities_fail_closed_without_queryable_sources(
     workspace_status_app,
     tmp_path,

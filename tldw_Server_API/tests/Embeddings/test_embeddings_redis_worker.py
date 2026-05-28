@@ -57,3 +57,63 @@ async def test_embeddings_redis_worker_chunking_enqueues_embedding(monkeypatch):
     _, payload = entries[0]
     assert payload.get("root_job_uuid") == "root-1"
     assert payload.get("chunks_path") == "chunks.json"
+
+
+@pytest.mark.asyncio
+async def test_embeddings_redis_worker_storage_marks_media_complete_after_root(monkeypatch):
+    client = InMemoryAsyncRedis(decode_responses=True)
+    streams = redis_pipeline.RedisEmbeddingsQueues(
+        streams={
+            "chunking": "embeddings:chunking",
+            "embedding": "embeddings:embedding",
+            "storage": "embeddings:storage",
+        },
+        groups={
+            "chunking": "chunking-workers",
+            "embedding": "embedding-workers",
+            "storage": "storage-workers",
+        },
+        dlq_prefix="embeddings:dlq",
+    )
+    call_order: list[tuple[object, ...]] = []
+
+    async def fake_storage(job, payload, **_kwargs):
+        return {
+            "embedding_count": 1,
+            "chunks_processed": 1,
+            "total_chunks": 1,
+            "embedding_model": "model",
+            "embedding_provider": "provider",
+        }
+
+    monkeypatch.setattr(redis_worker.jobs_worker, "_handle_storage_job", fake_storage)
+    monkeypatch.setattr(redis_worker.jobs_worker, "_resolve_model_provider", lambda *_a: ("model", "provider"))
+    monkeypatch.setattr(
+        redis_worker.jobs_worker,
+        "_update_root_job",
+        lambda root_uuid, *, status, result=None, error=None: call_order.append(("root", root_uuid, status)),
+    )
+    monkeypatch.setattr(
+        redis_worker.jobs_worker,
+        "_mark_media_embeddings_complete",
+        lambda *, user_id, media_id: call_order.append(("complete", user_id, media_id)),
+    )
+
+    await redis_worker._handle_stage_message(
+        stage="storage",
+        message_id="1-0",
+        fields={
+            "root_job_uuid": "root-2",
+            "media_id": "2",
+            "user_id": "user2",
+            "embedding_model": "model",
+            "embedding_provider": "provider",
+        },
+        client=client,
+        streams=streams,
+    )
+
+    assert call_order == [
+        ("root", "root-2", "completed"),
+        ("complete", "user2", 2),
+    ]

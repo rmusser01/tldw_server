@@ -9,6 +9,9 @@ rows marked `Current run` were rechecked during TASK-478.13.
 TASK-478.18 refreshed the migration row with TASK-515/TASK-516 live true-move
 evidence. TASK-478.25 then closed the guided recovery/import/export validation
 gap with a live backend plus WebUI CDP walkthrough.
+TASK-478.30 closed the real embeddings-backed vector completion validation gap
+with a live backend, Redis embeddings worker, WebUI CDP source-status check, and
+selected-source RAG request.
 
 ## Validation Rules
 
@@ -41,7 +44,7 @@ gap with a live backend plus WebUI CDP walkthrough.
 | RW-UAT-003 | Old `/workspace-playground` route is removed with no redirect | TASK-478.7, TASK-478.13 | WebUI route | Pass | TASK-478.13 live probe returned HTTP 404 for `/workspace-playground`, retained path `/workspace-playground`, and observed no `Location` header. Focused Playwright regression passed. | `research-workspace.real-backend.spec.ts` checks 404, retained path, then canonical route boot. | Never add route aliases or redirects for compatibility. |
 | RW-UAT-004 | Model catalog loads selectable configured models | TASK-478.1 | Model selector | Pass | Live CDP selected configured `Ollama / gemma3:1b`; fresh tab reported 0 console errors after Add Sources -> My Media. | `modelSelectorUtils.test.ts`; `ChatPane.stage2.test.tsx`. | Maintain provider metadata normalization across shared selectors. |
 | RW-UAT-005 | Missing-model and failed-response states are recoverable | TASK-478.2 | Chat composer/RAG send | Pass | Live CDP confirmed missing-model sends made zero chat requests, draft was preserved, invalid provider rendered recoverable 503 error, empty stream rendered `No response was returned.` | Focused chat/RAG frontend tests for missing model, failed submit, empty stream, and request normalization. | Continue checking provider-specific failure copy during model/provider changes. |
-| RW-UAT-006 | First-class workspace source ingestion/indexing status exists | TASK-478.3 | Workspaces API, Jobs | Pass | Live backend validation exposed workspace-source Jobs in `/api/v1/jobs/list` and `/sources/status`, including progress/error details for missing media. | Workspace status API and media ingest worker tests passed in TASK-478.3. | TASK-478.30 tracks the remaining live long-running vector completion validation with real embeddings enabled. |
+| RW-UAT-006 | First-class workspace source ingestion/indexing status exists | TASK-478.3, TASK-478.30 | Workspaces API, Jobs, Embeddings worker, WebUI source status | Pass | TASK-478.3 live validation exposed workspace-source Jobs in `/api/v1/jobs/list` and `/sources/status`, including progress/error details for missing media. TASK-478.30 then ran a live backend on `127.0.0.1:18033`, WebUI on `127.0.0.1:18034`, and Redis embeddings worker with task-scoped streams; a bounded media source completed `POST /api/v1/media/1/embeddings` job `e6861c66-c3c7-4cfa-965d-0e445078bb91` with `embedding_count=1`, Media DB reported `chunking_status=completed` and `vector_processing=1`, `/api/v1/workspaces/research-workspace-task47830-1779931800375/sources/status` reported `state=queryable`, `readiness.vector_ready=true`, `progress_percent=100`, and `Ready for grounded questions.`, and WebUI CDP showed the source card as `READY` with the store source status from `workspace-status-projection`. Screenshot: `/private/tmp/task47830-research-workspace-cdp.png`. | Workspace status API tests; media state repository test; embeddings backpressure tests; Redis worker completion tests; focused CDP live run. | Keep watching vector completion because provider/content-policy behavior can affect exact answer text; TASK-478.30 saw RAG cite the selected source while redacting the seeded numeric token under the content-policy filter. |
 | RW-UAT-007 | Source cards do not claim fully ready when API says partial | TASK-478.3 | Sources pane | Pass | TASK-478.3 live CDP confirmed source cards aligned with status projection after backend projection fix. | Frontend regression prevents legacy media fallback from overriding authoritative partial status. | Recheck when vector/indexing providers change. |
 | RW-UAT-008 | Individual, bulk, and persisted source selection share one contract | TASK-478.4 | Sources pane, Workspaces API, RAG | Pass | Live CDP seeded two media documents, selected one, saw `/sources/selection` and `/sources/status` agree, and saw `/api/v1/rag/search` include only the selected media ID. | Store/API-first selection tests and server reconciliation tests. | Keep selection intent separate from queryable media IDs for processing sources. |
 | RW-UAT-009 | Grounded selected-source RAG Q&A returns evidence/citations | TASK-478.5 | Chat/RAG | Pass | Live WebUI returned `/api/v1/rag/search` documents with `include_media_ids [8,7]`, visible answer containing `PASTE-EVIDENCE-ORION`, and expanded citations titled with source names. | `ragMode.sanitization.test.ts` plus chat-mode tests. | Continue verifying with at least one configured local provider per release. |
@@ -68,9 +71,10 @@ gap with a live backend plus WebUI CDP walkthrough.
 1. Full frontend TypeScript verification has been blocked in multiple child
    tasks by unrelated baseline errors. TASK-478.31 tracks reproducing and
    resolving or reclassifying those blockers so the UAT gate is trustworthy.
-2. Long-running vector indexing with real embedding completion should remain a
-   Watch row even though the Jobs/status projection is now first-class.
-   TASK-478.30 tracks the live embeddings-backed completion validation.
+2. Long-running vector indexing with real embedding completion is now
+   live-verified by TASK-478.30, but should remain a Watch risk because
+   provider availability, Redis stream configuration, Media DB readiness flags,
+   and content-policy redaction can still affect end-to-end answer quality.
 3. Sandbox workspace handoff is fixture-backed Pass, but TASK-478.29 used fake
    Docker execution because the host Docker daemon was unavailable. Repeat the
    same strict fixture with a real Docker daemon for release/runtime fidelity

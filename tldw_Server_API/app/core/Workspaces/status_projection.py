@@ -248,6 +248,16 @@ def _status_from_media(
             progress_message="Text extraction has not completed.",
         )
 
+    if readiness["vector_ready"] and not vector_failed:
+        return _base_status(
+            source,
+            state="queryable",
+            reason="source_queryable",
+            readiness=readiness,
+            progress_percent=100.0,
+            progress_message="Ready for grounded questions.",
+        )
+
     if chunking_status and chunking_status not in {"completed", "complete", "done"} and not vector_failed:
         return _base_status(
             source,
@@ -256,16 +266,6 @@ def _status_from_media(
             readiness=readiness,
             progress_percent=65.0,
             progress_message="Text is available while chunking continues.",
-        )
-
-    if readiness["vector_ready"]:
-        return _base_status(
-            source,
-            state="queryable",
-            reason="source_queryable",
-            readiness=readiness,
-            progress_percent=100.0,
-            progress_message="Ready for grounded questions.",
         )
 
     if vector_failed:

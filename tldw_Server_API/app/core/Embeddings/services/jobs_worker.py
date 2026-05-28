@@ -52,6 +52,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     get_user_media_db_path,
 )
+from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import _kanban_card_indexable
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_id
@@ -124,9 +125,12 @@ def _coerce_bool(value: Any) -> bool:
 
 
 def _normalize_chunk_type(value: Any) -> str | None:
+    """Normalize a chunk-type candidate while surfacing non-fatal normalization failures."""
+
     try:
         return Chunker.normalize_chunk_type(value)
-    except _EMBEDDINGS_JOB_NONCRITICAL_EXCEPTIONS:
+    except _EMBEDDINGS_JOB_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Failed to normalize chunk type candidate {!r}: {}", value, exc)
         return None
 
 
@@ -135,16 +139,6 @@ def _root_job_uuid(payload: dict[str, Any]) -> str | None:
     if root is None:
         return None
     return str(root)
-
-
-def _normalize_chunk_type(value: Any) -> str | None:
-    """Normalize a chunk-type candidate while surfacing non-fatal normalization failures."""
-
-    try:
-        return Chunker.normalize_chunk_type(value)
-    except _EMBEDDINGS_JOB_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Failed to normalize chunk type candidate {!r}: {}", value, exc)
-        return None
 
 
 def _resolve_chunk_type(*candidates: Any) -> str:
@@ -180,6 +174,62 @@ def _update_root_job(
     elif status == "failed":
         message = error or "Embeddings stage failed"
         jm.fail_job(root_id, error=message, retryable=False, enforce=False)
+
+
+def _should_track_media_state(job_type: str | None, payload: dict[str, Any]) -> bool:
+    """Return whether this embeddings job should update Media DB readiness state."""
+
+    if job_type in {
+        _EMBEDDINGS_CHUNKING_JOB_TYPE,
+        _EMBEDDINGS_EMBEDDING_JOB_TYPE,
+        _EMBEDDINGS_STORAGE_JOB_TYPE,
+    }:
+        return True
+    if job_type != _CONTENT_JOB_TYPE:
+        return False
+    return not (payload.get("collection_name") and payload.get("document_id"))
+
+
+def _mark_media_embeddings_complete(*, user_id: str, media_id: int) -> None:
+    """Mark a media item as vector-ready after embeddings storage completes."""
+
+    db_path = get_user_media_db_path(user_id)
+    with managed_media_database(
+        client_id="embeddings_jobs_worker",
+        db_path=db_path,
+        initialize=False,
+    ) as db:
+        mark_media_as_processed(db_instance=db, media_id=int(media_id))
+
+
+def _mark_media_embeddings_error(*, user_id: str, media_id: int, error_message: str) -> None:
+    """Mark embeddings processing as failed for a media item."""
+
+    db_path = get_user_media_db_path(user_id)
+    with managed_media_database(
+        client_id="embeddings_jobs_worker",
+        db_path=db_path,
+        initialize=False,
+    ) as db:
+        db.mark_embeddings_error(int(media_id), str(error_message))
+
+
+def _mark_media_embeddings_error_safely(
+    *, user_id: str, media_id: int, error_message: str
+) -> None:
+    """Best-effort failure-state marker for worker exception paths."""
+
+    try:
+        _mark_media_embeddings_error(
+            user_id=user_id,
+            media_id=media_id,
+            error_message=error_message,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to mark media embeddings error state "
+            f"(user_id={user_id}, media_id={media_id}): {exc}"
+        )
 
 
 def _load_media_content(media_id: int, user_id: str) -> dict[str, Any]:
@@ -1098,7 +1148,7 @@ async def _handle_job(job: dict[str, Any]) -> dict[str, Any]:
         if not getattr(exc, "retryable", False):
             _update_root_job(root_uuid, status="failed", error=str(exc))
             if _should_track_media_state(job_type, payload):
-                _mark_media_embeddings_error(
+                _mark_media_embeddings_error_safely(
                     user_id=user_id,
                     media_id=media_id,
                     error_message=str(exc),
@@ -1107,7 +1157,7 @@ async def _handle_job(job: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         _update_root_job(root_uuid, status="failed", error=str(exc))
         if _should_track_media_state(job_type, payload):
-            _mark_media_embeddings_error(
+            _mark_media_embeddings_error_safely(
                 user_id=user_id,
                 media_id=media_id,
                 error_message=str(exc),
