@@ -428,8 +428,14 @@ export function mergeChatProviderStatusIntoModels<T extends ModelDescriptor>(
     const providerConfigured = providerKey
       ? providerConfiguredByKey.get(providerKey)
       : undefined
+    const descriptorConfigured = readConfiguredFlagFromRecords(
+      getChatModelDescriptorRecords(model)
+    )
     const effectiveConfigured =
-      providerConfigured ?? (noProviderConfigured ? false : undefined)
+      providerConfigured ??
+      (noProviderConfigured && descriptorConfigured !== true
+        ? false
+        : undefined)
 
     if (effectiveConfigured == null) return model
     changed = true
