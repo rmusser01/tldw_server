@@ -4,7 +4,7 @@ title: Implement MCP Unified Stage 2C structured profile resolution primitives
 status: Done
 assignee: []
 created_date: '2026-05-28T00:57:00Z'
-updated_date: '2026-05-28 00:58'
+updated_date: '2026-05-28T00:58:00Z'
 labels:
   - mcp-unified
   - standalone

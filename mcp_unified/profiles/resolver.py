@@ -55,7 +55,7 @@ class StoreBackedProfileResolver:
     ) -> ProfileResolutionResult:
         """Return a structured profile-resolution result."""
         del user_id
-        resolved_id = profile_id or self.default_profile_id
+        resolved_id = self.default_profile_id if profile_id is None else profile_id
         used_default_profile = profile_id is None and self.default_profile_id is not None
         provenance = {
             "requested_profile_id": profile_id,

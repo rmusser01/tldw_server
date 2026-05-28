@@ -91,8 +91,15 @@ def test_write_capable_presets_advertise_workspace_binding_requirement() -> None
         )
         is True
     }
+    assignment_bound = {
+        preset.id
+        for preset in bundled
+        if preset.profile.policy_document.resource_constraints.get("binding_stage")
+        == "assignment"
+    }
 
     assert workspace_bound == WORKSPACE_BOUND_PRESET_IDS
+    assert assignment_bound == WORKSPACE_BOUND_PRESET_IDS
 
 
 def test_get_builtin_preset_returns_stable_profile_template() -> None:

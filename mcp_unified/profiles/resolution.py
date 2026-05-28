@@ -8,6 +8,15 @@ from pydantic import BaseModel, Field
 
 from .models import MCPProfile
 
+_WORKSPACE_BINDING_KEYS = (
+    "workspace_binding",
+    "workspace_id",
+    "workspace_root",
+    "path_scopes",
+    "scope",
+    "workspace",
+)
+
 ProfileResolutionStatus = Literal[
     "resolved",
     "profile_required",
@@ -72,7 +81,13 @@ def build_effective_policy_result(
     This helper only derives and validates policy metadata. It intentionally does
     not enforce runtime execution or call host-specific registries.
     """
+    if profile is None:
+        raise ValueError("profile cannot be None")
+
     policy_document = profile.policy_document
+    if policy_document is None:
+        raise ValueError("profile.policy_document cannot be None")
+
     provenance = {
         "profile_id": profile.id,
         "preset_id": profile.preset_id,
@@ -90,10 +105,10 @@ def build_effective_policy_result(
             provenance=provenance,
         )
 
-    allowed_tools = list(policy_document.allowed_tools)
-    denied_tools = list(policy_document.denied_tools)
-    capabilities = list(policy_document.capabilities)
-    denied_capabilities = list(policy_document.denied_capabilities)
+    allowed_tools = list(policy_document.allowed_tools or [])
+    denied_tools = list(policy_document.denied_tools or [])
+    capabilities = list(policy_document.capabilities or [])
+    denied_capabilities = list(policy_document.denied_capabilities or [])
 
     if tool_name is not None:
         if tool_name in denied_tools:
@@ -132,13 +147,15 @@ def build_effective_policy_result(
             denied_tools=denied_tools,
             capabilities=capabilities,
             denied_capabilities=denied_capabilities,
-            resource_constraints=policy_document.resource_constraints.copy(),
-            approval_policy=profile.approval_policy.copy(),
-            path_scopes=[scope.copy() for scope in profile.path_scopes],
+            resource_constraints=(policy_document.resource_constraints or {}).copy(),
+            approval_policy=(profile.approval_policy or {}).copy(),
+            path_scopes=[scope.copy() for scope in (profile.path_scopes or [])],
             external_server_grants=[
-                grant.copy() for grant in profile.external_server_grants
+                grant.copy() for grant in (profile.external_server_grants or [])
             ],
-            credential_grants=[grant.copy() for grant in profile.credential_grants],
+            credential_grants=[
+                grant.copy() for grant in (profile.credential_grants or [])
+            ],
         ),
         provenance=provenance,
     )
@@ -147,15 +164,18 @@ def build_effective_policy_result(
 def _requires_workspace_binding(profile: MCPProfile) -> bool:
     """Return whether a profile needs workspace binding before policy use."""
     policy_document = profile.policy_document
-    constraints = policy_document.resource_constraints
+    constraints = policy_document.resource_constraints or {}
     if constraints.get("requires_workspace_binding") is True:
         return True
 
-    capability_text = " ".join(policy_document.capabilities).lower()
-    if any(token in capability_text for token in ("write", "mutate", "delete")):
+    capabilities = policy_document.capabilities or []
+    if any(
+        any(token in str(capability).lower() for token in ("write", "mutate", "delete"))
+        for capability in capabilities
+    ):
         return True
 
-    risk_classes = set(policy_document.risk_classes)
+    risk_classes = set(policy_document.risk_classes or [])
     return bool(risk_classes & {"mutating", "destructive_filesystem"})
 
 
@@ -166,20 +186,32 @@ def _has_workspace_binding(
     assignment_binding: dict[str, Any] | None,
 ) -> bool:
     """Return whether profile, host, or assignment data binds workspace scope."""
-    if profile.path_scopes:
+    if _has_workspace_binding_value(profile.path_scopes or []):
         return True
-    if assignment_binding:
+    if _mapping_has_workspace_binding(assignment_binding):
         return True
-    if not host_caps:
-        return False
+    return _mapping_has_workspace_binding(host_caps)
 
-    binding_keys = (
-        "workspace_binding",
-        "workspace_id",
-        "workspace_root",
-        "path_scopes",
+
+def _mapping_has_workspace_binding(mapping: dict[str, Any] | None) -> bool:
+    """Return whether a mapping carries a recognized non-empty workspace binding."""
+    if not mapping:
+        return False
+    return any(
+        _has_workspace_binding_value(mapping.get(key))
+        for key in _WORKSPACE_BINDING_KEYS
     )
-    return any(bool(host_caps.get(key)) for key in binding_keys)
+
+
+def _has_workspace_binding_value(value: Any) -> bool:
+    """Return whether a value is meaningful workspace-binding data."""
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return any(_has_workspace_binding_value(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_workspace_binding_value(item) for item in value)
+    return bool(value)
 
 
 def _tool_allowed(
