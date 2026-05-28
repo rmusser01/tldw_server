@@ -4,7 +4,7 @@ title: Implement MCP Unified Stage 2E SQLite store slice
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-28 05:25'
+updated_date: '2026-05-28 06:04'
 labels:
   - mcp-unified
   - standalone
@@ -58,12 +58,23 @@ Review-fix verification:
 - source .venv/bin/activate && python -m mypy mcp_unified tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py -> Success, no issues in 15 source files
 - source .venv/bin/activate && python -m bandit -r mcp_unified -f json -o /tmp/bandit_mcp_unified_stage2e_review.json -> 0 findings, 0 skipped tests
 - git diff --check -> clean
+
+Additional review-fix pass completed after repeated raw SQL / async sqlite / audit ordering feedback. Replaced direct stdlib sqlite3 usage in mcp_unified/storage/sqlite.py with a SQLAlchemy Core-backed implementation while preserving the standalone package boundary and avoiding tldw_Server_API imports. Async store methods continue to offload DB work through asyncio.to_thread. SQLite engine creation now records timeout=30.0 and check_same_thread=False through connect_args, uses StaticPool for :memory: so thread offload shares the same in-memory schema, and enables FK enforcement on DBAPI connect. Audit events remain normalized to UTC before persistence, and existing FK cascade behavior is preserved. Added regression coverage for no direct sqlite3 import in the store module, SQLAlchemy connection args, :memory: thread-offload behavior, FK enforcement, and mixed-offset audit ordering.
+
+Verification for this pass:
+- source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_storage_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_registry_resolver.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_structured_resolution.py -v -> 56 passed, 3 warnings
+- source .venv/bin/activate && python -m ruff check mcp_unified tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py -> All checks passed
+- source .venv/bin/activate && python -m mypy mcp_unified tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py -> Success, no issues in 15 source files
+- source .venv/bin/activate && python -m bandit -r mcp_unified -> No issues identified
+- git diff --check -> clean
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added the Stage 2E SQLite storage slice and completed the PR #2089 review-fix pass after rebasing on latest dev. The store remains standalone/package-local while async methods now offload SQLite work, the connection is configured for thread offload with a lock timeout, dependent profile rows use foreign-key cascades, audit timestamps are normalized for correct newest-first ordering across timezone offsets, and review coverage was expanded. Known skips/blockers: none; host DB_Management wiring remains intentionally out of scope because it would violate the standalone package boundary.
+
+Additional review-fix pass replaced direct sqlite3/raw SQL handling in the standalone store with SQLAlchemy Core while keeping async thread offload, UTC audit normalization, FK cascades, and standalone package-boundary tests intact.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -1,21 +1,37 @@
 """SQLite-backed standalone MCP storage primitives.
 
-This backend intentionally stays in ``mcp_unified`` and uses stdlib SQLite so
-the standalone package does not import host ``tldw_Server_API`` DB helpers.
+The store uses SQLAlchemy Core as its database boundary so this standalone
+package does not issue raw sqlite3 calls or import host DB_Management helpers.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
-import threading
 from collections.abc import Callable, Mapping
 from datetime import timezone
 from pathlib import Path
-from typing import Any, ClassVar, ParamSpec, TypeVar
+from typing import Any, ClassVar, ParamSpec, TypeVar, cast
 
 from pydantic import BaseModel
+from sqlalchemy import (
+    URL,
+    Column,
+    Engine,
+    ForeignKey,
+    Index,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    create_engine,
+    delete,
+    event,
+    select,
+)
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.pool import StaticPool
 
 from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.storage.models import (
@@ -32,40 +48,9 @@ ParamsT = ParamSpec("ParamsT")
 
 
 class SQLiteMCPStore:
-    """Package-local SQLite implementation for MCP standalone stores."""
+    """SQLAlchemy-backed SQLite implementation for MCP standalone stores."""
 
     SCHEMA_VERSION = 1
-    _DELETE_BY_ID_SQL: ClassVar[dict[str, str]] = {
-        "mcp_profiles": "DELETE FROM mcp_profiles WHERE id = ?",
-        "mcp_profile_assignments": (
-            "DELETE FROM mcp_profile_assignments WHERE id = ?"
-        ),
-        "mcp_approval_policies": "DELETE FROM mcp_approval_policies WHERE id = ?",
-        "mcp_credential_grants": "DELETE FROM mcp_credential_grants WHERE id = ?",
-        "mcp_external_servers": "DELETE FROM mcp_external_servers WHERE id = ?",
-    }
-    _SELECT_BY_ID_SQL: ClassVar[dict[str, str]] = {
-        "mcp_profiles": "SELECT payload FROM mcp_profiles WHERE id = ?",
-        "mcp_profile_assignments": (
-            "SELECT payload FROM mcp_profile_assignments WHERE id = ?"
-        ),
-        "mcp_approval_policies": (
-            "SELECT payload FROM mcp_approval_policies WHERE id = ?"
-        ),
-        "mcp_credential_grants": (
-            "SELECT payload FROM mcp_credential_grants WHERE id = ?"
-        ),
-        "mcp_external_servers": (
-            "SELECT payload FROM mcp_external_servers WHERE id = ?"
-        ),
-    }
-    _SELECT_PAYLOAD_SQL: ClassVar[dict[str, str]] = {
-        "mcp_profile_assignments": "SELECT payload FROM mcp_profile_assignments",
-        "mcp_approval_policies": "SELECT payload FROM mcp_approval_policies",
-        "mcp_credential_grants": "SELECT payload FROM mcp_credential_grants",
-        "mcp_external_servers": "SELECT payload FROM mcp_external_servers",
-        "mcp_audit_events": "SELECT payload FROM mcp_audit_events",
-    }
     _FILTERABLE_COLUMNS: ClassVar[dict[str, frozenset[str]]] = {
         "mcp_profile_assignments": frozenset(
             {"profile_id", "principal_id", "workspace_id"}
@@ -77,10 +62,9 @@ class SQLiteMCPStore:
         "mcp_external_servers": frozenset({"enabled"}),
         "mcp_audit_events": frozenset({"actor_id", "profile_id", "event_type"}),
     }
-    _ORDER_BY_SQL: ClassVar[dict[str, str]] = {
-        "id ASC": "id ASC",
-        "created_at DESC, id DESC": "created_at DESC, id DESC",
-    }
+    _ORDER_BY_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"id ASC", "created_at DESC, id DESC"}
+    )
 
     def __init__(self, path: str | Path) -> None:
         if str(path) == ":memory:":
@@ -89,18 +73,15 @@ class SQLiteMCPStore:
             db_path = Path(path).expanduser()
             db_path.parent.mkdir(parents=True, exist_ok=True)
             self.path = str(db_path)
-        self._lock = threading.RLock()
-        self._conn = sqlite3.connect(
-            self.path,
-            timeout=30.0,
-            check_same_thread=False,
-        )
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys = ON")
+
+        self._metadata = MetaData()
+        self._tables = self._build_tables(self._metadata)
+        self._engine = self._create_engine()
+        event.listen(self._engine, "connect", self._enable_foreign_keys)
         self._initialize_schema()
 
     def close(self) -> None:
-        """Close the underlying SQLite connection."""
+        """Dispose the underlying database engine."""
         self._close_sync()
 
     async def aclose(self) -> None:
@@ -261,17 +242,13 @@ class SQLiteMCPStore:
         return await asyncio.to_thread(operation, *args, **kwargs)
 
     def _close_sync(self) -> None:
-        with self._lock:
-            self._conn.close()
+        self._engine.dispose()
 
     def _get_profile_sync(self, profile_id: str) -> MCPProfile | None:
         return self._get_model("mcp_profiles", profile_id, MCPProfile)
 
     def _list_profiles_sync(self) -> list[MCPProfile]:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT payload FROM mcp_profiles ORDER BY id",
-            ).fetchall()
+        rows = self._select_payloads("mcp_profiles", order_by="id ASC")
         return [self._load_model(row["payload"], MCPProfile) for row in rows]
 
     def _upsert_profile_sync(
@@ -280,23 +257,16 @@ class SQLiteMCPStore:
     ) -> MCPProfile:
         validated = self._validate_profile(profile)
         payload = self._dump_model(validated)
-        with self._lock, self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO mcp_profiles(id, enabled, updated_at, payload)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    enabled = excluded.enabled,
-                    updated_at = excluded.updated_at,
-                    payload = excluded.payload
-                """,
-                (
-                    validated.id,
-                    int(validated.enabled),
-                    validated.updated_at.isoformat(),
-                    payload,
-                ),
-            )
+        self._upsert_row(
+            "mcp_profiles",
+            {
+                "id": validated.id,
+                "enabled": int(validated.enabled),
+                "updated_at": validated.updated_at.isoformat(),
+                "payload": payload,
+            },
+            update_columns=("enabled", "updated_at", "payload"),
+        )
         return self._load_model(payload, MCPProfile)
 
     def _delete_profile_sync(self, profile_id: str) -> bool:
@@ -316,9 +286,9 @@ class SQLiteMCPStore:
         principal_id: str | None = None,
         workspace_id: str | None = None,
     ) -> list[ProfileAssignment]:
-        rows = self._select_filtered_payloads(
+        rows = self._select_payloads(
             "mcp_profile_assignments",
-            {
+            filters={
                 "profile_id": profile_id,
                 "principal_id": principal_id,
                 "workspace_id": workspace_id,
@@ -331,34 +301,28 @@ class SQLiteMCPStore:
         assignment: ProfileAssignment,
     ) -> ProfileAssignment:
         payload = self._dump_model(assignment)
-        with self._lock, self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO mcp_profile_assignments(
-                    id, profile_id, principal_id, workspace_id, is_default,
-                    enabled, updated_at, payload
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    profile_id = excluded.profile_id,
-                    principal_id = excluded.principal_id,
-                    workspace_id = excluded.workspace_id,
-                    is_default = excluded.is_default,
-                    enabled = excluded.enabled,
-                    updated_at = excluded.updated_at,
-                    payload = excluded.payload
-                """,
-                (
-                    assignment.id,
-                    assignment.profile_id,
-                    assignment.principal_id,
-                    assignment.workspace_id,
-                    int(assignment.is_default),
-                    int(assignment.enabled),
-                    assignment.updated_at.isoformat(),
-                    payload,
-                ),
-            )
+        self._upsert_row(
+            "mcp_profile_assignments",
+            {
+                "id": assignment.id,
+                "profile_id": assignment.profile_id,
+                "principal_id": assignment.principal_id,
+                "workspace_id": assignment.workspace_id,
+                "is_default": int(assignment.is_default),
+                "enabled": int(assignment.enabled),
+                "updated_at": assignment.updated_at.isoformat(),
+                "payload": payload,
+            },
+            update_columns=(
+                "profile_id",
+                "principal_id",
+                "workspace_id",
+                "is_default",
+                "enabled",
+                "updated_at",
+                "payload",
+            ),
+        )
         return self._load_model(payload, ProfileAssignment)
 
     def _delete_assignment_sync(self, assignment_id: str) -> bool:
@@ -372,9 +336,9 @@ class SQLiteMCPStore:
         *,
         profile_id: str | None = None,
     ) -> list[ApprovalPolicyDocument]:
-        rows = self._select_filtered_payloads(
+        rows = self._select_payloads(
             "mcp_approval_policies",
-            {"profile_id": profile_id},
+            filters={"profile_id": profile_id},
         )
         return [self._load_model(row["payload"], ApprovalPolicyDocument) for row in rows]
 
@@ -383,27 +347,17 @@ class SQLiteMCPStore:
         policy: ApprovalPolicyDocument,
     ) -> ApprovalPolicyDocument:
         payload = self._dump_model(policy)
-        with self._lock, self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO mcp_approval_policies(
-                    id, profile_id, enabled, updated_at, payload
-                )
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    profile_id = excluded.profile_id,
-                    enabled = excluded.enabled,
-                    updated_at = excluded.updated_at,
-                    payload = excluded.payload
-                """,
-                (
-                    policy.id,
-                    policy.profile_id,
-                    int(policy.enabled),
-                    policy.updated_at.isoformat(),
-                    payload,
-                ),
-            )
+        self._upsert_row(
+            "mcp_approval_policies",
+            {
+                "id": policy.id,
+                "profile_id": policy.profile_id,
+                "enabled": int(policy.enabled),
+                "updated_at": policy.updated_at.isoformat(),
+                "payload": payload,
+            },
+            update_columns=("profile_id", "enabled", "updated_at", "payload"),
+        )
         return self._load_model(payload, ApprovalPolicyDocument)
 
     def _delete_policy_sync(self, policy_id: str) -> bool:
@@ -418,9 +372,9 @@ class SQLiteMCPStore:
         profile_id: str | None = None,
         external_server_id: str | None = None,
     ) -> list[CredentialGrant]:
-        rows = self._select_filtered_payloads(
+        rows = self._select_payloads(
             "mcp_credential_grants",
-            {
+            filters={
                 "profile_id": profile_id,
                 "external_server_id": external_server_id,
             },
@@ -429,29 +383,24 @@ class SQLiteMCPStore:
 
     def _upsert_grant_sync(self, grant: CredentialGrant) -> CredentialGrant:
         payload = self._dump_model(grant)
-        with self._lock, self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO mcp_credential_grants(
-                    id, profile_id, external_server_id, enabled, updated_at, payload
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    profile_id = excluded.profile_id,
-                    external_server_id = excluded.external_server_id,
-                    enabled = excluded.enabled,
-                    updated_at = excluded.updated_at,
-                    payload = excluded.payload
-                """,
-                (
-                    grant.id,
-                    grant.profile_id,
-                    grant.external_server_id,
-                    int(grant.enabled),
-                    grant.updated_at.isoformat(),
-                    payload,
-                ),
-            )
+        self._upsert_row(
+            "mcp_credential_grants",
+            {
+                "id": grant.id,
+                "profile_id": grant.profile_id,
+                "external_server_id": grant.external_server_id,
+                "enabled": int(grant.enabled),
+                "updated_at": grant.updated_at.isoformat(),
+                "payload": payload,
+            },
+            update_columns=(
+                "profile_id",
+                "external_server_id",
+                "enabled",
+                "updated_at",
+                "payload",
+            ),
+        )
         return self._load_model(payload, CredentialGrant)
 
     def _delete_grant_sync(self, grant_id: str) -> bool:
@@ -465,9 +414,9 @@ class SQLiteMCPStore:
         *,
         enabled: bool | None = None,
     ) -> list[ExternalServerDefinition]:
-        rows = self._select_filtered_payloads(
+        rows = self._select_payloads(
             "mcp_external_servers",
-            {"enabled": None if enabled is None else int(enabled)},
+            filters={"enabled": None if enabled is None else int(enabled)},
         )
         return [self._load_model(row["payload"], ExternalServerDefinition) for row in rows]
 
@@ -476,27 +425,17 @@ class SQLiteMCPStore:
         server: ExternalServerDefinition,
     ) -> ExternalServerDefinition:
         payload = self._dump_model(server)
-        with self._lock, self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO mcp_external_servers(
-                    id, enabled, transport, updated_at, payload
-                )
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    enabled = excluded.enabled,
-                    transport = excluded.transport,
-                    updated_at = excluded.updated_at,
-                    payload = excluded.payload
-                """,
-                (
-                    server.id,
-                    int(server.enabled),
-                    server.transport,
-                    server.updated_at.isoformat(),
-                    payload,
-                ),
-            )
+        self._upsert_row(
+            "mcp_external_servers",
+            {
+                "id": server.id,
+                "enabled": int(server.enabled),
+                "transport": server.transport,
+                "updated_at": server.updated_at.isoformat(),
+                "payload": payload,
+            },
+            update_columns=("enabled", "transport", "updated_at", "payload"),
+        )
         return self._load_model(payload, ExternalServerDefinition)
 
     def _delete_server_sync(self, server_id: str) -> bool:
@@ -505,23 +444,17 @@ class SQLiteMCPStore:
     def _append_event_sync(self, event: AuditEvent) -> AuditEvent:
         normalized = self._normalize_audit_event(event)
         payload = self._dump_model(normalized)
-        with self._lock, self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO mcp_audit_events(
-                    id, actor_id, profile_id, event_type, created_at, payload
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    normalized.id,
-                    normalized.actor_id,
-                    normalized.profile_id,
-                    normalized.event_type,
-                    normalized.created_at.isoformat(),
-                    payload,
-                ),
-            )
+        self._insert_row(
+            "mcp_audit_events",
+            {
+                "id": normalized.id,
+                "actor_id": normalized.actor_id,
+                "profile_id": normalized.profile_id,
+                "event_type": normalized.event_type,
+                "created_at": normalized.created_at.isoformat(),
+                "payload": payload,
+            },
+        )
         return self._load_model(payload, AuditEvent)
 
     def _query_events_sync(
@@ -534,9 +467,9 @@ class SQLiteMCPStore:
     ) -> list[AuditEvent]:
         if limit is not None and limit < 0:
             raise ValueError("limit must be non-negative")
-        rows = self._select_filtered_payloads(
+        rows = self._select_payloads(
             "mcp_audit_events",
-            {
+            filters={
                 "actor_id": actor_id,
                 "profile_id": profile_id,
                 "event_type": event_type,
@@ -546,215 +479,285 @@ class SQLiteMCPStore:
         )
         return [self._load_model(row["payload"], AuditEvent) for row in rows]
 
-    def _initialize_schema(self) -> None:
-        with self._lock, self._conn:
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS mcp_storage_meta (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                )
-                """
-            )
-            self._ensure_compatible_schema_version()
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS mcp_profiles (
-                    id TEXT PRIMARY KEY,
-                    enabled INTEGER NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    payload TEXT NOT NULL
-                )
-                """
-            )
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS mcp_profile_assignments (
-                    id TEXT PRIMARY KEY,
-                    profile_id TEXT NOT NULL,
-                    principal_id TEXT,
-                    workspace_id TEXT,
-                    is_default INTEGER NOT NULL,
-                    enabled INTEGER NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    payload TEXT NOT NULL,
-                    FOREIGN KEY(profile_id)
-                        REFERENCES mcp_profiles(id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS mcp_approval_policies (
-                    id TEXT PRIMARY KEY,
-                    profile_id TEXT,
-                    enabled INTEGER NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    payload TEXT NOT NULL,
-                    FOREIGN KEY(profile_id)
-                        REFERENCES mcp_profiles(id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS mcp_credential_grants (
-                    id TEXT PRIMARY KEY,
-                    profile_id TEXT NOT NULL,
-                    external_server_id TEXT,
-                    enabled INTEGER NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    payload TEXT NOT NULL,
-                    FOREIGN KEY(profile_id)
-                        REFERENCES mcp_profiles(id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS mcp_external_servers (
-                    id TEXT PRIMARY KEY,
-                    enabled INTEGER NOT NULL,
-                    transport TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    payload TEXT NOT NULL
-                )
-                """
-            )
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS mcp_audit_events (
-                    id TEXT PRIMARY KEY,
-                    actor_id TEXT,
-                    profile_id TEXT,
-                    event_type TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    payload TEXT NOT NULL
-                )
-                """
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mcp_assignments_profile ON mcp_profile_assignments(profile_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mcp_assignments_principal ON mcp_profile_assignments(principal_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mcp_assignments_workspace ON mcp_profile_assignments(workspace_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mcp_policies_profile ON mcp_approval_policies(profile_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mcp_grants_profile ON mcp_credential_grants(profile_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mcp_grants_external_server ON mcp_credential_grants(external_server_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mcp_external_enabled ON mcp_external_servers(enabled)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mcp_audit_actor ON mcp_audit_events(actor_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mcp_audit_profile ON mcp_audit_events(profile_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mcp_audit_event_type ON mcp_audit_events(event_type)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mcp_audit_created_at ON mcp_audit_events(created_at)"
-            )
+    def _create_engine(self) -> Engine:
+        engine_kwargs: dict[str, Any] = {
+            "connect_args": {
+                "timeout": 30.0,
+                "check_same_thread": False,
+            },
+            "future": True,
+        }
+        if self.path == ":memory:":
+            engine_kwargs["poolclass"] = StaticPool
+        return create_engine(self._database_url(), **engine_kwargs)
 
-    def _ensure_compatible_schema_version(self) -> None:
-        current = self._conn.execute(
-            "SELECT value FROM mcp_storage_meta WHERE key = ?",
-            ("schema_version",),
-        ).fetchone()
+    def _database_url(self) -> URL:
+        return URL.create("sqlite", database=self.path)
+
+    def _initialize_schema(self) -> None:
+        meta_table = self._tables["mcp_storage_meta"]
+        with self._engine.begin() as connection:
+            meta_table.create(connection, checkfirst=True)
+            self._ensure_compatible_schema_version(connection)
+        self._metadata.create_all(self._engine)
+
+    def _ensure_compatible_schema_version(self, connection: Any) -> None:
+        meta_table = self._tables["mcp_storage_meta"]
+        current = connection.execute(
+            select(meta_table.c.value).where(meta_table.c.key == "schema_version")
+        ).mappings().first()
         if current is not None and int(current["value"]) > self.SCHEMA_VERSION:
             raise RuntimeError(
                 f"SQLite MCP store schema {current['value']} is newer than supported "
                 f"schema {self.SCHEMA_VERSION}"
             )
-        self._conn.execute(
-            """
-            INSERT INTO mcp_storage_meta(key, value)
-            VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            ("schema_version", str(self.SCHEMA_VERSION)),
+        statement = sqlite_insert(meta_table).values(
+            key="schema_version",
+            value=str(self.SCHEMA_VERSION),
+        )
+        connection.execute(
+            statement.on_conflict_do_update(
+                index_elements=[meta_table.c.key],
+                set_={"value": statement.excluded.value},
+            )
         )
 
-    def _delete_by_id(self, table: str, item_id: str) -> bool:
-        with self._lock, self._conn:
-            cursor = self._conn.execute(
-                self._DELETE_BY_ID_SQL[table],
-                (item_id,),
+    def _upsert_row(
+        self,
+        table_name: str,
+        values: Mapping[str, Any],
+        *,
+        update_columns: tuple[str, ...],
+    ) -> None:
+        table = self._table(table_name)
+        statement = sqlite_insert(table).values(**values)
+        connection_values = {
+            column: getattr(statement.excluded, column)
+            for column in update_columns
+        }
+        with self._engine.begin() as connection:
+            connection.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[table.c.id],
+                    set_=connection_values,
+                )
             )
-        return cursor.rowcount > 0
+
+    def _insert_row(self, table_name: str, values: Mapping[str, Any]) -> None:
+        table = self._table(table_name)
+        with self._engine.begin() as connection:
+            connection.execute(table.insert().values(**values))
+
+    def _delete_by_id(self, table_name: str, item_id: str) -> bool:
+        table = self._table(table_name)
+        with self._engine.begin() as connection:
+            result = connection.execute(delete(table).where(table.c.id == item_id))
+        return bool(result.rowcount and result.rowcount > 0)
 
     def _get_model(
         self,
-        table: str,
+        table_name: str,
         item_id: str,
         model_cls: type[ModelT],
     ) -> ModelT | None:
-        with self._lock:
-            row = self._conn.execute(
-                self._SELECT_BY_ID_SQL[table],
-                (item_id,),
-            ).fetchone()
+        table = self._table(table_name)
+        with self._engine.connect() as connection:
+            row = connection.execute(
+                select(table.c.payload).where(table.c.id == item_id)
+            ).mappings().first()
         if row is None:
             return None
         return self._load_model(row["payload"], model_cls)
 
-    def _select_filtered_payloads(
+    def _select_payloads(
         self,
-        table: str,
-        filters: dict[str, Any],
+        table_name: str,
+        filters: Mapping[str, Any] | None = None,
         *,
         limit: int | None = None,
         order_by: str = "id ASC",
-    ) -> list[sqlite3.Row]:
-        self._validate_filter_request(table, filters, order_by)
-        clauses: list[str] = []
-        values: list[Any] = []
+    ) -> list[Mapping[str, Any]]:
+        filters = filters or {}
+        self._validate_filter_request(table_name, filters, order_by)
+        table = self._table(table_name)
+        statement = select(table.c.payload)
         for column, value in filters.items():
             if value is None:
                 continue
-            clauses.append(f"{column} = ?")
-            values.append(value)
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        query_parts = [self._SELECT_PAYLOAD_SQL[table]]
-        if where:
-            query_parts.append(where)
-        query_parts.extend(["ORDER BY", self._ORDER_BY_SQL[order_by]])
+            statement = statement.where(table.c[column] == value)
+        for column in self._order_by_columns(table, order_by):
+            statement = statement.order_by(column)
         if limit is not None:
-            query_parts.append("LIMIT ?")
-            values.append(limit)
-        with self._lock:
-            return self._conn.execute(" ".join(query_parts), values).fetchall()
+            statement = statement.limit(limit)
+        with self._engine.connect() as connection:
+            return [
+                dict(row)
+                for row in connection.execute(statement).mappings().all()
+            ]
 
     def _validate_filter_request(
         self,
-        table: str,
-        filters: dict[str, Any],
+        table_name: str,
+        filters: Mapping[str, Any],
         order_by: str,
     ) -> None:
-        allowed_columns = self._FILTERABLE_COLUMNS.get(table)
-        if allowed_columns is None:
-            raise ValueError(f"Unsupported filter table: {table}")
-        unknown_columns = set(filters) - allowed_columns
+        allowed_columns = self._FILTERABLE_COLUMNS.get(table_name)
+        if allowed_columns is None and filters:
+            raise ValueError(f"Unsupported filter table: {table_name}")
+        unknown_columns = set(filters) - (allowed_columns or frozenset())
         if unknown_columns:
             raise ValueError(
-                f"Unsupported filter columns for {table}: {sorted(unknown_columns)}"
+                f"Unsupported filter columns for {table_name}: {sorted(unknown_columns)}"
             )
-        if order_by not in self._ORDER_BY_SQL:
+        if order_by not in self._ORDER_BY_KEYS:
             raise ValueError(f"Unsupported order by clause: {order_by}")
+
+    def _table(self, table_name: str) -> Table:
+        try:
+            return self._tables[table_name]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported table: {table_name}") from exc
+
+    @staticmethod
+    def _order_by_columns(table: Table, order_by: str) -> list[Any]:
+        if order_by == "id ASC":
+            return [table.c.id.asc()]
+        if order_by == "created_at DESC, id DESC":
+            return [table.c.created_at.desc(), table.c.id.desc()]
+        raise ValueError(f"Unsupported order by clause: {order_by}")
+
+    @staticmethod
+    def _enable_foreign_keys(dbapi_connection: Any, _connection_record: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys = ON")
+        finally:
+            cursor.close()
+
+    @classmethod
+    def _build_tables(cls, metadata: MetaData) -> dict[str, Table]:
+        tables: dict[str, Table] = {}
+        tables["mcp_storage_meta"] = Table(
+            "mcp_storage_meta",
+            metadata,
+            Column("key", String, primary_key=True),
+            Column("value", String, nullable=False),
+        )
+        tables["mcp_profiles"] = Table(
+            "mcp_profiles",
+            metadata,
+            Column("id", String, primary_key=True),
+            Column("enabled", Integer, nullable=False),
+            Column("updated_at", String, nullable=False),
+            Column("payload", Text, nullable=False),
+        )
+        tables["mcp_profile_assignments"] = Table(
+            "mcp_profile_assignments",
+            metadata,
+            Column("id", String, primary_key=True),
+            Column(
+                "profile_id",
+                String,
+                ForeignKey("mcp_profiles.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            Column("principal_id", String),
+            Column("workspace_id", String),
+            Column("is_default", Integer, nullable=False),
+            Column("enabled", Integer, nullable=False),
+            Column("updated_at", String, nullable=False),
+            Column("payload", Text, nullable=False),
+        )
+        tables["mcp_approval_policies"] = Table(
+            "mcp_approval_policies",
+            metadata,
+            Column("id", String, primary_key=True),
+            Column(
+                "profile_id",
+                String,
+                ForeignKey("mcp_profiles.id", ondelete="CASCADE"),
+            ),
+            Column("enabled", Integer, nullable=False),
+            Column("updated_at", String, nullable=False),
+            Column("payload", Text, nullable=False),
+        )
+        tables["mcp_credential_grants"] = Table(
+            "mcp_credential_grants",
+            metadata,
+            Column("id", String, primary_key=True),
+            Column(
+                "profile_id",
+                String,
+                ForeignKey("mcp_profiles.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            Column("external_server_id", String),
+            Column("enabled", Integer, nullable=False),
+            Column("updated_at", String, nullable=False),
+            Column("payload", Text, nullable=False),
+        )
+        tables["mcp_external_servers"] = Table(
+            "mcp_external_servers",
+            metadata,
+            Column("id", String, primary_key=True),
+            Column("enabled", Integer, nullable=False),
+            Column("transport", String, nullable=False),
+            Column("updated_at", String, nullable=False),
+            Column("payload", Text, nullable=False),
+        )
+        tables["mcp_audit_events"] = Table(
+            "mcp_audit_events",
+            metadata,
+            Column("id", String, primary_key=True),
+            Column("actor_id", String),
+            Column("profile_id", String),
+            Column("event_type", String, nullable=False),
+            Column("created_at", String, nullable=False),
+            Column("payload", Text, nullable=False),
+        )
+        cls._add_indexes(tables)
+        return tables
+
+    @staticmethod
+    def _add_indexes(tables: Mapping[str, Table]) -> None:
+        Index(
+            "idx_mcp_assignments_profile",
+            tables["mcp_profile_assignments"].c.profile_id,
+        )
+        Index(
+            "idx_mcp_assignments_principal",
+            tables["mcp_profile_assignments"].c.principal_id,
+        )
+        Index(
+            "idx_mcp_assignments_workspace",
+            tables["mcp_profile_assignments"].c.workspace_id,
+        )
+        Index(
+            "idx_mcp_policies_profile",
+            tables["mcp_approval_policies"].c.profile_id,
+        )
+        Index(
+            "idx_mcp_grants_profile",
+            tables["mcp_credential_grants"].c.profile_id,
+        )
+        Index(
+            "idx_mcp_grants_external_server",
+            tables["mcp_credential_grants"].c.external_server_id,
+        )
+        Index(
+            "idx_mcp_external_enabled",
+            tables["mcp_external_servers"].c.enabled,
+        )
+        Index("idx_mcp_audit_actor", tables["mcp_audit_events"].c.actor_id)
+        Index("idx_mcp_audit_profile", tables["mcp_audit_events"].c.profile_id)
+        Index(
+            "idx_mcp_audit_event_type",
+            tables["mcp_audit_events"].c.event_type,
+        )
+        Index(
+            "idx_mcp_audit_created_at",
+            tables["mcp_audit_events"].c.created_at,
+        )
 
     @staticmethod
     def _dump_model(model: BaseModel) -> str:
@@ -765,8 +768,8 @@ class SQLiteMCPStore:
         )
 
     @staticmethod
-    def _load_model(payload: str, model_cls: type[ModelT]) -> ModelT:
-        return model_cls.model_validate_json(payload)
+    def _load_model(payload: Any, model_cls: type[ModelT]) -> ModelT:
+        return model_cls.model_validate_json(cast(str, payload))
 
     @staticmethod
     def _normalize_audit_event(event: AuditEvent) -> AuditEvent:

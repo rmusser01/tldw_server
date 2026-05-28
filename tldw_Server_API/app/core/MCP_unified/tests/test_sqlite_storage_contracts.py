@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import ast
 import sqlite3
-from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -30,6 +29,18 @@ def _tldw_imports_for(path: Path) -> list[str]:
     return imports
 
 
+def _direct_imports_for(path: Path) -> list[str]:
+    """Return direct module imports used by a Python source file."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imports: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.append(node.module)
+    return imports
+
+
 def test_sqlite_storage_module_has_no_tldw_server_imports() -> None:
     import mcp_unified.storage.sqlite as sqlite_storage
 
@@ -37,6 +48,17 @@ def test_sqlite_storage_module_has_no_tldw_server_imports() -> None:
     sqlite_path = Path(sqlite_storage.__file__).resolve()
 
     assert _tldw_imports_for(sqlite_path) == []
+
+
+def test_sqlite_storage_module_uses_db_abstraction_not_direct_sqlite3() -> None:
+    import mcp_unified.storage.sqlite as sqlite_storage
+
+    assert sqlite_storage.__file__ is not None
+    sqlite_path = Path(sqlite_storage.__file__).resolve()
+    direct_imports = _direct_imports_for(sqlite_path)
+
+    assert "sqlite3" not in direct_imports
+    assert not any(import_name.startswith("sqlite3.") for import_name in direct_imports)
 
 
 def test_sqlite_store_initializes_schema_version_idempotently(tmp_path: Path) -> None:
@@ -102,26 +124,23 @@ def test_sqlite_store_uses_thread_safe_timeout_connection(
     import mcp_unified.storage.sqlite as sqlite_storage
     from mcp_unified.storage import SQLiteMCPStore
 
-    original_connect = cast(
-        Callable[..., sqlite3.Connection],
-        sqlite_storage.sqlite3.connect,
-    )
-    connect_kwargs: dict[str, Any] = {}
+    original_create_engine = sqlite_storage.create_engine
+    engine_kwargs: dict[str, Any] = {}
 
-    def recording_connect(
+    def recording_create_engine(
         *args: Any,
         **kwargs: Any,
-    ) -> sqlite3.Connection:
-        connect_kwargs.update(kwargs)
-        return original_connect(*args, **kwargs)
+    ) -> Any:
+        engine_kwargs.update(kwargs)
+        return original_create_engine(*args, **kwargs)
 
-    monkeypatch.setattr(sqlite_storage.sqlite3, "connect", recording_connect)
+    monkeypatch.setattr(sqlite_storage, "create_engine", recording_create_engine)
 
     store = SQLiteMCPStore(tmp_path / "mcp.sqlite")
     store.close()
 
-    assert connect_kwargs["timeout"] == 30.0
-    assert connect_kwargs["check_same_thread"] is False
+    assert engine_kwargs["connect_args"]["timeout"] == 30.0
+    assert engine_kwargs["connect_args"]["check_same_thread"] is False
 
 
 @pytest.mark.asyncio
@@ -153,6 +172,21 @@ async def test_sqlite_store_async_methods_offload_database_work(
     assert "_append_event_sync" in calls
     assert "_query_events_sync" in calls
     assert "_close_sync" in calls
+
+
+@pytest.mark.asyncio
+async def test_sqlite_store_memory_database_survives_thread_offload() -> None:
+    from mcp_unified.profiles import MCPProfile
+    from mcp_unified.storage import SQLiteMCPStore
+
+    store = SQLiteMCPStore(":memory:")
+
+    await store.upsert_profile(MCPProfile(id="qa", name="QA Engineer"))
+    profiles = await store.list_profiles()
+
+    assert [profile.id for profile in profiles] == ["qa"]
+
+    await store.aclose()
 
 
 @pytest.mark.asyncio
@@ -293,10 +327,11 @@ async def test_sqlite_store_enforces_profile_foreign_keys_and_cascades(
         ProfileAssignment,
         SQLiteMCPStore,
     )
+    from sqlalchemy.exc import IntegrityError
 
     store = SQLiteMCPStore(tmp_path / "mcp.sqlite")
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(IntegrityError):
         await store.upsert_assignment(
             ProfileAssignment(
                 id="orphan-assignment",
