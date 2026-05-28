@@ -401,7 +401,7 @@ describe("Research Workspace migration manifest planning", () => {
     expect(deleteLocalStorageValue).not.toHaveBeenCalled()
   })
 
-  it("preflights tombstone writing before deleting locally covered content", async () => {
+  it("fails safely when tombstone preflight write throws before local deletion", async () => {
     const deleteLocalStorageValue = vi.fn()
     const ackWorkspaceMigrationClientDelete = vi.fn(async () => ({ ok: true }))
 
