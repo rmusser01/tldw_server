@@ -1,5 +1,5 @@
 ---
-id: TASK-521
+id: TASK-521.3
 title: Plan remaining chat UX rebaseline slices
 status: Done
 assignee: []

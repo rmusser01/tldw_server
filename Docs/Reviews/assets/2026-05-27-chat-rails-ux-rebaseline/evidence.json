@@ -135,9 +135,9 @@
     }
   ],
   "verificationCommands": {
-    "task535FocusedRealServerSubset": "cd apps/tldw-frontend && env TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://localhost:18024 TLDW_E2E_SERVER_URL=http://127.0.0.1:18023 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY TLDW_E2E_EXPECT_STREAMING_CONTROLS=true npx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --workers=1 --grep 'uses the running server|keeps mobile cockpit|sends a real mobile|model provider confidence|captures streaming stop'",
+    "task535FocusedRealServerSubset": "cd apps/tldw-frontend && env TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://localhost:18024 TLDW_E2E_SERVER_URL=http://127.0.0.1:18023 TLDW_E2E_API_KEY=<local-e2e-api-key> TLDW_E2E_EXPECT_STREAMING_CONTROLS=true npx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --workers=1 --grep 'uses the running server|keeps mobile cockpit|sends a real mobile|model provider confidence|captures streaming stop'",
     "task535FocusedRealServerResult": "5 passed (33.3s)",
-    "mobileCockpitRegressionSingle": "cd apps/tldw-frontend && env TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://localhost:18024 TLDW_E2E_SERVER_URL=http://127.0.0.1:18023 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY TLDW_E2E_EXPECT_STREAMING_CONTROLS=true npx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --workers=1 --grep 'keeps mobile cockpit tabs'",
+    "mobileCockpitRegressionSingle": "cd apps/tldw-frontend && env TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://localhost:18024 TLDW_E2E_SERVER_URL=http://127.0.0.1:18023 TLDW_E2E_API_KEY=<local-e2e-api-key> TLDW_E2E_EXPECT_STREAMING_CONTROLS=true npx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --workers=1 --grep 'keeps mobile cockpit tabs'",
     "mobileCockpitRegressionResult": "1 passed (4.6s)",
     "cockpitGuard": "cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts",
     "cockpitGuardResult": "6 passed",

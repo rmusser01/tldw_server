@@ -789,10 +789,10 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
       >
         <ExternalLink className="size-4 text-text-subtle" />
         {fullAppButtonLabel}
-        <span id={fullAppHandoffDescriptionId} className="sr-only">
-          {fullAppHandoffDescription}
-        </span>
       </button>
+      <span id={fullAppHandoffDescriptionId} className="sr-only">
+        {fullAppHandoffDescription}
+      </span>
 
     </div>
   )

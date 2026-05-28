@@ -221,7 +221,7 @@ export const PlaygroundChat = ({
   const readinessChatModels = React.useMemo(
     () =>
       mergeChatProviderStatusIntoModels(
-        chatModels as any[],
+        (chatModels ?? []) as any[],
         providersStatus
       ) as any[],
     [chatModels, providersStatus]

@@ -50,6 +50,8 @@ export type RuntimeAssistantSummary = {
   mode: "none" | "character" | "persona";
   name?: string | null;
   detail?: string | null;
+  compositionTitle?: string | null;
+  compositionDetail?: string | null;
 };
 
 export type PlaygroundRuntimeInspectorProps = {

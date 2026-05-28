@@ -57,7 +57,7 @@ export type PlaygroundStatusStripProps = {
   sessionDetail?: string | null;
   sessionError?: string | null;
   hasContext: boolean;
-  contextSummary?: string[];
+  contextSummary?: string[] | null;
   temporaryChat?: boolean;
   characterChatActive?: boolean;
   degraded?: boolean;
@@ -266,7 +266,7 @@ export const PlaygroundStatusStrip = ({
           : t("cockpit.characterLocalDraft", "Local character chat draft")
     : null;
   const activeContextSummary = hasContext
-    ? contextSummary
+    ? (contextSummary || [])
         .map((item) => item.trim())
         .filter((item) => item.length > 0)
     : [];
@@ -277,7 +277,10 @@ export const PlaygroundStatusStrip = ({
   );
   const hiddenContextSummaryLabel =
     hiddenContextSummaryCount > 0
-      ? t("cockpit.moreContextSources", `+${hiddenContextSummaryCount} more`)
+      ? t("cockpit.moreContextSources", {
+          count: hiddenContextSummaryCount,
+          defaultValue: "+{{count}} more",
+        })
       : null;
 
   return (

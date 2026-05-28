@@ -226,10 +226,10 @@ test.describe("Sidepanel chat smoke", () => {
         extensionId,
         origin
       )
-      test.skip(
-        !granted,
-        "Host permission not granted; allow it in chrome://extensions > tldw Assistant > Site access, then re-run."
-      )
+      expect(
+        granted,
+        "Host permission must be granted programmatically before sidepanel chat can reach the mock server."
+      ).toBe(true)
 
       await setSelectedModel(page, MODEL_KEY)
 
@@ -304,10 +304,10 @@ test.describe("Sidepanel chat smoke", () => {
         extensionId,
         origin
       )
-      test.skip(
-        !granted,
-        "Host permission not granted; allow it in chrome://extensions > tldw Assistant > Site access, then re-run."
-      )
+      expect(
+        granted,
+        "Host permission must be granted programmatically before sidepanel chat can reach the mock server."
+      ).toBe(true)
 
       await setSelectedModel(page, MODEL_KEY)
 
@@ -372,10 +372,10 @@ test.describe("Sidepanel chat smoke", () => {
         extensionId,
         origin
       )
-      test.skip(
-        !granted,
-        "Host permission not granted; allow it in chrome://extensions > tldw Assistant > Site access, then re-run."
-      )
+      expect(
+        granted,
+        "Host permission must be granted programmatically before sidepanel chat can reach the mock server."
+      ).toBe(true)
 
       await setSelectedModel(page, MODEL_KEY)
 

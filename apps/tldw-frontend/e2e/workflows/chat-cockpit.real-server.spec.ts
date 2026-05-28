@@ -2082,9 +2082,7 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await assertChatCompletionRenderedOrRecoverable(page, null);
     await expect(
-      page.locator('.ant-notification-notice').filter({
-        hasText: 'Chat now saved on server',
-      })
+      page.getByText('Chat now saved on server', { exact: true })
     ).toHaveCount(0);
     await expect(page.getByTestId('chat-input')).toBeVisible();
     await page.screenshot({

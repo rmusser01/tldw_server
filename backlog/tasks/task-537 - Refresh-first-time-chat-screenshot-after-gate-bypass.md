@@ -50,8 +50,6 @@ Verification: bunx vitest run __tests__/app/app-layout.test.tsx ../packages/ui/s
 Refreshed the current first-time /chat screenshot and evidence after the first-run gate bypass. Updated the evidence JSON, review doc, asset README, and plan so first-time evidence now reflects the live chat cockpit state instead of the old global assistant setup overlay. Recorded the sandbox bind limitation, the elevated successful backend path, focused route-contract verification, JSON/whitespace checks, port cleanup, and Bandit skip rationale.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

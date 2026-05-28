@@ -87,7 +87,7 @@ describe("SidepanelHeaderSimple full-screen route", () => {
     })
   })
 
-  it("opens the chat dashboard route from the chat header dashboard button", async () => {
+  it("keeps the dashboard button on the dashboard route", async () => {
     const user = userEvent.setup()
 
     render(
@@ -98,9 +98,9 @@ describe("SidepanelHeaderSimple full-screen route", () => {
 
     await user.click(screen.getByTestId("chat-open-dashboard"))
 
-    expect(browserMocks.getURL).toHaveBeenCalledWith("/options.html#/chat")
+    expect(browserMocks.getURL).toHaveBeenCalledWith("/options.html#/flashcards")
     expect(browserMocks.createTab).toHaveBeenCalledWith({
-      url: "chrome-extension://tldw/options.html#/chat"
+      url: "chrome-extension://tldw/options.html#/flashcards"
     })
   })
 })

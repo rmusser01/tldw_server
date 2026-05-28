@@ -73,6 +73,8 @@ type ChatProviderConfigurationRecord = {
 export type ChatProviderConfigurationEntry =
   | string
   | ChatProviderConfigurationRecord
+  | null
+  | undefined
 
 export type ChatProviderConfigurationStatus =
   | {
@@ -327,6 +329,7 @@ const CONFIGURED_FLAG_KEYS = [
 const normalizeProviderStatusKey = (
   provider: ChatProviderConfigurationEntry
 ): string | null => {
+  if (!provider) return null
   if (typeof provider === "string") {
     return normalizeProviderValue(provider)
   }

@@ -308,7 +308,7 @@ Use the live backend and no route stubbing:
 ```bash
 cd apps/tldw-frontend
 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 \
-TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY \
+TLDW_E2E_API_KEY=<local-e2e-api-key> \
 TLDW_SERVER_URL=http://127.0.0.1:8000 \
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 \
 TLDW_WEB_URL=http://localhost:18014 \
@@ -659,7 +659,7 @@ Expected: all focused tests pass.
 ```bash
 cd apps/tldw-frontend
 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 \
-TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY \
+TLDW_E2E_API_KEY=<local-e2e-api-key> \
 TLDW_SERVER_URL=http://127.0.0.1:8000 \
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 \
 TLDW_WEB_URL=http://localhost:18014 \

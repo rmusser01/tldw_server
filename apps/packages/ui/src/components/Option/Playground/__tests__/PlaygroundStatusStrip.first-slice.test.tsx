@@ -7,7 +7,23 @@ import { PlaygroundStatusStrip } from "../PlaygroundStatusStrip";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback,
+    t: (
+      _key: string,
+      fallback?:
+        | string
+        | {
+            count?: number;
+            defaultValue?: string;
+          },
+    ) => {
+      if (typeof fallback === "object" && fallback != null) {
+        return (fallback.defaultValue ?? _key).replace(
+          "{{count}}",
+          String(fallback.count ?? ""),
+        );
+      }
+      return fallback;
+    },
   }),
 }));
 
@@ -45,6 +61,49 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     expect(status).not.toHaveTextContent("Context active");
     expect(status).toHaveTextContent("Web search on");
     expect(status).toHaveTextContent("2 files");
+  });
+
+  it("handles explicit null context summaries without throwing", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={3}
+        sessionLabel="Server chat"
+        hasContext
+        contextSummary={null}
+        temporaryChat={false}
+        degradedChecks={[]}
+        errorMessage={null}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Ready");
+    expect(status).not.toHaveTextContent("undefined");
+  });
+
+  it("uses count-aware copy for hidden context sources", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={3}
+        sessionLabel="Server chat"
+        hasContext
+        contextSummary={["One", "Two", "Three", "Four", "Five", "Six"]}
+        temporaryChat={false}
+        degradedChecks={[]}
+        errorMessage={null}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("+2 more");
   });
 
   it("does not render stale context source chips when context is inactive", () => {

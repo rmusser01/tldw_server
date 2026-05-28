@@ -270,13 +270,17 @@ export const Playground = () => {
           tldwClient
             .initialize()
             .then(() => tldwClient.getProvidersStatus())
-            .catch(() => null),
+            .catch((error) => {
+              console.warn("[Playground] Failed to load provider status", error);
+              return null;
+            }),
         ]);
         if (isCancelled?.()) return;
         setCharacterChatAvailableModels(Array.isArray(models) ? models : []);
         setChatProviderStatus(providerStatus);
-      } catch {
+      } catch (error) {
         if (isCancelled?.()) return;
+        console.warn("[Playground] Failed to refresh chat models", error);
         setCharacterChatAvailableModels([]);
         setChatProviderStatus(null);
       }
@@ -1965,22 +1969,20 @@ export const Playground = () => {
       returnFocusSelector: COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR,
     });
   }, [cockpitAssistantSelectTab]);
-  const clearAssistantFromCockpit = React.useCallback(() => {
-    void (async () => {
-      await setSelectedAssistant(null);
-      await setSelectedCharacter(null);
-      clearPersistedSession();
-      setServerChatCharacterId(null);
-      setServerChatAssistantKind(null);
-      setServerChatAssistantId(null);
-      setServerChatPersonaMemoryMode(null);
-      setServerChatMetaLoaded(false);
-      setServerChatId(null);
-      setCharacterModeIntentActive(false);
-      void setChatWorkflowMode("standard");
-      scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
-    })();
-    void applyChatSettingsPatch({
+  const clearAssistantFromCockpit = React.useCallback(async () => {
+    await setSelectedAssistant(null);
+    await setSelectedCharacter(null);
+    await clearPersistedSession();
+    setServerChatCharacterId(null);
+    setServerChatAssistantKind(null);
+    setServerChatAssistantId(null);
+    setServerChatPersonaMemoryMode(null);
+    setServerChatMetaLoaded(false);
+    setServerChatId(null);
+    setCharacterModeIntentActive(false);
+    void setChatWorkflowMode("standard");
+    scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
+    await applyChatSettingsPatch({
       historyId: stableHistoryId,
       serverChatId,
       patch: {
@@ -2040,6 +2042,12 @@ export const Playground = () => {
       ),
       noAssistantSelected: toText(
         t("playground:cockpit.noAssistantSelected", "No assistant selected"),
+      ),
+      noAssistantAttachedToNextMessage: toText(
+        t(
+          "playground:cockpit.noAssistantAttachedToNextMessage",
+          "No assistant attached to next message",
+        ),
       ),
       personaFallbackName: toText(
         t("playground:cockpit.personaFallback", "Persona"),

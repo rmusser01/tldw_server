@@ -46,8 +46,6 @@ Implemented the focused /chat first-run gate bypass. Added a route-level app-she
 /chat no longer blocks first-time users behind the global assistant setup modal. The route now bypasses FirstRunGate, while the existing inline assistant setup nudge remains available from the chat composer. Focused app-shell and composer-notice tests cover the behavior; docs/evidence were updated to avoid presenting the older global-modal screenshot as current state.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

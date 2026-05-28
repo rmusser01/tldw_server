@@ -234,6 +234,27 @@ describe("PlaygroundChat selected server chat load state", () => {
     expect(screen.getByTestId("playground-empty")).toBeInTheDocument()
   })
 
+  it("treats null chat model responses as empty instead of crashing readiness", () => {
+    queryState.chatModels = null as any
+    queryState.providersStatus = {
+      any_configured: true,
+      providers: [{ name: "openai", configured: true, requires_api_key: true }]
+    }
+    useMessageOptionState.value = {
+      ...useMessageOptionState.value,
+      serverChatLoadState: "idle",
+      serverChatLoadError: null
+    }
+
+    render(
+      <MemoryRouter>
+        <PlaygroundChat />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText("No AI models available")).toBeInTheDocument()
+  })
+
   it("shows the no-provider setup banner when catalog rows are provider-unconfigured", () => {
     queryState.chatModels = [
       {

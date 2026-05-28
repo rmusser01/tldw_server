@@ -311,7 +311,9 @@ test.describe("Stage 6 interaction stage 2 positive regressions", () => {
 
     const attachButton = page.getByRole("button", { name: "Attach image" })
     const sendButton = page.getByRole("button", { name: /send/i }).first()
-    const settingsButton = page.getByRole("button", { name: /send options/i })
+    const settingsButton = page.getByRole("button", {
+      name: /message delivery options/i
+    })
 
     await expect(attachButton).toBeVisible({ timeout: LOAD_TIMEOUT })
     await expect(sendButton).toBeVisible({ timeout: LOAD_TIMEOUT })

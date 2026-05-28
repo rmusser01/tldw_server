@@ -17,6 +17,8 @@ const baseInput = (
     mode: "none",
     name: null,
     detail: "No assistant selected",
+    compositionTitle: "No assistant attached to next message",
+    compositionDetail: null,
   },
   providerRoute: {
     selectedProvider: null,
@@ -381,5 +383,26 @@ describe("playground composition preview summary", () => {
       detail: "1 configured source",
     });
     expect(summary.overallState).toBe("ready");
+  });
+
+  it("uses semantic assistant preview copy instead of English fallback comparisons", () => {
+    const summary = buildPlaygroundCompositionPreviewSummary(
+      baseInput({
+        assistantSummary: {
+          mode: "none",
+          name: null,
+          detail: "TR assistant is not selected",
+          compositionTitle: "TR no assistant attached",
+          compositionDetail: null,
+        },
+      }),
+    );
+
+    const assistant = summary.entries.find((entry) => entry.kind === "assistant");
+    expect(assistant).toMatchObject({
+      title: "TR no assistant attached",
+      detail: null,
+      state: "disabled",
+    });
   });
 });

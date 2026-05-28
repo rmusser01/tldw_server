@@ -1,5 +1,5 @@
 ---
-id: TASK-521
+id: TASK-521.2
 title: Harden chat character clear and plain-chat continuity
 status: Done
 labels:

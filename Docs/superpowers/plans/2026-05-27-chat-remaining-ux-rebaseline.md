@@ -28,8 +28,8 @@ Out of scope for this plan:
 
 ## Backlog Ownership
 
-- Active task: `backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md`
-- Related completed task with same numeric ID: `backlog/completed/task-521 - Fix-chat-UX-rebaseline-false-setup-and-handoff-affordances.md`
+- Active task: `backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md`
+- Related completed task: `backlog/completed/task-521.1 - Fix-chat-UX-rebaseline-false-setup-and-handoff-affordances.md`
 - Use the active task path when recording plan and verification notes because numeric IDs can collide between active and completed storage.
 
 ## File Map
@@ -54,7 +54,7 @@ Out of scope for this plan:
   - Remaining repeated runtime/MCP labels and provider/model state copy.
 - Modify: `Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md`
   - Append the post-fix re-audit summary and mark which remaining findings were addressed or deferred.
-- Modify: `backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md`
+- Modify: `backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md`
   - Record plan path, implementation notes, verification results, and final summary.
 
 ## Known Baseline Constraints
@@ -69,7 +69,7 @@ Out of scope for this plan:
 
 - Modify: `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts`
 - Modify: `apps/packages/ui/src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx`
-- Modify: `backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md`
+- Modify: `backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md`
 
 - [ ] **Step 1: Inspect existing guard expectations**
 
@@ -133,7 +133,7 @@ Run:
 git add \
   apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts \
   apps/packages/ui/src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx \
-  "backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md"
+  "backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md"
 git commit -m "test(chat): preserve restored rail contracts"
 ```
 
@@ -147,7 +147,7 @@ Skip commit if no file changes were needed; record the no-op verification in the
 - Modify: `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx`
 - Modify: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
-- Modify: `backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md`
+- Modify: `backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md`
 
 - [ ] **Step 1: Write failing mobile shell expectations**
 
@@ -265,7 +265,7 @@ Run real-server mobile cockpit only when the backend and WebUI are running:
 ```bash
 cd apps/tldw-frontend
 TLDW_E2E_SERVER_URL=127.0.0.1:8000 \
-TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY \
+TLDW_E2E_API_KEY=<local-e2e-api-key> \
 bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts \
   --grep "keeps mobile cockpit tabs and focus composer usable"
 ```
@@ -282,7 +282,7 @@ git add \
   apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx \
   apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx \
   apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts \
-  "backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md"
+  "backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md"
 git commit -m "fix(chat): reduce mobile cockpit rail density"
 ```
 
@@ -294,7 +294,7 @@ git commit -m "fix(chat): reduce mobile cockpit rail density"
 - Modify: `apps/packages/ui/src/components/Option/Playground/hooks/__tests__/usePlaygroundPersistence.test.tsx`
 - Modify if needed: `apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx`
 - Modify: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
-- Modify: `backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md`
+- Modify: `backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md`
 
 - [x] **Step 1: Write failing persistence hook test**
 
@@ -371,7 +371,7 @@ Then, when local backend/WebUI are running:
 ```bash
 cd apps/tldw-frontend
 TLDW_E2E_SERVER_URL=127.0.0.1:8000 \
-TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY \
+TLDW_E2E_API_KEY=<local-e2e-api-key> \
 bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts \
   --grep "sends a real mobile focus conversation"
 ```
@@ -388,7 +388,7 @@ git add \
   apps/packages/ui/src/components/Option/Playground/hooks/__tests__/usePlaygroundPersistence.test.tsx \
   apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx \
   apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts \
-  "backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md"
+  "backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md"
 git commit -m "fix(chat): keep server save feedback inline"
 ```
 
@@ -403,7 +403,7 @@ Only stage `ComposerToolbar.tsx` if it was changed.
 - Modify if needed: `apps/packages/ui/src/components/Option/Playground/playground-composition-preview.ts`
 - Modify: `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx`
 - Modify: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
-- Modify: `backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md`
+- Modify: `backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md`
 
 - [x] **Step 1: Write failing accessible-name tests for the duplicated content only**
 
@@ -470,7 +470,7 @@ git add \
   apps/packages/ui/src/components/Option/Playground/PlaygroundRuntimeInspector.tsx \
   apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx \
   apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts \
-  "backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md"
+  "backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md"
 git commit -m "fix(chat): clarify rail state labels"
 ```
 
@@ -482,7 +482,7 @@ Only stage files that changed.
 
 - Modify: `Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md`
 - Add or update screenshots under: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/`
-- Modify: `backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md`
+- Modify: `backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md`
 
 - [x] **Step 1: Start local backend and WebUI**
 
@@ -568,7 +568,7 @@ Run:
 git add \
   Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md \
   Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline \
-  "backlog/tasks/task-521 - Plan-remaining-chat-UX-rebaseline-slices.md"
+  "backlog/tasks/task-521.3 - Plan-remaining-chat-UX-rebaseline-slices.md"
 git commit -m "docs(chat): refresh corrected chat UX audit"
 ```
 

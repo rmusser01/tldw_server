@@ -161,6 +161,34 @@ describe("chat model availability utilities", () => {
     })
   })
 
+  it("ignores null provider status entries while enriching model readiness", () => {
+    const models = mergeChatProviderStatusIntoModels(
+      [
+        {
+          id: "gemma3:1b",
+          model: "tldw:gemma3:1b",
+          provider: "ollama"
+        } as any
+      ],
+      {
+        any_configured: true,
+        providers: [
+          null,
+          {
+            name: "ollama",
+            configured: true,
+            requires_api_key: false
+          }
+        ] as any
+      }
+    )
+
+    expect(models?.[0]).toMatchObject({
+      is_configured: true,
+      provider_is_configured: true
+    })
+  })
+
   it("treats any catalog-only true flag as unavailable", () => {
     const ids = buildAvailableChatModelIds([
       {
