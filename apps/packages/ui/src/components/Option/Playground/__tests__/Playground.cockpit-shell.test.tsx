@@ -1255,6 +1255,21 @@ describe("Playground cockpit shell", () => {
   });
 
   it("surfaces empty assistant response recovery in the runtime sidechannel", async () => {
+    messageOptionState.value.selectedModel = "anthropic:claude-3-haiku";
+    tldwServerState.fetchChatModels.mockResolvedValue([
+      {
+        model: "openai:gpt-4.1-mini",
+        provider: "openai",
+        is_configured: true,
+        provider_is_configured: true,
+      },
+      {
+        model: "anthropic:claude-3-haiku",
+        provider: "anthropic",
+        is_configured: true,
+        provider_is_configured: true,
+      },
+    ]);
     messageOptionState.value.messages = [
       {
         id: "user-1",
@@ -1283,7 +1298,9 @@ describe("Playground cockpit shell", () => {
       within(runControls).getByRole("status", {
         name: "Empty assistant response",
       }),
-    ).toHaveTextContent("No response text returned.");
+    ).toHaveTextContent(
+      "openai:gpt-4.1-mini returned no response text.",
+    );
 
     fireEvent.click(
       within(runControls).getByRole("button", {

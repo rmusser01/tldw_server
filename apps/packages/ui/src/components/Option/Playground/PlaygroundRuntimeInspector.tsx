@@ -82,6 +82,7 @@ export type PlaygroundRuntimeInspectorProps = {
   canRegenerate?: boolean;
   onRegenerate?: () => void;
   emptyAssistantResponse?: boolean;
+  emptyAssistantResponseRouteLabel?: string | null;
   settingSummaries?: RuntimeSettingSummary[];
   toolSummary?: RuntimeToolSummary | null;
   setupRecoveryMode?: boolean;
@@ -121,6 +122,7 @@ export const PlaygroundRuntimeInspector = ({
   canRegenerate = false,
   onRegenerate,
   emptyAssistantResponse = false,
+  emptyAssistantResponseRouteLabel = null,
   settingSummaries = [],
   toolSummary = null,
   setupRecoveryMode = false,
@@ -150,6 +152,26 @@ export const PlaygroundRuntimeInspector = ({
       : displayProvider && displayModel
         ? `${displayProvider}:${displayModel}`
         : selectedModel || null);
+  const emptyAssistantRouteLabel =
+    typeof emptyAssistantResponseRouteLabel === "string"
+      ? emptyAssistantResponseRouteLabel.trim() || null
+      : null;
+  const emptyAssistantResponseSummary = emptyAssistantRouteLabel
+    ? t(
+        "cockpit.emptyAssistantResponseSummaryWithRoute",
+        {
+          defaultValue: "{{route}} returned no response text.",
+          route: emptyAssistantRouteLabel,
+        },
+      )
+    : t(
+        "cockpit.emptyAssistantResponseSummary",
+        "No response text returned.",
+      );
+  const emptyAssistantResponseDetail = t(
+    "cockpit.emptyAssistantResponseDetail",
+    "Regenerate this turn, or choose a different model if this provider keeps returning empty output.",
+  );
   const modelUsabilityBlocks =
     Boolean(modelUsabilityStatus) &&
     modelUsabilityStatus !== "ready" &&
@@ -569,16 +591,10 @@ export const PlaygroundRuntimeInspector = ({
             className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-2.5 py-2 text-xs text-warn"
           >
             <p className="font-medium">
-              {t(
-                "cockpit.emptyAssistantResponseSummary",
-                "No response text returned.",
-              )}
+              {emptyAssistantResponseSummary}
             </p>
             <p className="mt-1 opacity-90">
-              {t(
-                "cockpit.emptyAssistantResponseDetail",
-                "Regenerate this turn or switch model settings before trying again.",
-              )}
+              {emptyAssistantResponseDetail}
             </p>
           </div>
         ) : null}

@@ -7,7 +7,19 @@ import { PlaygroundRuntimeInspector } from "../PlaygroundRuntimeInspector";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback,
+    t: (
+      key: string,
+      fallbackOrOptions?:
+        | string
+        | { defaultValue?: string; [key: string]: unknown },
+    ) => {
+      if (typeof fallbackOrOptions === "string") return fallbackOrOptions;
+      const template = fallbackOrOptions?.defaultValue || key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_, token: string) => {
+        const value = fallbackOrOptions?.[token];
+        return value == null ? `{{${token}}}` : String(value);
+      });
+    },
   }),
 }));
 
@@ -515,20 +527,26 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
 
   it("surfaces empty assistant responses beside the regenerate control", () => {
     const props = renderInspector({
+      selectedProvider: "anthropic",
+      selectedModel: "claude-3-haiku",
+      providerRouteLabel: "anthropic:claude-3-haiku",
       streaming: false,
       runtimeStatus: "ready",
       canStopStreaming: false,
       canRegenerate: true,
       emptyAssistantResponse: true,
+      emptyAssistantResponseRouteLabel: "openai:gpt-4.1-mini",
     });
 
     const runControls = screen.getByRole("region", { name: "Run controls" });
     const status = within(runControls).getByRole("status", {
       name: "Empty assistant response",
     });
-    expect(status).toHaveTextContent("No response text returned.");
     expect(status).toHaveTextContent(
-      "Regenerate this turn or switch model settings before trying again.",
+      "openai:gpt-4.1-mini returned no response text.",
+    );
+    expect(status).toHaveTextContent(
+      "Regenerate this turn, or choose a different model if this provider keeps returning empty output.",
     );
 
     fireEvent.click(
