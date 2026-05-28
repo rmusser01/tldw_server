@@ -8,13 +8,17 @@ from .presets import (
     list_builtin_presets,
     validate_preset_safety,
 )
-from .resolver import ProfileResolver
+from .resolver import ProfileResolver, StoreBackedProfileResolver
+from .store import InMemoryProfileStore, ProfileStoreUnavailableError
 
 __all__ = [
+    "InMemoryProfileStore",
     "MCPProfile",
     "ProfilePolicy",
     "ProfilePreset",
     "ProfileResolver",
+    "ProfileStoreUnavailableError",
+    "StoreBackedProfileResolver",
     "duplicate_builtin_preset",
     "get_builtin_preset",
     "list_builtin_presets",

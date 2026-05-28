@@ -45,6 +45,8 @@ Acceptance criteria:
 - Existing `/api/v1/mcp/*` routes, JSON-RPC payloads, auth behavior, env vars, MCP Hub policy behavior, approvals, path scopes, and credential brokering remain compatible in `tldw_server`.
 - Existing clients that do not select a profile continue to resolve through the current default MCP Hub/AuthNZ/RBAC behavior in `tldw_server`; extraction must not unexpectedly deny or grant tools for no-profile legacy requests.
 - A minimal external FastAPI app can mount the package router with fake adapters and successfully call status, tools/list, and tools/call for a stub tool.
+- Runtime-neutral Stage 2 work is split into explicit sub-stages. Profile schema/store/resolver primitives are not treated as execution enforcement until structured profile/effective-policy resolution, reason codes, audit provenance, and host compatibility tests exist.
+- Profile and effective-policy resolution returns structured outcomes with machine-readable reason codes and provenance; execution code must not infer deny reasons from `None` alone.
 - The optional built-in SQLite storage provides separate `ProfileStore`, `ExternalRegistryStore`, and `AuditStore` interfaces for profiles/assignments/approval policies/credential grants, external server definitions, provenance, and audit events.
 - File/YAML data is limited to preset loading, seed/import/export, or read-only configuration, not concurrent policy persistence.
 - External-server stdio is supported in Phase A only as a managed upstream MCP server transport; the client-facing gateway stdio MCP server entrypoint belongs to Phase B.
@@ -115,12 +117,15 @@ The repository has conflicting license signals in local guidance and package met
 
 Until that decision is made, the package should be treated as an in-repo/internal package even if its technical boundary is clean.
 
+The project must not market, document, or tag `mcp_unified` as a standalone third-party package until the packaging gate is complete. Early in-repo users may depend on the boundary, but release notes and examples should describe it as internal/experimental until minimal-install, extras, and license metadata are proven.
+
 Packaging acceptance criteria:
 
 - `mcp_unified` can be installed without installing media ingestion, RAG, UI, STT/TTS, or other `tldw_server` optional dependency groups
 - extras are documented and tested independently
 - import-boundary tests run in a minimal environment
 - license metadata is explicit in the package metadata and docs
+- a CI or local smoke install verifies `mcp_unified` imports in a clean environment with only declared core dependencies
 
 ## Runtime Instance Model
 
@@ -223,11 +228,14 @@ tldw_Server_API/app/core/MCP_unified/adapters/
 
 Storage interfaces should be split by responsibility:
 
-- `ProfileStore`: profiles, assignments, approval policies, credential grants, schema migrations
+- `ProfileStore`: profile documents, profile schema version, profile lifecycle timestamps, and profile migrations
+- `ProfileAssignmentStore`: principal/workspace/default-profile assignments and assignment provenance
+- `ApprovalPolicyStore`: reusable approval policies and profile-to-approval-policy bindings
+- `CredentialGrantStore`: credential grant metadata and broker binding references, never secret values
 - `ExternalRegistryStore`: external server definitions, credential slot metadata, enabled/disabled state, registry migrations
 - `AuditStore`: append-only audit/provenance events and query helpers
 
-The bundled SQLite implementation can implement all three interfaces for the standalone gateway, but host integrations may provide each interface independently. `tldw_server` should adapt MCP Hub and AuthNZ repositories into these interfaces rather than routing all persistence through a generic profile store.
+The bundled SQLite implementation can implement all of these interfaces for the standalone gateway, but host integrations may provide each interface independently. `tldw_server` should adapt MCP Hub and AuthNZ repositories into these interfaces rather than routing all persistence through a generic profile store. If an early package slice provides only `ProfileStore`, it is a profile-document primitive, not the full standalone persistence contract.
 
 ## Protocol Compatibility
 
@@ -258,7 +266,8 @@ client request
   -> transport adapter (FastAPI HTTP/WS or stdio)
   -> auth/session adapter builds RequestContext
   -> runtime protocol validates JSON-RPC
-  -> profile resolver computes EffectivePolicy
+  -> profile resolver returns ProfileResolutionResult
+  -> effective-policy resolver computes EffectivePolicyResult
   -> RBAC/API-key ceilings are applied
   -> registry resolves local or external tool
   -> path, credential, approval, and risk hooks run
@@ -310,6 +319,14 @@ resource_constraints
 ```
 
 Profiles need schema and preset versioning from the start. Built-in presets can evolve, but duplicated user profiles must record the preset version they were created from. Migrations must be explicit and auditable; user-customized profiles should not be silently rewritten by preset updates.
+
+Write-capable profiles require an explicit workspace/path binding before they are executable. Capabilities such as `workspace.write_scoped`, `docs.write_scoped`, `source.write_scoped`, `repo.write_scoped`, `tests.write_scoped`, or any future mutating capability may appear in a preset template, but enabling that duplicated profile for execution requires one of:
+
+- a concrete `path_scopes` entry bound to a canonical workspace/root
+- a host-provided workspace binding in the effective policy provenance
+- a gateway-local assignment that supplies the workspace/root scope
+
+If a write-capable profile has no effective workspace/path binding, discovery may show the profile as incomplete, but execution must deny with a machine-readable `workspace_scope_required` reason. Preset safety tests should check that write-capable bundled presets either include this requirement in `resource_constraints` or are explicitly marked as templates requiring assignment-time binding.
 
 ## Preset Safety Baseline
 
@@ -380,6 +397,26 @@ Discovery may degrade more softly:
 - external discovery failure degrades only the affected server
 - catalog/profile resolution failures should not grant extra execution authority
 
+Resolution must be structured before it is wired into execution. The minimum package contract should include:
+
+```text
+ProfileResolutionResult
+  status: resolved | profile_required | profile_not_found | profile_disabled | store_unavailable
+  profile: MCPProfile | None
+  reason_code: str
+  provenance: dict
+  warnings: list[dict]
+
+EffectivePolicyResult
+  status: resolved | denied | approval_required | degraded
+  policy: EffectivePolicy | None
+  reason_code: str
+  provenance: dict
+  warnings: list[dict]
+```
+
+Allowed `ProfileResolutionResult.reason_code` values should include at least `profile_resolved`, `profile_required`, `profile_not_found`, `profile_disabled`, and `profile_store_unavailable`. Execution code must branch on these status and reason fields, not on whether a profile object is `None`. Discovery may translate the same result into softer visibility metadata, but execution remains fail-closed.
+
 Approval-required is a structured runtime outcome, not a generic permission error. It should include tool name, reason, target context, requested scope, expiry options when applicable, and safe argument summary or hash.
 
 ## Security Requirements
@@ -423,6 +460,8 @@ Phase A should manage registry plus lifecycle:
 - policy-gated execution
 
 It should not install or update third-party server packages in Phase A.
+
+Process-spawning upstream stdio is not the first external-server slice. Before the package starts external stdio processes, the implementation must already have registry storage, credential broker, audit sink, path/workspace policy, executable allowlist, environment allowlist, and process-policy adapters under test. Earlier external-server slices should be limited to non-spawning registry models, fake transports, health state, namespaced virtual-tool metadata, and policy-gated execution tests.
 
 There are two distinct stdio concerns:
 
@@ -541,9 +580,16 @@ Success means existing tests keep passing and behavior is unchanged.
 
 ### Stage 2: Runtime-Neutral Package
 
-Move request/response models, protocol dispatch, module registry, execution preparation, idempotency helpers, external server manager, transport contracts, profile schemas, and optional SQLite store implementations into `mcp_unified`.
+Stage 2 is not a single move. It should be broken into independently reviewable gates:
 
-Success means the package test suite runs without importing `tldw_Server_API`.
+- **Stage 2A: package boundary and neutral interfaces.** Create or maintain the `mcp_unified` package, host shim re-exports, import-boundary tests, and minimal dependency surface.
+- **Stage 2B: profile schema, presets, and profile-document store primitives.** Keep this limited to data contracts, copy isolation, preset safety, and profile lookup. No execution enforcement yet.
+- **Stage 2C: structured profile/effective-policy resolution.** Add result objects, reason codes, provenance, deny-over-allow precedence, workspace-binding requirements for write-capable profiles, and tests for standalone default-profile behavior versus `tldw_server` legacy no-profile behavior.
+- **Stage 2D: runtime protocol and execution shell.** Move request/response models, JSON-RPC protocol dispatch, module registry contracts, idempotency helpers, and execution preparation behind fake adapters. Prove two runtime instances do not share registry, profile, idempotency, session, or external-server state.
+- **Stage 2E: SQLite stores and migrations.** Add gateway-local SQLite implementations for the split stores: profiles, assignments, approval policies, credential grants, external registry, and audit. File/YAML remains seed/import/export only.
+- **Stage 2F: external registry and non-spawning federation shell.** Add external-server registry models, fake transport lifecycle, namespaced virtual-tool metadata, health state, and policy-gated execution tests. Defer real upstream stdio process spawning until registry, credential, audit, path, and process-policy adapters are all present.
+
+Success means each sub-stage has focused package tests that run without importing `tldw_Server_API`, and host compatibility tests prove existing `tldw_server` behavior remains unchanged before the next sub-stage begins.
 
 ### Stage 3: Host Adapters And Shims
 
