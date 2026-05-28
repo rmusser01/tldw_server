@@ -18,24 +18,21 @@ from typing import Any, Optional
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
-from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
-from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement_enabled
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _env_flag_enabled,
+)
+from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+)
+from tldw_Server_API.app.core.testing import (
     is_test_mode as _is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _is_truthy,
 )
-from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
-from tldw_Server_API.app.services.shutdown_transport_registry import (
-    register_shutdown_transport_family,
-)
 
-from .auth.jwt_manager import JWTManager, get_jwt_manager
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config, validate_config
 from .interfaces.runtime import MCPRuntimeDependencies
@@ -73,15 +70,13 @@ _ENV_PLACEHOLDER_RE = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)(?::-(?P<default>.*)
 
 
 def _is_authnz_access_token(token: str) -> bool:
-    """Return True when the token verifies as an AuthNZ access token."""
+    """Compatibility helper for endpoint code that still imports this symbol."""
     try:
-        jwt_service = get_jwt_service()
-        jwt_service.decode_access_token(token)
-        return True
-    except TokenExpiredError:
-        return True
-    except InvalidTokenError:
-        return False
+        from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
+            TldwServerAuthProvider,
+        )
+
+        return TldwServerAuthProvider().is_authnz_access_token(token)
     except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
         return False
 
@@ -102,27 +97,6 @@ def _resolve_env_placeholders(value: Any) -> Any:
     return os.getenv(env_name, default if default is not None else "")
 
 
-def _extract_api_key_permissions(info: Optional[dict[str, Any]]) -> list[str]:
-    """Normalize API key scopes into MCP permissions."""
-    if not info:
-        return []
-    try:
-        from tldw_Server_API.app.core.AuthNZ.api_key_manager import normalize_scope
-    except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-        return []
-
-    raw_scopes = info.get("scopes")
-    if raw_scopes is None:
-        raw_scopes = info.get("scope")
-
-    try:
-        scopes = normalize_scope(raw_scopes)
-    except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-        scopes = set()
-
-    return sorted(scopes) if scopes else []
-
-
 def _normalize_optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
@@ -131,7 +105,7 @@ def _normalize_optional_text(value: Any) -> str | None:
 class _JWTManagerProxy:
     """Proxy for JWT manager to allow per-server monkeypatching without global side effects."""
 
-    def __init__(self, manager: JWTManager):
+    def __init__(self, manager: Any):
         self._manager = manager
 
     def __getattr__(self, name: str):
@@ -246,7 +220,12 @@ class MCPServer:
             self.dependencies = dependencies
             self.protocol = MCPProtocol(dependencies=self.dependencies)
         self.module_registry = self.dependencies.module_registry
-        self.jwt_manager = _JWTManagerProxy(get_jwt_manager())
+        self.auth_provider = self.dependencies.auth_provider
+        self.lifecycle_guard = self.dependencies.lifecycle_guard
+        self.permission_seeder = self.dependencies.permission_seeder
+        self.module_config_provider = self.dependencies.module_config_provider
+        self.policy_context_provider = self.dependencies.policy_context_provider
+        self.jwt_manager = _JWTManagerProxy(self.auth_provider.get_mcp_jwt_manager())
         self.rbac_policy = self.dependencies.rbac_policy
         self.rate_limiter = self.dependencies.rate_limiter
         self.metrics_collector = self.dependencies.metrics_collector
@@ -269,7 +248,7 @@ class MCPServer:
 
         # Background tasks
         self.background_tasks: set[asyncio.Task] = set()
-        register_shutdown_transport_family(
+        self.lifecycle_guard.register_shutdown_transport_family(
             "mcp.websocket",
             active_count=self.get_active_connection_count,
             drain=self.drain_connections,
@@ -283,6 +262,27 @@ class MCPServer:
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             return {}
 
+    def _extract_api_key_permissions(self, info: Optional[dict[str, Any]]) -> list[str]:
+        """Normalize API-key scope payloads through the injected host adapter."""
+        try:
+            return self.auth_provider.normalize_api_key_permissions(info)
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            return []
+
+    def _policy_context_enabled(self) -> bool:
+        """Return whether host MCP Hub policy metadata should be attached."""
+        try:
+            return bool(self.policy_context_provider.is_policy_context_enabled())
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            return False
+
+    def _default_media_db_path(self) -> str:
+        """Return the host-provided default media DB path for module config."""
+        try:
+            return self.module_config_provider.default_media_db_path()
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            return ""
+
     def get_active_connection_count(self) -> int:
         return len(self.connections)
 
@@ -294,7 +294,7 @@ class MCPServer:
         if app is None:
             return True
         try:
-            assert_may_start_work(app, "mcp.websocket")
+            self.lifecycle_guard.assert_may_start_work(app, "mcp.websocket")
             return True
         except HTTPException:
             await websocket.close(code=1013, reason="shutdown_draining")
@@ -333,15 +333,11 @@ class MCPServer:
 
             try:
                 # Fail fast on insecure production configurations
-                try:
-                    _test_mode = _is_test_mode() or _is_explicit_pytest_runtime()
-                    if not self.config.debug_mode and not _test_mode:
-                        ok = validate_config()
-                        if not ok:
-                            raise RuntimeError("MCP configuration validation failed; refusing to start in production")
-                except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-                    # If validation fails, propagate to abort startup
-                    raise
+                _test_mode = _is_test_mode() or _is_explicit_pytest_runtime()
+                if not self.config.debug_mode and not _test_mode:
+                    ok = validate_config()
+                    if not ok:
+                        raise RuntimeError("MCP configuration validation failed; refusing to start in production")
                 # Warn if demo auth is enabled in a non-debug environment
                 try:
                     if _env_flag_enabled("MCP_ENABLE_DEMO_AUTH") and not self.config.debug_mode:
@@ -377,21 +373,7 @@ class MCPServer:
     async def _ensure_default_tool_permissions(self):
         """Seed wildcard tool permission tools.execute:* if missing."""
         try:
-            pool = await get_db_pool()
-            name = 'tools.execute:*'
-            desc = 'Wildcard tool execution'
-            if pool.pool:
-                await pool.execute(
-                    "INSERT INTO permissions (name, description, category) VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING",
-                    name, desc, 'tools'
-                )
-            else:
-                row = await pool.fetchone("SELECT 1 FROM permissions WHERE name = ?", name)
-                if not row:
-                    await pool.execute(
-                        "INSERT INTO permissions (name, description, category) VALUES (?, ?, ?)",
-                        name, desc, 'tools'
-                    )
+            await self.permission_seeder.seed_default_tool_permissions()
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"Seed wildcard tool permission failed: {self._mask_secrets(str(e))}")
 
@@ -471,7 +453,7 @@ class MCPServer:
             enable_media_flag = _env_flag_enabled("MCP_ENABLE_MEDIA_MODULE")
             test_mode = _is_test_mode()
             if enable_media_flag and not modules_to_load:
-                default_media_path = str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id()))
+                default_media_path = self._default_media_db_path()
                 modules_to_load.append({
                     "id": "media",
                     "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module:MediaModule",
@@ -489,7 +471,7 @@ class MCPServer:
             # 4) Test convenience: default-enable media module when TEST_MODE unless explicitly disabled
             if test_mode and not any(m.get("id") == "media" for m in modules_to_load):
                 if os.getenv("MCP_ENABLE_MEDIA_MODULE", "").strip().lower() not in {"0", "false", "off", "no", "n"}:
-                    default_media_path = str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id()))
+                    default_media_path = self._default_media_db_path()
                     modules_to_load.append({
                         "id": "media",
                         "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module:MediaModule",
@@ -853,43 +835,21 @@ class MCPServer:
             authnz_token_failed = False
             try:
                 # Try AuthNZ JWT first for consistency with HTTP endpoints
-                from starlette.requests import Request as _Request
-
-                from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import verify_jwt_and_fetch_user
-
-                scope = {
-                    "type": "http",
-                    "method": "GET",
-                    "path": "/api/v1/mcp/ws",
-                    "headers": [
-                        (k.encode("latin-1"), v.encode("latin-1"))
-                        for k, v in websocket.headers.items()
-                    ],
-                }
-                try:
-                    client = websocket.client
-                    if isinstance(client, (list, tuple)) and len(client) >= 2:
-                        scope["client"] = (client[0], client[1])
-                    elif client is not None and getattr(client, "host", None) is not None:
-                        scope["client"] = (client.host, getattr(client, "port", 0))
-                except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-                    pass
-
-                req = _Request(scope)
-                user = await verify_jwt_and_fetch_user(req, auth_token)
-                user_id = str(getattr(user, "id", None) or "")
-                ok = bool(user_id)
-                if ok:
+                identity = await self.auth_provider.authenticate_authnz_websocket_token(
+                    auth_token,
+                    websocket=websocket,
+                )
+                if identity is not None and identity.user_id:
+                    user_id = identity.user_id
+                    ok = True
                     logger.info(f"WebSocket authenticated for user (AuthNZ JWT): {user_id}")
-                    roles = list(getattr(user, "roles", []) or [])
-                    perms = list(getattr(user, "permissions", []) or [])
-                    if roles:
-                        metadata["roles"] = roles
-                    if perms:
-                        metadata["permissions"] = perms
+                    if identity.roles:
+                        metadata["roles"] = list(identity.roles)
+                    if identity.permissions:
+                        metadata["permissions"] = list(identity.permissions)
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"AuthNZ JWT auth failed: {self._mask_secrets(str(e))}")
-                if _is_authnz_access_token(auth_token):
+                if self.auth_provider.is_authnz_access_token(auth_token):
                     authnz_token_failed = True
                     if not api_key:
                         await websocket.close(code=1008, reason="Authentication failed")
@@ -914,10 +874,11 @@ class MCPServer:
         # API key auth (optional)
         if api_key and not user_id:
             try:
-                from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
-                mgr = await get_api_key_manager()
                 # Enforce allowed IPs for API keys by forwarding resolved client IP
-                info = await mgr.validate_api_key(api_key, ip_address=client_ip)
+                info = await self.auth_provider.validate_api_key(
+                    api_key,
+                    ip_address=client_ip,
+                )
                 if info and info.get('user_id'):
                     user_id = str(info['user_id'])
                     # Attach org/team context
@@ -929,7 +890,7 @@ class MCPServer:
                     if 'api_client' not in roles:
                         roles.append('api_client')
                     try:
-                        scopes = _extract_api_key_permissions(info)
+                        scopes = self._extract_api_key_permissions(info)
                         if scopes:
                             metadata["api_key_scopes"] = list(scopes)
                             metadata["auth_via"] = "api_key"
@@ -1201,7 +1162,7 @@ class MCPServer:
                     context_metadata["workspace_id"] = sess.workspace_id
                 if sess and sess.cwd:
                     context_metadata["cwd"] = sess.cwd
-                context_metadata["mcp_policy_context_enabled"] = is_mcp_hub_policy_enforcement_enabled()
+                context_metadata["mcp_policy_context_enabled"] = self._policy_context_enabled()
                 if sess and sess.safe_config:
                     context_metadata["safe_config"] = dict(sess.safe_config)
                 if sess:

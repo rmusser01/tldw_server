@@ -8,14 +8,20 @@ from .policy import (
 )
 from .runtime import (
     ApiKeyScopeNormalizer,
+    AuthenticatedIdentity,
     CircuitBreakerFactory,
     DatabasePathResolver,
+    LifecycleGuard,
     MCPRuntimeDependencies,
     MetricsCollector,
+    ModuleConfigProvider,
     ModuleRegistry,
+    PermissionSeeder,
+    PolicyContextProvider,
     RateLimiter,
     RbacPolicy,
     RedisClientFactory,
+    ServerAuthProvider,
     TelemetryProvider,
 )
 from .storage import (
@@ -28,6 +34,7 @@ from .storage import (
 )
 
 __all__ = [
+    "AuthenticatedIdentity",
     "ApiKeyScopeNormalizer",
     "ApprovalPolicyStore",
     "ApprovalEvaluator",
@@ -38,14 +45,19 @@ __all__ = [
     "EffectivePolicyResolver",
     "ExternalAccessEvaluator",
     "ExternalRegistryStore",
+    "LifecycleGuard",
     "MCPRuntimeDependencies",
     "MetricsCollector",
+    "ModuleConfigProvider",
     "ModuleRegistry",
     "PathScopeEnforcer",
+    "PermissionSeeder",
+    "PolicyContextProvider",
     "ProfileAssignmentStore",
     "ProfileStore",
     "RateLimiter",
     "RbacPolicy",
     "RedisClientFactory",
+    "ServerAuthProvider",
     "TelemetryProvider",
 ]

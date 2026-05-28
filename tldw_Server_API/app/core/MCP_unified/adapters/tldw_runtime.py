@@ -19,11 +19,33 @@ from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
 )
 from tldw_Server_API.app.core.Infrastructure.redis_factory import create_async_redis_client
 from tldw_Server_API.app.core.MCP_unified.auth.authnz_rbac import get_rbac_policy
+from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import get_rate_limiter
-from tldw_Server_API.app.core.MCP_unified.interfaces.runtime import MCPRuntimeDependencies
+from tldw_Server_API.app.core.MCP_unified.interfaces.runtime import (
+    AuthenticatedIdentity,
+    MCPRuntimeDependencies,
+)
 from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
 from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_collector
 from tldw_Server_API.app.core.Metrics.telemetry import get_telemetry_manager
+
+_TLDW_RUNTIME_ADAPTER_EXCEPTIONS = (
+    AssertionError,
+    AttributeError,
+    ConnectionError,
+    FileNotFoundError,
+    ImportError,
+    KeyError,
+    LookupError,
+    OSError,
+    PermissionError,
+    RuntimeError,
+    TimeoutError,
+    TypeError,
+    UnicodeDecodeError,
+    ValueError,
+    json.JSONDecodeError,
+)
 
 
 class TldwDatabasePathResolver:
@@ -47,7 +69,7 @@ class TldwDatabasePathResolver:
 
             paths = DatabasePaths.get_all_user_db_paths(normalized_user_id)
             return {key: str(value) for key, value in paths.items()}
-        except Exception as exc:
+        except _TLDW_RUNTIME_ADAPTER_EXCEPTIONS as exc:
             logger.debug(
                 "MCP user database path resolution failed; returning empty paths: {}",
                 exc.__class__.__name__,
@@ -64,7 +86,7 @@ class TldwApiKeyScopeNormalizer:
             from tldw_Server_API.app.core.AuthNZ.api_key_manager import normalize_scope
 
             return set(normalize_scope(raw_scopes))
-        except Exception as exc:
+        except _TLDW_RUNTIME_ADAPTER_EXCEPTIONS as exc:
             logger.debug(
                 "MCP API key scope normalizer failed; using local fallback: {}",
                 exc.__class__.__name__,
@@ -96,6 +118,176 @@ class TldwApiKeyScopeNormalizer:
                 if isinstance(item, str) and item.strip()
             }
         return set()
+
+
+class TldwServerAuthProvider:
+    """Authenticate MCP transport callers through current tldw_server services."""
+
+    def __init__(self) -> None:
+        self._jwt_manager = get_jwt_manager()
+        self._scope_normalizer = TldwApiKeyScopeNormalizer()
+
+    def get_mcp_jwt_manager(self) -> Any:
+        """Return the in-repo MCP JWT manager used for legacy MCP tokens."""
+        return self._jwt_manager
+
+    def is_authnz_access_token(self, token: str) -> bool:
+        """Return True when the token verifies as an AuthNZ access token."""
+        try:
+            from tldw_Server_API.app.core.AuthNZ.exceptions import (
+                InvalidTokenError,
+                TokenExpiredError,
+            )
+            from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+
+            jwt_service = get_jwt_service()
+            jwt_service.decode_access_token(token)
+            return True
+        except TokenExpiredError:
+            return True
+        except InvalidTokenError:
+            return False
+        except _TLDW_RUNTIME_ADAPTER_EXCEPTIONS as exc:
+            logger.debug(
+                "MCP AuthNZ token detection failed closed: {}",
+                exc.__class__.__name__,
+            )
+            return False
+
+    async def authenticate_authnz_websocket_token(
+        self,
+        token: str,
+        *,
+        websocket: Any,
+    ) -> AuthenticatedIdentity | None:
+        """Authenticate an AuthNZ websocket bearer token and project identity data."""
+        from starlette.requests import Request
+
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
+            verify_jwt_and_fetch_user,
+        )
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/mcp/ws",
+            "headers": [
+                (key.encode("latin-1"), value.encode("latin-1"))
+                for key, value in websocket.headers.items()
+            ],
+        }
+        try:
+            client = websocket.client
+            if isinstance(client, (list, tuple)) and len(client) >= 2:
+                scope["client"] = (client[0], client[1])
+            elif client is not None and getattr(client, "host", None) is not None:
+                scope["client"] = (client.host, getattr(client, "port", 0))
+        except _TLDW_RUNTIME_ADAPTER_EXCEPTIONS as exc:
+            logger.debug(
+                "MCP AuthNZ websocket client projection failed: {}",
+                exc.__class__.__name__,
+            )
+
+        user = await verify_jwt_and_fetch_user(Request(scope), token)
+        user_id = str(getattr(user, "id", None) or "")
+        if not user_id:
+            return None
+        return AuthenticatedIdentity(
+            user_id=user_id,
+            roles=list(getattr(user, "roles", []) or []),
+            permissions=list(getattr(user, "permissions", []) or []),
+        )
+
+    async def validate_api_key(
+        self,
+        api_key: str,
+        *,
+        ip_address: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Validate a tldw_server API key for MCP transport authentication."""
+        from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
+
+        manager = await get_api_key_manager()
+        return await manager.validate_api_key(api_key, ip_address=ip_address)
+
+    def normalize_api_key_permissions(self, info: dict[str, Any] | None) -> list[str]:
+        """Normalize API-key scope payloads into MCP permission strings."""
+        if not info:
+            return []
+        raw_scopes = info.get("scopes")
+        if raw_scopes is None:
+            raw_scopes = info.get("scope")
+        scopes = self._scope_normalizer.normalize(raw_scopes)
+        return sorted(scopes) if scopes else []
+
+
+class TldwLifecycleGuard:
+    """Bridge MCP server lifecycle hooks to tldw_server app lifecycle services."""
+
+    def assert_may_start_work(self, app: Any, family: str) -> None:
+        """Raise when the host app is draining and new work should not start."""
+        from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
+
+        assert_may_start_work(app, family)
+
+    def register_shutdown_transport_family(
+        self,
+        family: str,
+        *,
+        active_count: Any,
+        drain: Any,
+    ) -> None:
+        """Register a transport family with the host shutdown registry."""
+        from tldw_Server_API.app.services.shutdown_transport_registry import (
+            register_shutdown_transport_family,
+        )
+
+        register_shutdown_transport_family(
+            family,
+            active_count=active_count,
+            drain=drain,
+        )
+
+
+class TldwPermissionSeeder:
+    """Seed MCP compatibility permissions through the current AuthNZ database."""
+
+    async def seed_default_tool_permissions(self) -> None:
+        """Ensure the legacy wildcard tool execution permission exists."""
+        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.services.admin_roles_permissions_service import (
+            ensure_permission,
+        )
+
+        pool = await get_db_pool()
+        await ensure_permission(
+            pool,
+            "tools.execute:*",
+            "Wildcard tool execution",
+            category="tools",
+        )
+
+
+class TldwModuleConfigProvider:
+    """Provide tldw_server defaults for MCP module configuration."""
+
+    def default_media_db_path(self) -> str:
+        """Return the single-user media database path used by legacy module defaults."""
+        from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+
+        return str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id()))
+
+
+class TldwPolicyContextProvider:
+    """Expose host MCP Hub policy-context feature flags to MCPServer."""
+
+    def is_policy_context_enabled(self) -> bool:
+        """Return whether host MCP Hub policy-context metadata should be attached."""
+        from tldw_Server_API.app.core.feature_flags import (
+            is_mcp_hub_policy_enforcement_enabled,
+        )
+
+        return is_mcp_hub_policy_enforcement_enabled()
 
 
 def _to_tldw_circuit_breaker_config(config: Any) -> CircuitBreakerConfig:
@@ -142,4 +334,9 @@ def build_default_runtime_dependencies() -> MCPRuntimeDependencies:
         external_access_evaluator=TldwExternalAccessEvaluator(),
         redis_client_factory=create_async_redis_client,
         circuit_breaker_factory=create_tldw_circuit_breaker,
+        auth_provider=TldwServerAuthProvider(),
+        lifecycle_guard=TldwLifecycleGuard(),
+        permission_seeder=TldwPermissionSeeder(),
+        module_config_provider=TldwModuleConfigProvider(),
+        policy_context_provider=TldwPolicyContextProvider(),
     )
