@@ -884,7 +884,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(screen.getByText("Approve workspace tool use before running MCP actions.")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Open MCP Hub" })).toHaveAttribute(
       "href",
-      "/mcp-hub"
+      "/mcp-hub?workflow=workspaces&view=workspace-sets&workspace_id=workspace-a&source=research-workspace"
     )
   })
 

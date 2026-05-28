@@ -1,8 +1,10 @@
 """Tests for Research Workspace migration protocol endpoints."""
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints import workspace_migrations
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
@@ -25,8 +27,8 @@ def db(tmp_path):
 
 @pytest.fixture
 def workspace_fastapi_app():
-    from tldw_Server_API.app.main import app
-
+    app = FastAPI()
+    app.include_router(workspace_migrations.router, prefix="/api/v1/workspaces")
     return app
 
 

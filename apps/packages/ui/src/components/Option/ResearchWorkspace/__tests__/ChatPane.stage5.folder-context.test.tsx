@@ -27,16 +27,29 @@ const {
       mediaId: number
       title: string
       type: "pdf" | "video" | "audio" | "website" | "document" | "text"
+      status?: "processing" | "ready" | "error"
       addedAt?: Date
       url?: string
     }>,
     selectedSourceIds: [] as string[],
     selectedSourceFolderIds: [] as string[],
     getSelectedSources: () =>
-      [] as Array<{ id: string; title: string; mediaId?: number; type?: string }>,
+      [] as Array<{
+        id: string
+        title: string
+        mediaId?: number
+        type?: string
+        status?: "processing" | "ready" | "error"
+      }>,
     getSelectedMediaIds: () => [] as number[],
     getEffectiveSelectedSources: () =>
-      [] as Array<{ id: string; title: string; mediaId?: number; type?: string }>,
+      [] as Array<{
+        id: string
+        title: string
+        mediaId?: number
+        type?: string
+        status?: "processing" | "ready" | "error"
+      }>,
     getEffectiveSelectedMediaIds: () => [] as number[],
     setSelectedSourceIds: vi.fn(),
     focusSourceById: vi.fn(),
@@ -258,7 +271,8 @@ describe("ChatPane Stage 5 folder-derived context", () => {
         id: "source-folder",
         mediaId: 101,
         title: "Folder Source",
-        type: "pdf"
+        type: "pdf",
+        status: "ready"
       }
     ]
     workspaceStoreState.selectedSourceIds = []

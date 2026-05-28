@@ -46,6 +46,7 @@ const workspaceStoreState = {
     mediaId: number
     title: string
     type: "pdf" | "video" | "audio" | "website" | "document" | "text"
+    status?: "processing" | "ready" | "error"
     addedAt?: Date
     url?: string
   }>,
@@ -56,6 +57,7 @@ const workspaceStoreState = {
       mediaId: number
       title: string
       type: "pdf" | "video" | "audio" | "website" | "document" | "text"
+      status?: "processing" | "ready" | "error"
     }>,
   getSelectedMediaIds: () => [] as number[],
   setSelectedSourceIds: vi.fn(),
@@ -350,7 +352,8 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-video-1",
         mediaId: 10,
         title: "Interview Recording",
-        type: "video"
+        type: "video",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [10]
@@ -369,7 +372,8 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-video-1",
         mediaId: 10,
         title: "Interview Recording",
-        type: "video"
+        type: "video",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [10]
@@ -404,7 +408,8 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-doc-1",
         mediaId: 101,
         title: "Policy Document",
-        type: "pdf"
+        type: "pdf",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [101]
@@ -428,7 +433,8 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-doc-1",
         mediaId: 101,
         title: "Policy Document",
-        type: "pdf"
+        type: "pdf",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [101]
@@ -463,7 +469,8 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-doc-1",
         mediaId: 101,
         title: "Policy Document",
-        type: "pdf"
+        type: "pdf",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [101]
@@ -501,13 +508,15 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-doc-1",
         mediaId: 101,
         title: "Primary Paper",
-        type: "pdf"
+        type: "pdf",
+        status: "ready"
       },
       {
         id: "source-doc-2",
         mediaId: 102,
         title: "Appendix Notes",
-        type: "document"
+        type: "document",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [101, 102]

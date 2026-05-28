@@ -51,6 +51,7 @@ const workspaceStoreState = {
     mediaId: number
     title: string
     type: "pdf" | "video" | "audio" | "website" | "document" | "text"
+    status?: "processing" | "ready" | "error"
     addedAt?: Date
     url?: string
   }>,
@@ -71,7 +72,7 @@ const workspaceStoreState = {
 }
 
 const deriveSelectedSources = () =>
-  workspaceStoreState.sources.filter((source) =>
+  getWorkspaceSources().filter((source) =>
     workspaceStoreState.selectedSourceIds.includes(source.id)
   )
 
@@ -79,6 +80,12 @@ const deriveSelectedMediaIds = () =>
   deriveSelectedSources()
     .map((source) => source.mediaId)
     .filter((mediaId): mediaId is number => Number.isFinite(mediaId))
+
+const getWorkspaceSources = () =>
+  workspaceStoreState.sources.map((source) => ({
+    status: "ready" as const,
+    ...source
+  }))
 
 const messageOptionState = {
   messages: [] as StoreMessage[],
@@ -143,7 +150,11 @@ vi.mock("@/store/connection", () => ({
 vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: (
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) =>
+    selector({
+      ...workspaceStoreState,
+      sources: getWorkspaceSources()
+    })
 }))
 
 vi.mock("@/store/option", () => ({

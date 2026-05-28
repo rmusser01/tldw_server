@@ -1,7 +1,7 @@
 ---
 id: TASK-478
 title: Research Workspace UAT remediation workstream
-status: In Progress
+status: Done
 labels:
 - research-workspace
 - uat
@@ -35,6 +35,10 @@ Parallelization model: tasks inside a later gate may be investigated in parallel
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] All Research Workspace UAT child tasks through TASK-478.31 are closed or explicitly split out.
+- [x] Post-rebase frontend Research Workspace test and TypeScript gates are verified.
+- [x] Post-rebase backend workspace/status/migration/capability/sandbox/embeddings regression gates are verified.
+- [x] Remaining fixture-backed risks were validated, resolved, or tracked in the child task records without overclaiming live coverage.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -72,21 +76,29 @@ Operating rule: do not close or move past a gate without live backend + WebUI va
 - Post-original-plan follow-ups are tracked as TASK-478.14 through TASK-478.18. These cover backend startup restore, parity workflow naming, smoke metadata governance, model metadata allowlist ownership, and the migration true-move matrix refresh.
 - TASK-515 and TASK-516 moved migration true-move deletion from server-ineligible/retained to live-verified delete eligibility plus durable tombstone suppression. TASK-478.18 refreshed RW-UAT-025 with that evidence, and TASK-478.25 later closed the guided migration import/export recovery walkthrough with live WebUI evidence.
 - TASK-478.19, TASK-478.21, TASK-478.22, TASK-478.23, TASK-478.24, and TASK-478.25 closed the keyboard, MCP handoff, ACP bridge, sandbox diagnostics, sandbox execution-contract, and migration import/export recovery slices as far as live evidence supports.
-- TASK-478.26 reconciled the remaining risks into fixture-backed follow-ups rather than overclaiming the matrix. TASK-478 remains In Progress because the remaining Partial/Watch items require real fixture-backed execution: TASK-478.27 for MCP workspace-set policy/tool execution, TASK-478.28 for ACP workspace-scoped run diagnostics, TASK-478.29 for sandbox enabled-runtime workspace runs, TASK-478.30 for long-running vector completion with real embeddings, and TASK-478.31 for the frontend TypeScript baseline verification blocker.
+- TASK-478.26 reconciled the remaining risks into fixture-backed follow-ups rather than overclaiming the matrix. TASK-478.27 through TASK-478.31 then closed the MCP workspace-set policy/tool execution, ACP workspace-scoped run diagnostics, sandbox enabled-runtime workspace runs, long-running vector completion with real embeddings, and frontend TypeScript baseline verification blockers.
+- Parent closeout was rebased onto origin/dev and verified against the Research Workspace UI/store/API gate, the shared UI TypeScript gate, and the focused backend workspace/status/migration/capability/sandbox/embeddings regression gate. Workspace endpoint tests that only need overridden endpoint dependencies now use minimal router fixtures instead of the production FastAPI lifespan, avoiding unrelated startup worker shutdown hangs during focused endpoint verification.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed the Research Workspace UAT remediation workstream. All known TASK-478 child slices through TASK-478.31 are Done, including the Shared Workspaces/MCP/ACP/sandbox model alignment, ingestion/indexing status, extension handoff, live UAT matrix maintenance, fixture-backed MCP/ACP/sandbox/vector validation, and the frontend TypeScript blocker.
 
+Post-rebase verification recorded:
+- `bunx vitest run src/components/Option/ResearchWorkspace/__tests__ src/store/__tests__/workspace.test.ts src/store/__tests__/workspace-api-first.test.ts src/store/__tests__/workspace-migration.test.ts src/store/__tests__/research-workspace-legacy-storage-inventory.test.ts src/services/tldw/domains/__tests__/workspace-api.status-capabilities.test.ts --reporter=dot` -> 56 files, 523 tests passed.
+- `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` -> passed.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspaces_api.py tldw_Server_API/tests/Workspaces/test_workspace_source_status_api.py tldw_Server_API/tests/Workspaces/test_workspace_source_preview_context_api.py tldw_Server_API/tests/Workspaces/test_workspace_migration_api.py tldw_Server_API/tests/Research_Workspace/test_capability_endpoint.py tldw_Server_API/tests/Research_Workspace/test_capability_derivation.py tldw_Server_API/tests/sandbox/test_workspace_diagnostics.py tldw_Server_API/tests/Embeddings/test_backpressure_and_quotas.py tldw_Server_API/tests/Embeddings/test_embeddings_redis_worker.py tldw_Server_API/tests/Embeddings/test_embeddings_jobs_worker.py -q` -> 111 tests passed.
+- `python -m bandit -r <touched workspace API test files> -s B101 -f json` -> 0 results, 0 errors. The initial unskipped Bandit run only reported pytest `assert` usage.
+- `git diff --check` -> passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

@@ -3415,16 +3415,6 @@ const ResearchWorkspaceBody: React.FC = () => {
                 />
               </>
             )}
-            {!leftPaneOpen && (
-              <WorkspaceRestoreRailButton
-                side="left"
-                label={t("playground:workspace.showSources", "Show sources")}
-                panelId="workspace-sources-panel"
-                testId="workspace-restore-sources"
-                onClick={handleRestoreLeftPane}
-              />
-            )}
-
             <Drawer
               title={
                 <span className="flex items-center gap-2">
@@ -3495,16 +3485,6 @@ const ResearchWorkspaceBody: React.FC = () => {
                 </aside>
               </>
             )}
-            {!rightPaneOpen && (
-              <WorkspaceRestoreRailButton
-                side="right"
-                label={t("playground:workspace.showStudio", "Show studio")}
-                panelId="workspace-studio-panel"
-                testId="workspace-restore-studio"
-                onClick={handleRestoreRightPane}
-              />
-            )}
-
             <Drawer
               title={
                 <span className="flex items-center gap-2">
