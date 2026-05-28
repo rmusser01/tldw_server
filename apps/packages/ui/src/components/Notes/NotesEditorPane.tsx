@@ -37,6 +37,7 @@ import {
   NOTES_SHORTCUTS_SUMMARY_ID,
   NOTE_TEMPLATES,
   normalizeNotesTitleStrategy,
+  toSafeTestId,
 } from './notes-manager-utils'
 import { NOTES_TITLE_SUGGEST_STRATEGY_SETTING } from '@/services/settings/ui-settings'
 import { setSetting } from '@/services/settings/registry'
@@ -59,9 +60,24 @@ export interface NoteRelationsShape {
     title: string
     directed: boolean
     outgoing: boolean
+    relationLabel?: string
+    available?: boolean
+    unavailableReason?: string | null
   }>
-  related: Array<{ id: string; title: string }>
-  backlinks: Array<{ id: string; title: string }>
+  related: Array<{
+    id: string
+    title: string
+    relationLabel?: string
+    available?: boolean
+    unavailableReason?: string | null
+  }>
+  backlinks: Array<{
+    id: string
+    title: string
+    relationLabel?: string
+    available?: boolean
+    unavailableReason?: string | null
+  }>
 }
 
 export interface NotesEditorPaneProps {
@@ -369,6 +385,24 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         <LazyMarkdownPreview content={previewContent} size="sm" />
       </React.Suspense>
     </div>
+  )
+
+  const renderRelationMeta = (
+    relationLabel?: string,
+    unavailableReason?: string | null
+  ) => (
+    <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] leading-none">
+      {relationLabel ? (
+        <span className="rounded bg-surface3 px-1.5 py-0.5 text-text-muted">
+          {relationLabel}
+        </span>
+      ) : null}
+      {unavailableReason ? (
+        <span className="rounded border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-warn">
+          {unavailableReason}
+        </span>
+      ) : null}
+    </span>
   )
 
   return (
@@ -884,15 +918,28 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     <div
                       key={link.edgeId}
                       className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1"
+                      data-testid={`notes-manual-link-${toSafeTestId(link.edgeId)}`}
                     >
                       <button
                         type="button"
-                        className="text-xs text-text hover:underline"
+                        aria-label={
+                          link.available === false
+                            ? `${link.title} ${link.unavailableReason || 'Unavailable'}`
+                            : link.title
+                        }
+                        className={`flex flex-col items-start text-xs ${
+                          link.available === false
+                            ? 'cursor-not-allowed text-text-muted'
+                            : 'text-text hover:underline'
+                        }`}
+                        disabled={link.available === false}
                         onClick={() => {
+                          if (link.available === false) return
                           void handleSelectNote(link.noteId)
                         }}
                       >
-                        {link.title}
+                        <span>{link.title}</span>
+                        {renderRelationMeta(link.relationLabel, link.unavailableReason)}
                       </button>
                       <button
                         type="button"
@@ -904,7 +951,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                         aria-label={t('option:notesSearch.manualLinkRemoveAria', {
                           defaultValue: `Remove manual link ${link.title}`
                         })}
-                        data-testid={`notes-manual-link-remove-${link.edgeId.replace(/[^a-z0-9_-]/gi, '_')}`}
+                        data-testid={`notes-manual-link-remove-${toSafeTestId(link.edgeId)}`}
                       >
                         {manualLinkDeletingEdgeId === link.edgeId
                           ? t('option:notesSearch.manualLinkRemoving', {
@@ -961,16 +1008,33 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               ) : (
                 <div className="mt-2 flex flex-wrap gap-1.5" data-testid="notes-related-list">
                   {noteRelations.related.map((note) => (
-                    <button
+                    <div
                       key={`related-${note.id}`}
-                      type="button"
-                      className="rounded border border-border bg-surface px-2 py-1 text-left text-xs text-text hover:bg-surface3"
-                      onClick={() => {
-                        void handleSelectNote(note.id)
-                      }}
+                      className="rounded border border-border bg-surface"
+                      data-testid={`notes-related-note-${toSafeTestId(note.id)}`}
                     >
-                      {note.title}
-                    </button>
+                      <button
+                        type="button"
+                        aria-label={
+                          note.available === false
+                            ? `${note.title} ${note.unavailableReason || 'Unavailable'}`
+                            : note.title
+                        }
+                        className={`flex min-w-[7rem] flex-col items-start px-2 py-1 text-left text-xs ${
+                          note.available === false
+                            ? 'cursor-not-allowed text-text-muted'
+                            : 'text-text hover:bg-surface3'
+                        }`}
+                        disabled={note.available === false}
+                        onClick={() => {
+                          if (note.available === false) return
+                          void handleSelectNote(note.id)
+                        }}
+                      >
+                        <span>{note.title}</span>
+                        {renderRelationMeta(note.relationLabel, note.unavailableReason)}
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -1016,16 +1080,33 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               ) : (
                 <div className="mt-2 flex flex-wrap gap-1.5" data-testid="notes-backlinks-list">
                   {noteRelations.backlinks.map((note) => (
-                    <button
+                    <div
                       key={`backlink-${note.id}`}
-                      type="button"
-                      className="rounded border border-border bg-surface px-2 py-1 text-left text-xs text-text hover:bg-surface3"
-                      onClick={() => {
-                        void handleSelectNote(note.id)
-                      }}
+                      className="rounded border border-border bg-surface"
+                      data-testid={`notes-backlink-note-${toSafeTestId(note.id)}`}
                     >
-                      {note.title}
-                    </button>
+                      <button
+                        type="button"
+                        aria-label={
+                          note.available === false
+                            ? `${note.title} ${note.unavailableReason || 'Unavailable'}`
+                            : note.title
+                        }
+                        className={`flex min-w-[7rem] flex-col items-start px-2 py-1 text-left text-xs ${
+                          note.available === false
+                            ? 'cursor-not-allowed text-text-muted'
+                            : 'text-text hover:bg-surface3'
+                        }`}
+                        disabled={note.available === false}
+                        onClick={() => {
+                          if (note.available === false) return
+                          void handleSelectNote(note.id)
+                        }}
+                      >
+                        <span>{note.title}</span>
+                        {renderRelationMeta(note.relationLabel, note.unavailableReason)}
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}

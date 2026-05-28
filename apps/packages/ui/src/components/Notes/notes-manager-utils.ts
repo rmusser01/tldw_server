@@ -239,6 +239,26 @@ export const normalizeGraphNoteId = (rawId: string | number | null | undefined):
   return text
 }
 
+export const getNotesGraphEdgeLabel = (rawType: string | null | undefined): string => {
+  switch (String(rawType || '').toLowerCase()) {
+    case 'manual':
+      return 'Manual link'
+    case 'wikilink':
+      return 'Note link'
+    case 'backlink':
+      return 'Backlink'
+    case 'tag_membership':
+      return 'Tag'
+    case 'source_membership':
+      return 'Source'
+    default:
+      return 'Connection'
+  }
+}
+
+export const toSafeTestId = (value: string | number | null | undefined): string =>
+  String(value ?? 'unknown').replace(/[^a-z0-9_-]/gi, '_')
+
 export const parseSourceNodeId = (
   rawId: string | number | null | undefined
 ): { source: string; externalRef: string | null } | null => {

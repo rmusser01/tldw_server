@@ -61,6 +61,7 @@ import {
   toConversationLabel,
   toAttachmentMarkdown,
   normalizeGraphNoteId,
+  getNotesGraphEdgeLabel,
   parseSourceNodeId,
   MIN_SIDEBAR_HEIGHT,
   NOTES_LIST_REGION_ID,
@@ -383,16 +384,24 @@ const NotesManagerPage: React.FC = () => {
     const nodes = Array.isArray(noteNeighborsData?.nodes) ? noteNeighborsData.nodes : []
     const edges = Array.isArray(noteNeighborsData?.edges) ? noteNeighborsData.edges : []
 
-    const noteNodeMap = new Map<string, { id: string; title: string }>()
+    const noteNodeMap = new Map<
+      string,
+      { id: string; title: string; available: boolean; unavailableReason: string | null }
+    >()
     const sourceNodeMap = new Map<string, { id: string; label: string }>()
     for (const node of nodes) {
       const nodeType = String(node?.type || '')
       if (!nodeType || nodeType === 'note') {
         const normalizedId = normalizeGraphNoteId(node?.id)
         if (!normalizedId) continue
+        const deleted = Boolean(node?.deleted)
         noteNodeMap.set(normalizedId, {
           id: normalizedId,
-          title: String(node?.label || node?.title || `Note ${normalizedId}`)
+          title: String(node?.label || node?.title || `Note ${normalizedId}`),
+          available: !deleted,
+          unavailableReason: deleted
+            ? t('option:notesSearch.linkedNoteDeleted', { defaultValue: 'Unavailable' })
+            : null
         })
         continue
       }
@@ -406,33 +415,64 @@ const NotesManagerPage: React.FC = () => {
       }
     }
 
-    const relatedIds = new Set<string>()
-    const backlinkIds = new Set<string>()
     const sourceIds = new Set<string>()
+    const relatedById = new Map<
+      string,
+      { id: string; title: string; relationLabel: string; available: boolean; unavailableReason: string | null }
+    >()
+    const backlinksById = new Map<
+      string,
+      { id: string; title: string; relationLabel: string; available: boolean; unavailableReason: string | null }
+    >()
     const manualLinkByEdgeId = new Map<
       string,
-      { edgeId: string; noteId: string; title: string; directed: boolean; outgoing: boolean }
+      {
+        edgeId: string
+        noteId: string
+        title: string
+        directed: boolean
+        outgoing: boolean
+        relationLabel: string
+        available: boolean
+        unavailableReason: string | null
+      }
     >()
+
+    const buildNoteRelation = (id: string, relationLabel: string) => {
+      const node = noteNodeMap.get(id)
+      return {
+        id,
+        title: node?.title || t('option:notesSearch.unavailableLinkedNoteTitle', {
+          defaultValue: 'Unavailable note'
+        }),
+        relationLabel,
+        available: node?.available ?? false,
+        unavailableReason: node?.unavailableReason || (
+          node
+            ? null
+            : t('option:notesSearch.linkedNoteUnavailable', { defaultValue: 'Unavailable' })
+        )
+      }
+    }
+
+    const upsertRelation = (
+      map: Map<string, ReturnType<typeof buildNoteRelation>>,
+      id: string,
+      relationLabel: string
+    ) => {
+      if (!id || id === selectedNormalized) return
+      const existing = map.get(id)
+      if (existing) return
+      map.set(id, buildNoteRelation(id, relationLabel))
+    }
 
     for (const edge of edges) {
       const source = normalizeGraphNoteId(edge?.source)
       const target = normalizeGraphNoteId(edge?.target)
       if (!source || !target || source === target) continue
 
-      if (source === selectedNormalized) relatedIds.add(target)
-      if (target === selectedNormalized) relatedIds.add(source)
-
       const type = String(edge?.type || '').toLowerCase()
       const directed = Boolean(edge?.directed)
-      if (type === 'wikilink' && target === selectedNormalized) {
-        backlinkIds.add(source)
-      }
-      if (type === 'backlink' && source === selectedNormalized) {
-        backlinkIds.add(target)
-      }
-      if (type === 'manual' && directed && target === selectedNormalized) {
-        backlinkIds.add(source)
-      }
       if (type === 'source_membership') {
         if (source === selectedNormalized && sourceNodeMap.has(target)) {
           sourceIds.add(target)
@@ -440,41 +480,79 @@ const NotesManagerPage: React.FC = () => {
         if (target === selectedNormalized && sourceNodeMap.has(source)) {
           sourceIds.add(source)
         }
+        continue
+      }
+      if (type === 'tag_membership') {
+        continue
+      }
+
+      const touchesSelected = source === selectedNormalized || target === selectedNormalized
+      if (!touchesSelected) continue
+      const counterpartId = source === selectedNormalized ? target : source
+      const relationLabel =
+        type === 'wikilink' && target === selectedNormalized
+          ? t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })
+          : type === 'backlink'
+            ? t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })
+            : type === 'manual' && directed && target === selectedNormalized
+              ? t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })
+              : getNotesGraphEdgeLabel(type)
+
+      upsertRelation(relatedById, counterpartId, relationLabel)
+
+      if (type === 'wikilink' && target === selectedNormalized) {
+        upsertRelation(
+          backlinksById,
+          source,
+          t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })
+        )
+      }
+      if (type === 'backlink' && source === selectedNormalized) {
+        upsertRelation(
+          backlinksById,
+          target,
+          t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })
+        )
+      }
+      if (type === 'manual' && directed && target === selectedNormalized) {
+        upsertRelation(
+          backlinksById,
+          source,
+          t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })
+        )
       }
       if (type === 'manual') {
-        const touchesSelected = source === selectedNormalized || target === selectedNormalized
-        if (!touchesSelected) continue
-        const counterpartId = source === selectedNormalized ? target : source
         if (!counterpartId) continue
         const edgeId = String(edge?.id || '')
         if (!edgeId) continue
-        const node = noteNodeMap.get(counterpartId)
+        const relation = buildNoteRelation(counterpartId, getNotesGraphEdgeLabel(type))
         manualLinkByEdgeId.set(edgeId, {
           edgeId,
           noteId: counterpartId,
-          title: node?.title || `Note ${counterpartId}`,
+          title: relation.title,
           directed,
-          outgoing: source === selectedNormalized
+          outgoing: source === selectedNormalized,
+          relationLabel: relation.relationLabel,
+          available: relation.available,
+          unavailableReason: relation.unavailableReason
         })
       }
     }
 
     for (const normalizedId of noteNodeMap.keys()) {
       if (normalizedId !== selectedNormalized) {
-        relatedIds.add(normalizedId)
+        upsertRelation(
+          relatedById,
+          normalizedId,
+          t('option:notesSearch.connectionLabelGraphNeighbor', { defaultValue: 'Graph neighbor' })
+        )
       }
     }
 
-    const toItems = (ids: Set<string>) =>
-      Array.from(ids)
-        .filter((id) => id !== selectedNormalized)
-        .map((id) => {
-          const node = noteNodeMap.get(id)
-          return {
-            id,
-            title: node?.title || `Note ${id}`
-          }
-        })
+    const toItems = (
+      items: Map<string, ReturnType<typeof buildNoteRelation>>
+    ) =>
+      Array.from(items.values())
         .sort((a, b) => a.title.localeCompare(b.title))
 
     const sourceItems = Array.from(sourceIds)
@@ -492,14 +570,14 @@ const NotesManagerPage: React.FC = () => {
       .sort((a, b) => a.label.localeCompare(b.label))
 
     return {
-      related: toItems(relatedIds),
-      backlinks: toItems(backlinkIds),
+      related: toItems(relatedById),
+      backlinks: toItems(backlinksById),
       manualLinks: Array.from(manualLinkByEdgeId.values()).sort((a, b) =>
         a.title.localeCompare(b.title)
       ),
       sources: sourceItems
     }
-  }, [noteNeighborsData, ed.selectedId])
+  }, [noteNeighborsData, ed.selectedId, t])
 
   const manualLinkOptions = React.useMemo(() => {
     const selectedNormalized = normalizeGraphNoteId(ed.selectedId)
@@ -521,9 +599,11 @@ const NotesManagerPage: React.FC = () => {
       }
     }
     for (const item of noteRelations.related) {
+      if (item.available === false) continue
       append(item.id, item.title)
     }
     for (const item of noteRelations.backlinks) {
+      if (item.available === false) continue
       append(item.id, item.title)
     }
     return options.sort((a, b) => a.label.localeCompare(b.label))
