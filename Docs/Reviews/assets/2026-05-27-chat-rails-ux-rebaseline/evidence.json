@@ -13,7 +13,7 @@
     "source": "approved localhost curl before browser capture"
   },
   "scopeLimitations": [
-    "Captured dev WebUI and debug sidepanel route, not packaged extension.",
+    "Initial captures used the dev WebUI and debug sidepanel route; TASK-534 adds packaged extension sidepanel smoke evidence.",
     "First-time state cleared localStorage but reused the local backend and server config.",
     "First-send streaming path was not completed because the observed page reported No LLM provider configured.",
     "Prior real-server workflow failures are retained as follow-up evidence but were not rerun in this final browser pass."
@@ -31,7 +31,8 @@
     "mobileCockpitContext": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit.png",
     "mobileCockpitRuntime": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit-runtime.png",
     "mobileSendState": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-send-state.png",
-    "extensionSidepanel": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel.png"
+    "extensionSidepanel": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel.png",
+    "extensionSidepanelPackagedHandoff": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel-packaged-handoff.png"
   },
   "currentBrowserObservations": [
     {
@@ -124,6 +125,17 @@
         "Character",
         "SEND"
       ]
+    },
+    {
+      "state": "extension-sidepanel-packaged-handoff",
+      "route": "chrome-extension://<dynamic-extension-id>/sidepanel.html#/chat",
+      "viewport": "390x780",
+      "packagedExtension": true,
+      "horizontalOverflow": false,
+      "fullScreenHandoffTarget": "/options.html#/chat",
+      "routeOnlyCopyRuntimeEvidence": "Open full chat in WebUI button title: Opens /chat in a new tab. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel.",
+      "removedStandaloneCharacterControlRailPresent": false,
+      "sendReplySmokePassed": true
     }
   ],
   "retainedPriorRealServerFailures": {
@@ -139,12 +151,14 @@
   },
   "currentTopFindings": [
     "Provider readiness and selected model state contradict each other.",
-    "Extension sidepanel debug chat route horizontally overflows at 390 px.",
+    "Historical extension debug-route overflow is superseded by packaged extension /chat smoke evidence passing at 390 px.",
     "Exact Send role lookup is ambiguous even though the primary submit has Send message.",
     "First-run cockpit remains dense when setup is blocked.",
-    "Extension handoff proves only /chat route target, not draft/thread state preservation."
+    "Extension handoff is intentionally route-only; draft/thread state preservation remains a product follow-up."
   ],
   "verificationCommands": {
+    "packagedExtensionSidepanelSmoke": "cd apps/extension && npx playwright test tests/e2e/sidepanel-chat-smoke.spec.ts --project=chromium-extension --reporter=line --workers=1",
+    "rolePlayHandoffUnit": "cd apps/packages/ui && bunx vitest run src/components/Sidepanel/Chat/__tests__/ControlRow.role-play-handoff.test.tsx src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx --reporter=verbose",
     "plannedPostDocVerification": [
       "git diff --check",
       "bunx vitest run focused chat rail/persistence/sidepanel tests",

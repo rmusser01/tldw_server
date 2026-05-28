@@ -9,4 +9,5 @@ Required files:
 - `mobile-focus.png`
 - `mobile-cockpit.png`
 - `extension-sidepanel.png`
+- `extension-sidepanel-packaged-handoff.png`
 - `evidence.json`

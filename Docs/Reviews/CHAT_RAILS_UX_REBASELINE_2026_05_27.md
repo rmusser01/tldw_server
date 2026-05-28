@@ -4,7 +4,7 @@
 
 Post-rebase reconciliation for `TASK-533`: the rows below were valid findings from the corrected rail-enabled audit, and the current branch now has focused component plus live real-server proof for the main `/chat` cockpit path. The current top UX risks are narrower:
 
-1. Packaged-extension sidepanel validation should still be refreshed before PR closeout. Source contracts and debug-route evidence pass, but this reconciliation did not rebuild and run the full packaged extension smoke.
+1. Packaged-extension sidepanel validation is now refreshed for `/chat`: the 390 px sidepanel layout, route-only full-screen handoff, no standalone `CharacterControlRail`, and send/reply smoke pass against the packaged extension shell.
 2. The sidepanel-to-WebUI handoff is deliberately route-only. Users now get explicit copy, but draft transfer, current-page context transfer, and thread resume remain product/architecture follow-ups.
 3. Long-session behavior, compare/export/share, context-limit recovery, and broader retry/stop paths remain outside this focused proof.
 4. Web search status and model-scope behavior have component coverage; the final live proof covered model provider selection and first send, but not a live Web search provider call.
@@ -26,8 +26,8 @@ Post-rebase reconciliation for `TASK-533`: the rows below were valid findings fr
 - Post-rebase WebUI proof ports: `18017`, `18019`, `18021`, `18022`
 - Backend health was confirmed with approved localhost access before the browser pass: status `ok`, auth mode `single_user`.
 - Post-rebase provider proof confirmed `/api/v1/llm/providers` returned configured providers; the final live Playwright proof used the configured `tldw:gpt-4o` route backed by the mock OpenAI server.
-- Live browser evidence was captured from the dev WebUI, not from a packaged extension install.
-- The sidepanel evidence uses `/__debug__/sidepanel-chat?nextgenComposer=1`, which is valid for directly connected sidepanel chat layout and handoff review but is not a full packaged-extension validation.
+- Initial live browser evidence was captured from the dev WebUI and debug sidepanel route.
+- TASK-534 added packaged-extension evidence using `chrome-extension://<dynamic-id>/sidepanel.html#/chat`, plus the focused role-play handoff unit contract.
 - Earlier no-rails evidence was stale or from the wrong page/branch. Current `/chat` evidence shows context and runtime cockpit rails present.
 - Reconciliation verification:
   - `bunx vitest run ... Playground.cockpit-controls ... PlaygroundSendControl.accessibility ... PlaygroundStatusStrip ... Playground.cockpit-regression.guard ... PlaygroundRuntimeInspector ... PlaygroundCompositionPreview ... playground-composition-preview ... ControlRow.role-play-handoff --reporter=verbose` passed: 8 files, 92 tests.
@@ -35,6 +35,8 @@ Post-rebase reconciliation for `TASK-533`: the rows below were valid findings fr
   - `bunx vitest run Playground.cockpit-a11y.test.tsx Playground.cockpit-shell.test.tsx --reporter=verbose` passed: 2 files, 39 tests.
   - `bunx vitest run src/routes/__tests__/sidepanel-chat.narrow-layout.contract.test.ts --reporter=verbose` passed: 1 file, 2 tests.
   - `npx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --workers=1 --grep 'uses the running server|model provider confidence|selects and clears'` passed: 4 tests. Covered running-server cockpit/focus controls, tracked character clear/plain WebUI return, persona select/clear, and configured model provider first send.
+  - `npx playwright test tests/e2e/sidepanel-chat-smoke.spec.ts --project=chromium-extension --reporter=line --workers=1` passed: 3 tests. Covered packaged extension `/chat` at 390 px, route-only full-screen handoff to `/options.html#/chat`, no standalone `CharacterControlRail`, and send/reply.
+  - `bunx vitest run src/components/Sidepanel/Chat/__tests__/ControlRow.role-play-handoff.test.tsx src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx --reporter=verbose` passed: 2 files, 6 tests. Covered role-play `/chat?mode=character&characterId=...` handoff and route-only header copy.
 
 ## Captured Artifacts
 
@@ -46,6 +48,7 @@ Post-rebase reconciliation for `TASK-533`: the rows below were valid findings fr
 - Mobile cockpit runtime panel: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit-runtime.png`
 - Mobile send/recoverable blocked state: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-send-state.png`
 - Extension sidepanel chat debug route: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel.png`
+- Packaged extension sidepanel `/chat` handoff: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel-packaged-handoff.png`
 - Structured evidence: `Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/evidence.json`
 
 ## What Was Actually Tested Or Inspected
@@ -57,7 +60,8 @@ Post-rebase reconciliation for `TASK-533`: the rows below were valid findings fr
 - Inspected first-time localStorage-cleared state; this is not a full first-install machine profile because the local backend/config remained available.
 - Attempted the mobile first-send path; the UI was blocked by `No LLM provider configured`, so streaming, stop, retry, and final response actions were not revalidated in this pass.
 - Opened the sidepanel chat debug route at 390 x 844 and measured horizontal overflow.
-- Reused existing regression-test evidence for rail wiring and sidepanel full-screen handoff to `/chat`.
+- Opened packaged extension sidepanel `/chat` at 390 px, verified no horizontal overflow, captured screenshot evidence, clicked the full-screen handoff, and verified it opened `/options.html#/chat`.
+- Reused focused component regression evidence for role-play `/chat?mode=character&characterId=...` handoff.
 - TASK-531 added focused regression coverage and accessible copy for the sidepanel-to-WebUI handoff contract: it opens `/chat`, carries role-play route intent only where applicable, and keeps sidepanel draft/current-page/unsaved chat state in the sidepanel.
 - TASK-532 inspected completed remediation tasks `TASK-522` through `TASK-531`, ran focused current regression tests, and updated this audit so stale findings no longer drive duplicate work.
 - TASK-533 rebased the branch onto `origin/dev`, refreshed live backend proof, found and fixed an assistant-clear race where the UI could clear visible assistant state before detaching the tracked server chat, and hardened the real-server persona selector proof against transient catalog load retries.
@@ -68,12 +72,12 @@ Post-rebase reconciliation for `TASK-533`: the rows below were valid findings fr
 | --- | --- | --- | --- |
 | F1 provider/model readiness contradiction | Addressed by `TASK-522`, `TASK-525`, and `TASK-526`. | Current focused tests pass for standard readiness, provider setup blocking, setup recovery focus, runtime rail, status strip, and composition preview. Post-rebase real-server proof passed configured provider selection and first send. | None beyond keeping the focused live provider proof in regression rotation. |
 | F2 ambiguous send controls | Addressed by `TASK-524`. | Current `PlaygroundSendControl.accessibility.test.tsx` passes; primary action remains `Send message`, adjacent trigger is `Open message delivery options`. | None beyond normal a11y regression coverage. |
-| F3 sidepanel 390 px overflow | Addressed by `TASK-523`. | Current source contract passes for sidepanel shell/composer/control-row containment; this session also ran a temporary rendered guard that passed at 390 px before deleting the duplicate exploratory test. | Re-run packaged extension sidepanel smoke after extension build refresh. |
+| F3 sidepanel 390 px overflow | Addressed by `TASK-523` and packaged-smoked by `TASK-534`. | Current source contract passes for sidepanel shell/composer/control-row containment; packaged extension `/chat` smoke passed at 390 px and captured `extension-sidepanel-packaged-handoff.png`. | None beyond keeping the packaged smoke in regression rotation. |
 | F4 setup-blocked first-run overload | Addressed by `TASK-526`. | Current cockpit shell/a11y tests pass; setup-blocked mode suppresses the starter deck and collapses secondary rail detail while preserving restored rails. | Browser screenshot refresh can confirm the improved first-run hierarchy after rebase. |
 | F5 active context/Web search feedback | Addressed by `TASK-527`. | Current status-strip tests pass for active context source chips and inactive-context suppression. | Live Web search provider behavior remains a separate proof item if required before release. |
 | F6 configured/catalog model scope discoverability | Addressed by `TASK-528`. | Current selector and cockpit regression tests pass; post-rebase real-server proof selected a configured model and sent a provider-qualified request. | None beyond keeping the focused live provider proof in regression rotation. |
 | F7 assistant clear and plain-chat return | Addressed by `TASK-530` and hardened by `TASK-533`. | Current cockpit-control tests pass for canonical assistant clear, legacy mirror clear, server metadata clear, persisted overlay clear, and `serverChatId` detach. Post-rebase real-server proof passed for tracked character clear/plain WebUI return and persona clear. | None beyond normal regression coverage. |
-| F8 sidepanel handoff ambiguity | Addressed by `TASK-531`. | Current `SidepanelHeaderSimple.fullscreen-route` and `ControlRow.role-play-handoff` tests pass; copy states that sidepanel draft/page/unsaved state stays in the sidepanel. | Draft/page/thread transfer remains a larger product decision, not a bug in the route-only contract. |
+| F8 sidepanel handoff ambiguity | Addressed by `TASK-531` and packaged-smoked by `TASK-534`. | Current `SidepanelHeaderSimple.fullscreen-route` and `ControlRow.role-play-handoff` tests pass; packaged extension smoke verified the header opens `/options.html#/chat`; copy states that sidepanel draft/page/unsaved state stays in the sidepanel. | Draft/page/thread transfer remains a larger product decision, not a bug in the route-only contract. |
 | F9 repeated empty assistant labels | Addressed by `TASK-529`. | Current runtime, composition preview, and cockpit a11y tests pass with region-specific empty labels. | None beyond normal a11y regression coverage. |
 | F10 mobile cockpit density | Mitigated by `TASK-521` / commit `5f4d9d5b3`. | Current cockpit a11y/shell tests pass; mobile panel cap is compact and summary is accessible without occupying visible space. | Optional screenshot refresh after rebase if mobile hierarchy is part of final PR evidence. |
 
@@ -97,7 +101,7 @@ Post-rebase reconciliation for `TASK-533`: the rows below were valid findings fr
 | Uses personas/characters/prompts/RAG/context/tools | Context and runtime rails are back. Runtime panel uses region-specific empty assistant copy. Assistant clear now clears canonical state, legacy character mirror state, server metadata, persisted assistant overlay settings, and tracked `serverChatId`. | Post-rebase real-server proof passed tracked character clear/plain WebUI return and persona select/clear. | `TASK-529`; `TASK-530`; `TASK-533`; focused Vitest; live Playwright |
 | Compares outputs or iterates across settings | Not reached in this corrected pass. | Compare/parallel-output and deep model-settings iteration should stay follow-up scope unless provider readiness becomes the same root blocker. | Scope limitation |
 | Manages long sessions, failures, retries, context limits | Run controls and timeline sections are visible in the runtime rail. | Long-session behavior, context limits, retries, and recovery after provider errors were not exercised. | `mobile-cockpit-runtime.png`; scope limitation |
-| Moves between extension and WebUI | Sidepanel full-screen handoff is covered by focused tests and targets `/chat`. The sidepanel starter UI renders. TASK-531 makes the route-only handoff explicit in the header and ControlRow affordances. | The 390 px overflow has source-contract and earlier rendered proof, but packaged extension smoke should be rerun after build refresh. Draft/thread/state preservation remains out of scope for the route-only handoff. | `TASK-523`; `TASK-531`; sidepanel tests |
+| Moves between extension and WebUI | Sidepanel full-screen handoff is covered by focused tests and packaged extension smoke. The sidepanel starter UI renders at 390 px, the header opens `/options.html#/chat`, and TASK-531 makes the route-only handoff explicit in the header and ControlRow affordances. | Draft/thread/state preservation remains out of scope for the route-only handoff. | `TASK-523`; `TASK-531`; `TASK-534`; sidepanel tests |
 
 ## Severity-Ranked Findings And Current Status
 
@@ -105,12 +109,12 @@ Post-rebase reconciliation for `TASK-533`: the rows below were valid findings fr
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | F1 | Addressed; was P1 | First-time; power user | `TASK-522`, `TASK-525`, `TASK-526`, `TASK-533`; focused readiness tests and configured-provider live proof passed | Provider readiness and selected model state originally contradicted each other. | The original user impact was severe first-send uncertainty. | Keep the shared readiness contract and focused configured-provider live proof. | M | High |
 | F2 | Addressed; was P2 | First-time; accessibility; test automation | `TASK-524`; current `PlaygroundSendControl.accessibility` passed | Primary send and adjacent options originally shared fuzzy `Send` naming. | Screen-reader and automation targeting could be ambiguous. | Keep `Send message` for submit and `Open message delivery options` for the adjacent trigger. | S | High |
-| F3 | Addressed; was P2 | Extension handoff | `TASK-523`; current sidepanel narrow-layout contract passed | Sidepanel debug route originally overflowed at 390 px. | Extension users could get sideways scroll or clipped composer/header controls. | Keep min-width/overflow containment and rerun packaged extension smoke before closeout. | S | High |
+| F3 | Addressed; was P2 | Extension handoff | `TASK-523`, `TASK-534`; sidepanel narrow-layout contract and packaged extension smoke passed | Sidepanel debug route originally overflowed at 390 px. | Extension users could get sideways scroll or clipped composer/header controls. | Keep min-width/overflow containment and packaged extension smoke in regression rotation. | S | High |
 | F4 | Addressed; was P2 | First-time | `TASK-526`; current cockpit a11y/shell tests passed | Setup-blocked first view originally competed with starter deck and advanced rail detail. | New users had too many primary choices before setup. | Keep setup recovery focus: suppress starter deck, collapse secondary rail detail, preserve rail affordances. | M | Medium-high |
 | F5 | Addressed; was P2 | Power user | `TASK-527`; current status-strip tests passed | Active context/Web search state lacked obvious status-strip confirmation. | Users could send with different context state than expected. | Keep active source chips; run live Web search provider proof only if release scope requires it. | S | Medium-high |
 | F6 | Addressed; was P2 | Power user | `TASK-528`, `TASK-533`; selector/cockpit tests and live configured-model selection passed | Configured-vs-catalog model scope was not consistently exposed. | Users could not confidently switch model scope. | Keep configured/catalog controls inside the selector and the live model-provider proof. | S | High |
 | F7 | Addressed; was P2 | Power user; persona/character users | `TASK-530`, `TASK-533`; cockpit-control tests and live character/persona clear proof passed | Assistant/persona clear and plain-chat return were not stable/proven. | Users could think an assistant was cleared while stale metadata survived. | Keep overlay/server/canonical clear behavior and tracked-server-chat detach. | M | High |
-| F8 | Addressed; residual P3 product follow-up | Extension handoff | `TASK-531`; current sidepanel handoff tests passed | Handoff transfer semantics were previously implicit. | Users could assume unsaved sidepanel state moved into WebUI. | Keep route-only copy/test guard; treat draft/current-page/thread transfer as a separate architecture decision. | S for current contract; L for transfer | High |
+| F8 | Addressed; residual P3 product follow-up | Extension handoff | `TASK-531`, `TASK-534`; current sidepanel handoff tests and packaged `/chat` header handoff passed | Handoff transfer semantics were previously implicit. | Users could assume unsaved sidepanel state moved into WebUI. | Keep route-only copy/test guard; treat draft/current-page/thread transfer as a separate architecture decision. | S for current contract; L for transfer | High |
 | F9 | Addressed; was P3 | First-time; screen-reader users | `TASK-529`; current runtime/composition/a11y tests passed | Empty assistant labels repeated generic copy across regions. | Users heard/read similar labels without region priority. | Keep region-specific empty assistant labels. | S | High |
 | F10 | Mitigated; was P3 | Mobile first-time | `TASK-521`; current cockpit a11y/shell tests passed | Mobile cockpit panels occupied too much viewport. | Chat content and composer context were visually compressed. | Keep compact mobile panel cap and accessible summary; refresh screenshot evidence if needed. | S | Medium-high |
 
@@ -118,7 +122,7 @@ Post-rebase reconciliation for `TASK-533`: the rows below were valid findings fr
 
 - Done: provider-readiness alignment, send-control accessible names, sidepanel narrow containment, setup-blocked first-run focus, active context/status chips, configured/catalog model scope, assistant clear continuity, region-specific assistant labels, route-only handoff copy, and restored rail absence guards.
 - Post-rebase proof item completed: focused real-server `/chat` workflow suite passed against a live backend and mock OpenAI provider.
-- Next extension proof item: rebuild/run packaged extension sidepanel smoke so F3/F8 are proven in the actual extension shell, not only source contracts and debug route evidence.
+- Done in TASK-534: packaged extension sidepanel smoke proves F3/F8 in the actual extension shell for `/chat`, with role-play route intent covered by the focused `ControlRow.role-play-handoff` unit contract.
 
 ## Larger Improvements
 
