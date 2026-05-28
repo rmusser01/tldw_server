@@ -8007,6 +8007,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Backfill note folder tables for PostgreSQL deployments."""
         if not hasattr(self.backend, "execute"):
             return
+        duplicate_folder_cte = """
+            WITH ranked_folders AS (
+              SELECT
+                id,
+                FIRST_VALUE(id) OVER (
+                  PARTITION BY LOWER(path)
+                  ORDER BY deleted ASC, id ASC
+                ) AS canonical_id
+              FROM note_folders
+            ),
+            duplicate_folders AS (
+              SELECT
+                id AS duplicate_id,
+                canonical_id
+              FROM ranked_folders
+              WHERE id <> canonical_id
+            )
+        """
+
+        def duplicate_folder_statement(sql_body: str) -> str:
+            return "\n".join((duplicate_folder_cte, sql_body))
+
         statements = [
             """
             CREATE TABLE IF NOT EXISTS note_folders(
@@ -8024,10 +8046,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """,
             "CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_path ON note_folders(path)",
-            (
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_lower "
-                "ON note_folders(LOWER(path))"
-            ),
             """
             CREATE TABLE IF NOT EXISTS note_folder_memberships(
               note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -8058,6 +8076,79 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_note_folder_source_keys_folder ON note_folder_source_keys(folder_id)",
+            duplicate_folder_statement(
+                """
+            INSERT INTO note_folder_memberships(note_id, folder_id, created_at)
+            SELECT
+              membership.note_id,
+              duplicate_folders.canonical_id,
+              MIN(membership.created_at)
+            FROM note_folder_memberships AS membership
+            JOIN duplicate_folders
+              ON membership.folder_id = duplicate_folders.duplicate_id
+            GROUP BY membership.note_id, duplicate_folders.canonical_id
+            ON CONFLICT (note_id, folder_id) DO NOTHING
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            DELETE FROM note_folder_memberships AS membership
+            USING duplicate_folders
+            WHERE membership.folder_id = duplicate_folders.duplicate_id
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            INSERT INTO note_folder_source_memberships(note_id, source_id, folder_id, created_at)
+            SELECT
+              membership.note_id,
+              membership.source_id,
+              duplicate_folders.canonical_id,
+              MIN(membership.created_at)
+            FROM note_folder_source_memberships AS membership
+            JOIN duplicate_folders
+              ON membership.folder_id = duplicate_folders.duplicate_id
+            GROUP BY membership.note_id, membership.source_id, duplicate_folders.canonical_id
+            ON CONFLICT (note_id, source_id, folder_id) DO NOTHING
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            DELETE FROM note_folder_source_memberships AS membership
+            USING duplicate_folders
+            WHERE membership.folder_id = duplicate_folders.duplicate_id
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            UPDATE note_folder_source_keys AS source_key
+            SET folder_id = duplicate_folders.canonical_id
+            FROM duplicate_folders
+            WHERE source_key.folder_id = duplicate_folders.duplicate_id
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            UPDATE note_folders AS child
+            SET parent_id = CASE
+              WHEN child.id = duplicate_folders.canonical_id THEN NULL
+              ELSE duplicate_folders.canonical_id
+            END
+            FROM duplicate_folders
+            WHERE child.parent_id = duplicate_folders.duplicate_id
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            DELETE FROM note_folders AS folder
+            USING duplicate_folders
+            WHERE folder.id = duplicate_folders.duplicate_id
+            """
+            ),
+            (
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_lower "
+                "ON note_folders(LOWER(path))"
+            ),
         ]
         for statement in statements:
             self.backend.execute(statement, connection=conn)

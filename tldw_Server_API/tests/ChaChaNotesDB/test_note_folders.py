@@ -61,3 +61,38 @@ def test_postgres_note_folder_schema_enforces_case_insensitive_paths() -> None:
         and "LOWER(path)" in statement
         for statement in backend.statements
     )
+
+
+def test_postgres_note_folder_schema_deduplicates_paths_before_unique_index() -> None:
+    class FakePostgresBackend:
+        backend_type = BackendType.POSTGRESQL
+
+        def __init__(self) -> None:
+            self.statements: list[str] = []
+
+        def execute(self, statement: str, params: Any = None, connection: Any = None) -> None:
+            self.statements.append(statement)
+
+    backend = FakePostgresBackend()
+    db_instance = CharactersRAGDB.__new__(CharactersRAGDB)
+    db_instance._local = type("Local", (), {})()
+    db_instance._backend = backend
+    db_instance._uses_shared_content_backend = False
+
+    db_instance._ensure_note_folder_schema_postgres(object())
+
+    lower_unique_index = next(
+        index
+        for index, statement in enumerate(backend.statements)
+        if "UNIQUE INDEX" in statement and "LOWER(path)" in statement
+    )
+    dedupe_statements = [
+        statement
+        for statement in backend.statements[:lower_unique_index]
+        if "duplicate_folders" in statement
+    ]
+
+    assert any("note_folder_memberships" in statement for statement in dedupe_statements)
+    assert any("note_folder_source_memberships" in statement for statement in dedupe_statements)
+    assert any("note_folder_source_keys" in statement for statement in dedupe_statements)
+    assert any("DELETE FROM note_folders" in statement for statement in dedupe_statements)
