@@ -234,6 +234,38 @@ describe("PlaygroundChat selected server chat load state", () => {
     expect(screen.getByTestId("playground-empty")).toBeInTheDocument()
   })
 
+  it("does not show the no-provider setup banner when the model catalog marks a local model usable", () => {
+    queryState.chatModels = [
+      {
+        api_name: "ollama",
+        model: "gemma3:1b",
+        provider: "ollama",
+        is_configured: true,
+        provider_is_configured: true
+      }
+    ]
+    queryState.providersStatus = {
+      any_configured: false,
+      providers: []
+    }
+    useMessageOptionState.value = {
+      ...useMessageOptionState.value,
+      serverChatLoadState: "idle",
+      serverChatLoadError: null
+    }
+
+    render(
+      <MemoryRouter>
+        <PlaygroundChat />
+      </MemoryRouter>
+    )
+
+    expect(
+      screen.queryByText("No LLM provider configured")
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("playground-empty")).toBeInTheDocument()
+  })
+
   it("treats null chat model responses as empty instead of crashing readiness", () => {
     queryState.chatModels = null as any
     queryState.providersStatus = {

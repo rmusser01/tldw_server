@@ -161,6 +161,40 @@ describe("chat model availability utilities", () => {
     })
   })
 
+  it("preserves descriptor-level configured flags when aggregate provider status is stale", () => {
+    const models = mergeChatProviderStatusIntoModels(
+      [
+        {
+          id: "gemma3:1b",
+          model: "tldw:gemma3:1b",
+          provider: "ollama",
+          is_configured: true,
+          provider_is_configured: true
+        } as any
+      ],
+      {
+        any_configured: false,
+        providers: []
+      }
+    )
+
+    expect(models?.[0]).toMatchObject({
+      is_configured: true,
+      provider_is_configured: true
+    })
+    expect(
+      buildChatModelUsability({
+        selectedModel: "tldw:gemma3:1b",
+        availableModels: models as any[]
+      })
+    ).toMatchObject({
+      status: "ready",
+      canSend: true,
+      matchedModelId: "gemma3:1b",
+      matchedProvider: "ollama"
+    })
+  })
+
   it("ignores null provider status entries while enriching model readiness", () => {
     const models = mergeChatProviderStatusIntoModels(
       [
