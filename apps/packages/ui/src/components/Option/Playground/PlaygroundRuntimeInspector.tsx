@@ -150,6 +150,19 @@ export const PlaygroundRuntimeInspector = ({
       : displayProvider && displayModel
         ? `${displayProvider}:${displayModel}`
         : selectedModel || null);
+  const emptyAssistantResponseSummary = routeLabel
+    ? t(
+        "cockpit.emptyAssistantResponseSummaryWithRoute",
+        `${routeLabel} returned no response text.`,
+      )
+    : t(
+        "cockpit.emptyAssistantResponseSummary",
+        "No response text returned.",
+      );
+  const emptyAssistantResponseDetail = t(
+    "cockpit.emptyAssistantResponseDetail",
+    "Regenerate this turn, or choose a different model if this provider keeps returning empty output.",
+  );
   const modelUsabilityBlocks =
     Boolean(modelUsabilityStatus) &&
     modelUsabilityStatus !== "ready" &&
@@ -569,16 +582,10 @@ export const PlaygroundRuntimeInspector = ({
             className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-2.5 py-2 text-xs text-warn"
           >
             <p className="font-medium">
-              {t(
-                "cockpit.emptyAssistantResponseSummary",
-                "No response text returned.",
-              )}
+              {emptyAssistantResponseSummary}
             </p>
             <p className="mt-1 opacity-90">
-              {t(
-                "cockpit.emptyAssistantResponseDetail",
-                "Regenerate this turn or switch model settings before trying again.",
-              )}
+              {emptyAssistantResponseDetail}
             </p>
           </div>
         ) : null}

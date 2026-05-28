@@ -1283,7 +1283,9 @@ describe("Playground cockpit shell", () => {
       within(runControls).getByRole("status", {
         name: "Empty assistant response",
       }),
-    ).toHaveTextContent("No response text returned.");
+    ).toHaveTextContent(
+      "openai:gpt-4.1-mini returned no response text.",
+    );
 
     fireEvent.click(
       within(runControls).getByRole("button", {

@@ -526,9 +526,11 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     const status = within(runControls).getByRole("status", {
       name: "Empty assistant response",
     });
-    expect(status).toHaveTextContent("No response text returned.");
     expect(status).toHaveTextContent(
-      "Regenerate this turn or switch model settings before trying again.",
+      "openai:gpt-4.1-mini returned no response text.",
+    );
+    expect(status).toHaveTextContent(
+      "Regenerate this turn, or choose a different model if this provider keeps returning empty output.",
     );
 
     fireEvent.click(
