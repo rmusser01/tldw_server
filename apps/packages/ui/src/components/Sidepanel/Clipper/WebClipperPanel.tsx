@@ -686,7 +686,12 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
       <ClipPreview draft={draft} />
 
       {saveRuntime ? (
-        <section className={`rounded-xl border px-3 py-2 ${bannerClasses}`}>
+        <section
+          className={`rounded-xl border px-3 py-2 ${bannerClasses}`}
+          role={saveRuntime.banner.severity === "error" ? "alert" : "status"}
+          aria-live={saveRuntime.banner.severity === "error" ? "assertive" : "polite"}
+          aria-label={t("sidepanel:clipper.saveResultAriaLabel", "Clip save result")}
+        >
           <p className="text-sm font-semibold">{saveRuntime.banner.title}</p>
           <p className="mt-1 text-sm">{saveRuntime.banner.message}</p>
           {saveRuntime.banner.warnings.length > 0 ? (
@@ -721,17 +726,22 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
       ) : null}
 
       {submissionError ? (
-        <section className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+        <section
+          className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900"
+          role="alert"
+          aria-live="assertive"
+          aria-label={t("sidepanel:clipper.saveErrorAriaLabel", "Clip save error")}
+        >
           {submissionError}
         </section>
       ) : null}
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2" data-testid="web-clipper-actions">
         <button
           type="button"
           onClick={onCancel}
           disabled={isSaving}
-          className="rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold text-text disabled:cursor-not-allowed disabled:opacity-60"
+          className="min-w-[7rem] rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold text-text disabled:cursor-not-allowed disabled:opacity-60"
         >
           {t("sidepanel:clipper.cancelLabel", "Cancel")}
         </button>
@@ -740,7 +750,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
           type="button"
           onClick={() => void submitSave("save")}
           disabled={isSaving}
-          className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+          className="min-w-[8rem] flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSaving && activeAction === "save"
             ? t("sidepanel:clipper.savingLabel", "Saving...")
@@ -751,7 +761,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
           type="button"
           onClick={() => void submitSave("analyze")}
           disabled={isSaving}
-          className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold text-text disabled:cursor-not-allowed disabled:opacity-60"
+          className="min-w-[8rem] flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold text-text disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSaving && activeAction === "analyze"
             ? t("sidepanel:clipper.savingLabel", "Saving...")
@@ -762,7 +772,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
           type="button"
           onClick={() => void submitSave("open")}
           disabled={isSaving}
-          className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold text-text disabled:cursor-not-allowed disabled:opacity-60"
+          className="min-w-[8rem] flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold text-text disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSaving && activeAction === "open"
             ? t("sidepanel:clipper.savingLabel", "Saving...")

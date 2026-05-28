@@ -333,10 +333,10 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
         data-testid="notes-list-region"
         className={
           isMobileViewport
-            ? `absolute left-0 top-0 z-40 h-full w-[min(92vw,420px)] max-w-full transform border-r border-border bg-surface shadow-xl transition-transform duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-focus ${
+            ? `absolute left-0 top-0 z-40 h-full w-[min(92vw,420px)] max-w-full transform border-r border-border bg-surface shadow-xl transition-transform duration-300 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-focus ${
                 mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
               }`
-            : `flex-shrink-0 transition-all duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-focus ${
+            : `flex-shrink-0 transition-all duration-300 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-focus ${
                 sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-[300px] lg:w-[340px] xl:w-[380px]'
               }`
         }
@@ -523,6 +523,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     <Select
                       className="w-full"
                       size="small"
+                      aria-label={t('option:notesSearch.moodboardSelectAriaLabel', {
+                        defaultValue: 'Collection'
+                      })}
                       value={selectedMoodboardId == null ? undefined : selectedMoodboardId}
                       onChange={(value) => {
                         if (value == null) {
@@ -609,6 +612,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       <Select
                         className="min-w-0 flex-1"
                         size="small"
+                        aria-label={t('option:notesSearch.notebookSelectAriaLabel', {
+                          defaultValue: 'Saved filter'
+                        })}
                         value={selectedNotebookId ?? undefined}
                         onChange={(value) => {
                           if (value == null) {
@@ -690,6 +696,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                         })}
                         prefix={(<SearchIcon className="w-4 h-4 text-text-subtle" />)}
                         value={queryInput}
+                        aria-label={t('option:notesSearch.searchInputAriaLabel', {
+                          defaultValue: 'Search notes'
+                        })}
                         onChange={(e) => {
                           setQueryInput(e.target.value)
                         }}
@@ -780,6 +789,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       mode="tags"
                       allowClear
                       placeholder={t('option:notesSearch.keywordsPlaceholder', {
+                        defaultValue: 'Filter by tag'
+                      })}
+                      aria-label={t('option:notesSearch.keywordFilterAriaLabel', {
                         defaultValue: 'Filter by tag'
                       })}
                       className="w-full"

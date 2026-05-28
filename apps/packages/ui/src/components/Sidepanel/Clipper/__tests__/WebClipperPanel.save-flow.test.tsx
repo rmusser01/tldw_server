@@ -410,7 +410,8 @@ describe("WebClipperPanel save flow", () => {
 
       await user.click(screen.getByRole("button", { name: "Save clip" }))
 
-      expect(await screen.findByText(bannerTitle)).toBeInTheDocument()
+      const banner = await screen.findByRole("status", { name: "Clip save result" })
+      expect(banner).toHaveTextContent(bannerTitle)
       expect(screen.getByText("Attachment upload skipped")).toBeInTheDocument()
     }
   )
@@ -484,6 +485,19 @@ describe("WebClipperPanel save flow", () => {
 
     expect(await screen.findByText("Clip save failed")).toBeInTheDocument()
     expect(openTabMock).not.toHaveBeenCalled()
+  })
+
+  it("announces submission errors and keeps action buttons usable in narrow sidepanels", async () => {
+    const user = userEvent.setup()
+    apiMocks.saveWebClip.mockRejectedValueOnce(new Error("Server unavailable"))
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    const alert = await screen.findByRole("alert", { name: "Clip save error" })
+    expect(alert).toHaveTextContent("Server unavailable")
+    expect(screen.getByTestId("web-clipper-actions").className).toContain("flex-wrap")
   })
 
   it("save and open falls back to notes when only the canonical note was created", async () => {

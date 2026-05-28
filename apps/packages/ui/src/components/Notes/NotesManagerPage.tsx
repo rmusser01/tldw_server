@@ -2158,17 +2158,19 @@ const NotesManagerPage: React.FC = () => {
       <p id={NOTES_SHORTCUTS_SUMMARY_ID} className="sr-only">
         {t('option:notesSearch.shortcutSummaryText', { defaultValue: 'Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.' })}
       </p>
-      <div className="absolute right-4 top-4 z-20">
-        <Button
-          type="primary"
-          size="small"
-          onClick={handleCreateStudyPackFromNote}
-          disabled={ed.selectedId == null || ed.isDirty || !ed.title.trim()}
-          data-testid="notes-create-study-pack-button"
-        >
-          {t('option:notesSearch.createStudyPack', { defaultValue: 'Create study pack' })}
-        </Button>
-      </div>
+      {!isMobileViewport && (
+        <div className="absolute right-4 top-4 z-20">
+          <Button
+            type="primary"
+            size="small"
+            onClick={handleCreateStudyPackFromNote}
+            disabled={ed.selectedId == null || ed.isDirty || !ed.title.trim()}
+            data-testid="notes-create-study-pack-button"
+          >
+            {t('option:notesSearch.createStudyPack', { defaultValue: 'Create study pack' })}
+          </Button>
+        </div>
+      )}
       {isMobileViewport && mobileSidebarOpen && (
         <button type="button" aria-label={t('option:notesSearch.closeMobileSidebar', { defaultValue: 'Close notes list' })} data-testid="notes-mobile-sidebar-backdrop" className="absolute inset-0 z-30 bg-black/35" onClick={() => setMobileSidebarOpen(false)} />
       )}
@@ -2272,7 +2274,7 @@ const NotesManagerPage: React.FC = () => {
       {!isMobileViewport && (
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="relative w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors rounded-r-lg"
+          className="relative w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg"
           style={{ minHeight: `${MIN_SIDEBAR_HEIGHT}px`, height: `${sidebarHeight}px` }}
           aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse sidebar' })}
           data-testid="notes-desktop-sidebar-toggle"

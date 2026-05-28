@@ -48,6 +48,12 @@ const LazyMarkdownPreview = React.lazy(() =>
   }))
 )
 
+const NOTES_SAVE_STATUS_MESSAGE_ID = 'notes-save-status-message'
+const NOTES_EDITOR_CONTENT_HELP_ID = 'notes-editor-content-help'
+
+const joinAriaIds = (...ids: Array<string | null | undefined>) =>
+  ids.filter((id): id is string => Boolean(id)).join(' ') || undefined
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -360,6 +366,26 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   applyWikilinkSuggestion,
 }) => {
   const { t } = useTranslation(['option', 'common'])
+  const saveStatusRef = React.useRef<HTMLSpanElement | null>(null)
+  const saveStatusDescriptionId = saveIndicatorText ? NOTES_SAVE_STATUS_MESSAGE_ID : null
+  const contentDescribedBy = joinAriaIds(NOTES_EDITOR_CONTENT_HELP_ID, saveStatusDescriptionId)
+
+  React.useEffect(() => {
+    if (saveIndicator !== 'error' || !saveIndicatorText) return
+    const target = saveStatusRef.current
+    if (!target) return
+    const activeElement = document.activeElement
+    const shouldMoveFocus =
+      activeElement == null ||
+      activeElement === document.body ||
+      (activeElement instanceof HTMLElement &&
+        Boolean(activeElement.closest('[data-testid="notes-header-actions"]')))
+    if (!shouldMoveFocus) return
+    window.requestAnimationFrame(() => {
+      if (target.isConnected) target.focus()
+    })
+  }, [saveIndicator, saveIndicatorText])
+
   const renderHelpButton = React.useCallback(
     (label: string) => (
       <button
@@ -595,6 +621,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             placeholder={t('option:notesSearch.titlePlaceholder', {
               defaultValue: 'Title'
             })}
+            aria-label={t('option:notesSearch.titleInputAriaLabel', {
+              defaultValue: 'Note title'
+            })}
+            aria-describedby={saveStatusDescriptionId || undefined}
             value={title}
             onChange={(e) => {
               setTitle(e.target.value)
@@ -676,6 +706,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             placeholder={t('option:notesSearch.keywordsEditorPlaceholder', {
               defaultValue: 'Tags'
             })}
+            aria-label={t('option:notesSearch.keywordsEditorAriaLabel', {
+              defaultValue: 'Note tags'
+            })}
+            aria-describedby={saveStatusDescriptionId || undefined}
             data-testid="notes-keywords-editor"
             className="w-full"
             value={editorKeywords}
@@ -699,16 +733,22 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             disabled={editorDisabled}
           />
           {saveIndicatorText && (
-            <Typography.Text
-              type={saveIndicator === 'error' ? 'danger' : 'secondary'}
-              className="block text-[11px] mt-1 text-text-muted"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
+            <span
+              id={NOTES_SAVE_STATUS_MESSAGE_ID}
+              ref={saveStatusRef}
+              role={saveIndicator === 'error' ? 'alert' : 'status'}
+              tabIndex={saveIndicator === 'error' ? -1 : undefined}
+              aria-label={t('option:notesSearch.saveStatusAriaLabel', {
+                defaultValue: 'Note save status'
+              })}
+              aria-live={saveIndicator === 'error' ? 'assertive' : 'polite'}
+              className={`block text-[11px] mt-1 ${
+                saveIndicator === 'error' ? 'text-danger' : 'text-text-muted'
+              }`}
               data-testid="notes-save-feedback"
             >
               {saveIndicatorText}
-            </Typography.Text>
+            </span>
           )}
           {saveRecoveryNotice && (
             <div
@@ -1412,6 +1452,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     aria-label={t('option:notesSearch.editorAriaLabel', {
                       defaultValue: 'Note content'
                     })}
+                    aria-describedby={contentDescribedBy}
                     data-testid="notes-wysiwyg-editor"
                     dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
                   />
@@ -1435,6 +1476,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                       aria-label={t('option:notesSearch.editorAriaLabel', {
                         defaultValue: 'Note content'
                       })}
+                      aria-describedby={contentDescribedBy}
                     />
                     {activeWikilinkQuery && wikilinkSuggestions.length > 0 && (
                       <div
@@ -1475,6 +1517,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   </>
                 )}
                 <Typography.Text
+                  id={NOTES_EDITOR_CONTENT_HELP_ID}
                   type="secondary"
                   className="block text-[11px] mt-1 text-text-muted"
                 >
@@ -1548,6 +1591,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   aria-label={t('option:notesSearch.editorAriaLabel', {
                     defaultValue: 'Note content'
                   })}
+                  aria-describedby={contentDescribedBy}
                   data-testid="notes-wysiwyg-editor"
                   dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
                 />
@@ -1571,6 +1615,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     aria-label={t('option:notesSearch.editorAriaLabel', {
                       defaultValue: 'Note content'
                     })}
+                    aria-describedby={contentDescribedBy}
                   />
                   {activeWikilinkQuery && wikilinkSuggestions.length > 0 && (
                     <div
@@ -1611,6 +1656,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 </>
               )}
               <Typography.Text
+                id={NOTES_EDITOR_CONTENT_HELP_ID}
                 type="secondary"
                 className="block text-[11px] mt-1 text-text-muted"
               >
