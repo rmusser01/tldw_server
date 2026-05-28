@@ -28,13 +28,13 @@ Implement Phase 1 from Docs/superpowers/plans/2026-05-25-flashcards-ux-fixes-imp
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Empty accounts land on Study/home, not dense transfer tooling, while explicit generate/study-pack deep links still open transfer setup.
-- [ ] #2 First screen explains flashcards in this product and exposes clear actions to create manually, import a deck, generate from source, or choose an existing deck when present.
-- [ ] #3 Manage no-card state suppresses expert filters, sort, density, and shortcut chips until cards exist or filters are active.
-- [ ] #4 Scheduler is discoverable before a deck exists through disabled-tab copy or Study empty-state scheduling preview.
-- [ ] #5 Transfer/create/import label no longer implies normal import/export is LLM-only.
-- [ ] #6 Study Pack setup copy labels Source ID as an advanced/manual source reference and points users toward supported source types.
-- [ ] #7 Focused component/e2e verification is run or limitations are documented.
+- [x] #1 Empty accounts land on Study/home, not dense transfer tooling, while explicit generate/study-pack deep links still open transfer setup.
+- [x] #2 First screen explains flashcards in this product and exposes clear actions to create manually, import a deck, generate from source, or choose an existing deck when present.
+- [x] #3 Manage no-card state suppresses expert filters, sort, density, and shortcut chips until cards exist or filters are active.
+- [x] #4 Scheduler is discoverable before a deck exists through disabled-tab copy or Study empty-state scheduling preview.
+- [x] #5 Transfer/create/import label no longer implies normal import/export is LLM-only.
+- [x] #6 Study Pack setup copy labels Source ID as an advanced/manual source reference and points users toward supported source types.
+- [x] #7 Focused component/e2e verification is run or limitations are documented.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -60,10 +60,10 @@ Phase 1 complete. Empty /flashcards accounts now stay on Study with first-time s
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched Python code or non-Python skip documented
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched Python code or non-Python skip documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

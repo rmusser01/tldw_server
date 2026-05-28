@@ -154,7 +154,7 @@ describe("FlashcardsWorkspace connection states", () => {
     expect(screen.getByText("Study workspace")).toBeInTheDocument()
 
     const modes = within(screen.getByRole("navigation", { name: "Flashcards modes" }))
-    for (const mode of ["Study", "Manage", "Import / Export", "Templates", "Scheduler"]) {
+    for (const mode of ["Study", "Manage", "Transfer", "Templates", "Scheduler"]) {
       expect(modes.getByText(mode)).toBeInTheDocument()
     }
   })

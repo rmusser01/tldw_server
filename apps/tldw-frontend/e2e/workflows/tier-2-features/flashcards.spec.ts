@@ -97,13 +97,28 @@ async function createFlashcardCard(input: {
 }
 
 async function cleanupFlashcardDeck(deck: SeededDeck): Promise<void> {
-  await fetchWithApiKey(
-    `${TEST_CONFIG.serverUrl}/api/v1/flashcards/decks/${deck.id}?expected_version=${deck.version ?? 1}`,
-    TEST_CONFIG.apiKey,
-    {
-      method: 'DELETE',
-    }
-  ).catch(() => undefined);
+  const expectedVersion = deck.version ?? 1;
+
+  try {
+    const response = await fetchWithApiKey(
+      `${TEST_CONFIG.serverUrl}/api/v1/flashcards/decks/${deck.id}?expected_version=${expectedVersion}`,
+      TEST_CONFIG.apiKey,
+      {
+        method: 'DELETE',
+      }
+    );
+
+    expect(
+      response.ok,
+      `Failed to cleanup flashcard deck ${deck.id} at version ${expectedVersion}: ${response.status} ${response.statusText}`
+    ).toBeTruthy();
+  } catch (error) {
+    console.error(
+      `Failed to cleanup flashcard deck ${deck.id} at version ${expectedVersion} from ${TEST_CONFIG.serverUrl}`,
+      error
+    );
+    throw error;
+  }
 }
 
 test.describe('Flashcards', () => {
@@ -170,8 +185,7 @@ test.describe('Flashcards', () => {
         } else if (tab === 'scheduler') {
           await expect(authedPage.getByPlaceholder('Search decks')).toBeVisible({ timeout: 10_000 });
         } else if (tab === 'transfer') {
-          await expect(flashcards.importButton).toBeVisible({ timeout: 10_000 });
-          await expect(flashcards.exportButton).toBeVisible({ timeout: 10_000 });
+          await expect(flashcards.transferTaskSwitcher).toBeVisible({ timeout: 10_000 });
         } else {
           await expect(flashcards.reviewDeckSelect).toBeVisible({ timeout: 10_000 });
         }
@@ -783,7 +797,7 @@ test.describe('Flashcards', () => {
       if (!online) return;
 
       await flashcards.switchToTab('transfer');
-      await expect(flashcards.importButton).toBeVisible({ timeout: 10_000 });
+      await flashcards.openExportTask();
       await expect(flashcards.exportButton).toBeVisible({ timeout: 10_000 });
 
       const exportVisible = await flashcards.exportButton.isVisible().catch(() => false);
@@ -831,8 +845,8 @@ test.describe('Flashcards', () => {
       if (!online) return;
 
       await flashcards.switchToTab('transfer');
+      await flashcards.openImportTask();
       await expect(flashcards.importButton).toBeVisible({ timeout: 10_000 });
-      await expect(flashcards.exportButton).toBeVisible({ timeout: 10_000 });
 
       await expect(flashcards.importFormatSelect).toBeVisible({ timeout: 10_000 });
       await expect(flashcards.importButton).toBeVisible();
@@ -851,6 +865,7 @@ test.describe('Flashcards', () => {
       const online = await flashcards.isOnline();
       if (!online) return;
 
+      await flashcards.openImportTask();
       await expect(flashcards.importTextarea).toBeVisible({ timeout: 10_000 });
       await flashcards.importTextarea.fill('Deck,Front,Back\nBiology,Question,Answer');
 
@@ -863,8 +878,8 @@ test.describe('Flashcards', () => {
       await assertNoCriticalErrors(diagnostics);
     });
 
-    test.fixme(
-      'flashcards Phase 0 RED evidence: invalid delimited import should not show zero-card success or get stuck (TASK-537)',
+    test(
+      'flashcards Phase 0 evidence: invalid delimited import does not show zero-card success or get stuck (TASK-537)',
       async ({ authedPage, serverInfo }) => {
         skipIfServerUnavailable(serverInfo);
 
@@ -872,6 +887,7 @@ test.describe('Flashcards', () => {
         await flashcards.gotoPath('/flashcards?tab=importExport');
         await flashcards.assertPageReady();
 
+        await flashcards.openImportTask();
         await flashcards.importTextarea.fill('Deck\tFront\tBack\nBroken\t\t');
         await flashcards.importButton.click();
 
@@ -914,6 +930,7 @@ test.describe('Flashcards', () => {
       await expect(flashcards.testWithQuizButton).toBeVisible({ timeout: 10_000 });
 
       await flashcards.switchToTab('transfer');
+      await flashcards.openImportTask();
       await expect(flashcards.importFormatSelect).toBeVisible({ timeout: 10_000 });
       await expect(flashcards.importTextarea).toBeVisible({ timeout: 10_000 });
       await expect(flashcards.importButton).toBeVisible({ timeout: 10_000 });

@@ -22,10 +22,10 @@ modified_files:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Rebase codex/flashcards-ux-phase1-pr onto latest origin/dev
-- [ ] #2 Inspect PR #2087 review comments, review threads, and check results
-- [ ] #3 Address validated flashcards-scope review issues with focused code/test changes
-- [ ] #4 Run affected verification and push updated branch
+- [x] #1 Rebase codex/flashcards-ux-phase1-pr onto latest origin/dev
+- [x] #2 Inspect PR #2087 review comments, review threads, and check results
+- [x] #3 Address validated flashcards-scope review issues with focused code/test changes
+- [x] #4 Run affected verification and push updated branch
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -42,10 +42,10 @@ Rebased codex/flashcards-ux-phase1-pr onto the latest fetched origin/dev (alread
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

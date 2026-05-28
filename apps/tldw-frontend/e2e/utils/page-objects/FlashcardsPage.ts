@@ -346,8 +346,28 @@ export class FlashcardsPage extends BasePage {
     return this.page.locator('[data-testid="flashcards-import-format"]');
   }
 
+  get importTaskPanel(): Locator {
+    return this.page.locator('[data-testid="flashcards-import-task-panel"]');
+  }
+
+  get exportTaskPanel(): Locator {
+    return this.page.locator('[data-testid="flashcards-export-task-panel"]');
+  }
+
+  get transferTaskSwitcher(): Locator {
+    return this.page.locator('[data-testid="flashcards-transfer-task-switcher"]');
+  }
+
+  get transferImportTask(): Locator {
+    return this.transferTaskSwitcher.getByText('Import file', { exact: true });
+  }
+
+  get transferExportTask(): Locator {
+    return this.transferTaskSwitcher.getByText('Export backup', { exact: true });
+  }
+
   get importTextarea(): Locator {
-    return this.page.locator('[data-testid="flashcards-import-textarea"]');
+    return this.importTaskPanel.locator('[data-testid="flashcards-import-textarea"]');
   }
 
   get importDelimiterSelect(): Locator {
@@ -454,6 +474,17 @@ export class FlashcardsPage extends BasePage {
     const option = this.getActiveSelectOption(formatLabel);
     await expect(option).toBeVisible({ timeout: 10_000 });
     await option.click();
+  }
+
+  async openImportTask(): Promise<void> {
+    await this.transferImportTask.click({ force: true });
+    await expect(this.importTaskPanel).toBeVisible({ timeout: 10_000 });
+    await expect(this.importTextarea).toBeVisible({ timeout: 10_000 });
+  }
+
+  async openExportTask(): Promise<void> {
+    await this.transferExportTask.click({ force: true });
+    await expect(this.exportTaskPanel).toBeVisible({ timeout: 10_000 });
   }
 
   async setReviewMode(mode: 'due' | 'cram'): Promise<void> {

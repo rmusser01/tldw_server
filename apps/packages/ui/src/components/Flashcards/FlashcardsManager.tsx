@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next"
 import { useLocation, useNavigate } from "react-router-dom"
 import { ReviewTab, ManageTab, ImportExportTab, SchedulerTab, TemplatesTab } from "./tabs"
 import { KeyboardShortcutsModal } from "./components"
-import { useDecksQuery } from "./hooks"
+import { useDecksQuery, type UseFlashcardQueriesOptions } from "./hooks"
 import type { Flashcard } from "@/services/flashcards"
 import { parseFlashcardsGenerateIntentFromLocation } from "@/services/tldw/flashcards-generate-handoff"
 import { parseStudyPackIntentFromLocation } from "@/services/tldw/study-pack-handoff"
@@ -70,9 +70,10 @@ export const FlashcardsManager: React.FC = () => {
   const [activeTab, setActiveTab] = React.useState<string>(() =>
     currentTab ?? (currentGenerateIntent || currentStudyPackIntent ? "importExport" : "review")
   )
-  const { data: initialDecks } = useDecksQuery({
+  const deckVisibilityOptions = React.useMemo<UseFlashcardQueriesOptions>(() => ({
     includeWorkspaceItems: currentStudyIntent?.forceShowWorkspaceItems ?? false
-  })
+  }), [currentStudyIntent?.forceShowWorkspaceItems])
+  const { data: initialDecks } = useDecksQuery(deckVisibilityOptions)
   const showSchedulerTab = initialDecks === undefined || initialDecks.length > 0
   const [reviewDeckId, setReviewDeckId] = React.useState<number | null | undefined>(
     currentStudyIntent?.deckId ?? undefined
@@ -114,6 +115,10 @@ export const FlashcardsManager: React.FC = () => {
     setManageDeckHandoff(null)
     setSchedulerDeckHandoff(null)
     setExportDeckHandoff(null)
+  }, [])
+  const discardSchedulerChanges = React.useCallback(() => {
+    setSchedulerDirty(false)
+    setSchedulerDiscardSignal((current) => current + 1)
   }, [])
   const applyReviewDeckChange = React.useCallback(
     (deckId: number | null | undefined) => {
@@ -159,9 +164,12 @@ export const FlashcardsManager: React.FC = () => {
 
   React.useEffect(() => {
     if (!showSchedulerTab && activeTab === "scheduler") {
+      if (schedulerDirty) {
+        discardSchedulerChanges()
+      }
       setActiveTab("review")
     }
-  }, [activeTab, showSchedulerTab])
+  }, [activeTab, discardSchedulerChanges, schedulerDirty, showSchedulerTab])
 
   const handleReviewCard = React.useCallback(
     (card: Flashcard) => {
@@ -239,13 +247,12 @@ export const FlashcardsManager: React.FC = () => {
           })
         )
         if (!shouldDiscard) return
-        setSchedulerDirty(false)
-        setSchedulerDiscardSignal((current) => current + 1)
+        discardSchedulerChanges()
       }
 
       setActiveTab(nextTab)
     },
-    [activeTab, schedulerDirty, showSchedulerTab, t]
+    [activeTab, discardSchedulerChanges, schedulerDirty, showSchedulerTab, t]
   )
 
   return (
@@ -366,6 +373,7 @@ export const FlashcardsManager: React.FC = () => {
                       isActive={effectiveActiveTab === "scheduler"}
                       initialDeckId={effectiveSchedulerDeckId}
                       initialDeckHandoffKey={effectiveSchedulerHandoffKey}
+                      deckVisibilityOptions={deckVisibilityOptions}
                       onDirtyChange={setSchedulerDirty}
                       discardSignal={schedulerDiscardSignal}
                     />

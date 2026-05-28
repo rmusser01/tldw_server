@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { FlashcardsManager } from "../FlashcardsManager"
 
@@ -103,6 +103,9 @@ vi.mock("../tabs", () => ({
   SchedulerTab: (props: {
     initialDeckId?: number | null
     initialDeckHandoffKey?: string | null
+    deckVisibilityOptions?: {
+      includeWorkspaceItems?: boolean
+    }
     onDirtyChange?: (dirty: boolean) => void
     discardSignal?: number
   }) => {
@@ -118,6 +121,10 @@ vi.mock("../tabs", () => ({
         Scheduler panel
         <span data-testid="mock-scheduler-initial-deck-id">{String(props.initialDeckId ?? "")}</span>
         <span data-testid="mock-scheduler-handoff-key">{String(props.initialDeckHandoffKey ?? "")}</span>
+        <span data-testid="mock-scheduler-include-workspace">
+          {String(props.deckVisibilityOptions?.includeWorkspaceItems ?? false)}
+        </span>
+        <span data-testid="mock-scheduler-discard-signal">{String(props.discardSignal ?? 0)}</span>
         <span data-testid="mock-scheduler-draft-state">{draftState}</span>
         <button
           onClick={() => {
@@ -222,6 +229,19 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-scheduler-tab")).toBeInTheDocument()
     expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("9")
     expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("initial-location")
+  })
+
+  it("passes workspace deck visibility to Scheduler for workspace handoffs", () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/flashcards?tab=scheduler&deck_id=9&include_workspace_items=1"
+    )
+
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-scheduler-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-scheduler-include-workspace")).toHaveTextContent("true")
   })
 
   it("refreshes Scheduler handoff identity when the same deck deep-link is requested again", () => {
@@ -518,5 +538,28 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-scheduler-draft-state")).toHaveTextContent("clean")
 
     confirmSpy.mockRestore()
+  })
+
+  it("discards scheduler draft state when Scheduler is auto-hidden", async () => {
+    window.history.replaceState({}, "", "/flashcards")
+    const { rerender } = render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Scheduler"))
+    fireEvent.click(screen.getByText("Mark Scheduler Dirty"))
+    expect(screen.getByTestId("mock-scheduler-draft-state")).toHaveTextContent("dirty")
+
+    mocks.decks = []
+    rerender(<FlashcardsManager />)
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
+    })
+
+    mocks.decks = [{ id: 1, name: "Biology" }]
+    rerender(<FlashcardsManager />)
+    fireEvent.click(screen.getByText("Scheduler"))
+
+    expect(screen.getByTestId("mock-scheduler-discard-signal")).toHaveTextContent("1")
+    expect(screen.getByTestId("mock-scheduler-draft-state")).toHaveTextContent("clean")
   })
 })
