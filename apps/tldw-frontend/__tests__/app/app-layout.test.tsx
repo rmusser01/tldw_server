@@ -179,6 +179,23 @@ describe("App layout routing", () => {
     )
   })
 
+  it("lets /chat bypass the global assistant setup overlay", () => {
+    renderApp("/chat")
+
+    expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
+      "data-allow-degraded",
+      "true"
+    )
+    expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
+      "data-bypass",
+      "true"
+    )
+
+    fireEvent.click(screen.getByTestId("first-run-gate-start"))
+
+    expect(mockRouter.push).toHaveBeenCalledWith("/persona")
+  })
+
   it("bypasses the generic first-run splash for character-chat route intent", async () => {
     renderApp("/characters")
 

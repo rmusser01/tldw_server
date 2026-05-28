@@ -48,6 +48,19 @@ describe("Playground cockpit regression guard", () => {
     expect(source).toContain('"focus"');
   });
 
+  it("keeps mobile cockpit mode from letting an expanded composer overlap the rails", () => {
+    const source = readFileSync(playgroundPath, "utf8");
+    const formSource = readFileSync(playgroundFormPath, "utf8");
+
+    expect(source).toContain("mobileCockpitComposerConstrained");
+    expect(source).toContain("mobileCockpitModeActive={mobileCockpitComposerConstrained}");
+    expect(source).toContain("min-h-0 shrink overflow-y-auto overscroll-contain");
+    expect(formSource).toContain("suppressComposerToolbarForMobileCockpit");
+    expect(formSource).toContain('<div className="hidden">{composerToolbarNode}</div>');
+    expect(formSource).toContain("facetsSlot={composerToolbarSlot}");
+    expect(formSource).toContain("bottomBarSlot={composerToolbarSlot}");
+  });
+
   it("keeps configured and catalog model scope controls wired into the selector", () => {
     const source = readFileSync(playgroundFormPath, "utf8");
 

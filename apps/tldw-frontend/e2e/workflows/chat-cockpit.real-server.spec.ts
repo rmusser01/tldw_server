@@ -25,6 +25,8 @@ const serverUrl = (
 
 const apiKey =
   process.env.TLDW_E2E_API_KEY || process.env.TLDW_API_KEY || process.env.SINGLE_USER_API_KEY || '';
+const expectStreamingControlEvidence =
+  process.env.TLDW_E2E_EXPECT_STREAMING_CONTROLS === 'true';
 
 test.skip(
   !apiKey,
@@ -688,6 +690,51 @@ const waitForChatCompletionAttempt = (page: Page, timeout = 15_000) => {
     { timeout }
   );
 };
+
+type ControlCandidate = {
+  label: string;
+  locator: Locator;
+  requireEnabled?: boolean;
+};
+
+const waitForFirstAvailableControl = async (
+  candidates: ControlCandidate[],
+  timeout = 10_000
+): Promise<ControlCandidate | null> => {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    for (const candidate of candidates) {
+      const visible = await candidate.locator.isVisible().catch(() => false);
+      if (!visible) continue;
+      const enabled = candidate.requireEnabled
+        ? await candidate.locator.isEnabled().catch(() => false)
+        : true;
+      if (enabled) return candidate;
+    }
+    await sleep(100);
+  }
+  return null;
+};
+
+const clickFirstAvailableControl = async (
+  candidates: ControlCandidate[]
+): Promise<ControlCandidate | null> => {
+  for (const candidate of candidates) {
+    const visible = await candidate.locator.isVisible().catch(() => false);
+    if (!visible) continue;
+    const enabled = candidate.requireEnabled
+      ? await candidate.locator.isEnabled().catch(() => false)
+      : true;
+    if (!enabled) continue;
+    const clicked = await candidate.locator
+      .click({ timeout: 1_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (clicked) return candidate;
+  }
+  return null;
+};
+
 
 const assertChatCompletionRenderedOrRecoverable = async (
   page: Page,
@@ -2497,5 +2544,106 @@ test.describe('/chat cockpit real-server parity', () => {
     const failingApiHits = apiTracker.hits.filter((hit) => hit.status >= 400);
     expect(failingApiHits).toEqual([]);
     apiTracker.dispose();
+  });
+
+  test('captures streaming stop and regenerate controls through the real cockpit', async ({
+    page,
+    request,
+  }, testInfo) => {
+    test.setTimeout(150_000);
+
+    const health = await apiGet<any>(request, '/api/v1/health');
+    assertHealthResponse(health);
+    const chatModelSelection = await getConfiguredChatModelSelection(request);
+
+    await openDesktopChatCockpit(page, chatModelSelection);
+
+    const contextRail = getDesktopContextRail(page);
+    const webSearchControl = contextRail.getByRole('button', {
+      name: 'Web search',
+      exact: true,
+    });
+    if ((await webSearchControl.getAttribute('aria-pressed')) === 'true') {
+      await webSearchControl.click();
+      await expect(webSearchControl).toHaveAttribute('aria-pressed', 'false');
+    }
+
+    const runtimeInspector = getDesktopRuntimeInspector(page);
+    const regenerateControl = runtimeInspector.getByRole('button', {
+      name: 'Regenerate last response',
+    });
+    await expect(regenerateControl).toBeDisabled();
+
+    const prompt = `Cockpit streaming controls proof ${Date.now()}: reply with a concise numbered list.`;
+    const completionAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
+
+    await page.getByTestId('chat-input').fill(prompt);
+    await page.getByRole('button', { name: /send message/i }).click();
+    const completionResponse = await completionAttempt;
+    expect(completionResponse).toBeTruthy();
+
+    const statusStripStop = page
+      .getByRole('status', { name: 'Chat status' })
+      .getByRole('button', { name: 'Stop generation' });
+    const runtimeStop = runtimeInspector.getByRole('button', { name: 'Stop generation' });
+    const messageStop = page
+      .getByRole('button', { name: /Stop streaming response/i })
+      .first();
+    const stopCandidates = [
+      { label: 'status strip stop', locator: statusStripStop },
+      { label: 'runtime rail stop', locator: runtimeStop, requireEnabled: true },
+      { label: 'message stop', locator: messageStop },
+    ];
+    const stopControl = await waitForFirstAvailableControl(stopCandidates, 15_000);
+
+    if (!stopControl) {
+      const note =
+        'No streaming stop control became observable before the provider response completed.';
+      testInfo.annotations.push({
+        type: expectStreamingControlEvidence ? 'failure-context' : 'streaming-control',
+        description: note,
+      });
+      if (expectStreamingControlEvidence) {
+        throw new Error(note);
+      }
+      await assertChatCompletionRenderedOrRecoverable(page, completionResponse);
+    } else {
+      const clickedStopControl =
+        (await clickFirstAvailableControl([stopControl, ...stopCandidates])) ?? null;
+      if (!clickedStopControl && expectStreamingControlEvidence) {
+        throw new Error(
+          `Streaming stop control "${stopControl.label}" appeared but disappeared before it could be clicked.`
+        );
+      }
+      await page.screenshot({
+        path: testInfo.outputPath('chat-cockpit-streaming-stop-clicked.png'),
+        fullPage: true,
+      });
+      await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
+      await expect(statusStripStop).toHaveCount(0);
+    }
+
+    if (completionResponse) {
+      await assertProviderQualifiedPayload(page, completionResponse);
+    }
+
+    await expect(regenerateControl).toBeEnabled({ timeout: 30_000 });
+    await page.screenshot({
+      path: testInfo.outputPath('chat-cockpit-regenerate-ready.png'),
+      fullPage: true,
+    });
+
+    const regenerateAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
+    await regenerateControl.click();
+    const regenerateResponse = await regenerateAttempt;
+    expect(regenerateResponse).toBeTruthy();
+    await assertChatCompletionRenderedOrRecoverable(page, regenerateResponse);
+    if (regenerateResponse) {
+      await assertProviderQualifiedPayload(page, regenerateResponse);
+    }
+    await page.screenshot({
+      path: testInfo.outputPath('chat-cockpit-regenerated-response.png'),
+      fullPage: true,
+    });
   });
 });

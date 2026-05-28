@@ -543,6 +543,8 @@ export const Playground = () => {
     cockpitContextRailVisible !== false;
   const normalizedCockpitRuntimeRailVisible =
     cockpitRuntimeRailVisible !== false;
+  const mobileCockpitComposerConstrained =
+    isMobileViewport && normalizedChatLayoutMode === "cockpit";
   const handleChatLayoutModeChange = React.useCallback(
     (mode: PlaygroundCockpitMode) => {
       if (
@@ -3424,7 +3426,11 @@ export const Playground = () => {
               data-testid={
                 stickyChatInput ? "playground-chat-composer-dock" : undefined
               }
-              className={`relative w-full shrink-0 ${
+              className={`relative w-full ${
+                mobileCockpitComposerConstrained
+                  ? "min-h-0 shrink overflow-y-auto overscroll-contain"
+                  : "shrink-0"
+              } ${
                 stickyChatInput
                   ? "sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"
                   : ""
@@ -3461,6 +3467,7 @@ export const Playground = () => {
               <PlaygroundForm
                 droppedFiles={droppedFiles}
                 stickyDockEnabled={stickyChatInput}
+                mobileCockpitModeActive={mobileCockpitComposerConstrained}
                 onComposerLayoutChange={
                   stickyChatInput ? handleComposerLayoutChange : undefined
                 }
