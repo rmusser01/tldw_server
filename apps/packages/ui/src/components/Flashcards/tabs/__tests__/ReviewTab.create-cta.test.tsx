@@ -310,6 +310,9 @@ describe("ReviewTab create CTA visibility", () => {
       "Alert"
     )
     expect(onboardingGuide).toHaveAttribute("aria-live", "off")
+    expect(screen.getByTestId("flashcards-review-scheduler-preview")).toHaveTextContent(
+      "Scheduler"
+    )
     expect(screen.getByTestId("flashcards-review-onboarding-doc-link")).toHaveAttribute(
       "href",
       FLASHCARDS_HELP_LINKS.ratings

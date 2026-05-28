@@ -5,7 +5,8 @@ import { useTranslation } from "react-i18next"
 import {
   useDecksQuery,
   useDueCountsQuery,
-  useUpdateDeckMutation
+  useUpdateDeckMutation,
+  type UseFlashcardQueriesOptions
 } from "../hooks/useFlashcardQueries"
 import { DeckSchedulerSettingsEditor } from "../components/DeckSchedulerSettingsEditor"
 import { useDeckSchedulerDraft } from "../hooks/useDeckSchedulerDraft"
@@ -22,6 +23,7 @@ export interface SchedulerTabProps {
   isActive?: boolean
   initialDeckId?: number | null
   initialDeckHandoffKey?: string | null
+  deckVisibilityOptions?: UseFlashcardQueriesOptions
   onDirtyChange?: (dirty: boolean) => void
   discardSignal?: number
 }
@@ -50,11 +52,12 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
   isActive = false,
   initialDeckId = null,
   initialDeckHandoffKey = null,
+  deckVisibilityOptions,
   onDirtyChange,
   discardSignal = 0
 }) => {
   const { t } = useTranslation(["option", "common"])
-  const decksQuery = useDecksQuery()
+  const decksQuery = useDecksQuery(deckVisibilityOptions)
   const updateDeckMutation = useUpdateDeckMutation()
   const schedulerDraft = useDeckSchedulerDraft()
 
@@ -110,6 +113,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
     [allDecks, selectedDeckId]
   )
   const activeDeckCounts = useDueCountsQuery(activeDeck?.id, {
+    ...deckVisibilityOptions,
     enabled: isActive && !!activeDeck
   })
 

@@ -157,6 +157,30 @@ describe("SchedulerTab editor", () => {
     )
   })
 
+  it("uses the supplied deck visibility options for deck list and due counts", async () => {
+    render(
+      <SchedulerTab
+        isActive
+        deckVisibilityOptions={{ includeWorkspaceItems: true, workspaceId: "workspace-77" }}
+      />
+    )
+
+    expect(useDecksQuery).toHaveBeenCalledWith({
+      includeWorkspaceItems: true,
+      workspaceId: "workspace-77"
+    })
+    await waitFor(() => {
+      expect(useDueCountsQuery).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          enabled: true,
+          includeWorkspaceItems: true,
+          workspaceId: "workspace-77"
+        })
+      )
+    })
+  })
+
   it("reapplies the same requested deck when a new scheduler handoff arrives", async () => {
     const { rerender } = render(
       <SchedulerTab isActive initialDeckId={2} initialDeckHandoffKey="handoff-1" />

@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { FlashcardsManager } from "../FlashcardsManager"
 
@@ -103,6 +103,9 @@ vi.mock("../tabs", () => ({
   SchedulerTab: (props: {
     initialDeckId?: number | null
     initialDeckHandoffKey?: string | null
+    deckVisibilityOptions?: {
+      includeWorkspaceItems?: boolean
+    }
     onDirtyChange?: (dirty: boolean) => void
     discardSignal?: number
   }) => {
@@ -118,6 +121,10 @@ vi.mock("../tabs", () => ({
         Scheduler panel
         <span data-testid="mock-scheduler-initial-deck-id">{String(props.initialDeckId ?? "")}</span>
         <span data-testid="mock-scheduler-handoff-key">{String(props.initialDeckHandoffKey ?? "")}</span>
+        <span data-testid="mock-scheduler-include-workspace">
+          {String(props.deckVisibilityOptions?.includeWorkspaceItems ?? false)}
+        </span>
+        <span data-testid="mock-scheduler-discard-signal">{String(props.discardSignal ?? 0)}</span>
         <span data-testid="mock-scheduler-draft-state">{draftState}</span>
         <button
           onClick={() => {
@@ -188,7 +195,7 @@ describe("FlashcardsManager consistency standards", () => {
     )
   })
 
-  it("opens Import / Export tab first when URL contains generate intent", () => {
+  it("opens Transfer tab first when URL contains generate intent", () => {
     window.history.replaceState(
       {},
       "",
@@ -222,6 +229,19 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-scheduler-tab")).toBeInTheDocument()
     expect(screen.getByTestId("mock-scheduler-initial-deck-id")).toHaveTextContent("9")
     expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("initial-location")
+  })
+
+  it("passes workspace deck visibility to Scheduler for workspace handoffs", () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/flashcards?tab=scheduler&deck_id=9&include_workspace_items=1"
+    )
+
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-scheduler-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-scheduler-include-workspace")).toHaveTextContent("true")
   })
 
   it("refreshes Scheduler handoff identity when the same deck deep-link is requested again", () => {
@@ -363,36 +383,57 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("review:21")
   })
 
-  it("uses Study/Manage/Create & Import/Scheduler tab labels", () => {
+  it("uses Study/Manage/Transfer/Scheduler tab labels", () => {
     window.history.replaceState({}, "", "/flashcards")
     render(<FlashcardsManager />)
 
     expect(screen.getByText("Study")).toBeInTheDocument()
     expect(screen.getByText("Manage")).toBeInTheDocument()
-    expect(screen.getByText("Create & Import")).toBeInTheDocument()
+    expect(screen.getByText("Transfer")).toBeInTheDocument()
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.getByText("Scheduler")).toBeInTheDocument()
   })
 
-  it("defaults to Study and keeps Scheduler discoverable when no decks are available", () => {
+  it("defaults empty accounts to Study and keeps transfer available without implying LLM-only import", () => {
     mocks.decks = []
     window.history.replaceState({}, "", "/flashcards")
 
     render(<FlashcardsManager />)
 
     expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
-    expect(screen.queryByTestId("mock-transfer-tab")).not.toBeInTheDocument()
+    expect(screen.getByText("Transfer")).toBeInTheDocument()
+    expect(screen.queryByText("LLM")).not.toBeInTheDocument()
     expect(screen.getByText("Templates")).toBeInTheDocument()
-    const schedulerTab = screen.getByRole("tab", { name: /scheduler/i })
-    const schedulerLabel = screen.getByText("Scheduler")
-    expect(schedulerTab).not.toHaveAttribute("aria-disabled", "true")
-    expect(schedulerLabel).toHaveAttribute(
-      "aria-disabled",
-      "true"
-    )
-    fireEvent.click(schedulerTab)
-    expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
+    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
     expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
+  })
+
+  it("still opens Transfer first for explicit generate and study-pack intents", () => {
+    mocks.decks = []
+    window.history.replaceState(
+      {},
+      "",
+      "/flashcards?generate=1&generate_text=Study%20notes"
+    )
+
+    const { unmount } = render(<FlashcardsManager />)
+    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+
+    unmount()
+    const studyPackPayload = encodeURIComponent(
+      JSON.stringify({
+        title: "Lecture 5",
+        sourceItems: [{ sourceType: "media", sourceId: "42" }]
+      })
+    )
+    window.history.replaceState(
+      {},
+      "",
+      `/flashcards?study_pack=1&study_pack_payload=${studyPackPayload}`
+    )
+
+    render(<FlashcardsManager />)
+    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
   })
 
   it("routes template deep-links to the Templates tab", () => {
@@ -412,14 +453,8 @@ describe("FlashcardsManager consistency standards", () => {
 
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.getByTestId("mock-templates-tab")).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /scheduler/i })).not.toHaveAttribute(
-      "aria-disabled",
-      "true"
-    )
-    expect(screen.getByText("Scheduler")).toHaveAttribute(
-      "aria-disabled",
-      "true"
-    )
+    expect(screen.queryByRole("tab", { name: /scheduler/i })).not.toBeInTheDocument()
+    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
   })
 
   it("requests workspace decks when study links include workspace items", () => {
@@ -438,21 +473,12 @@ describe("FlashcardsManager consistency standards", () => {
     )
   })
 
-  it("clamps scheduler deep-links to Study when Scheduler is disabled", () => {
+  it("clamps scheduler deep-links to Study when Scheduler is hidden", () => {
     mocks.decks = []
     window.history.replaceState({}, "", "/flashcards?tab=scheduler&deck_id=9")
 
     render(<FlashcardsManager />)
 
-    expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
-    expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
-    const schedulerTab = screen.getByRole("tab", { name: /scheduler/i })
-    expect(schedulerTab).not.toHaveAttribute("aria-disabled", "true")
-    expect(screen.getByText("Scheduler")).toHaveAttribute(
-      "aria-disabled",
-      "true"
-    )
-    fireEvent.click(schedulerTab)
     expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
     expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
@@ -512,5 +538,28 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-scheduler-draft-state")).toHaveTextContent("clean")
 
     confirmSpy.mockRestore()
+  })
+
+  it("discards scheduler draft state when Scheduler is auto-hidden", async () => {
+    window.history.replaceState({}, "", "/flashcards")
+    const { rerender } = render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Scheduler"))
+    fireEvent.click(screen.getByText("Mark Scheduler Dirty"))
+    expect(screen.getByTestId("mock-scheduler-draft-state")).toHaveTextContent("dirty")
+
+    mocks.decks = []
+    rerender(<FlashcardsManager />)
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
+    })
+
+    mocks.decks = [{ id: 1, name: "Biology" }]
+    rerender(<FlashcardsManager />)
+    fireEvent.click(screen.getByText("Scheduler"))
+
+    expect(screen.getByTestId("mock-scheduler-discard-signal")).toHaveTextContent("1")
+    expect(screen.getByTestId("mock-scheduler-draft-state")).toHaveTextContent("clean")
   })
 })
