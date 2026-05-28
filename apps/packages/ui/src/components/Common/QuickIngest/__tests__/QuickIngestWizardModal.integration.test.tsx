@@ -829,6 +829,38 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(startButton).toBeTruthy()
   })
 
+  it("Step 3 — renders estimate copy without duplicate approximation markers", () => {
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 3,
+          highestStep: 3,
+          queueItems: [
+            {
+              id: "large-video",
+              kind: "file",
+              fileName: "large-video.mp4",
+              detectedType: "video",
+              icon: "Film",
+              fileSize: 400 * 1024 * 1024,
+              mimeType: "video/mp4",
+              validation: { valid: true },
+            },
+          ],
+        }}
+      />
+    )
+
+    const summary = screen.getByText(/1 items \| Standard preset/i)
+    expect(summary).toHaveTextContent(/~\d+ (sec|min|hr) estimated/)
+    expect(summary).not.toHaveTextContent("~~")
+
+    const longTimeWarning = screen.getByText(/Processing may take a while/i)
+    expect(longTimeWarning).toHaveTextContent(/~\d+ (sec|min|hr)/)
+    expect(longTimeWarning).not.toHaveTextContent("~~")
+  })
+
   it("Step 3 — blocks final processing while disconnected and allows going back", async () => {
     const user = userEvent.setup()
     const retryConnection = vi.fn()
