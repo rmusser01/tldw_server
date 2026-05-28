@@ -241,10 +241,14 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
               className="min-w-[120px]"
             />
             <Input
-              aria-label="Source ID"
+              aria-label={t("option:flashcards.studyPackSourceIdAdvancedLabel", {
+                defaultValue: "Source ID (advanced/manual)"
+              })}
               value={sourceId}
               onChange={(event) => setSourceId(event.target.value)}
-              placeholder="Source ID"
+              placeholder={t("option:flashcards.studyPackSourceIdAdvancedPlaceholder", {
+                defaultValue: "Source ID (advanced/manual)"
+              })}
             />
             <Input
               aria-label="Source Title"
@@ -258,12 +262,23 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
               {t("common:add", { defaultValue: "Add source" })}
             </Button>
           </Space.Compact>
+          <Text
+            type="secondary"
+            className="mt-2 block text-xs"
+            data-testid="study-pack-source-id-guidance"
+          >
+            {t("option:flashcards.studyPackSourceIdGuidance", {
+              defaultValue:
+                "Advanced/manual source reference. Choose Media, Note, or Message, then paste the item ID from that source."
+            })}
+          </Text>
 
           <div className="mt-3 space-y-2">
             {sourceItems.length === 0 ? (
               <Text type="secondary">
                 {t("option:flashcards.studyPackSourcesEmpty", {
-                  defaultValue: "Add at least one supported source to create a study pack."
+                  defaultValue:
+                    "Add at least one supported source: Media, Note, or Message."
                 })}
               </Text>
             ) : (

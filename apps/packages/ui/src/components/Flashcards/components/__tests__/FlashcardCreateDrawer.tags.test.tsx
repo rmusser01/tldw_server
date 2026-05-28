@@ -6,6 +6,7 @@ import { FlashcardCreateDrawer } from "../FlashcardCreateDrawer"
 import {
   useCreateDeckMutation,
   useCreateFlashcardMutation,
+  useCreateFlashcardTemplateMutation,
   useDecksQuery
 } from "../../hooks"
 
@@ -53,8 +54,23 @@ vi.mock("@/hooks/useAntdMessage", () => ({
 vi.mock("../../hooks", () => ({
   useDecksQuery: vi.fn(),
   useCreateFlashcardMutation: vi.fn(),
+  useCreateFlashcardTemplateMutation: vi.fn(),
   useCreateDeckMutation: vi.fn(),
-  useDebouncedFormField: vi.fn(() => undefined)
+  useDebouncedFormField: vi.fn(() => undefined),
+  useFlashcardDeckRecentCardsQuery: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn()
+  })),
+  useFlashcardDeckSearchQuery: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn()
+  }))
 }))
 
 vi.mock("../MarkdownWithBoundary", () => ({
@@ -142,6 +158,10 @@ describe("FlashcardCreateDrawer tags", () => {
     } as any)
     vi.mocked(useCreateFlashcardMutation).mockReturnValue({
       mutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardTemplateMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
       isPending: false
     } as any)
     vi.mocked(useCreateDeckMutation).mockReturnValue({

@@ -1657,6 +1657,16 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                             })}
                           </li>
                         </ol>
+                        <Text
+                          type="secondary"
+                          className="block text-xs"
+                          data-testid="flashcards-review-scheduler-preview"
+                        >
+                          {t("option:flashcards.onboardingSchedulerPreview", {
+                            defaultValue:
+                              "Scheduler defaults become available after you create a deck. Use Scheduler to tune daily limits and review algorithm settings before future sessions."
+                          })}
+                        </Text>
                         <a
                           href={FLASHCARDS_HELP_LINKS.ratings}
                           target="_blank"

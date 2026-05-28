@@ -179,6 +179,76 @@ test.describe('Flashcards', () => {
 
       await assertNoCriticalErrors(diagnostics);
     });
+
+    test('flashcards Phase 1 evidence: empty first entry stays on Study with setup actions', async ({
+      authedPage,
+      serverInfo,
+      diagnostics,
+    }) => {
+      skipIfServerUnavailable(serverInfo);
+
+      await authedPage.route(/\/api\/v1\/flashcards\/decks(?:\?.*)?$/, async route => {
+        if (route.request().method() !== 'GET') return route.fallback();
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([]),
+        });
+      });
+      await authedPage.route(/\/api\/v1\/flashcards\/review\/next(?:\?.*)?$/, async route => {
+        if (route.request().method() !== 'GET') return route.fallback();
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ card: null }),
+        });
+      });
+      await authedPage.route(/\/api\/v1\/flashcards\/review-sessions(?:\?.*)?$/, async route => {
+        if (route.request().method() !== 'GET') return route.fallback();
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([]),
+        });
+      });
+      await authedPage.route(/\/api\/v1\/flashcards\/tags(?:\?.*)?$/, async route => {
+        if (route.request().method() !== 'GET') return route.fallback();
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ items: [] }),
+        });
+      });
+      await authedPage.route(/\/api\/v1\/flashcards(?:\?.*)?$/, async route => {
+        if (route.request().method() !== 'GET') return route.fallback();
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ items: [], count: 0, total: 0 }),
+        });
+      });
+
+      flashcards = new FlashcardsPage(authedPage);
+      await flashcards.gotoPath('/flashcards');
+      await flashcards.assertPageReady();
+
+      expect(await flashcards.isOnline()).toBe(true);
+      await expect(flashcards.studyTab).toHaveAttribute('aria-selected', 'true');
+      await expect(flashcards.transferTab).toBeVisible();
+      await expect(flashcards.schedulerTab).toHaveCount(0);
+      await expect(flashcards.tabsContainer.getByText('LLM', { exact: true })).toHaveCount(0);
+      await expect(authedPage.locator('[data-testid="flashcards-review-onboarding-guide"]')).toBeVisible({
+        timeout: 10_000,
+      });
+      await expect(authedPage.locator('[data-testid="flashcards-review-scheduler-preview"]')).toContainText(
+        'Scheduler'
+      );
+      await expect(authedPage.locator('[data-testid="flashcards-review-empty-create-cta"]')).toBeVisible();
+      await expect(authedPage.locator('[data-testid="flashcards-review-empty-import-cta"]')).toBeVisible();
+      await expect(authedPage.locator('[data-testid="flashcards-review-empty-generate-cta"]')).toBeVisible();
+
+      await assertNoCriticalErrors(diagnostics);
+    });
   });
 
   // =========================================================================

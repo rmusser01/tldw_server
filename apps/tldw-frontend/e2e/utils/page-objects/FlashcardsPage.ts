@@ -3,7 +3,7 @@
  *
  * The route renders FlashcardsWorkspace which shows either:
  * - A connection/offline banner when the server is unreachable
- * - FlashcardsManager with tabs for Study, Manage, Import / Export, Templates, and Scheduler
+ * - FlashcardsManager with tabs for Study, Manage, Transfer, Templates, and Scheduler
  *
  * API base paths:
  *   /api/v1/flashcards        (cards CRUD, review, generate, import, export)
@@ -87,7 +87,7 @@ export class FlashcardsPage extends BasePage {
   }
 
   get transferTab(): Locator {
-    return this.page.getByRole('tab', { name: /create\s*&\s*import|import\s*\/\s*export/i });
+    return this.page.getByRole('tab', { name: /transfer|create\s*&\s*import|import\s*\/\s*export/i });
   }
 
   // -- Locators: Tab bar extra content ---------------------------------------

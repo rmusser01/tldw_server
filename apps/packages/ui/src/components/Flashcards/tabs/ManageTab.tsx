@@ -214,15 +214,6 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     setSelectedWorkspaceId(null)
     setPage(1)
   }, [initialDeckHandoffKey, initialDeckId, initialShowWorkspaceDecks])
-
-  React.useEffect(() => {
-    if (!isActive || viewMode !== "cards" || shortcutHintDensity === "hidden") return
-    void trackFlashcardsShortcutHintTelemetry({
-      type: "flashcards_shortcut_hints_exposed",
-      surface: "cards",
-      density: shortcutHintDensity
-    })
-  }, [isActive, viewMode, shortcutHintDensity])
   const cycleShortcutHintDensity = React.useCallback(() => {
     void setShortcutHintDensity((prev) => {
       const next =
@@ -588,6 +579,16 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     !hasActiveFilters &&
     totalCount === 0 &&
     pageItems.length === 0
+  const showManageExpertChrome = viewMode === "cards" && !isNoCardFirstRun
+
+  React.useEffect(() => {
+    if (!isActive || !showManageExpertChrome || shortcutHintDensity === "hidden") return
+    void trackFlashcardsShortcutHintTelemetry({
+      type: "flashcards_shortcut_hints_exposed",
+      surface: "cards",
+      density: shortcutHintDensity
+    })
+  }, [isActive, shortcutHintDensity, showManageExpertChrome])
 
   const updateMutation = useUpdateFlashcardMutation()
   const bulkUpdateMutation = useUpdateFlashcardsBulkMutation()
@@ -1585,7 +1586,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               ]}
             />
             {/* Keyboard shortcut hint */}
-            {viewMode === "cards" && !isNoCardFirstRun && (
+            {showManageExpertChrome && (
               <div
                 className="hidden md:flex items-center gap-1.5"
                 data-testid="flashcards-manage-shortcut-chips"
@@ -1658,7 +1659,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         )}
 
         {/* Simplified Filter UI */}
-        {viewMode === "cards" && !isNoCardFirstRun && (
+        {showManageExpertChrome && (
         <div className="mb-3 space-y-3">
           {/* Primary filters: Search + Deck (always visible) */}
           <div className="flex items-center gap-2 flex-wrap">
@@ -1924,7 +1925,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         )}
 
         {/* Selection Summary Bar - simplified to two modes */}
-        {viewMode === "cards" && !isNoCardFirstRun && (
+        {showManageExpertChrome && (
         <div
           className="mb-2 flex items-center gap-3"
           data-testid="flashcards-manage-selection-summary"

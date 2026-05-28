@@ -132,7 +132,7 @@ describe("StudyPackCreateDrawer", () => {
 
     expect(screen.getByRole("button", { name: "Create study pack" })).toBeDisabled()
 
-    fireEvent.change(screen.getByLabelText("Source ID"), {
+    fireEvent.change(screen.getByLabelText(/Source ID/), {
       target: { value: "42" }
     })
     fireEvent.click(screen.getByRole("button", { name: "Add source" }))
@@ -214,7 +214,7 @@ describe("StudyPackCreateDrawer", () => {
     fireEvent.change(screen.getByLabelText("Title"), {
       target: { value: "Networks" }
     })
-    fireEvent.change(screen.getByLabelText("Source ID"), {
+    fireEvent.change(screen.getByLabelText(/Source ID/), {
       target: { value: "42" }
     })
     fireEvent.click(screen.getByRole("button", { name: "Add source" }))
@@ -224,5 +224,15 @@ describe("StudyPackCreateDrawer", () => {
       expect(messageSpies.error).toHaveBeenCalledWith("Study pack generation failed.")
     })
     expect(navigateMock).not.toHaveBeenCalled()
+  })
+
+  it("labels source IDs as an advanced manual reference with supported source guidance", () => {
+    render(<StudyPackCreateDrawer open onClose={vi.fn()} />)
+
+    expect(screen.getByLabelText("Source ID (advanced/manual)")).toBeInTheDocument()
+    expect(screen.getByTestId("study-pack-source-id-guidance")).toHaveTextContent(
+      "Media, Note, or Message"
+    )
+    expect(screen.getByText(/supported source/i)).toBeInTheDocument()
   })
 })
