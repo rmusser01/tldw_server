@@ -7,6 +7,7 @@ from .models import (
     ExternalServerDefinition,
     ProfileAssignment,
 )
+from .sqlite import SQLiteMCPStore
 
 __all__ = [
     "ApprovalPolicyDocument",
@@ -14,4 +15,5 @@ __all__ = [
     "CredentialGrant",
     "ExternalServerDefinition",
     "ProfileAssignment",
+    "SQLiteMCPStore",
 ]
