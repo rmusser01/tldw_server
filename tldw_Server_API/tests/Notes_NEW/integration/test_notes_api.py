@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 
 
 pytestmark = pytest.mark.integration
@@ -30,6 +30,22 @@ class _BulkStubDB:
 
     def get_note_by_id(self, note_id: str):
         return None
+
+
+class _FolderConflictStubDB:
+    client_id = "folder_conflict_stub"
+
+    def __init__(self) -> None:
+        self._lookup_count = 0
+
+    def get_note_folder_by_path(self, folder_path: str) -> dict[str, object] | None:
+        self._lookup_count += 1
+        if self._lookup_count == 1:
+            return None
+        return {"id": 42, "name": "Inbox", "path": "Inbox", "parent_id": None}
+
+    def create_note_folder_path(self, folder_path: str) -> dict[str, object]:
+        raise ConflictError("Folder already exists")
 
 
 @pytest.fixture()
@@ -74,6 +90,33 @@ def client_with_bulk_stub(monkeypatch):
 
     def override_db_dep():
         return _BulkStubDB()
+
+    monkeypatch.setenv("MINIMAL_TEST_APP", "0")
+    monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
+
+    from tldw_Server_API.app import main as app_main
+
+    importlib.reload(app_main)
+    fastapi_app = app_main.app
+
+    fastapi_app.dependency_overrides[get_request_user] = override_user
+    fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_db_dep
+
+    with TestClient(fastapi_app) as client:
+        yield client
+
+    fastapi_app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def client_with_folder_conflict_stub(monkeypatch):
+    async def override_user():
+        return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
+
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+
+    def override_db_dep():
+        return _FolderConflictStubDB()
 
     monkeypatch.setenv("MINIMAL_TEST_APP", "0")
     monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
@@ -166,6 +209,18 @@ def test_note_folder_list_and_create_endpoints(client_with_notes_db: TestClient)
         "Inbox",
         "Inbox/Captured Articles",
     ]
+
+
+def test_create_note_folder_refetches_after_conflict(
+    client_with_folder_conflict_stub: TestClient,
+) -> None:
+    response = client_with_folder_conflict_stub.post(
+        "/api/v1/notes/folders/",
+        json={"path": "Inbox"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == 42
 
 
 def test_keywords_crud_and_linking(client_with_notes_db: TestClient):

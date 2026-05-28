@@ -1611,7 +1611,17 @@ async def create_note_folder(
                 status_code=status.HTTP_200_OK,
                 content=jsonable_encoder(existing_response),
             )
-        folder = await _run_db_call(db.create_note_folder_path, folder_in.path)
+        try:
+            folder = await _run_db_call(db.create_note_folder_path, folder_in.path)
+        except ConflictError:
+            existing_after_conflict = await _run_db_call(db.get_note_folder_by_path, folder_in.path)
+            if existing_after_conflict is not None:
+                existing_response = NoteFolderResponse.model_validate(existing_after_conflict)
+                return JSONResponse(
+                    status_code=status.HTTP_200_OK,
+                    content=jsonable_encoder(existing_response),
+                )
+            raise
         return NoteFolderResponse.model_validate(folder)
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "note folder")

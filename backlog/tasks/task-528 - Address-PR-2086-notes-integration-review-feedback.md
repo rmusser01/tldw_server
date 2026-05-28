@@ -36,7 +36,7 @@ Review feedback addressed after rebasing PR #2086 branch on origin/dev 731c365b5
 - Qodo: note-folder endpoint rate-limit check failures now log a warning before retaining the existing fail-open behavior.
 - Qodo: list_note_folders/create_note_folder now have return type hints and docstrings.
 - Qodo: new note-folder tests now have fixture/test return and parameter type hints.
-- Qodo: PostgreSQL note_folders schema now has a unique LOWER(path) index and the duplicate _ensure_note_folder_schema_postgres definition was removed.
+- Qodo: PostgreSQL note_folders schema now has a unique `LOWER(path)` index and the duplicate `_ensure_note_folder_schema_postgres` definition was removed.
 - Qodo: WebClipper folder/workspace picker load guards reset on cancellation/failure so users can retry after transient failures.
 
 Verification:

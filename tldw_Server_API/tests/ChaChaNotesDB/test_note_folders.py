@@ -59,6 +59,8 @@ def test_postgres_note_folder_schema_enforces_case_insensitive_paths() -> None:
         "UNIQUE INDEX" in statement
         and "note_folders" in statement
         and "LOWER(path)" in statement
+        and "WHERE" in statement
+        and "deleted" in statement
         for statement in backend.statements
     )
 

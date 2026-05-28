@@ -30,7 +30,7 @@ Create a single integration branch for the approved /notes UX remediation slices
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Integration branch/worktree:
 - Branch: codex/notes-ux-remediation-integrated
 - Worktree: .worktrees/notes-ux-remediation-integrated
@@ -67,7 +67,7 @@ Verification:
 - Backend tests generated two untracked watchlist template markdown files; they were not staged.
 
 Post-task-update diff checks passed: git diff --check origin/dev..HEAD and git diff --check.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

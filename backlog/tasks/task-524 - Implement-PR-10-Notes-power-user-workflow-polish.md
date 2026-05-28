@@ -47,10 +47,6 @@ Implemented PR10 power-user polish for /notes. The editor now has a Save & new a
 Verification recorded: focused Notes vitest suite passed 19/19; search/filter/tag organization vitest suite passed 12/12; extension compile passed; git diff --check passed. UI tsc with 8GB heap still fails on the existing Characters test GalleryCardDensity baseline at src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx:35. Bandit skipped because this slice touched only frontend TypeScript/TSX and Backlog markdown. Browser smoke was run during this PR10 pass for online Save & new with API config/tour dismissed and observed POST /api/v1/notes/ returning 201 followed by a blank focused draft; offline diagnostics preserved the single queued draft:new entry, which is documented as a product follow-up.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

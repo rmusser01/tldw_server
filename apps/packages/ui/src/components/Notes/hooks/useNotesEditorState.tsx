@@ -370,7 +370,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (next === current) return
       recentNotesRef.current = next
       setRecentNotes(next)
-      void setSetting(NOTES_RECENT_OPENED_SETTING, next)
+      void setSetting(NOTES_RECENT_OPENED_SETTING, next).catch(() => {
+        // Keep the in-memory recent list even if settings persistence fails.
+      })
     },
     []
   )

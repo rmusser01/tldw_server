@@ -368,6 +368,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   applyWikilinkSuggestion,
 }) => {
   const { t } = useTranslation(['option', 'common'])
+  const unavailableLabel = t('option:notesSearch.linkedNoteUnavailable', {
+    defaultValue: 'Unavailable'
+  })
   const saveStatusRef = React.useRef<HTMLSpanElement | null>(null)
   const saveStatusDescriptionId = saveIndicatorText ? NOTES_SAVE_STATUS_MESSAGE_ID : null
   const contentDescribedBy = joinAriaIds(NOTES_EDITOR_CONTENT_HELP_ID, saveStatusDescriptionId)
@@ -969,7 +972,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                         type="button"
                         aria-label={
                           link.available === false
-                            ? `${link.title} ${link.unavailableReason || 'Unavailable'}`
+                            ? `${link.title} ${link.unavailableReason || unavailableLabel}`
                             : link.title
                         }
                         className={`flex flex-col items-start text-xs ${
@@ -1062,7 +1065,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                         type="button"
                         aria-label={
                           note.available === false
-                            ? `${note.title} ${note.unavailableReason || 'Unavailable'}`
+                            ? `${note.title} ${note.unavailableReason || unavailableLabel}`
                             : note.title
                         }
                         className={`flex min-w-[7rem] flex-col items-start px-2 py-1 text-left text-xs ${
@@ -1134,7 +1137,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                         type="button"
                         aria-label={
                           note.available === false
-                            ? `${note.title} ${note.unavailableReason || 'Unavailable'}`
+                            ? `${note.title} ${note.unavailableReason || unavailableLabel}`
                             : note.title
                         }
                         className={`flex min-w-[7rem] flex-col items-start px-2 py-1 text-left text-xs ${

@@ -8013,9 +8013,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 id,
                 FIRST_VALUE(id) OVER (
                   PARTITION BY LOWER(path)
-                  ORDER BY deleted ASC, id ASC
+                  ORDER BY id ASC
                 ) AS canonical_id
               FROM note_folders
+              WHERE deleted = FALSE
             ),
             duplicate_folders AS (
               SELECT
@@ -8034,7 +8035,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CREATE TABLE IF NOT EXISTS note_folders(
               id            BIGSERIAL PRIMARY KEY,
               name          TEXT    NOT NULL,
-              path          TEXT    UNIQUE NOT NULL,
+              path          TEXT    NOT NULL,
               parent_id     BIGINT REFERENCES note_folders(id)
                              ON DELETE CASCADE ON UPDATE CASCADE,
               created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -8044,6 +8045,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               version       INTEGER NOT NULL DEFAULT 1
             )
             """,
+            "ALTER TABLE note_folders DROP CONSTRAINT IF EXISTS note_folders_path_key",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_path ON note_folders(path)",
             """
@@ -8145,9 +8147,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             WHERE folder.id = duplicate_folders.duplicate_id
             """
             ),
+            """
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1
+                  FROM pg_indexes
+                 WHERE schemaname = current_schema()
+                   AND tablename = 'note_folders'
+                   AND indexname = 'idx_note_folders_path_lower'
+                   AND indexdef NOT ILIKE '%WHERE%deleted%'
+              ) THEN
+                DROP INDEX idx_note_folders_path_lower;
+              END IF;
+            END $$;
+            """,
             (
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_lower "
-                "ON note_folders(LOWER(path))"
+                "ON note_folders(LOWER(path)) WHERE deleted = FALSE"
             ),
         ]
         for statement in statements:
@@ -17760,7 +17777,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return None
         return self._coerce_mapping_row(
             conn.execute(
-                "SELECT id, path, deleted, version FROM note_folders WHERE LOWER(path) = LOWER(?)",
+                """
+                SELECT id, path, deleted, version
+                  FROM note_folders
+                 WHERE LOWER(path) = LOWER(?)
+                 ORDER BY deleted ASC, id ASC
+                 LIMIT 1
+                """,
                 (normalized_path,),
             ).fetchone()
         )

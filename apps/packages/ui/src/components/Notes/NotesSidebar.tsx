@@ -322,6 +322,29 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
     [setListViewMode, setPage]
   )
 
+  const listErrorState = hasListError ? (
+    <div
+      className="rounded-md border border-error/30 bg-error/5 px-3 py-4 text-sm text-text"
+      data-testid="notes-list-error-state"
+      role="alert"
+    >
+      <div className="font-medium">
+        {t('option:notesSearch.listErrorTitle', {
+          defaultValue: 'Could not load notes'
+        })}
+      </div>
+      <div className="mt-1 text-text-muted">
+        {listErrorMessage ||
+          t('option:notesSearch.listErrorFallback', {
+            defaultValue: 'The notes list is unavailable right now.'
+          })}
+      </div>
+      <Button size="small" className="mt-3" onClick={retryList}>
+        {t('common:retry', { defaultValue: 'Retry' })}
+      </Button>
+    </div>
+  ) : null
+
   return (
       <aside
         id={NOTES_LIST_REGION_ID}
@@ -936,7 +959,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           <div className="flex-1 overflow-y-auto">
             {listMode === 'active' && listViewMode === 'timeline' ? (
               <div className="h-full overflow-y-auto px-3 py-3" data-testid="notes-timeline-view">
-                {isFetching && (
+                {listErrorState || (isFetching && (
                   <div className="mb-3 inline-flex items-center gap-2 text-xs text-text-muted">
                     <Spin size="small" />
                     <span>
@@ -945,8 +968,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       })}
                     </span>
                   </div>
-                )}
-                {timelineSections.length === 0 ? (
+                ))}
+                {!listErrorState && timelineSections.length === 0 ? (
                   <div
                     className="rounded-md border border-dashed border-border bg-surface2 px-3 py-4 text-sm text-text-muted"
                     data-testid="notes-timeline-empty"
@@ -955,7 +978,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       defaultValue: 'No notes match the current filters.'
                     })}
                   </div>
-                ) : (
+                ) : !listErrorState ? (
                   <div className="space-y-4">
                     {timelineSections.map((section) => (
                       <section key={section.key} data-testid={`notes-timeline-group-${section.key}`}>
@@ -1005,11 +1028,13 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       </section>
                     ))}
                   </div>
-                )}
+                ) : null}
               </div>
             ) : listMode === 'active' && listViewMode === 'moodboard' ? (
               <div className="h-full overflow-y-auto px-3 py-3" data-testid="notes-moodboard-view">
-                {selectedMoodboard == null ? (
+                {listErrorState ? (
+                  listErrorState
+                ) : selectedMoodboard == null ? (
                   <div
                     className="rounded-md border border-dashed border-border bg-surface2 px-3 py-4 text-sm text-text-muted"
                     data-testid="notes-moodboard-empty-selection"

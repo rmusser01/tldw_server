@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesEditorHeader from "../NotesEditorHeader"
 
@@ -29,7 +29,9 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => responsiveState.isMobile
 }))
 
-const renderHeader = () =>
+type HeaderOverrideProps = Partial<React.ComponentProps<typeof NotesEditorHeader>>
+
+const renderHeader = (overrides: HeaderOverrideProps = {}) =>
   render(
     <NotesEditorHeader
       title="Stage 2 note"
@@ -56,6 +58,7 @@ const renderHeader = () =>
       onExport={() => undefined}
       onSave={() => undefined}
       onDelete={() => undefined}
+      {...overrides}
     />
   )
 
@@ -111,5 +114,28 @@ describe("NotesEditorHeader stage 2 touch layout", () => {
 
     // On mobile the editor mode toggle group is hidden
     expect(screen.queryByRole("group", { name: "Editor mode" })).not.toBeInTheDocument()
+  })
+
+  it("disables desktop Save & new while a save is in progress", () => {
+    responsiveState.isMobile = false
+    renderHeader({
+      isSaving: true,
+      onSaveAndNew: () => undefined
+    })
+
+    expect(screen.getByTestId("notes-save-and-new-button")).toBeDisabled()
+  })
+
+  it("disables mobile Save & new overflow item while a save is in progress", async () => {
+    responsiveState.isMobile = true
+    renderHeader({
+      isSaving: true,
+      onSaveAndNew: () => undefined
+    })
+
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
+
+    const menuItem = (await screen.findByText("Save & new")).closest(".ant-dropdown-menu-item")
+    expect(menuItem).toHaveClass("ant-dropdown-menu-item-disabled")
   })
 })
