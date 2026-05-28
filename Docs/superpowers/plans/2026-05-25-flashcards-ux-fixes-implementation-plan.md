@@ -16,6 +16,7 @@
 - Existing master fix list: `Flashcards-UX-Fix-List.md`
 - Existing planning task: `TASK-479`
 - Current planning refresh task: `TASK-535`
+- Current review-fix task: `TASK-536`
 - Primary route: `/flashcards`
 - Direct WebUI handoffs: `/quiz` when launched from flashcards, Study Pack creation from flashcards source controls.
 - Direct extension handoffs:
@@ -123,7 +124,7 @@ Do not bundle all phases into one PR unless the user explicitly asks for a large
 
 1. Phase 0 runs first because later phases depend on trustworthy e2e selectors and confirmed reproduction of invalid import, create drawer, review, responsive, and quiz handoff states.
 2. Phase 1 runs after Phase 0 so first-time route defaults and labels stabilize before deeper setup UI work.
-3. Phase 2 runs after Phase 1 because import/create/generate recovery depends on the updated setup IA and task names.
+3. Phase 2 can begin after Phase 0 for the invalid-import recovery sub-slice because that is an observed high-severity reliability issue. The broader create/generate/transfer IA portions should still coordinate with Phase 1 labels and setup state.
 4. Phase 3 can begin after Phase 0 but should merge after Phase 1 so Study labels and route defaults are stable.
 5. Phase 4 depends on Phase 3 when deck dashboard actions reuse review completion/session labels.
 6. Phase 5 can run in parallel with late Phase 3 or Phase 4 if selectors are stable, but it should not ship before the core first-time and review flows are stable.
@@ -175,6 +176,7 @@ Do not bundle all phases into one PR unless the user explicitly asks for a large
 
 - E2E can create or seed a deck/card, open `/flashcards`, and start a review session.
 - E2E captures invalid import behavior and asserts it does not silently pass once fixed in Phase 2.
+- Any currently failing assertion is handled as RED evidence, a documented reproduction script, or a temporary `test.fixme` with the linked phase task. Phase 0 must not merge unresolved failing tests that break the baseline suite.
 - E2E or component coverage exercises manual create success and failed create feedback.
 - Keyboard-only review skeleton covers reveal, rating, completion, and return to deck/manage state.
 - Mobile/narrow viewport smoke identifies whether tabs, metrics, review card, import panels, and action rows remain reachable.
@@ -185,6 +187,7 @@ Do not bundle all phases into one PR unless the user explicitly asks for a large
 - Add selectors for create front/back fields, Create, Create and Add Another, import textarea/file controls, import submit, import result alert, rating buttons, completion state, Cram mode, progress labels, recent sessions, and quiz handoff.
 - Keep this phase mostly test/harness focused. Only fix product code here if the create drawer is completely blocked and no later phase can be tested.
 - Record exact reproduction evidence in the phase Backlog task before implementation phases begin.
+- If a grep-based Playwright command is added in this phase, give the new tests titles that match the grep pattern, or replace the command with exact test names before committing.
 
 **Focused Verification:**
 
@@ -218,7 +221,8 @@ cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THI
 - Manage no-card state suppresses expert filters, sort, density, and shortcut chips until cards exist or filters are active.
 - Scheduler is discoverable before a deck exists through disabled tab copy or Study empty-state scheduling preview.
 - Transfer/create/import label no longer implies normal import/export is LLM-only.
-- Study Pack setup does not require users to guess a raw Source ID. If a real picker is not feasible in this phase, add clear copy and defer source-picker implementation to Phase 6.
+- Study Pack setup copy clearly labels the current Source ID path as an advanced/manual source reference and points users toward supported source types. A real source picker/search is Phase 6 scope.
+- Desktop and narrow-width smoke checks confirm the changed first-time setup controls remain reachable without clipping.
 
 **Implementation Notes:**
 
@@ -233,6 +237,8 @@ cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THI
 cd apps/packages/ui && bunx vitest run src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/tabs/__tests__/ImportExportTab.decomposition.test.tsx
 cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/tier-2-features/flashcards.spec.ts --grep "first-time|empty|tabs"
 ```
+
+If the grep pattern does not match committed test titles yet, add/rename the relevant tests in this phase or run exact test names instead.
 
 ---
 
@@ -264,6 +270,7 @@ cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THI
 - Transfer summary never renders unresolved `{{cards}}` or `{{bytes}}` placeholders.
 - Create drawer has one clear deck-selection/creation model. It avoids duplicate "Create" and duplicate "New deck name" controls.
 - Failed create shows a visible error, keeps user input, and exits loading state.
+- Desktop and narrow-width smoke checks confirm import/create recovery controls remain reachable without clipping.
 
 **Implementation Notes:**
 
@@ -293,6 +300,8 @@ cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/
 cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/tier-2-features/flashcards.spec.ts --grep "import|create"
 ```
 
+If the grep pattern does not match committed test titles yet, add/rename the relevant tests in this phase or run exact test names instead.
+
 ---
 
 ## Phase 3: Review Session Comprehension And Recovery
@@ -319,6 +328,7 @@ cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THI
 - Progress labels distinguish `Due` from `Available now` or `Study queue` when new cards are reviewable.
 - Recent session rows show user-facing deck name where available, mode label, reviewed count, completed time, and clear actions such as Continue session, View completed session, or Review same deck again.
 - Shortcut modal only advertises actions that have visible equivalent controls or explicitly labels them as accelerators.
+- Desktop and narrow-width smoke checks confirm reveal, rating, undo/re-rate, and completion controls remain reachable without clipping.
 
 **Implementation Notes:**
 
@@ -338,6 +348,8 @@ const availableNow = (dueCounts?.due ?? 0) + (dueCounts?.new ?? 0) + (dueCounts?
 cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.assistant.test.tsx src/components/Flashcards/components/__tests__/KeyboardShortcutsModal.rating-scale.test.tsx src/components/Flashcards/components/__tests__/RecentStudySessions.test.tsx
 cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/tier-2-features/flashcards.spec.ts --grep "review|completion|keyboard"
 ```
+
+If the grep pattern does not match committed test titles yet, add/rename the relevant tests in this phase or run exact test names instead.
 
 ---
 
@@ -390,6 +402,8 @@ cd apps/packages/ui && bunx vitest run src/components/Flashcards/components/__te
 cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/tier-2-features/flashcards.spec.ts --grep "deck|manage|cram|resume"
 ```
 
+If the grep pattern does not match committed test titles yet, add/rename the relevant tests in this phase or run exact test names instead.
+
 ---
 
 ## Phase 5: Responsive Layout And Accessibility Hardening
@@ -431,6 +445,8 @@ cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THI
 cd apps/packages/ui && bunx vitest run src/components/Flashcards
 cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/tier-2-features/flashcards.spec.ts --grep "mobile|keyboard|accessibility|responsive"
 ```
+
+If the grep pattern does not match committed test titles yet, add/rename the relevant tests in this phase or run exact test names instead.
 
 Manual browser verification is required for this phase:
 
@@ -490,6 +506,8 @@ cd apps/tldw-frontend && TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THI
 cd apps/extension && bunx playwright test tests/e2e/flashcards-ux.spec.ts
 ```
 
+If the grep pattern does not match committed test titles yet, add/rename the relevant tests in this phase or run exact test names instead.
+
 ---
 
 ## Phase 7: Documentation, Release Gate, And Follow-On Backlog
@@ -548,6 +566,8 @@ source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endp
 ```
 
 For frontend-only or docs-only phases, record Bandit as not applicable in the Backlog task final summary.
+
+Grep-based Playwright commands in this roadmap are phase conventions, not permission to skip tests. Each phase must either add/rename tests so the grep pattern selects the intended coverage, or replace the grep command with exact committed test titles in that phase's Backlog summary.
 
 Every phase final summary must record:
 
