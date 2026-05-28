@@ -26,6 +26,19 @@ EXPECTED_PRESET_IDS = {
     "memory-keeper",
 }
 
+WORKSPACE_BOUND_PRESET_IDS = {
+    "orchestrator",
+    "product-owner",
+    "merge-conflict-resolver",
+    "documentation-writer",
+    "deep-researcher",
+    "devops-engineer",
+    "backend-engineer",
+    "frontend-engineer",
+    "sdet",
+    "memory-keeper",
+}
+
 
 def _tldw_imports_for(path: Path) -> list[str]:
     """Return imports from a Python file that cross into the host package."""
@@ -66,6 +79,27 @@ def test_builtin_presets_cover_initial_mode_ids_and_pass_safety_baseline() -> No
         if presets.validate_preset_safety(preset)
     }
     assert safety_violations == {}
+
+
+def test_write_capable_presets_advertise_workspace_binding_requirement() -> None:
+    bundled = presets.list_builtin_presets()
+    workspace_bound = {
+        preset.id
+        for preset in bundled
+        if preset.profile.policy_document.resource_constraints.get(
+            "requires_workspace_binding"
+        )
+        is True
+    }
+    assignment_bound = {
+        preset.id
+        for preset in bundled
+        if preset.profile.policy_document.resource_constraints.get("binding_stage")
+        == "assignment"
+    }
+
+    assert workspace_bound == WORKSPACE_BOUND_PRESET_IDS
+    assert assignment_bound == WORKSPACE_BOUND_PRESET_IDS
 
 
 def test_get_builtin_preset_returns_stable_profile_template() -> None:
