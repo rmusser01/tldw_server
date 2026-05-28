@@ -6,10 +6,15 @@ import { ChatHeader } from "../ChatHeader"
 
 vi.mock("antd", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  Input: ({ value, onChange, ...rest }: any) => (
+  Input: ({ value, onChange, onPressEnter, ...rest }: any) => (
     <input
       value={value}
       onChange={onChange}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          onPressEnter?.(event)
+        }
+      }}
       {...rest}
     />
   )
@@ -234,6 +239,20 @@ describe("ChatHeader shortcut toggle", () => {
     render(<ChatHeader {...props} />)
 
     expect(screen.queryByText("Chat title")).not.toBeInTheDocument()
+  })
+
+  it("labels the title editor and keeps an untitled placeholder visible", () => {
+    const props = createProps({
+      chatTitle: "",
+      isEditingTitle: true
+    })
+
+    render(<ChatHeader {...props} />)
+
+    const titleInput = screen.getByRole("textbox", {
+      name: "Rename conversation"
+    })
+    expect(titleInput).toHaveAttribute("placeholder", "Untitled")
   })
 
   it("shows share controls and status when provided", () => {

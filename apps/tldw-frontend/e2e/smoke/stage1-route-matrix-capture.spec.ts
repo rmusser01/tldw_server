@@ -2,15 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { test, expect, seedAuth, AUTH_CONFIG } from './smoke.setup';
 import { waitForAppShell } from '../utils/helpers';
+import {
+  hasRuntimeOverlayBodySignal,
+  hasRuntimeOverlayConsoleSignal,
+} from './runtime-overlay';
 
 const LOAD_TIMEOUT = 30_000;
-const RUNTIME_OVERLAY_PATTERNS = [
-  /Runtime(?:\s+\w+)?\s+Error/i,
-  /Runtime SyntaxError/i,
-  /Invalid or unexpected token/i,
-  /Objects are not valid as a React child/i,
-  /message\.error is not a function/i,
-];
 const CHROME_RUNTIME_PATTERNS = [
   /chrome is not defined/i,
   /chrome\.storage/i,
@@ -111,8 +108,8 @@ test.describe('Stage 1 route matrix capture', () => {
         MAX_DEPTH_PATTERN.test(entry)
       ).length;
       const hasErrorOverlay =
-        [...consoleErrors, ...pageErrors].some((entry) => hasPatternMatch(entry, RUNTIME_OVERLAY_PATTERNS)) ||
-        hasPatternMatch(bodyText, RUNTIME_OVERLAY_PATTERNS);
+        [...consoleErrors, ...pageErrors].some(hasRuntimeOverlayConsoleSignal) ||
+        hasRuntimeOverlayBodySignal(bodyText);
       const hasChromeRuntimeError = [...consoleErrors, ...pageErrors].some((entry) =>
         hasPatternMatch(entry, CHROME_RUNTIME_PATTERNS)
       );

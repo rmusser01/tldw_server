@@ -310,6 +310,41 @@ describe("PlaygroundContextRail first-slice controls", () => {
     ).toBeInTheDocument();
   });
 
+  it("starts secondary context sections collapsed in setup recovery mode", () => {
+    renderRail({
+      setupRecoveryMode: true,
+      compositionPreviewSummary: compositionSummary(),
+      promptSelectControl: (
+        <button type="button" aria-label="Select a prompt">
+          Select prompt
+        </button>
+      ),
+    });
+
+    const rail = screen.getByTestId("playground-context-rail");
+    expect(
+      within(rail).getByRole("button", { name: "Collapse Context stack" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      within(rail).getByRole("button", { name: "Expand Prompt" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(rail).getByRole("button", { name: "Expand Search & sources" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(rail).getByRole("button", { name: "Expand Session" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(rail).queryByRole("button", { name: "Select a prompt" }),
+    ).toBeNull();
+
+    fireEvent.click(within(rail).getByRole("button", { name: "Expand Prompt" }));
+
+    expect(
+      within(rail).getByRole("button", { name: "Select a prompt" }),
+    ).toBeInTheDocument();
+  });
+
   it("preserves existing left rail actions after regrouping", () => {
     const props = renderRail({
       compositionPreviewSummary: compositionSummary(),

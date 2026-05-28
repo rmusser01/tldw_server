@@ -35,6 +35,14 @@ const messageOptionState = vi.hoisted(() => ({
     serverChatState: "active" as string | null,
     serverChatTopic: "Research" as string | null,
     serverChatSource: "webui" as string | null,
+    serverChatCharacterId: null as string | number | null,
+    setServerChatCharacterId: vi.fn(),
+    serverChatAssistantKind: null as "character" | "persona" | null,
+    setServerChatAssistantKind: vi.fn(),
+    serverChatAssistantId: null as string | number | null,
+    setServerChatAssistantId: vi.fn(),
+    serverChatMetaLoaded: true,
+    setServerChatMetaLoaded: vi.fn(),
     isLoading: false,
     setHistoryId: vi.fn(),
     setHistory: vi.fn(),
@@ -58,6 +66,7 @@ const messageOptionState = vi.hoisted(() => ({
       name: "Mira Vale",
     } as { kind: "character" | "persona"; id: string; name: string } | null,
     serverChatPersonaMemoryMode: null as "read_only" | "read_write" | null,
+    setServerChatPersonaMemoryMode: vi.fn(),
     setSelectedAssistant: vi.fn(),
     compareMode: false,
     compareFeatureEnabled: false,
@@ -77,6 +86,7 @@ const messageOptionState = vi.hoisted(() => ({
 const sessionPersistenceState = vi.hoisted(() => ({
   value: {
     restoreSession: vi.fn(async () => false),
+    clearPersistedSession: vi.fn(),
     sessionScopeReady: true,
     hasPersistedSession: false,
     persistedHistoryId: null as string | null,
@@ -106,9 +116,78 @@ const modelSettingsState = vi.hoisted(() => ({
   },
 }));
 
+const chatSettingsState = vi.hoisted(() => ({
+  syncChatSettingsForServerChat: vi.fn(async (_params: unknown) => null),
+  applyChatSettingsPatch: vi.fn(async (_params: unknown) => null),
+}));
+
+const serverChatHistoryState = vi.hoisted(() => ({
+  value: [
+    {
+      id: "tracked-character-chat",
+      title: "Mira field notes",
+      assistant_kind: "character",
+      character_id: "character-1",
+      created_at: "2026-05-22T12:00:00.000Z",
+      updated_at: "2026-05-22T12:15:00.000Z",
+    },
+    {
+      id: "plain-chat",
+      title: "Plain chat",
+      assistant_kind: null,
+      character_id: null,
+      created_at: "2026-05-21T12:00:00.000Z",
+      updated_at: "2026-05-21T12:15:00.000Z",
+    },
+  ],
+}));
+
+const tldwServerState = vi.hoisted(() => ({
+  fetchChatModels: vi.fn(async (): Promise<any[]> => [
+    {
+      model: "openai:gpt-4.1-mini",
+      provider: "openai",
+      is_configured: true,
+      provider_is_configured: true,
+    },
+  ]),
+}));
+
+const tldwClientState = vi.hoisted(() => ({
+  initialize: vi.fn(async () => null),
+  getProvidersStatus: vi.fn(async () => ({
+    providers: [
+      {
+        name: "openai",
+        configured: true,
+        requires_api_key: true,
+      },
+    ],
+    any_configured: true,
+  })),
+  getResearchBundle: vi.fn(async () => ({})),
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, defaultValue?: string) => defaultValue || key,
+    t: (
+      key: string,
+      defaultValueOrOptions?: string | { defaultValue?: string },
+      interpolationOptions?: Record<string, unknown>,
+    ) => {
+      const defaultValue =
+        typeof defaultValueOrOptions === "string"
+          ? defaultValueOrOptions
+          : defaultValueOrOptions?.defaultValue || key;
+      const values =
+        typeof defaultValueOrOptions === "object" && defaultValueOrOptions
+          ? defaultValueOrOptions
+          : interpolationOptions;
+
+      return defaultValue.replace(/\{\{(\w+)\}\}/g, (_match, token) =>
+        values?.[token] == null ? `{{${token}}}` : String(values[token]),
+      );
+    },
   }),
 }));
 
@@ -138,6 +217,21 @@ vi.mock("@/hooks/playground-session-restore", () => ({
 
 vi.mock("@/services/app", () => ({
   webUIResumeLastChat: vi.fn(async () => false),
+}));
+
+vi.mock("@/services/chat-settings", () => ({
+  applyChatSettingsPatch: (params: unknown) =>
+    chatSettingsState.applyChatSettingsPatch(params),
+  syncChatSettingsForServerChat: (params: unknown) =>
+    chatSettingsState.syncChatSettingsForServerChat(params),
+}));
+
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: tldwServerState.fetchChatModels,
+}));
+
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: tldwClientState,
 }));
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -235,6 +329,17 @@ vi.mock("@/hooks/useLoadLocalConversation", () => ({
   useLoadLocalConversation: () => vi.fn(async () => {}),
 }));
 
+vi.mock("@/hooks/useServerChatHistory", () => ({
+  useServerChatHistory: () => ({
+    data: serverChatHistoryState.value,
+    total: serverChatHistoryState.value.length,
+    isLoading: false,
+    sidebarRefreshState: "ready",
+    hasUsableData: true,
+    isShowingStaleData: false,
+  }),
+}));
+
 vi.mock("../playground-shortcuts", () => ({
   resolvePlaygroundShortcutAction: () => null,
 }));
@@ -289,6 +394,18 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.serverChatState = "active";
     messageOptionState.value.serverChatTopic = "Research";
     messageOptionState.value.serverChatSource = "webui";
+    messageOptionState.value.serverChatCharacterId = null;
+    messageOptionState.value.setServerChatCharacterId = vi.fn();
+    messageOptionState.value.serverChatAssistantKind = null;
+    messageOptionState.value.setServerChatAssistantKind = vi.fn();
+    messageOptionState.value.serverChatAssistantId = null;
+    messageOptionState.value.setServerChatAssistantId = vi.fn();
+    messageOptionState.value.serverChatMetaLoaded = true;
+    messageOptionState.value.setServerChatMetaLoaded = vi.fn();
+    messageOptionState.value.setServerChatId = vi.fn();
+    messageOptionState.value.setHistoryId = vi.fn();
+    messageOptionState.value.setHistory = vi.fn();
+    messageOptionState.value.setMessages = vi.fn();
     messageOptionState.value.streaming = true;
     messageOptionState.value.selectedSystemPrompt = "";
     messageOptionState.value.setSelectedSystemPrompt = vi.fn();
@@ -305,6 +422,7 @@ describe("Playground cockpit controls", () => {
       name: "Mira Vale",
     };
     messageOptionState.value.serverChatPersonaMemoryMode = null;
+    messageOptionState.value.setServerChatPersonaMemoryMode = vi.fn();
     messageOptionState.value.temporaryChat = true;
     messageOptionState.value.webSearch = true;
     messageOptionState.value.toolChoice = "auto";
@@ -319,6 +437,25 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.setRagMediaIds = vi.fn();
     messageOptionState.value.stopStreamingRequest = vi.fn();
     messageOptionState.value.regenerateLastMessage = vi.fn();
+    messageOptionState.value.setSelectedAssistant = vi.fn();
+    messageOptionState.value.setSelectedCharacter = vi.fn();
+    sessionPersistenceState.value.clearPersistedSession = vi.fn();
+    chatSettingsState.syncChatSettingsForServerChat.mockClear();
+    chatSettingsState.applyChatSettingsPatch.mockClear();
+    tldwServerState.fetchChatModels.mockClear();
+    tldwClientState.initialize.mockClear();
+    tldwClientState.getProvidersStatus.mockClear();
+    tldwClientState.getProvidersStatus.mockResolvedValue({
+      providers: [
+        {
+          name: "openai",
+          configured: true,
+          requires_api_key: true,
+        },
+      ],
+      any_configured: true,
+    });
+    tldwClientState.getResearchBundle.mockClear();
     useMcpToolsStore.setState({
       healthState: "healthy",
       toolsLoading: false,
@@ -374,6 +511,16 @@ describe("Playground cockpit controls", () => {
         within(contextRail).getByText("1 knowledge item"),
       ).toBeInTheDocument();
       expect(within(contextRail).getByText("2 media scopes")).toBeInTheDocument();
+      const statusStrip = screen.getByRole("status", { name: "Chat status" });
+      expect(statusStrip).toHaveTextContent("Web search on");
+      expect(statusStrip).toHaveTextContent("1 file");
+      expect(statusStrip).toHaveTextContent("1 knowledge item");
+      expect(statusStrip).toHaveTextContent("+1 more");
+      expect(
+        within(statusStrip).getByRole("button", {
+          name: /open search & context/i,
+        }),
+      ).toBeInTheDocument();
       expect(within(contextRail).getByText("Temporary chat")).toBeInTheDocument();
       expect(within(contextRail).getByText("History linked")).toBeInTheDocument();
       expect(
@@ -650,8 +797,14 @@ describe("Playground cockpit controls", () => {
         name: "Clear assistant",
       }),
     );
-    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
-    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
+    await waitFor(() => {
+      expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(
+        null,
+      );
+      expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+        null,
+      );
+    });
   });
 
   it("shows server session title and recoverable load errors in the context rail", async () => {
@@ -891,9 +1044,15 @@ describe("Playground cockpit controls", () => {
     clearButton.focus();
     fireEvent.click(clearButton);
 
-    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
-    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
     expect(document.activeElement).toBe(clearButton);
+    await waitFor(() => {
+      expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(
+        null,
+      );
+      expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+        null,
+      );
+    });
 
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
@@ -902,9 +1061,12 @@ describe("Playground cockpit controls", () => {
       screen.getByTestId("playground-cockpit-right-rail"),
     ).getByTestId("playground-runtime-inspector");
     expect(
-      within(updatedRuntimeInspector).getAllByText("No assistant selected")
+      within(updatedRuntimeInspector).getAllByText("No runtime assistant selected")
         .length,
     ).toBeGreaterThan(0);
+    expect(
+      within(updatedRuntimeInspector).queryByText("No assistant selected"),
+    ).toBeNull();
     expect(within(updatedRuntimeInspector).queryByText("Legacy Character")).toBeNull();
     await waitFor(() => {
       expect(document.activeElement).toBe(
@@ -913,6 +1075,100 @@ describe("Playground cockpit controls", () => {
         }),
       );
     });
+  });
+
+  it("clears tracked server-chat assistant metadata from the runtime rail", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = {
+      kind: "character",
+      id: "character-1",
+      name: "Mira Vale",
+    };
+    messageOptionState.value.selectedCharacter = {
+      id: "character-1",
+      name: "Mira Vale",
+    };
+    messageOptionState.value.serverChatId = "tracked-character-chat";
+    messageOptionState.value.serverChatCharacterId = "character-1";
+    messageOptionState.value.serverChatAssistantKind = "character";
+    messageOptionState.value.serverChatAssistantId = "character-1";
+    messageOptionState.value.serverChatPersonaMemoryMode = null;
+    messageOptionState.value.serverChatMetaLoaded = true;
+
+    render(<Playground />);
+
+    const runtimeInspector = within(
+      await screen.findByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    fireEvent.click(
+      within(runtimeInspector).getByRole("button", {
+        name: "Clear assistant",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(
+        null,
+      );
+      expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+        null,
+      );
+      expect(messageOptionState.value.setServerChatCharacterId).toHaveBeenCalledWith(
+        null,
+      );
+      expect(
+        messageOptionState.value.setServerChatAssistantKind,
+      ).toHaveBeenCalledWith(null);
+      expect(messageOptionState.value.setServerChatAssistantId).toHaveBeenCalledWith(
+        null,
+      );
+      expect(
+        messageOptionState.value.setServerChatPersonaMemoryMode,
+      ).toHaveBeenCalledWith(null);
+      expect(messageOptionState.value.setServerChatMetaLoaded).toHaveBeenCalledWith(
+        false,
+      );
+      expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null);
+      expect(sessionPersistenceState.value.clearPersistedSession).toHaveBeenCalled();
+    });
+  });
+
+  it("clears persisted assistant overlay settings when returning to plain chat", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.historyId = "history-overlay";
+    messageOptionState.value.serverChatId = "overlay-chat";
+    messageOptionState.value.selectedAssistant = {
+      kind: "persona",
+      id: "persona-overlay",
+      name: "Overlay Persona",
+      metadata: {
+        selectionMode: "overlay",
+      },
+    } as any;
+    messageOptionState.value.selectedCharacter = null;
+
+    render(<Playground />);
+
+    const runtimeInspector = within(
+      await screen.findByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    fireEvent.click(
+      within(runtimeInspector).getByRole("button", {
+        name: "Clear assistant",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(chatSettingsState.applyChatSettingsPatch).toHaveBeenCalledWith({
+        historyId: "history-overlay",
+        serverChatId: "overlay-chat",
+        patch: {
+          assistantOverlay: null,
+        },
+      });
+    });
+    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
+    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
   });
 
   it("does not render cockpit control rails in focus mode", async () => {
@@ -960,6 +1216,8 @@ describe("Playground cockpit controls", () => {
 
   it("reflects degraded server readiness in the cockpit runtime and status strip", async () => {
     messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
 
     render(<Playground />);
 
@@ -986,6 +1244,8 @@ describe("Playground cockpit controls", () => {
 
   it("keeps streaming primary when degraded readiness is warning-only", async () => {
     messageOptionState.value.streaming = true;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
 
     render(<Playground />);
 
@@ -1011,6 +1271,8 @@ describe("Playground cockpit controls", () => {
 
   it("surfaces blocked server readiness as chat-critical unavailable state", async () => {
     messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
 
     render(<Playground />);
 
@@ -1041,8 +1303,68 @@ describe("Playground cockpit controls", () => {
     expect(status).not.toHaveTextContent("Chat remains available.");
   });
 
+  it("keeps provider setup blocking consistent across empty-state and cockpit rails", async () => {
+    messageOptionState.value.messages = [];
+    messageOptionState.value.historyId = null;
+    messageOptionState.value.serverChatId = null;
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
+    messageOptionState.value.selectedModel = "tldw:gpt-4o";
+    modelSettingsState.value.apiProvider = undefined;
+    modelSettingsState.value.activeSettingsScope = "tldw:gpt-4o";
+    tldwServerState.fetchChatModels.mockResolvedValueOnce([
+      {
+        id: "gpt-4o",
+        model: "tldw:gpt-4o",
+        name: "GPT-4o",
+        provider: "openai",
+        type: "chat",
+      },
+    ]);
+    tldwClientState.getProvidersStatus.mockResolvedValueOnce({
+      providers: [
+        {
+          name: "openai",
+          configured: false,
+          requires_api_key: true,
+        },
+      ],
+      any_configured: false,
+    });
+
+    render(<Playground />);
+
+    const leftRail = await screen.findByTestId("playground-cockpit-left-rail");
+    expect(leftRail).toBeInTheDocument();
+    expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
+    expect(
+      within(leftRail).getByRole("button", { name: "Expand Prompt" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    const rightRail = await screen.findByTestId("playground-cockpit-right-rail");
+    expect(
+      within(rightRail).getByRole("button", { name: "Expand Assistant" }),
+    ).toHaveAttribute("aria-expanded", "false");
+
+    const runtimeInspector = within(
+      rightRail,
+    ).getByTestId("playground-runtime-inspector");
+
+    await waitFor(() => {
+      expect(within(runtimeInspector).getByText("Error")).toBeInTheDocument();
+    });
+    expect(runtimeInspector).toHaveTextContent("Provider setup needed");
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Model setup needed");
+    expect(status).toHaveTextContent("Provider setup needed");
+    expect(status).not.toHaveTextContent("Ready");
+  });
+
   it("keeps the cockpit visibly degraded when readiness details are empty", async () => {
     messageOptionState.value.streaming = false;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
 
     render(<Playground />);
 

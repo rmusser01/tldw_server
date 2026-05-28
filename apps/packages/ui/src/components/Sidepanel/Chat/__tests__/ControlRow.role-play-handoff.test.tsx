@@ -260,7 +260,13 @@ describe("ControlRow role-play handoff behavior", () => {
   it("uses the resolved extension URL when tabs.create is unavailable", () => {
     render(<ControlRow {...defaultProps()} />)
 
-    fireEvent.click(screen.getByTestId("chat-open-full-app"))
+    const openFullApp = screen.getByTestId("chat-open-full-app")
+
+    expect(openFullApp).toHaveAccessibleDescription(
+      "Opens /chat in a new tab with the active role-play route. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+    )
+
+    fireEvent.click(openFullApp)
 
     expect(mocks.runtimeGetURL).toHaveBeenCalledWith(
       "/options.html#/chat?mode=character&characterId=char-review"

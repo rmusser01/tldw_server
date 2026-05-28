@@ -17,9 +17,11 @@ import { tldwClient, type ChatLinkedResearchRun } from "@/services/tldw/TldwApiC
 import { NoProviderBanner } from "@/components/Common/NoProviderBanner"
 import { applyVariantToMessage } from "@/utils/message-variants"
 import {
+  buildAvailableChatModelIds,
   buildCharacterChatReadiness,
   CHARACTER_CHAT_MODEL_SETTINGS_PATH,
-  getCharacterChatReadinessCopy
+  getCharacterChatReadinessCopy,
+  mergeChatProviderStatusIntoModels
 } from "@/utils/chat-model-availability"
 import {
   getChatLinkedResearchActionPolicy,
@@ -216,6 +218,17 @@ export const PlaygroundChat = ({
   })
   const noProvidersConfigured =
     providersStatus != null && providersStatus.any_configured === false
+  const readinessChatModels = React.useMemo(
+    () =>
+      mergeChatProviderStatusIntoModels(
+        (chatModels ?? []) as any[],
+        providersStatus
+      ) as any[],
+    [chatModels, providersStatus]
+  )
+  const hasUsableChatModels =
+    chatModelsFetched &&
+    buildAvailableChatModelIds(readinessChatModels).size > 0
   const selectedCharacterName =
     selectedCharacter?.name ||
     (selectedCharacter as any)?.title ||
@@ -227,12 +240,18 @@ export const PlaygroundChat = ({
       isServerConnected: isConnected,
       selectedCharacter,
       selectedModel: null,
-      availableModels: chatModels as any[]
+      availableModels: readinessChatModels
     })
     return getCharacterChatReadinessCopy(readiness, t, {
       characterName: selectedCharacterName
     })
-  }, [chatModels, isConnected, selectedCharacter, selectedCharacterName, t])
+  }, [
+    isConnected,
+    readinessChatModels,
+    selectedCharacter,
+    selectedCharacterName,
+    t
+  ])
   const compareModeActive = compareFeatureEnabled && compareMode
   const stableHistoryId =
     temporaryChat || historyId === "temp" ? null : historyId
@@ -425,16 +444,21 @@ export const PlaygroundChat = ({
       "playground:selectedServerChatLoadFailure",
       "Failed to load the selected conversation."
     ) as string)
-  const showNoProvidersNotice = isConnected && noProvidersConfigured
+  const showNoProvidersNotice =
+    isConnected &&
+    noProvidersConfigured &&
+    chatModelsFetched &&
+    !hasUsableChatModels
   const showNoModelsNotice =
     isConnected &&
     !noProvidersConfigured &&
     chatModelsFetched &&
-    chatModels.length === 0
+    !hasUsableChatModels
+  const showSetupRecoveryNotice = showNoProvidersNotice || showNoModelsNotice
   const showEmptyStarterRegion =
     messages.length === 0 &&
     serverChatLoadState !== "loading" &&
-    (showStarterDeck || showNoProvidersNotice || showNoModelsNotice)
+    (showStarterDeck || showSetupRecoveryNotice)
   const normalizedSearchQuery =
     typeof searchQuery === "string" ? searchQuery.trim() : ""
   const resolveSearchMatch = React.useCallback(
@@ -1086,7 +1110,7 @@ export const PlaygroundChat = ({
                 </p>
               </div>
             )}
-            {showStarterDeck && <PlaygroundEmpty />}
+            {showStarterDeck && !showSetupRecoveryNotice && <PlaygroundEmpty />}
           </div>
         )}
         <React.Suspense fallback={null}>

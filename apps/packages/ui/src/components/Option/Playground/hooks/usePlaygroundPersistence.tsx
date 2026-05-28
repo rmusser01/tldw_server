@@ -422,22 +422,6 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       }
 
       if (!serverPersistenceHintSeenRef.current) {
-        notificationApi.success({
-          message: t(
-            "playground:composer.persistence.serverSavedTitle",
-            "Chat now saved on server"
-          ),
-          description:
-            t(
-              "playground:composer.persistence.serverSaved",
-              "Future messages in this chat will sync to your tldw server."
-            ) +
-            " " +
-            t(
-              "playground:composer.persistence.serverBenefits",
-              "This keeps a durable record in server history so you can reopen the conversation later, access it from other browsers, and run server-side analytics over your chats."
-            )
-        })
         serverPersistenceHintSeenRef.current = true
         setServerPersistenceHintSeen(true)
         setShowServerPersistenceHint(true)

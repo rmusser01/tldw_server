@@ -577,7 +577,7 @@ describe("AssistantSelect behavior", () => {
         detail: {
           tab: "persona",
           applyAs: "overlay",
-          source: "character-control-rail"
+          source: "playground-cockpit"
         }
       })
     )
@@ -630,7 +630,7 @@ describe("AssistantSelect behavior", () => {
         detail: {
           tab: "character",
           applyAs: "overlay",
-          source: "character-control-rail"
+          source: "playground-cockpit"
         }
       })
     )
@@ -667,7 +667,7 @@ describe("AssistantSelect behavior", () => {
         detail: {
           tab: "persona",
           applyAs: "overlay",
-          source: "character-control-rail"
+          source: "playground-cockpit"
         }
       })
     )
@@ -705,7 +705,7 @@ describe("AssistantSelect behavior", () => {
         detail: {
           tab: "persona",
           applyAs: "overlay",
-          source: "character-control-rail"
+          source: "playground-cockpit"
         }
       })
     )

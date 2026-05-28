@@ -57,10 +57,6 @@ vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
   PlaygroundChat: () => <div data-testid="playground-chat" />
 }))
 
-vi.mock("@/components/Option/Playground/CharacterControlRail", () => ({
-  CharacterControlRail: () => <div data-testid="character-control-rail" />
-}))
-
 vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
   ArtifactsPanel: () => null
 }))
@@ -153,6 +149,17 @@ vi.mock("@/hooks/useLoadLocalConversation", () => ({
   useLoadLocalConversation: () => vi.fn(async () => {})
 }))
 
+vi.mock("@/hooks/useServerChatHistory", () => ({
+  useServerChatHistory: () => ({
+    data: [],
+    total: 0,
+    isLoading: false,
+    sidebarRefreshState: "ready",
+    hasUsableData: true,
+    isShowingStaleData: false
+  })
+}))
+
 vi.mock("../playground-shortcuts", () => ({
   resolvePlaygroundShortcutAction: () => null
 }))
@@ -202,15 +209,13 @@ describe("Playground coordinator integration", () => {
         "server-history": false,
         "mcp-tools": false,
         "audio-health": false,
-        "model-catalog": false,
-        "character-control": false
+        "model-catalog": false
       },
       engagedPanels: {
         "server-history": false,
         "mcp-tools": false,
         "audio-health": false,
-        "model-catalog": false,
-        "character-control": false
+        "model-catalog": false
       }
     })
   })
@@ -242,19 +247,6 @@ describe("Playground coordinator integration", () => {
     await waitFor(() => {
       expect(restoreSession).toHaveBeenCalledTimes(1)
     })
-  })
-
-  it("renders the character control rail when the coordinator marks it visible", () => {
-    useChatSurfaceCoordinatorStore.setState((state) => ({
-      visiblePanels: {
-        ...state.visiblePanels,
-        "character-control": true
-      }
-    }))
-
-    render(<Playground />)
-
-    expect(screen.getByTestId("character-control-rail")).toBeInTheDocument()
   })
 
   it("applies explicit character chat route ids before persisted session restore", async () => {

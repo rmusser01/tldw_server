@@ -389,13 +389,13 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
               aria-label={
                 t(
                   "playground:composer.sendOptions",
-                  "Open send options"
+                  "Open message delivery options"
                 ) as string
               }
               title={
                 t(
                   "playground:composer.sendOptions",
-                  "Open send options"
+                  "Open message delivery options"
                 ) as string
               }
               icon={

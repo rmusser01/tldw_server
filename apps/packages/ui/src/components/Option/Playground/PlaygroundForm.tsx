@@ -260,6 +260,7 @@ type Props = {
   ) => void;
   onPrepareResearchFollowUp?: (target: ResearchFollowUpTarget) => void;
   stickyDockEnabled?: boolean;
+  mobileCockpitModeActive?: boolean;
   onComposerLayoutChange?: (metrics: ComposerDockLayoutMetrics) => void;
   onDraftPresenceChange?: (hasDraft: boolean) => void;
   characterChatSendBlocker?: PlaygroundSendBlocker | null;
@@ -454,6 +455,7 @@ export const PlaygroundForm = ({
   onSelectAttachedResearchContextHistory,
   onPrepareResearchFollowUp,
   stickyDockEnabled = false,
+  mobileCockpitModeActive = false,
   onComposerLayoutChange,
   onDraftPresenceChange,
   characterChatSendBlocker = null,
@@ -618,6 +620,8 @@ export const PlaygroundForm = ({
 
   const [autoSubmitVoiceMessage] = useStorage("autoSubmitVoiceMessage", false);
   const isMobileViewport = useMobile();
+  const suppressComposerToolbarForMobileCockpit =
+    mobileCockpitModeActive && isMobileViewport;
   const mobileComposerViewport = useMobileComposerViewport(isMobileViewport);
   const [viewportHeightPx, setViewportHeightPx] = React.useState(() =>
     typeof window === "undefined" ? 0 : window.innerHeight,
@@ -1426,22 +1430,6 @@ export const PlaygroundForm = ({
     };
   }, [markOptionalPanelEngaged, setOptionalPanelVisible, voiceChatEnabled]);
 
-  React.useEffect(() => {
-    const showCharacterControl = !isMobileViewport;
-    setOptionalPanelVisible("character-control", showCharacterControl);
-    if (showCharacterControl) {
-      markOptionalPanelEngaged("character-control");
-    }
-
-    return () => {
-      setOptionalPanelVisible("character-control", false);
-    };
-  }, [
-    isMobileViewport,
-    markOptionalPanelEngaged,
-    setOptionalPanelVisible,
-  ]);
-
   // Auto-select model on initial load when no model is selected
   // Priority: 1) First favorite model, 2) First available model
   React.useEffect(() => {
@@ -2158,10 +2146,27 @@ export const PlaygroundForm = ({
     imageBackendMenuItems,
     imageBackendBadgeLabel,
   } = useImageBackend({ imageModels });
+  const translateModelCatalogControl = React.useCallback(
+    (key: string, defaultValueOrOptions?: unknown, options?: unknown) =>
+      toText(t(key, defaultValueOrOptions as never, options as never)),
+    [t],
+  );
+  const modelCatalogControls = (
+    <PlaygroundModelCatalogControls
+      t={translateModelCatalogControl}
+      modelListScope={modelListScope}
+      setModelListScope={setModelListScope}
+      modelSearchQuery={modelSearchQuery}
+      setModelSearchQuery={setModelSearchQuery}
+      modelSortMode={modelSortMode}
+      setModelSortMode={setModelSortMode}
+    />
+  );
 
   const modelSelectButton = (
     <ChatModelSelectorDropdown
       apiModelLabel={apiModelLabel}
+      catalogControls={modelCatalogControls}
       connectionStatusLabel={connectionStatusLabel}
       connectionStatusWarning={
         !isConnectionReady || connectionUxState === "connected_degraded"
@@ -5258,7 +5263,11 @@ export const PlaygroundForm = ({
                                     !composerOptionsExpanded,
                                   )
                                 }
-                                className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-surface/80 text-text-muted transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/40 ${
+                                className={`${
+                                  suppressComposerToolbarForMobileCockpit
+                                    ? "hidden"
+                                    : "inline-flex"
+                                } h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-surface/80 text-text-muted transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/40 ${
                                   composerOptionsExpanded
                                     ? "border-primary/40 text-primaryStrong"
                                     : ""
@@ -5274,7 +5283,9 @@ export const PlaygroundForm = ({
                               <div
                                 className={
                                   isMobileViewport
-                                    ? "min-w-0"
+                                    ? suppressComposerToolbarForMobileCockpit
+                                      ? "col-span-2 min-w-0"
+                                      : "min-w-0"
                                     : "min-w-0 flex-1"
                                 }
                               >
@@ -5632,6 +5643,12 @@ export const PlaygroundForm = ({
                             )}
                           </div>
                         );
+                        const composerToolbarSlot =
+                          suppressComposerToolbarForMobileCockpit
+                            ? (
+                                <div className="hidden">{composerToolbarNode}</div>
+                              )
+                            : composerToolbarNode;
 
                         if (nextgenComposerEnabled) {
                           const sharedNoticesSlot = (
@@ -5740,7 +5757,7 @@ export const PlaygroundForm = ({
                                   textareaRef.current?.focus();
                                 }}
                                 textareaSlot={composerTextareaNode}
-                                facetsSlot={composerToolbarNode}
+                                facetsSlot={composerToolbarSlot}
                                 noticesSlot={sharedNoticesSlot}
                               />
                             ) : nextgenComposerVariant === "v3" ? (
@@ -5756,7 +5773,7 @@ export const PlaygroundForm = ({
                                 tokens={tokensProp}
                                 briefSections={briefSections}
                                 textareaSlot={composerTextareaNode}
-                                bottomBarSlot={composerToolbarNode}
+                                bottomBarSlot={composerToolbarSlot}
                                 noticesSlot={sharedNoticesSlot}
                               />
                             ) : (
@@ -5771,7 +5788,7 @@ export const PlaygroundForm = ({
                                 stopStreaming={stopStreamingRequest}
                                 tokens={tokensProp}
                                 textareaSlot={composerTextareaNode}
-                                bottomBarSlot={composerToolbarNode}
+                                bottomBarSlot={composerToolbarSlot}
                                 noticesSlot={sharedNoticesSlot}
                               />
                             );
@@ -5786,7 +5803,7 @@ export const PlaygroundForm = ({
                         return (
                           <>
                             {composerTextareaNode}
-                            {composerToolbarNode}
+                            {composerToolbarSlot}
                             {composerInlineMessagesNode}
                             {composerNoticesNode}
                           </>

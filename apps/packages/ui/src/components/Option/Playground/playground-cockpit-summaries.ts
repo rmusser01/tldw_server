@@ -25,6 +25,7 @@ type AssistantSummaryCopy = Partial<{
   legacyCharacterFallbackName: (id: string | number) => string;
   memoryReadOnly: string;
   memoryReadWrite: string;
+  noAssistantAttachedToNextMessage: string;
   noAssistantSelected: string;
   personaFallbackName: string;
   personaSelected: string;
@@ -83,6 +84,7 @@ const defaultAssistantCopy = {
   legacyCharacterFallbackName: (id: string | number) => `Character ${id}`,
   memoryReadOnly: "memory read-only",
   memoryReadWrite: "memory read/write",
+  noAssistantAttachedToNextMessage: "No assistant attached to next message",
   noAssistantSelected: "No assistant selected",
   personaFallbackName: "Persona",
   personaSelected: "Persona selected",
@@ -243,6 +245,8 @@ export function buildCockpitAssistantSummary(input: {
     mode: "none",
     name: null,
     detail: copy.noAssistantSelected,
+    compositionTitle: copy.noAssistantAttachedToNextMessage,
+    compositionDetail: null,
   };
 }
 

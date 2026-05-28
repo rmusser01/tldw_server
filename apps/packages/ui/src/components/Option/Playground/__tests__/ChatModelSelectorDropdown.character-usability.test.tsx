@@ -20,13 +20,55 @@ vi.mock("react-router-dom", () => ({
 }))
 
 vi.mock("antd", () => ({
-  Dropdown: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Dropdown: ({
+    children,
+    open,
+    popupRender
+  }: {
+    children: React.ReactNode
+    open?: boolean
+    popupRender?: (menu: React.ReactNode) => React.ReactNode
+  }) => (
+    <>
+      {children}
+      {open && popupRender ? (
+        <div data-testid="model-selector-popup">
+          {popupRender(<div data-testid="model-selector-menu" />)}
+        </div>
+      ) : null}
+    </>
+  ),
+  Input: ({ "aria-label": ariaLabel, placeholder, value, onChange }: any) => (
+    <input
+      aria-label={ariaLabel}
+      placeholder={placeholder}
+      value={value}
+      onChange={onChange}
+    />
+  ),
+  Select: ({ value, onChange, options }: any) => (
+    <select
+      aria-label="Sort models"
+      value={value}
+      onChange={(event) => onChange?.(event.target.value)}
+    >
+      {options.map((option: { value: string; label: string }) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  ),
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 
 vi.mock("@/components/Common/ProviderIcon", () => ({
   ProviderIcons: ({ provider }: { provider: string }) => (
-    <span data-testid="provider-icon">{provider}</span>
+    <span
+      aria-hidden="true"
+      data-provider={provider}
+      data-testid="provider-icon"
+    />
   )
 }))
 
@@ -58,9 +100,8 @@ describe("ChatModelSelectorDropdown character model usability", () => {
       name: /configure the selected model provider before chatting as ada/i
     })
 
-    expect(selector).toHaveTextContent(
-      "OpenAI / gpt-4o - Provider setup needed"
-    )
+    expect(selector).toHaveTextContent("OpenAI / gpt-4o")
+    expect(selector).toHaveTextContent("Provider setup needed")
     expect(selector).toHaveAttribute(
       "title",
       "Configure the selected model provider before chatting as Ada"
@@ -83,10 +124,28 @@ describe("ChatModelSelectorDropdown character model usability", () => {
       name: /checking chat model readiness/i
     })
 
-    expect(selector).toHaveTextContent(
-      "OpenAI / gpt-4o - Checking model readiness"
-    )
+    expect(selector).toHaveTextContent("OpenAI / gpt-4o")
+    expect(selector).toHaveTextContent("Checking model readiness")
     expect(selector).not.toHaveTextContent("Healthy")
     expect(selector).not.toHaveTextContent("Ready")
+  })
+
+  it("renders provided configured/catalog controls in the model popup", () => {
+    render(
+      <ChatModelSelectorDropdown
+        {...baseProps}
+        modelDropdownOpen
+        catalogControls={
+          <button type="button" data-testid="model-list-scope-toggle">
+            Search all models
+          </button>
+        }
+      />
+    )
+
+    const popup = screen.getByTestId("model-selector-popup")
+    expect(popup).toHaveTextContent("Search all models")
+    expect(screen.getByTestId("model-list-scope-toggle")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Search models")).toBeNull()
   })
 })

@@ -165,6 +165,12 @@ export function ChatHeader({
                 <Input
                   size="small"
                   autoFocus
+                  aria-label={toText(
+                    t("option:header.renameConversation", "Rename conversation")
+                  )}
+                  placeholder={toText(
+                    t("option:header.untitledChat", "Untitled")
+                  )}
                   value={chatTitle}
                   onChange={(e) => onTitleChange(e.target.value)}
                   onPressEnter={() => {

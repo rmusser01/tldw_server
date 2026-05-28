@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type BrowserContext, type Page } from "@playwright/test"
 import { launchWithExtensionOrSkip } from "./utils/real-server"
 import http from "node:http"
 import { AddressInfo } from "node:net"
@@ -11,9 +11,27 @@ import {
 } from "./utils/connection"
 import { grantHostPermission } from "./utils/permissions"
 
-const EXT_PATH = path.resolve("build/chrome-mv3")
+const EXT_PATH = path.resolve(
+  process.env.TLDW_E2E_EXTENSION_PATH || "build/chrome-mv3"
+)
 const MODEL_ID = "mock-model"
 const MODEL_KEY = `tldw:${MODEL_ID}`
+const CHAT_HANDOFF_DESCRIPTION =
+  "Opens /chat in a new tab. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+
+const buildSeedConfig = (
+  baseUrl: string,
+  extra: Record<string, unknown> = {}
+) => ({
+  __tldw_first_run_complete: true,
+  __tldw_allow_offline: true,
+  tldwConfig: {
+    serverUrl: baseUrl,
+    authMode: "single-user",
+    apiKey: "test-key"
+  },
+  ...extra
+})
 
 const readBody = (req: http.IncomingMessage) =>
   new Promise<string>((resolve) => {
@@ -129,6 +147,22 @@ const startChatMockServer = async () => {
   return { server, baseUrl: `http://127.0.0.1:${addr.port}` }
 }
 
+const stopChatMockServer = async (server: http.Server) => {
+  await new Promise<void>((resolve) => {
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+
+    server.close(done)
+    server.closeAllConnections?.()
+    const fallback = setTimeout(done, 1000)
+    fallback.unref?.()
+  })
+}
+
 const ensureChatInput = async (page: Page) => {
   const startButton = page.getByRole("button", { name: /Start chatting/i })
   if ((await startButton.count()) > 0) {
@@ -145,22 +179,44 @@ const ensureChatInput = async (page: Page) => {
   return input
 }
 
+const waitForOpenedExtensionRoute = async (
+  context: BrowserContext,
+  expectedUrl: string,
+  trigger: () => Promise<void>
+) => {
+  const popupPromise = context
+    .waitForEvent("page", { timeout: 10000 })
+    .catch(() => null)
+
+  await trigger()
+
+  const popup = await popupPromise
+  if (popup) {
+    await popup.waitForLoadState("domcontentloaded").catch(() => {})
+  }
+
+  await expect
+    .poll(
+      () => context.pages().some((page) => page.url() === expectedUrl),
+      { timeout: 10000 }
+    )
+    .toBe(true)
+
+  const openedPage = context
+    .pages()
+    .find((page) => page.url() === expectedUrl)
+  expect(openedPage, `Expected ${expectedUrl} to open`).toBeTruthy()
+  return openedPage as Page
+}
+
 test.describe("Sidepanel chat smoke", () => {
-  test("sends and renders a reply", async () => {
+  test("keeps the 390px sidepanel chat layout inside the viewport", async () => {
     test.setTimeout(90000)
     const { server, baseUrl } = await startChatMockServer()
 
     const { context, page, openSidepanel, extensionId } =
       (await launchWithExtensionOrSkip(test, EXT_PATH, {
-        seedConfig: {
-          __tldw_first_run_complete: true,
-          __tldw_allow_offline: true,
-          tldwConfig: {
-            serverUrl: baseUrl,
-            authMode: "single-user",
-            apiKey: "test-key"
-          }
-        }
+        seedConfig: buildSeedConfig(baseUrl)
       })) as any
 
     try {
@@ -170,14 +226,160 @@ test.describe("Sidepanel chat smoke", () => {
         extensionId,
         origin
       )
-      test.skip(
-        !granted,
-        "Host permission not granted; allow it in chrome://extensions > tldw Assistant > Site access, then re-run."
-      )
+      expect(
+        granted,
+        "Host permission must be granted programmatically before sidepanel chat can reach the mock server."
+      ).toBe(true)
 
       await setSelectedModel(page, MODEL_KEY)
 
-      const sidepanel = await openSidepanel()
+      const sidepanel = await openSidepanel("/chat")
+      await sidepanel.setViewportSize({ width: 390, height: 780 })
+      await waitForConnectionStore(sidepanel, "sidepanel-chat:narrow-store")
+      await forceConnected(
+        sidepanel,
+        { serverUrl: baseUrl },
+        "sidepanel-chat:narrow-connected"
+      )
+
+      await ensureChatInput(sidepanel)
+      await expect(sidepanel.getByTestId("chat-main")).toBeVisible()
+      await expect(
+        sidepanel.getByRole("button", { name: /Send message|Queue request/i })
+      ).toBeVisible()
+
+      const metrics = await sidepanel.evaluate(() => {
+        const rectFor = (selector: string) => {
+          const node = document.querySelector(selector)
+          if (!node) return null
+          const rect = node.getBoundingClientRect()
+          return {
+            left: Math.round(rect.left),
+            right: Math.round(rect.right),
+            width: Math.round(rect.width)
+          }
+        }
+
+        return {
+          innerWidth: window.innerWidth,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+          workspace: rectFor('[data-testid="chat-workspace"]'),
+          main: rectFor('[data-testid="chat-main"]'),
+          messages: rectFor('[data-testid="chat-messages"]'),
+          input: rectFor('[data-testid="chat-input"]'),
+          send: rectFor(
+            '[data-testid="chat-send"], [aria-label="Send message"], [aria-label="Queue request"]'
+          )
+        }
+      })
+
+      expect(metrics.innerWidth).toBe(390)
+      expect(metrics.documentScrollWidth).toBeLessThanOrEqual(390)
+      expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(390)
+      expect(metrics.workspace?.width).toBeLessThanOrEqual(390)
+      expect(metrics.main?.right).toBeLessThanOrEqual(390)
+      expect(metrics.messages?.right).toBeLessThanOrEqual(390)
+      expect(metrics.input?.right).toBeLessThanOrEqual(390)
+      expect(metrics.send?.right).toBeLessThanOrEqual(390)
+    } finally {
+      await context.close()
+      await stopChatMockServer(server)
+    }
+  })
+
+  test("keeps packaged /chat handoffs route-only and rail-safe", async ({}, testInfo) => {
+    test.setTimeout(90000)
+    const { server, baseUrl } = await startChatMockServer()
+
+    const { context, page, openSidepanel, extensionId } =
+      (await launchWithExtensionOrSkip(test, EXT_PATH, {
+        seedConfig: buildSeedConfig(baseUrl)
+      })) as any
+
+    try {
+      const origin = new URL(baseUrl).origin + "/*"
+      const granted = await grantHostPermission(
+        context,
+        extensionId,
+        origin
+      )
+      expect(
+        granted,
+        "Host permission must be granted programmatically before sidepanel chat can reach the mock server."
+      ).toBe(true)
+
+      await setSelectedModel(page, MODEL_KEY)
+
+      const sidepanel = await openSidepanel("/chat")
+      await sidepanel.setViewportSize({ width: 390, height: 780 })
+      await waitForConnectionStore(sidepanel, "sidepanel-chat:handoff-store")
+      await forceConnected(
+        sidepanel,
+        { serverUrl: baseUrl },
+        "sidepanel-chat:handoff-connected"
+      )
+
+      await ensureChatInput(sidepanel)
+      await expect(sidepanel.getByTestId("chat-main")).toBeVisible()
+      await expect(sidepanel.locator("body")).not.toContainText(
+        "CharacterControlRail"
+      )
+
+      const headerFullScreen = sidepanel.getByTestId("chat-open-full-screen")
+      await expect(headerFullScreen).toHaveAttribute(
+        "title",
+        CHAT_HANDOFF_DESCRIPTION
+      )
+      await expect(headerFullScreen).toHaveAttribute(
+        "aria-label",
+        "Open full chat in WebUI"
+      )
+
+      await sidepanel.screenshot({
+        path: testInfo.outputPath("packaged-sidepanel-chat-handoff.png"),
+        fullPage: true
+      })
+
+      const expectedFullChatUrl = `chrome-extension://${extensionId}/options.html#/chat`
+      const openedFullChatPage = await waitForOpenedExtensionRoute(
+        context,
+        expectedFullChatUrl,
+        () => headerFullScreen.click()
+      )
+      await expect(openedFullChatPage.locator("body")).not.toContainText(
+        "CharacterControlRail"
+      )
+    } finally {
+      await context.close()
+      await stopChatMockServer(server)
+    }
+  })
+
+  test("sends and renders a reply", async () => {
+    test.setTimeout(90000)
+    const { server, baseUrl } = await startChatMockServer()
+
+    const { context, page, openSidepanel, extensionId } =
+      (await launchWithExtensionOrSkip(test, EXT_PATH, {
+        seedConfig: buildSeedConfig(baseUrl)
+      })) as any
+
+    try {
+      const origin = new URL(baseUrl).origin + "/*"
+      const granted = await grantHostPermission(
+        context,
+        extensionId,
+        origin
+      )
+      expect(
+        granted,
+        "Host permission must be granted programmatically before sidepanel chat can reach the mock server."
+      ).toBe(true)
+
+      await setSelectedModel(page, MODEL_KEY)
+
+      const sidepanel = await openSidepanel("/chat")
       await waitForConnectionStore(sidepanel, "sidepanel-chat:store")
       await forceConnected(
         sidepanel,
@@ -210,7 +412,7 @@ test.describe("Sidepanel chat smoke", () => {
       await expect(assistantMessage).toBeVisible({ timeout: 20000 })
     } finally {
       await context.close()
-      await new Promise<void>((resolve) => server.close(() => resolve()))
+      await stopChatMockServer(server)
     }
   })
 })

@@ -5,8 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
+import { PlaygroundCompositionPreview } from "../PlaygroundCompositionPreview";
 import { PlaygroundModelCatalogControls } from "../PlaygroundModelCatalogControls";
+import { PlaygroundRuntimeInspector } from "../PlaygroundRuntimeInspector";
 import { PlaygroundStatusStrip } from "../PlaygroundStatusStrip";
+import { buildPlaygroundCompositionPreviewSummary } from "../playground-composition-preview";
 
 const translate = vi.hoisted(
   () =>
@@ -92,6 +95,39 @@ describe("Playground cockpit accessibility", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(toggle);
     expect(onModeChange).toHaveBeenCalledWith("focus");
+  });
+
+  it("keeps the mobile cockpit panel compact while preserving its accessible summary", () => {
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        onModeChange={vi.fn()}
+        leftRailVisible
+        rightRailVisible
+        onLeftRailVisibleChange={vi.fn()}
+        onRightRailVisibleChange={vi.fn()}
+        leftRail={<div>Context tools</div>}
+        rightRail={<div>Runtime tools</div>}
+        statusStrip={<div>Ready</div>}
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>,
+    );
+
+    const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "context");
+
+    const contextPanel = screen.getByRole("tabpanel", { name: "Context" });
+    expect(contextPanel.className).toContain("max-h-[30vh]");
+    expect(contextPanel.className).not.toContain("max-h-[42vh]");
+
+    const summary = screen.getByTestId(
+      "playground-cockpit-mobile-panel-summary",
+    );
+    expect(summary).toHaveClass("sr-only");
+    expect(summary).toHaveTextContent(
+      "Context panel active. Composer draft remains available below.",
+    );
   });
 
   it("labels independent rail visibility controls", () => {
@@ -307,5 +343,68 @@ describe("Playground cockpit accessibility", () => {
       "placeholder",
       "Search all known models",
     );
+  });
+
+  it("qualifies empty assistant copy inside composition and runtime rail summaries", () => {
+    const assistantSummary = {
+      mode: "none" as const,
+      name: null,
+      detail: "No assistant selected",
+    };
+    const compositionSummary = buildPlaygroundCompositionPreviewSummary({
+      promptSummary: {
+        state: "none",
+        label: "No prompt selected",
+        detail: "No system prompt will be added.",
+      },
+      assistantSummary,
+      providerRoute: {
+        selectedProvider: "openai",
+        selectedModel: "gpt-4o-mini",
+        providerRouteLabel: "openai:gpt-4o-mini",
+      },
+      settingSummaries: [],
+      contextSources: [],
+      toolSummary: null,
+      compositionStatus: "idle",
+      composition: null,
+    });
+
+    render(
+      <>
+        <PlaygroundCompositionPreview summary={compositionSummary} />
+        <PlaygroundRuntimeInspector
+          streaming={false}
+          selectedProvider="openai"
+          selectedModel="gpt-4o-mini"
+          messageCount={0}
+          threadSearchOpen={false}
+          assistantSummary={assistantSummary}
+          onOpenModelSettings={vi.fn()}
+          onOpenAssistantSelect={vi.fn()}
+        />
+      </>,
+    );
+
+    const composition = screen.getByRole("region", {
+      name: "Next message composition",
+    });
+    expect(
+      within(composition).getByText("No assistant attached to next message"),
+    ).toBeInTheDocument();
+    expect(
+      within(composition).queryByText("No assistant selected"),
+    ).not.toBeInTheDocument();
+
+    const runtimeInspector = screen.getByTestId("playground-runtime-inspector");
+    expect(
+      within(runtimeInspector).getByText("No runtime assistant selected"),
+    ).toBeInTheDocument();
+    expect(
+      within(runtimeInspector).queryByText("No assistant selected"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryAllByText("No assistant selected"),
+    ).toHaveLength(0);
   });
 });

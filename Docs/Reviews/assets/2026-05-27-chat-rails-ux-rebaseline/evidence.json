@@ -1,0 +1,163 @@
+{
+  "audit": "chat-rails-ux-rebaseline",
+  "date": "2026-05-27",
+  "lastUpdated": "2026-05-28",
+  "worktree": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chat-rails-ux-rebaseline",
+  "branch": "codex/chat-rails-ux-rebaseline",
+  "backend": "http://127.0.0.1:18023",
+  "webui": "http://localhost:18024",
+  "mockOpenAI": "http://127.0.0.1:18088",
+  "backendHealth": {
+    "status": "ok",
+    "authMode": "single_user",
+    "source": "approved localhost curl before focused browser verification"
+  },
+  "scopeLimitations": [
+    "First-time unseeded capture clears browser storage but uses the same local WebUI/backend runtime; it is not a full clean-machine install.",
+    "TASK-537 refreshed the first-time unseeded /chat screenshot after TASK-536; the screenshot now shows the chat cockpit rather than the global assistant setup overlay.",
+    "Live third-party Web search provider calls are intentionally out of scope; /chat Web search toggle/status behavior is covered without invoking an external search provider.",
+    "Extension sidepanel full-screen handoff remains route-only and is covered by TASK-534; draft, page-context, and thread transfer are not implemented in TASK-535."
+  ],
+  "firstTimeScreenshotRefresh": {
+    "task": "TASK-537",
+    "backend": "http://127.0.0.1:18041",
+    "webui": "http://localhost:18042",
+    "backendHealth": {
+      "status": "ok",
+      "authMode": "single_user"
+    },
+    "initialBackendAttempt": {
+      "port": "127.0.0.1:18041",
+      "sandboxResult": "exited with [Errno 1] operation not permitted while attempting to bind",
+      "resolution": "same backend command succeeded with approved elevated localhost binding"
+    },
+    "playwrightAssertions": {
+      "url": "http://localhost:18042/chat",
+      "globalAssistantSetupOverlayCount": 0,
+      "buildYourAssistantCopyCount": 0,
+      "chatInputCount": 1,
+      "startChatHeadingCount": 1
+    }
+  },
+  "whyEarlierNoRailsCaptureWasWrong": {
+    "finding": "Current configured /chat evidence shows context and runtime cockpit rails present.",
+    "likelyCause": "Earlier missing-siderails observation came from stale or wrong branch/page evidence.",
+    "currentGuard": "Playground.cockpit-regression.guard.test.ts asserts cockpit shell/context/runtime rail wiring and absence of the removed standalone CharacterControlRail."
+  },
+  "screenshots": {
+    "firstTimeUnseeded": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/first-time-unseeded.png",
+    "desktopCockpit": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-cockpit.png",
+    "desktopFocus": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-focus.png",
+    "desktopConversation": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-conversation.png",
+    "desktopContextCollapsedSideOnly": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-context-collapsed-side-only.png",
+    "desktopModelProviderConversation": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-model-provider-conversation.png",
+    "desktopStreamingStopClicked": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-streaming-stop-clicked.png",
+    "desktopRegenerateReady": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-regenerate-ready.png",
+    "desktopRegeneratedResponse": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/desktop-regenerated-response.png",
+    "mobileFocus": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-focus.png",
+    "mobileCockpitContext": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit.png",
+    "mobileCockpitRuntime": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit-runtime.png",
+    "mobileCockpitActiveDraft": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-cockpit-active-draft.png",
+    "mobileSendState": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/mobile-send-state.png",
+    "extensionSidepanel": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel.png",
+    "extensionSidepanelPackagedHandoff": "Docs/Reviews/assets/2026-05-27-chat-rails-ux-rebaseline/extension-sidepanel-packaged-handoff.png"
+  },
+  "currentBrowserObservations": [
+    {
+      "state": "first-time-unseeded-task537",
+      "route": "/chat",
+      "viewport": "1440x960",
+      "observedSurface": "chat cockpit empty state",
+      "visibleCopy": "Start a new chat; Chat cockpit; No model selected",
+      "cockpitVisible": true,
+      "contextRailPresent": true,
+      "runtimeRailPresent": true,
+      "globalAssistantSetupOverlayBypassed": true,
+      "inlineAssistantSetupNudgeAvailable": true,
+      "playwrightAssertion": "no first-run-gate-overlay and no Build Your Assistant copy"
+    },
+    {
+      "state": "configured-desktop-cockpit",
+      "route": "/chat",
+      "viewport": "desktop chromium",
+      "cockpitMode": "cockpit",
+      "contextRailPresent": true,
+      "runtimeRailPresent": true,
+      "providerRoute": "tldw:gpt-4o",
+      "conversationCompleted": true
+    },
+    {
+      "state": "configured-desktop-focus",
+      "route": "/chat",
+      "viewport": "desktop chromium",
+      "cockpitMode": "focus",
+      "contextRailPresent": false,
+      "runtimeRailPresent": false
+    },
+    {
+      "state": "configured-mobile-cockpit",
+      "route": "/chat",
+      "viewport": "390x844",
+      "contextPanel": "verified",
+      "runtimePanel": "verified",
+      "draftPreserved": true,
+      "railAndComposerOverlap": false,
+      "mobileToolbarSuppressedInCockpit": true
+    },
+    {
+      "state": "configured-mobile-focus-send",
+      "route": "/chat",
+      "viewport": "390x844",
+      "messageSent": true,
+      "providerRoute": "tldw:gpt-4o",
+      "responseRenderedOrRecoverable": true
+    },
+    {
+      "state": "streaming-stop-regenerate",
+      "route": "/chat",
+      "viewport": "desktop chromium",
+      "strictStreamingControlEvidence": true,
+      "stopControlClicked": true,
+      "regenerateEnabledAfterFirstTurn": true,
+      "regenerateSentSecondProviderRequest": true
+    },
+    {
+      "state": "extension-sidepanel-packaged-handoff",
+      "route": "chrome-extension://<dynamic-extension-id>/sidepanel.html#/chat",
+      "viewport": "390x780",
+      "packagedExtension": true,
+      "horizontalOverflow": false,
+      "fullScreenHandoffTarget": "/options.html#/chat",
+      "routeOnlyCopyRuntimeEvidence": "Open full chat in WebUI button title: Opens /chat in a new tab. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel.",
+      "removedStandaloneCharacterControlRailPresent": false,
+      "sendReplySmokePassed": true,
+      "coveredBy": "TASK-534"
+    }
+  ],
+  "verificationCommands": {
+    "task535FocusedRealServerSubset": "cd apps/tldw-frontend && env TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://localhost:18024 TLDW_E2E_SERVER_URL=http://127.0.0.1:18023 TLDW_E2E_API_KEY=<local-e2e-api-key> TLDW_E2E_EXPECT_STREAMING_CONTROLS=true npx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --workers=1 --grep 'uses the running server|keeps mobile cockpit|sends a real mobile|model provider confidence|captures streaming stop'",
+    "task535FocusedRealServerResult": "5 passed (33.3s)",
+    "mobileCockpitRegressionSingle": "cd apps/tldw-frontend && env TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://localhost:18024 TLDW_E2E_SERVER_URL=http://127.0.0.1:18023 TLDW_E2E_API_KEY=<local-e2e-api-key> TLDW_E2E_EXPECT_STREAMING_CONTROLS=true npx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --workers=1 --grep 'keeps mobile cockpit tabs'",
+    "mobileCockpitRegressionResult": "1 passed (4.6s)",
+    "cockpitGuard": "cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts",
+    "cockpitGuardResult": "6 passed",
+    "packagedExtensionSidepanelSmoke": "cd apps/extension && npx playwright test tests/e2e/sidepanel-chat-smoke.spec.ts --project=chromium-extension --reporter=line --workers=1",
+    "rolePlayHandoffUnit": "cd apps/packages/ui && bunx vitest run src/components/Sidepanel/Chat/__tests__/ControlRow.role-play-handoff.test.tsx src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx --reporter=verbose",
+    "task536FirstRunGateBypass": "cd apps/tldw-frontend && bunx vitest run __tests__/app/app-layout.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundComposerNotices.first-run.test.tsx",
+    "task536FirstRunGateBypassResult": "2 files passed, 17 tests passed",
+    "task537FirstTimeScreenshot": "Playwright Chromium clean context opened http://localhost:18042/chat and overwrote first-time-unseeded.png after asserting no global assistant setup overlay, one chat input, and the Start a new chat heading.",
+    "task537FirstTimeScreenshotResult": "Captured 1440x960 PNG; overlayCount=0, setupCopy=0, chatInputCount=1, startChatCount=1",
+    "task537FocusedRouteContract": "cd apps/tldw-frontend && bunx vitest run __tests__/app/app-layout.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundComposerNotices.first-run.test.tsx",
+    "task537FocusedRouteContractResult": "2 files passed, 17 tests passed",
+    "task537EvidenceChecks": "node -e JSON.parse(evidence.json); git diff --check; file first-time-unseeded.png",
+    "task537EvidenceChecksResult": "JSON parsed, whitespace check passed, screenshot is 1440x960 PNG",
+    "bandit": "Skipped: TASK-535/TASK-536/TASK-537 touched TypeScript, Markdown, JSON, and PNG assets only; no Python scope was changed."
+  },
+  "currentTopFindings": [
+    "The configured /chat cockpit rails are restored and regression-covered.",
+    "Mobile cockpit mode now suppresses redundant composer toolbar layout while keeping selector controllers mounted for rail-triggered dialogs.",
+    "Streaming stop and regenerate controls are deterministic only under the slow mock provider setup used by TASK-535.",
+    "TASK-536 lets unseeded /chat users reach the chat surface instead of the global assistant setup overlay; TASK-537 refreshed live screenshot evidence for that current behavior.",
+    "Extension handoff is intentionally route-only; draft/page/thread transfer remains a larger product follow-up."
+  ]
+}

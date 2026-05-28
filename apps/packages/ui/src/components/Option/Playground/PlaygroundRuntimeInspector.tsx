@@ -50,6 +50,8 @@ export type RuntimeAssistantSummary = {
   mode: "none" | "character" | "persona";
   name?: string | null;
   detail?: string | null;
+  compositionTitle?: string | null;
+  compositionDetail?: string | null;
 };
 
 export type PlaygroundRuntimeInspectorProps = {
@@ -82,6 +84,7 @@ export type PlaygroundRuntimeInspectorProps = {
   emptyAssistantResponse?: boolean;
   settingSummaries?: RuntimeSettingSummary[];
   toolSummary?: RuntimeToolSummary | null;
+  setupRecoveryMode?: boolean;
 };
 
 const toolStateClass = (state: RuntimeToolSummary["state"]) => {
@@ -120,6 +123,7 @@ export const PlaygroundRuntimeInspector = ({
   emptyAssistantResponse = false,
   settingSummaries = [],
   toolSummary = null,
+  setupRecoveryMode = false,
 }: PlaygroundRuntimeInspectorProps) => {
   const { t } = useTranslation("playground");
   const runControlsId = React.useId();
@@ -196,9 +200,22 @@ export const PlaygroundRuntimeInspector = ({
             "No persona or character will shape replies.",
           ),
         });
+  const noAssistantSelectedLabel = t(
+    "cockpit.noAssistantSelected",
+    "No assistant selected",
+  );
   const assistantLabel =
     effectiveAssistantSummary.name ||
-    t("cockpit.noAssistantSelected", "No assistant selected");
+    (effectiveAssistantSummary.mode === "none"
+      ? t(
+          "cockpit.noRuntimeAssistantSelected",
+          "No runtime assistant selected",
+        )
+      : noAssistantSelectedLabel);
+  const noAssistantDetail = t(
+    "cockpit.noAssistantDetail",
+    "No persona or character will shape replies.",
+  );
   const assistantModeLabel =
     effectiveAssistantSummary.mode === "persona"
       ? t("cockpit.personaMode", "Persona")
@@ -206,13 +223,14 @@ export const PlaygroundRuntimeInspector = ({
         ? t("cockpit.characterMode", "Character")
         : t("cockpit.noAssistantMode", "None");
   const assistantDetail =
-    effectiveAssistantSummary.detail ||
-    (effectiveAssistantSummary.mode === "none"
-      ? t(
-          "cockpit.noAssistantDetail",
-          "No persona or character will shape replies.",
-        )
-      : assistantModeLabel);
+    effectiveAssistantSummary.mode === "none" &&
+    (effectiveAssistantSummary.detail === assistantLabel ||
+      effectiveAssistantSummary.detail === noAssistantSelectedLabel)
+      ? noAssistantDetail
+      : effectiveAssistantSummary.detail ||
+        (effectiveAssistantSummary.mode === "none"
+          ? noAssistantDetail
+          : assistantModeLabel);
   const openAssistant = onOpenAssistantSelect || onOpenCharacterSettings;
   const openSceneDirector = onOpenSceneDirector || onOpenCharacterSettings;
   const toolChoices: Array<{ value: RuntimeToolChoice; label: string }> = [
@@ -246,6 +264,7 @@ export const PlaygroundRuntimeInspector = ({
         );
   const stopReasonId = `${runControlsId}-stop-disabled-reason`;
   const regenerateReasonId = `${runControlsId}-regenerate-disabled-reason`;
+  const recoveryModeKey = setupRecoveryMode ? "setup" : "standard";
 
   return (
     <div
@@ -357,8 +376,10 @@ export const PlaygroundRuntimeInspector = ({
       </PlaygroundRailSection>
 
       <PlaygroundRailSection
+        key={`assistant-${recoveryModeKey}`}
         label={t("cockpit.assistant", "Assistant")}
         title={t("cockpit.assistant", "Assistant")}
+        defaultOpen={!setupRecoveryMode}
       >
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -433,8 +454,10 @@ export const PlaygroundRuntimeInspector = ({
       </PlaygroundRailSection>
 
       <PlaygroundRailSection
+        key={`tools-${recoveryModeKey}`}
         label={mcpToolsLabel}
         title={mcpToolsLabel}
+        defaultOpen={!setupRecoveryMode}
       >
         {toolSummary ? (
           <div className={`mt-2 ${cockpitRailStyles.inset}`}>
@@ -530,8 +553,10 @@ export const PlaygroundRuntimeInspector = ({
       </PlaygroundRailSection>
 
       <PlaygroundRailSection
+        key={`run-${recoveryModeKey}`}
         label={t("cockpit.runControls", "Run controls")}
         title={t("cockpit.runControls", "Run controls")}
+        defaultOpen={!setupRecoveryMode}
       >
         {emptyAssistantResponse && !streaming ? (
           <div

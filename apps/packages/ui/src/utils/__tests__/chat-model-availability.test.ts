@@ -6,6 +6,7 @@ import {
   findUnavailableChatModel,
   getCharacterChatReadinessCopy,
   getMatchingCharacterChatModelUsabilityCopy,
+  mergeChatProviderStatusIntoModels,
   normalizeChatModelId
 } from "../chat-model-availability"
 
@@ -123,6 +124,69 @@ describe("chat model availability utilities", () => {
 
     expect(ids.has("gpt-4o")).toBe(false)
     expect(ids.has("openai:gpt-4o")).toBe(false)
+  })
+
+  it("applies provider setup status to descriptors without configured flags", () => {
+    const models = mergeChatProviderStatusIntoModels(
+      [
+        {
+          id: "gpt-4o",
+          model: "tldw:gpt-4o",
+          provider: "openai"
+        } as any
+      ],
+      {
+        any_configured: false,
+        providers: [
+          {
+            name: "openai",
+            configured: false,
+            requires_api_key: true
+          }
+        ]
+      }
+    )
+
+    expect(
+      buildChatModelUsability({
+        selectedModel: "tldw:gpt-4o",
+        availableModels: models as any[]
+      })
+    ).toMatchObject({
+      status: "provider_unconfigured",
+      canSend: false,
+      matchedModelId: "gpt-4o",
+      matchedProvider: "openai",
+      recommendedAction: "open-model-settings"
+    })
+  })
+
+  it("ignores null provider status entries while enriching model readiness", () => {
+    const models = mergeChatProviderStatusIntoModels(
+      [
+        {
+          id: "gemma3:1b",
+          model: "tldw:gemma3:1b",
+          provider: "ollama"
+        } as any
+      ],
+      {
+        any_configured: true,
+        providers: [
+          null,
+          {
+            name: "ollama",
+            configured: true,
+            requires_api_key: false
+          }
+        ] as any
+      }
+    )
+
+    expect(models?.[0]).toMatchObject({
+      is_configured: true,
+      provider_is_configured: true
+    })
   })
 
   it("treats any catalog-only true flag as unavailable", () => {

@@ -229,6 +229,36 @@ describe("usePlaygroundPersistence", () => {
     })
   })
 
+  it("shows inline persistence feedback without opening a blocking success notification", async () => {
+    const notificationApi = {
+      error: vi.fn(),
+      warning: vi.fn(),
+      info: vi.fn(),
+      success: vi.fn()
+    }
+    const setServerPersistenceHintSeen = vi.fn()
+
+    const { result } = renderHook(
+      (deps: ReturnType<typeof buildDeps>) => usePlaygroundPersistence(deps),
+      {
+        initialProps: buildDeps({
+          notificationApi,
+          setServerPersistenceHintSeen,
+          history: [{ role: "user", content: "Persist this chat" }]
+        })
+      }
+    )
+
+    await waitFor(() => {
+      expect(mocks.createChat).toHaveBeenCalledTimes(1)
+      expect(result.current.showServerPersistenceHint).toBe(true)
+    })
+
+    expect(setServerPersistenceHintSeen).toHaveBeenCalledWith(true)
+    expect(notificationApi.success).not.toHaveBeenCalled()
+    expect(notificationApi.error).not.toHaveBeenCalled()
+  })
+
   it("uses current history when the first message arrives after mount", async () => {
     const notificationApi = {
       error: vi.fn(),

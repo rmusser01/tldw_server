@@ -128,11 +128,12 @@ import {
   buildCharacterChatReadiness,
   getCharacterChatReadinessCopy,
   getMatchingCharacterChatModelUsabilityCopy,
+  mergeChatProviderStatusIntoModels,
+  type ChatProviderConfigurationStatus,
   type CharacterChatReadinessAction,
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
-import { CharacterControlRail } from "./CharacterControlRail";
 
 type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
 
@@ -233,6 +234,8 @@ export const Playground = () => {
     React.useState(0);
   const [characterChatAvailableModels, setCharacterChatAvailableModels] =
     React.useState<ChatModelCatalog | null>(null);
+  const [chatProviderStatus, setChatProviderStatus] =
+    React.useState<ChatProviderConfigurationStatus | null>(null);
   const [composerDockMetrics, setComposerDockMetrics] =
     React.useState<ComposerDockLayoutMetrics | null>(null);
   const [composerHasDraft, setComposerHasDraft] = React.useState(false);
@@ -257,16 +260,29 @@ export const Playground = () => {
   const refreshCharacterChatModels = React.useCallback(
     async (isCancelled?: () => boolean) => {
       setCharacterChatAvailableModels(null);
+      setChatProviderStatus(null);
       try {
-        const models = await fetchChatModels({
-          returnEmpty: true,
-          forceRefresh: true,
-        });
+        const [models, providerStatus] = await Promise.all([
+          fetchChatModels({
+            returnEmpty: true,
+            forceRefresh: true,
+          }),
+          tldwClient
+            .initialize()
+            .then(() => tldwClient.getProvidersStatus())
+            .catch((error) => {
+              console.warn("[Playground] Failed to load provider status", error);
+              return null;
+            }),
+        ]);
         if (isCancelled?.()) return;
         setCharacterChatAvailableModels(Array.isArray(models) ? models : []);
-      } catch {
+        setChatProviderStatus(providerStatus);
+      } catch (error) {
         if (isCancelled?.()) return;
+        console.warn("[Playground] Failed to refresh chat models", error);
         setCharacterChatAvailableModels([]);
+        setChatProviderStatus(null);
       }
     },
     [],
@@ -336,6 +352,11 @@ export const Playground = () => {
     selectedAssistant,
     setSelectedAssistant,
     serverChatPersonaMemoryMode,
+    setServerChatCharacterId,
+    setServerChatAssistantKind,
+    setServerChatAssistantId,
+    setServerChatPersonaMemoryMode,
+    setServerChatMetaLoaded,
   } = useMessageOption();
   const {
     systemPrompt,
@@ -475,6 +496,7 @@ export const Playground = () => {
   const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
   const {
     restoreSession,
+    clearPersistedSession,
     sessionScopeReady,
     hasPersistedSession,
     persistedHistoryId,
@@ -517,9 +539,6 @@ export const Playground = () => {
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
   );
-  const characterControlVisible = useChatSurfaceCoordinatorStore(
-    (state) => state.visiblePanels["character-control"],
-  );
   const normalizedChatLayoutMode: PlaygroundCockpitMode =
     chatLayoutMode === "focus" || chatLayoutMode === "cockpit"
       ? chatLayoutMode
@@ -528,6 +547,8 @@ export const Playground = () => {
     cockpitContextRailVisible !== false;
   const normalizedCockpitRuntimeRailVisible =
     cockpitRuntimeRailVisible !== false;
+  const mobileCockpitComposerConstrained =
+    isMobileViewport && normalizedChatLayoutMode === "cockpit";
   const handleChatLayoutModeChange = React.useCallback(
     (mode: PlaygroundCockpitMode) => {
       if (
@@ -1948,11 +1969,40 @@ export const Playground = () => {
       returnFocusSelector: COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR,
     });
   }, [cockpitAssistantSelectTab]);
-  const clearAssistantFromCockpit = React.useCallback(() => {
-    void setSelectedAssistant(null);
-    setSelectedCharacter(null);
+  const clearAssistantFromCockpit = React.useCallback(async () => {
+    await setSelectedAssistant(null);
+    await setSelectedCharacter(null);
+    await clearPersistedSession();
+    setServerChatCharacterId(null);
+    setServerChatAssistantKind(null);
+    setServerChatAssistantId(null);
+    setServerChatPersonaMemoryMode(null);
+    setServerChatMetaLoaded(false);
+    setServerChatId(null);
+    setCharacterModeIntentActive(false);
+    void setChatWorkflowMode("standard");
     scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
-  }, [setSelectedAssistant, setSelectedCharacter]);
+    await applyChatSettingsPatch({
+      historyId: stableHistoryId,
+      serverChatId,
+      patch: {
+        assistantOverlay: null,
+      },
+    }).catch(() => undefined);
+  }, [
+    clearPersistedSession,
+    serverChatId,
+    setChatWorkflowMode,
+    setSelectedAssistant,
+    setSelectedCharacter,
+    setServerChatId,
+    setServerChatAssistantId,
+    setServerChatAssistantKind,
+    setServerChatCharacterId,
+    setServerChatMetaLoaded,
+    setServerChatPersonaMemoryMode,
+    stableHistoryId,
+  ]);
   const inspectAssistantFromCockpit = React.useCallback(() => {
     if (selectedAssistant?.kind === "persona") {
       navigate(
@@ -1992,6 +2042,12 @@ export const Playground = () => {
       ),
       noAssistantSelected: toText(
         t("playground:cockpit.noAssistantSelected", "No assistant selected"),
+      ),
+      noAssistantAttachedToNextMessage: toText(
+        t(
+          "playground:cockpit.noAssistantAttachedToNextMessage",
+          "No assistant attached to next message",
+        ),
       ),
       personaFallbackName: toText(
         t("playground:cockpit.personaFallback", "Persona"),
@@ -2115,19 +2171,27 @@ export const Playground = () => {
     selectedProvider: apiProvider,
     selectedModel,
   });
-  const characterChatModelUsability = React.useMemo(
+  const readinessChatModels = React.useMemo(
+    () =>
+      mergeChatProviderStatusIntoModels(
+        characterChatAvailableModels,
+        chatProviderStatus,
+      ),
+    [characterChatAvailableModels, chatProviderStatus],
+  );
+  const standardChatModelUsability = React.useMemo(
     () =>
       buildChatModelUsability({
         isServerConnected: serverReadinessState !== "blocked",
         selectedModel: providerRouteSummary.selectedModel,
-        availableModels: characterChatAvailableModels,
-        modelsLoading: !Array.isArray(characterChatAvailableModels),
+        availableModels: readinessChatModels,
+        modelsLoading: !Array.isArray(readinessChatModels),
         serverDegraded: serverReadinessState === "degraded",
-        allowDegradedSend: false,
+        allowDegradedSend: true,
       }),
     [
-      characterChatAvailableModels,
       providerRouteSummary.selectedModel,
+      readinessChatModels,
       serverReadinessState,
     ],
   );
@@ -2137,17 +2201,17 @@ export const Playground = () => {
         isServerConnected: serverReadinessState !== "blocked",
         selectedCharacter,
         selectedModel: providerRouteSummary.selectedModel,
-        availableModels: characterChatAvailableModels,
-        modelsLoading: !Array.isArray(characterChatAvailableModels),
+        availableModels: readinessChatModels,
+        modelsLoading: !Array.isArray(readinessChatModels),
         serverDegraded: serverReadinessState === "degraded",
-        allowDegradedSend: false,
+        allowDegradedSend: true,
         isSendBlocked: Boolean(streaming || isProcessing || isLoading),
       }),
     [
-      characterChatAvailableModels,
       isLoading,
       isProcessing,
       providerRouteSummary.selectedModel,
+      readinessChatModels,
       selectedCharacter,
       serverReadinessState,
       streaming,
@@ -2168,25 +2232,26 @@ export const Playground = () => {
     [activeCharacterModeLabel, characterChatBlocked, characterChatReadiness, t],
   );
   const activeCharacterChatModelUsability = characterWorkflowActive
-    ? characterChatModelUsability
+    ? standardChatModelUsability
     : null;
+  const activeChatModelUsability = standardChatModelUsability;
   const characterChatModelUsabilityMessage =
     getMatchingCharacterChatModelUsabilityCopy({
       modelUsability: activeCharacterChatModelUsability,
       readiness: characterChatReadiness,
       readinessTitle: characterChatReadinessCopy?.title ?? null,
     });
-  const characterChatModelSelectorLabel = React.useMemo(() => {
+  const activeChatModelSelectorLabel = React.useMemo(() => {
     if (
-      !activeCharacterChatModelUsability ||
-      activeCharacterChatModelUsability.status === "ready" ||
-      (activeCharacterChatModelUsability.status === "degraded" &&
-        activeCharacterChatModelUsability.canSend)
+      !activeChatModelUsability ||
+      activeChatModelUsability.status === "ready" ||
+      (activeChatModelUsability.status === "degraded" &&
+        activeChatModelUsability.canSend)
     ) {
       return null;
     }
 
-    switch (activeCharacterChatModelUsability.status) {
+    switch (activeChatModelUsability.status) {
       case "loading":
         return toText(
           t(
@@ -2234,15 +2299,26 @@ export const Playground = () => {
       default:
         return null;
     }
-  }, [activeCharacterChatModelUsability, t]);
-  const characterChatModelSelectorTitle = characterChatModelSelectorLabel
-    ? characterChatModelUsabilityMessage ?? characterChatModelSelectorLabel
+  }, [activeChatModelUsability, t]);
+  const activeChatModelUsabilityMessage =
+    characterChatModelUsabilityMessage ?? activeChatModelSelectorLabel;
+  const activeChatModelSelectorTitle = activeChatModelSelectorLabel
+    ? activeChatModelUsabilityMessage ?? activeChatModelSelectorLabel
     : null;
-  const characterChatModelUsabilityBlocks = Boolean(
-    activeCharacterChatModelUsability &&
-      activeCharacterChatModelUsability.status !== "ready" &&
-      !activeCharacterChatModelUsability.canSend,
+  const activeChatModelUsabilityBlocks = Boolean(
+    activeChatModelUsability &&
+      activeChatModelUsability.status !== "ready" &&
+      !activeChatModelUsability.canSend,
   );
+  const setupRecoveryMode =
+    messages.length === 0 &&
+    !stableHistoryId &&
+    !serverChatId &&
+    !streaming &&
+    !isProcessing &&
+    activeChatModelUsabilityBlocks &&
+    (activeChatModelUsability?.status === "no_models" ||
+      activeChatModelUsability?.status === "provider_unconfigured");
   React.useEffect(() => {
     if (typeof setActiveSettingsScope === "function") {
       setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
@@ -2605,9 +2681,9 @@ export const Playground = () => {
     toolSummary: cockpitToolSummary,
     compositionStatus,
     composition: null,
-    modelUsabilityStatus: activeCharacterChatModelUsability?.status ?? null,
-    modelUsabilityCanSend: activeCharacterChatModelUsability?.canSend ?? null,
-    modelUsabilityDetail: characterChatModelUsabilityMessage,
+    modelUsabilityStatus: activeChatModelUsability?.status ?? null,
+    modelUsabilityCanSend: activeChatModelUsability?.canSend ?? null,
+    modelUsabilityDetail: activeChatModelUsabilityMessage,
     modelUnavailable: characterChatModelUnavailable,
     modelUnavailableDetail: characterChatModelUnavailable
       ? characterChatReadinessCopy?.title ?? null
@@ -2798,6 +2874,7 @@ export const Playground = () => {
       onClearMedia={() => setRagMediaIds(null)}
       onClearResearch={handleRemoveAttachedResearchContext}
       compositionPreviewSummary={compositionPreviewSummary}
+      setupRecoveryMode={setupRecoveryMode}
     />
   );
   const cockpitRightRail = (
@@ -2806,24 +2883,28 @@ export const Playground = () => {
       selectedProvider={providerRouteSummary.selectedProvider}
       selectedModel={providerRouteSummary.selectedModel}
       providerRouteLabel={providerRouteSummary.providerRouteLabel}
-      modelUsabilityStatus={activeCharacterChatModelUsability?.status ?? null}
-      modelUsabilityCanSend={activeCharacterChatModelUsability?.canSend ?? null}
-      modelUsabilityDetail={characterChatModelUsabilityMessage}
+      modelUsabilityStatus={activeChatModelUsability?.status ?? null}
+      modelUsabilityCanSend={activeChatModelUsability?.canSend ?? null}
+      modelUsabilityDetail={activeChatModelUsabilityMessage}
       runtimeStatus={
         serverReadinessState === "blocked"
           ? "error"
           : streaming
             ? "streaming"
-            : activeCharacterChatModelUsability?.status === "loading"
+            : activeChatModelUsability?.status === "loading"
               ? "loading"
-            : characterChatModelUsabilityBlocks
+            : activeChatModelUsabilityBlocks
               ? "error"
               : serverReadinessState === "degraded"
                 ? "degraded"
                 : "ready"
       }
       runtimeStatusDetail={
-        characterChatReadinessCopy?.title ?? runtimeStatusDetail
+        serverReadinessState === "blocked"
+          ? runtimeStatusDetail
+          : activeChatModelUsabilityBlocks
+            ? activeChatModelUsabilityMessage ?? runtimeStatusDetail
+            : characterChatReadinessCopy?.title ?? runtimeStatusDetail
       }
       messageCount={cockpitMessageCount}
       threadSearchOpen={threadSearchOpen}
@@ -2843,6 +2924,7 @@ export const Playground = () => {
       onToolChoiceChange={(nextChoice) => setToolChoice(nextChoice)}
       onOpenMcpSettings={openMcpSettingsFromCockpit}
       toolSummary={cockpitToolSummary}
+      setupRecoveryMode={setupRecoveryMode}
     />
   );
   const cockpitStatusStrip = (
@@ -2866,9 +2948,9 @@ export const Playground = () => {
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
       serverBlocked={serverReadinessState === "blocked"}
-      modelUsabilityStatus={activeCharacterChatModelUsability?.status ?? null}
-      modelUsabilityCanSend={activeCharacterChatModelUsability?.canSend ?? null}
-      modelUsabilityMessage={characterChatModelUsabilityMessage}
+      modelUsabilityStatus={activeChatModelUsability?.status ?? null}
+      modelUsabilityCanSend={activeChatModelUsability?.canSend ?? null}
+      modelUsabilityMessage={activeChatModelUsabilityMessage}
       modelUnavailable={characterChatModelUnavailable}
       modelUnavailableMessage={
         characterChatModelUnavailable ? characterChatReadinessCopy?.title ?? null : null
@@ -3352,7 +3434,11 @@ export const Playground = () => {
               data-testid={
                 stickyChatInput ? "playground-chat-composer-dock" : undefined
               }
-              className={`relative w-full shrink-0 ${
+              className={`relative w-full ${
+                mobileCockpitComposerConstrained
+                  ? "min-h-0 shrink overflow-y-auto overscroll-contain"
+                  : "shrink-0"
+              } ${
                 stickyChatInput
                   ? "sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"
                   : ""
@@ -3389,6 +3475,7 @@ export const Playground = () => {
               <PlaygroundForm
                 droppedFiles={droppedFiles}
                 stickyDockEnabled={stickyChatInput}
+                mobileCockpitModeActive={mobileCockpitComposerConstrained}
                 onComposerLayoutChange={
                   stickyChatInput ? handleComposerLayoutChange : undefined
                 }
@@ -3423,22 +3510,17 @@ export const Playground = () => {
                 }
                 onDraftPresenceChange={handleComposerDraftPresenceChange}
                 characterChatSendBlocker={characterChatSendBlocker}
-                characterChatModelUsability={activeCharacterChatModelUsability}
+                characterChatModelUsability={activeChatModelUsability}
                 characterChatModelUsabilityLabel={
-                  characterChatModelSelectorLabel
+                  activeChatModelSelectorLabel
                 }
                 characterChatModelUsabilityTitle={
-                  characterChatModelSelectorTitle
+                  activeChatModelSelectorTitle
                 }
               />
             </div>
           </div>
         </PlaygroundCockpitShell>
-        {characterControlVisible && !isMobileViewport && (
-          <div className="hidden h-full w-[28%] min-w-[280px] max-w-[360px] shrink-0 lg:flex">
-            <CharacterControlRail />
-          </div>
-        )}
         {artifactsOpen && (
           <>
             <div className="hidden h-full w-[36%] min-w-[280px] max-w-[520px] shrink-0 lg:flex">
