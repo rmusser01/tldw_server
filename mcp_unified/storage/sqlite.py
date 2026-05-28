@@ -1,12 +1,19 @@
-"""SQLite-backed standalone MCP storage primitives."""
+"""SQLite-backed standalone MCP storage primitives.
+
+This backend intentionally stays in ``mcp_unified`` and uses stdlib SQLite so
+the standalone package does not import host ``tldw_Server_API`` DB helpers.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
-from collections.abc import Mapping
+import threading
+from collections.abc import Callable, Mapping
+from datetime import timezone
 from pathlib import Path
-from typing import Any, ClassVar, TypeVar
+from typing import Any, ClassVar, ParamSpec, TypeVar
 
 from pydantic import BaseModel
 
@@ -20,6 +27,8 @@ from mcp_unified.storage.models import (
 )
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+ReturnT = TypeVar("ReturnT")
+ParamsT = ParamSpec("ParamsT")
 
 
 class SQLiteMCPStore:
@@ -80,38 +89,198 @@ class SQLiteMCPStore:
             db_path = Path(path).expanduser()
             db_path.parent.mkdir(parents=True, exist_ok=True)
             self.path = str(db_path)
-        self._conn = sqlite3.connect(self.path)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(
+            self.path,
+            timeout=30.0,
+            check_same_thread=False,
+        )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._initialize_schema()
 
     def close(self) -> None:
         """Close the underlying SQLite connection."""
-        self._conn.close()
+        self._close_sync()
 
     async def aclose(self) -> None:
         """Async-friendly close helper for callers managing stores generically."""
-        self.close()
+        await self._run_db(self._close_sync)
 
     async def get_profile(self, profile_id: str) -> MCPProfile | None:
         """Return a copy-isolated profile by id."""
-        return self._get_model("mcp_profiles", profile_id, MCPProfile)
+        return await self._run_db(self._get_profile_sync, profile_id)
 
     async def list_profiles(self) -> list[MCPProfile]:
         """Return all profiles sorted by id."""
-        rows = self._conn.execute(
-            "SELECT payload FROM mcp_profiles ORDER BY id",
-        ).fetchall()
-        return [self._load_model(row["payload"], MCPProfile) for row in rows]
+        return await self._run_db(self._list_profiles_sync)
 
     async def upsert_profile(
         self,
         profile: MCPProfile | Mapping[str, Any],
     ) -> MCPProfile:
         """Store a profile document and return the persisted model."""
+        return await self._run_db(self._upsert_profile_sync, profile)
+
+    async def delete_profile(self, profile_id: str) -> bool:
+        """Delete a profile by id and return whether it existed."""
+        return await self._run_db(self._delete_profile_sync, profile_id)
+
+    async def get_assignment(self, assignment_id: str) -> ProfileAssignment | None:
+        """Return a profile assignment by id."""
+        return await self._run_db(self._get_assignment_sync, assignment_id)
+
+    async def list_assignments(
+        self,
+        *,
+        profile_id: str | None = None,
+        principal_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> list[ProfileAssignment]:
+        """Return profile assignments matching optional filters."""
+        return await self._run_db(
+            self._list_assignments_sync,
+            profile_id=profile_id,
+            principal_id=principal_id,
+            workspace_id=workspace_id,
+        )
+
+    async def upsert_assignment(
+        self,
+        assignment: ProfileAssignment,
+    ) -> ProfileAssignment:
+        """Store a profile assignment and return the persisted model."""
+        return await self._run_db(self._upsert_assignment_sync, assignment)
+
+    async def delete_assignment(self, assignment_id: str) -> bool:
+        """Delete a profile assignment by id and return whether it existed."""
+        return await self._run_db(self._delete_assignment_sync, assignment_id)
+
+    async def get_policy(self, policy_id: str) -> ApprovalPolicyDocument | None:
+        """Return an approval policy by id."""
+        return await self._run_db(self._get_policy_sync, policy_id)
+
+    async def list_policies(
+        self,
+        *,
+        profile_id: str | None = None,
+    ) -> list[ApprovalPolicyDocument]:
+        """Return approval policies matching optional filters."""
+        return await self._run_db(self._list_policies_sync, profile_id=profile_id)
+
+    async def upsert_policy(
+        self,
+        policy: ApprovalPolicyDocument,
+    ) -> ApprovalPolicyDocument:
+        """Store an approval policy and return the persisted model."""
+        return await self._run_db(self._upsert_policy_sync, policy)
+
+    async def delete_policy(self, policy_id: str) -> bool:
+        """Delete an approval policy by id and return whether it existed."""
+        return await self._run_db(self._delete_policy_sync, policy_id)
+
+    async def get_grant(self, grant_id: str) -> CredentialGrant | None:
+        """Return a credential grant by id."""
+        return await self._run_db(self._get_grant_sync, grant_id)
+
+    async def list_grants(
+        self,
+        *,
+        profile_id: str | None = None,
+        external_server_id: str | None = None,
+    ) -> list[CredentialGrant]:
+        """Return credential grants matching optional filters."""
+        return await self._run_db(
+            self._list_grants_sync,
+            profile_id=profile_id,
+            external_server_id=external_server_id,
+        )
+
+    async def upsert_grant(self, grant: CredentialGrant) -> CredentialGrant:
+        """Store a credential grant and return the persisted model."""
+        return await self._run_db(self._upsert_grant_sync, grant)
+
+    async def delete_grant(self, grant_id: str) -> bool:
+        """Delete a credential grant by id and return whether it existed."""
+        return await self._run_db(self._delete_grant_sync, grant_id)
+
+    async def get_server(self, server_id: str) -> ExternalServerDefinition | None:
+        """Return an external server definition by id."""
+        return await self._run_db(self._get_server_sync, server_id)
+
+    async def list_servers(self) -> list[ExternalServerDefinition]:
+        """Return all external server definitions sorted by id."""
+        return await self.list_server_definitions()
+
+    async def list_server_definitions(
+        self,
+        *,
+        enabled: bool | None = None,
+    ) -> list[ExternalServerDefinition]:
+        """Return external server definitions matching optional enabled state."""
+        return await self._run_db(self._list_server_definitions_sync, enabled=enabled)
+
+    async def upsert_server(
+        self,
+        server: ExternalServerDefinition,
+    ) -> ExternalServerDefinition:
+        """Store an external server definition and return the persisted model."""
+        return await self._run_db(self._upsert_server_sync, server)
+
+    async def delete_server(self, server_id: str) -> bool:
+        """Delete an external server definition by id and return whether it existed."""
+        return await self._run_db(self._delete_server_sync, server_id)
+
+    async def append_event(self, event: AuditEvent) -> AuditEvent:
+        """Append an audit event and return the persisted event."""
+        return await self._run_db(self._append_event_sync, event)
+
+    async def query_events(
+        self,
+        *,
+        actor_id: str | None = None,
+        profile_id: str | None = None,
+        event_type: str | None = None,
+        limit: int | None = None,
+    ) -> list[AuditEvent]:
+        """Return audit events matching optional filters, newest first."""
+        return await self._run_db(
+            self._query_events_sync,
+            actor_id=actor_id,
+            profile_id=profile_id,
+            event_type=event_type,
+            limit=limit,
+        )
+
+    async def _run_db(
+        self,
+        operation: Callable[ParamsT, ReturnT],
+        *args: ParamsT.args,
+        **kwargs: ParamsT.kwargs,
+    ) -> ReturnT:
+        return await asyncio.to_thread(operation, *args, **kwargs)
+
+    def _close_sync(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    def _get_profile_sync(self, profile_id: str) -> MCPProfile | None:
+        return self._get_model("mcp_profiles", profile_id, MCPProfile)
+
+    def _list_profiles_sync(self) -> list[MCPProfile]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload FROM mcp_profiles ORDER BY id",
+            ).fetchall()
+        return [self._load_model(row["payload"], MCPProfile) for row in rows]
+
+    def _upsert_profile_sync(
+        self,
+        profile: MCPProfile | Mapping[str, Any],
+    ) -> MCPProfile:
         validated = self._validate_profile(profile)
         payload = self._dump_model(validated)
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 """
                 INSERT INTO mcp_profiles(id, enabled, updated_at, payload)
@@ -130,26 +299,23 @@ class SQLiteMCPStore:
             )
         return self._load_model(payload, MCPProfile)
 
-    async def delete_profile(self, profile_id: str) -> bool:
-        """Delete a profile by id and return whether it existed."""
+    def _delete_profile_sync(self, profile_id: str) -> bool:
         return self._delete_by_id("mcp_profiles", profile_id)
 
-    async def get_assignment(self, assignment_id: str) -> ProfileAssignment | None:
-        """Return a profile assignment by id."""
+    def _get_assignment_sync(self, assignment_id: str) -> ProfileAssignment | None:
         return self._get_model(
             "mcp_profile_assignments",
             assignment_id,
             ProfileAssignment,
         )
 
-    async def list_assignments(
+    def _list_assignments_sync(
         self,
         *,
         profile_id: str | None = None,
         principal_id: str | None = None,
         workspace_id: str | None = None,
     ) -> list[ProfileAssignment]:
-        """Return profile assignments matching optional filters."""
         rows = self._select_filtered_payloads(
             "mcp_profile_assignments",
             {
@@ -160,13 +326,12 @@ class SQLiteMCPStore:
         )
         return [self._load_model(row["payload"], ProfileAssignment) for row in rows]
 
-    async def upsert_assignment(
+    def _upsert_assignment_sync(
         self,
         assignment: ProfileAssignment,
     ) -> ProfileAssignment:
-        """Store a profile assignment and return the persisted model."""
         payload = self._dump_model(assignment)
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 """
                 INSERT INTO mcp_profile_assignments(
@@ -196,33 +361,29 @@ class SQLiteMCPStore:
             )
         return self._load_model(payload, ProfileAssignment)
 
-    async def delete_assignment(self, assignment_id: str) -> bool:
-        """Delete a profile assignment by id and return whether it existed."""
+    def _delete_assignment_sync(self, assignment_id: str) -> bool:
         return self._delete_by_id("mcp_profile_assignments", assignment_id)
 
-    async def get_policy(self, policy_id: str) -> ApprovalPolicyDocument | None:
-        """Return an approval policy by id."""
+    def _get_policy_sync(self, policy_id: str) -> ApprovalPolicyDocument | None:
         return self._get_model("mcp_approval_policies", policy_id, ApprovalPolicyDocument)
 
-    async def list_policies(
+    def _list_policies_sync(
         self,
         *,
         profile_id: str | None = None,
     ) -> list[ApprovalPolicyDocument]:
-        """Return approval policies matching optional filters."""
         rows = self._select_filtered_payloads(
             "mcp_approval_policies",
             {"profile_id": profile_id},
         )
         return [self._load_model(row["payload"], ApprovalPolicyDocument) for row in rows]
 
-    async def upsert_policy(
+    def _upsert_policy_sync(
         self,
         policy: ApprovalPolicyDocument,
     ) -> ApprovalPolicyDocument:
-        """Store an approval policy and return the persisted model."""
         payload = self._dump_model(policy)
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 """
                 INSERT INTO mcp_approval_policies(
@@ -245,21 +406,18 @@ class SQLiteMCPStore:
             )
         return self._load_model(payload, ApprovalPolicyDocument)
 
-    async def delete_policy(self, policy_id: str) -> bool:
-        """Delete an approval policy by id and return whether it existed."""
+    def _delete_policy_sync(self, policy_id: str) -> bool:
         return self._delete_by_id("mcp_approval_policies", policy_id)
 
-    async def get_grant(self, grant_id: str) -> CredentialGrant | None:
-        """Return a credential grant by id."""
+    def _get_grant_sync(self, grant_id: str) -> CredentialGrant | None:
         return self._get_model("mcp_credential_grants", grant_id, CredentialGrant)
 
-    async def list_grants(
+    def _list_grants_sync(
         self,
         *,
         profile_id: str | None = None,
         external_server_id: str | None = None,
     ) -> list[CredentialGrant]:
-        """Return credential grants matching optional filters."""
         rows = self._select_filtered_payloads(
             "mcp_credential_grants",
             {
@@ -269,10 +427,9 @@ class SQLiteMCPStore:
         )
         return [self._load_model(row["payload"], CredentialGrant) for row in rows]
 
-    async def upsert_grant(self, grant: CredentialGrant) -> CredentialGrant:
-        """Store a credential grant and return the persisted model."""
+    def _upsert_grant_sync(self, grant: CredentialGrant) -> CredentialGrant:
         payload = self._dump_model(grant)
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 """
                 INSERT INTO mcp_credential_grants(
@@ -297,37 +454,29 @@ class SQLiteMCPStore:
             )
         return self._load_model(payload, CredentialGrant)
 
-    async def delete_grant(self, grant_id: str) -> bool:
-        """Delete a credential grant by id and return whether it existed."""
+    def _delete_grant_sync(self, grant_id: str) -> bool:
         return self._delete_by_id("mcp_credential_grants", grant_id)
 
-    async def get_server(self, server_id: str) -> ExternalServerDefinition | None:
-        """Return an external server definition by id."""
+    def _get_server_sync(self, server_id: str) -> ExternalServerDefinition | None:
         return self._get_model("mcp_external_servers", server_id, ExternalServerDefinition)
 
-    async def list_servers(self) -> list[ExternalServerDefinition]:
-        """Return all external server definitions sorted by id."""
-        return await self.list_server_definitions()
-
-    async def list_server_definitions(
+    def _list_server_definitions_sync(
         self,
         *,
         enabled: bool | None = None,
     ) -> list[ExternalServerDefinition]:
-        """Return external server definitions matching optional enabled state."""
         rows = self._select_filtered_payloads(
             "mcp_external_servers",
             {"enabled": None if enabled is None else int(enabled)},
         )
         return [self._load_model(row["payload"], ExternalServerDefinition) for row in rows]
 
-    async def upsert_server(
+    def _upsert_server_sync(
         self,
         server: ExternalServerDefinition,
     ) -> ExternalServerDefinition:
-        """Store an external server definition and return the persisted model."""
         payload = self._dump_model(server)
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 """
                 INSERT INTO mcp_external_servers(
@@ -350,14 +499,13 @@ class SQLiteMCPStore:
             )
         return self._load_model(payload, ExternalServerDefinition)
 
-    async def delete_server(self, server_id: str) -> bool:
-        """Delete an external server definition by id and return whether it existed."""
+    def _delete_server_sync(self, server_id: str) -> bool:
         return self._delete_by_id("mcp_external_servers", server_id)
 
-    async def append_event(self, event: AuditEvent) -> AuditEvent:
-        """Append an audit event and return the persisted event."""
-        payload = self._dump_model(event)
-        with self._conn:
+    def _append_event_sync(self, event: AuditEvent) -> AuditEvent:
+        normalized = self._normalize_audit_event(event)
+        payload = self._dump_model(normalized)
+        with self._lock, self._conn:
             self._conn.execute(
                 """
                 INSERT INTO mcp_audit_events(
@@ -366,17 +514,17 @@ class SQLiteMCPStore:
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    event.id,
-                    event.actor_id,
-                    event.profile_id,
-                    event.event_type,
-                    event.created_at.isoformat(),
+                    normalized.id,
+                    normalized.actor_id,
+                    normalized.profile_id,
+                    normalized.event_type,
+                    normalized.created_at.isoformat(),
                     payload,
                 ),
             )
         return self._load_model(payload, AuditEvent)
 
-    async def query_events(
+    def _query_events_sync(
         self,
         *,
         actor_id: str | None = None,
@@ -384,7 +532,6 @@ class SQLiteMCPStore:
         event_type: str | None = None,
         limit: int | None = None,
     ) -> list[AuditEvent]:
-        """Return audit events matching optional filters, newest first."""
         if limit is not None and limit < 0:
             raise ValueError("limit must be non-negative")
         rows = self._select_filtered_payloads(
@@ -400,7 +547,7 @@ class SQLiteMCPStore:
         return [self._load_model(row["payload"], AuditEvent) for row in rows]
 
     def _initialize_schema(self) -> None:
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS mcp_storage_meta (
@@ -430,7 +577,10 @@ class SQLiteMCPStore:
                     is_default INTEGER NOT NULL,
                     enabled INTEGER NOT NULL,
                     updated_at TEXT NOT NULL,
-                    payload TEXT NOT NULL
+                    payload TEXT NOT NULL,
+                    FOREIGN KEY(profile_id)
+                        REFERENCES mcp_profiles(id)
+                        ON DELETE CASCADE
                 )
                 """
             )
@@ -441,7 +591,10 @@ class SQLiteMCPStore:
                     profile_id TEXT,
                     enabled INTEGER NOT NULL,
                     updated_at TEXT NOT NULL,
-                    payload TEXT NOT NULL
+                    payload TEXT NOT NULL,
+                    FOREIGN KEY(profile_id)
+                        REFERENCES mcp_profiles(id)
+                        ON DELETE CASCADE
                 )
                 """
             )
@@ -453,7 +606,10 @@ class SQLiteMCPStore:
                     external_server_id TEXT,
                     enabled INTEGER NOT NULL,
                     updated_at TEXT NOT NULL,
-                    payload TEXT NOT NULL
+                    payload TEXT NOT NULL,
+                    FOREIGN KEY(profile_id)
+                        REFERENCES mcp_profiles(id)
+                        ON DELETE CASCADE
                 )
                 """
             )
@@ -534,7 +690,7 @@ class SQLiteMCPStore:
         )
 
     def _delete_by_id(self, table: str, item_id: str) -> bool:
-        with self._conn:
+        with self._lock, self._conn:
             cursor = self._conn.execute(
                 self._DELETE_BY_ID_SQL[table],
                 (item_id,),
@@ -547,10 +703,11 @@ class SQLiteMCPStore:
         item_id: str,
         model_cls: type[ModelT],
     ) -> ModelT | None:
-        row = self._conn.execute(
-            self._SELECT_BY_ID_SQL[table],
-            (item_id,),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                self._SELECT_BY_ID_SQL[table],
+                (item_id,),
+            ).fetchone()
         if row is None:
             return None
         return self._load_model(row["payload"], model_cls)
@@ -578,9 +735,9 @@ class SQLiteMCPStore:
         query_parts.extend(["ORDER BY", self._ORDER_BY_SQL[order_by]])
         if limit is not None:
             query_parts.append("LIMIT ?")
-        if limit is not None:
             values.append(limit)
-        return self._conn.execute(" ".join(query_parts), values).fetchall()
+        with self._lock:
+            return self._conn.execute(" ".join(query_parts), values).fetchall()
 
     def _validate_filter_request(
         self,
@@ -610,6 +767,13 @@ class SQLiteMCPStore:
     @staticmethod
     def _load_model(payload: str, model_cls: type[ModelT]) -> ModelT:
         return model_cls.model_validate_json(payload)
+
+    @staticmethod
+    def _normalize_audit_event(event: AuditEvent) -> AuditEvent:
+        return event.model_copy(
+            update={"created_at": event.created_at.astimezone(timezone.utc)},
+            deep=True,
+        )
 
     @staticmethod
     def _validate_profile(profile: MCPProfile | Mapping[str, Any]) -> MCPProfile:

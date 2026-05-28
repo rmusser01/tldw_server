@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import ast
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -94,6 +95,66 @@ def test_sqlite_store_rejects_future_schema_version(tmp_path: Path) -> None:
         SQLiteMCPStore(db_path)
 
 
+def test_sqlite_store_uses_thread_safe_timeout_connection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import mcp_unified.storage.sqlite as sqlite_storage
+    from mcp_unified.storage import SQLiteMCPStore
+
+    original_connect = cast(
+        Callable[..., sqlite3.Connection],
+        sqlite_storage.sqlite3.connect,
+    )
+    connect_kwargs: dict[str, Any] = {}
+
+    def recording_connect(
+        *args: Any,
+        **kwargs: Any,
+    ) -> sqlite3.Connection:
+        connect_kwargs.update(kwargs)
+        return original_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite_storage.sqlite3, "connect", recording_connect)
+
+    store = SQLiteMCPStore(tmp_path / "mcp.sqlite")
+    store.close()
+
+    assert connect_kwargs["timeout"] == 30.0
+    assert connect_kwargs["check_same_thread"] is False
+
+
+@pytest.mark.asyncio
+async def test_sqlite_store_async_methods_offload_database_work(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import mcp_unified.storage.sqlite as sqlite_storage
+    from mcp_unified.profiles import MCPProfile
+    from mcp_unified.storage import AuditEvent, SQLiteMCPStore
+
+    store = SQLiteMCPStore(tmp_path / "mcp.sqlite")
+    calls: list[str] = []
+
+    async def recording_to_thread(function: Any, /, *args: Any, **kwargs: Any) -> Any:
+        calls.append(function.__name__)
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite_storage.asyncio, "to_thread", recording_to_thread)
+
+    await store.upsert_profile(MCPProfile(id="backend", name="Backend"))
+    await store.list_profiles()
+    await store.append_event(AuditEvent(id="event-1", event_type="tool.allowed"))
+    await store.query_events()
+    await store.aclose()
+
+    assert "_upsert_profile_sync" in calls
+    assert "_list_profiles_sync" in calls
+    assert "_append_event_sync" in calls
+    assert "_query_events_sync" in calls
+    assert "_close_sync" in calls
+
+
 @pytest.mark.asyncio
 async def test_sqlite_store_round_trips_profiles_with_copy_isolation(tmp_path: Path) -> None:
     from mcp_unified.profiles import MCPProfile
@@ -129,6 +190,7 @@ async def test_sqlite_store_round_trips_profiles_with_copy_isolation(tmp_path: P
 async def test_sqlite_store_filters_assignment_policy_and_grant_rows(
     tmp_path: Path,
 ) -> None:
+    from mcp_unified.profiles import MCPProfile
     from mcp_unified.storage import (
         ApprovalPolicyDocument,
         CredentialGrant,
@@ -137,6 +199,8 @@ async def test_sqlite_store_filters_assignment_policy_and_grant_rows(
     )
 
     store = SQLiteMCPStore(tmp_path / "mcp.sqlite")
+    await store.upsert_profile(MCPProfile(id="backend", name="Backend"))
+    await store.upsert_profile(MCPProfile(id="frontend", name="Frontend"))
     await store.upsert_assignment(
         ProfileAssignment(
             id="assignment-user",
@@ -214,6 +278,61 @@ async def test_sqlite_store_filters_assignment_policy_and_grant_rows(
     assert await store.get_assignment("assignment-user") is None
     assert await store.delete_policy("missing-policy") is False
     assert await store.delete_grant("missing-grant") is False
+
+    await store.aclose()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_store_enforces_profile_foreign_keys_and_cascades(
+    tmp_path: Path,
+) -> None:
+    from mcp_unified.profiles import MCPProfile
+    from mcp_unified.storage import (
+        ApprovalPolicyDocument,
+        CredentialGrant,
+        ProfileAssignment,
+        SQLiteMCPStore,
+    )
+
+    store = SQLiteMCPStore(tmp_path / "mcp.sqlite")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        await store.upsert_assignment(
+            ProfileAssignment(
+                id="orphan-assignment",
+                profile_id="missing-profile",
+                principal_id="user-1",
+            )
+        )
+
+    await store.upsert_profile(MCPProfile(id="backend", name="Backend"))
+    await store.upsert_assignment(
+        ProfileAssignment(
+            id="assignment-user",
+            profile_id="backend",
+            principal_id="user-1",
+        )
+    )
+    await store.upsert_policy(
+        ApprovalPolicyDocument(
+            id="policy-backend",
+            name="Backend writes",
+            profile_id="backend",
+        )
+    )
+    await store.upsert_grant(
+        CredentialGrant(
+            id="grant-search",
+            profile_id="backend",
+            broker_id="local",
+            credential_slot="search",
+        )
+    )
+
+    assert await store.delete_profile("backend") is True
+    assert await store.list_assignments(profile_id="backend") == []
+    assert await store.list_policies(profile_id="backend") == []
+    assert await store.list_grants(profile_id="backend") == []
 
     await store.aclose()
 
@@ -317,5 +436,45 @@ async def test_sqlite_store_appends_and_queries_audit_events(tmp_path: Path) -> 
     assert [event.id for event in backend_events] == ["new", "old"]
     assert [event.id for event in denied_events] == ["middle"]
     assert old_event.payload["args"]["path"] == "/repo/README.md"
+
+    await store.aclose()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_store_orders_audit_events_by_utc_instant(
+    tmp_path: Path,
+) -> None:
+    from mcp_unified.storage import AuditEvent, SQLiteMCPStore
+
+    store = SQLiteMCPStore(tmp_path / "mcp.sqlite")
+    older = datetime(
+        2026,
+        5,
+        29,
+        0,
+        15,
+        tzinfo=timezone(timedelta(hours=2)),
+    )
+    newer = datetime(
+        2026,
+        5,
+        28,
+        23,
+        30,
+        tzinfo=timezone(timedelta(hours=-2)),
+    )
+
+    await store.append_event(
+        AuditEvent(id="older-offset", event_type="tool.allowed", created_at=older)
+    )
+    await store.append_event(
+        AuditEvent(id="newer-offset", event_type="tool.allowed", created_at=newer)
+    )
+
+    events = await store.query_events()
+
+    assert [event.id for event in events] == ["newer-offset", "older-offset"]
+    assert events[0].created_at.utcoffset() == timedelta(0)
+    assert events[0].created_at.isoformat() == "2026-05-29T01:30:00+00:00"
 
     await store.aclose()

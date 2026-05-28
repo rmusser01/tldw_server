@@ -4,7 +4,7 @@ title: Implement MCP Unified Stage 2E SQLite store slice
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-28 05:05'
+updated_date: '2026-05-28 05:25'
 labels:
   - mcp-unified
   - standalone
@@ -43,12 +43,27 @@ Verification:
 - source .venv/bin/activate && python -m mypy mcp_unified tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py -> Success, no issues in 15 source files
 - source .venv/bin/activate && python -m bandit -r mcp_unified -f json -o /tmp/bandit_mcp_unified_stage2e_sqlite.json -> 0 findings, 0 skipped tests
 - git diff --check -> clean
+
+Review-fix pass after rebasing on latest origin/dev:
+- Rebased PR #2089 branch onto origin/dev at 4a48a0f6.
+- Addressed async SQLite review feedback by routing async store methods through asyncio.to_thread, using a check_same_thread=False SQLite connection with timeout=30.0, and serializing connection access with a reentrant lock.
+- Addressed foreign-key feedback by adding profile_id foreign keys with ON DELETE CASCADE for assignments, approval policies, and credential grants, plus regression coverage for orphan rejection and cascade cleanup.
+- Addressed audit ordering feedback by normalizing persisted audit event timestamps to UTC and adding mixed-timezone ordering coverage.
+- Addressed the redundant limit branch feedback by combining query LIMIT handling into one conditional.
+- Evaluated the raw SQL / DB_Management comment and kept stdlib sqlite3 inside mcp_unified intentionally because this standalone storage package must not import host tldw_Server_API DB helpers; the package-boundary tests continue to enforce that.
+
+Review-fix verification:
+- source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_storage_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_registry_resolver.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_structured_resolution.py -v -> 54 passed, 3 warnings
+- source .venv/bin/activate && python -m ruff check mcp_unified tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py -> All checks passed
+- source .venv/bin/activate && python -m mypy mcp_unified tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py -> Success, no issues in 15 source files
+- source .venv/bin/activate && python -m bandit -r mcp_unified -f json -o /tmp/bandit_mcp_unified_stage2e_review.json -> 0 findings, 0 skipped tests
+- git diff --check -> clean
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added the Stage 2E SQLite storage slice for MCP Unified standalone extraction. The new store covers schema-versioned SQLite persistence for profiles, profile assignments, approval policies, credential grants, external server definitions, and audit events without introducing host-package imports or runtime enforcement wiring. Known skips/blockers: none; gateway entrypoints, YAML import/export, runtime enforcement, and external MCP lifecycle remain out of scope for this slice.
+Added the Stage 2E SQLite storage slice and completed the PR #2089 review-fix pass after rebasing on latest dev. The store remains standalone/package-local while async methods now offload SQLite work, the connection is configured for thread offload with a lock timeout, dependent profile rows use foreign-key cascades, audit timestamps are normalized for correct newest-first ordering across timezone offsets, and review coverage was expanded. Known skips/blockers: none; host DB_Management wiring remains intentionally out of scope because it would violate the standalone package boundary.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
