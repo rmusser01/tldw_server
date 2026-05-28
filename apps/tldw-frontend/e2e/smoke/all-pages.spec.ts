@@ -23,6 +23,11 @@ import {
 } from './smoke.setup';
 import { waitForAppShell } from '../utils/helpers';
 import { PAGES, PageEntry, getActivePages, PAGE_COUNT, ACTIVE_PAGE_COUNT } from './page-inventory';
+import {
+  hasRuntimeOverlayBodySignal,
+  hasRuntimeOverlayConsoleSignal,
+  hasTransientRuntimeOverlaySignal,
+} from './runtime-overlay';
 
 // Test configuration
 const LOAD_TIMEOUT = 30_000; // 30s max for page load
@@ -126,19 +131,6 @@ const NON_CORE_ROUTE_BOUNDARY_TARGETS = [
     routeLabel: 'Speech Playground',
   },
 ] as const;
-const RUNTIME_OVERLAY_PATTERNS = [
-  /Runtime(?:\s+\w+)?\s+Error/i,
-  /Runtime SyntaxError/i,
-  /Invalid or unexpected token/i,
-  /Objects are not valid as a React child/i,
-  /message\.error is not a function/i,
-];
-const TRANSIENT_RUNTIME_OVERLAY_PATTERNS = [
-  /Runtime SyntaxError/i,
-  /Invalid or unexpected token/i,
-  /Unexpected end of input/i,
-];
-
 const keyNavEntries: PageEntry[] = KEY_NAV_TARGETS.map((targetPath) =>
   PAGES.find((entry) => entry.path === targetPath)
 ).filter((entry): entry is PageEntry => Boolean(entry));
@@ -244,14 +236,6 @@ function assertWarningHardGate(
       .map((entry) => `${entry.url} (${entry.errorText})`)
       .join(' | ')}`
   ).toHaveLength(0);
-}
-
-function hasRuntimeOverlaySignal(input: string): boolean {
-  return RUNTIME_OVERLAY_PATTERNS.some((pattern) => pattern.test(input));
-}
-
-function hasTransientRuntimeOverlaySignal(input: string): boolean {
-  return TRANSIENT_RUNTIME_OVERLAY_PATTERNS.some((pattern) => pattern.test(input));
 }
 
 function resetDiagnostics(diagnostics: DiagnosticsData): void {
@@ -373,13 +357,13 @@ async function assertNoRuntimeOverlay(
 ): Promise<void> {
   const runtimeConsoleErrors = issues.consoleErrors
     .map((entry) => entry.text)
-    .filter(hasRuntimeOverlaySignal);
+    .filter(hasRuntimeOverlayConsoleSignal);
 
   const overlaySnapshot = await page.evaluate(() => ({
     bodyText: document.body?.innerText ?? '',
   }));
 
-  const bodyHasRuntimeSignal = hasRuntimeOverlaySignal(overlaySnapshot.bodyText);
+  const bodyHasRuntimeSignal = hasRuntimeOverlayBodySignal(overlaySnapshot.bodyText);
   const bodySnippet = bodyHasRuntimeSignal
     ? overlaySnapshot.bodyText.replace(/\s+/g, ' ').trim().slice(0, 220)
     : '';

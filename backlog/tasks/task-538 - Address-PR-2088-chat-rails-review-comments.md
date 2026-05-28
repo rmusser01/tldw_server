@@ -2,10 +2,14 @@
 id: TASK-538
 title: Address PR 2088 chat rails review comments
 status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-05-28 06:12
 labels:
 - chat
 - ux
 - review
+dependencies: []
 priority: high
 modified_files:
 - apps/packages/ui/src/components/Option/Playground/Playground.tsx
@@ -23,6 +27,11 @@ modified_files:
 - apps/packages/ui/src/components/Sidepanel/Chat/SidepanelHeaderSimple.tsx
 - apps/packages/ui/src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx
 - apps/tldw-frontend/e2e/smoke/stage6-interaction-stage2.spec.ts
+- apps/tldw-frontend/e2e/smoke/all-pages.spec.ts
+- apps/tldw-frontend/e2e/smoke/invalid-api-key.spec.ts
+- apps/tldw-frontend/e2e/smoke/stage1-route-matrix-capture.spec.ts
+- apps/tldw-frontend/e2e/smoke/runtime-overlay.ts
+- apps/tldw-frontend/__tests__/e2e/runtime-overlay-signals.test.ts
 - apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts
 - apps/extension/tests/e2e/sidepanel-chat-smoke.spec.ts
 - Docs/Reviews/CHAT_RAILS_UX_REBASELINE_2026_05_27.md
@@ -54,6 +63,7 @@ Address review feedback and CI issues on PR #2088 after rebasing the chat rails 
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started PR #2088 review-fix pass. Branch was fetched and rebased cleanly onto latest origin/dev. Review collection found unresolved Gemini/CodeRabbit/Qodo comments plus UX Smoke Gate failure in the pre-rebase CI run. Next step is validating each comment against current code and implementing only still-valid fixes.
 
@@ -62,10 +72,15 @@ Validated and implemented the still-current PR #2088 review fixes: provider-stat
 Verification so far: focused package UI Vitest passed 6 files / 100 tests; cockpit/control guard Vitest passed 3 files / 26 tests; targeted UX smoke mobile composer Playwright passed 1 Chromium test; packaged extension sidepanel chat smoke passed 3 Chromium-extension tests after production build; evidence JSON parse passed; git diff --check passed. Bandit skipped because the touched executable code is frontend TypeScript/TSX plus Markdown/JSON/Backlog metadata, with no Python files in this slice.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
+CI recheck found and fixed a second UX Smoke Gate failure after the first review-fix push: the all-pages runtime overlay detector scanned full body text with a broad /Runtime ... Error/ pattern, which matched legitimate /chat cockpit text (`Runtime` rail plus `Error` runtime status). Added a shared smoke runtime-overlay helper with stricter body patterns, updated all-pages, invalid-api-key, and Stage 1 route-matrix capture to use it, and added Vitest regression coverage for the chat rail false positive.
+
+Additional verification: runtime-overlay Vitest passed 1 file / 2 tests; targeted all-pages Chat smoke passed 1 Chromium test; invalid API key chat smoke passed 1 Chromium test; CI-matching all-pages smoke gate passed 111 Chromium tests. A non-CI local full all-pages invocation without the gate grep still has an unrelated Kanban forced-error route-boundary failure; the package CI script only runs `Smoke Tests - All Pages` and passed.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased PR #2088 onto latest `origin/dev` and addressed the still-current review comments plus the prior UX Smoke Gate failure. The fix pass hardens provider/model readiness null cases, makes assistant clearing deterministic, restores dashboard versus full-chat route separation, removes the nested `aria-describedby` text, preserves localized composition-preview copy semantics, removes fake local E2E keys from PR docs/evidence, makes extension host-permission setup fail loudly, updates stale smoke selectors, checks completed Backlog DoD state, and moves the PR-added duplicate chat `TASK-521` records to decimal sub-IDs. Verification passed for focused package UI Vitest (6 files / 100 tests), cockpit/control Vitest (3 files / 26 tests), targeted mobile composer Playwright smoke (1 Chromium test), packaged extension sidepanel chat smoke (3 Chromium-extension tests after production build), evidence JSON parse, and `git diff --check`. Bandit skipped because this slice touched frontend TypeScript/TSX, Markdown, JSON, screenshots/evidence metadata, and Backlog records only; no Python files changed.
+Rebased PR #2088 onto latest `origin/dev` and addressed the still-current review comments plus both UX Smoke Gate failures observed during the PR recheck. The review-fix pass hardens provider/model readiness null cases, makes assistant clearing deterministic, restores dashboard versus full-chat route separation, removes nested `aria-describedby` text, preserves localized composition-preview copy semantics, removes fake local E2E keys from PR docs/evidence, makes extension host-permission setup fail loudly, updates stale smoke selectors, checks completed Backlog DoD state, and moves PR-added duplicate chat `TASK-521` records to decimal sub-IDs. The follow-up CI fix extracts shared runtime-overlay smoke detection, separates broad console checks from stricter body-text checks, and prevents normal `/chat` runtime rail copy from being misclassified as a framework runtime overlay. Verification passed for focused package UI Vitest (6 files / 100 tests), cockpit/control Vitest (3 files / 26 tests), targeted mobile composer Playwright smoke (1 Chromium test), packaged extension sidepanel chat smoke (3 Chromium-extension tests after production build), runtime-overlay Vitest (1 file / 2 tests), targeted `/chat` all-pages smoke (1 Chromium test), invalid-key chat smoke (1 Chromium test), CI-matching all-pages smoke gate (111 Chromium tests), evidence JSON parse, and `git diff --check`. Bandit skipped because this slice touched frontend TypeScript/TSX, Markdown, JSON, screenshots/evidence metadata, and Backlog records only; no Python files changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
