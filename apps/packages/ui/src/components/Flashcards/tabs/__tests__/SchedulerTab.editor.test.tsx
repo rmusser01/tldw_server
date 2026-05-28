@@ -279,7 +279,7 @@ describe("SchedulerTab editor", () => {
   it("renders the FSRS switch guidance with the design-system Alert", async () => {
     render(<SchedulerTab isActive />)
 
-    fireEvent.mouseDown(screen.getByText("SM-2+"))
+    fireEvent.mouseDown(screen.getByTestId("deck-scheduler-editor-field-scheduler-type"))
     const fsrsOptions = await screen.findAllByText("FSRS")
     fireEvent.click(fsrsOptions[fsrsOptions.length - 1])
 
