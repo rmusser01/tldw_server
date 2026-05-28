@@ -585,14 +585,30 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         try:
             response = await self._client.call("session/new", params)
         except ACPResponseError as exc:
-            if not agent_type or "invalid params" not in str(exc).lower():
+            if "invalid params" not in str(exc).lower():
                 raise
             fallback_params = dict(params)
-            fallback_params.pop("agentType", None)
-            logger.debug(
-                "ACP session/new rejected agentType for this runner; retrying without agentType"
-            )
-            response = await self._client.call("session/new", fallback_params)
+            if "agentType" in fallback_params:
+                fallback_params.pop("agentType", None)
+                logger.debug(
+                    "ACP session/new rejected agentType for this runner; retrying without agentType"
+                )
+                try:
+                    response = await self._client.call("session/new", fallback_params)
+                except ACPResponseError as second_exc:
+                    if "invalid params" not in str(second_exc).lower():
+                        raise
+                    fallback_params.pop("mcpServers", None)
+                    logger.debug(
+                        "ACP session/new rejected mcpServers for this runner; retrying without mcpServers"
+                    )
+                    response = await self._client.call("session/new", fallback_params)
+            else:
+                fallback_params.pop("mcpServers", None)
+                logger.debug(
+                    "ACP session/new rejected mcpServers for this runner; retrying without mcpServers"
+                )
+                response = await self._client.call("session/new", fallback_params)
         result = response.result or {}
         session_id = result.get("sessionId")
         if not session_id:

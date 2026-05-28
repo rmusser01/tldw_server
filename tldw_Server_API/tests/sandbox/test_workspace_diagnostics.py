@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime, timedelta, timezone
 from itertools import chain
 
@@ -25,12 +26,10 @@ def _user_dep(user_id: int = 1, *, is_admin: bool = False):
 def _client(monkeypatch, *, user_id: int = 1, is_admin: bool = False) -> TestClient:
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
-    try:
+    with contextlib.suppress(Exception):
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
         reset_settings()
-    except Exception:
-        pass
 
     from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb
 
@@ -48,12 +47,10 @@ def _sandbox_api_client(monkeypatch, *, user_id: int = 1, is_admin: bool = False
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "0")
     monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "0")
-    try:
+    with contextlib.suppress(Exception):
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
         reset_settings()
-    except Exception:
-        pass
 
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb_api
     from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb_diag
@@ -166,6 +163,83 @@ def test_workspace_diagnostics_filters_runs_to_authenticated_user_and_workspace(
     assert data["runs"]["total"] == 1
     assert [item["id"] for item in data["runs"]["items"]] == ["workspace_diag_target"]
     assert data["runs"]["items"][0]["workspace_id"] == "workspace-alpha"
+
+
+@pytest.mark.unit
+@pytest.mark.sandbox_no_auth
+def test_workspace_diagnostics_rejects_unknown_source_label(monkeypatch) -> None:
+    with _client(monkeypatch, user_id=1, is_admin=False) as client:
+        response = client.get(
+            "/api/v1/sandbox/workspaces/workspace-alpha/diagnostics",
+            params={"source_label": "workspace_playground"},
+        )
+
+    assert response.status_code == 400
+    assert "source_label" in response.json()["detail"]
+
+
+@pytest.mark.unit
+@pytest.mark.sandbox_no_auth
+def test_workspace_diagnostics_uses_thread_for_blocking_run_queries(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb
+
+    monkeypatch.setattr(
+        sb._service,
+        "runtime_diagnostics_summary",
+        lambda: {
+            "source": "feature_discovery",
+            "summary": {"total": 0, "ready": 0, "unavailable": 0},
+            "runtimes": [],
+        },
+    )
+    _seed_run("workspace_diag_threaded", 1, workspace_id="workspace-threaded")
+    called: list[str] = []
+
+    async def fake_to_thread(func, /, *args, **kwargs):
+        called.append(getattr(func, "__name__", repr(func)))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(sb.asyncio, "to_thread", fake_to_thread)
+
+    with _client(monkeypatch, user_id=1, is_admin=False) as client:
+        response = client.get("/api/v1/sandbox/workspaces/workspace-threaded/diagnostics")
+
+    assert response.status_code == 200
+    assert called == ["list_runs", "count_runs"]
+
+
+@pytest.mark.unit
+def test_workspace_diagnostics_does_not_suppress_cancelled_error(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb
+
+    def raise_cancelled():
+        raise sb.asyncio.CancelledError()
+
+    monkeypatch.setattr(sb._service, "runtime_diagnostics_summary", raise_cancelled)
+
+    with pytest.raises(sb.asyncio.CancelledError):
+        sb._sandbox_workspace_runtime_state()
+
+
+@pytest.mark.unit
+def test_workspace_diagnostics_response_models_are_documented() -> None:
+    from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
+        SandboxWorkspaceDiagnosticState,
+        SandboxWorkspaceDiagnosticsLinks,
+        SandboxWorkspaceDiagnosticsResponse,
+        SandboxWorkspaceDiagnosticsRunList,
+        SandboxWorkspaceDiagnosticsRunSummary,
+    )
+
+    for model in (
+        SandboxWorkspaceDiagnosticState,
+        SandboxWorkspaceDiagnosticsRunSummary,
+        SandboxWorkspaceDiagnosticsRunList,
+        SandboxWorkspaceDiagnosticsLinks,
+        SandboxWorkspaceDiagnosticsResponse,
+    ):
+        assert model.__doc__
+        assert len(model.__doc__.strip()) > 20
 
 
 @pytest.mark.unit

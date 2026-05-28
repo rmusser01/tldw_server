@@ -533,6 +533,19 @@ export const runResearchWorkspaceMigration = async ({
       }
     }
 
+    const hasCoveredLocalPayloads = plan.chunks.length > 0
+    if (hasCoveredLocalPayloads && !deleteLocalStorageValue) {
+      return {
+        status: "blocked",
+        migrationId: plan.migrationId,
+        manifestHash: plan.manifestHash,
+        serverMigration,
+        localDeletionEligibility: plan.localDeletionEligibility,
+        deletedSurfaceIds: [],
+        message: "Server deletion eligibility is available, but local deletion dependencies are not configured."
+      }
+    }
+
     if (
       !canDeleteCoveredLocalPayloads({
         chunks: plan.chunks,
@@ -561,14 +574,11 @@ export const runResearchWorkspaceMigration = async ({
       tombstone.legacyWorkspaceId
     )
     const tombstonePayload = JSON.stringify(tombstone)
-    if (deleteLocalStorageValue) {
-      const preflightKey = `${RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX}:${encodeURIComponent(
-        tombstone.legacyWorkspaceId
-      )}`
+    const preflightKey = `${RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX}:${encodeURIComponent(
+      tombstone.legacyWorkspaceId
+    )}`
+    if (hasCoveredLocalPayloads && deleteLocalStorageValue) {
       await writeLocalStorageValue(preflightKey, tombstonePayload)
-      await deleteLocalStorageValue(preflightKey)
-    } else {
-      await writeLocalStorageValue(tombstoneKey, tombstonePayload)
     }
 
     const deletedSurfaceIds = await deleteCoveredLocalPayloads({
@@ -590,6 +600,9 @@ export const runResearchWorkspaceMigration = async ({
     }
 
     await writeLocalStorageValue(tombstoneKey, tombstonePayload)
+    if (hasCoveredLocalPayloads && deleteLocalStorageValue) {
+      await deleteLocalStorageValue(preflightKey)
+    }
     await api.ackWorkspaceMigrationClientDelete(plan.migrationId, {
       acknowledged_manifest_hash: plan.manifestHash
     })

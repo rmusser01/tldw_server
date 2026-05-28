@@ -1481,12 +1481,16 @@ const ResearchWorkspaceBody: React.FC = () => {
       return undefined
     }
     return {
-      label: "Details",
-      ariaLabel: "Review migration recovery details",
+      label: t("playground:workspace.details", "Details"),
+      ariaLabel: t(
+        "playground:workspace.reviewMigrationRecoveryDetails",
+        "Review migration recovery details"
+      ),
       onClick: () => setWorkspaceMigrationDetailsOpen(true)
     }
   }, [
     statusGuardrailsEnabled,
+    t,
     workspaceMigrationResult,
     workspaceMigrationStatusMessages.length
   ])
@@ -3668,7 +3672,10 @@ const ResearchWorkspaceBody: React.FC = () => {
       </Modal>
 
       <Modal
-        title="Migration recovery details"
+        title={t(
+          "playground:workspace.migrationRecoveryDetails",
+          "Migration recovery details"
+        )}
         open={workspaceMigrationDetailsOpen}
         onCancel={() => setWorkspaceMigrationDetailsOpen(false)}
         destroyOnHidden
@@ -3702,61 +3709,93 @@ const ResearchWorkspaceBody: React.FC = () => {
           >
             <p className="text-text-muted">{workspaceMigrationResult.message}</p>
             <dl className="grid grid-cols-[minmax(120px,0.42fr)_1fr] gap-x-3 gap-y-2">
-              <dt className="text-text-muted">Result</dt>
+              <dt className="text-text-muted">
+                {t("playground:workspace.migrationResult", "Result")}
+              </dt>
               <dd>{workspaceMigrationResult.status}</dd>
-              <dt className="text-text-muted">Migration ID</dt>
+              <dt className="text-text-muted">
+                {t("playground:workspace.migrationId", "Migration ID")}
+              </dt>
               <dd className="break-all">
-                {workspaceMigrationResult.migrationId || "Not available"}
+                {workspaceMigrationResult.migrationId ||
+                  t("playground:workspace.notAvailable", "Not available")}
               </dd>
-              <dt className="text-text-muted">Manifest hash</dt>
+              <dt className="text-text-muted">
+                {t("playground:workspace.manifestHash", "Manifest hash")}
+              </dt>
               <dd className="break-all">
-                {workspaceMigrationResult.manifestHash || "Not available"}
+                {workspaceMigrationResult.manifestHash ||
+                  t("playground:workspace.notAvailable", "Not available")}
               </dd>
-              <dt className="text-text-muted">Server receipt</dt>
+              <dt className="text-text-muted">
+                {t("playground:workspace.serverReceipt", "Server receipt")}
+              </dt>
               <dd>
                 {workspaceMigrationResult.serverMigration
-                  ? "Server receipt saved"
-                  : "No server receipt"}
+                  ? t(
+                      "playground:workspace.serverReceiptSaved",
+                      "Server receipt saved"
+                    )
+                  : t("playground:workspace.noServerReceipt", "No server receipt")}
               </dd>
-              <dt className="text-text-muted">Server status</dt>
+              <dt className="text-text-muted">
+                {t("playground:workspace.serverStatus", "Server status")}
+              </dt>
               <dd>
                 {workspaceMigrationResult.serverMigration?.status ||
-                  "No server receipt"}
+                  t("playground:workspace.noServerReceipt", "No server receipt")}
               </dd>
-              <dt className="text-text-muted">Client deletion eligible</dt>
+              <dt className="text-text-muted">
+                {t(
+                  "playground:workspace.clientDeletionEligible",
+                  "Client deletion eligible"
+                )}
+              </dt>
               <dd>
                 {workspaceMigrationResult.serverMigration?.client_delete_eligible
-                  ? "Yes"
-                  : "No"}
+                  ? t("common:yes", "Yes")
+                  : t("common:no", "No")}
               </dd>
             </dl>
 
             <div className="grid gap-3 md:grid-cols-3">
               <section className="rounded-md border border-border p-3">
                 <h3 className="mb-2 text-xs font-semibold uppercase text-text-muted">
-                  Deleted surfaces
+                  {t("playground:workspace.deletedSurfaces", "Deleted surfaces")}
                 </h3>
                 {renderMigrationSurfaceList(
                   migrationDeletedSurfaces,
-                  "No local content deleted"
+                  t(
+                    "playground:workspace.noLocalContentDeleted",
+                    "No local content deleted"
+                  )
                 )}
               </section>
               <section className="rounded-md border border-border p-3">
                 <h3 className="mb-2 text-xs font-semibold uppercase text-text-muted">
-                  Retained local surfaces
+                  {t(
+                    "playground:workspace.retainedLocalSurfaces",
+                    "Retained local surfaces"
+                  )}
                 </h3>
                 {renderMigrationSurfaceList(
                   migrationRetainedSurfaces,
-                  "No retained known surfaces"
+                  t(
+                    "playground:workspace.noRetainedKnownSurfaces",
+                    "No retained known surfaces"
+                  )
                 )}
               </section>
               <section className="rounded-md border border-border p-3">
                 <h3 className="mb-2 text-xs font-semibold uppercase text-text-muted">
-                  Unknown local surfaces
+                  {t(
+                    "playground:workspace.unknownLocalSurfaces",
+                    "Unknown local surfaces"
+                  )}
                 </h3>
                 {renderMigrationSurfaceList(
                   migrationUnknownSurfaces,
-                  "No unknown surfaces"
+                  t("playground:workspace.noUnknownSurfaces", "No unknown surfaces")
                 )}
               </section>
             </div>

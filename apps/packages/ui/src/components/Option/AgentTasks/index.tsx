@@ -278,6 +278,7 @@ export const AgentTasksPage: React.FC = () => {
   const [taskForm] = Form.useForm()
   const orchestrationSupportRef = React.useRef<boolean | null>(null)
   const taskDetailRequestRef = React.useRef<AbortController | null>(null)
+  const fetchProjectsRequestIdRef = React.useRef(0)
 
   const buildRequestTransport = useCallback(
     (path: string) => {
@@ -402,11 +403,15 @@ export const AgentTasksPage: React.FC = () => {
 
   const fetchProjects = useCallback(async () => {
     if (!apiBase) return
+    const requestId = fetchProjectsRequestIdRef.current + 1
+    fetchProjectsRequestIdRef.current = requestId
+    const isLatestRequest = () => fetchProjectsRequestIdRef.current === requestId
     setLoading(true)
     setError(null)
     setProjectsLoadedSuccessfully(false)
     try {
       const supported = await hasOrchestrationSupport()
+      if (!isLatestRequest()) return
       if (!supported) {
         markUnsupported()
         return
@@ -417,10 +422,12 @@ export const AgentTasksPage: React.FC = () => {
       })
       await ensureOrchestrationResponse(res)
       const data = await res.json()
+      if (!isLatestRequest()) return
       setIsUnsupported(false)
       setProjects(normalizeListPayload<ProjectSummary>(data, "projects"))
       setProjectsLoadedSuccessfully(true)
     } catch (err) {
+      if (!isLatestRequest()) return
       if (isUnsupportedError(err)) {
         markUnsupported()
       } else {
@@ -428,7 +435,9 @@ export const AgentTasksPage: React.FC = () => {
         setError(err instanceof Error ? err.message : "Failed to load projects")
       }
     } finally {
-      setLoading(false)
+      if (isLatestRequest()) {
+        setLoading(false)
+      }
     }
   }, [
     apiBase,

@@ -475,16 +475,16 @@ def _is_embeddings_backpressure_redis_enabled() -> bool:
     if redis_enabled_env is not None:
         return is_truthy(redis_enabled_env)
 
-    if os.getenv("EMBEDDINGS_REDIS_URL") or os.getenv("REDIS_URL"):
-        return True
-
     try:
-        configured = settings.get("REDIS_ENABLED", False)
-        if isinstance(configured, str):
-            return is_truthy(configured)
-        return bool(configured)
+        configured = settings.get("REDIS_ENABLED", None)
+        if configured is not None:
+            if isinstance(configured, str):
+                return is_truthy(configured)
+            return bool(configured)
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        return False
+        pass
+
+    return bool(os.getenv("EMBEDDINGS_REDIS_URL") or os.getenv("REDIS_URL"))
 
 
 def _should_enforce_tenant_rps(request: Request) -> bool:
@@ -558,8 +558,8 @@ async def _check_backpressure_and_quotas(request: Request, user: User) -> HTTPEx
             try:
                 if client is not None:
                     await ensure_async_client_closed(client)
-            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-                pass
+            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug("Failed to close embeddings backpressure Redis client: {}", exc)
 
     # Per-tenant quotas in multi-user mode
     try:

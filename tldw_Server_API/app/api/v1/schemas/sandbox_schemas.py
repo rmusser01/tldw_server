@@ -386,6 +386,8 @@ class SandboxRunStatus(BaseModel):
 
 
 class SandboxWorkspaceDiagnosticState(BaseModel):
+    """Workspace-specific sandbox readiness or admission state."""
+
     state: Literal[
         "available",
         "not_configured",
@@ -399,6 +401,8 @@ class SandboxWorkspaceDiagnosticState(BaseModel):
 
 
 class SandboxWorkspaceDiagnosticsRunSummary(BaseModel):
+    """Compact sandbox run record shown in Research Workspace diagnostics."""
+
     id: str
     runtime: RuntimeType | None = None
     runtime_version: str | None = None
@@ -426,6 +430,8 @@ class SandboxWorkspaceDiagnosticsRunSummary(BaseModel):
 
 
 class SandboxWorkspaceDiagnosticsRunList(BaseModel):
+    """Paginated recent sandbox runs linked to a canonical workspace."""
+
     total: int
     limit: int
     has_more: bool
@@ -433,11 +439,15 @@ class SandboxWorkspaceDiagnosticsRunList(BaseModel):
 
 
 class SandboxWorkspaceDiagnosticsLinks(BaseModel):
+    """Related management surfaces for resolving sandbox workspace issues."""
+
     runtime_config: str | None = None
     admin_runs: str | None = None
 
 
 class SandboxWorkspaceDiagnosticsResponse(BaseModel):
+    """Sandbox diagnostics response scoped to one Research Workspace."""
+
     workspace_id: str
     source_label: Literal["research_workspace"]
     runtime: SandboxWorkspaceDiagnosticState

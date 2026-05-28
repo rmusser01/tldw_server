@@ -458,6 +458,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
   importWorkspaceBundle: (bundle) => {
     if (
+      !bundle ||
       (bundle.format !== WORKSPACE_EXPORT_BUNDLE_FORMAT &&
         bundle.format !== LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT) ||
       bundle.schemaVersion !== WORKSPACE_EXPORT_BUNDLE_SCHEMA_VERSION

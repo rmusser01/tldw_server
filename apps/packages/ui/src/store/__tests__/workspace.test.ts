@@ -2475,6 +2475,14 @@ describe("workspace store snapshot persistence", () => {
     expect(importedSavedWorkspace?.collectionId ?? null).toBeNull()
   })
 
+  it("rejects missing workspace import bundles without throwing", () => {
+    const result = useWorkspaceStore
+      .getState()
+      .importWorkspaceBundle(null as never)
+
+    expect(result).toBeNull()
+  })
+
   it("imports legacy workspace export bundles as a recovery input while exporting current format", () => {
     useWorkspaceStore.getState().initializeWorkspace("Legacy Export Source")
     const sourceWorkspaceId = useWorkspaceStore.getState().workspaceId

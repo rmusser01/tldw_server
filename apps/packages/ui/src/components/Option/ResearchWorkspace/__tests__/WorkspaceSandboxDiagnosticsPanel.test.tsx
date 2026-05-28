@@ -13,6 +13,12 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string) => fallback ?? _key
+  })
+}))
+
 const makeDiagnostics = (overrides: Record<string, unknown> = {}) => ({
   workspace_id: "workspace-alpha",
   source_label: "research_workspace",
@@ -63,6 +69,24 @@ describe("WorkspaceSandboxDiagnosticsPanel", () => {
       { sourceLabel: "research_workspace", limit: 10 }
     )
     expect(screen.queryByText(/workspace_playground/i)).toBeNull()
+  })
+
+  it("does not render unsafe runtime config links from diagnostics payloads", async () => {
+    mockGetSandboxWorkspaceDiagnostics.mockResolvedValue(
+      makeDiagnostics({
+        links: {
+          runtime_config: "javascript:alert(1)",
+          admin_runs: "/admin/monitoring?focus=sandbox&workspace_id=workspace-alpha"
+        }
+      })
+    )
+
+    render(<WorkspaceSandboxDiagnosticsPanel workspaceId="workspace-alpha" />)
+
+    expect(
+      await screen.findByText("No sandbox runs are linked to this workspace yet.")
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: /runtime config/i })).toBeNull()
   })
 
   it("shows unavailable runtime state without raw endpoint dumps", async () => {

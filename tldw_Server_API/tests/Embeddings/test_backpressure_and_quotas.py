@@ -75,6 +75,32 @@ async def test_backpressure_ignores_default_local_redis_when_redis_disabled(monk
     assert await ep._check_backpressure_and_quotas(request, user) is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_backpressure_respects_settings_redis_disabled_when_env_url_exists(monkeypatch):
+    """Explicit settings REDIS_ENABLED=False wins over ambient Redis URL env vars."""
+
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as ep
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    import redis.asyncio as aioredis
+
+    stale = FakeRedisBP(depth=1, age_first_ms=1000)
+
+    async def fake_from_url(url, decode_responses=True):  # noqa: ARG001
+        return stale
+
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("EMBEDDINGS_REDIS_URL", raising=False)
+    monkeypatch.setenv("EMB_BACKPRESSURE_MAX_AGE_SECONDS", "0.1")
+    monkeypatch.setitem(ep.settings, "REDIS_ENABLED", False)
+    monkeypatch.setattr(aioredis, "from_url", fake_from_url)
+
+    user = User(id="u1", username="u1", email="u1@example.test", is_active=True, is_admin=False)
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    assert await ep._check_backpressure_and_quotas(request, user) is None
+
+
 @pytest.mark.unit
 def test_backpressure_by_age_returns_429(monkeypatch):
     client = TestClient(app)

@@ -8,7 +8,7 @@ from functools import lru_cache
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
@@ -37,7 +37,6 @@ router = APIRouter(prefix="/sandbox", tags=["sandbox"])
 _service = sandbox_service
 
 _SANDBOX_WORKSPACE_DIAGNOSTICS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AttributeError,
     ConnectionError,
     FileNotFoundError,
@@ -264,33 +263,50 @@ async def get_workspace_sandbox_diagnostics(
     limit: int = Query(10, ge=1, le=100),
     current_user: User = Depends(get_request_user),
 ) -> SandboxWorkspaceDiagnosticsResponse:
-    del source_label
+    """Return workspace-scoped sandbox readiness and recent run diagnostics.
+
+    The endpoint is intentionally scoped to canonical Research Workspace
+    contexts. Unknown source labels fail fast so clients do not accidentally
+    treat diagnostics from an unsupported workspace model as authoritative.
+    Run store queries are executed off the event loop because the current
+    sandbox orchestrator storage interface is synchronous.
+    """
+
+    if source_label != "research_workspace":
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported source_label. Expected 'research_workspace'.",
+        )
+
     runtime, admission = _sandbox_workspace_runtime_state()
     user_id = str(current_user.id)
-    rows = _service._orch.list_runs(  # type: ignore[attr-defined]
-        user_id=user_id,
-        workspace_id=workspace_id,
-        limit=limit,
-        offset=0,
-        sort_desc=True,
-    )
-    total = int(
-        _service._orch.count_runs(  # type: ignore[attr-defined]
+    rows, total = await asyncio.gather(
+        asyncio.to_thread(
+            _service._orch.list_runs,  # type: ignore[attr-defined]
             user_id=user_id,
             workspace_id=workspace_id,
-        )
+            limit=limit,
+            offset=0,
+            sort_desc=True,
+        ),
+        asyncio.to_thread(
+            _service._orch.count_runs,  # type: ignore[attr-defined]
+            user_id=user_id,
+            workspace_id=workspace_id,
+        ),
     )
     items = [_workspace_diagnostics_run_summary(row) for row in rows]
+    total_count = int(total)
     encoded_workspace_id = quote(str(workspace_id), safe="")
     return SandboxWorkspaceDiagnosticsResponse(
         workspace_id=workspace_id,
-        source_label="research_workspace",
+        source_label=source_label,
         runtime=runtime,
         admission=admission,
         runs=SandboxWorkspaceDiagnosticsRunList(
-            total=total,
+            total=total_count,
             limit=int(limit),
-            has_more=len(items) < total,
+            has_more=len(items) < total_count,
             items=items,
         ),
         links=SandboxWorkspaceDiagnosticsLinks(

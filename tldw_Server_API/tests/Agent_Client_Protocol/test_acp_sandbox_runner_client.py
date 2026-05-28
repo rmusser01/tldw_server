@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -169,15 +170,19 @@ async def test_standard_runner_create_session_sends_session_env() -> None:
     runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
     fake_client = _FakeClient()
     runner._client = fake_client
+    workspace_auth_value = f"workspace-{uuid4().hex}"
 
     session_id = await runner.create_session(
         "/repo",
-        session_env={"WORKSPACE_TOKEN": "abc"},
+        session_env={"WORKSPACE_TOKEN": workspace_auth_value},
     )
 
     assert session_id == "session-env"
     assert fake_client.calls == [
-        ("session/new", {"cwd": "/repo", "mcpServers": [], "env": {"WORKSPACE_TOKEN": "abc"}})
+        (
+            "session/new",
+            {"cwd": "/repo", "mcpServers": [], "env": {"WORKSPACE_TOKEN": workspace_auth_value}},
+        )
     ]
 
 
@@ -248,6 +253,71 @@ async def test_standard_runner_create_session_retries_without_agent_type_for_nat
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_standard_runner_create_session_retries_without_mcp_servers_for_legacy_acp() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            if "mcpServers" in payload:
+                raise ACPResponseError("Invalid params")
+            return _CallResult({"sessionId": "session-legacy-no-mcp"})
+
+    runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    session_id = await runner.create_session("/repo")
+
+    assert session_id == "session-legacy-no-mcp"
+    assert fake_client.calls == [
+        ("session/new", {"cwd": "/repo", "mcpServers": []}),
+        ("session/new", {"cwd": "/repo"}),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_create_session_retries_without_agent_type_then_mcp_servers() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, dict(payload)))
+            if payload.get("agentType") == "hermes" or "mcpServers" in payload:
+                raise ACPResponseError("Invalid params")
+            return _CallResult({"sessionId": "session-legacy-no-agent-mcp"})
+
+    runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    session_id = await runner.create_session("/repo", agent_type="hermes")
+
+    assert session_id == "session-legacy-no-agent-mcp"
+    assert fake_client.calls == [
+        ("session/new", {"cwd": "/repo", "mcpServers": [], "agentType": "hermes"}),
+        ("session/new", {"cwd": "/repo", "mcpServers": []}),
+        ("session/new", {"cwd": "/repo"}),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_create_session_rejects_unavailable_vz_macos_runtime(monkeypatch) -> None:
     manager = ACPSandboxRunnerManager(
         ACPSandboxConfig(
@@ -288,11 +358,16 @@ async def test_create_session_rejects_seatbelt_without_standard_opt_in(monkeypat
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_sandbox_create_session_merges_config_and_session_env(monkeypatch) -> None:
+    config_workspace_auth_value = f"config-{uuid4().hex}"
+    session_workspace_auth_value = f"workspace-{uuid4().hex}"
     manager = ACPSandboxRunnerManager(
         ACPSandboxConfig(
             enabled=True,
             agent_command="/usr/local/bin/codex",
-            agent_env={"CONFIG_ONLY": "yes", "WORKSPACE_TOKEN": "config"},
+            agent_env={
+                "CONFIG_ONLY": "yes",
+                "WORKSPACE_TOKEN": config_workspace_auth_value,
+            },
             ssh_enabled=False,
         )
     )
@@ -376,13 +451,16 @@ async def test_sandbox_create_session_merges_config_and_session_env(monkeypatch)
     session_id = await manager.create_session(
         cwd="/workspace",
         user_id=7,
-        session_env={"WORKSPACE_TOKEN": "abc"},
+        session_env={"WORKSPACE_TOKEN": session_workspace_auth_value},
     )
 
     assert session_id == "acp-session-env"
     run_spec = capture["run_spec"]
     agent_env = json.loads(run_spec.env["ACP_AGENT_ENV_JSON"])
-    assert agent_env == {"CONFIG_ONLY": "yes", "WORKSPACE_TOKEN": "abc"}
+    assert agent_env == {
+        "CONFIG_ONLY": "yes",
+        "WORKSPACE_TOKEN": session_workspace_auth_value,
+    }
 
 
 @pytest.mark.unit
