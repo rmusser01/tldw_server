@@ -58,6 +58,7 @@ describe("NotesListPanel stage 46 export progress copy", () => {
         page={1}
         pageSize={20}
         selectedId={null}
+        onCreateNote={vi.fn()}
         onSelectNote={vi.fn()}
         onChangePage={vi.fn()}
         onResetEditor={vi.fn()}

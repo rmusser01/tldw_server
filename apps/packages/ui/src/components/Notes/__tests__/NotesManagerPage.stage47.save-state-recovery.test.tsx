@@ -147,7 +147,7 @@ const updateCalls = () =>
   mockBgRequest.mock.calls.filter(([request]) => {
     const path = String(request?.path || "")
     const method = String(request?.method || "GET").toUpperCase()
-    return path.startsWith("/api/v1/notes/11?expected_version=") && method === "PUT"
+    return path === "/api/v1/notes/11" && method === "PUT"
   })
 
 const seedBaseNotesMock = () => {
@@ -181,7 +181,7 @@ const seedBaseNotesMock = () => {
       }
     }
 
-    if (path.startsWith("/api/v1/notes/11?expected_version=") && method === "PUT") {
+    if (path === "/api/v1/notes/11" && method === "PUT") {
       return {
         id: 11,
         version: 2,
@@ -367,7 +367,7 @@ describe("NotesManagerPage stage 47 save state and recovery", () => {
         }
       }
 
-      if (path.startsWith("/api/v1/notes/11?expected_version=") && method === "PUT") {
+      if (path === "/api/v1/notes/11" && method === "PUT") {
         throw { status: 409, message: "Version conflict" }
       }
 
