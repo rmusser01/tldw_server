@@ -18,13 +18,22 @@ from .runtime import (
     RedisClientFactory,
     TelemetryProvider,
 )
-from .storage import AuditStore, ExternalRegistryStore, ProfileStore
+from .storage import (
+    ApprovalPolicyStore,
+    AuditStore,
+    CredentialGrantStore,
+    ExternalRegistryStore,
+    ProfileAssignmentStore,
+    ProfileStore,
+)
 
 __all__ = [
     "ApiKeyScopeNormalizer",
+    "ApprovalPolicyStore",
     "ApprovalEvaluator",
     "AuditStore",
     "CircuitBreakerFactory",
+    "CredentialGrantStore",
     "DatabasePathResolver",
     "EffectivePolicyResolver",
     "ExternalAccessEvaluator",
@@ -33,6 +42,7 @@ __all__ = [
     "MetricsCollector",
     "ModuleRegistry",
     "PathScopeEnforcer",
+    "ProfileAssignmentStore",
     "ProfileStore",
     "RateLimiter",
     "RbacPolicy",
