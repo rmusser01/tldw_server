@@ -82,6 +82,7 @@ export type PlaygroundRuntimeInspectorProps = {
   canRegenerate?: boolean;
   onRegenerate?: () => void;
   emptyAssistantResponse?: boolean;
+  emptyAssistantResponseRouteLabel?: string | null;
   settingSummaries?: RuntimeSettingSummary[];
   toolSummary?: RuntimeToolSummary | null;
   setupRecoveryMode?: boolean;
@@ -121,6 +122,7 @@ export const PlaygroundRuntimeInspector = ({
   canRegenerate = false,
   onRegenerate,
   emptyAssistantResponse = false,
+  emptyAssistantResponseRouteLabel = null,
   settingSummaries = [],
   toolSummary = null,
   setupRecoveryMode = false,
@@ -150,10 +152,17 @@ export const PlaygroundRuntimeInspector = ({
       : displayProvider && displayModel
         ? `${displayProvider}:${displayModel}`
         : selectedModel || null);
-  const emptyAssistantResponseSummary = routeLabel
+  const emptyAssistantRouteLabel =
+    typeof emptyAssistantResponseRouteLabel === "string"
+      ? emptyAssistantResponseRouteLabel.trim() || null
+      : null;
+  const emptyAssistantResponseSummary = emptyAssistantRouteLabel
     ? t(
         "cockpit.emptyAssistantResponseSummaryWithRoute",
-        `${routeLabel} returned no response text.`,
+        {
+          defaultValue: "{{route}} returned no response text.",
+          route: emptyAssistantRouteLabel,
+        },
       )
     : t(
         "cockpit.emptyAssistantResponseSummary",

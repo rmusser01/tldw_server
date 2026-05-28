@@ -64,7 +64,7 @@ import { ChevronDown, Keyboard, Search, X } from "lucide-react";
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings";
 import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
-import { useStoreMessageOption } from "@/store/option";
+import { useStoreMessageOption, type Message } from "@/store/option";
 import { useArtifactsStore } from "@/store/artifacts";
 import { DEGRADED_STATE_LABEL, READY_STATE_LABEL } from "@/design-system";
 import { useSetting } from "@/hooks/useSetting";
@@ -136,6 +136,21 @@ import type { Character } from "@/types/character";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
 
 type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
+
+const getAssistantMessageRouteLabel = (
+  message: Message | null,
+): string | null => {
+  const routeCandidates = [message?.modelId, message?.modelName, message?.name];
+
+  for (const candidate of routeCandidates) {
+    const value = typeof candidate === "string" ? candidate.trim() : "";
+    if (value.includes(":")) {
+      return value;
+    }
+  }
+
+  return null;
+};
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
@@ -2079,6 +2094,10 @@ export const Playground = () => {
     if (!latestAssistantMessage || streaming || isProcessing) return false;
     return !hasVisibleAssistantResponse(latestAssistantMessage);
   }, [isProcessing, latestAssistantMessage, streaming]);
+  const emptyAssistantResponseRouteLabel = React.useMemo(() => {
+    if (!emptyAssistantResponse) return null;
+    return getAssistantMessageRouteLabel(latestAssistantMessage);
+  }, [emptyAssistantResponse, latestAssistantMessage]);
   const runtimeStatusDetail =
     serverReadinessState === "blocked"
       ? toText(
@@ -2919,6 +2938,7 @@ export const Playground = () => {
       canRegenerate={canRegenerateLastResponse}
       onRegenerate={() => regenerateLastMessage()}
       emptyAssistantResponse={emptyAssistantResponse}
+      emptyAssistantResponseRouteLabel={emptyAssistantResponseRouteLabel}
       settingSummaries={runtimeSettingSummaries}
       toolChoice={toolChoice as RuntimeToolChoice}
       onToolChoiceChange={(nextChoice) => setToolChoice(nextChoice)}
