@@ -73,7 +73,7 @@ export const FlashcardsManager: React.FC = () => {
   const { data: initialDecks } = useDecksQuery({
     includeWorkspaceItems: currentStudyIntent?.forceShowWorkspaceItems ?? false
   })
-  const showSchedulerTab = !(initialDecks !== undefined && initialDecks.length === 0)
+  const showSchedulerTab = initialDecks === undefined || initialDecks.length > 0
   const [reviewDeckId, setReviewDeckId] = React.useState<number | null | undefined>(
     currentStudyIntent?.deckId ?? undefined
   )
