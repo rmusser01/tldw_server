@@ -57,7 +57,7 @@ Out of scope:
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_profile_structured_resolution.py`
 
-- [ ] **Step 1: Write failing profile-resolution tests**
+- [x] **Step 1: Write failing profile-resolution tests**
 
 Add tests covering:
 
@@ -94,7 +94,7 @@ async def test_resolve_profile_keeps_legacy_none_wrapper_behavior() -> None:
     assert await resolver.resolve_profile(None) is None
 ```
 
-- [ ] **Step 2: Run RED test**
+- [x] **Step 2: Run RED test**
 
 Run:
 
@@ -110,7 +110,7 @@ Expected: FAIL because `resolve_profile_result` and result models do not exist.
 - Create: `mcp_unified/profiles/resolution.py`
 - Modify: `mcp_unified/profiles/__init__.py`
 
-- [ ] **Step 1: Implement result models**
+- [x] **Step 1: Implement result models**
 
 Add Pydantic models:
 
@@ -140,11 +140,11 @@ class ProfileResolutionResult(BaseModel):
 
 Also add `EffectivePolicy` and `EffectivePolicyResult` with the same provenance/warning shape.
 
-- [ ] **Step 2: Export result primitives**
+- [x] **Step 2: Export result primitives**
 
 Export from `mcp_unified.profiles`.
 
-- [ ] **Step 3: Run focused import tests**
+- [x] **Step 3: Run focused import tests**
 
 Run:
 
@@ -160,7 +160,7 @@ Expected: PASS after exports are stable.
 - Modify: `mcp_unified/profiles/resolver.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_profile_structured_resolution.py`
 
-- [ ] **Step 1: Implement `resolve_profile_result()`**
+- [x] **Step 1: Implement `resolve_profile_result()`**
 
 Add structured behavior:
 - no explicit/default id -> `profile_required`
@@ -171,11 +171,11 @@ Add structured behavior:
 
 Each result must include provenance with at least `requested_profile_id`, `resolved_profile_id`, `used_default_profile`, and `resolver`.
 
-- [ ] **Step 2: Preserve wrapper behavior**
+- [x] **Step 2: Preserve wrapper behavior**
 
 Keep `resolve_profile()` returning `MCPProfile | None` for existing primitive callers by delegating to `resolve_profile_result()` and returning the copied profile only when status is `resolved`.
 
-- [ ] **Step 3: Run focused tests**
+- [x] **Step 3: Run focused tests**
 
 Run:
 
@@ -193,7 +193,7 @@ Expected: PASS.
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_profile_structured_resolution.py`
 
-- [ ] **Step 1: Write failing workspace-binding tests**
+- [x] **Step 1: Write failing workspace-binding tests**
 
 Add tests proving:
 - write-capable profiles without `path_scopes`, host binding, or assignment binding return `workspace_scope_required`
@@ -201,11 +201,11 @@ Add tests proving:
 - deny entries override allow entries
 - no allowed tools/capabilities defaults to deny for execution
 
-- [ ] **Step 2: Mark write-capable presets**
+- [x] **Step 2: Mark write-capable presets**
 
 Set `policy_document.resource_constraints["requires_workspace_binding"] = True` for bundled presets with mutating/write-scoped capabilities.
 
-- [ ] **Step 3: Implement effective-policy helper**
+- [x] **Step 3: Implement effective-policy helper**
 
 Add a package-local helper, for example:
 
@@ -221,7 +221,7 @@ def build_effective_policy_result(
 
 Do not call this from runtime execution in this slice.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -236,7 +236,7 @@ Expected: PASS.
 **Files:**
 - Modify: implementation Backlog task file
 
-- [ ] **Step 1: Run focused regression tests**
+- [x] **Step 1: Run focused regression tests**
 
 Run:
 
@@ -251,7 +251,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 2: Run static and security checks**
+- [x] **Step 2: Run static and security checks**
 
 Run:
 
@@ -265,7 +265,7 @@ git diff --check
 
 Expected: Ruff passes, Mypy passes, runtime Bandit reports 0 findings, and diff whitespace is clean.
 
-- [ ] **Step 3: Update Backlog task and commit**
+- [x] **Step 3: Update Backlog task and commit**
 
 Record RED/GREEN evidence, verification, known skips, and final summary, then commit:
 

@@ -50,6 +50,7 @@ def _policy(
     allowed_tools: list[str] | None = None,
     tool_patterns: list[str] | None = None,
     module_patterns: list[str] | None = None,
+    resource_constraints: dict[str, Any] | None = None,
 ) -> ProfilePolicy:
     """Build a conservative package-local policy document for a preset."""
     return ProfilePolicy(
@@ -58,6 +59,7 @@ def _policy(
         tool_patterns=tool_patterns or [],
         module_patterns=module_patterns or [],
         risk_classes=risk_classes or [],
+        resource_constraints=resource_constraints or {},
     )
 
 
@@ -71,6 +73,7 @@ def _profile(
     approval_policy: dict[str, Any] | None = None,
     external_server_grants: list[dict[str, Any]] | None = None,
     credential_grants: list[dict[str, Any]] | None = None,
+    requires_workspace_binding: bool = False,
     provenance: dict[str, Any] | None = None,
     agent_metadata: dict[str, Any] | None = None,
 ) -> MCPProfile:
@@ -90,6 +93,12 @@ def _profile(
         policy_document=_policy(
             capabilities=capabilities,
             risk_classes=risk_classes,
+            resource_constraints={
+                "requires_workspace_binding": True,
+                "binding_stage": "assignment",
+            }
+            if requires_workspace_binding
+            else None,
         ),
         approval_policy=approval_policy or {},
         external_server_grants=external_server_grants or [],
@@ -113,6 +122,7 @@ def _preset(
     risk_classes: list[str] | None = None,
     approval_policy: dict[str, Any] | None = None,
     external_server_grants: list[dict[str, Any]] | None = None,
+    requires_workspace_binding: bool = False,
     provenance: dict[str, Any] | None = None,
     agent_metadata: dict[str, Any] | None = None,
 ) -> ProfilePreset:
@@ -128,6 +138,7 @@ def _preset(
             risk_classes=risk_classes,
             approval_policy=approval_policy,
             external_server_grants=external_server_grants,
+            requires_workspace_binding=requires_workspace_binding,
             provenance=provenance,
             agent_metadata=agent_metadata,
         ),
@@ -147,6 +158,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         capabilities=["workflow.plan", "task.coordinate", "workspace.read", "workspace.write_scoped"],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
+        requires_workspace_binding=True,
     ),
     _preset(
         preset_id="product-owner",
@@ -155,6 +167,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         capabilities=["issues.plan", "stories.write", "docs.read", "docs.write_scoped"],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
+        requires_workspace_binding=True,
     ),
     _preset(
         preset_id="architect",
@@ -172,6 +185,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             "required_for": ["repo.write_scoped", "git.destructive"],
             "reason": "Conflict resolution writes are repo-scoped and mutating.",
         },
+        requires_workspace_binding=True,
     ),
     _preset(
         preset_id="documentation-writer",
@@ -180,6 +194,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         capabilities=["docs.read", "docs.write_scoped", "filesystem.read"],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
+        requires_workspace_binding=True,
     ),
     _preset(
         preset_id="project-researcher",
@@ -206,6 +221,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "external_network": "External network is limited to research/citation tools.",
             },
         },
+        requires_workspace_binding=True,
     ),
     _preset(
         preset_id="code-reviewer",
@@ -223,6 +239,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             "required_for": ["infra.mutate_scoped", "deployment.mutate"],
             "reason": "Infrastructure changes require explicit approval.",
         },
+        requires_workspace_binding=True,
     ),
     _preset(
         preset_id="backend-engineer",
@@ -231,6 +248,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         capabilities=["source.write_scoped", "code_search", "tests.request", "backend.inspect"],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
+        requires_workspace_binding=True,
     ),
     _preset(
         preset_id="frontend-engineer",
@@ -239,6 +257,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         capabilities=["source.write_scoped", "browser.debug", "frontend.inspect", "tests.request"],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
+        requires_workspace_binding=True,
     ),
     _preset(
         preset_id="qa-engineer",
@@ -253,6 +272,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         capabilities=["tests.write_scoped", "tests.request", "code_search", "filesystem.read"],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
+        requires_workspace_binding=True,
     ),
     _preset(
         preset_id="memory-keeper",
@@ -262,6 +282,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
         agent_metadata={"memory_provider": "graphiti"},
+        requires_workspace_binding=True,
     ),
 )
 
