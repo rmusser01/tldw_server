@@ -99,28 +99,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Flashcards/tabs/SchedulerTab.tsx:Alert#antd-alert-schedulertab-type-error-line-472-1tez9d9",
-    "path": "src/components/Flashcards/tabs/SchedulerTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Flashcards/tabs/SchedulerTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Flashcards/tabs/SchedulerTab.tsx:Alert#antd-alert-schedulertab-type-info-line-476-xytukb",
-    "path": "src/components/Flashcards/tabs/SchedulerTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Flashcards/tabs/SchedulerTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Admin/ApiKeyManagementPage.tsx:Alert#antd-alert-apikeymanagementpage-type-error-access-denied-1uep3es",
     "path": "src/components/Option/Admin/ApiKeyManagementPage.tsx",
     "rule": "antd-product-state-import",

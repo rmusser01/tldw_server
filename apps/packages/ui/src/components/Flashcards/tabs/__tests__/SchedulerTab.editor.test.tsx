@@ -262,6 +262,31 @@ describe("SchedulerTab editor", () => {
     expect(await screen.findByText(/leech threshold must be >= 1/i)).toBeInTheDocument()
   })
 
+  it("renders scheduler save errors with the design-system Alert", async () => {
+    updateDeckMock.mockRejectedValue(new Error("Could not save deck settings"))
+
+    render(<SchedulerTab isActive />)
+
+    fireEvent.change(screen.getByTestId("deck-scheduler-editor-field-leech-threshold"), {
+      target: { value: "9" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+
+    const alertText = await screen.findByText(/failed to save deck settings/i)
+    expect(alertText.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+  })
+
+  it("renders the FSRS switch guidance with the design-system Alert", async () => {
+    render(<SchedulerTab isActive />)
+
+    fireEvent.mouseDown(screen.getByText("SM-2+"))
+    const fsrsOptions = await screen.findAllByText("FSRS")
+    fireEvent.click(fsrsOptions[fsrsOptions.length - 1])
+
+    const alertTitle = await screen.findByText(/switching this deck to fsrs/i)
+    expect(alertTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+  })
+
   it("saves scheduler edits with optimistic locking", async () => {
     updateDeckMock.mockResolvedValue({
       ...biologyDeck,
