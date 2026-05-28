@@ -166,7 +166,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
     // Long estimated time
     if (totalEstimatedSeconds > LONG_TIME_THRESHOLD) {
       result.push(
-        qi("review.warnLongTime", "Processing may take a while (~{{time}})", {
+        qi("review.warnLongTime", "Processing may take a while ({{time}})", {
           time: estimatedTimeLabel,
         })
       )
@@ -206,7 +206,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
           {qi("review.title", "Ready to Process")}
         </h2>
         <p className="mt-1 text-sm text-text-muted">
-          {qi("review.summary", "{{count}} items | {{preset}} preset | ~{{time}} estimated", {
+          {qi("review.summary", "{{count}} items | {{preset}} preset | {{time}} estimated", {
             count: selectedQueueItems.length,
             preset: presetLabel,
             time: estimatedTimeLabel,

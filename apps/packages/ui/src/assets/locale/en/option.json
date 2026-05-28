@@ -652,6 +652,8 @@
     "reviewWarningConfirm": "Enable review",
     "reviewWarningCancel": "Cancel",
     "reviewRunLabel": "Review",
+    "review.warnLongTime": "Processing may take a while ({{time}})",
+    "review.summary": "{{count}} items | {{preset}} preset | {{time}} estimated",
     "reviewDraftsCreated": "Drafts ready for review.",
     "reviewDraftsFailedTitle": "Review drafts couldn't be created.",
     "reviewDraftsFailedFallback": "Failed to create review drafts.",
