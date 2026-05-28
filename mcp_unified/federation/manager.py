@@ -37,6 +37,7 @@ class ExternalFederationManager:
         self._transports: dict[str, ExternalFederationTransport] = {}
         self._virtual_tools: dict[str, VirtualExternalTool] = {}
         self._last_errors: dict[str, str | None] = {}
+        self._last_lifecycle_errors: list[dict[str, Any]] = []
         self._started = False
         self._lock = asyncio.Lock()
 
@@ -45,30 +46,55 @@ class ExternalFederationManager:
         """Return whether the manager has an active logical lifecycle."""
         return self._started
 
+    @property
+    def last_lifecycle_errors(self) -> list[dict[str, Any]]:
+        """Return cleanup or lifecycle errors captured during best-effort operations."""
+        return deepcopy(self._last_lifecycle_errors)
+
     async def start(self) -> None:
         """Load enabled registry definitions and connect fake transports."""
         async with self._lock:
             await self._stop_unlocked()
             servers = await self._load_enabled_servers()
-            for server in servers:
-                transport = self._transport_factory(server)
-                self._servers[server.id] = server
-                self._transports[server.id] = transport
-                self._last_errors[server.id] = None
-                await transport.connect()
-                await self._audit(
-                    "external_server.lifecycle",
-                    payload={
-                        "reason_code": "started",
-                        "server_id": server.id,
-                        "transport": server.transport,
-                        "spawns_process": False,
-                    },
-                    target_type="external_server",
-                    target_id=server.id,
-                )
-                await self._refresh_server_tools_unlocked(server.id)
-            self._started = True
+            current_server: ExternalServerDefinition | None = None
+            try:
+                for server in servers:
+                    current_server = server
+                    transport = self._transport_factory(server)
+                    self._servers[server.id] = server
+                    self._transports[server.id] = transport
+                    self._last_errors[server.id] = None
+                    await transport.connect()
+                    await self._audit(
+                        "external_server.lifecycle",
+                        payload={
+                            "reason_code": "started",
+                            "server_id": server.id,
+                            "transport": server.transport,
+                            "spawns_process": False,
+                        },
+                        target_type="external_server",
+                        target_id=server.id,
+                    )
+                    await self._refresh_server_tools_unlocked(server.id)
+            except Exception as exc:  # noqa: BLE001 - adapters may raise arbitrary lifecycle errors.
+                if current_server is not None:
+                    self._last_errors[current_server.id] = self._exception_summary(exc)
+                    await self._audit_best_effort(
+                        "external_server.lifecycle",
+                        payload={
+                            "reason_code": "start_failed",
+                            "server_id": current_server.id,
+                            "error_type": type(exc).__name__,
+                            "error_message": str(exc),
+                        },
+                        target_type="external_server",
+                        target_id=current_server.id,
+                    )
+                await self._stop_unlocked()
+                raise
+            else:
+                self._started = True
 
     async def stop(self) -> None:
         """Close active fake transports and clear runtime state."""
@@ -88,10 +114,23 @@ class ExternalFederationManager:
                 try:
                     await self._refresh_server_tools_unlocked(target_id)
                     refreshed += 1
-                except (OSError, RuntimeError, TimeoutError, ValueError, TypeError):
+                except Exception as exc:  # noqa: BLE001 - adapters may raise arbitrary discovery errors.
                     errors[target_id] = "external_server_discovery_failed"
-                    self._last_errors[target_id] = "external_server_discovery_failed"
+                    self._last_errors[target_id] = self._exception_summary(exc)
                     self._clear_server_tools(target_id)
+                    audit_error = await self._audit_best_effort(
+                        "external_server.discovery",
+                        payload={
+                            "reason_code": "external_server_discovery_failed",
+                            "server_id": target_id,
+                            "error_type": type(exc).__name__,
+                            "error_message": str(exc),
+                        },
+                        target_type="external_server",
+                        target_id=target_id,
+                    )
+                    if audit_error is not None:
+                        self._last_lifecycle_errors.append(audit_error)
             return {
                 "refreshed_servers": refreshed,
                 "total_servers": len(target_ids),
@@ -101,34 +140,45 @@ class ExternalFederationManager:
 
     async def list_servers(self) -> list[dict[str, Any]]:
         """Return summarized health for loaded external server definitions."""
+        async with self._lock:
+            snapshots = [
+                (
+                    server_id,
+                    server.model_copy(deep=True),
+                    self._transports.get(server_id),
+                    self._last_errors.get(server_id),
+                    self._count_tools_for_server(server_id),
+                )
+                for server_id, server in sorted(self._servers.items())
+            ]
+
         rows: list[dict[str, Any]] = []
-        for server_id in sorted(self._servers):
-            server = self._servers[server_id]
-            transport = self._transports.get(server_id)
+        for _server_id, server, transport, last_error, tool_count in snapshots:
             checks = {"configured": True, "connected": False, "spawns_process": False}
             if transport is not None:
                 checks = await transport.health_check()
             connected = bool(checks.get("connected"))
-            status = self._server_status(server_id=server_id, connected=connected)
+            status = self._server_status(connected=connected, last_error=last_error)
             rows.append(
                 {
                     "id": server.id,
                     "name": server.name,
                     "transport": server.transport,
-                    "tool_count": self._count_tools_for_server(server.id),
+                    "tool_count": tool_count,
                     "status": status,
                     "checks": dict(checks),
-                    "last_error": self._last_errors.get(server.id),
+                    "last_error": last_error,
                 }
             )
         return rows
 
-    def list_virtual_tools(self) -> list[VirtualExternalTool]:
+    async def list_virtual_tools(self) -> list[VirtualExternalTool]:
         """Return discovered virtual tools sorted by namespaced tool name."""
-        return [
-            self._virtual_tools[name]
-            for name in sorted(self._virtual_tools)
-        ]
+        async with self._lock:
+            return [
+                deepcopy(self._virtual_tools[name])
+                for name in sorted(self._virtual_tools)
+            ]
 
     async def execute_virtual_tool(
         self,
@@ -145,7 +195,9 @@ class ExternalFederationManager:
             if virtual_tool is None:
                 raise ValueError(f"Unknown external virtual tool '{virtual_tool_name}'")
 
-            server = self._servers[virtual_tool.server_id]
+            server = self._servers.get(virtual_tool.server_id)
+            if server is None:
+                raise ValueError(f"External server '{virtual_tool.server_id}' is unavailable")
             profile_id = self._policy_profile_id(effective_policy)
             deny_reason = self._deny_reason(
                 server=server,
@@ -170,7 +222,9 @@ class ExternalFederationManager:
                     },
                 )
 
-            transport = self._transports[virtual_tool.server_id]
+            transport = self._transports.get(virtual_tool.server_id)
+            if transport is None:
+                raise ValueError(f"External server '{virtual_tool.server_id}' is unavailable")
             result = await transport.call_tool(
                 virtual_tool.upstream_tool_name,
                 deepcopy(arguments or {}),
@@ -206,23 +260,53 @@ class ExternalFederationManager:
         raise TypeError("external registry rows must be ExternalServerDefinition or dict")
 
     async def _stop_unlocked(self) -> None:
-        for server_id, transport in list(self._transports.items()):
-            await transport.close()
-            await self._audit(
-                "external_server.lifecycle",
-                payload={
+        errors: list[dict[str, Any]] = []
+        try:
+            for server_id, transport in list(self._transports.items()):
+                close_error: dict[str, Any] | None = None
+                try:
+                    await transport.close()
+                except Exception as exc:  # noqa: BLE001 - shutdown must continue across adapter failures.
+                    close_error = self._lifecycle_error(
+                        server_id=server_id,
+                        operation="close",
+                        exc=exc,
+                    )
+                    errors.append(close_error)
+
+                payload: dict[str, Any] = {
                     "reason_code": "stopped",
                     "server_id": server_id,
                     "spawns_process": False,
+                }
+                if close_error is not None:
+                    payload["close_error"] = close_error
+                audit_error = await self._audit_best_effort(
+                    "external_server.lifecycle",
+                    payload=payload,
+                    target_type="external_server",
+                    target_id=server_id,
+                )
+                if audit_error is not None:
+                    errors.append(audit_error)
+        finally:
+            self._servers = {}
+            self._transports = {}
+            self._virtual_tools = {}
+            self._last_errors = {}
+            self._started = False
+            self._last_lifecycle_errors = errors
+
+        if errors:
+            audit_error = await self._audit_best_effort(
+                "external_server.lifecycle_error",
+                payload={
+                    "reason_code": "stop_errors",
+                    "errors": deepcopy(errors),
                 },
-                target_type="external_server",
-                target_id=server_id,
             )
-        self._servers = {}
-        self._transports = {}
-        self._virtual_tools = {}
-        self._last_errors = {}
-        self._started = False
+            if audit_error is not None:
+                self._last_lifecycle_errors.append(audit_error)
 
     async def _refresh_server_tools_unlocked(self, server_id: str) -> None:
         transport = self._transports[server_id]
@@ -455,12 +539,60 @@ class ExternalFederationManager:
         )
         await self._audit_store.append_event(event)
 
-    def _server_status(self, *, server_id: str, connected: bool) -> str:
-        if connected and self._last_errors.get(server_id) is None:
+    async def _audit_best_effort(
+        self,
+        event_type: str,
+        *,
+        payload: dict[str, Any],
+        actor_id: str | None = None,
+        profile_id: str | None = None,
+        target_type: str | None = None,
+        target_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        try:
+            await self._audit(
+                event_type,
+                payload=payload,
+                actor_id=actor_id,
+                profile_id=profile_id,
+                target_type=target_type,
+                target_id=target_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - audit failures must not block cleanup.
+            return self._lifecycle_error(
+                server_id=target_id,
+                operation="audit",
+                exc=exc,
+            )
+        return None
+
+    @staticmethod
+    def _server_status(*, connected: bool, last_error: str | None) -> str:
+        if connected and last_error is None:
             return "healthy"
-        if connected or self._last_errors.get(server_id) is None:
+        if connected or last_error is None:
             return "degraded"
         return "unhealthy"
+
+    @staticmethod
+    def _exception_summary(exc: BaseException) -> str:
+        message = str(exc).strip()
+        error_type = type(exc).__name__
+        return f"{error_type}: {message}" if message else error_type
+
+    @staticmethod
+    def _lifecycle_error(
+        *,
+        server_id: str | None,
+        operation: str,
+        exc: BaseException,
+    ) -> dict[str, Any]:
+        return {
+            "server_id": server_id,
+            "operation": operation,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+        }
 
     @staticmethod
     def _virtual_tool_name(server_id: str, tool_name: str) -> str:

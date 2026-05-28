@@ -31,6 +31,8 @@ def _tldw_imports_for(path: Path) -> list[str]:
 
 
 class _MemoryExternalRegistryStore:
+    """In-memory external registry test double for package contract tests."""
+
     def __init__(self, servers: list[ExternalServerDefinition]) -> None:
         self._servers = {server.id: server for server in servers}
 
@@ -62,6 +64,8 @@ class _MemoryExternalRegistryStore:
 
 
 class _MemoryAuditStore:
+    """In-memory audit sink that preserves appended events for assertions."""
+
     def __init__(self) -> None:
         self.events: list[AuditEvent] = []
 
@@ -149,7 +153,7 @@ async def test_non_spawning_manager_loads_registry_and_virtual_tools() -> None:
     await manager.start()
 
     server_rows = await manager.list_servers()
-    virtual_tools = manager.list_virtual_tools()
+    virtual_tools = await manager.list_virtual_tools()
 
     assert server_rows == [
         {
@@ -254,6 +258,138 @@ async def test_external_execution_allows_granted_tool_and_audits_success() -> No
     assert transport.calls == [("search", {"query": "MCP"})]
     assert audit.events[-1].event_type == "external_tool.allowed"
     assert audit.events[-1].payload["reason_code"] == "allowed"
+
+
+@pytest.mark.asyncio
+async def test_start_rolls_back_connected_transports_on_discovery_failure() -> None:
+    from mcp_unified.federation import (
+        ExternalFederationManager,
+        ExternalToolDefinition,
+        FakeExternalTransport,
+    )
+
+    class _FailingDiscoveryTransport(FakeExternalTransport):
+        """Fake transport that connects but fails during tool discovery."""
+
+        async def list_tools(self) -> list[ExternalToolDefinition]:
+            raise RuntimeError("discovery failed")
+
+    research_transport = FakeExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    broken_transport = _FailingDiscoveryTransport(server_id="broken")
+    transports = {
+        "research": research_transport,
+        "broken": broken_transport,
+    }
+    manager = ExternalFederationManager(
+        registry_store=_MemoryExternalRegistryStore(
+            [
+                _research_server(),
+                _research_server(id="broken", name="Broken"),
+            ]
+        ),
+        transport_factory=lambda server: transports[server.id],
+    )
+
+    with pytest.raises(RuntimeError, match="discovery failed"):
+        await manager.start()
+
+    assert manager.started is False
+    assert research_transport.connected is False
+    assert broken_transport.connected is False
+    assert research_transport.close_count == 1
+    assert broken_transport.close_count == 1
+    assert await manager.list_servers() == []
+
+
+@pytest.mark.asyncio
+async def test_stop_clears_state_when_close_and_audit_failures_occur() -> None:
+    from mcp_unified.federation import (
+        ExternalFederationManager,
+        ExternalToolDefinition,
+        FakeExternalTransport,
+    )
+
+    class _FailingCloseTransport(FakeExternalTransport):
+        """Fake transport that fails during close after marking itself closed."""
+
+        async def close(self) -> None:
+            await super().close()
+            raise RuntimeError("close failed")
+
+    class _FailingStopAuditStore(_MemoryAuditStore):
+        """Audit sink that fails only for stop lifecycle events."""
+
+        async def append_event(self, event: AuditEvent) -> AuditEvent:
+            if (
+                event.event_type == "external_server.lifecycle"
+                and event.payload.get("reason_code") == "stopped"
+            ):
+                raise RuntimeError("audit failed")
+            return await super().append_event(event)
+
+    transport = _FailingCloseTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    manager = ExternalFederationManager(
+        registry_store=_MemoryExternalRegistryStore([_research_server()]),
+        transport_factory=lambda _server: transport,
+        audit_store=_FailingStopAuditStore(),
+    )
+    await manager.start()
+
+    await manager.stop()
+
+    assert manager.started is False
+    assert transport.connected is False
+    assert await manager.list_servers() == []
+    assert [error["operation"] for error in manager.last_lifecycle_errors] == [
+        "close",
+        "audit",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_refresh_audits_discovery_error_details() -> None:
+    from mcp_unified.federation import (
+        ExternalFederationManager,
+        ExternalToolDefinition,
+        FakeExternalTransport,
+    )
+
+    class _ToggleDiscoveryTransport(FakeExternalTransport):
+        """Fake transport that can fail discovery after initial startup."""
+
+        fail_discovery = False
+
+        async def list_tools(self) -> list[ExternalToolDefinition]:
+            if self.fail_discovery:
+                raise RuntimeError("refresh failed")
+            return await super().list_tools()
+
+    audit = _MemoryAuditStore()
+    transport = _ToggleDiscoveryTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    manager = ExternalFederationManager(
+        registry_store=_MemoryExternalRegistryStore([_research_server()]),
+        transport_factory=lambda _server: transport,
+        audit_store=audit,
+    )
+    await manager.start()
+    transport.fail_discovery = True
+
+    result = await manager.refresh()
+
+    assert result["errors"] == {"research": "external_server_discovery_failed"}
+    assert audit.events[-1].event_type == "external_server.discovery"
+    assert audit.events[-1].payload["reason_code"] == "external_server_discovery_failed"
+    assert audit.events[-1].payload["error_type"] == "RuntimeError"
+    assert audit.events[-1].payload["error_message"] == "refresh failed"
 
 
 @pytest.mark.asyncio

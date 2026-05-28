@@ -26,11 +26,11 @@ Plan and implement the next reviewable MCP Unified standalone Stage 2F slice: pa
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 mcp_unified exposes package-local external registry/federation primitives with no tldw_Server_API imports.
-- [ ] #2 Fake/non-spawning transport lifecycle can register, start/stop, report health, and expose namespaced virtual-tool metadata without launching processes.
-- [ ] #3 Policy-gated execution denies or allows fake upstream tool calls based on injected profile/effective policy decisions and records audit events where available.
-- [ ] #4 Existing tldw_server MCP behavior and Stage 2A-2E tests remain compatible.
-- [ ] #5 Focused pytest and Bandit checks pass for the touched scope.
+- [x] #1 mcp_unified exposes package-local external registry/federation primitives with no tldw_Server_API imports.
+- [x] #2 Fake/non-spawning transport lifecycle can register, start/stop, report health, and expose namespaced virtual-tool metadata without launching processes.
+- [x] #3 Policy-gated execution denies or allows fake upstream tool calls based on injected profile/effective policy decisions and records audit events where available.
+- [x] #4 Existing tldw_server MCP behavior and Stage 2A-2E tests remain compatible.
+- [x] #5 Focused pytest and Bandit checks pass for the touched scope.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -42,7 +42,8 @@ Docs/superpowers/plans/2026-05-28-mcp-unified-stage2f-external-registry-shell-pl
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-['Spec: Docs/superpowers/specs/2026-05-26-mcp-unified-standalone-library-gateway-design.md Stage 2F.']
+- Spec: Docs/superpowers/specs/2026-05-26-mcp-unified-standalone-library-gateway-design.md Stage 2F.
+- PR #2094 review pass addressed lifecycle rollback, best-effort stop cleanup, refresh diagnostics, locked read snapshots, and helper docstrings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -53,10 +54,10 @@ Stage 2F adds a standalone, non-spawning external federation shell under mcp_uni
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
