@@ -108,10 +108,11 @@ async def _handle_stage_message(
         raise jobs_worker.EmbeddingsJobError("Missing media_id in embeddings payload", retryable=False)
     media_id = int(media_id)
 
+    stage_job_type = _STAGE_JOB_TYPES.get(stage)
     job = {
         "uuid": message_id,
         "queue": streams.streams.get(stage),
-        "job_type": _STAGE_JOB_TYPES.get(stage),
+        "job_type": stage_job_type,
         "owner_user_id": payload.get("user_id"),
         "request_id": payload.get("request_id"),
         "trace_id": payload.get("trace_id"),
@@ -148,6 +149,8 @@ async def _handle_stage_message(
                     "total_chunks": 0,
                 }
                 jobs_worker._update_root_job(root_uuid, status="completed", result=payload_result)
+                if jobs_worker._should_track_media_state(stage_job_type, payload):
+                    jobs_worker._mark_media_embeddings_complete(user_id=user_id, media_id=media_id)
                 return
             next_payload = dict(payload)
             next_payload.update(result)
@@ -192,6 +195,8 @@ async def _handle_stage_message(
                 root_uuid=root_uuid,
             )
             jobs_worker._update_root_job(root_uuid, status="completed", result=result)
+            if jobs_worker._should_track_media_state(stage_job_type, payload):
+                jobs_worker._mark_media_embeddings_complete(user_id=user_id, media_id=media_id)
             return
 
         if stage == "content":
@@ -200,7 +205,7 @@ async def _handle_stage_message(
                 progress_percent=1.0,
                 progress_message="content embedding started",
             )
-            await jobs_worker._handle_content_job(
+            result = await jobs_worker._handle_content_job(
                 job,
                 payload,
                 media_id=media_id,
@@ -211,28 +216,55 @@ async def _handle_stage_message(
                 chunk_overlap=chunk_overlap,
                 root_uuid=root_uuid,
             )
+            jobs_worker._update_root_job(root_uuid, status="completed", result=result)
+            if jobs_worker._should_track_media_state(stage_job_type, payload):
+                jobs_worker._mark_media_embeddings_complete(user_id=user_id, media_id=media_id)
             return
 
         raise jobs_worker.EmbeddingsJobError(f"Unsupported embeddings stage {stage}", retryable=False)
     except jobs_worker.EmbeddingsJobError as exc:
         retry_cfg = _retry_limits()
-        retry_count = jobs_worker._coerce_int(payload.get("retry_count"), 0)
+        payload_val = locals().get("payload") or {}
+        retry_count = jobs_worker._coerce_int(payload_val.get("retry_count"), 0)
         if exc.retryable and retry_count < retry_cfg["max_retries"]:
             backoff = getattr(exc, "backoff_seconds", None)
             if backoff is None:
                 backoff = retry_cfg["base_backoff"] * (2 ** retry_count)
             backoff = min(float(backoff), float(retry_cfg["max_backoff"]))
             await asyncio.sleep(backoff)
-            retry_payload = dict(payload)
+            retry_payload = dict(payload_val)
             retry_payload["retry_count"] = retry_count + 1
             retry_payload["last_error"] = str(exc)
             await client.xadd(streams.streams[stage], retry_payload)
             return
-        jobs_worker._update_root_job(root_uuid, status="failed", error=str(exc))
-        await _send_dlq(client, stage=stage, payload=payload, error=str(exc))
+        root_uuid_val = locals().get("root_uuid")
+        if root_uuid_val:
+            jobs_worker._update_root_job(root_uuid_val, status="failed", error=str(exc))
+        if payload_val and jobs_worker._should_track_media_state(stage_job_type, payload_val):
+            user_id_val = locals().get("user_id")
+            media_id_val = locals().get("media_id")
+            if user_id_val is not None and media_id_val is not None:
+                jobs_worker._mark_media_embeddings_error_safely(
+                    user_id=user_id_val,
+                    media_id=media_id_val,
+                    error_message=str(exc),
+                )
+        await _send_dlq(client, stage=stage, payload=payload_val, error=str(exc))
     except Exception as exc:
-        jobs_worker._update_root_job(root_uuid, status="failed", error=str(exc))
-        await _send_dlq(client, stage=stage, payload=payload, error=str(exc))
+        payload_val = locals().get("payload") or {}
+        root_uuid_val = locals().get("root_uuid")
+        if root_uuid_val:
+            jobs_worker._update_root_job(root_uuid_val, status="failed", error=str(exc))
+        if payload_val and jobs_worker._should_track_media_state(stage_job_type, payload_val):
+            user_id_val = locals().get("user_id")
+            media_id_val = locals().get("media_id")
+            if user_id_val is not None and media_id_val is not None:
+                jobs_worker._mark_media_embeddings_error_safely(
+                    user_id=user_id_val,
+                    media_id=media_id_val,
+                    error_message=str(exc),
+                )
+        await _send_dlq(client, stage=stage, payload=payload_val, error=str(exc))
 
 
 async def _worker_loop(stage: str, worker_id: str, stop_event: asyncio.Event) -> None:

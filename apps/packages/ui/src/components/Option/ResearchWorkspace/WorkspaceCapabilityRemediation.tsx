@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useState } from "react"
 import { AlertTriangle, ExternalLink } from "lucide-react"
 import { Link } from "react-router-dom"
 import type {
@@ -6,6 +6,7 @@ import type {
   WorkspaceCapabilityService,
   WorkspaceCapabilityServiceState
 } from "@/services/tldw/domains/workspace-api"
+import { WorkspaceSandboxDiagnosticsPanel } from "./WorkspaceSandboxDiagnosticsPanel"
 
 type WorkspaceCapabilityRemediationProps = {
   capabilities: WorkspaceCapabilitiesResponse | null | undefined
@@ -27,6 +28,7 @@ type RemediationItem = {
   impact: string
   severity: RemediationSeverity
   link: RemediationLink | null
+  diagnosticsWorkspaceId?: string | null
 }
 
 type ServiceConfig = {
@@ -61,6 +63,21 @@ const MANAGEMENT_LINKS: Record<string, RemediationLink | undefined> = {
   sandbox_settings: { label: "Open Runtime Config", href: "/admin/runtime-config" },
   model_settings: { label: "Open Model Settings", href: "/settings/model" },
   shared_workspaces: { label: "Open Shared", href: "/shared" }
+}
+
+const buildMcpHubWorkspaceSetHref = (
+  workspaceId: string | null | undefined
+): string => {
+  const params = new URLSearchParams({
+    workflow: "workspaces",
+    view: "workspace-sets"
+  })
+  const normalizedWorkspaceId = String(workspaceId ?? "").trim()
+  if (normalizedWorkspaceId) {
+    params.set("workspace_id", normalizedWorkspaceId)
+  }
+  params.set("source", "research-workspace")
+  return `/mcp-hub?${params.toString()}`
 }
 
 const READY_STATES = new Set<WorkspaceCapabilityServiceState | string>([
@@ -211,13 +228,18 @@ const getServiceGuidance = (
 
 const buildServiceItem = (
   key: (typeof SERVICE_ORDER)[number],
-  service: WorkspaceCapabilityService | null | undefined
+  service: WorkspaceCapabilityService | null | undefined,
+  workspaceId: string | null | undefined
 ): RemediationItem | null => {
   if (!service || READY_STATES.has(service.state)) return null
 
   const config = SERVICE_CONFIG[key]
   const managementSurface = service.management_surface ?? ""
-  const link = MANAGEMENT_LINKS[managementSurface] ?? null
+  const baseLink = MANAGEMENT_LINKS[managementSurface] ?? null
+  const link =
+    key === "mcp" && managementSurface === "mcp_hub" && baseLink
+      ? { ...baseLink, href: buildMcpHubWorkspaceSetHref(workspaceId) }
+      : baseLink
 
   return {
     id: key,
@@ -227,7 +249,9 @@ const buildServiceItem = (
     guidance: getServiceGuidance(key, service),
     impact: config.impact,
     severity: getSeverity(service),
-    link
+    link,
+    diagnosticsWorkspaceId:
+      key === "sandbox" && workspaceId ? String(workspaceId) : null
   }
 }
 
@@ -265,7 +289,11 @@ const buildRemediationItems = (
   if (!capabilities) return []
 
   const items = SERVICE_ORDER.flatMap((key) => {
-    const item = buildServiceItem(key, capabilities.workspace_services?.[key])
+    const item = buildServiceItem(
+      key,
+      capabilities.workspace_services?.[key],
+      capabilities.workspace_id
+    )
     return item ? [item] : []
   })
   const groundedItem = buildGroundedAnswersItem(capabilities)
@@ -286,6 +314,9 @@ const itemToneClass = (severity: RemediationSeverity): string => {
 export const WorkspaceCapabilityRemediation: React.FC<
   WorkspaceCapabilityRemediationProps
 > = ({ capabilities }) => {
+  const [openDiagnosticsItemId, setOpenDiagnosticsItemId] = useState<string | null>(
+    null
+  )
   const items = buildRemediationItems(capabilities)
   if (items.length === 0) return null
 
@@ -338,16 +369,38 @@ export const WorkspaceCapabilityRemediation: React.FC<
               <span className="truncate text-[11px] text-text-subtle">
                 Affects: {item.impact}
               </span>
-              {item.link && (
-                <Link
-                  to={item.link.href}
-                  className="inline-flex shrink-0 items-center gap-1 rounded border border-current/20 px-1.5 py-0.5 text-[11px] font-semibold text-current hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
-                >
-                  {item.link.label}
-                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                </Link>
-              )}
+              <span className="inline-flex shrink-0 flex-wrap items-center gap-1.5">
+                {item.diagnosticsWorkspaceId && (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded border border-current/20 px-1.5 py-0.5 text-[11px] font-semibold text-current hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
+                    onClick={() =>
+                      setOpenDiagnosticsItemId((current) =>
+                        current === item.id ? null : item.id
+                      )
+                    }
+                  >
+                    View Sandbox Diagnostics
+                  </button>
+                )}
+                {item.link && (
+                  <Link
+                    to={item.link.href}
+                    className="inline-flex items-center gap-1 rounded border border-current/20 px-1.5 py-0.5 text-[11px] font-semibold text-current hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
+                  >
+                    {item.link.label}
+                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                  </Link>
+                )}
+              </span>
             </div>
+            {item.diagnosticsWorkspaceId && openDiagnosticsItemId === item.id && (
+              <div className="mt-2">
+                <WorkspaceSandboxDiagnosticsPanel
+                  workspaceId={item.diagnosticsWorkspaceId}
+                />
+              </div>
+            )}
           </div>
         ))}
       </div>

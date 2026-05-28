@@ -183,16 +183,31 @@ vi.mock("../StudioPane", () => ({
 vi.mock("../WorkspaceStatusBar", () => ({
   WorkspaceStatusBar: ({
     activeOperations,
-    statusMessages
+    statusMessages,
+    statusAction
   }: {
     activeOperations?: string[]
     statusMessages?: string[]
+    statusAction?: {
+      label: string
+      ariaLabel?: string
+      onClick: () => void
+    }
   }) => (
     <div data-testid="workspace-status-bar">
       {statusMessages && statusMessages.length > 0 && (
         <div data-testid="workspace-statusbar-notice">
           {statusMessages.join(" ")}
         </div>
+      )}
+      {statusAction && (
+        <button
+          type="button"
+          aria-label={statusAction.ariaLabel || statusAction.label}
+          onClick={statusAction.onClick}
+        >
+          {statusAction.label}
+        </button>
       )}
       {activeOperations && activeOperations.length > 0 && (
         <div data-testid="workspace-statusbar-activity">
@@ -445,6 +460,19 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     })
   })
 
+  it("does not show a migration details action when there is no migration notice", async () => {
+    render(<ResearchWorkspace />)
+
+    await screen.findByTestId("workspace-status-bar")
+
+    expect(screen.queryByTestId("workspace-statusbar-notice")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", {
+        name: "Review migration recovery details"
+      })
+    ).not.toBeInTheDocument()
+  })
+
   it("runs legacy workspace migration once and shows a compact recovery status when local data is retained", async () => {
     const legacyPayload = JSON.stringify({
       workspaces: [{ id: "legacy-workspace", name: "Legacy Workspace" }]
@@ -496,7 +524,15 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     expect(notice).toHaveTextContent(
       "Local data retained until server deletion eligibility is available"
     )
-    expect(notice).toHaveTextContent("Review recovery details")
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review migration recovery details" })
+    )
+    const dialog = await screen.findByRole("dialog", {
+      name: "Migration recovery details"
+    })
+    expect(dialog).toHaveTextContent("research-workspace-workspace-1-abcd")
+    expect(dialog).toHaveTextContent("Server receipt saved")
+    expect(dialog).toHaveTextContent("Client deletion eligible")
     expect(screen.queryByText(/workspace-playground/i)).not.toBeInTheDocument()
     expect(screen.queryByTestId("workspace-trust-panel")).not.toBeInTheDocument()
   })
@@ -597,7 +633,14 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     const notice = await screen.findByTestId("workspace-statusbar-notice")
     expect(notice).toHaveTextContent("Server receipt saved")
     expect(notice).toHaveTextContent("Local data retained")
-    expect(notice).toHaveTextContent("Review recovery details")
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review migration recovery details" })
+    )
+    const dialog = await screen.findByRole("dialog", {
+      name: "Migration recovery details"
+    })
+    expect(dialog).toHaveTextContent("Unknown local surfaces")
+    expect(dialog).toHaveTextContent("tldw:research-workspace:unknown")
   })
 
   it("settles migration status when React StrictMode remounts effects", async () => {

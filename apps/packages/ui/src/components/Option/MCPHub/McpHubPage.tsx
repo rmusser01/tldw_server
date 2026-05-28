@@ -109,6 +109,8 @@ export const McpHubPage = () => {
       }),
     [searchParams]
   )
+  const focusWorkspaceId = searchParams.get("workspace_id")?.trim() || null
+  const focusSource = searchParams.get("source")?.trim() || null
 
   const updateRouteState = (nextState: McpHubRouteState) => {
     const nextParams = new URLSearchParams(searchParams)
@@ -198,6 +200,8 @@ export const McpHubPage = () => {
     "workspace-sets": (
       <WorkspaceSetsTab
         drillTarget={drillTarget}
+        focusSource={focusSource}
+        focusWorkspaceId={focusWorkspaceId}
         onDrillHandled={handleDrillHandled}
       />
     ),

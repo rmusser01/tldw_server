@@ -856,6 +856,67 @@ def _workspace_response_payload(workspace: Any) -> dict[str, Any]:
     return payload
 
 
+def _normalize_canonical_workspace_filter_source(value: Any) -> str:
+    """Normalize a canonical workspace source for filtering without masking invalid labels."""
+    source = str(value or "").strip()
+    if source in _LEGACY_CANONICAL_WORKSPACE_SOURCES:
+        return CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE
+    if source:
+        return source
+    return CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE
+
+
+def _canonical_workspace_source_matches(value: Any, expected_source: str) -> bool:
+    """Return whether stored canonical source metadata matches the requested filter."""
+    source = str(value or "").strip()
+    if not source:
+        return expected_source == CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE
+    if source in _LEGACY_CANONICAL_WORKSPACE_SOURCES:
+        source = CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE
+    return source == expected_source
+
+
+def _metadata_matches_canonical_workspace(
+    metadata: Any,
+    *,
+    canonical_workspace_id: str,
+    canonical_workspace_source: str,
+) -> bool:
+    """Return whether metadata links an object to the requested canonical workspace."""
+    if not isinstance(metadata, dict):
+        return False
+    stored_id = str(metadata.get(CANONICAL_WORKSPACE_ID_METADATA_KEY) or "").strip()
+    if stored_id != canonical_workspace_id:
+        return False
+    return _canonical_workspace_source_matches(
+        metadata.get(CANONICAL_WORKSPACE_SOURCE_METADATA_KEY),
+        canonical_workspace_source,
+    )
+
+
+def _project_matches_canonical_workspace_filter(
+    project: Any,
+    *,
+    workspace: Any | None,
+    canonical_workspace_id: str,
+    canonical_workspace_source: str,
+) -> bool:
+    """Return whether a project belongs to the requested canonical workspace."""
+    if not canonical_workspace_id:
+        return True
+    if _metadata_matches_canonical_workspace(
+        getattr(workspace, "metadata", None),
+        canonical_workspace_id=canonical_workspace_id,
+        canonical_workspace_source=canonical_workspace_source,
+    ):
+        return True
+    return _metadata_matches_canonical_workspace(
+        getattr(project, "metadata", None),
+        canonical_workspace_id=canonical_workspace_id,
+        canonical_workspace_source=canonical_workspace_source,
+    )
+
+
 def _canonical_workspace_name(canonical_workspace: Any, fallback_id: str) -> str:
     """Return a display name from a canonical workspace row or fallback ID."""
     if isinstance(canonical_workspace, dict):
@@ -1280,10 +1341,22 @@ async def create_project(
 async def list_projects(
     workspace_id: int | None = Query(default=None, description="Filter by workspace ID (omit for all)"),
     unbound: bool = Query(default=False, description="If true, list only projects without a workspace"),
+    canonical_workspace_id: str | None = Query(
+        default=None,
+        description="Filter by canonical product workspace ID",
+    ),
+    canonical_workspace_source: str = Query(
+        default=CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE,
+        description="Filter by canonical workspace source label",
+    ),
     user: User = Depends(get_request_user),
 ) -> list[ProjectResponse]:
     """List projects for the current user, optionally filtered by workspace."""
     db = get_orchestration_db(_user_id_int(user))
+    canonical_filter_id = str(canonical_workspace_id or "").strip()
+    canonical_filter_source = _normalize_canonical_workspace_filter_source(
+        canonical_workspace_source
+    )
 
     def _list() -> list[dict[str, Any]]:
         if workspace_id is not None:
@@ -1297,16 +1370,23 @@ async def list_projects(
         ])
         results = []
         for p in projects:
-            summary = db.get_project_summary(p.id)
             d = p.to_dict()
-            d["task_summary"] = summary
             # Include workspace info if bound
+            ws = None
             if p.workspace_id:
                 ws = workspaces_by_id.get(p.workspace_id)
                 if ws:
                     workspace_payload = _workspace_response_payload(ws)
                     d["workspace"] = workspace_payload
                     d["canonical_workspace"] = workspace_payload.get("canonical_workspace")
+            if not _project_matches_canonical_workspace_filter(
+                p,
+                workspace=ws,
+                canonical_workspace_id=canonical_filter_id,
+                canonical_workspace_source=canonical_filter_source,
+            ):
+                continue
+            d["task_summary"] = db.get_project_summary(p.id)
             results.append(d)
         return results
 

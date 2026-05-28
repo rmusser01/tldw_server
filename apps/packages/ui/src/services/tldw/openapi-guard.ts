@@ -47,6 +47,7 @@ export type ClientPath =
   | "/api/v1/research-workspace/capabilities"
   | "/api/v1/workspaces/{workspace_id}/context"
   | "/api/v1/workspaces/{workspace_id}/sources/{source_id}/preview"
+  | "/api/v1/sandbox/workspaces/{workspace_id}/diagnostics"
   | "/api/v1/rag/health"
   | "/api/v1/rag/search"
   | "/api/v1/rag/search/stream"

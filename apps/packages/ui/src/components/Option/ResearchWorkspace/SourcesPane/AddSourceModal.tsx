@@ -1546,8 +1546,8 @@ const ExistingTab: React.FC<{
   )
 
   React.useEffect(() => {
-    void fetchMediaFromServer(DEFAULT_EXISTING_MEDIA_FILTERS, { page: 1 })
-  }, [fetchMediaFromServer])
+    void loadMedia(DEFAULT_EXISTING_MEDIA_FILTERS)
+  }, [loadMedia])
 
   const currentFilters = React.useMemo<ExistingMediaFilters>(
     () => ({

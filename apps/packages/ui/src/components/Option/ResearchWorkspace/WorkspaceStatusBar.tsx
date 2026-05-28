@@ -24,6 +24,13 @@ interface WorkspaceStatusBarProps {
   activeOperations?: string[]
   /** Non-spinning recovery/status notices shown in the status bar */
   statusMessages?: string[]
+  /** Optional compact action for status/recovery details */
+  statusAction?: {
+    label: string
+    ariaLabel?: string
+    onClick: () => void
+    disabled?: boolean
+  }
   /** Rollout gate for status/guardrails surfaces */
   statusGuardrailsEnabled?: boolean
 }
@@ -71,6 +78,7 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
   storageQuotaBytes,
   activeOperations = [],
   statusMessages = [],
+  statusAction,
   statusGuardrailsEnabled = true
 }) => {
   const { t } = useTranslation(["playground", "common"])
@@ -202,6 +210,17 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
               </span>
             ))}
           </div>
+        )}
+        {statusAction && (
+          <button
+            type="button"
+            className="rounded px-1.5 py-0.5 text-[11px] font-medium text-warning transition hover:bg-warning/10 hover:text-warning disabled:cursor-not-allowed disabled:opacity-60"
+            aria-label={statusAction.ariaLabel || statusAction.label}
+            onClick={statusAction.onClick}
+            disabled={statusAction.disabled}
+          >
+            {statusAction.label}
+          </button>
         )}
         {activeOperations.length > 0 && (
           <div

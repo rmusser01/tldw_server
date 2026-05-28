@@ -14,6 +14,7 @@ import {
 
 const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
 const PROJECTS_PATH = `${AGENT_ORCHESTRATION_BASE_PATH}/projects`
+const CANONICAL_WORKSPACE_SOURCE = "research_workspace"
 const AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE =
   "Agent orchestration is not available on this server."
 const AGENT_ORCHESTRATION_UNSUPPORTED_CODE =
@@ -121,6 +122,14 @@ const getCanonicalWorkspaceId = (
 ): string | null =>
   normalizeWorkspaceId(item.canonical_workspace?.canonical_workspace_id) ||
   normalizeWorkspaceId(item.metadata?.canonical_workspace_id)
+
+const buildCanonicalProjectsPath = (canonicalWorkspaceId: string): string => {
+  const params = new URLSearchParams({
+    canonical_workspace_id: canonicalWorkspaceId,
+    canonical_workspace_source: CANONICAL_WORKSPACE_SOURCE
+  })
+  return `${PROJECTS_PATH}?${params.toString()}`
+}
 
 const readApiErrorMessage = async (response: Response): Promise<string> => {
   const payload = await response.json().catch(() => null)
@@ -237,7 +246,7 @@ export const WorkspaceACPHistoryModal: React.FC<
         const message = await readApiErrorMessage(response)
         if (
           response.status === 404 &&
-          path === PROJECTS_PATH &&
+          (path === PROJECTS_PATH || path.startsWith(`${PROJECTS_PATH}?`)) &&
           message === "Not Found"
         ) {
           throw createUnsupportedError()
@@ -269,7 +278,7 @@ export const WorkspaceACPHistoryModal: React.FC<
         }
 
         const projectsPayload = await fetchJson<unknown>(
-          PROJECTS_PATH,
+          buildCanonicalProjectsPath(canonicalWorkspaceId),
           abortController.signal
         )
         const projects = normalizeListPayload<ProjectSummary>(

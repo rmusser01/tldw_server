@@ -19,7 +19,7 @@ import {
 } from "../../utils/fixtures"
 import { MCPHubPage } from "../../utils/page-objects/MCPHubPage"
 import { expectApiCall } from "../../utils/api-assertions"
-import { seedAuth } from "../../utils/helpers"
+import { fetchWithApiKey, seedAuth, TEST_CONFIG } from "../../utils/helpers"
 
 const TOY_MCP_SERVER_SCRIPT = `\
 import readline from "node:readline";
@@ -108,6 +108,68 @@ async function writeToyMcpServer(): Promise<{ dir: string; scriptPath: string }>
   return { dir, scriptPath }
 }
 
+type ApiResult = {
+  status: number
+  body: unknown
+  text: string
+}
+
+const apiBaseUrl = (): string => {
+  const raw = TEST_CONFIG.serverUrl.replace(/\/$/, "")
+  return /^https?:\/\//i.test(raw) ? raw : `http://${raw}`
+}
+
+function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
+  if (!headers) {
+    return {}
+  }
+  if (headers instanceof Headers) {
+    return Object.fromEntries([...headers.entries()])
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers.map(([key, value]) => [key, String(value)]))
+  }
+  return Object.fromEntries(Object.entries(headers).map(([key, value]) => [key, String(value)]))
+}
+
+async function apiRequest(path: string, init: RequestInit = {}): Promise<ApiResult> {
+  const headers: Record<string, string> = {
+    ...(init.body ? { "content-type": "application/json" } : {}),
+    ...normalizeHeaders(init.headers),
+  }
+  const response = await fetchWithApiKey(`${apiBaseUrl()}${path}`, TEST_CONFIG.apiKey, {
+    ...init,
+    headers,
+  })
+  const text = await response.text()
+  let body: unknown = null
+  if (text) {
+    try {
+      body = JSON.parse(text)
+    } catch {
+      body = text
+    }
+  }
+  return { status: response.status, body, text }
+}
+
+function assertMutableApiAvailable(result: ApiResult, label: string): void {
+  if ([401, 403, 404].includes(result.status)) {
+    test.skip(true, `${label} unavailable in this live run: HTTP ${result.status}`)
+  }
+}
+
+function expectSuccessfulApiResult<T extends Record<string, unknown>>(
+  result: ApiResult,
+  label: string
+): T {
+  assertMutableApiAvailable(result, label)
+  expect(result.status, `${label}: ${result.text}`).toBeGreaterThanOrEqual(200)
+  expect(result.status, `${label}: ${result.text}`).toBeLessThan(300)
+  expect(result.body && typeof result.body === "object", `${label}: ${result.text}`).toBe(true)
+  return result.body as T
+}
+
 test.describe("MCP Hub", () => {
   let mcpHub: MCPHubPage
 
@@ -187,6 +249,222 @@ test.describe("MCP Hub", () => {
       await mcpHub.expectViewSelected("assignments")
 
       await assertNoCriticalErrors(diagnostics)
+    })
+
+    test("should hydrate Research Workspace context in Workspace Sets", async ({
+      authedPage,
+      serverInfo,
+      diagnostics,
+    }) => {
+      skipIfServerUnavailable(serverInfo)
+
+      mcpHub = new MCPHubPage(authedPage)
+      await mcpHub.goto(
+        "/mcp-hub?workflow=setup&view=workspace-sets&workspace_id=rw-e2e-context&source=research-workspace"
+      )
+      await mcpHub.assertPageReady()
+
+      await mcpHub.expectWorkflowSelected("workspaces")
+      await mcpHub.expectViewSelected("workspace-sets")
+
+      const contextStatus = authedPage.getByTestId("mcp-workspace-context-status")
+      await expect(contextStatus).toBeVisible({ timeout: 15_000 })
+      await expect(contextStatus).toContainText(/rw-e2e-context/)
+      await expect(contextStatus).toContainText(
+        /included in .* MCP workspace set|No MCP workspace set includes/i
+      )
+
+      await assertNoCriticalErrors(diagnostics)
+    })
+
+    test("binds a Research Workspace into an MCP workspace set and resolves policy evidence", async ({
+      authedPage,
+      serverInfo,
+      diagnostics,
+    }, testInfo) => {
+      skipIfServerUnavailable(serverInfo)
+
+      const suffix = `${Date.now().toString(36)}-${testInfo.workerIndex}`
+      const workspaceId = `rw-mcp-e2e-${suffix}`
+      const personaId = `rw-mcp-persona-${suffix}`
+      const teamId = 1
+      const workspaceRoot = await mkdtemp(join(tmpdir(), "tldw-rw-mcp-"))
+      let policyAssignmentId: number | null = null
+      let workspaceSetObjectId: number | null = null
+      let sharedWorkspaceId: number | null = null
+
+      try {
+        const workspace = expectSuccessfulApiResult<Record<string, unknown>>(
+          await apiRequest(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              name: `RW MCP E2E ${suffix}`,
+              study_materials_policy: "general",
+            }),
+          }),
+          "create Research Workspace"
+        )
+        expect(workspace.id).toBe(workspaceId)
+
+        const sharedWorkspace = expectSuccessfulApiResult<Record<string, unknown>>(
+          await apiRequest("/api/v1/mcp/hub/shared-workspaces", {
+            method: "POST",
+            body: JSON.stringify({
+              workspace_id: workspaceId,
+              display_name: `RW MCP Shared ${suffix}`,
+              absolute_root: workspaceRoot,
+              owner_scope_type: "team",
+              owner_scope_id: teamId,
+              is_active: true,
+            }),
+          }),
+          "create MCP Hub Shared Workspace"
+        )
+        sharedWorkspaceId = Number(sharedWorkspace.id)
+        expect(Number.isFinite(sharedWorkspaceId), JSON.stringify(sharedWorkspace)).toBe(true)
+        expect(sharedWorkspace.workspace_id).toBe(workspaceId)
+
+        const workspaceSet = expectSuccessfulApiResult<Record<string, unknown>>(
+          await apiRequest("/api/v1/mcp/hub/workspace-set-objects", {
+            method: "POST",
+            body: JSON.stringify({
+              name: `RW MCP Set ${suffix}`,
+              description: "E2E Research Workspace handoff validation",
+              owner_scope_type: "team",
+              owner_scope_id: teamId,
+              is_active: true,
+            }),
+          }),
+          "create MCP Hub workspace set"
+        )
+        workspaceSetObjectId = Number(workspaceSet.id)
+        expect(Number.isFinite(workspaceSetObjectId), JSON.stringify(workspaceSet)).toBe(true)
+        expect(workspaceSet.owner_scope_type).toBe("team")
+
+        const workspaceSetMember = expectSuccessfulApiResult<Record<string, unknown>>(
+          await apiRequest(`/api/v1/mcp/hub/workspace-set-objects/${workspaceSetObjectId}/members`, {
+            method: "POST",
+            body: JSON.stringify({ workspace_id: workspaceId }),
+          }),
+          "add Research Workspace ID to MCP workspace set"
+        )
+        expect(workspaceSetMember.workspace_id).toBe(workspaceId)
+
+        const policyAssignment = expectSuccessfulApiResult<Record<string, unknown>>(
+          await apiRequest("/api/v1/mcp/hub/policy-assignments", {
+            method: "POST",
+            body: JSON.stringify({
+              target_type: "persona",
+              target_id: personaId,
+              owner_scope_type: "team",
+              owner_scope_id: teamId,
+              workspace_source_mode: "named",
+              workspace_set_object_id: workspaceSetObjectId,
+              inline_policy_document: {
+                allowed_tools: ["run"],
+                approval_mode: "allow_silently",
+              },
+              is_active: true,
+            }),
+          }),
+          "create MCP Hub named workspace-set policy assignment"
+        )
+        policyAssignmentId = Number(policyAssignment.id)
+        expect(Number.isFinite(policyAssignmentId), JSON.stringify(policyAssignment)).toBe(true)
+        expect(policyAssignment.workspace_source_mode).toBe("named")
+        expect(policyAssignment.workspace_set_object_id).toBe(workspaceSetObjectId)
+
+        const effectivePolicy = expectSuccessfulApiResult<Record<string, unknown>>(
+          await apiRequest(
+            `/api/v1/mcp/hub/effective-policy?persona_id=${encodeURIComponent(personaId)}&team_id=${teamId}`,
+            { method: "GET" }
+          ),
+          "resolve MCP Hub effective policy"
+        )
+        expect(effectivePolicy.enabled).toBe(true)
+        expect(effectivePolicy.selected_workspace_source_mode).toBe("named")
+        expect(effectivePolicy.selected_workspace_set_object_id).toBe(workspaceSetObjectId)
+        expect(effectivePolicy.selected_workspace_trust_source).toBe("shared_registry")
+        expect(effectivePolicy.selected_assignment_workspace_ids).toEqual(
+          expect.arrayContaining([workspaceId])
+        )
+        expect(effectivePolicy.allowed_tools).toEqual(expect.arrayContaining(["run"]))
+
+        const toolExecution = await apiRequest("/api/v1/mcp/tools/execute", {
+          method: "POST",
+          headers: {
+            "x-tldw-workspace-id": workspaceId,
+            "x-tldw-cwd": workspaceRoot,
+          },
+          body: JSON.stringify({
+            tool_name: "run",
+            arguments: { command: "help" },
+          }),
+        })
+        await testInfo.attach("mcp-tool-execution-probe.json", {
+          body: JSON.stringify(
+            {
+              status: toolExecution.status,
+              body: toolExecution.body,
+            },
+            null,
+            2
+          ),
+          contentType: "application/json",
+        })
+        assertMutableApiAvailable(toolExecution, "execute MCP tool under Research Workspace headers")
+        expect(toolExecution.status, toolExecution.text).toBeGreaterThanOrEqual(200)
+        expect(toolExecution.status, toolExecution.text).toBeLessThan(300)
+        expect(toolExecution.body && typeof toolExecution.body === "object", toolExecution.text).toBe(
+          true
+        )
+        expect((toolExecution.body as { result?: unknown }).result, toolExecution.text).toEqual(
+          expect.stringContaining("Virtual CLI commands available")
+        )
+
+        mcpHub = new MCPHubPage(authedPage)
+        await mcpHub.goto(
+          `/mcp-hub?workflow=setup&view=workspace-sets&workspace_id=${encodeURIComponent(workspaceId)}&source=research-workspace`
+        )
+        await mcpHub.assertPageReady()
+
+        expect(authedPage.url()).toContain("source=research-workspace")
+        expect(authedPage.url()).not.toContain("workspace-playground")
+        await mcpHub.expectWorkflowSelected("workspaces")
+        await mcpHub.expectViewSelected("workspace-sets")
+
+        const contextStatus = authedPage.getByTestId("mcp-workspace-context-status")
+        await expect(contextStatus).toBeVisible({ timeout: 15_000 })
+        await expect(contextStatus).toContainText(workspaceId)
+        await expect(contextStatus).toContainText(/included in .* MCP workspace set/i)
+        await expect(contextStatus).not.toContainText(/workspace-playground/i)
+
+        await assertNoCriticalErrors(diagnostics)
+      } finally {
+        if (policyAssignmentId != null) {
+          await apiRequest(`/api/v1/mcp/hub/policy-assignments/${policyAssignmentId}`, {
+            method: "DELETE",
+          }).catch(() => {})
+        }
+        if (workspaceSetObjectId != null) {
+          await apiRequest(
+            `/api/v1/mcp/hub/workspace-set-objects/${workspaceSetObjectId}/members/${encodeURIComponent(workspaceId)}`,
+            { method: "DELETE" }
+          ).catch(() => {})
+          await apiRequest(`/api/v1/mcp/hub/workspace-set-objects/${workspaceSetObjectId}`, {
+            method: "DELETE",
+          }).catch(() => {})
+        }
+        if (sharedWorkspaceId != null) {
+          await apiRequest(`/api/v1/mcp/hub/shared-workspaces/${sharedWorkspaceId}`, {
+            method: "DELETE",
+          }).catch(() => {})
+        }
+        await apiRequest(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}`, {
+          method: "DELETE",
+        }).catch(() => {})
+        await rm(workspaceRoot, { recursive: true, force: true }).catch(() => {})
+      }
     })
   })
 

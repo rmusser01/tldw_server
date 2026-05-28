@@ -468,6 +468,25 @@ async def _orchestrator_depth_and_age(client: aioredis.Redis) -> tuple[int, floa
     return (max(depths) if depths else 0, max(ages) if ages else 0.0)
 
 
+def _is_embeddings_backpressure_redis_enabled() -> bool:
+    """Return whether Redis-backed embeddings backpressure should inspect streams."""
+
+    redis_enabled_env = os.getenv("REDIS_ENABLED")
+    if redis_enabled_env is not None:
+        return is_truthy(redis_enabled_env)
+
+    try:
+        configured = settings.get("REDIS_ENABLED", None)
+        if configured is not None:
+            if isinstance(configured, str):
+                return is_truthy(configured)
+            return bool(configured)
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+        pass
+
+    return bool(os.getenv("EMBEDDINGS_REDIS_URL") or os.getenv("REDIS_URL"))
+
+
 def _should_enforce_tenant_rps(request: Request) -> bool:
     """
     Decide whether to enforce per-tenant RPS quotas for this request.
@@ -518,27 +537,29 @@ def _should_enforce_tenant_rps(request: Request) -> bool:
 async def _check_backpressure_and_quotas(request: Request, user: User) -> HTTPException | None:
     """Return HTTPException(429) if backpressure or tenant quota exceeded; else None."""
     # Orchestrator-based backpressure
-    try:
-        client = await _get_redis_client()
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        client = None
-    try:
-        if client is not None:
-            depth, age = await _orchestrator_depth_and_age(client)
-            if depth >= BP_MAX_DEPTH or age >= BP_MAX_AGE_S:
-                retry_after = 5
-                if age >= BP_MAX_AGE_S:
-                    retry_after = min(60, int(max(5, age / 2)))
-                headers = {"Retry-After": str(retry_after)}
-                return HTTPException(status_code=429, detail="Backpressure: queue overload", headers=headers)
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        pass
-    finally:
+    client = None
+    if _is_embeddings_backpressure_redis_enabled():
+        try:
+            client = await _get_redis_client()
+        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            client = None
         try:
             if client is not None:
-                    await ensure_async_client_closed(client)
+                depth, age = await _orchestrator_depth_and_age(client)
+                if depth >= BP_MAX_DEPTH or age >= BP_MAX_AGE_S:
+                    retry_after = 5
+                    if age >= BP_MAX_AGE_S:
+                        retry_after = min(60, int(max(5, age / 2)))
+                    headers = {"Retry-After": str(retry_after)}
+                    return HTTPException(status_code=429, detail="Backpressure: queue overload", headers=headers)
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             pass
+        finally:
+            try:
+                if client is not None:
+                    await ensure_async_client_closed(client)
+            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug("Failed to close embeddings backpressure Redis client: {}", exc)
 
     # Per-tenant quotas in multi-user mode
     try:

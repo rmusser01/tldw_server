@@ -35,6 +35,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.endpoints.sandbox_service import sandbox_service
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     ArtifactListResponse,
     CancelResponse,
@@ -173,7 +174,7 @@ class SandboxArtifactGuardRoute(APIRoute):
 
 router = APIRouter(prefix="/sandbox", tags=["sandbox"], route_class=SandboxArtifactGuardRoute)
 
-_service = SandboxService(enable_background_tasks=False)
+_service = sandbox_service
 
 
 def _status_reason_code(
@@ -206,7 +207,6 @@ def _status_reason_details(
     """Build the public schema metadata for a normalized status reason code."""
 
     return _cached_status_reason_details(str(code or "unknown").strip())
-
 
 
 @router.on_event("startup")
@@ -2393,6 +2393,9 @@ async def admin_macos_image_store_cleanup(
 async def admin_list_runs(
     image_digest: str | None = Query(None, description="Filter by image digest"),
     user_id: str | None = Query(None, description="Filter by user id"),
+    workspace_id: str | None = Query(None, description="Filter by workspace id"),
+    workspace_group_id: str | None = Query(None, description="Filter by workspace-group id"),
+    scope_snapshot_id: str | None = Query(None, description="Filter by scope snapshot id"),
     phase: str | None = Query(None, description="Filter by run phase"),
     started_at_from: str | None = Query(None, description="ISO timestamp inclusive lower bound"),
     started_at_to: str | None = Query(None, description="ISO timestamp inclusive upper bound"),
@@ -2405,6 +2408,9 @@ async def admin_list_runs(
     items_raw = _service._orch.list_runs(  # type: ignore[attr-defined]
         image_digest=image_digest,
         user_id=user_id,
+        workspace_id=workspace_id,
+        workspace_group_id=workspace_group_id,
+        scope_snapshot_id=scope_snapshot_id,
         phase=phase,
         started_at_from=started_at_from,
         started_at_to=started_at_to,
@@ -2415,6 +2421,9 @@ async def admin_list_runs(
     total = _service._orch.count_runs(  # type: ignore[attr-defined]
         image_digest=image_digest,
         user_id=user_id,
+        workspace_id=workspace_id,
+        workspace_group_id=workspace_group_id,
+        scope_snapshot_id=scope_snapshot_id,
         phase=phase,
         started_at_from=started_at_from,
         started_at_to=started_at_to,

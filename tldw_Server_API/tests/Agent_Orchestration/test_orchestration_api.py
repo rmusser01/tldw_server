@@ -686,6 +686,115 @@ async def test_project_and_task_detail_include_canonical_workspace(monkeypatch, 
         db.close()
 
 
+async def test_list_projects_filters_by_canonical_workspace(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    alpha_workspace = db.create_workspace(
+        name="Alpha execution",
+        root_path=str(tmp_path / "alpha"),
+        metadata={
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "research_workspace",
+            "link_status": "linked",
+        },
+    )
+    beta_workspace = db.create_workspace(
+        name="Beta execution",
+        root_path=str(tmp_path / "beta"),
+        metadata={
+            "canonical_workspace_id": "workspace-beta",
+            "canonical_workspace_source": "research_workspace",
+            "link_status": "linked",
+        },
+    )
+    alpha_project = db.create_project(
+        name="Alpha agent work",
+        workspace_id=alpha_workspace.id,
+    )
+    db.create_project(name="Beta agent work", workspace_id=beta_workspace.id)
+    metadata_project = db.create_project(
+        name="Alpha legacy work",
+        metadata={
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "research_workspace",
+        },
+    )
+    db.create_project(name="Unrelated unbound work")
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+
+    try:
+        results = await orch_mod.list_projects(
+            workspace_id=None,
+            unbound=False,
+            canonical_workspace_id="workspace-alpha",
+            canonical_workspace_source="research_workspace",
+            user=_TestUser(),
+        )
+
+        assert [project.id for project in results] == [
+            metadata_project.id,
+            alpha_project.id,
+        ]
+        assert {project.name for project in results} == {
+            "Alpha agent work",
+            "Alpha legacy work",
+        }
+        assert all(
+            project.canonical_workspace is None
+            or project.canonical_workspace.canonical_workspace_id == "workspace-alpha"
+            for project in results
+        )
+    finally:
+        db.close()
+
+
+async def test_list_projects_canonical_filter_normalizes_legacy_source(
+    monkeypatch,
+    tmp_path,
+):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    workspace = db.create_workspace(
+        name="Legacy source link",
+        root_path=str(tmp_path / "legacy"),
+        metadata={
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "workspace_playground",
+            "link_status": "linked",
+        },
+    )
+    project = db.create_project(name="Legacy source work", workspace_id=workspace.id)
+    db.create_project(
+        name="Wrong source work",
+        metadata={
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "other",
+        },
+    )
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+
+    try:
+        results = await orch_mod.list_projects(
+            workspace_id=None,
+            unbound=False,
+            canonical_workspace_id="workspace-alpha",
+            canonical_workspace_source="research_workspace",
+            user=_TestUser(),
+        )
+
+        assert [item.id for item in results] == [project.id]
+        assert (
+            results[0].canonical_workspace.canonical_workspace_source
+            == "research_workspace"
+        )
+    finally:
+        db.close()
+
+
 async def test_dispatch_run_inherits_trusted_root_from_canonical_bridge(monkeypatch, tmp_path):
     from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
 

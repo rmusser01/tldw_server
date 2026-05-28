@@ -14,7 +14,18 @@ vi.mock("../PathScopesTab", () => ({
   PathScopesTab: () => <div>path scopes tab</div>
 }))
 vi.mock("../WorkspaceSetsTab", () => ({
-  WorkspaceSetsTab: () => <div>workspace sets tab</div>
+  WorkspaceSetsTab: ({
+    focusWorkspaceId
+  }: {
+    focusWorkspaceId?: string | null
+  }) => (
+    <div>
+      workspace sets tab
+      <span data-testid="workspace-sets-focus">
+        {focusWorkspaceId ?? "no workspace context"}
+      </span>
+    </div>
+  )
 }))
 vi.mock("../SharedWorkspacesTab", () => ({
   SharedWorkspacesTab: () => <div>shared workspaces tab</div>
@@ -144,6 +155,19 @@ describe("McpHubPage", () => {
       "aria-pressed",
       "true"
     )
+  })
+
+  it("passes research workspace query context into Workspace Sets", () => {
+    renderMcpHubPage(
+      "/mcp-hub?workflow=setup&view=workspace-sets&workspace_id=rw-1&source=research-workspace"
+    )
+
+    expect(screen.getByText("workspace sets tab")).toBeTruthy()
+    expect(screen.getByTestId("mcp-hub-workflow-workspaces")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByTestId("workspace-sets-focus")).toHaveTextContent("rw-1")
   })
 
   it("updates query state when selecting a workflow", async () => {

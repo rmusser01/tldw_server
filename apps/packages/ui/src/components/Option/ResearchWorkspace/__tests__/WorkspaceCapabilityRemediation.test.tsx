@@ -1,8 +1,16 @@
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { WorkspaceCapabilityRemediation } from "../WorkspaceCapabilityRemediation"
 import type { WorkspaceCapabilitiesResponse } from "@/services/tldw/domains/workspace-api"
+
+vi.mock("../WorkspaceSandboxDiagnosticsPanel", () => ({
+  WorkspaceSandboxDiagnosticsPanel: ({ workspaceId }: { workspaceId: string }) => (
+    <div data-testid="workspace-sandbox-diagnostics-panel">
+      Sandbox diagnostics for {workspaceId}
+    </div>
+  )
+}))
 
 const makeCapabilities = (
   overrides: Partial<WorkspaceCapabilitiesResponse> = {}
@@ -84,7 +92,10 @@ describe("WorkspaceCapabilityRemediation", () => {
     ).toBeInTheDocument()
     expect(
       within(panel).getByRole("link", { name: "Open MCP Hub" })
-    ).toHaveAttribute("href", "/mcp-hub")
+    ).toHaveAttribute(
+      "href",
+      "/mcp-hub?workflow=workspaces&view=workspace-sets&workspace_id=workspace-1&source=research-workspace"
+    )
 
     expect(within(panel).getByText("ACP Agents")).toBeInTheDocument()
     expect(
@@ -128,6 +139,39 @@ describe("WorkspaceCapabilityRemediation", () => {
         expect.stringContaining("workspace-playground")
       )
     }
+  })
+
+  it("opens sandbox diagnostics from the sandbox remediation item without adding a trust bar", () => {
+    renderRemediation(makeCapabilities())
+
+    const panel = screen.getByTestId("workspace-capability-remediation")
+    const diagnosticsButton = within(panel).getByRole("button", {
+      name: "View Sandbox Diagnostics"
+    })
+
+    fireEvent.click(diagnosticsButton)
+
+    expect(screen.getByTestId("workspace-sandbox-diagnostics-panel")).toHaveTextContent(
+      "Sandbox diagnostics for workspace-1"
+    )
+    expect(panel).not.toHaveTextContent(/workspace trust/i)
+  })
+
+  it("encodes the active workspace id in the MCP Hub handoff link", () => {
+    renderRemediation(
+      makeCapabilities({
+        workspace_id: "workspace one/with spaces"
+      })
+    )
+
+    const panel = screen.getByTestId("workspace-capability-remediation")
+
+    expect(
+      within(panel).getByRole("link", { name: "Open MCP Hub" })
+    ).toHaveAttribute(
+      "href",
+      "/mcp-hub?workflow=workspaces&view=workspace-sets&workspace_id=workspace+one%2Fwith+spaces&source=research-workspace"
+    )
   })
 
   it("renders grounded-answer remediation when selected sources are not queryable", () => {

@@ -9,6 +9,8 @@ export const RESEARCH_WORKSPACE_MIGRATION_SOURCE_PRODUCT =
   "research-workspace-webui"
 export const RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX =
   "tldw:research-workspace:migration:tombstone"
+const RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX =
+  "tldw:research-workspace:migration:tombstone-preflight"
 
 export interface ResearchWorkspaceIndexedDbStoreRef {
   databaseName: string
@@ -362,6 +364,37 @@ const buildChunkMetadata = (
   store_name: chunk.storeName
 })
 
+const canDeleteCoveredLocalPayloads = ({
+  chunks,
+  deleteLocalStorageValue,
+  deleteIndexedDbStorePayload
+}: {
+  chunks: ResearchWorkspaceMigrationChunkPlan[]
+  deleteLocalStorageValue?: (key: string) => Promise<void> | void
+  deleteIndexedDbStorePayload?: (
+    store: ResearchWorkspaceIndexedDbStoreRef
+  ) => Promise<void> | void
+}): boolean => {
+  for (const chunk of chunks) {
+    if (chunk.storageKind === "local_storage") {
+      if (!chunk.key || !deleteLocalStorageValue) return false
+      continue
+    }
+
+    if (chunk.storageKind === "indexeddb_store") {
+      if (
+        !chunk.databaseName ||
+        !chunk.storeName ||
+        !deleteIndexedDbStorePayload
+      ) {
+        return false
+      }
+    }
+  }
+
+  return true
+}
+
 const deleteCoveredLocalPayloads = async ({
   chunks,
   deleteLocalStorageValue,
@@ -373,21 +406,14 @@ const deleteCoveredLocalPayloads = async ({
     store: ResearchWorkspaceIndexedDbStoreRef
   ) => Promise<void> | void
 }): Promise<string[] | null> => {
-  for (const chunk of chunks) {
-    if (chunk.storageKind === "local_storage") {
-      if (!chunk.key || !deleteLocalStorageValue) return null
-      continue
-    }
-
-    if (chunk.storageKind === "indexeddb_store") {
-      if (
-        !chunk.databaseName ||
-        !chunk.storeName ||
-        !deleteIndexedDbStorePayload
-      ) {
-        return null
-      }
-    }
+  if (
+    !canDeleteCoveredLocalPayloads({
+      chunks,
+      deleteLocalStorageValue,
+      deleteIndexedDbStorePayload
+    })
+  ) {
+    return null
   }
 
   const deletedSurfaceIds: string[] = []
@@ -426,8 +452,9 @@ export const runResearchWorkspaceMigration = async ({
   now = () => new Date().toISOString(),
   ...planInput
 }: ResearchWorkspaceMigrationRunInput): Promise<ResearchWorkspaceMigrationRunResult> => {
+  let plan: ResearchWorkspaceMigrationPlan | null = null
   try {
-    const plan = await buildResearchWorkspaceMigrationPlan(planInput)
+    plan = await buildResearchWorkspaceMigrationPlan(planInput)
 
     if (plan.chunks.length === 0) {
       return {
@@ -506,6 +533,54 @@ export const runResearchWorkspaceMigration = async ({
       }
     }
 
+    const hasCoveredLocalPayloads = plan.chunks.length > 0
+    if (hasCoveredLocalPayloads && !deleteLocalStorageValue) {
+      return {
+        status: "blocked",
+        migrationId: plan.migrationId,
+        manifestHash: plan.manifestHash,
+        serverMigration,
+        localDeletionEligibility: plan.localDeletionEligibility,
+        deletedSurfaceIds: [],
+        message: "Server deletion eligibility is available, but local deletion dependencies are not configured."
+      }
+    }
+
+    if (
+      !canDeleteCoveredLocalPayloads({
+        chunks: plan.chunks,
+        deleteLocalStorageValue,
+        deleteIndexedDbStorePayload
+      })
+    ) {
+      return {
+        status: "blocked",
+        migrationId: plan.migrationId,
+        manifestHash: plan.manifestHash,
+        serverMigration,
+        localDeletionEligibility: plan.localDeletionEligibility,
+        deletedSurfaceIds: [],
+        message: "Server deletion eligibility is available, but local deletion dependencies are not configured."
+      }
+    }
+
+    const tombstone = buildResearchWorkspaceMigrationTombstone({
+      legacyWorkspaceId: legacyWorkspaceId || planInput.targetWorkspaceId,
+      serverWorkspaceId: planInput.targetWorkspaceId,
+      migrationId: plan.migrationId,
+      deletedAt: now()
+    })
+    const tombstoneKey = buildResearchWorkspaceMigrationTombstoneKey(
+      tombstone.legacyWorkspaceId
+    )
+    const tombstonePayload = JSON.stringify(tombstone)
+    const preflightKey = `${RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX}:${encodeURIComponent(
+      tombstone.legacyWorkspaceId
+    )}`
+    if (hasCoveredLocalPayloads && deleteLocalStorageValue) {
+      await writeLocalStorageValue(preflightKey, tombstonePayload)
+    }
+
     const deletedSurfaceIds = await deleteCoveredLocalPayloads({
       chunks: plan.chunks,
       deleteLocalStorageValue,
@@ -524,16 +599,10 @@ export const runResearchWorkspaceMigration = async ({
       }
     }
 
-    const tombstone = buildResearchWorkspaceMigrationTombstone({
-      legacyWorkspaceId: legacyWorkspaceId || planInput.targetWorkspaceId,
-      serverWorkspaceId: planInput.targetWorkspaceId,
-      migrationId: plan.migrationId,
-      deletedAt: now()
-    })
-    await writeLocalStorageValue(
-      buildResearchWorkspaceMigrationTombstoneKey(tombstone.legacyWorkspaceId),
-      JSON.stringify(tombstone)
-    )
+    await writeLocalStorageValue(tombstoneKey, tombstonePayload)
+    if (hasCoveredLocalPayloads && deleteLocalStorageValue) {
+      await deleteLocalStorageValue(preflightKey)
+    }
     await api.ackWorkspaceMigrationClientDelete(plan.migrationId, {
       acknowledged_manifest_hash: plan.manifestHash
     })
@@ -550,10 +619,10 @@ export const runResearchWorkspaceMigration = async ({
   } catch (error) {
     return {
       status: "failed",
-      migrationId: null,
-      manifestHash: null,
+      migrationId: plan?.migrationId ?? null,
+      manifestHash: plan?.manifestHash ?? null,
       serverMigration: null,
-      localDeletionEligibility: null,
+      localDeletionEligibility: plan?.localDeletionEligibility ?? null,
       deletedSurfaceIds: [],
       message: "Research Workspace migration failed before local deletion.",
       error

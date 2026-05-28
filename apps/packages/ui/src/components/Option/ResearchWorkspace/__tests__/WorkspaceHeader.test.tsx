@@ -174,6 +174,8 @@ const registryStateOverrides = {
 const fetchMockState = {
   fetch: vi.fn()
 }
+const ACP_PROJECTS_FOR_ALPHA_URL =
+  "http://127.0.0.1:8000/api/v1/agent-orchestration/projects?canonical_workspace_id=workspace-alpha&canonical_workspace_source=research_workspace"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -264,6 +266,14 @@ vi.mock("../workspace-banner-image", () => ({
       this.code = code
     }
   }
+}))
+
+vi.mock("../WorkspaceSandboxDiagnosticsPanel", () => ({
+  WorkspaceSandboxDiagnosticsPanel: ({ workspaceId }: { workspaceId: string }) => (
+    <div data-testid="workspace-sandbox-diagnostics-panel">
+      Sandbox diagnostics for {workspaceId}
+    </div>
+  )
 }))
 
 vi.mock("@/utils/research-workspace-telemetry", async () => {
@@ -1387,7 +1397,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
       if (
         url ===
-        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+        ACP_PROJECTS_FOR_ALPHA_URL
       ) {
         return {
           ok: true,
@@ -1513,6 +1523,28 @@ describe("WorkspaceHeader workspace browser modal", () => {
     )
   })
 
+  it("opens sandbox diagnostics from the settings menu", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Sandbox diagnostics"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Sandbox diagnostics"
+    })
+    expect(within(modal).getByTestId("workspace-sandbox-diagnostics-panel")).toHaveTextContent(
+      "Sandbox diagnostics for workspace-alpha"
+    )
+    expect(modal).not.toHaveTextContent(/workspace trust/i)
+  })
+
   it("aborts ACP run history requests when the modal closes", async () => {
     let capturedSignal: AbortSignal | undefined
     fetchMockState.fetch.mockImplementation(
@@ -1553,7 +1585,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
       if (
         url ===
-        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+        ACP_PROJECTS_FOR_ALPHA_URL
       ) {
         return {
           ok: true,
@@ -1731,7 +1763,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
       if (
         url ===
-        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+        ACP_PROJECTS_FOR_ALPHA_URL
       ) {
         return {
           ok: true,

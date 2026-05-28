@@ -32,7 +32,7 @@ const createProps = (
   viewMode: "table",
   characterListScope: "active",
   setCharacterListScope: vi.fn(),
-  galleryDensity: "comfortable",
+  galleryDensity: "rich",
   tableDensity: "comfortable",
   currentPage: 1,
   setCurrentPage: vi.fn(),

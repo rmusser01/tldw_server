@@ -134,6 +134,7 @@ const AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION =
 const AGENT_ORCHESTRATION_UNSUPPORTED_CODE = "AGENT_ORCHESTRATION_UNSUPPORTED"
 const AGENT_ORCHESTRATION_PROJECTS_PATH = "/api/v1/agent-orchestration/projects"
 const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
+const CANONICAL_WORKSPACE_SOURCE = "research_workspace"
 const ALL_WORKSPACES_FILTER_VALUE = "__all_workspaces__"
 const LINKED_CANONICAL_WORKSPACE_STATUS = "linked"
 
@@ -202,6 +203,20 @@ const normalizeListPayload = <T,>(payload: unknown, key: string): T[] => {
   return []
 }
 
+const buildProjectsRequestUrl = (
+  apiBase: string,
+  workspaceFilterId: string | null
+): string => {
+  if (!workspaceFilterId) {
+    return `${apiBase}/projects`
+  }
+  const params = new URLSearchParams({
+    canonical_workspace_id: workspaceFilterId,
+    canonical_workspace_source: CANONICAL_WORKSPACE_SOURCE
+  })
+  return `${apiBase}/projects?${params.toString()}`
+}
+
 const createUnsupportedError = (): Error & { code: string } =>
   Object.assign(new Error(AGENT_ORCHESTRATION_UNSUPPORTED_CODE), {
     code: AGENT_ORCHESTRATION_UNSUPPORTED_CODE,
@@ -263,6 +278,7 @@ export const AgentTasksPage: React.FC = () => {
   const [taskForm] = Form.useForm()
   const orchestrationSupportRef = React.useRef<boolean | null>(null)
   const taskDetailRequestRef = React.useRef<AbortController | null>(null)
+  const fetchProjectsRequestIdRef = React.useRef(0)
 
   const buildRequestTransport = useCallback(
     (path: string) => {
@@ -387,23 +403,31 @@ export const AgentTasksPage: React.FC = () => {
 
   const fetchProjects = useCallback(async () => {
     if (!apiBase) return
+    const requestId = fetchProjectsRequestIdRef.current + 1
+    fetchProjectsRequestIdRef.current = requestId
+    const isLatestRequest = () => fetchProjectsRequestIdRef.current === requestId
     setLoading(true)
     setError(null)
     setProjectsLoadedSuccessfully(false)
     try {
       const supported = await hasOrchestrationSupport()
+      if (!isLatestRequest()) return
       if (!supported) {
         markUnsupported()
         return
       }
       const headers = getHeaders(apiTransport)
-      const res = await fetch(`${apiBase}/projects`, { headers })
+      const res = await fetch(buildProjectsRequestUrl(apiBase, workspaceFilterId), {
+        headers
+      })
       await ensureOrchestrationResponse(res)
       const data = await res.json()
+      if (!isLatestRequest()) return
       setIsUnsupported(false)
       setProjects(normalizeListPayload<ProjectSummary>(data, "projects"))
       setProjectsLoadedSuccessfully(true)
     } catch (err) {
+      if (!isLatestRequest()) return
       if (isUnsupportedError(err)) {
         markUnsupported()
       } else {
@@ -411,9 +435,18 @@ export const AgentTasksPage: React.FC = () => {
         setError(err instanceof Error ? err.message : "Failed to load projects")
       }
     } finally {
-      setLoading(false)
+      if (isLatestRequest()) {
+        setLoading(false)
+      }
     }
-  }, [apiBase, apiTransport, getHeaders, hasOrchestrationSupport, markUnsupported])
+  }, [
+    apiBase,
+    apiTransport,
+    getHeaders,
+    hasOrchestrationSupport,
+    markUnsupported,
+    workspaceFilterId
+  ])
 
   const fetchTasks = useCallback(
     async (projectId: number) => {

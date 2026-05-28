@@ -37,6 +37,15 @@ vi.mock("@/services/tldw/deployment-mode", () => ({
   isHostedTldwDeployment: () => deploymentMocks.isHostedTldwDeployment()
 }))
 
+const PROJECTS_URL =
+  "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+const PROJECTS_FOR_ALPHA_URL =
+  `${PROJECTS_URL}?canonical_workspace_id=workspace-alpha&canonical_workspace_source=research_workspace`
+const PROJECTS_FOR_BETA_URL =
+  `${PROJECTS_URL}?canonical_workspace_id=workspace-beta&canonical_workspace_source=research_workspace`
+const PROJECTS_FOR_MISSING_URL =
+  `${PROJECTS_URL}?canonical_workspace_id=workspace-missing&canonical_workspace_source=research_workspace`
+
 vi.mock("antd", () => {
   const formApi = {
     resetFields: vi.fn(),
@@ -170,6 +179,16 @@ const renderAgentTasksPageWithRouteProbe = (route = "/agent-tasks") =>
       <LocationProbe />
     </MemoryRouter>
   )
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}
 
 describe("AgentTasksPage connection and payload normalization", () => {
   beforeEach(() => {
@@ -469,7 +488,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
-      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+      if (url === PROJECTS_URL) {
         return {
           ok: true,
           json: async () => [
@@ -614,7 +633,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
-      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+      if (url === PROJECTS_FOR_ALPHA_URL) {
         return {
           ok: true,
           json: async () => [
@@ -636,6 +655,13 @@ describe("AgentTasksPage connection and payload normalization", () => {
                 }
               }
             },
+          ]
+        }
+      }
+      if (url === PROJECTS_FOR_BETA_URL) {
+        return {
+          ok: true,
+          json: async () => [
             {
               id: 8,
               name: "Beta Project",
@@ -652,6 +678,37 @@ describe("AgentTasksPage connection and payload normalization", () => {
                 status_counts: {
                   todo: 1
                 }
+              }
+            }
+          ]
+        }
+      }
+      if (url === PROJECTS_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 7,
+              name: "Alpha Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 33,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
+              }
+            },
+            {
+              id: 8,
+              name: "Beta Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 34,
+                canonical_workspace_id: "workspace-beta",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
               }
             }
           ]
@@ -699,6 +756,15 @@ describe("AgentTasksPage connection and payload normalization", () => {
     )
 
     fireEvent.change(screen.getByLabelText("Workspace filter"), {
+      target: { value: "__all_workspaces__" }
+    })
+
+    expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(
+      "/agent-tasks"
+    )
+    expect(await screen.findByText("Beta Project")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("Workspace filter"), {
       target: { value: "workspace-beta" }
     })
 
@@ -707,6 +773,143 @@ describe("AgentTasksPage connection and payload normalization", () => {
     )
     expect(await screen.findByText("Beta Project")).toBeInTheDocument()
     expect(screen.queryByText("Alpha Project")).toBeNull()
+  })
+
+  it("ignores stale project responses after the workspace filter changes", async () => {
+    const alphaProjects = deferred<{ ok: boolean; json: () => Promise<unknown[]> }>()
+    const betaProjects = deferred<{ ok: boolean; json: () => Promise<unknown[]> }>()
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === PROJECTS_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 7,
+              name: "Race Alpha Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 37,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
+              }
+            },
+            {
+              id: 8,
+              name: "Race Beta Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 38,
+                canonical_workspace_id: "workspace-beta",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
+              }
+            }
+          ]
+        }
+      }
+      if (url === PROJECTS_FOR_ALPHA_URL) {
+        return alphaProjects.promise
+      }
+      if (url === PROJECTS_FOR_BETA_URL) {
+        return betaProjects.promise
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderAgentTasksPageWithRouteProbe()
+
+    expect(await screen.findByText("Race Alpha Project")).toBeInTheDocument()
+    expect(screen.getByText("Race Beta Project")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("Workspace filter"), {
+      target: { value: "workspace-alpha" }
+    })
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(PROJECTS_FOR_ALPHA_URL, expect.anything())
+    })
+
+    fireEvent.change(screen.getByLabelText("Workspace filter"), {
+      target: { value: "workspace-beta" }
+    })
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(PROJECTS_FOR_BETA_URL, expect.anything())
+    })
+
+    betaProjects.resolve({
+      ok: true,
+      json: async () => [
+        {
+          id: 8,
+          name: "Race Beta Project",
+          user_id: 1,
+          created_at: "2026-03-20T19:00:00Z",
+          canonical_workspace: {
+            acp_workspace_id: 38,
+            canonical_workspace_id: "workspace-beta",
+            canonical_workspace_source: "research_workspace",
+            link_status: "linked"
+          }
+        }
+      ]
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText("Race Alpha Project")).toBeNull()
+    })
+    expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(
+      "/agent-tasks?workspace=workspace-beta"
+    )
+
+    alphaProjects.resolve({
+      ok: true,
+      json: async () => [
+        {
+          id: 7,
+          name: "Race Alpha Project",
+          user_id: 1,
+          created_at: "2026-03-20T19:00:00Z",
+          canonical_workspace: {
+            acp_workspace_id: 37,
+            canonical_workspace_id: "workspace-alpha",
+            canonical_workspace_source: "research_workspace",
+            link_status: "linked"
+          }
+        }
+      ]
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText("Race Alpha Project")).toBeNull()
+    })
+    expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(
+      "/agent-tasks?workspace=workspace-beta"
+    )
   })
 
   it("surfaces workspace setup gaps when the selected canonical workspace has no linked ACP execution project", async () => {
@@ -732,7 +935,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
-      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+      if (url === PROJECTS_FOR_MISSING_URL) {
         return {
           ok: true,
           json: async () => []
@@ -788,7 +991,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
-      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+      if (url === PROJECTS_FOR_ALPHA_URL) {
         return {
           ok: false,
           status: 503,
@@ -833,7 +1036,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
-      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+      if (url === PROJECTS_FOR_ALPHA_URL) {
         return {
           ok: true,
           json: async () => [
