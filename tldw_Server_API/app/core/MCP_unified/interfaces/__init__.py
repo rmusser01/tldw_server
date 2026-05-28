@@ -2,9 +2,11 @@
 
 from mcp_unified.interfaces import (
     ApiKeyScopeNormalizer,
+    ApprovalPolicyStore,
     ApprovalEvaluator,
     AuditStore,
     CircuitBreakerFactory,
+    CredentialGrantStore,
     DatabasePathResolver,
     EffectivePolicyResolver,
     ExternalAccessEvaluator,
@@ -13,6 +15,7 @@ from mcp_unified.interfaces import (
     MetricsCollector,
     ModuleRegistry,
     PathScopeEnforcer,
+    ProfileAssignmentStore,
     ProfileStore,
     RateLimiter,
     RbacPolicy,
@@ -22,9 +25,11 @@ from mcp_unified.interfaces import (
 
 __all__ = [
     "ApiKeyScopeNormalizer",
+    "ApprovalPolicyStore",
     "ApprovalEvaluator",
     "AuditStore",
     "CircuitBreakerFactory",
+    "CredentialGrantStore",
     "DatabasePathResolver",
     "EffectivePolicyResolver",
     "ExternalAccessEvaluator",
@@ -33,6 +38,7 @@ __all__ = [
     "MetricsCollector",
     "ModuleRegistry",
     "PathScopeEnforcer",
+    "ProfileAssignmentStore",
     "ProfileStore",
     "RateLimiter",
     "RbacPolicy",
