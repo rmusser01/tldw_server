@@ -47,7 +47,7 @@ TASK-478.25 completed the guided migration/import/export recovery slice. The mig
 Verification:
 - `bunx vitest run src/store/__tests__/workspace-migration.test.ts src/store/__tests__/workspace.test.ts src/components/Option/ResearchWorkspace/__tests__/WorkspaceStatusBar.test.tsx src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage3.test.tsx` passed: 4 files, 97 tests.
 - Live backend + WebUI + Playwright/CDP validated eligible true-move deletion, blocked unknown-inventory retention, current ZIP export/import, legacy JSON recovery import, and `/workspace-playground` 404 with no redirect. Screenshots: `/private/tmp/research-workspace-migration-eligible.png`, `/private/tmp/research-workspace-migration-blocked.png`, `/private/tmp/research-workspace-import-export.png`.
-- `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` is still blocked by the unrelated baseline error `src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx(35,3): Type '"comfortable"' is not assignable to type 'GalleryCardDensity'.`
+- At TASK-478.25 completion time, `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` was blocked by the unrelated baseline error `src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx(35,3): Type '"comfortable"' is not assignable to type 'GalleryCardDensity'.` TASK-478.31 later fixed that stale blocker.
 - Bandit was not run because this slice touched TypeScript/TSX tests, docs, and Backlog records only; no Python/backend files changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
