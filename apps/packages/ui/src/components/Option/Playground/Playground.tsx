@@ -1964,8 +1964,20 @@ export const Playground = () => {
     });
   }, [cockpitAssistantSelectTab]);
   const clearAssistantFromCockpit = React.useCallback(() => {
-    void setSelectedAssistant(null);
-    setSelectedCharacter(null);
+    void (async () => {
+      await setSelectedAssistant(null);
+      await setSelectedCharacter(null);
+      clearPersistedSession();
+      setServerChatCharacterId(null);
+      setServerChatAssistantKind(null);
+      setServerChatAssistantId(null);
+      setServerChatPersonaMemoryMode(null);
+      setServerChatMetaLoaded(false);
+      setServerChatId(null);
+      setCharacterModeIntentActive(false);
+      void setChatWorkflowMode("standard");
+      scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
+    })();
     void applyChatSettingsPatch({
       historyId: stableHistoryId,
       serverChatId,
@@ -1973,21 +1985,13 @@ export const Playground = () => {
         assistantOverlay: null,
       },
     }).catch(() => undefined);
-    setServerChatCharacterId(null);
-    setServerChatAssistantKind(null);
-    setServerChatAssistantId(null);
-    setServerChatPersonaMemoryMode(null);
-    setServerChatMetaLoaded(false);
-    clearPersistedSession();
-    setCharacterModeIntentActive(false);
-    void setChatWorkflowMode("standard");
-    scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
   }, [
     clearPersistedSession,
     serverChatId,
     setChatWorkflowMode,
     setSelectedAssistant,
     setSelectedCharacter,
+    setServerChatId,
     setServerChatAssistantId,
     setServerChatAssistantKind,
     setServerChatCharacterId,

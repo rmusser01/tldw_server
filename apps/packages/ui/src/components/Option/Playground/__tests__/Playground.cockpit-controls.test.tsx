@@ -797,8 +797,14 @@ describe("Playground cockpit controls", () => {
         name: "Clear assistant",
       }),
     );
-    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
-    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
+    await waitFor(() => {
+      expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(
+        null,
+      );
+      expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+        null,
+      );
+    });
   });
 
   it("shows server session title and recoverable load errors in the context rail", async () => {
@@ -1038,9 +1044,15 @@ describe("Playground cockpit controls", () => {
     clearButton.focus();
     fireEvent.click(clearButton);
 
-    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
-    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
     expect(document.activeElement).toBe(clearButton);
+    await waitFor(() => {
+      expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(
+        null,
+      );
+      expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+        null,
+      );
+    });
 
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
@@ -1094,24 +1106,31 @@ describe("Playground cockpit controls", () => {
       }),
     );
 
-    expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
-    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
-    expect(messageOptionState.value.setServerChatCharacterId).toHaveBeenCalledWith(
-      null,
-    );
-    expect(messageOptionState.value.setServerChatAssistantKind).toHaveBeenCalledWith(
-      null,
-    );
-    expect(messageOptionState.value.setServerChatAssistantId).toHaveBeenCalledWith(
-      null,
-    );
-    expect(
-      messageOptionState.value.setServerChatPersonaMemoryMode,
-    ).toHaveBeenCalledWith(null);
-    expect(messageOptionState.value.setServerChatMetaLoaded).toHaveBeenCalledWith(
-      false,
-    );
-    expect(sessionPersistenceState.value.clearPersistedSession).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(
+        null,
+      );
+      expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+        null,
+      );
+      expect(messageOptionState.value.setServerChatCharacterId).toHaveBeenCalledWith(
+        null,
+      );
+      expect(
+        messageOptionState.value.setServerChatAssistantKind,
+      ).toHaveBeenCalledWith(null);
+      expect(messageOptionState.value.setServerChatAssistantId).toHaveBeenCalledWith(
+        null,
+      );
+      expect(
+        messageOptionState.value.setServerChatPersonaMemoryMode,
+      ).toHaveBeenCalledWith(null);
+      expect(messageOptionState.value.setServerChatMetaLoaded).toHaveBeenCalledWith(
+        false,
+      );
+      expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null);
+      expect(sessionPersistenceState.value.clearPersistedSession).toHaveBeenCalled();
+    });
   });
 
   it("clears persisted assistant overlay settings when returning to plain chat", async () => {

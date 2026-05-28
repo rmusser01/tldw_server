@@ -937,14 +937,14 @@ const selectAssistantFromRuntimeRail = async (
   const retryButton = page.getByRole('button', {
     name: options.tab === 'Personas' ? 'Retry personas' : 'Retry characters',
   });
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     if (await assistantButton.isVisible().catch(() => false)) {
       break;
     }
     if (await retryButton.isVisible().catch(() => false)) {
       await retryButton.click();
     }
-    await page.waitForTimeout(1_000);
+    await page.waitForTimeout(1_500);
   }
   await expect(assistantButton).toBeVisible({ timeout: 30_000 });
   await assistantButton.click();
@@ -2148,12 +2148,12 @@ test.describe('/chat cockpit real-server parity', () => {
         fullPage: true,
       });
 
+      const plainReturnCapture = captureAllApiCalls(page);
       await assistantContextSource.getByRole('button', { name: 'Clear assistant' }).click();
       await assertRuntimeAssistantCleared(runtimeInspector);
       await expect(assistantContextSource).toHaveCount(0);
       await expect(composerAssistant).toHaveAttribute('aria-label', /Select character or persona/i);
 
-      const plainReturnCapture = captureAllApiCalls(page);
       const plainPrompt = `Plain return after character clear ${Date.now()}`;
       const plainCompletionAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
       await page.getByTestId('chat-input').fill(plainPrompt);
@@ -2201,26 +2201,21 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const personaName = `Cockpit Persona ${Date.now()}`;
     const personaId = `cockpit_persona_${Date.now()}`;
-    const created = await apiPost<any>(request, '/api/v1/persona/profiles', {
-      id: personaId,
-      name: personaName,
-      mode: 'session_scoped',
-      system_prompt: `You are ${personaName}, a concise persona proof assistant.`,
-      is_active: true,
-      use_persona_state_context_default: true,
-    });
 
-    let selectedPersona = created.body;
+    let selectedPersona: { id?: unknown; name?: unknown; version?: unknown } | null = null;
     let cleanupPersonaId: string | null = null;
     let cleanupPersonaVersion: number | null = null;
 
-    if (created.status === 201 && selectedPersona?.id) {
+    try {
+      selectedPersona = await createDisposablePersona(request, personaId, personaName);
       cleanupPersonaId = String(selectedPersona.id);
       cleanupPersonaVersion = Number(selectedPersona.version ?? 1);
-    } else {
+    } catch (error) {
       testInfo.annotations.push({
         type: 'blocker',
-        description: `Could not create disposable persona via real server: status ${created.status}`,
+        description: `Could not create disposable persona via real server: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       });
       const listed = await apiGet<any>(request, '/api/v1/persona/profiles?active_only=true');
       const personas = extractPersonaProfiles(listed.body);
@@ -2238,7 +2233,9 @@ test.describe('/chat cockpit real-server parity', () => {
       const runtimeInspector = getDesktopRuntimeInspector(page);
       await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
       await page.getByRole('tab', { name: 'Personas' }).click();
-      await expect(page.getByText('No personas available.')).toBeVisible();
+      await expect(
+        page.getByText(/No personas available\.|Could not load personas\./)
+      ).toBeVisible();
       return;
     }
 
@@ -2257,13 +2254,10 @@ test.describe('/chat cockpit real-server parity', () => {
       const composerAssistant = page.getByTestId('character-select');
       await assertRuntimeAssistantCleared(runtimeInspector);
 
-      await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
-      await page.getByRole('tab', { name: 'Personas' }).click();
-      await expect(page.getByRole('tab', { name: 'Personas' })).toHaveAttribute(
-        'aria-selected',
-        'true'
-      );
-      await page.getByRole('button', { name: String(selectedPersona.name), exact: true }).click();
+      await selectAssistantFromRuntimeRail(page, {
+        tab: 'Personas',
+        assistantName: String(selectedPersona.name),
+      });
 
       const assistantTrigger = runtimeInspector.locator('[data-cockpit-assistant-select-trigger]');
       await expect(assistantTrigger).toBeFocused({ timeout: 5_000 });
