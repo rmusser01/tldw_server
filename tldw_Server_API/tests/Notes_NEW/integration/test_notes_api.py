@@ -134,7 +134,7 @@ def test_create_get_update_delete_note(client_with_notes_db: TestClient):
     assert del_resp.status_code in (200, 204)
 
 
-def test_note_folder_list_and_create_endpoints(client_with_notes_db: TestClient):
+def test_note_folder_list_and_create_endpoints(client_with_notes_db: TestClient) -> None:
     client = client_with_notes_db
 
     empty_response = client.get("/api/v1/notes/folders/")

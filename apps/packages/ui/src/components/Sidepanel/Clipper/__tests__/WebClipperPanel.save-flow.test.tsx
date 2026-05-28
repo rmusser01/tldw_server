@@ -294,6 +294,37 @@ describe("WebClipperPanel save flow", () => {
     )
   })
 
+  it("retries folder picker loading after a transient failure when returning to note mode", async () => {
+    const user = userEvent.setup()
+    apiMocks.listNoteFolders
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: 17,
+            name: "Captured Articles",
+            path: "Inbox/Captured Articles",
+            parent_id: 1
+          }
+        ],
+        count: 1
+      })
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    expect(
+      await screen.findByText("Folder picker could not load. Enter a folder ID manually.")
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+    await user.click(screen.getByRole("radio", { name: "Note" }))
+
+    expect(
+      await screen.findByRole("combobox", { name: "Folder" })
+    ).toBeInTheDocument()
+    expect(apiMocks.listNoteFolders).toHaveBeenCalledTimes(2)
+  })
+
   it("keeps raw workspace ID entry hidden while workspace choices are loading", async () => {
     const user = userEvent.setup()
     const workspaceList = createDeferred<{
@@ -352,6 +383,42 @@ describe("WebClipperPanel save flow", () => {
         workspace: { workspace_id: "workspace-fallback" }
       })
     )
+  })
+
+  it("retries workspace picker loading after a transient failure when returning to workspace mode", async () => {
+    const user = userEvent.setup()
+    apiMocks.listWorkspaces
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "workspace-alpha",
+            name: "Alpha Workspace",
+            archived: false,
+            study_materials_policy: "general",
+            deleted: false,
+            created_at: "2026-05-27T00:00:00Z",
+            last_modified: "2026-05-27T00:00:00Z",
+            version: 1
+          }
+        ],
+        total: 1
+      })
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+    expect(
+      await screen.findByText("Workspace picker could not load. Enter a workspace ID manually.")
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("radio", { name: "Note" }))
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+
+    expect(
+      await screen.findByRole("combobox", { name: "Workspace" })
+    ).toBeInTheDocument()
+    expect(apiMocks.listWorkspaces).toHaveBeenCalledTimes(2)
   })
 
   it("does not load workspace choices for note-only saves", async () => {

@@ -142,6 +142,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [editProvenance, setEditProvenance] = React.useState<EditProvenanceState>({ mode: 'manual' })
   const [monitoringNotice, setMonitoringNotice] = React.useState<MonitoringNoticeState | null>(null)
   const [recentNotes, setRecentNotes] = React.useState<NotesRecentOpenedEntry[]>([])
+  const recentNotesRef = React.useRef<NotesRecentOpenedEntry[]>([])
   const [pinnedNoteIds, setPinnedNoteIds] = React.useState<string[]>([])
   const [titleSuggestStrategy, setTitleSuggestStrategy] =
     React.useState<NotesTitleSuggestStrategy>('heuristic')
@@ -362,19 +363,29 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   )
 
   // ---- load/reset ----
+  const updateRecentNotes = React.useCallback(
+    (getNext: (current: NotesRecentOpenedEntry[]) => NotesRecentOpenedEntry[]) => {
+      const current = recentNotesRef.current
+      const next = getNext(current)
+      if (next === current) return
+      recentNotesRef.current = next
+      setRecentNotes(next)
+      void setSetting(NOTES_RECENT_OPENED_SETTING, next)
+    },
+    []
+  )
+
   const rememberRecentNote = React.useCallback((noteId: string | number, noteTitle: string) => {
     const normalizedId = String(noteId || '').trim()
     const normalizedTitle = String(noteTitle || '').trim()
     if (!normalizedId || !normalizedTitle) return
-    setRecentNotes((current) => {
-      const next = [
+    updateRecentNotes((current) =>
+      [
         { id: normalizedId, title: normalizedTitle },
         ...current.filter((entry) => entry.id !== normalizedId)
       ].slice(0, 5)
-      void setSetting(NOTES_RECENT_OPENED_SETTING, next)
-      return next
-    })
-  }, [])
+    )
+  }, [updateRecentNotes])
 
   const removeRecentNotes = React.useCallback((noteIds: Array<string | number>) => {
     const removedIds = new Set(
@@ -383,13 +394,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         .filter(Boolean)
     )
     if (removedIds.size === 0) return
-    setRecentNotes((current) => {
+    updateRecentNotes((current) => {
       const next = current.filter((entry) => !removedIds.has(String(entry.id)))
       if (next.length === current.length) return current
-      void setSetting(NOTES_RECENT_OPENED_SETTING, next)
       return next
     })
-  }, [])
+  }, [updateRecentNotes])
 
   const loadDetail = React.useCallback(async (id: string | number): Promise<boolean> => {
     clearAssistUndoState()
@@ -1703,6 +1713,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const savedRecent = await getSetting(NOTES_RECENT_OPENED_SETTING)
       if (cancelled) return
       if (!Array.isArray(savedRecent)) return
+      recentNotesRef.current = savedRecent
       setRecentNotes(savedRecent)
     })()
     return () => {

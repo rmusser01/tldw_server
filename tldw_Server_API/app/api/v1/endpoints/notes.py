@@ -1514,6 +1514,24 @@ async def list_deleted_notes(
         handle_db_errors(e, "deleted notes list")
 
 
+async def _check_note_rate_limit(
+        rate_limiter: RateLimiter,
+        current_user: User,
+        action: str,
+) -> tuple[bool, dict[str, Any]]:
+    """Check a notes rate limit and log fail-open limiter outages."""
+    try:
+        return await rate_limiter.check_user_rate_limit(int(current_user.id), action)
+    except _NOTES_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Rate limiter check failed for notes action '{}' and user '{}': {}",
+            action,
+            current_user.id,
+            exc,
+        )
+        return True, {}
+
+
 @router.get(
     "/folders",
     response_model=NoteFoldersListResponse,
@@ -1533,12 +1551,10 @@ async def list_note_folders(
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
         _: None = Depends(rbac_rate_limit("notes.list")),
-):
+) -> NoteFoldersListResponse:
+    """List active note folders for the authenticated user's notes UI."""
     try:
-        try:
-            allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.list")
-        except _NOTES_NONCRITICAL_EXCEPTIONS:
-            allowed, meta = True, {}
+        allowed, meta = await _check_note_rate_limit(rate_limiter, current_user, "notes.list")
         if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -1547,11 +1563,12 @@ async def list_note_folders(
             )
 
         folders = await _run_db_call(db.list_note_folders, limit=limit, offset=offset)
-        return {
-            "items": folders,
-            "folders": folders,
-            "count": len(folders),
-        }
+        folder_items = [NoteFolderResponse.model_validate(folder) for folder in folders]
+        return NoteFoldersListResponse(
+            items=folder_items,
+            folders=folder_items,
+            count=len(folder_items),
+        )
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "note folders list")
 
@@ -1576,12 +1593,10 @@ async def create_note_folder(
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
         _: None = Depends(rbac_rate_limit("notes.create")),
-):
+) -> NoteFolderResponse | JSONResponse:
+    """Create a note folder path or return the existing matching folder."""
     try:
-        try:
-            allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.create")
-        except _NOTES_NONCRITICAL_EXCEPTIONS:
-            allowed, meta = True, {}
+        allowed, meta = await _check_note_rate_limit(rate_limiter, current_user, "notes.create")
         if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -1590,10 +1605,14 @@ async def create_note_folder(
             )
 
         existing = await _run_db_call(db.get_note_folder_by_path, folder_in.path)
-        folder = await _run_db_call(db.create_note_folder_path, folder_in.path)
         if existing is not None:
-            return JSONResponse(status_code=status.HTTP_200_OK, content=jsonable_encoder(folder))
-        return folder
+            existing_response = NoteFolderResponse.model_validate(existing)
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=jsonable_encoder(existing_response),
+            )
+        folder = await _run_db_call(db.create_note_folder_path, folder_in.path)
+        return NoteFolderResponse.model_validate(folder)
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "note folder")
 

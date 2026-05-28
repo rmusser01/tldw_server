@@ -282,6 +282,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         )
       })
       .catch(() => {
+        hasRequestedFolderOptionsRef.current = false
         if (
           cancelled ||
           !isMountedRef.current ||
@@ -310,6 +311,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
 
     return () => {
       cancelled = true
+      hasRequestedFolderOptionsRef.current = false
     }
   }, [destinationMode, draft.clipId])
 
@@ -346,6 +348,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         )
       })
       .catch(() => {
+        hasRequestedWorkspaceOptionsRef.current = false
         if (
           cancelled ||
           !isMountedRef.current ||
@@ -374,6 +377,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
 
     return () => {
       cancelled = true
+      hasRequestedWorkspaceOptionsRef.current = false
     }
   }, [destinationMode, draft.clipId])
 

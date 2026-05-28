@@ -8024,61 +8024,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """,
             "CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_path ON note_folders(path)",
-            """
-            CREATE TABLE IF NOT EXISTS note_folder_memberships(
-              note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              folder_id  BIGINT  NOT NULL REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              PRIMARY KEY(note_id, folder_id)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_note_folder_memberships_folder ON note_folder_memberships(folder_id)",
-            """
-            CREATE TABLE IF NOT EXISTS note_folder_source_memberships(
-              note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              source_id  INTEGER NOT NULL,
-              folder_id  BIGINT  NOT NULL REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              PRIMARY KEY(note_id, source_id, folder_id)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_note_folder_source_memberships_note_source ON note_folder_source_memberships(note_id, source_id)",
-            "CREATE INDEX IF NOT EXISTS idx_note_folder_source_memberships_folder ON note_folder_source_memberships(folder_id)",
-            """
-            CREATE TABLE IF NOT EXISTS note_folder_source_keys(
-              source_id   INTEGER NOT NULL,
-              folder_key  TEXT    NOT NULL,
-              folder_id   BIGINT  NOT NULL REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              PRIMARY KEY(source_id, folder_key)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_note_folder_source_keys_folder ON note_folder_source_keys(folder_id)",
-        ]
-        for statement in statements:
-            conn.execute(statement)
-
-    def _ensure_note_folder_schema_postgres(self, conn: Any) -> None:
-        """Backfill note folder tables for PostgreSQL deployments."""
-        if not hasattr(self.backend, "execute"):
-            return
-        statements = [
-            """
-            CREATE TABLE IF NOT EXISTS note_folders(
-              id            BIGSERIAL PRIMARY KEY,
-              name          TEXT    NOT NULL,
-              path          TEXT    UNIQUE NOT NULL,
-              parent_id     BIGINT REFERENCES note_folders(id)
-                             ON DELETE CASCADE ON UPDATE CASCADE,
-              created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              deleted       BOOLEAN NOT NULL DEFAULT FALSE,
-              client_id     TEXT    NOT NULL DEFAULT 'unknown',
-              version       INTEGER NOT NULL DEFAULT 1
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)",
-            "CREATE INDEX IF NOT EXISTS idx_note_folders_path ON note_folders(path)",
+            (
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_lower "
+                "ON note_folders(LOWER(path))"
+            ),
             """
             CREATE TABLE IF NOT EXISTS note_folder_memberships(
               note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
