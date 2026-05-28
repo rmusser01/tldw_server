@@ -17,11 +17,17 @@ import {
 } from '../../utils/fixtures';
 import { expectApiCall } from '../../utils/api-assertions';
 import { FlashcardsPage } from '../../utils/page-objects';
-import { seedAuth, fetchWithApiKey, TEST_CONFIG } from '../../utils/helpers';
+import {
+  dispatchKeyboardShortcut,
+  seedAuth,
+  fetchWithApiKey,
+  TEST_CONFIG,
+} from '../../utils/helpers';
 
 type SeededDeck = {
   id: number;
   name: string;
+  version?: number;
 };
 
 type SeededCard = {
@@ -88,6 +94,16 @@ async function createFlashcardCard(input: {
   const payload = (await response.json()) as SeededCard;
   expect(payload.uuid).toBeTruthy();
   return payload;
+}
+
+async function cleanupFlashcardDeck(deck: SeededDeck): Promise<void> {
+  await fetchWithApiKey(
+    `${TEST_CONFIG.serverUrl}/api/v1/flashcards/decks/${deck.id}?expected_version=${deck.version ?? 1}`,
+    TEST_CONFIG.apiKey,
+    {
+      method: 'DELETE',
+    }
+  ).catch(() => undefined);
 }
 
 test.describe('Flashcards', () => {
@@ -194,6 +210,72 @@ test.describe('Flashcards', () => {
       await assertNoCriticalErrors(diagnostics);
     });
 
+    test('flashcards Phase 0 evidence: reviews a seeded card with keyboard reveal and rating', async ({
+      authedPage,
+      serverInfo,
+      diagnostics,
+    }) => {
+      test.setTimeout(120_000);
+      skipIfServerUnavailable(serverInfo);
+
+      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const deck = await createFlashcardDeck(`E2E Phase0 Review ${runId}`);
+      const front = `Phase 0 front ${runId}`;
+      const back = `Phase 0 back ${runId}`;
+
+      await createFlashcardCard({
+        deckId: deck.id,
+        front,
+        back,
+      });
+
+      try {
+        flashcards = new FlashcardsPage(authedPage);
+        await flashcards.gotoPath(`/flashcards?tab=review&deck_id=${deck.id}`);
+        await flashcards.assertPageReady();
+
+        expect(await flashcards.isOnline()).toBe(true);
+        await expect(flashcards.reviewDeckSelect).toBeVisible({ timeout: 10_000 });
+        await expect(flashcards.reviewActiveCard).toBeVisible({ timeout: 20_000 });
+        await expect(flashcards.reviewActiveCard.getByText(front, { exact: true })).toBeVisible({
+          timeout: 10_000,
+        });
+        await expect(flashcards.reviewShortcutQuestionChips).toBeVisible({ timeout: 10_000 });
+
+        await dispatchKeyboardShortcut(authedPage, { key: ' ' });
+        await expect(flashcards.reviewActiveCard.getByText(back, { exact: true })).toBeVisible({
+          timeout: 10_000,
+        });
+        await expect(flashcards.reviewShortcutAnswerChips).toBeVisible({ timeout: 10_000 });
+        await expect(flashcards.reviewRateGoodButton).toBeVisible({ timeout: 10_000 });
+
+        const reviewResponsePromise = authedPage.waitForResponse((response) => {
+          return (
+            response.request().method() === 'POST' &&
+            /\/api\/v1\/flashcards\/review$/.test(response.url())
+          );
+        });
+
+        await dispatchKeyboardShortcut(authedPage, { key: '3' });
+
+        const reviewResponse = await reviewResponsePromise;
+        expect(reviewResponse.status()).toBeLessThan(400);
+
+        await expect(flashcards.reviewEmptyCard).toBeVisible({ timeout: 20_000 });
+        await expect(flashcards.reviewEmptyCard).toContainText(
+          /cards reviewed this session|all caught up|No cards are due/i
+        );
+
+        if (await flashcards.reviewProgressStatus.isVisible().catch(() => false)) {
+          await expect(flashcards.reviewProgressStatus).toContainText(/reviewed/i);
+        }
+
+        await assertNoCriticalErrors(diagnostics);
+      } finally {
+        await cleanupFlashcardDeck(deck);
+      }
+    });
+
     test('should flip the review prompt side for a selected deck', async ({
       authedPage,
       serverInfo,
@@ -298,6 +380,25 @@ test.describe('Flashcards', () => {
       expect(reviewResponse.status()).toBeLessThan(400);
 
       await expect(flashcards.reviewCompletionState).toBeVisible({ timeout: 20_000 });
+
+      await assertNoCriticalErrors(diagnostics);
+    });
+
+    test('flashcards Phase 0 evidence: Cram mode controls are reachable before review', async ({
+      authedPage,
+      diagnostics,
+    }) => {
+      flashcards = new FlashcardsPage(authedPage);
+      await flashcards.gotoPath('/flashcards?tab=review');
+      await flashcards.assertPageReady();
+
+      const online = await flashcards.isOnline();
+      if (!online) return;
+
+      await expect(flashcards.reviewTopbar).toBeVisible({ timeout: 10_000 });
+      await flashcards.setReviewMode('cram');
+      await expect(flashcards.reviewCramTagInput).toBeVisible({ timeout: 10_000 });
+      await expect(flashcards.reviewCramUpdateScheduleToggle).toBeVisible({ timeout: 10_000 });
 
       await assertNoCriticalErrors(diagnostics);
     });
@@ -667,6 +768,127 @@ test.describe('Flashcards', () => {
       await expect(flashcards.importButton).toBeVisible();
 
       await assertNoCriticalErrors(diagnostics);
+    });
+
+    test('flashcards Phase 0 evidence: invalid delimiter sample shows recovery preflight before import', async ({
+      authedPage,
+      diagnostics,
+    }) => {
+      flashcards = new FlashcardsPage(authedPage);
+      await flashcards.gotoPath('/flashcards?tab=importExport');
+      await flashcards.assertPageReady();
+
+      const online = await flashcards.isOnline();
+      if (!online) return;
+
+      await expect(flashcards.importTextarea).toBeVisible({ timeout: 10_000 });
+      await flashcards.importTextarea.fill('Deck,Front,Back\nBiology,Question,Answer');
+
+      await expect(flashcards.importPreflightWarning).toBeVisible({ timeout: 10_000 });
+      await expect(flashcards.importPreflightWarning).toContainText(
+        /Selected delimiter .* may be incorrect/i
+      );
+      await expect(flashcards.importButton).toBeEnabled();
+
+      await assertNoCriticalErrors(diagnostics);
+    });
+
+    test.fixme(
+      'flashcards Phase 0 RED evidence: invalid delimited import should not show zero-card success or get stuck (TASK-537)',
+      async ({ authedPage, serverInfo }) => {
+        skipIfServerUnavailable(serverInfo);
+
+        flashcards = new FlashcardsPage(authedPage);
+        await flashcards.gotoPath('/flashcards?tab=importExport');
+        await flashcards.assertPageReady();
+
+        await flashcards.importTextarea.fill('Deck\tFront\tBack\nBroken\t\t');
+        await flashcards.importButton.click();
+
+        await expect(flashcards.importResultAlert).toBeVisible({ timeout: 20_000 });
+        await expect(flashcards.importResultAlert).not.toContainText(/0 cards imported/i);
+        await expect(flashcards.importButton).toBeEnabled({ timeout: 20_000 });
+      }
+    );
+  });
+
+  // =========================================================================
+  // Responsive Smoke
+  // =========================================================================
+
+  test.describe('Responsive Smoke', () => {
+    test('flashcards Phase 0 evidence: records mobile study and transfer reachability', async ({
+      authedPage,
+      diagnostics,
+    }, testInfo) => {
+      await authedPage.setViewportSize({ width: 390, height: 844 });
+
+      flashcards = new FlashcardsPage(authedPage);
+      await flashcards.goto();
+      await flashcards.assertPageReady();
+
+      const online = await flashcards.isOnline();
+      if (!online) return;
+
+      await expect(flashcards.tabsContainer).toBeVisible({ timeout: 10_000 });
+      await flashcards.switchToTab('study');
+      const studyReachability = {
+        reviewTopbarVisible: await flashcards.reviewTopbar.isVisible().catch(() => false),
+        reviewDeckSelectVisible: await flashcards.reviewDeckSelect.isVisible().catch(() => false),
+      };
+      await testInfo.attach('flashcards-mobile-study-reachability.json', {
+        body: JSON.stringify(studyReachability, null, 2),
+        contentType: 'application/json',
+      });
+      await flashcards.testWithQuizButton.scrollIntoViewIfNeeded();
+      await expect(flashcards.testWithQuizButton).toBeVisible({ timeout: 10_000 });
+
+      await flashcards.switchToTab('transfer');
+      await expect(flashcards.importFormatSelect).toBeVisible({ timeout: 10_000 });
+      await expect(flashcards.importTextarea).toBeVisible({ timeout: 10_000 });
+      await expect(flashcards.importButton).toBeVisible({ timeout: 10_000 });
+
+      await assertNoCriticalErrors(diagnostics);
+    });
+  });
+
+  // =========================================================================
+  // Direct Handoffs
+  // =========================================================================
+
+  test.describe('Direct Handoffs', () => {
+    test('flashcards Phase 0 evidence: quiz handoff preserves selected review deck context', async ({
+      authedPage,
+      serverInfo,
+      diagnostics,
+    }) => {
+      test.setTimeout(90_000);
+      skipIfServerUnavailable(serverInfo);
+
+      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const deck = await createFlashcardDeck(`E2E Quiz Handoff ${runId}`);
+
+      try {
+        flashcards = new FlashcardsPage(authedPage);
+        await flashcards.gotoPath(`/flashcards?tab=review&deck_id=${deck.id}`);
+        await flashcards.assertPageReady();
+
+        expect(await flashcards.isOnline()).toBe(true);
+        await expect(flashcards.testWithQuizButton).toBeVisible({ timeout: 10_000 });
+
+        await flashcards.testWithQuizButton.click();
+        await authedPage.waitForURL(/\/quiz\?/, { timeout: 15_000 });
+
+        const url = new URL(authedPage.url());
+        expect(url.pathname).toBe('/quiz');
+        expect(url.searchParams.get('tab')).toBe('take');
+        expect(url.searchParams.get('source')).toBe('flashcards');
+        expect(url.searchParams.get('deck_id')).toBe(String(deck.id));
+
+        await assertNoCriticalErrors(diagnostics);
+      } finally {
+        await cleanupFlashcardDeck(deck);
+      }
     });
   });
 
