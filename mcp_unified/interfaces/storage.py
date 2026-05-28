@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from mcp_unified.profiles.models import MCPProfile
@@ -92,11 +92,18 @@ class CredentialGrantStore(Protocol):
 
 
 class ExternalRegistryStore(Protocol):
-    """Store for external MCP server registry entries."""
+    """Store for external MCP server registry entries.
+
+    ``list_servers`` preserves the existing host runtime manager shape: no
+    filters and dict-compatible status rows. New typed stores can additionally
+    expose ``list_server_definitions`` for model-based persistence queries.
+    """
 
     async def get_server(self, server_id: str) -> ExternalServerDefinition | None: ...
 
-    async def list_servers(
+    async def list_servers(self) -> list[ExternalServerDefinition] | list[dict[str, Any]]: ...
+
+    async def list_server_definitions(
         self,
         *,
         enabled: bool | None = None,

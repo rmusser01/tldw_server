@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import ast
 import importlib
+import inspect
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+import pytest
 
 
 def _tldw_imports_for(path: Path) -> list[str]:
@@ -59,6 +62,23 @@ def test_profile_assignment_models_gateway_default_and_workspace_binding() -> No
     assert assignment.updated_at.tzinfo is not None
 
 
+def test_profile_assignment_requires_assignment_target() -> None:
+    from mcp_unified.storage import ProfileAssignment
+
+    with pytest.raises(ValueError, match="principal_id, workspace_id, or is_default"):
+        ProfileAssignment(id="assignment-1", profile_id="backend-engineer")
+
+    default_assignment = ProfileAssignment(
+        id="assignment-2",
+        profile_id="orchestrator",
+        is_default=True,
+    )
+
+    assert default_assignment.is_default is True
+    assert default_assignment.principal_id is None
+    assert default_assignment.workspace_id is None
+
+
 def test_credential_grant_contract_excludes_secret_material_fields() -> None:
     from mcp_unified.storage import CredentialGrant
 
@@ -98,6 +118,68 @@ def test_external_server_definition_defaults_do_not_start_lifecycle() -> None:
     assert server.credential_slots == []
 
 
+def test_external_server_definition_rejects_unsupported_transport() -> None:
+    from mcp_unified.storage import ExternalServerDefinition
+
+    with pytest.raises(ValueError):
+        ExternalServerDefinition(
+            id="unsupported",
+            name="Unsupported",
+            transport=cast(Any, "http"),
+            url="https://example.com/mcp",
+        )
+
+
+def test_external_server_definition_validates_enabled_transport_fields() -> None:
+    from mcp_unified.storage import ExternalServerDefinition
+
+    with pytest.raises(ValueError, match="stdio.*command"):
+        ExternalServerDefinition(
+            id="stdio-empty",
+            name="Empty stdio",
+            transport="stdio",
+            command=["   "],
+        )
+
+    with pytest.raises(ValueError, match="websocket.*url"):
+        ExternalServerDefinition(
+            id="websocket-empty",
+            name="Empty websocket",
+            transport="websocket",
+            url="   ",
+        )
+
+    disabled_draft = ExternalServerDefinition(
+        id="draft",
+        name="Draft",
+        transport="stdio",
+        enabled=False,
+    )
+
+    assert disabled_draft.enabled is False
+    assert disabled_draft.command == []
+
+
+def test_external_server_definition_normalizes_transport_fields() -> None:
+    from mcp_unified.storage import ExternalServerDefinition
+
+    stdio_server = ExternalServerDefinition(
+        id="stdio",
+        name="Stdio",
+        transport="stdio",
+        command=["  /usr/local/bin/mcp  ", "  --verbose  "],
+    )
+    websocket_server = ExternalServerDefinition(
+        id="websocket",
+        name="Websocket",
+        transport="websocket",
+        url="  wss://example.com/mcp  ",
+    )
+
+    assert stdio_server.command == ["/usr/local/bin/mcp", "--verbose"]
+    assert websocket_server.url == "wss://example.com/mcp"
+
+
 def test_audit_event_uses_aware_timestamp_and_caller_owned_payload() -> None:
     from mcp_unified.storage import AuditEvent
 
@@ -133,3 +215,53 @@ def test_storage_interfaces_export_split_store_contracts() -> None:
     ):
         assert hasattr(storage, name)
         assert getattr(interfaces, name) is getattr(storage, name)
+
+
+def test_external_registry_store_list_servers_preserves_runtime_manager_shape() -> None:
+    from mcp_unified.interfaces.storage import ExternalRegistryStore
+
+    from tldw_Server_API.app.core.MCP_unified.external_servers.manager import ExternalServerManager
+
+    assert list(inspect.signature(ExternalRegistryStore.list_servers).parameters) == ["self"]
+    assert list(inspect.signature(ExternalServerManager.list_servers).parameters) == ["self"]
+
+
+def test_external_registry_store_exposes_typed_definition_listing() -> None:
+    from mcp_unified.interfaces.storage import ExternalRegistryStore
+
+    params = inspect.signature(ExternalRegistryStore.list_server_definitions).parameters
+
+    assert list(params) == ["self", "enabled"]
+    assert params["enabled"].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_external_registry_store_accepts_legacy_dict_listing_shape() -> None:
+    from mcp_unified.interfaces.storage import ExternalRegistryStore
+    from mcp_unified.storage import ExternalServerDefinition
+
+    class LegacyRegistryStore:
+        async def get_server(self, server_id: str) -> ExternalServerDefinition | None:
+            return None
+
+        async def list_servers(self) -> list[dict[str, Any]]:
+            return []
+
+        async def list_server_definitions(
+            self,
+            *,
+            enabled: bool | None = None,
+        ) -> list[ExternalServerDefinition]:
+            return []
+
+        async def upsert_server(
+            self,
+            server: ExternalServerDefinition,
+        ) -> ExternalServerDefinition:
+            return server
+
+        async def delete_server(self, server_id: str) -> bool:
+            return False
+
+    store: ExternalRegistryStore = LegacyRegistryStore()
+
+    assert store is not None

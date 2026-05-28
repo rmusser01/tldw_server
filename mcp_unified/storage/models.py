@@ -6,7 +6,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _utc_now() -> datetime:
@@ -26,6 +26,14 @@ def _copy_list(value: Any) -> list[Any]:
     if value is None:
         return []
     return deepcopy(value)
+
+
+def _normalize_optional_text(value: str | None) -> str | None:
+    """Strip optional text values and treat blank strings as omitted."""
+    if value is None:
+        return None
+    text = value.strip()
+    return text or None
 
 
 class ProfileAssignment(BaseModel):
@@ -49,6 +57,20 @@ class ProfileAssignment(BaseModel):
     def _coerce_mapping(cls, value: Any) -> dict[str, Any]:
         """Treat explicit null mapping fields as omitted safe defaults."""
         return _copy_mapping(value)
+
+    @field_validator("principal_id", "workspace_id", mode="after")
+    @classmethod
+    def _normalize_optional_text(cls, value: str | None) -> str | None:
+        """Treat blank assignment targets as omitted."""
+        return _normalize_optional_text(value)
+
+    @model_validator(mode="after")
+    def _validate_assignment_target(self) -> ProfileAssignment:
+        if not self.principal_id and not self.workspace_id and not self.is_default:
+            raise ValueError(
+                "ProfileAssignment must have principal_id, workspace_id, or is_default set"
+            )
+        return self
 
 
 class ApprovalPolicyDocument(BaseModel):
@@ -117,7 +139,7 @@ class ExternalServerDefinition(BaseModel):
 
     id: str
     name: str
-    transport: Literal["stdio", "websocket", "http"]
+    transport: Literal["stdio", "websocket"]
     command: list[str] = Field(default_factory=list)
     url: str | None = None
     cwd: str | None = None
@@ -141,6 +163,23 @@ class ExternalServerDefinition(BaseModel):
     def _coerce_mapping(cls, value: Any) -> dict[str, Any]:
         """Treat explicit null mapping fields as omitted safe defaults."""
         return _copy_mapping(value)
+
+    @field_validator("url", "cwd", mode="after")
+    @classmethod
+    def _normalize_optional_text(cls, value: str | None) -> str | None:
+        """Treat blank optional transport text fields as omitted."""
+        return _normalize_optional_text(value)
+
+    @model_validator(mode="after")
+    def _validate_transport_fields(self) -> ExternalServerDefinition:
+        self.command = [part.strip() for part in self.command if part.strip()]
+        if not self.enabled:
+            return self
+        if self.transport == "stdio" and not self.command:
+            raise ValueError("stdio transport requires a non-empty command")
+        if self.transport == "websocket" and not self.url:
+            raise ValueError("websocket transport requires a non-empty url")
+        return self
 
 
 class AuditEvent(BaseModel):
