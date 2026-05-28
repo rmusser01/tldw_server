@@ -15,6 +15,8 @@ describe("ServerReadinessGate", () => {
     } catch {
       // ignore test storage availability
     }
+    delete (window as unknown as { __tldwServerReadinessState?: unknown })
+      .__tldwServerReadinessState
     vi.restoreAllMocks()
     vi.useRealTimers()
     vi.unstubAllEnvs()
@@ -67,6 +69,65 @@ describe("ServerReadinessGate", () => {
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("publishes bounded readiness diagnostics for degraded health", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 206,
+      json: async () => ({
+        status: "degraded",
+        checks: { mcp: { status: "degraded" } }
+      })
+    } as Response)
+
+    const readinessEvents: Array<Record<string, unknown>> = []
+    const handleReadinessState = (event: Event) => {
+      readinessEvents.push(
+        (event as CustomEvent<Record<string, unknown>>).detail
+      )
+    }
+    window.addEventListener(
+      "tldw:server-readiness-state",
+      handleReadinessState
+    )
+
+    try {
+      const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+      render(
+        <ServerReadinessGate allowDegraded>
+          <div>App ready</div>
+        </ServerReadinessGate>
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText("App ready")).toBeInTheDocument()
+      })
+
+      await waitFor(() => {
+        expect(readinessEvents.at(-1)).toEqual(
+          expect.objectContaining({
+            state: "degraded",
+            healthUrl: "http://127.0.0.1:8000/api/v1/health",
+            httpStatus: 206,
+            healthStatus: "degraded",
+            degradedChecks: ["mcp"]
+          })
+        )
+      })
+      expect(
+        (window as unknown as { __tldwServerReadinessState?: unknown })
+          .__tldwServerReadinessState
+      ).toEqual(readinessEvents.at(-1))
+    } finally {
+      window.removeEventListener(
+        "tldw:server-readiness-state",
+        handleReadinessState
+      )
+    }
   })
 
   it("accepts ok and allowed degraded status envelopes from normal successful responses", async () => {

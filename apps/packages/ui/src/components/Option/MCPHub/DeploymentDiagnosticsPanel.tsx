@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react"
 import { Card, Descriptions, Tag } from "antd"
 
 import {
@@ -16,6 +17,18 @@ type DeploymentDiagnosticsPanelProps = {
   env?: DeploymentDiagnosticsEnv
   pageOrigin?: string
 }
+
+type ServerReadinessSnapshot = {
+  state?: string
+  degradedChecks?: string[]
+  healthUrl?: string
+  httpStatus?: number
+  healthStatus?: string
+  errorMessage?: string
+  checkedAt?: string
+}
+
+const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state"
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "")
 
@@ -37,10 +50,45 @@ const getPageOrigin = (pageOrigin?: string): string => {
 const buildHealthUrl = (apiOrigin: string): string =>
   apiOrigin ? `${trimTrailingSlash(apiOrigin)}/api/v1/health` : "/api/v1/health"
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const normalizeReadinessSnapshot = (value: unknown): ServerReadinessSnapshot | null => {
+  if (!isRecord(value)) return null
+  return {
+    state: typeof value.state === "string" ? value.state : undefined,
+    degradedChecks: Array.isArray(value.degradedChecks)
+      ? value.degradedChecks.filter((item): item is string => typeof item === "string")
+      : undefined,
+    healthUrl: typeof value.healthUrl === "string" ? value.healthUrl : undefined,
+    httpStatus: typeof value.httpStatus === "number" ? value.httpStatus : undefined,
+    healthStatus: typeof value.healthStatus === "string" ? value.healthStatus : undefined,
+    errorMessage: typeof value.errorMessage === "string" ? value.errorMessage : undefined,
+    checkedAt: typeof value.checkedAt === "string" ? value.checkedAt : undefined
+  }
+}
+
+const readReadinessSnapshot = (): ServerReadinessSnapshot | null => {
+  if (typeof window === "undefined") return null
+  return normalizeReadinessSnapshot(
+    (window as typeof window & { __tldwServerReadinessState?: unknown })
+      .__tldwServerReadinessState
+  )
+}
+
+const getHealthTagColor = (state: string): string => {
+  if (state === "healthy" || state === "ok" || state === "ready") return "green"
+  if (state === "unhealthy" || state === "blocked") return "red"
+  if (state === "degraded" || state === "unavailable") return "orange"
+  return "default"
+}
+
 export const DeploymentDiagnosticsPanel = ({
   env,
   pageOrigin
 }: DeploymentDiagnosticsPanelProps) => {
+  const [readinessSnapshot, setReadinessSnapshot] =
+    useState<ServerReadinessSnapshot | null>(() => readReadinessSnapshot())
   const healthState = useMcpToolsStore((state) => state.healthState)
   const deploymentEnv = env ?? readDeploymentEnv()
   const resolvedPageOrigin = getPageOrigin(pageOrigin)
@@ -67,6 +115,28 @@ export const DeploymentDiagnosticsPanel = ({
     healthUrl = "not available"
     configIssue = err instanceof Error ? err.message : "Invalid deployment networking config."
   }
+
+  useEffect(() => {
+    setReadinessSnapshot(readReadinessSnapshot())
+    const handleReadinessState = (event: Event) => {
+      setReadinessSnapshot(
+        normalizeReadinessSnapshot(
+          (event as CustomEvent<ServerReadinessSnapshot>).detail
+        )
+      )
+    }
+    window.addEventListener(SERVER_READINESS_STATE_EVENT, handleReadinessState)
+    return () => {
+      window.removeEventListener(SERVER_READINESS_STATE_EVENT, handleReadinessState)
+    }
+  }, [])
+
+  const lastHealthStatus =
+    readinessSnapshot?.healthStatus || readinessSnapshot?.state || "unknown"
+  const lastStatusCode =
+    typeof readinessSnapshot?.httpStatus === "number"
+      ? String(readinessSnapshot.httpStatus)
+      : "not recorded"
 
   return (
     <Card size="small" title="Deployment Diagnostics">
@@ -101,6 +171,27 @@ export const DeploymentDiagnosticsPanel = ({
             {healthState}
           </Tag>
         </Descriptions.Item>
+        <Descriptions.Item label="Last health status">
+          <Tag color={getHealthTagColor(lastHealthStatus)}>
+            {lastHealthStatus}
+          </Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="Last status code">
+          {lastStatusCode}
+        </Descriptions.Item>
+        <Descriptions.Item label="Last checked">
+          {readinessSnapshot?.checkedAt || "not recorded"}
+        </Descriptions.Item>
+        {readinessSnapshot?.healthUrl ? (
+          <Descriptions.Item label="Readiness health URL" span={3}>
+            {readinessSnapshot.healthUrl}
+          </Descriptions.Item>
+        ) : null}
+        {readinessSnapshot?.errorMessage ? (
+          <Descriptions.Item label="Last health error" span={3}>
+            {readinessSnapshot.errorMessage}
+          </Descriptions.Item>
+        ) : null}
         {configIssue ? (
           <Descriptions.Item label="Config issue" span={3}>
             {configIssue}
