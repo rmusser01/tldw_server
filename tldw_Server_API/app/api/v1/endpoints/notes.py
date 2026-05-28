@@ -64,6 +64,9 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NoteAttachmentsListResponse,
     NoteAttachmentResponse,
     NoteCreate,
+    NoteFolderCreate,
+    NoteFolderResponse,
+    NoteFoldersListResponse,
     NoteKeywordLinkResponse,
     NoteResponse,
     NotesExportRequest,
@@ -1509,6 +1512,119 @@ async def list_deleted_notes(
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "deleted notes list")
+
+
+async def _check_note_rate_limit(
+        rate_limiter: RateLimiter,
+        current_user: User,
+        action: str,
+) -> tuple[bool, dict[str, Any]]:
+    """Check a notes rate limit and log fail-open limiter outages."""
+    try:
+        return await rate_limiter.check_user_rate_limit(int(current_user.id), action)
+    except _NOTES_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Rate limiter check failed for notes action '{}' and user '{}': {}",
+            action,
+            current_user.id,
+            exc,
+        )
+        return True, {}
+
+
+@router.get(
+    "/folders",
+    response_model=NoteFoldersListResponse,
+    summary="List note folders for the current user",
+    tags=["notes"],
+)
+@router.get(
+    "/folders/",
+    response_model=NoteFoldersListResponse,
+    summary="List note folders for the current user",
+    tags=["notes"],
+)
+async def list_note_folders(
+        db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+        limit: int = Query(1000, ge=1, le=1000, description="Number of folders to return"),
+        offset: int = Query(0, ge=0, description="Offset for pagination"),
+        rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+        current_user: User = Depends(get_request_user),
+        _: None = Depends(rbac_rate_limit("notes.list")),
+) -> NoteFoldersListResponse:
+    """List active note folders for the authenticated user's notes UI."""
+    try:
+        allowed, meta = await _check_note_rate_limit(rate_limiter, current_user, "notes.list")
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded for notes.list",
+                headers={"Retry-After": str(meta.get("retry_after", 60))},
+            )
+
+        folders = await _run_db_call(db.list_note_folders, limit=limit, offset=offset)
+        folder_items = [NoteFolderResponse.model_validate(folder) for folder in folders]
+        return NoteFoldersListResponse(
+            items=folder_items,
+            folders=folder_items,
+            count=len(folder_items),
+        )
+    except _NOTES_NONCRITICAL_EXCEPTIONS as e:
+        handle_db_errors(e, "note folders list")
+
+
+@router.post(
+    "/folders",
+    response_model=NoteFolderResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create or reuse a note folder path",
+    tags=["notes"],
+)
+@router.post(
+    "/folders/",
+    response_model=NoteFolderResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create or reuse a note folder path",
+    tags=["notes"],
+)
+async def create_note_folder(
+        folder_in: NoteFolderCreate,
+        db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+        rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+        current_user: User = Depends(get_request_user),
+        _: None = Depends(rbac_rate_limit("notes.create")),
+) -> NoteFolderResponse | JSONResponse:
+    """Create a note folder path or return the existing matching folder."""
+    try:
+        allowed, meta = await _check_note_rate_limit(rate_limiter, current_user, "notes.create")
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded for notes.create",
+                headers={"Retry-After": str(meta.get("retry_after", 60))},
+            )
+
+        existing = await _run_db_call(db.get_note_folder_by_path, folder_in.path)
+        if existing is not None:
+            existing_response = NoteFolderResponse.model_validate(existing)
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=jsonable_encoder(existing_response),
+            )
+        try:
+            folder = await _run_db_call(db.create_note_folder_path, folder_in.path)
+        except ConflictError:
+            existing_after_conflict = await _run_db_call(db.get_note_folder_by_path, folder_in.path)
+            if existing_after_conflict is not None:
+                existing_response = NoteFolderResponse.model_validate(existing_after_conflict)
+                return JSONResponse(
+                    status_code=status.HTTP_200_OK,
+                    content=jsonable_encoder(existing_response),
+                )
+            raise
+        return NoteFolderResponse.model_validate(folder)
+    except _NOTES_NONCRITICAL_EXCEPTIONS as e:
+        handle_db_errors(e, "note folder")
 
 
 @router.get(

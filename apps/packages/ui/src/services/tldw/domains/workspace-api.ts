@@ -40,6 +40,11 @@ export interface WorkspaceApiResponse {
   version: number
 }
 
+export interface WorkspaceListApiResponse {
+  items: WorkspaceApiResponse[]
+  total: number
+}
+
 export interface WorkspaceSourceApiResponse {
   id: string
   workspace_id: string
@@ -579,6 +584,13 @@ export const workspaceApiMethods = {
   },
 
   // ── Workspace sub-resource methods ──
+
+  async listWorkspaces(): Promise<WorkspaceListApiResponse> {
+    return await bgRequest<WorkspaceListApiResponse>({
+      path: "/api/v1/workspaces/",
+      method: "GET"
+    })
+  },
 
   async upsertWorkspace(
     workspaceId: string,

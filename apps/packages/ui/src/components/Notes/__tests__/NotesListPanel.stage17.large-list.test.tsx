@@ -58,6 +58,7 @@ describe("NotesListPanel stage 17 large list fallback", () => {
         onSelectNote={vi.fn()}
         onToggleBulkSelection={onToggleBulkSelection}
         onChangePage={vi.fn()}
+        onCreateNote={vi.fn()}
         onResetEditor={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenHealth={vi.fn()}

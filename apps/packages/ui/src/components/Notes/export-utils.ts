@@ -194,7 +194,7 @@ export const buildSingleNotePrintableHtml = (
   const renderedContent = renderPrintableMarkdownHtml(markdownSource)
   const keywordsMarkup =
     keywords.length > 0
-      ? `<p class="meta-row"><strong>Keywords:</strong> ${escapeHtml(keywords.join(", "))}</p>`
+      ? `<p class="meta-row"><strong>Tags:</strong> ${escapeHtml(keywords.join(", "))}</p>`
       : ""
 
   return `<!doctype html>

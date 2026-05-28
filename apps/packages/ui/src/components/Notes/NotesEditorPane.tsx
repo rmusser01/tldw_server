@@ -19,6 +19,7 @@ import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
 import type {
   SaveIndicatorState,
+  SaveRecoveryNotice,
   NotesEditorMode,
   NotesInputMode,
   NotesAssistAction,
@@ -36,6 +37,7 @@ import {
   NOTES_SHORTCUTS_SUMMARY_ID,
   NOTE_TEMPLATES,
   normalizeNotesTitleStrategy,
+  toSafeTestId,
 } from './notes-manager-utils'
 import { NOTES_TITLE_SUGGEST_STRATEGY_SETTING } from '@/services/settings/ui-settings'
 import { setSetting } from '@/services/settings/registry'
@@ -45,6 +47,12 @@ const LazyMarkdownPreview = React.lazy(() =>
     default: module.MarkdownPreview,
   }))
 )
+
+const NOTES_SAVE_STATUS_MESSAGE_ID = 'notes-save-status-message'
+const NOTES_EDITOR_CONTENT_HELP_ID = 'notes-editor-content-help'
+
+const joinAriaIds = (...ids: Array<string | null | undefined>) =>
+  ids.filter((id): id is string => Boolean(id)).join(' ') || undefined
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,9 +66,24 @@ export interface NoteRelationsShape {
     title: string
     directed: boolean
     outgoing: boolean
+    relationLabel?: string
+    available?: boolean
+    unavailableReason?: string | null
   }>
-  related: Array<{ id: string; title: string }>
-  backlinks: Array<{ id: string; title: string }>
+  related: Array<{
+    id: string
+    title: string
+    relationLabel?: string
+    available?: boolean
+    unavailableReason?: string | null
+  }>
+  backlinks: Array<{
+    id: string
+    title: string
+    relationLabel?: string
+    available?: boolean
+    unavailableReason?: string | null
+  }>
 }
 
 export interface NotesEditorPaneProps {
@@ -101,6 +124,7 @@ export interface NotesEditorPaneProps {
   keywordOptions: string[]
   saveIndicator: SaveIndicatorState
   saveIndicatorText: string | null
+  saveRecoveryNotice: SaveRecoveryNotice | null
   selectedLastSavedAt: string | null
   offlineStatusText: string | null
   currentOfflineDraft: OfflineDraftEntry | null
@@ -189,7 +213,9 @@ export interface NotesEditorPaneProps {
   handleCreateStudyPackFromNote?: () => void
   handleOpenNotesStudio: () => void
   exportSelected: (format: SingleNoteExportFormat) => void
-  saveNote: () => Promise<void>
+  saveNote: () => Promise<boolean>
+  reloadSelectedNoteAfterConflict: () => Promise<void>
+  saveAndStartNew: () => Promise<void>
   deleteNote: () => Promise<void>
   handleSelectNote: (id: string | number) => Promise<void>
   openGraphModal: () => void
@@ -250,6 +276,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   keywordOptions,
   saveIndicator,
   saveIndicatorText,
+  saveRecoveryNotice,
   selectedLastSavedAt,
   offlineStatusText,
   currentOfflineDraft,
@@ -315,6 +342,8 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   handleOpenNotesStudio,
   exportSelected,
   saveNote,
+  reloadSelectedNoteAfterConflict,
+  saveAndStartNew,
   deleteNote,
   handleSelectNote,
   openGraphModal,
@@ -339,6 +368,29 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   applyWikilinkSuggestion,
 }) => {
   const { t } = useTranslation(['option', 'common'])
+  const unavailableLabel = t('option:notesSearch.linkedNoteUnavailable', {
+    defaultValue: 'Unavailable'
+  })
+  const saveStatusRef = React.useRef<HTMLSpanElement | null>(null)
+  const saveStatusDescriptionId = saveIndicatorText ? NOTES_SAVE_STATUS_MESSAGE_ID : null
+  const contentDescribedBy = joinAriaIds(NOTES_EDITOR_CONTENT_HELP_ID, saveStatusDescriptionId)
+
+  React.useEffect(() => {
+    if (saveIndicator !== 'error' || !saveIndicatorText) return
+    const target = saveStatusRef.current
+    if (!target) return
+    const activeElement = document.activeElement
+    const shouldMoveFocus =
+      activeElement == null ||
+      activeElement === document.body ||
+      (activeElement instanceof HTMLElement &&
+        Boolean(activeElement.closest('[data-testid="notes-header-actions"]')))
+    if (!shouldMoveFocus) return
+    window.requestAnimationFrame(() => {
+      if (target.isConnected) target.focus()
+    })
+  }, [saveIndicator, saveIndicatorText])
+
   const renderHelpButton = React.useCallback(
     (label: string) => (
       <button
@@ -364,6 +416,24 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         <LazyMarkdownPreview content={previewContent} size="sm" />
       </React.Suspense>
     </div>
+  )
+
+  const renderRelationMeta = (
+    relationLabel?: string,
+    unavailableReason?: string | null
+  ) => (
+    <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] leading-none">
+      {relationLabel ? (
+        <span className="rounded bg-surface3 px-1.5 py-0.5 text-text-muted">
+          {relationLabel}
+        </span>
+      ) : null}
+      {unavailableReason ? (
+        <span className="rounded border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-warn">
+          {unavailableReason}
+        </span>
+      ) : null}
+    </span>
   )
 
   return (
@@ -409,6 +479,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         hasContent={content.trim().length > 0}
         canSave={
           !editorDisabled &&
+          !saving &&
           (title.trim().length > 0 || content.trim().length > 0)
         }
         canGenerateFlashcards={!editorDisabled && content.trim().length > 0}
@@ -457,6 +528,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         }}
         onSave={() => {
           void saveNote()
+        }}
+        onSaveAndNew={() => {
+          void saveAndStartNew()
         }}
         onDelete={() => {
           void deleteNote()
@@ -555,6 +629,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             placeholder={t('option:notesSearch.titlePlaceholder', {
               defaultValue: 'Title'
             })}
+            aria-label={t('option:notesSearch.titleInputAriaLabel', {
+              defaultValue: 'Note title'
+            })}
+            aria-describedby={saveStatusDescriptionId || undefined}
             value={title}
             onChange={(e) => {
               setTitle(e.target.value)
@@ -636,6 +714,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             placeholder={t('option:notesSearch.keywordsEditorPlaceholder', {
               defaultValue: 'Tags'
             })}
+            aria-label={t('option:notesSearch.keywordsEditorAriaLabel', {
+              defaultValue: 'Note tags'
+            })}
+            aria-describedby={saveStatusDescriptionId || undefined}
             data-testid="notes-keywords-editor"
             className="w-full"
             value={editorKeywords}
@@ -659,13 +741,61 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             disabled={editorDisabled}
           />
           {saveIndicatorText && (
-            <Typography.Text
-              type={saveIndicator === 'error' ? 'danger' : 'secondary'}
-              className="block text-[11px] mt-1 text-text-muted"
-              aria-live="polite"
+            <span
+              id={NOTES_SAVE_STATUS_MESSAGE_ID}
+              ref={saveStatusRef}
+              role={saveIndicator === 'error' ? 'alert' : 'status'}
+              tabIndex={saveIndicator === 'error' ? -1 : undefined}
+              aria-label={t('option:notesSearch.saveStatusAriaLabel', {
+                defaultValue: 'Note save status'
+              })}
+              aria-live={saveIndicator === 'error' ? 'assertive' : 'polite'}
+              className={`block text-[11px] mt-1 ${
+                saveIndicator === 'error' ? 'text-danger' : 'text-text-muted'
+              }`}
+              data-testid="notes-save-feedback"
             >
               {saveIndicatorText}
-            </Typography.Text>
+            </span>
+          )}
+          {saveRecoveryNotice && (
+            <div
+              className={`mt-2 flex flex-wrap items-center gap-2 rounded border px-2 py-2 text-[12px] ${
+                saveRecoveryNotice.kind === 'conflict'
+                  ? 'border-warn/50 bg-warn/10 text-warn'
+                  : 'border-danger/50 bg-danger/10 text-danger'
+              }`}
+              role="alert"
+              aria-live="assertive"
+              aria-atomic="true"
+              data-testid="notes-save-recovery-notice"
+            >
+              <span>{saveRecoveryNotice.message}</span>
+              <Button
+                size="small"
+                onClick={() => {
+                  void saveNote()
+                }}
+                disabled={saving || editorDisabled}
+                data-testid="notes-save-recovery-retry"
+              >
+                {t('option:notesSearch.saveStatusRetry', { defaultValue: 'Retry' })}
+              </Button>
+              {saveRecoveryNotice.kind === 'conflict' && selectedId != null ? (
+                <Button
+                  size="small"
+                  onClick={() => {
+                    void reloadSelectedNoteAfterConflict()
+                  }}
+                  disabled={saving || editorDisabled}
+                  data-testid="notes-save-conflict-reload"
+                >
+                  {t('option:notesSearch.reloadConflictAction', {
+                    defaultValue: 'Reload server version'
+                  })}
+                </Button>
+              ) : null}
+            </div>
           )}
           {offlineStatusText && (
             <Typography.Text
@@ -836,15 +966,28 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     <div
                       key={link.edgeId}
                       className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1"
+                      data-testid={`notes-manual-link-${toSafeTestId(link.edgeId)}`}
                     >
                       <button
                         type="button"
-                        className="text-xs text-text hover:underline"
+                        aria-label={
+                          link.available === false
+                            ? `${link.title} ${link.unavailableReason || unavailableLabel}`
+                            : link.title
+                        }
+                        className={`flex flex-col items-start text-xs ${
+                          link.available === false
+                            ? 'cursor-not-allowed text-text-muted'
+                            : 'text-text hover:underline'
+                        }`}
+                        disabled={link.available === false}
                         onClick={() => {
+                          if (link.available === false) return
                           void handleSelectNote(link.noteId)
                         }}
                       >
-                        {link.title}
+                        <span>{link.title}</span>
+                        {renderRelationMeta(link.relationLabel, link.unavailableReason)}
                       </button>
                       <button
                         type="button"
@@ -856,7 +999,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                         aria-label={t('option:notesSearch.manualLinkRemoveAria', {
                           defaultValue: `Remove manual link ${link.title}`
                         })}
-                        data-testid={`notes-manual-link-remove-${link.edgeId.replace(/[^a-z0-9_-]/gi, '_')}`}
+                        data-testid={`notes-manual-link-remove-${toSafeTestId(link.edgeId)}`}
                       >
                         {manualLinkDeletingEdgeId === link.edgeId
                           ? t('option:notesSearch.manualLinkRemoving', {
@@ -913,16 +1056,33 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               ) : (
                 <div className="mt-2 flex flex-wrap gap-1.5" data-testid="notes-related-list">
                   {noteRelations.related.map((note) => (
-                    <button
+                    <div
                       key={`related-${note.id}`}
-                      type="button"
-                      className="rounded border border-border bg-surface px-2 py-1 text-left text-xs text-text hover:bg-surface3"
-                      onClick={() => {
-                        void handleSelectNote(note.id)
-                      }}
+                      className="rounded border border-border bg-surface"
+                      data-testid={`notes-related-note-${toSafeTestId(note.id)}`}
                     >
-                      {note.title}
-                    </button>
+                      <button
+                        type="button"
+                        aria-label={
+                          note.available === false
+                            ? `${note.title} ${note.unavailableReason || unavailableLabel}`
+                            : note.title
+                        }
+                        className={`flex min-w-[7rem] flex-col items-start px-2 py-1 text-left text-xs ${
+                          note.available === false
+                            ? 'cursor-not-allowed text-text-muted'
+                            : 'text-text hover:bg-surface3'
+                        }`}
+                        disabled={note.available === false}
+                        onClick={() => {
+                          if (note.available === false) return
+                          void handleSelectNote(note.id)
+                        }}
+                      >
+                        <span>{note.title}</span>
+                        {renderRelationMeta(note.relationLabel, note.unavailableReason)}
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -968,16 +1128,33 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               ) : (
                 <div className="mt-2 flex flex-wrap gap-1.5" data-testid="notes-backlinks-list">
                   {noteRelations.backlinks.map((note) => (
-                    <button
+                    <div
                       key={`backlink-${note.id}`}
-                      type="button"
-                      className="rounded border border-border bg-surface px-2 py-1 text-left text-xs text-text hover:bg-surface3"
-                      onClick={() => {
-                        void handleSelectNote(note.id)
-                      }}
+                      className="rounded border border-border bg-surface"
+                      data-testid={`notes-backlink-note-${toSafeTestId(note.id)}`}
                     >
-                      {note.title}
-                    </button>
+                      <button
+                        type="button"
+                        aria-label={
+                          note.available === false
+                            ? `${note.title} ${note.unavailableReason || unavailableLabel}`
+                            : note.title
+                        }
+                        className={`flex min-w-[7rem] flex-col items-start px-2 py-1 text-left text-xs ${
+                          note.available === false
+                            ? 'cursor-not-allowed text-text-muted'
+                            : 'text-text hover:bg-surface3'
+                        }`}
+                        disabled={note.available === false}
+                        onClick={() => {
+                          if (note.available === false) return
+                          void handleSelectNote(note.id)
+                        }}
+                      >
+                        <span>{note.title}</span>
+                        {renderRelationMeta(note.relationLabel, note.unavailableReason)}
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -1283,6 +1460,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     aria-label={t('option:notesSearch.editorAriaLabel', {
                       defaultValue: 'Note content'
                     })}
+                    aria-describedby={contentDescribedBy}
                     data-testid="notes-wysiwyg-editor"
                     dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
                   />
@@ -1306,6 +1484,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                       aria-label={t('option:notesSearch.editorAriaLabel', {
                         defaultValue: 'Note content'
                       })}
+                      aria-describedby={contentDescribedBy}
                     />
                     {activeWikilinkQuery && wikilinkSuggestions.length > 0 && (
                       <div
@@ -1346,6 +1525,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   </>
                 )}
                 <Typography.Text
+                  id={NOTES_EDITOR_CONTENT_HELP_ID}
                   type="secondary"
                   className="block text-[11px] mt-1 text-text-muted"
                 >
@@ -1419,6 +1599,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   aria-label={t('option:notesSearch.editorAriaLabel', {
                     defaultValue: 'Note content'
                   })}
+                  aria-describedby={contentDescribedBy}
                   data-testid="notes-wysiwyg-editor"
                   dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
                 />
@@ -1442,6 +1623,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     aria-label={t('option:notesSearch.editorAriaLabel', {
                       defaultValue: 'Note content'
                     })}
+                    aria-describedby={contentDescribedBy}
                   />
                   {activeWikilinkQuery && wikilinkSuggestions.length > 0 && (
                     <div
@@ -1482,6 +1664,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 </>
               )}
               <Typography.Text
+                id={NOTES_EDITOR_CONTENT_HELP_ID}
                 type="secondary"
                 className="block text-[11px] mt-1 text-text-muted"
               >

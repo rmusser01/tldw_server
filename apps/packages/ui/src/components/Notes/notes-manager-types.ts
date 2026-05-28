@@ -4,6 +4,7 @@ export type {
   KeywordSyncWarning,
   SaveNoteOptions,
   SaveIndicatorState,
+  SaveRecoveryNotice,
   NotesEditorMode,
   NotesInputMode,
   NotesSortOption,

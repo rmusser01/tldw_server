@@ -12,6 +12,8 @@ import WebClipperPanel from "../WebClipperPanel"
 
 const apiMocks = vi.hoisted(() => ({
   initialize: vi.fn(),
+  listNoteFolders: vi.fn(),
+  listWorkspaces: vi.fn(),
   saveWebClip: vi.fn(),
   persistWebClipEnrichment: vi.fn(),
   createChatCompletion: vi.fn()
@@ -24,6 +26,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: (...args: unknown[]) =>
       apiMocks.initialize(...args),
+    listNoteFolders: (...args: unknown[]) =>
+      apiMocks.listNoteFolders(...args),
+    listWorkspaces: (...args: unknown[]) =>
+      apiMocks.listWorkspaces(...args),
     saveWebClip: (...args: unknown[]) =>
       apiMocks.saveWebClip(...args),
     persistWebClipEnrichment: (...args: unknown[]) =>
@@ -97,12 +103,64 @@ const createDeferred = <T,>() => {
   return { promise, resolve }
 }
 
+const chooseWorkspaceDestination = async (
+  user: ReturnType<typeof userEvent.setup>,
+  destinationLabel: "Workspace" | "Both" = "Workspace",
+  workspaceId = "workspace-alpha"
+) => {
+  await user.click(screen.getByRole("radio", { name: destinationLabel }))
+  const picker = await screen.findByRole("combobox", { name: "Workspace" })
+  await user.selectOptions(picker, workspaceId)
+}
+
 describe("WebClipperPanel save flow", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.sessionStorage.clear()
     clearPendingClipDraft()
     apiMocks.initialize.mockResolvedValue(undefined)
+    apiMocks.listNoteFolders.mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          name: "Inbox",
+          path: "Inbox",
+          parent_id: null
+        },
+        {
+          id: 17,
+          name: "Captured Articles",
+          path: "Inbox/Captured Articles",
+          parent_id: 1
+        }
+      ],
+      count: 2
+    })
+    apiMocks.listWorkspaces.mockResolvedValue({
+      items: [
+        {
+          id: "workspace-alpha",
+          name: "Alpha Workspace",
+          archived: false,
+          study_materials_policy: "general",
+          deleted: false,
+          created_at: "2026-05-27T00:00:00Z",
+          last_modified: "2026-05-27T00:00:00Z",
+          version: 1
+        },
+        {
+          id: "workspace-beta",
+          name: "Beta Workspace",
+          archived: false,
+          study_materials_policy: "workspace",
+          deleted: false,
+          created_at: "2026-05-27T00:00:00Z",
+          last_modified: "2026-05-27T00:00:00Z",
+          version: 1
+        }
+      ],
+      total: 2
+    })
     apiMocks.saveWebClip.mockResolvedValue({
       clip_id: "clip-123",
       note_id: "note-123",
@@ -147,19 +205,233 @@ describe("WebClipperPanel save flow", () => {
       navigateMock
   })
 
-  it("shows the review-sheet filing controls", () => {
+  it("shows the review-sheet filing controls", async () => {
     render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
 
     expect(screen.getByLabelText("Title")).toHaveValue("Example Story")
     expect(screen.getByLabelText("Comment")).toHaveValue("")
     expect(screen.getByLabelText("Tags")).toHaveValue("")
-    expect(screen.getByLabelText("Folder ID")).toHaveValue(null)
+    expect(
+      await screen.findByRole("combobox", { name: "Folder" })
+    ).toBeInTheDocument()
     expect(screen.getByRole("radio", { name: "Note" })).toBeChecked()
     expect(screen.getByRole("radio", { name: "Workspace" })).not.toBeChecked()
     expect(screen.getByRole("radio", { name: "Both" })).not.toBeChecked()
+    expect(apiMocks.listNoteFolders).toHaveBeenCalledTimes(1)
+    expect(apiMocks.listWorkspaces).not.toHaveBeenCalled()
     expect(screen.getByLabelText("Run OCR")).not.toBeChecked()
     expect(screen.getByLabelText("Run visual analysis")).not.toBeChecked()
     expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled()
+  })
+
+  it("loads workspace choices after choosing Workspace and submits the selected workspace", async () => {
+    const user = userEvent.setup()
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+
+    const picker = await screen.findByRole("combobox", { name: "Workspace" })
+    await user.selectOptions(picker, "workspace-beta")
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+    expect(apiMocks.listWorkspaces).toHaveBeenCalledTimes(1)
+    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destination_mode: "workspace",
+        workspace: { workspace_id: "workspace-beta" }
+      })
+    )
+    expect(screen.getByText("Advanced: enter workspace ID manually")).toBeInTheDocument()
+  })
+
+  it("loads note folder choices and submits the selected folder", async () => {
+    const user = userEvent.setup()
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    const picker = await screen.findByRole("combobox", { name: "Folder" })
+    await user.selectOptions(picker, "17")
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        note: expect.objectContaining({
+          folder_id: 17
+        })
+      })
+    )
+    expect(screen.getByText("Advanced: enter folder ID manually")).toBeInTheDocument()
+  })
+
+  it("keeps raw folder ID entry available when the folder picker cannot load", async () => {
+    const user = userEvent.setup()
+    apiMocks.listNoteFolders.mockRejectedValueOnce(new Error("offline"))
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    expect(
+      await screen.findByText("Folder picker could not load. Enter a folder ID manually.")
+    ).toBeInTheDocument()
+    await user.type(screen.getByLabelText("Folder ID"), "17")
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        note: expect.objectContaining({
+          folder_id: 17
+        })
+      })
+    )
+  })
+
+  it("retries folder picker loading after a transient failure when returning to note mode", async () => {
+    const user = userEvent.setup()
+    apiMocks.listNoteFolders
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: 17,
+            name: "Captured Articles",
+            path: "Inbox/Captured Articles",
+            parent_id: 1
+          }
+        ],
+        count: 1
+      })
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    expect(
+      await screen.findByText("Folder picker could not load. Enter a folder ID manually.")
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+    await user.click(screen.getByRole("radio", { name: "Note" }))
+
+    expect(
+      await screen.findByRole("combobox", { name: "Folder" })
+    ).toBeInTheDocument()
+    expect(apiMocks.listNoteFolders).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps raw workspace ID entry hidden while workspace choices are loading", async () => {
+    const user = userEvent.setup()
+    const workspaceList = createDeferred<{
+      items: unknown[]
+      total: number
+    }>()
+    apiMocks.listWorkspaces.mockReturnValueOnce(workspaceList.promise)
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+
+    expect(screen.getByText("Loading workspaces...")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Workspace ID")).not.toBeInTheDocument()
+
+    workspaceList.resolve({
+      items: [
+        {
+          id: "workspace-alpha",
+          name: "Alpha Workspace",
+          archived: false,
+          study_materials_policy: "general",
+          deleted: false,
+          created_at: "2026-05-27T00:00:00Z",
+          last_modified: "2026-05-27T00:00:00Z",
+          version: 1
+        }
+      ],
+      total: 1
+    })
+
+    expect(
+      await screen.findByRole("combobox", { name: "Workspace" })
+    ).toBeInTheDocument()
+  })
+
+  it("keeps raw workspace ID entry available when the workspace picker cannot load", async () => {
+    const user = userEvent.setup()
+    apiMocks.listWorkspaces.mockRejectedValueOnce(new Error("offline"))
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+
+    expect(
+      await screen.findByText("Workspace picker could not load. Enter a workspace ID manually.")
+    ).toBeInTheDocument()
+    await user.type(screen.getByLabelText("Workspace ID"), "workspace-fallback")
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: { workspace_id: "workspace-fallback" }
+      })
+    )
+  })
+
+  it("retries workspace picker loading after a transient failure when returning to workspace mode", async () => {
+    const user = userEvent.setup()
+    apiMocks.listWorkspaces
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "workspace-alpha",
+            name: "Alpha Workspace",
+            archived: false,
+            study_materials_policy: "general",
+            deleted: false,
+            created_at: "2026-05-27T00:00:00Z",
+            last_modified: "2026-05-27T00:00:00Z",
+            version: 1
+          }
+        ],
+        total: 1
+      })
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+    expect(
+      await screen.findByText("Workspace picker could not load. Enter a workspace ID manually.")
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("radio", { name: "Note" }))
+    await user.click(screen.getByRole("radio", { name: "Workspace" }))
+
+    expect(
+      await screen.findByRole("combobox", { name: "Workspace" })
+    ).toBeInTheDocument()
+    expect(apiMocks.listWorkspaces).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not load workspace choices for note-only saves", async () => {
+    const user = userEvent.setup()
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+    expect(apiMocks.listWorkspaces).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -205,7 +477,8 @@ describe("WebClipperPanel save flow", () => {
 
       await user.click(screen.getByRole("button", { name: "Save clip" }))
 
-      expect(await screen.findByText(bannerTitle)).toBeInTheDocument()
+      const banner = await screen.findByRole("status", { name: "Clip save result" })
+      expect(banner).toHaveTextContent(bannerTitle)
       expect(screen.getByText("Attachment upload skipped")).toBeInTheDocument()
     }
   )
@@ -239,8 +512,10 @@ describe("WebClipperPanel save flow", () => {
       render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
 
       if (destinationLabel !== "Note") {
-        await user.click(screen.getByRole("radio", { name: destinationLabel }))
-        await user.type(screen.getByLabelText("Workspace ID"), "workspace-alpha")
+        await chooseWorkspaceDestination(
+          user,
+          destinationLabel as "Workspace" | "Both"
+        )
       }
 
       await user.click(screen.getByRole("button", { name: "Save and open" }))
@@ -279,6 +554,19 @@ describe("WebClipperPanel save flow", () => {
     expect(openTabMock).not.toHaveBeenCalled()
   })
 
+  it("announces submission errors and keeps action buttons usable in narrow sidepanels", async () => {
+    const user = userEvent.setup()
+    apiMocks.saveWebClip.mockRejectedValueOnce(new Error("Server unavailable"))
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    const alert = await screen.findByRole("alert", { name: "Clip save error" })
+    expect(alert).toHaveTextContent("Server unavailable")
+    expect(screen.getByTestId("web-clipper-actions").className).toContain("flex-wrap")
+  })
+
   it("save and open falls back to notes when only the canonical note was created", async () => {
     const user = userEvent.setup()
     apiMocks.saveWebClip.mockResolvedValueOnce({
@@ -295,8 +583,7 @@ describe("WebClipperPanel save flow", () => {
 
     render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
 
-    await user.click(screen.getByRole("radio", { name: "Workspace" }))
-    await user.type(screen.getByLabelText("Workspace ID"), "workspace-alpha")
+    await chooseWorkspaceDestination(user)
     await user.click(screen.getByRole("button", { name: "Save and open" }))
 
     await waitFor(() => {
@@ -320,7 +607,6 @@ describe("WebClipperPanel save flow", () => {
     expect(await screen.findByText("Clip saved")).toBeInTheDocument()
 
     await user.click(screen.getByRole("radio", { name: "Workspace" }))
-    await user.clear(screen.getByLabelText("Workspace ID"))
     await user.click(screen.getByRole("button", { name: "Save clip" }))
 
     expect(
@@ -331,16 +617,38 @@ describe("WebClipperPanel save flow", () => {
 
   it("blocks invalid folder ids before submitting the save request", async () => {
     const user = userEvent.setup()
+    apiMocks.listNoteFolders.mockResolvedValueOnce({ items: [], count: 0 })
 
     render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
 
-    await user.type(screen.getByLabelText("Folder ID"), "0")
+    await user.type(await screen.findByLabelText("Folder ID"), "0")
     await user.click(screen.getByRole("button", { name: "Save clip" }))
 
     expect(
       screen.getByText("Choose a positive whole-number folder ID or leave it blank.")
     ).toBeInTheDocument()
     expect(apiMocks.saveWebClip).not.toHaveBeenCalled()
+  })
+
+  it("adds the durable captured tag while preserving user-entered tags", async () => {
+    const user = userEvent.setup()
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText("Tags"), "research, source")
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+
+    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        note: expect.objectContaining({
+          keywords: expect.arrayContaining(["research", "source", "captured"])
+        })
+      })
+    )
   })
 
   it("includes screenshot attachments when the draft carries a captured image", async () => {
@@ -605,12 +913,12 @@ describe("WebClipperPanel save flow", () => {
 
   it("does not let a hidden invalid folder id block workspace-only saves", async () => {
     const user = userEvent.setup()
+    apiMocks.listNoteFolders.mockResolvedValueOnce({ items: [], count: 0 })
 
     render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
 
-    await user.type(screen.getByLabelText("Folder ID"), "0")
-    await user.click(screen.getByRole("radio", { name: "Workspace" }))
-    await user.type(screen.getByLabelText("Workspace ID"), "workspace-alpha")
+    await user.type(await screen.findByLabelText("Folder ID"), "0")
+    await chooseWorkspaceDestination(user)
     await user.click(screen.getByRole("button", { name: "Save clip" }))
 
     await waitFor(() => {

@@ -43,6 +43,7 @@ const renderPanel = (
     page: 1,
     pageSize: 20,
     selectedId: null,
+    onCreateNote: vi.fn(),
     onSelectNote: vi.fn(),
     onChangePage: vi.fn(),
     onResetEditor: vi.fn(),

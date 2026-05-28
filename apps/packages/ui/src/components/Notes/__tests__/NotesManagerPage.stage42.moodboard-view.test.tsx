@@ -321,6 +321,45 @@ describe("NotesManagerPage stage 42 moodboard view", () => {
     })
   })
 
+  it("shows retryable list errors in moodboard view", async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+      if (path.startsWith("/api/v1/notes/moodboards?") && method === "GET") {
+        return { moodboards: seededMoodboards }
+      }
+      if (path.startsWith("/api/v1/notes/moodboards/7/notes?") && method === "GET") {
+        throw new Error("Collection notes unavailable")
+      }
+      if (path === "/api/v1/admin/notes/title-settings" && method === "GET") {
+        return {
+          llm_enabled: false,
+          default_strategy: "heuristic",
+          effective_strategy: "heuristic",
+          strategies: ["heuristic"]
+        }
+      }
+      if (path.startsWith("/api/v1/notes/?")) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+      return {}
+    })
+
+    renderPage()
+    allowMoodboardFetch = true
+    fireEvent.click(screen.getByTestId("notes-view-mode-moodboard"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-list-error-state")).toHaveTextContent(
+        "Collection notes unavailable"
+      )
+    })
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+  })
+
   it("supports create, rename, and delete actions for moodboards", async () => {
     mockPromptModal
       .mockResolvedValueOnce("Fresh Board")

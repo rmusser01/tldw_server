@@ -85,6 +85,7 @@ import {
   type LegacySidepanelChatSnapshot,
   readSidepanelRuntimeTabId
 } from "./sidepanel-chat-resume"
+import { buildSidepanelCapturedNotePayload } from "./sidepanel-note-capture"
 
 // Lazy-load Timeline to reduce initial bundle size (~1.2MB cytoscape)
 const TimelineModal = lazy(() =>
@@ -717,19 +718,26 @@ const SidepanelChat = () => {
     setNoteError(null)
     setNoteSaving(true)
     try {
-      await tldwClient.createNote(content, {
+      const payload = buildSidepanelCapturedNotePayload({
+        content,
         title,
-        metadata: {
-          source_url: noteSourceUrl,
-          origin: "context-menu"
-        }
+        sourceUrl: noteSourceUrl
       })
+      await tldwClient.createNote(payload.content, payload.noteFields)
       notification.success({
         message: t("sidepanel:notification.savedToNotes", "Saved to Notes")
       })
       resetNoteModal()
     } catch (e: any) {
-      const msg = e?.message || "Failed to save note"
+      const msg = e?.message
+        ? t("sidepanel:notes.createFailedWithReason", "Note creation failed: {{reason}}").replace(
+            "{{reason}}",
+            e.message
+          )
+        : t(
+            "sidepanel:notes.createFailed",
+            "Note creation failed. The captured selection was not saved."
+          )
       setNoteError(msg)
       notification.error({ message: msg })
     } finally {

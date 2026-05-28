@@ -336,7 +336,7 @@ describe("NotesManagerPage stage 10 AI title generation", () => {
     const strategySelect = await screen.findByTestId("notes-title-strategy-select")
     const selectTrigger = strategySelect.closest(".ant-select") || strategySelect
     fireEvent.mouseDown(selectTrigger)
-    fireEvent.click(await screen.findByText("LLM (quality)"))
+    fireEvent.click(await screen.findByText("AI-powered"))
 
     await waitFor(() => {
       expect(mockSetSetting).toHaveBeenCalled()

@@ -6,6 +6,7 @@ import cytoscape, { Core } from 'cytoscape'
 import dagre from 'cytoscape-dagre'
 import { bgRequest } from '@/services/background-proxy'
 import { useTranslation } from 'react-i18next'
+import { getNotesGraphEdgeLabel } from './notes-manager-utils'
 
 cytoscape.use(dagre)
 
@@ -83,7 +84,17 @@ const NotesGraphModal: React.FC<NotesGraphModalProps> = ({
   const graphElements = React.useMemo(() => {
     const nodes = Array.isArray(data?.elements?.nodes) ? data?.elements?.nodes : []
     const edges = Array.isArray(data?.elements?.edges) ? data?.elements?.edges : []
-    return [...nodes, ...edges]
+    return [...nodes, ...edges].map((element) => {
+      const elementData = element?.data || {}
+      if (!elementData.source || !elementData.target) return element
+      return {
+        ...element,
+        data: {
+          ...elementData,
+          displayLabel: elementData.label || getNotesGraphEdgeLabel(elementData.type)
+        }
+      }
+    })
   }, [data])
 
   const openSelectedNote = React.useCallback(() => {
@@ -151,7 +162,7 @@ const NotesGraphModal: React.FC<NotesGraphModalProps> = ({
             'curve-style': 'bezier',
             'target-arrow-shape': 'triangle',
             'target-arrow-color': '#94a3b8',
-            label: 'data(type)',
+            label: 'data(displayLabel)',
             'font-size': '8px',
             color: '#64748b'
           } as any
@@ -344,6 +355,8 @@ const NotesGraphModal: React.FC<NotesGraphModalProps> = ({
         <span>{t('option:notesSearch.graphLegendManual', { defaultValue: 'Manual = linked by you' })}</span>
         <span>{t('option:notesSearch.graphLegendWikilink', { defaultValue: 'Note link = [[ ]] syntax' })}</span>
         <span>{t('option:notesSearch.graphLegendBacklink', { defaultValue: 'Backlink = linked from another note' })}</span>
+        <span>{t('option:notesSearch.graphLegendTagMembership', { defaultValue: 'Tag = shared tag' })}</span>
+        <span>{t('option:notesSearch.graphLegendSourceMembership', { defaultValue: 'Source = shared source' })}</span>
       </div>
     </Modal>
   )

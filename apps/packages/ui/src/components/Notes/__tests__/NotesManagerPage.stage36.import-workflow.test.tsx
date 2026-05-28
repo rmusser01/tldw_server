@@ -199,6 +199,12 @@ describe("NotesManagerPage stage 36 import workflow", () => {
     })
     expect(screen.getByTestId("notes-import-preview-summary")).toHaveTextContent("Files: 1")
     expect(screen.getByTestId("notes-import-preview-summary")).toHaveTextContent("Estimated notes: 1")
+    expect(importInput.accept).toContain(".txt")
+    expect(
+      screen.getByText(
+        "Upload JSON exports, Markdown (.md/.markdown), or plain text (.txt) files. Choose how to handle imported IDs that already exist."
+      )
+    ).toBeInTheDocument()
 
     fireEvent.change(screen.getByTestId("notes-import-duplicate-strategy"), {
       target: { value: "skip" }
@@ -224,7 +230,7 @@ describe("NotesManagerPage stage 36 import workflow", () => {
     expect(mockMessageSuccess).toHaveBeenCalledWith("Imported 2 notes.")
   })
 
-  it("shows file parse preview error and warning toast for partial import results", async () => {
+  it("shows warning toast for partial import results", async () => {
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")
       const method = String(request.method || "GET").toUpperCase()
@@ -253,17 +259,14 @@ describe("NotesManagerPage stage 36 import workflow", () => {
     renderPage()
 
     const importInput = screen.getByTestId("notes-import-input") as HTMLInputElement
-    const invalidJsonFile = new File(["{not-json"], "broken-import.json", {
+    const importFile = new File([JSON.stringify([{ title: "Imported title", content: "Imported body" }])], "partial-import.json", {
       type: "application/json"
     })
     fireEvent.change(importInput, {
-      target: { files: [invalidJsonFile] }
+      target: { files: [importFile] }
     })
 
-    await waitFor(() => {
-      expect(screen.getByText("Could not parse notes from this JSON file.")).toBeInTheDocument()
-    })
-
+    expect(await screen.findByTestId("notes-import-modal")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Import notes" }))
 
     await waitFor(() => {
@@ -271,5 +274,49 @@ describe("NotesManagerPage stage 36 import workflow", () => {
         expect.stringContaining("Import completed with partial results")
       )
     })
+  })
+
+  it("blocks submit when selected files have parse errors and preserves the preview", async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+      if (path.startsWith("/api/v1/notes/?")) {
+        return { items: [], pagination: { total_items: 0, total_pages: 1 } }
+      }
+      if (path === "/api/v1/admin/notes/title-settings" && method === "GET") {
+        return {
+          llm_enabled: false,
+          default_strategy: "heuristic",
+          effective_strategy: "heuristic",
+          strategies: ["heuristic"]
+        }
+      }
+      if (path === "/api/v1/notes/import" && method === "POST") {
+        throw new Error("invalid import should not submit")
+      }
+      return {}
+    })
+
+    renderPage()
+
+    const importInput = screen.getByTestId("notes-import-input") as HTMLInputElement
+    const invalidJsonFile = new File(["{not-json"], "broken-import.json", {
+      type: "application/json"
+    })
+    fireEvent.change(importInput, {
+      target: { files: [invalidJsonFile] }
+    })
+
+    expect(await screen.findByText("Could not parse notes from this JSON file.")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Import notes" }))
+
+    expect(mockMessageWarning).toHaveBeenCalledWith(
+      "Fix or reselect files with import errors before importing."
+    )
+    expect(screen.getByTestId("notes-import-modal")).toBeInTheDocument()
+    expect(
+      mockBgRequest.mock.calls.some(([request]) => request.path === "/api/v1/notes/import")
+    ).toBe(false)
   })
 })

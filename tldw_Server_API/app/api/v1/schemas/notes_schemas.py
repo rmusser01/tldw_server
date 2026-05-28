@@ -159,6 +159,18 @@ class NoteKeywordSyncStatus(BaseModel):
     )
 
 
+class NoteFolderCreate(BaseModel):
+    path: str = Field(..., min_length=1, max_length=500, description="Relative folder path to create or reuse")
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Folder path cannot be empty.")
+        return normalized
+
+
 class NoteFolderResponse(BaseModel):
     id: int = Field(..., description="Integer ID of the folder")
     name: str = Field(..., description="Folder display name")
@@ -166,6 +178,12 @@ class NoteFolderResponse(BaseModel):
     parent_id: int | None = Field(default=None, description="Parent folder ID, if any")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class NoteFoldersListResponse(BaseModel):
+    items: list[NoteFolderResponse] = Field(default_factory=list, description="Folder rows")
+    folders: list[NoteFolderResponse] = Field(default_factory=list, description="Alias for items")
+    count: int = Field(default=0, ge=0, description="Number of returned folders")
 
 
 class NoteResponse(NoteBase):

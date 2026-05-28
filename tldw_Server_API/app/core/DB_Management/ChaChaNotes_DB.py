@@ -8007,67 +8007,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Backfill note folder tables for PostgreSQL deployments."""
         if not hasattr(self.backend, "execute"):
             return
-        statements = [
-            """
-            CREATE TABLE IF NOT EXISTS note_folders(
-              id            BIGSERIAL PRIMARY KEY,
-              name          TEXT    NOT NULL,
-              path          TEXT    UNIQUE NOT NULL,
-              parent_id     BIGINT REFERENCES note_folders(id)
-                             ON DELETE CASCADE ON UPDATE CASCADE,
-              created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              deleted       BOOLEAN NOT NULL DEFAULT FALSE,
-              client_id     TEXT    NOT NULL DEFAULT 'unknown',
-              version       INTEGER NOT NULL DEFAULT 1
+        duplicate_folder_cte = """
+            WITH ranked_folders AS (
+              SELECT
+                id,
+                FIRST_VALUE(id) OVER (
+                  PARTITION BY LOWER(path)
+                  ORDER BY id ASC
+                ) AS canonical_id
+              FROM note_folders
+              WHERE deleted = FALSE
+            ),
+            duplicate_folders AS (
+              SELECT
+                id AS duplicate_id,
+                canonical_id
+              FROM ranked_folders
+              WHERE id <> canonical_id
             )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)",
-            "CREATE INDEX IF NOT EXISTS idx_note_folders_path ON note_folders(path)",
-            """
-            CREATE TABLE IF NOT EXISTS note_folder_memberships(
-              note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              folder_id  BIGINT  NOT NULL REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              PRIMARY KEY(note_id, folder_id)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_note_folder_memberships_folder ON note_folder_memberships(folder_id)",
-            """
-            CREATE TABLE IF NOT EXISTS note_folder_source_memberships(
-              note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              source_id  INTEGER NOT NULL,
-              folder_id  BIGINT  NOT NULL REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              PRIMARY KEY(note_id, source_id, folder_id)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_note_folder_source_memberships_note_source ON note_folder_source_memberships(note_id, source_id)",
-            "CREATE INDEX IF NOT EXISTS idx_note_folder_source_memberships_folder ON note_folder_source_memberships(folder_id)",
-            """
-            CREATE TABLE IF NOT EXISTS note_folder_source_keys(
-              source_id   INTEGER NOT NULL,
-              folder_key  TEXT    NOT NULL,
-              folder_id   BIGINT  NOT NULL REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              PRIMARY KEY(source_id, folder_key)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS idx_note_folder_source_keys_folder ON note_folder_source_keys(folder_id)",
-        ]
-        for statement in statements:
-            conn.execute(statement)
+        """
 
-    def _ensure_note_folder_schema_postgres(self, conn: Any) -> None:
-        """Backfill note folder tables for PostgreSQL deployments."""
-        if not hasattr(self.backend, "execute"):
-            return
+        def duplicate_folder_statement(sql_body: str) -> str:
+            return "\n".join((duplicate_folder_cte, sql_body))
+
         statements = [
             """
             CREATE TABLE IF NOT EXISTS note_folders(
               id            BIGSERIAL PRIMARY KEY,
               name          TEXT    NOT NULL,
-              path          TEXT    UNIQUE NOT NULL,
+              path          TEXT    NOT NULL,
               parent_id     BIGINT REFERENCES note_folders(id)
                              ON DELETE CASCADE ON UPDATE CASCADE,
               created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -8077,6 +8045,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               version       INTEGER NOT NULL DEFAULT 1
             )
             """,
+            "ALTER TABLE note_folders DROP CONSTRAINT IF EXISTS note_folders_path_key",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_path ON note_folders(path)",
             """
@@ -8109,6 +8078,94 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_note_folder_source_keys_folder ON note_folder_source_keys(folder_id)",
+            duplicate_folder_statement(
+                """
+            INSERT INTO note_folder_memberships(note_id, folder_id, created_at)
+            SELECT
+              membership.note_id,
+              duplicate_folders.canonical_id,
+              MIN(membership.created_at)
+            FROM note_folder_memberships AS membership
+            JOIN duplicate_folders
+              ON membership.folder_id = duplicate_folders.duplicate_id
+            GROUP BY membership.note_id, duplicate_folders.canonical_id
+            ON CONFLICT (note_id, folder_id) DO NOTHING
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            DELETE FROM note_folder_memberships AS membership
+            USING duplicate_folders
+            WHERE membership.folder_id = duplicate_folders.duplicate_id
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            INSERT INTO note_folder_source_memberships(note_id, source_id, folder_id, created_at)
+            SELECT
+              membership.note_id,
+              membership.source_id,
+              duplicate_folders.canonical_id,
+              MIN(membership.created_at)
+            FROM note_folder_source_memberships AS membership
+            JOIN duplicate_folders
+              ON membership.folder_id = duplicate_folders.duplicate_id
+            GROUP BY membership.note_id, membership.source_id, duplicate_folders.canonical_id
+            ON CONFLICT (note_id, source_id, folder_id) DO NOTHING
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            DELETE FROM note_folder_source_memberships AS membership
+            USING duplicate_folders
+            WHERE membership.folder_id = duplicate_folders.duplicate_id
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            UPDATE note_folder_source_keys AS source_key
+            SET folder_id = duplicate_folders.canonical_id
+            FROM duplicate_folders
+            WHERE source_key.folder_id = duplicate_folders.duplicate_id
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            UPDATE note_folders AS child
+            SET parent_id = CASE
+              WHEN child.id = duplicate_folders.canonical_id THEN NULL
+              ELSE duplicate_folders.canonical_id
+            END
+            FROM duplicate_folders
+            WHERE child.parent_id = duplicate_folders.duplicate_id
+            """
+            ),
+            duplicate_folder_statement(
+                """
+            DELETE FROM note_folders AS folder
+            USING duplicate_folders
+            WHERE folder.id = duplicate_folders.duplicate_id
+            """
+            ),
+            """
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1
+                  FROM pg_indexes
+                 WHERE schemaname = current_schema()
+                   AND tablename = 'note_folders'
+                   AND indexname = 'idx_note_folders_path_lower'
+                   AND indexdef NOT ILIKE '%WHERE%deleted%'
+              ) THEN
+                DROP INDEX idx_note_folders_path_lower;
+              END IF;
+            END $$;
+            """,
+            (
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_lower "
+                "ON note_folders(LOWER(path)) WHERE deleted = FALSE"
+            ),
         ]
         for statement in statements:
             self.backend.execute(statement, connection=conn)
@@ -17720,7 +17777,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return None
         return self._coerce_mapping_row(
             conn.execute(
-                "SELECT id, path, deleted, version FROM note_folders WHERE LOWER(path) = LOWER(?)",
+                """
+                SELECT id, path, deleted, version
+                  FROM note_folders
+                 WHERE LOWER(path) = LOWER(?)
+                 ORDER BY deleted ASC, id ASC
+                 LIMIT 1
+                """,
                 (normalized_path,),
             ).fetchone()
         )
@@ -17784,6 +17847,66 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not created_row:
             raise CharactersRAGDBError(f"Failed to create note folder path '{normalized_path}'.")  # noqa: TRY003
         return int(created_row["id"])
+
+    def _active_note_folder_deleted_value(self) -> bool | int:
+        return False if self.backend_type == BackendType.POSTGRESQL else 0
+
+    def create_note_folder_path(self, folder_path: str) -> dict[str, Any]:
+        """Create or reuse a note folder path and return the active folder row."""
+        try:
+            with self.transaction() as conn:
+                folder_id = self._ensure_note_folder_path_locked(conn, folder_path)
+                folder_row = self._coerce_mapping_row(
+                    conn.execute(
+                        """
+                        SELECT id, name, path, parent_id
+                          FROM note_folders
+                         WHERE id = ? AND deleted = ?
+                        """,
+                        (folder_id, self._active_note_folder_deleted_value()),
+                    ).fetchone()
+                )
+                if folder_row is None:
+                    raise CharactersRAGDBError(f"Failed to reload note folder '{folder_path}'.")  # noqa: TRY003
+                return folder_row
+        except CharactersRAGDBError:
+            raise
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError(f"Failed creating note folder path: {exc}") from exc  # noqa: TRY003
+
+    def get_note_folder_by_path(self, folder_path: str) -> dict[str, Any] | None:
+        """Return an active note folder row by case-insensitive normalized path."""
+        normalized_path = self._normalize_note_folder_path(folder_path)
+        if not normalized_path:
+            return None
+        cursor = self.execute_query(
+            """
+            SELECT id, name, path, parent_id
+              FROM note_folders
+             WHERE LOWER(path) = LOWER(?) AND deleted = ?
+            """,
+            (normalized_path, self._active_note_folder_deleted_value()),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def list_note_folders(self, limit: int = 1000, offset: int = 0) -> list[dict[str, Any]]:
+        """Return active note folders ordered by path for picker UIs."""
+        if limit <= 0:
+            return []
+        path_order_expr = self._case_insensitive_order_expression("path")
+        query = (
+            "SELECT id, name, path, parent_id "
+            "FROM note_folders "
+            "WHERE deleted = ? "
+            f"ORDER BY {path_order_expr} "  # nosec B608
+            "LIMIT ? OFFSET ?"
+        )
+        cursor = self.execute_query(
+            query,
+            (self._active_note_folder_deleted_value(), limit, max(0, offset)),
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
     def sync_note_folders(self, note_id: str, folder_paths: list[str] | tuple[str, ...]) -> list[dict[str, Any]]:
         desired_paths = self._expand_note_folder_paths(list(folder_paths or []))

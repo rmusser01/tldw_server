@@ -60,7 +60,7 @@ describe("notes export utils", () => {
     expect(buildSingleNoteCopyText(note, "markdown")).toContain("# Copy note")
   })
 
-  it("builds printable html with sanitized markdown content and metadata", () => {
+  it("builds printable html with sanitized markdown content and tag metadata", () => {
     const html = buildSingleNotePrintableHtml(
       {
         id: 11,
@@ -75,7 +75,7 @@ describe("notes export utils", () => {
 
     expect(html).toContain("Printable &lt;Note&gt;")
     expect(html).toContain("<strong>bold</strong>")
-    expect(html).toContain("Keywords:</strong> research, summary")
+    expect(html).toContain("Tags:</strong> research, summary")
     expect(html).toContain("2026-02-18T00:00:00.000Z")
     expect(html).not.toContain("<script>")
   })

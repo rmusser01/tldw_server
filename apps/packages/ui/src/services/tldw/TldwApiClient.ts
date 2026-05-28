@@ -3586,6 +3586,41 @@ export class TldwApiClientBase {
     return await bgRequest<any>({ path: '/api/v1/notes/', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { content, ...metadata } })
   }
 
+  async listNoteFolders(): Promise<{
+    items: Array<{
+      id: number
+      name: string
+      path: string
+      parent_id: number | null
+    }>
+    folders?: Array<{
+      id: number
+      name: string
+      path: string
+      parent_id: number | null
+    }>
+    count: number
+  }> {
+    return await bgRequest({
+      path: "/api/v1/notes/folders/",
+      method: "GET"
+    })
+  }
+
+  async createNoteFolder(path: string): Promise<{
+    id: number
+    name: string
+    path: string
+    parent_id: number | null
+  }> {
+    return await bgRequest({
+      path: "/api/v1/notes/folders/",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  }
+
   async listNotes(
     params?: {
       page?: number

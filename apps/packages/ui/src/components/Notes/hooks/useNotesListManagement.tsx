@@ -3,6 +3,7 @@ import type { MessageInstance } from 'antd/es/message/interface'
 import type { QueryClient } from '@tanstack/react-query'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { bgRequest } from '@/services/background-proxy'
+import { CAPTURED_NOTE_KEYWORD } from '@/services/note-capture'
 import { getSetting, setSetting } from '@/services/settings/registry'
 import {
   NOTES_PAGE_SIZE_SETTING,
@@ -88,7 +89,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
 
   // ---- derived ----
   const effectiveKeywordTokens = React.useMemo(() => {
-    const merged = [...keywordTokens, ...notebookKeywordTokens]
+    const merged = [
+      ...(listViewMode === 'inbox' ? [CAPTURED_NOTE_KEYWORD] : []),
+      ...keywordTokens,
+      ...notebookKeywordTokens
+    ]
     const deduped: string[] = []
     for (const token of merged) {
       const normalized = String(token || '').trim().toLowerCase()
@@ -97,7 +102,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       deduped.push(normalized)
     }
     return deduped
-  }, [keywordTokens, notebookKeywordTokens])
+  }, [keywordTokens, listViewMode, notebookKeywordTokens])
 
   const selectedNotebook = React.useMemo(
     () =>
@@ -270,7 +275,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     return sortNoteRows(items, sortOption).map(mapNoteListItem)
   }, [effectiveKeywordTokens, fetchFilteredNotesRaw, listMode, listViewMode, page, pageSize, query, selectedMoodboardId, sortOption])
 
-  const { data, isFetching, refetch } = useQuery({
+  const { data, isFetching, refetch, isError, error } = useQuery({
     queryKey: [
       'notes',
       listMode,
@@ -287,6 +292,13 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     placeholderData: keepPreviousData,
     enabled: isOnline
   })
+  const listErrorMessage = React.useMemo(() => {
+    if (!isError) return null
+    const messageText = String((error as any)?.message || error || '').trim()
+    return messageText || t('option:notesSearch.loadErrorDescription', {
+      defaultValue: 'The notes list failed to load. Retry the request or check server health.'
+    })
+  }, [error, isError, t])
 
   /** Raw notes from the query - pinning is applied at the component level */
   const rawNotes = React.useMemo(() => {
@@ -715,8 +727,9 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     setQueryInput('')
     setKeywordTokens([])
     setSelectedNotebookId(null)
+    setListViewMode('list')
     setPage(1)
-  }, [setKeywordTokens])
+  }, [setKeywordTokens, setListViewMode])
 
   const clearBulkSelection = React.useCallback(() => {
     setBulkSelectedIds([])
@@ -917,7 +930,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     bulkSelectedIdSet, selectedBulkNotes,
     hasActiveFilters,
     // query data
-    data, isFetching, refetch,
+    data, isFetching, refetch, isError, error, listErrorMessage,
     // helpers
     fetchFilteredNotesRaw,
     clearSearchQueryTimeout,
