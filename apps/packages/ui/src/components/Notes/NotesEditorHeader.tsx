@@ -10,7 +10,7 @@ import {
   Sparkles as SparklesIcon,
   Copy as CopyIcon,
   FileDown as FileDownIcon,
-  FilePlus2 as FileTemplateIcon,
+  FilePlus2 as FilePlusIcon,
   Save as SaveIcon,
   Star as StarIcon,
   Trash2 as TrashIcon,
@@ -58,6 +58,7 @@ interface NotesEditorHeaderProps {
   onOpenNotesStudio?: () => void
   onExport: (format: 'md' | 'json' | 'print') => void
   onSave: () => void
+  onSaveAndNew?: () => void
   onDelete: () => void
   studioBadgeLabel?: string | null
 }
@@ -99,6 +100,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
   onOpenNotesStudio,
   onExport,
   onSave,
+  onSaveAndNew,
   onDelete,
   studioBadgeLabel = null,
 }) => {
@@ -164,6 +166,15 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
     if (!editorDisabled) {
       const createChildren: MenuProps['items'] = []
 
+      if (isMobileViewport && onSaveAndNew) {
+        createChildren.push({
+          key: 'save-and-new',
+          label: t('option:notesSearch.saveAndNewAction', { defaultValue: 'Save & new' }),
+          icon: (<FilePlusIcon className="w-4 h-4" />),
+          disabled: !canSave
+        })
+      }
+
       if (onDuplicate) {
         createChildren.push({
           key: 'duplicate',
@@ -177,7 +188,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
         createChildren.push({
           key: 'template-submenu',
           label: t('option:notesSearch.templateAction', { defaultValue: 'From Template' }),
-          icon: (<FileTemplateIcon className="w-4 h-4" />),
+          icon: (<FilePlusIcon className="w-4 h-4" />),
           children: templateOptions.map((tpl) => ({
             key: `template-${tpl.id}`,
             label: tpl.label
@@ -338,12 +349,14 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
     canOpenNotesStudio,
     canGenerateFlashcards,
     canCreateStudyPack,
+    canSave,
     canExport,
     canDelete,
     hasContent,
     backlinkConversationId,
     templateOptions,
     onDuplicate,
+    onSaveAndNew,
     onApplyTemplate,
     onTogglePin,
     t
@@ -362,6 +375,9 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
         break
       case 'duplicate':
         onDuplicate?.()
+        break
+      case 'save-and-new':
+        onSaveAndNew?.()
         break
       case 'pin':
         onTogglePin?.()
@@ -497,6 +513,35 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
             {t('common:save', { defaultValue: 'Save' })}
           </Button>
         </Tooltip>
+
+        {!isMobileViewport && onSaveAndNew ? (
+          <Tooltip
+            title={
+              !canSave
+                ? t('option:notesSearch.toolbarSaveDisabledTooltip', {
+                    defaultValue: 'Add a title or content to save'
+                  })
+                : t('option:notesSearch.toolbarSaveAndNewTooltip', {
+                    defaultValue: 'Save and start another note'
+                  })
+            }
+          >
+            <Button
+              size={toolbarButtonSize}
+              onClick={onSaveAndNew}
+              loading={isSaving}
+              disabled={!canSave}
+              icon={(<FilePlusIcon className="w-4 h-4" />)}
+              className={touchTargetClass}
+              aria-label={t('option:notesSearch.toolbarSaveAndNewTooltip', {
+                defaultValue: 'Save and start another note'
+              })}
+              data-testid="notes-save-and-new-button"
+            >
+              {t('option:notesSearch.saveAndNewAction', { defaultValue: 'Save & new' })}
+            </Button>
+          </Tooltip>
+        ) : null}
 
         {/* Editor mode toggle - visible on desktop, hidden on mobile */}
         {!isMobileViewport && (

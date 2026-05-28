@@ -828,6 +828,24 @@ const NotesManagerPage: React.FC = () => {
     startDraftSession
   ])
 
+  const saveAndStartNew = React.useCallback(async () => {
+    const saved = await ed.saveNote()
+    if (!saved) return
+    if (list.listMode !== 'active') list.setListMode('active')
+    if (isMobileViewport) setMobileSidebarOpen(false)
+    startDraftSession()
+    window.setTimeout(() => {
+      ed.titleInputRef.current?.focus()
+    }, 0)
+  }, [
+    ed.saveNote,
+    ed.titleInputRef,
+    isMobileViewport,
+    list.listMode,
+    list.setListMode,
+    startDraftSession
+  ])
+
   const handleCreateStudyPackFromNote = React.useCallback(() => {
     const selectedNoteId = ed.selectedId
     if (selectedNoteId == null) {
@@ -2384,6 +2402,7 @@ const NotesManagerPage: React.FC = () => {
         exportSelected={exp.exportSelected}
         saveNote={ed.saveNote}
         reloadSelectedNoteAfterConflict={ed.reloadSelectedNoteAfterConflict}
+        saveAndStartNew={saveAndStartNew}
         deleteNote={async () => {
           await deleteNote()
         }}

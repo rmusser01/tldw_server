@@ -251,6 +251,78 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     })
   })
 
+  it("saves a draft and immediately opens a blank focused draft for repeated capture", async () => {
+    renderPage()
+
+    const titleInput = screen.getByPlaceholderText("Title")
+    const contentInput = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    )
+
+    fireEvent.change(titleInput, {
+      target: { value: "First quick capture" }
+    })
+    fireEvent.change(contentInput, {
+      target: { value: "Capture this and keep moving." }
+    })
+
+    fireEvent.click(screen.getByTestId("notes-save-and-new-button"))
+
+    await waitFor(() => {
+      expect(createCalls()).toHaveLength(1)
+    })
+
+    await waitFor(() => {
+      expect(titleInput).toHaveValue("")
+      expect(contentInput).toHaveValue("")
+    })
+    expect(titleInput).toHaveFocus()
+  })
+
+  it("keeps the current draft in place when save and new fails", async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+
+      if (path.startsWith("/api/v1/notes/?")) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+
+      if (path === "/api/v1/notes/" && method === "POST") {
+        throw new Error("Save failed")
+      }
+
+      return {}
+    })
+
+    renderPage()
+
+    const titleInput = screen.getByPlaceholderText("Title")
+    const contentInput = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    )
+
+    fireEvent.change(titleInput, {
+      target: { value: "Do not lose this" }
+    })
+    fireEvent.change(contentInput, {
+      target: { value: "The save failed, so this text must remain." }
+    })
+
+    fireEvent.click(screen.getByTestId("notes-save-and-new-button"))
+
+    await waitFor(() => {
+      expect(createCalls()).toHaveLength(1)
+      expect(mockMessageError).toHaveBeenCalledWith("Save failed")
+    })
+
+    expect(titleInput).toHaveValue("Do not lose this")
+    expect(contentInput).toHaveValue("The save failed, so this text must remain.")
+  })
+
   it("does not save when Ctrl/Cmd+S is pressed outside the editor region", async () => {
     renderPage()
 

@@ -162,7 +162,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   // ---- refs ----
   const autosaveTimeoutRef = React.useRef<number | null>(null)
-  const saveNoteRef = React.useRef<((opts?: { showSuccessMessage?: boolean }) => Promise<void>) | null>(null)
+  const saveNoteRef = React.useRef<((opts?: { showSuccessMessage?: boolean }) => Promise<boolean>) | null>(null)
   const savingInFlightRef = React.useRef(false)
   const titleInputRef = React.useRef<InputRef | null>(null)
   const contentTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
@@ -466,50 +466,55 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (!isDirty) return true
     if (!saving && (content.trim() || title.trim()) && saveNoteRef.current) {
       try {
-        await saveNoteRef.current({ showSuccessMessage: false })
-        return true
+        const saved = await saveNoteRef.current({ showSuccessMessage: false })
+        if (saved) return true
       } catch {
-        // Save failed — show 3-button dialog: retry / discard / cancel
-        const retryResult = await new Promise<'saved' | 'discard' | 'cancel'>((resolve) => {
-          const modalRef = Modal.confirm({
-            title: t('option:notesSearch.unsavedChangesTitle', { defaultValue: 'Save changes?' }),
-            content: t('option:notesSearch.unsavedChangesContent', {
-              defaultValue: 'Auto-save could not reach the server. You can try saving again or discard your changes.'
-            }),
-            okText: t('option:notesSearch.retrySave', { defaultValue: 'Try saving again' }),
-            cancelText: t('common:cancel', { defaultValue: 'Cancel' }),
-            okButtonProps: { type: 'primary' },
-            onOk: async () => {
-              try {
-                if (saveNoteRef.current) {
-                  await saveNoteRef.current({ showSuccessMessage: true })
-                }
-                resolve('saved')
-              } catch {
-                // Save still failed — stay on current note
-                resolve('cancel')
-              }
-            },
-            onCancel: () => resolve('cancel'),
-            footer: (_, { OkBtn, CancelBtn }) => (
-              <>
-                <CancelBtn />
-                <Button
-                  danger
-                  onClick={() => {
-                    modalRef.destroy()
-                    resolve('discard')
-                  }}
-                >
-                  {t('option:notesSearch.discardChanges', { defaultValue: 'Discard changes' })}
-                </Button>
-                <OkBtn />
-              </>
-            ),
-          })
-        })
-        return retryResult === 'saved' || retryResult === 'discard'
+        // Fall through to the retry/discard/cancel dialog below.
       }
+      // Save failed — show 3-button dialog: retry / discard / cancel
+      const retryResult = await new Promise<'saved' | 'discard' | 'cancel'>((resolve) => {
+        const modalRef = Modal.confirm({
+          title: t('option:notesSearch.unsavedChangesTitle', { defaultValue: 'Save changes?' }),
+          content: t('option:notesSearch.unsavedChangesContent', {
+            defaultValue: 'Auto-save could not reach the server. You can try saving again or discard your changes.'
+          }),
+          okText: t('option:notesSearch.retrySave', { defaultValue: 'Try saving again' }),
+          cancelText: t('common:cancel', { defaultValue: 'Cancel' }),
+          okButtonProps: { type: 'primary' },
+          onOk: async () => {
+            try {
+              if (saveNoteRef.current) {
+                const saved = await saveNoteRef.current({ showSuccessMessage: true })
+                if (!saved) {
+                  resolve('cancel')
+                  return
+                }
+              }
+              resolve('saved')
+            } catch {
+              // Save still failed — stay on current note
+              resolve('cancel')
+            }
+          },
+          onCancel: () => resolve('cancel'),
+          footer: (_, { OkBtn, CancelBtn }) => (
+            <>
+              <CancelBtn />
+              <Button
+                danger
+                onClick={() => {
+                  modalRef.destroy()
+                  resolve('discard')
+                }}
+              >
+                {t('option:notesSearch.discardChanges', { defaultValue: 'Discard changes' })}
+              </Button>
+              <OkBtn />
+            </>
+          ),
+        })
+      })
+      return retryResult === 'saved' || retryResult === 'discard'
     }
     // Fallback for edge cases (empty content or save in progress)
     const ok = await confirmDanger({
@@ -720,13 +725,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   // ---- save note ----
   const saveNote = React.useCallback(
     async ({ showSuccessMessage = true }: SaveNoteOptions = {}) => {
-      if (saving || savingInFlightRef.current) return
+      if (saving || savingInFlightRef.current) return false
       if (!content.trim() && !title.trim()) {
         if (showSuccessMessage) {
           message.warning('Nothing to save')
         }
         setSaveIndicator('idle')
-        return
+        return false
       }
       if (!isOnline) {
         const queuedAt = new Date().toISOString()
@@ -746,7 +751,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             })
           )
         }
-        return
+        return true
       }
       if (
         selectedId != null &&
@@ -763,7 +768,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           cancelText: 'Cancel'
         })
         if (!proceed) {
-          return
+          return false
         }
       }
       savingInFlightRef.current = true
@@ -819,6 +824,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             }
             void loadMonitoringNoticeForSavedNote(created.id, 'notes.create', saveStartedAtMs)
           }
+          return true
         } else {
           let expectedVersion = selectedVersion
           if (expectedVersion == null) {
@@ -839,7 +845,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
               if (showSuccessMessage) {
                 message.error(e?.message || 'Save failed')
               }
-              return
+              return false
             }
           }
           if (expectedVersion == null) {
@@ -853,7 +859,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             if (showSuccessMessage) {
               message.error('Missing version; reload and try again')
             }
-            return
+            return false
           }
           const updated = await bgRequest<any>({
             path: noteResourcePath(selectedId) as any,
@@ -900,6 +906,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           if (selectedId != null) {
             void loadMonitoringNoticeForSavedNote(selectedId, 'notes.update', saveStartedAtMs)
           }
+          return true
         }
       } catch (e: any) {
         setSaveIndicator('error')
@@ -930,6 +937,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             })
           })
         }
+        return false
       } finally {
         savingInFlightRef.current = false
         setSaving(false)

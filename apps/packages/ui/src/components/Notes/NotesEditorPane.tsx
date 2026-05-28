@@ -213,8 +213,9 @@ export interface NotesEditorPaneProps {
   handleCreateStudyPackFromNote?: () => void
   handleOpenNotesStudio: () => void
   exportSelected: (format: SingleNoteExportFormat) => void
-  saveNote: () => Promise<void>
+  saveNote: () => Promise<boolean>
   reloadSelectedNoteAfterConflict: () => Promise<void>
+  saveAndStartNew: () => Promise<void>
   deleteNote: () => Promise<void>
   handleSelectNote: (id: string | number) => Promise<void>
   openGraphModal: () => void
@@ -342,6 +343,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   exportSelected,
   saveNote,
   reloadSelectedNoteAfterConflict,
+  saveAndStartNew,
   deleteNote,
   handleSelectNote,
   openGraphModal,
@@ -523,6 +525,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         }}
         onSave={() => {
           void saveNote()
+        }}
+        onSaveAndNew={() => {
+          void saveAndStartNew()
         }}
         onDelete={() => {
           void deleteNote()
