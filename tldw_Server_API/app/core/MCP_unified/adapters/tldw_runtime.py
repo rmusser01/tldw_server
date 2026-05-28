@@ -42,7 +42,7 @@ _TLDW_RUNTIME_ADAPTER_EXCEPTIONS = (
     RuntimeError,
     TimeoutError,
     TypeError,
-    UnicodeDecodeError,
+    UnicodeError,
     ValueError,
     json.JSONDecodeError,
 )
@@ -167,16 +167,16 @@ class TldwServerAuthProvider:
             verify_jwt_and_fetch_user,
         )
 
-        scope = {
-            "type": "http",
-            "method": "GET",
-            "path": "/api/v1/mcp/ws",
-            "headers": [
-                (key.encode("latin-1"), value.encode("latin-1"))
-                for key, value in websocket.headers.items()
-            ],
-        }
         try:
+            scope = {
+                "type": "http",
+                "method": "GET",
+                "path": "/api/v1/mcp/ws",
+                "headers": [
+                    (key.encode("latin-1"), value.encode("latin-1"))
+                    for key, value in websocket.headers.items()
+                ],
+            }
             client = websocket.client
             if isinstance(client, (list, tuple)) and len(client) >= 2:
                 scope["client"] = (client[0], client[1])
@@ -184,9 +184,10 @@ class TldwServerAuthProvider:
                 scope["client"] = (client.host, getattr(client, "port", 0))
         except _TLDW_RUNTIME_ADAPTER_EXCEPTIONS as exc:
             logger.debug(
-                "MCP AuthNZ websocket client projection failed: {}",
+                "MCP AuthNZ websocket scope projection failed: {}",
                 exc.__class__.__name__,
             )
+            return None
 
         user = await verify_jwt_and_fetch_user(Request(scope), token)
         user_id = str(getattr(user, "id", None) or "")

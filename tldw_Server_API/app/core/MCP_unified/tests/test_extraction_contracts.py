@@ -207,6 +207,38 @@ def test_default_runtime_dependency_builder_exposes_core_dependencies() -> None:
     assert hasattr(deps, "rbac_policy")
 
 
+@pytest.mark.asyncio
+async def test_tldw_auth_provider_fails_closed_for_unencodable_ws_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
+
+    verify_calls = 0
+
+    async def _unexpected_verify(*_args: Any, **_kwargs: Any) -> None:
+        nonlocal verify_calls
+        verify_calls += 1
+        raise AssertionError("verify_jwt_and_fetch_user should not be called")
+
+    monkeypatch.setattr(tldw_runtime, "get_jwt_manager", lambda: object())
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.User_DB_Handling.verify_jwt_and_fetch_user",
+        _unexpected_verify,
+    )
+
+    provider = tldw_runtime.TldwServerAuthProvider()
+    websocket = SimpleNamespace(headers={"x-bad": "snowman \u2603"}, client=None)
+
+    assert (
+        await provider.authenticate_authnz_websocket_token(
+            "token",
+            websocket=websocket,
+        )
+        is None
+    )
+    assert verify_calls == 0
+
+
 def test_stage3_runtime_contracts_are_exported_by_interface_packages() -> None:
     import mcp_unified.interfaces as standalone_interfaces
 
