@@ -28,6 +28,17 @@ const extensionSidepanelRegistrySource = readFileSync(
   "utf8"
 )
 
+const extensionSidepanelFlashcardsComponentCandidates = [
+  "apps/tldw-frontend/extension/routes/sidepanel-flashcards.tsx",
+  "../../tldw-frontend/extension/routes/sidepanel-flashcards.tsx",
+  "../tldw-frontend/extension/routes/sidepanel-flashcards.tsx"
+]
+
+const extensionSidepanelFlashcardsComponentPath =
+  extensionSidepanelFlashcardsComponentCandidates.find((candidate) =>
+    existsSync(candidate)
+  )
+
 const extractLiteralPaths = (source: string): string[] =>
   [...source.matchAll(/path:\s*"([^"]+)"/g)].map((match) => match[1])
 
@@ -49,6 +60,13 @@ describe("sidepanel route metadata availability", () => {
     )
 
     expect(missingSidepanelMetadata).toEqual([])
+  })
+
+  it("registers the Flashcards extension sidepanel route", () => {
+    expect(extensionSidepanelRegistrySource).toMatch(/path:\s*"\/flashcards"/)
+    expect(extensionSidepanelRegistrySource).toContain("SidepanelFlashcards")
+    expect(extensionSidepanelRegistrySource).toContain("sidepanel-flashcards")
+    expect(extensionSidepanelFlashcardsComponentPath).toBeDefined()
   })
 
   it("keeps sidepanel debug routes classified as internal QA", () => {
