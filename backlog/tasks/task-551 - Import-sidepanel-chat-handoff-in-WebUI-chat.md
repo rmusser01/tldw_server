@@ -1,10 +1,10 @@
 ---
 id: TASK-551
 title: Import sidepanel chat handoff in WebUI chat
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-29 07:47'
+updated_date: '2026-05-29 07:48'
 labels:
   - chat
   - extension
