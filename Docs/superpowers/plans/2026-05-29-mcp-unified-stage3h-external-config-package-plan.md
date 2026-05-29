@@ -3,6 +3,7 @@
 **Goal:** Move external MCP server registry config schema parsing/loading into the standalone `mcp_unified` package while preserving host imports and host default config behavior.
 
 **Backlog:** TASK-548
+**PR:** https://github.com/rmusser01/tldw_server/pull/2126
 
 ## Stage 1: RED Boundary And Compatibility Tests
 **Goal:** Capture the desired external-server config schema package seam before implementation.
@@ -34,7 +35,7 @@
 
 - [x] Run focused pytest for extraction contracts, runtime package boundary, external server config schema, and affected external server manager/transport tests.
 - [x] Run Ruff and Bandit on touched code.
-- [x] Update TASK-548 with verification and summary; add the PR link after the PR is opened.
+- [x] Update TASK-548 with verification, summary, and PR link.
 
 ## Verification
 

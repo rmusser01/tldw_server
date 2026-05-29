@@ -1,12 +1,14 @@
 ---
 id: TASK-548
 title: Implement MCP Unified Stage 3H external config schema package seam
-status: In Progress
+status: Done
 labels:
 - mcp
 - mcp-unified
 - standalone
 - stage3
+references:
+- https://github.com/rmusser01/tldw_server/pull/2126
 modified_files:
 - Docs/superpowers/plans/2026-05-29-mcp-unified-stage3h-external-config-package-plan.md
 - mcp_unified/federation/config_schema.py
@@ -46,6 +48,7 @@ Move external MCP server registry config schema parsing/loading into the standal
   - Bandit touched implementation scope: 0 findings in `/tmp/bandit_mcp_stage3h_external_config.json`.
   - `git diff --check`: passed.
 - Known non-slice baseline: adding `tldw_Server_API/tests/MCP_unified/test_phase3_3_small_core_sanitizers.py` to the broad command fails because current `origin/dev` lacks `protocol.get_telemetry_manager`; this slice does not touch protocol telemetry.
+- PR: https://github.com/rmusser01/tldw_server/pull/2126
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
