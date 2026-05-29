@@ -7,6 +7,19 @@ labels:
 - mcp-unified
 - standalone
 - stage3
+modified_files:
+- mcp_unified/interfaces/__init__.py
+- mcp_unified/interfaces/runtime.py
+- tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py
+- tldw_Server_API/app/core/MCP_unified/interfaces/__init__.py
+- tldw_Server_API/app/core/MCP_unified/interfaces/runtime.py
+- tldw_Server_API/app/core/MCP_unified/protocol.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py
+- tldw_Server_API/app/core/DB_Management/Tool_Catalog_DB.py
+- tldw_Server_API/app/services/admin_tool_catalog_service.py
+- tldw_Server_API/tests/Services/test_admin_tool_catalog_service_backend_selection.py
+- backlog/tasks/task-546 - Implement-MCP-Unified-Stage-3F-protocol-catalog-provider-seam.md
 ---
 
 ## Description
@@ -46,20 +59,19 @@ Move protocol tool-catalog lookup behind a runtime dependency provider so MCPPro
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Stage 3F moved tool-catalog filtering out of `MCPProtocol` and into an injected runtime provider seam. Verification:
+Stage 3F moved tool-catalog filtering out of `MCPProtocol` and into an injected runtime provider seam. PR #2113 merged at `7afa5191a6` while this closeout was in progress, so the remaining DB_Management tightening was rebased onto the post-merge `origin/dev` and kept as a single follow-up commit on `codex/mcp-unified-stage3f-protocol-catalog-provider`.
 
-- RED: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py::test_protocol_catalog_lookup_uses_runtime_dependencies tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py::test_protocol_catalog_resolution_uses_injected_provider -q` -> 2 failed for the intended direct import and missing provider delegation.
-- GREEN/focused pytest: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py -q` -> 41 passed, 3 warnings
-- Ruff: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check mcp_unified/interfaces tldw_Server_API/app/core/MCP_unified/interfaces/__init__.py tldw_Server_API/app/core/MCP_unified/interfaces/runtime.py tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py` -> All checks passed
-- Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r mcp_unified/interfaces tldw_Server_API/app/core/MCP_unified/interfaces tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py tldw_Server_API/app/core/MCP_unified/protocol.py -f json -o /tmp/bandit_mcp_stage3f_protocol_catalog_provider.json` -> 0 results, 0 errors
-- `git diff --check` -> passed
+The final closeout moves catalog filter lookup SQL from `app/services` into `tldw_Server_API/app/core/DB_Management/Tool_Catalog_DB.py`; `admin_tool_catalog_service.resolve_tool_catalog_filter_names()` now delegates to that DB_Management helper while preserving the service API used by the MCP runtime adapter. The visible PR review threads were already resolved/outdated on GitHub, and this pass tightens the Qodo raw-SQL remediation rather than changing protocol behavior.
 
-Review-fix pass after rebase onto latest `origin/dev`:
+Verification:
 
-- Focused pytest: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py tldw_Server_API/tests/Services/test_admin_tool_catalog_service_backend_selection.py -q` -> 56 passed, 5 warnings
-- Ruff: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check mcp_unified/interfaces tldw_Server_API/app/core/MCP_unified/interfaces/__init__.py tldw_Server_API/app/core/MCP_unified/interfaces/runtime.py tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py tldw_Server_API/app/services/admin_tool_catalog_service.py tldw_Server_API/tests/Services/test_admin_tool_catalog_service_backend_selection.py` -> All checks passed
-- Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r mcp_unified/interfaces tldw_Server_API/app/core/MCP_unified/interfaces tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/services/admin_tool_catalog_service.py -f json -o /tmp/bandit_mcp_stage3f_protocol_catalog_provider_review.json` -> 0 results, 0 errors
-- `git diff --check` -> passed
+- Rebase: `git rebase origin/dev` -> successfully rebased one follow-up commit onto `origin/dev` after PR #2113 merged.
+- RED: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Services/test_admin_tool_catalog_service_backend_selection.py::test_resolve_tool_catalog_filter_names_delegates_to_db_management -q` -> failed with `ImportError: cannot import name 'Tool_Catalog_DB'`, proving the missing DB_Management seam.
+- GREEN/focused regression: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Services/test_admin_tool_catalog_service_backend_selection.py::test_resolve_tool_catalog_filter_names_delegates_to_db_management tldw_Server_API/tests/Services/test_admin_tool_catalog_service_backend_selection.py::test_resolve_tool_catalog_filter_names_handles_tuple_rows -q` -> 2 passed, 5 warnings.
+- Post-rebase focused pytest: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py tldw_Server_API/tests/Services/test_admin_tool_catalog_service_backend_selection.py -q` -> 57 passed, 5 warnings.
+- Post-rebase Ruff: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check mcp_unified/interfaces tldw_Server_API/app/core/MCP_unified/interfaces/__init__.py tldw_Server_API/app/core/MCP_unified/interfaces/runtime.py tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/core/DB_Management/Tool_Catalog_DB.py tldw_Server_API/app/services/admin_tool_catalog_service.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py tldw_Server_API/tests/Services/test_admin_tool_catalog_service_backend_selection.py` -> All checks passed.
+- Post-rebase Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/DB_Management/Tool_Catalog_DB.py tldw_Server_API/app/services/admin_tool_catalog_service.py -f json -o /tmp/bandit_mcp_stage3f_protocol_catalog_provider_followup_rebased.json` -> 0 results, 0 errors.
+- `git diff --check origin/dev...HEAD` -> passed.
 
 No known blockers or verification skips.
 <!-- SECTION:FINAL_SUMMARY:END -->

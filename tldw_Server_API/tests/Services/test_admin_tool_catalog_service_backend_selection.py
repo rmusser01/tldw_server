@@ -155,6 +155,59 @@ async def test_resolve_tool_catalog_filter_names_handles_tuple_rows() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_resolve_tool_catalog_filter_names_delegates_to_db_management(monkeypatch) -> None:
+    from tldw_Server_API.app.core.DB_Management import Tool_Catalog_DB as tool_catalog_db
+
+    calls: list[dict[str, Any]] = []
+
+    async def _resolve_from_db_management(
+        db: Any,
+        *,
+        catalog_name: str | None,
+        catalog_id: Any,
+        metadata: Any,
+        strict: bool,
+    ) -> set[str]:
+        calls.append(
+            {
+                "db": db,
+                "catalog_name": catalog_name,
+                "catalog_id": catalog_id,
+                "metadata": metadata,
+                "strict": strict,
+            }
+        )
+        return {"media.search"}
+
+    monkeypatch.setattr(
+        tool_catalog_db,
+        "resolve_tool_catalog_filter_names",
+        _resolve_from_db_management,
+    )
+    db = object()
+
+    resolved = await svc.resolve_tool_catalog_filter_names(
+        db,
+        catalog_name="A",
+        catalog_id="12",
+        metadata={"team_id": 7},
+        strict=True,
+    )
+
+    assert resolved == {"media.search"}
+    assert calls == [
+        {
+            "db": db,
+            "catalog_name": "A",
+            "catalog_id": "12",
+            "metadata": {"team_id": 7},
+            "strict": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("call_factory", "expected_log", "raw_marker"),
     [
