@@ -52,11 +52,15 @@ Task 3 completed: updated the Flashcards Import / Export tab label default and s
 
 Task 4 completed: added a one-shot Study-selected deck handoff from Review/Study create routing into ManageTab's Create drawer without reusing the direct Manage route filter state. ManageTab now consumes the handoff into local drawer state, clears it on consume/close/manual create, and FlashcardCreateDrawer applies initialDeckId after reset when opening.
 
+Task 4 follow-up completed: fixed the create handoff workspace reset gap by applying createInitialShowWorkspaceDecks on every new openCreateSignal and clearing selectedWorkspaceId for the create handoff path. Added a ManageTab regression covering prior workspace-scoped Manage state followed by a non-workspace Study create handoff.
+
 Verification:
 - RED Task 4: cd apps/packages/ui && bunx vitest run src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx failed on missing createInitialDeckId handoff and missing drawer initialDeckId behavior.
 - GREEN Task 4: same focused Vitest command passed, 36 tests.
-- Self-review Task 4: git diff --check passed; git diff --stat reviewed.
-- Bandit Task 4: skipped because Task 4 touched TypeScript UI code/tests only, no Python touched.
+- RED Task 4 follow-up: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx failed because the Create drawer still received workspace-77 after a non-workspace create handoff.
+- GREEN Task 4 follow-up: cd apps/packages/ui && bunx vitest run src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx passed, 48 tests.
+- Self-review Task 4 follow-up: git diff --check passed; git diff --stat reviewed.
+- Bandit Task 4 follow-up: skipped because the follow-up touched TypeScript UI code/tests only, no Python touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

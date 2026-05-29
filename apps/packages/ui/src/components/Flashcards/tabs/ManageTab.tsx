@@ -1181,10 +1181,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     if (!openCreateSignal || handledOpenCreateSignalRef.current === openCreateSignal) return
     handledOpenCreateSignalRef.current = openCreateSignal
     setViewMode("cards")
-    if (createInitialShowWorkspaceDecks) {
-      setShowWorkspaceDecks(true)
-      setSelectedWorkspaceId(null)
-    }
+    setShowWorkspaceDecks(createInitialShowWorkspaceDecks)
+    setSelectedWorkspaceId(null)
     if (createInitialDeckId != null) {
       setMDeckId(createInitialDeckId)
       setPage(1)
