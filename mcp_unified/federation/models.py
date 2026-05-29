@@ -30,6 +30,23 @@ def _copy_mapping(value: dict[str, Any] | None) -> dict[str, Any]:
 
 
 @dataclass(slots=True)
+class BrokeredExternalCredential:
+    """Ephemeral per-call auth material resolved outside long-lived adapter state."""
+
+    headers: dict[str, str] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def copy(self) -> BrokeredExternalCredential:
+        """Return caller-owned brokered credential data."""
+        return BrokeredExternalCredential(
+            headers=dict(self.headers or {}),
+            env=dict(self.env or {}),
+            metadata=_copy_mapping(self.metadata),
+        )
+
+
+@dataclass(slots=True)
 class ExternalToolDefinition:
     """Normalized external tool metadata discovered from a transport."""
 
