@@ -1,5 +1,5 @@
 ---
-id: TASK-551
+id: TASK-554
 title: Stabilize full-suite backend flakes blocking Evaluations alert PR
 status: In Progress
 labels:
@@ -29,7 +29,7 @@ PR #2129 review-fix CI exposed unrelated full-suite backend flakes on Windows/ma
 <!-- AC:BEGIN -->
 - [x] #1 Windows/macOS full-suite failure causes are addressed or explicitly documented as unrelated baseline if not safely fixable.
 - [x] #2 Focused tests for the failing Admin, Audio, and Audit cases pass locally.
-- [ ] #3 PR #2134 check rollup is rerun after fixes or status is documented if remote CI remains pending.
+- [x] #3 PR #2134 check rollup is rerun after fixes or status is documented if remote CI remains pending.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -40,17 +40,20 @@ PR #2129 review-fix CI exposed unrelated full-suite backend flakes on Windows/ma
 - Audio heartbeat log coverage now waits briefly for the background heartbeat task to emit the sanitized failure log, avoiding scheduler timing races on slower runners.
 - Audit service stop cleanup now treats `LookupError` from `service.stop()` as a handled stop failure and the async cleanup test waits with a bounded timeout for background cleanup.
 - Opened follow-up PR #2134 from `codex/task-549-full-suite-flakes` after rebasing onto `origin/dev`; the branch diff now contains only this stabilization work on top of the merged Evaluations alert PR.
+- PR #2134 review feedback was addressed by using reverse plus stable sort for invitation ties and moving the audio heartbeat polling inside the `TestClient` lifetime.
+- Latest `origin/dev` introduced a canonical sidepanel `TASK-551`; this stabilization tracker was moved to `TASK-554` to avoid a duplicate Backlog ID.
+- PR #2134 was rebased onto latest `origin/dev` at `87409dded3` and force-pushed with lease at head `d35280b6a3`; GitHub check rollup restarted and was pending/skipped when checked immediately after push.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Opened PR #2134 from `codex/task-549-full-suite-flakes` after rebasing onto `origin/dev`. The branch isolates the full-suite flake fixes exposed by PR #2129: deterministic invitation ordering for tied `created_at` timestamps, less race-prone audio heartbeat failure-log coverage, handled audit stop `LookupError` cleanup, and a bounded audit cleanup wait in tests. Review feedback on PR #2134 has been addressed by using reverse + stable sort for invitation ties and moving the audio heartbeat polling inside the `TestClient` lifetime. Verification passed locally: Admin invitation suite 32 tests, Audio transcription hotword suite 23 tests, Audit DB deps suite 17 tests, `py_compile` on touched Python files, `git diff --check`, and Bandit on touched backend code with 0 findings. Remote PR check rollup is pending rerun after push.
+Opened PR #2134 from `codex/task-549-full-suite-flakes` after rebasing onto `origin/dev`. The branch isolates the full-suite flake fixes exposed by PR #2129: deterministic invitation ordering for tied `created_at` timestamps, less race-prone audio heartbeat failure-log coverage, handled audit stop `LookupError` cleanup, and a bounded audit cleanup wait in tests. Review feedback on PR #2134 has been addressed by using reverse plus stable sort for invitation ties and moving the audio heartbeat polling inside the `TestClient` lifetime. Verification passed locally after the latest rebase: Admin invitation suite 32 tests, Audio transcription hotword suite 23 tests, Audit DB deps suite 17 tests, `py_compile` on touched Python files, `git diff --check`, and Bandit on touched backend code with 0 findings. Remote PR check rollup was restarted after the rebased push and was still pending/skipped when checked.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
