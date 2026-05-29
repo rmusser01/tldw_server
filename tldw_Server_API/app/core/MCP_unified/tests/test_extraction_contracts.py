@@ -6,7 +6,7 @@ import inspect
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, get_type_hints
 
 import pytest
 
@@ -36,6 +36,8 @@ def _fake_runtime_dependencies() -> SimpleNamespace:
         permission_seeder=object(),
         module_config_provider=object(),
         policy_context_provider=object(),
+        environment_flags_provider=_FakeEnvironmentFlagsProvider(),
+        websocket_stream_factory=_RecordingWebSocketStreamFactory(),
     )
 
 
@@ -112,6 +114,90 @@ class _FakePolicyContextProvider:
 
     def is_policy_context_enabled(self) -> bool:
         return self.enabled
+
+
+class _FakeEnvironmentFlagsProvider:
+    """Environment flag provider double with caller-controlled results."""
+
+    def __init__(
+        self,
+        *,
+        flags: dict[str, bool] | None = None,
+        test_mode: bool = False,
+        explicit_pytest_runtime: bool = False,
+        truthy_values: dict[Any, bool] | None = None,
+    ) -> None:
+        self.flags = flags or {}
+        self.test_mode = test_mode
+        self.explicit_pytest_runtime = explicit_pytest_runtime
+        self.truthy_values = truthy_values or {}
+        self.flag_calls: list[str] = []
+        self.truthy_calls: list[Any] = []
+
+    def env_flag_enabled(self, name: str) -> bool:
+        self.flag_calls.append(name)
+        return self.flags.get(name, False)
+
+    def is_test_mode(self) -> bool:
+        return self.test_mode
+
+    def is_explicit_pytest_runtime(self) -> bool:
+        return self.explicit_pytest_runtime
+
+    def is_truthy(self, value: Any) -> bool:
+        self.truthy_calls.append(value)
+        return self.truthy_values.get(value, False)
+
+
+class _FakeWebSocketStream:
+    """Sentinel stream object returned by the injected WebSocket stream factory."""
+
+    def __init__(self) -> None:
+        self.ws = SimpleNamespace(close=lambda *args, **kwargs: None)
+        self.sent: list[dict[str, Any]] = []
+        self.started = False
+        self.stopped = False
+        self.activity_marks = 0
+
+    async def start(self) -> None:
+        self.started = True
+
+    async def stop(self) -> None:
+        self.stopped = True
+
+    def mark_activity(self) -> None:
+        self.activity_marks += 1
+
+    async def send_json(self, payload: dict[str, Any]) -> None:
+        self.sent.append(payload)
+
+
+class _RecordingWebSocketStreamFactory:
+    """WebSocket stream factory double that records construction calls."""
+
+    def __init__(self) -> None:
+        self.stream = _FakeWebSocketStream()
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        websocket: Any,
+        *,
+        heartbeat_interval_s: float | None,
+        idle_timeout_s: float | None,
+        close_on_done: bool,
+        labels: dict[str, str],
+    ) -> _FakeWebSocketStream:
+        self.calls.append(
+            {
+                "websocket": websocket,
+                "heartbeat_interval_s": heartbeat_interval_s,
+                "idle_timeout_s": idle_timeout_s,
+                "close_on_done": close_on_done,
+                "labels": labels,
+            }
+        )
+        return self.stream
 
 
 class _FakeAuthProvider:
@@ -264,6 +350,24 @@ def test_protocol_uses_runtime_dependencies_for_stage3b_host_services() -> None:
     assert offenders == []
 
 
+def test_server_uses_runtime_dependencies_for_stage3c_host_services() -> None:
+    forbidden_imports = {
+        "tldw_Server_API.app.core.AuthNZ.exceptions",
+        "tldw_Server_API.app.core.Streaming.streams",
+        "tldw_Server_API.app.core.testing",
+    }
+
+    imports = _resolved_import_sources_for(MCP_ROOT / "server.py", MCP_PACKAGE)
+    offenders = sorted(
+        source
+        for source in imports
+        if source in forbidden_imports
+        or any(source.startswith(f"{forbidden}.") for forbidden in forbidden_imports)
+    )
+
+    assert offenders == []
+
+
 def test_protocol_boundary_scan_resolves_relative_imports(tmp_path: Path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(
@@ -332,6 +436,34 @@ async def test_tldw_auth_provider_fails_closed_for_unencodable_ws_headers(
     assert verify_calls == 0
 
 
+@pytest.mark.asyncio
+async def test_tldw_auth_provider_fails_closed_when_authnz_ws_verify_rejects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
+
+    async def _reject_token(*_args: Any, **_kwargs: Any) -> None:
+        raise InvalidTokenError("bad token")
+
+    monkeypatch.setattr(tldw_runtime, "get_jwt_manager", lambda: object())
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.User_DB_Handling.verify_jwt_and_fetch_user",
+        _reject_token,
+    )
+
+    provider = tldw_runtime.TldwServerAuthProvider()
+    websocket = SimpleNamespace(headers={}, client=None)
+
+    assert (
+        await provider.authenticate_authnz_websocket_token(
+            "token",
+            websocket=websocket,
+        )
+        is None
+    )
+
+
 def test_stage3_runtime_contracts_are_exported_by_interface_packages() -> None:
     import mcp_unified.interfaces as standalone_interfaces
 
@@ -344,6 +476,9 @@ def test_stage3_runtime_contracts_are_exported_by_interface_packages() -> None:
         "PermissionSeeder",
         "PolicyContextProvider",
         "ServerAuthProvider",
+        "EnvironmentFlagsProvider",
+        "WebSocketStream",
+        "WebSocketStreamFactory",
     ]
 
     for name in names:
@@ -374,6 +509,8 @@ def test_mcp_server_accepts_runtime_dependencies() -> None:
     assert server.permission_seeder is deps.permission_seeder
     assert server.module_config_provider is deps.module_config_provider
     assert server.policy_context_provider is deps.policy_context_provider
+    assert server.environment_flags_provider is deps.environment_flags_provider
+    assert server.websocket_stream_factory is deps.websocket_stream_factory
 
 
 def test_mcp_server_registers_shutdown_family_through_injected_lifecycle_guard() -> None:
@@ -420,6 +557,9 @@ async def test_mcp_server_default_media_module_path_uses_injected_module_config_
     monkeypatch.setenv("MCP_ENABLE_FILESYSTEM_MODULE", "0")
     monkeypatch.setenv("MCP_MODULES_CONFIG", "/tmp/mcp-stage3-no-modules.yaml")
     deps = _server_runtime_dependencies()
+    deps.environment_flags_provider = _FakeEnvironmentFlagsProvider(
+        flags={"MCP_ENABLE_MEDIA_MODULE": True}
+    )
     server = MCPServer(dependencies=deps)
 
     await server._register_default_modules()  # noqa: SLF001
@@ -440,6 +580,73 @@ def test_mcp_server_uses_injected_auth_and_policy_context_helpers() -> None:
 
     assert server._extract_api_key_permissions({"scopes": "ignored"}) == ["fake.scope"]  # noqa: SLF001
     assert server._policy_context_enabled() is False  # noqa: SLF001
+
+
+def test_websocket_stream_factory_declares_returned_stream_contract() -> None:
+    from mcp_unified.interfaces import runtime as standalone_runtime
+
+    hints = get_type_hints(standalone_runtime.WebSocketStreamFactory.__call__)
+
+    assert hints["return"] is standalone_runtime.WebSocketStream
+    assert hasattr(standalone_runtime.WebSocketStream, "start")
+    assert hasattr(standalone_runtime.WebSocketStream, "stop")
+    assert hasattr(standalone_runtime.WebSocketStream, "mark_activity")
+    assert hasattr(standalone_runtime.WebSocketStream, "send_json")
+
+
+def test_mcp_server_websocket_stream_annotations_use_runtime_contract() -> None:
+    from tldw_Server_API.app.core.MCP_unified.interfaces import WebSocketStream
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    create_hints = get_type_hints(MCPServer._create_websocket_stream)
+    handle_hints = get_type_hints(MCPServer._handle_websocket_messages)
+
+    assert create_hints["return"] is WebSocketStream
+    assert handle_hints["stream"] is WebSocketStream
+    assert handle_hints["return"] is type(None)
+
+
+def test_mcp_server_uses_injected_environment_flags_provider() -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    deps = _server_runtime_dependencies()
+    deps.environment_flags_provider = _FakeEnvironmentFlagsProvider(
+        flags={"MCP_ENABLE_DEMO_AUTH": True},
+        test_mode=True,
+        explicit_pytest_runtime=True,
+        truthy_values={"yes": True},
+    )
+    server = MCPServer(dependencies=deps)
+
+    assert server._env_flag_enabled("MCP_ENABLE_DEMO_AUTH") is True  # noqa: SLF001
+    assert server._is_test_mode() is True  # noqa: SLF001
+    assert server._is_explicit_pytest_runtime() is True  # noqa: SLF001
+    assert server._is_truthy("yes") is True  # noqa: SLF001
+
+
+def test_mcp_server_uses_injected_websocket_stream_factory() -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    deps = _server_runtime_dependencies()
+    factory = _RecordingWebSocketStreamFactory()
+    deps.websocket_stream_factory = factory
+    server = MCPServer(dependencies=deps)
+    server.config.ws_ping_interval = 7
+    server.config.ws_idle_timeout_seconds = 11
+    websocket = object()
+
+    stream = server._create_websocket_stream(websocket)  # noqa: SLF001
+
+    assert stream is factory.stream
+    assert factory.calls == [
+        {
+            "websocket": websocket,
+            "heartbeat_interval_s": 7.0,
+            "idle_timeout_s": 11.0,
+            "close_on_done": True,
+            "labels": {"component": "mcp", "endpoint": "mcp_ws"},
+        }
+    ]
 
 
 def test_mcp_server_logs_host_adapter_fallbacks(

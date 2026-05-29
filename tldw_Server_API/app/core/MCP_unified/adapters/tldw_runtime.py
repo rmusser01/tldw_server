@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import get_rate_limi
 from tldw_Server_API.app.core.MCP_unified.interfaces.runtime import (
     AuthenticatedIdentity,
     MCPRuntimeDependencies,
+    WebSocketStream,
 )
 from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
 from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_collector
@@ -182,11 +183,22 @@ class TldwServerAuthProvider:
         websocket: Any,
     ) -> AuthenticatedIdentity | None:
         """Authenticate an AuthNZ websocket bearer token and project identity data."""
-        from starlette.requests import Request
+        try:
+            from starlette.requests import Request
 
-        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-            verify_jwt_and_fetch_user,
-        )
+            from tldw_Server_API.app.core.AuthNZ.exceptions import (
+                InvalidTokenError,
+                TokenExpiredError,
+            )
+            from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
+                verify_jwt_and_fetch_user,
+            )
+        except _TLDW_RUNTIME_ADAPTER_EXCEPTIONS as exc:
+            logger.debug(
+                "MCP AuthNZ websocket dependencies unavailable: {}",
+                exc.__class__.__name__,
+            )
+            return None
 
         try:
             scope = {
@@ -210,7 +222,20 @@ class TldwServerAuthProvider:
             )
             return None
 
-        user = await verify_jwt_and_fetch_user(Request(scope), token)
+        try:
+            user = await verify_jwt_and_fetch_user(Request(scope), token)
+        except (InvalidTokenError, TokenExpiredError) as exc:
+            logger.debug(
+                "MCP AuthNZ websocket token authentication failed closed: {}",
+                exc.__class__.__name__,
+            )
+            return None
+        except _TLDW_RUNTIME_ADAPTER_EXCEPTIONS as exc:
+            logger.debug(
+                "MCP AuthNZ websocket user lookup failed closed: {}",
+                exc.__class__.__name__,
+            )
+            return None
         user_id = str(getattr(user, "id", None) or "")
         if not user_id:
             return None
@@ -313,6 +338,58 @@ class TldwPolicyContextProvider:
         return is_mcp_hub_policy_enforcement_enabled()
 
 
+class TldwEnvironmentFlagsProvider:
+    """Expose tldw_server environment and test-mode helpers to MCPServer."""
+
+    def env_flag_enabled(self, name: str) -> bool:
+        """Return whether a named environment flag is enabled by host rules."""
+        from tldw_Server_API.app.core.testing import env_flag_enabled
+
+        return env_flag_enabled(name)
+
+    def is_test_mode(self) -> bool:
+        """Return whether the host process is running in test mode."""
+        from tldw_Server_API.app.core.testing import is_test_mode
+
+        return is_test_mode()
+
+    def is_explicit_pytest_runtime(self) -> bool:
+        """Return whether the host process is an explicit pytest runtime."""
+        from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
+
+        return is_explicit_pytest_runtime()
+
+    def is_truthy(self, value: Any) -> bool:
+        """Normalize host truthy environment-style values."""
+        from tldw_Server_API.app.core.testing import is_truthy
+
+        return is_truthy(value)
+
+
+class TldwWebSocketStreamFactory:
+    """Create tldw_server WebSocketStream wrappers for MCP websocket sessions."""
+
+    def __call__(
+        self,
+        websocket: Any,
+        *,
+        heartbeat_interval_s: float | None,
+        idle_timeout_s: float | None,
+        close_on_done: bool,
+        labels: dict[str, str],
+    ) -> WebSocketStream:
+        """Return a host WebSocketStream configured for MCP transport lifecycle."""
+        from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
+
+        return WebSocketStream(
+            websocket,
+            heartbeat_interval_s=heartbeat_interval_s,
+            idle_timeout_s=idle_timeout_s,
+            close_on_done=close_on_done,
+            labels=labels,
+        )
+
+
 def _to_tldw_circuit_breaker_config(config: Any) -> CircuitBreakerConfig:
     """Convert a host-neutral circuit-breaker config to tldw_server config."""
     if isinstance(config, CircuitBreakerConfig):
@@ -362,4 +439,6 @@ def build_default_runtime_dependencies() -> MCPRuntimeDependencies:
         permission_seeder=TldwPermissionSeeder(),
         module_config_provider=TldwModuleConfigProvider(),
         policy_context_provider=TldwPolicyContextProvider(),
+        environment_flags_provider=TldwEnvironmentFlagsProvider(),
+        websocket_stream_factory=TldwWebSocketStreamFactory(),
     )

@@ -5,6 +5,7 @@ from mcp_unified.interfaces.runtime import (
     AuthenticatedIdentity,
     CircuitBreakerFactory,
     DatabasePathResolver,
+    EnvironmentFlagsProvider,
     LifecycleGuard,
     MCPRuntimeDependencies,
     MetricsCollector,
@@ -17,6 +18,9 @@ from mcp_unified.interfaces.runtime import (
     RedisClientFactory,
     ServerAuthProvider,
     TelemetryProvider,
+    WebSocketCloseTarget,
+    WebSocketStream,
+    WebSocketStreamFactory,
 )
 
 __all__ = [
@@ -24,6 +28,7 @@ __all__ = [
     "ApiKeyScopeNormalizer",
     "CircuitBreakerFactory",
     "DatabasePathResolver",
+    "EnvironmentFlagsProvider",
     "LifecycleGuard",
     "MCPRuntimeDependencies",
     "MetricsCollector",
@@ -36,4 +41,7 @@ __all__ = [
     "RedisClientFactory",
     "ServerAuthProvider",
     "TelemetryProvider",
+    "WebSocketCloseTarget",
+    "WebSocketStream",
+    "WebSocketStreamFactory",
 ]

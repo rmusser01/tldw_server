@@ -1,14 +1,13 @@
-import os
-import pytest
-
 from types import SimpleNamespace
 
-from tldw_Server_API.app.core.MCP_unified.server import MCPServer
-from tldw_Server_API.app.core.MCP_unified.config import get_config
-from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
-from tldw_Server_API.app.core.MCP_unified.auth.authnz_rbac import AuthNZRBAC, Resource, Action
+import pytest
 from fastapi import WebSocketDisconnect
+
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError
+from tldw_Server_API.app.core.MCP_unified.auth.authnz_rbac import Action, AuthNZRBAC, Resource
+from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
+from tldw_Server_API.app.core.MCP_unified.config import get_config
+from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 
 
 class FakeWebSocket:
@@ -38,7 +37,7 @@ class FakeWebSocket:
 @pytest.mark.asyncio
 async def test_ws_origin_denied(monkeypatch):
     # Configure allowed origins to a different host than provided header
-    os.environ["MCP_WS_ALLOWED_ORIGINS"] = "https://allowed.com"
+    monkeypatch.setenv("MCP_WS_ALLOWED_ORIGINS", "https://allowed.com")
     # Reset config cache
     try:
         get_config.cache_clear()  # type: ignore[attr-defined]
@@ -60,9 +59,9 @@ async def test_ws_origin_denied(monkeypatch):
 @pytest.mark.asyncio
 async def test_ws_query_auth_disabled_requires_auth(monkeypatch):
     # Allow any origin for this test and require auth
-    os.environ["MCP_WS_ALLOWED_ORIGINS"] = "*"
-    os.environ["MCP_WS_AUTH_REQUIRED"] = "1"
-    os.environ["MCP_WS_ALLOW_QUERY_AUTH"] = "0"  # default, explicit here
+    monkeypatch.setenv("MCP_WS_ALLOWED_ORIGINS", "*")
+    monkeypatch.setenv("MCP_WS_AUTH_REQUIRED", "1")
+    monkeypatch.setenv("MCP_WS_ALLOW_QUERY_AUTH", "0")  # default, explicit here
     try:
         get_config.cache_clear()  # type: ignore[attr-defined]
     except Exception:
@@ -85,10 +84,10 @@ async def test_ws_query_auth_disabled_requires_auth(monkeypatch):
 @pytest.mark.asyncio
 async def test_ws_header_bearer_auth_accepts(monkeypatch):
     # Allow any origin and allow auth via header
-    os.environ["MCP_WS_ALLOWED_ORIGINS"] = "*"
-    os.environ["MCP_WS_AUTH_REQUIRED"] = "1"
-    os.environ["MCP_WS_ALLOW_QUERY_AUTH"] = "0"
-    os.environ["MCP_JWT_SECRET"] = "x" * 64  # strong secret
+    monkeypatch.setenv("MCP_WS_ALLOWED_ORIGINS", "*")
+    monkeypatch.setenv("MCP_WS_AUTH_REQUIRED", "1")
+    monkeypatch.setenv("MCP_WS_ALLOW_QUERY_AUTH", "0")
+    monkeypatch.setenv("MCP_JWT_SECRET", "x" * 64)  # strong secret
     try:
         get_config.cache_clear()  # type: ignore[attr-defined]
     except Exception:
@@ -118,9 +117,9 @@ async def test_ws_header_bearer_auth_accepts(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ws_invalid_authnz_token_allows_api_key(monkeypatch):
-    os.environ["MCP_WS_ALLOWED_ORIGINS"] = "*"
-    os.environ["MCP_WS_AUTH_REQUIRED"] = "1"
-    os.environ["MCP_WS_ALLOW_QUERY_AUTH"] = "0"
+    monkeypatch.setenv("MCP_WS_ALLOWED_ORIGINS", "*")
+    monkeypatch.setenv("MCP_WS_AUTH_REQUIRED", "1")
+    monkeypatch.setenv("MCP_WS_ALLOW_QUERY_AUTH", "0")
     try:
         get_config.cache_clear()  # type: ignore[attr-defined]
     except Exception:
@@ -159,6 +158,55 @@ async def test_ws_invalid_authnz_token_allows_api_key(monkeypatch):
     assert ws.accepted is True
     if ws.closed:
         assert "Authentication failed" not in (ws.close_args[1] or "")
+
+
+@pytest.mark.asyncio
+async def test_ws_failed_authnz_token_does_not_fall_back_to_mcp_jwt():
+    server = MCPServer()
+    server.config.ws_allowed_origins = ["*"]
+    server.config.ws_auth_required = True
+
+    class _FailingAuthNZProvider:
+        def get_mcp_jwt_manager(self):
+            return object()
+
+        def is_authnz_access_token(self, _token: str) -> bool:
+            return True
+
+        async def authenticate_authnz_websocket_token(self, _token: str, *, websocket):
+            del websocket
+            return None
+
+        async def validate_api_key(self, _api_key: str, *, ip_address: str | None = None):
+            del ip_address
+            return None
+
+        def normalize_api_key_permissions(self, info: dict | None) -> list[str]:
+            return []
+
+    class _JwtVerifier:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def verify_token(self, _token: str):
+            self.calls += 1
+            raise AssertionError("MCP JWT verifier should not receive AuthNZ access tokens")
+
+    jwt_verifier = _JwtVerifier()
+    server.auth_provider = _FailingAuthNZProvider()
+    server.jwt_manager = jwt_verifier  # type: ignore[assignment]
+    ws = FakeWebSocket(
+        headers={
+            "origin": "https://any.com",
+            "Authorization": "Bearer expired-authnz-token",
+        }
+    )
+
+    await server.handle_websocket(ws, client_id="c-authnz-failed")
+
+    assert jwt_verifier.calls == 0
+    assert ws.closed is True
+    assert ws.close_args == (1008, "Authentication failed")
 
 
 @pytest.mark.asyncio
