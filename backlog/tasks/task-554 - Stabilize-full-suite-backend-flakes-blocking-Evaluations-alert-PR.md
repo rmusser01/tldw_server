@@ -42,7 +42,7 @@ PR #2129 review-fix CI exposed unrelated full-suite backend flakes on Windows/ma
 - Opened follow-up PR #2134 from `codex/task-549-full-suite-flakes` after rebasing onto `origin/dev`; the branch diff now contains only this stabilization work on top of the merged Evaluations alert PR.
 - PR #2134 review feedback was addressed by using reverse plus stable sort for invitation ties and moving the audio heartbeat polling inside the `TestClient` lifetime.
 - Latest `origin/dev` introduced a canonical sidepanel `TASK-551`; this stabilization tracker was moved to `TASK-554` to avoid a duplicate Backlog ID.
-- PR #2134 was rebased onto latest `origin/dev` at `87409dded3` and force-pushed with lease at head `d35280b6a3`; GitHub check rollup restarted and was pending/skipped when checked immediately after push.
+- PR #2134 was rebased onto latest `origin/dev` at `87409dded3` and force-pushed with lease; GitHub check rollup restarted and was pending/skipped when checked immediately after push.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
