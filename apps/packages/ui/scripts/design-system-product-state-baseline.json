@@ -891,17 +891,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/EvaluationsPage.tsx:Alert",
-    "path": "src/components/Option/Evaluations/EvaluationsPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/EvaluationsPage.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/recipe-configs/RagAnswerQualityConfig.tsx:Alert#antd-alert-raganswerqualityconfig-type-error-line-469-ctgble",
     "path": "src/components/Option/Evaluations/tabs/recipe-configs/RagAnswerQualityConfig.tsx",
     "rule": "antd-product-state-import",
