@@ -54,13 +54,17 @@ Task 4 completed: added a one-shot Study-selected deck handoff from Review/Study
 
 Task 4 follow-up completed: fixed the create handoff workspace reset gap by applying createInitialShowWorkspaceDecks on every new openCreateSignal and clearing selectedWorkspaceId for the create handoff path. Added a ManageTab regression covering prior workspace-scoped Manage state followed by a non-workspace Study create handoff.
 
+Task 4 code-quality follow-up completed: fixed stale URL deck fallback in the create handoff so Create uses only the live Study deck state. Added a manager regression for clearing the Study selector after a review URL deck, and asserted ManageTab consumes the handoff callback when processing a new open signal.
+
 Verification:
 - RED Task 4: cd apps/packages/ui && bunx vitest run src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx failed on missing createInitialDeckId handoff and missing drawer initialDeckId behavior.
 - GREEN Task 4: same focused Vitest command passed, 36 tests.
 - RED Task 4 follow-up: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx failed because the Create drawer still received workspace-77 after a non-workspace create handoff.
 - GREEN Task 4 follow-up: cd apps/packages/ui && bunx vitest run src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx passed, 48 tests.
-- Self-review Task 4 follow-up: git diff --check passed; git diff --stat reviewed.
-- Bandit Task 4 follow-up: skipped because the follow-up touched TypeScript UI code/tests only, no Python touched.
+- RED Task 4 code-quality follow-up: cd apps/packages/ui && bunx vitest run src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx failed because Create still passed deck 12 after clearing the live Study deck selection.
+- GREEN Task 4 code-quality follow-up: cd apps/packages/ui && bunx vitest run src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx passed, 49 tests.
+- Self-review Task 4 code-quality follow-up: git diff --check passed; git diff --stat reviewed.
+- Bandit Task 4 code-quality follow-up: skipped because the follow-up touched TypeScript UI code/tests only, no Python touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

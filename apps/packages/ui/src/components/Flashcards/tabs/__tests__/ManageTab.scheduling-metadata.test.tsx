@@ -686,6 +686,7 @@ describe("ManageTab scheduling metadata visibility", () => {
       onReviewCard: () => {},
       isActive: true
     }
+    const onCreateHandoffConsumed = vi.fn()
     const { rerender } = render(<ManageTab {...baseProps} />)
 
     fireEvent.click(screen.getByRole("checkbox", { name: /Show workspace decks/i }))
@@ -705,6 +706,7 @@ describe("ManageTab scheduling metadata visibility", () => {
         openCreateSignal={1}
         createInitialDeckId={12}
         createInitialShowWorkspaceDecks={false}
+        onCreateHandoffConsumed={onCreateHandoffConsumed}
       />
     )
 
@@ -714,6 +716,7 @@ describe("ManageTab scheduling metadata visibility", () => {
     expect(screen.getByTestId("mock-create-drawer-initial-deck-id")).toHaveTextContent("12")
     expect(screen.getByTestId("mock-create-drawer-include-workspace")).toHaveTextContent("false")
     expect(screen.getByTestId("mock-create-drawer-workspace-id")).toBeEmptyDOMElement()
+    expect(onCreateHandoffConsumed).toHaveBeenCalledTimes(1)
   })
 
   it("moves deck scope by patching workspace_id in the update payload", async () => {

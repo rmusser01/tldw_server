@@ -64,6 +64,7 @@ vi.mock("../tabs", () => ({
       <button onClick={props.onNavigateToCreate}>Route Create</button>
       <button onClick={() => props.onReviewDeckChange(12)}>Select Deck 12</button>
       <button onClick={() => props.onReviewDeckChange(21)}>Select Deck 21</button>
+      <button onClick={() => props.onReviewDeckChange(undefined)}>Clear Deck</button>
       <button onClick={() => props.onNavigateToManageDeck?.(12)}>Route Manage Deck 12</button>
       <button onClick={() => props.onNavigateToManageDeck?.(21)}>Route Manage Deck 21</button>
       <button onClick={() => props.onNavigateToSchedulerDeck?.(12)}>Route Scheduler Deck 12</button>
@@ -509,6 +510,20 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
     expect(screen.getByTestId("mock-open-create-signal")).toHaveTextContent("1")
     expect(screen.getByTestId("mock-create-initial-deck-id")).toHaveTextContent("12")
+  })
+
+  it("does not resurrect a URL Study deck after the live Study selection is cleared", () => {
+    window.history.replaceState({}, "", "/flashcards?tab=review&deck_id=12")
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-review-deck-id")).toHaveTextContent("12")
+    fireEvent.click(screen.getByText("Clear Deck"))
+    expect(screen.getByTestId("mock-review-deck-id")).toHaveTextContent("")
+
+    fireEvent.click(screen.getByText("Route Create"))
+
+    expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-create-initial-deck-id")).toBeEmptyDOMElement()
   })
 
   it("clears the create drawer Study deck handoff after Manage consumes it", () => {
