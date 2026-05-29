@@ -526,6 +526,25 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-create-initial-deck-id")).toBeEmptyDOMElement()
   })
 
+  it("does not keep URL workspace visibility after the live Study selection is cleared", () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/flashcards?tab=review&deck_id=12&include_workspace_items=1"
+    )
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-review-deck-id")).toHaveTextContent("12")
+    fireEvent.click(screen.getByText("Clear Deck"))
+    expect(screen.getByTestId("mock-review-deck-id")).toHaveTextContent("")
+
+    fireEvent.click(screen.getByText("Route Create"))
+
+    expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-create-initial-deck-id")).toBeEmptyDOMElement()
+    expect(screen.getByTestId("mock-create-show-workspace")).toHaveTextContent("false")
+  })
+
   it("clears the create drawer Study deck handoff after Manage consumes it", () => {
     window.history.replaceState({}, "", "/flashcards?tab=review&deck_id=12")
     render(<FlashcardsManager />)

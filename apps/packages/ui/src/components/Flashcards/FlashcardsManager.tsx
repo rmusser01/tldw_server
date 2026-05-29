@@ -189,9 +189,11 @@ export const FlashcardsManager: React.FC = () => {
   )
 
   const routeToCreateEntryPoint = React.useCallback(() => {
+    const createDeckId = reviewDeckId ?? null
     setCreateDeckHandoff({
-      deckId: reviewDeckId ?? null,
-      showWorkspaceDecks: currentStudyIntent?.forceShowWorkspaceItems ?? false
+      deckId: createDeckId,
+      showWorkspaceDecks:
+        createDeckId != null && currentStudyIntent?.forceShowWorkspaceItems === true
     })
     setActiveTab("cards")
     setOpenCreateSignal((prev) => prev + 1)
