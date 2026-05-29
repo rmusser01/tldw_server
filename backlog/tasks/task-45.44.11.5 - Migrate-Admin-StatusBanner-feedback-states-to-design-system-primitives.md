@@ -4,7 +4,7 @@ title: Migrate Admin StatusBanner feedback states to design-system primitives
 status: Done
 assignee: []
 created_date: '2026-05-29'
-updated_date: '2026-05-29 17:32'
+updated_date: '2026-05-29 20:36'
 labels:
   - design-system
   - webui
@@ -50,6 +50,18 @@ Verification:
 Known blocker: bun run verify:design-system-state currently exits 1 on unrelated current-dev product-state drift in IntegrationPolicyPanel, WritingActionBar, Notes, and ResearchWorkspace plus stale IntegrationPolicyPanel baseline entries. This slice keeps that broader cleanup out of scope.
 
 Bandit: skipped because this slice only changes frontend TypeScript/TSX, JSON baseline data, and Backlog markdown; no Python runtime code was touched.
+
+PR review follow-up after rebase:
+- Rebased codex/design-system-admin-status-banner onto latest origin/dev.
+- Added a regression assertion that the loading branch keeps a block-level flex/bordered banner wrapper around the canonical LoadingState primitive.
+- Wrapped LoadingState in the original banner container to avoid inline-flex shrink-wrap layout shifts while keeping the design-system primitive inside.
+
+Review-fix verification:
+- bunx vitest run src/components/Option/Admin/__tests__/StatusBanner.test.tsx => 3 tests passed.
+- bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot => 54 tests passed.
+- bun run verify:design-system-state still exits 1 on unrelated current-dev IntegrationPolicyPanel/WritingActionBar/Notes/ResearchWorkspace drift; rg -n "StatusBanner" /tmp/design-system-status-banner-rebased.log returned no output.
+- NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false with touched-path filter for StatusBanner/baseline/task => exit 0 with no touched-path output.
+- git diff --check => exit 0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

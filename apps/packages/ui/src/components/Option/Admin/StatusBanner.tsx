@@ -70,12 +70,9 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({
 
   if (loading) {
     return (
-      <LoadingState
-        mode="inline"
-        size="sm"
-        label="Loading status..."
-        className={`rounded-lg border border-border bg-bg p-3 ${className || ""}`}
-      />
+      <div className={`flex items-center gap-2 rounded-lg border border-border bg-bg p-3 ${className || ""}`}>
+        <LoadingState mode="inline" size="sm" label="Loading status..." />
+      </div>
     )
   }
 

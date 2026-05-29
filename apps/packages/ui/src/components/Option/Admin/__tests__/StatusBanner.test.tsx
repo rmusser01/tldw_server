@@ -9,8 +9,11 @@ describe("StatusBanner", () => {
     render(<StatusBanner state="loading" loading />)
 
     const loadingText = screen.getByText("Loading status...")
+    const loadingState = loadingText.closest('[data-ds-component="LoadingState"]')
 
-    expect(loadingText.closest('[data-ds-component="LoadingState"]')).toBeTruthy()
+    expect(loadingState).toBeTruthy()
+    expect(loadingState?.parentElement?.className).toContain("flex")
+    expect(loadingState?.parentElement?.className).toContain("border-border")
   })
 
   it("sanitizes user-facing admin error details", () => {
