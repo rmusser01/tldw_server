@@ -385,28 +385,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/StatusBanner.tsx:Alert",
-    "path": "src/components/Option/Admin/StatusBanner.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/StatusBanner.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Admin/StatusBanner.tsx:Spin",
-    "path": "src/components/Option/Admin/StatusBanner.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Spin",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Spin product-state UI in src/components/Option/Admin/StatusBanner.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Admin/UsageAnalyticsPage.tsx:Alert#antd-alert-usageanalyticspage-type-error-access-denied-y-14wdvha",
     "path": "src/components/Option/Admin/UsageAnalyticsPage.tsx",
     "rule": "antd-product-state-import",
