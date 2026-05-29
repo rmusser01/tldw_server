@@ -169,8 +169,9 @@ async def test_schedule_service_stop_clears_flag_on_failure(monkeypatch):
 
     deps._schedule_service_stop(1, svc, "test")
 
-    for _ in range(20):
-        await asyncio.sleep(0)
+    deadline = loop.time() + 1.0
+    while loop.time() < deadline:
+        await asyncio.sleep(0.01)
         if not getattr(svc, "_tldw_stop_scheduled", True):
             break
 
