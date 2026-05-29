@@ -307,7 +307,7 @@ def _schedule_service_stop(user_id: Optional[Union[int, str]], service: UnifiedA
                 break
             await service.stop()
             logger.info(f"Audit service for user {user_id} stopped ({reason}).")
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        except (LookupError, OSError, RuntimeError, TypeError, ValueError) as exc:
             logger.error(
                 f"Failed to stop audit service for user {user_id} ({reason}): {exc}",
                 exc_info=True,
@@ -336,7 +336,7 @@ def _schedule_service_stop(user_id: Optional[Union[int, str]], service: UnifiedA
     def _run():
         try:
             asyncio.run(_stop())
-        except (OSError, RuntimeError, TypeError, ValueError) as e:
+        except (LookupError, OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(
                 f"Audit service stop failed for user {user_id} in fallback thread: {type(e).__name__}: {e}"
             )

@@ -1,5 +1,6 @@
 import io
 import os as real_os
+import time
 from unittest.mock import call
 
 import numpy as np
@@ -647,12 +648,19 @@ def test_audio_transcriptions_sanitizes_heartbeat_jobs_failure_log(
             pytest.skip("audio/transcriptions endpoint not mounted in this build")
         assert resp.status_code == 200, resp.text
 
-    heartbeat_logs = [
-        msg
-        for msg in logger_stub.debugs
-        if msg.startswith("audio.transcriptions heartbeat_jobs failed")
-        or msg.startswith("audio.transcriptions job heartbeat failed")
-    ]
+    deadline = time.monotonic() + 1.0
+    heartbeat_logs = []
+    while time.monotonic() < deadline:
+        heartbeat_logs = [
+            msg
+            for msg in logger_stub.debugs
+            if msg.startswith("audio.transcriptions heartbeat_jobs failed")
+            or msg.startswith("audio.transcriptions job heartbeat failed")
+        ]
+        if heartbeat_logs:
+            break
+        time.sleep(0.01)
+
     assert heartbeat_logs == ["audio.transcriptions job heartbeat failed; continuing"]
 
 

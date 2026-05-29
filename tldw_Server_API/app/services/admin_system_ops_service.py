@@ -1186,8 +1186,12 @@ def list_invitations(
         if status_norm in _INVITATION_STATUSES:
             invitations = [inv for inv in invitations if inv.get("status") == status_norm]
 
-    invitations.sort(key=lambda item: item.get("created_at") or "", reverse=True)
-    return invitations
+    indexed_invitations = list(enumerate(invitations))
+    indexed_invitations.sort(
+        key=lambda item: (item[1].get("created_at") or "", item[0]),
+        reverse=True,
+    )
+    return [invitation for _, invitation in indexed_invitations]
 
 
 def create_invitation(
