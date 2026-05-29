@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const storageState = vi.hoisted(() => {
   const store = new Map<string, unknown>()
@@ -37,8 +37,12 @@ import {
   createSidepanelChatHandoff,
   readSidepanelChatHandoff,
   SIDEPANEL_CHAT_HANDOFF_MAX_DRAFT_CHARS,
+  SIDEPANEL_CHAT_HANDOFF_MAX_ROUTE_CHARACTER_ID_CHARS,
+  SIDEPANEL_CHAT_HANDOFF_MAX_ROUTE_PATH_CHARS,
   SIDEPANEL_CHAT_HANDOFF_MAX_SNIPPET_CHARS,
   SIDEPANEL_CHAT_HANDOFF_MAX_SNIPPETS,
+  SIDEPANEL_CHAT_HANDOFF_MAX_TITLE_CHARS,
+  SIDEPANEL_CHAT_HANDOFF_MAX_URL_CHARS,
   SIDEPANEL_CHAT_HANDOFF_STORAGE_PREFIX,
   SIDEPANEL_CHAT_HANDOFF_TTL_MS,
   type SidepanelChatHandoffPackage
@@ -70,6 +74,10 @@ describe("sidepanel chat handoff storage service", () => {
     vi.setSystemTime(NOW)
     vi.clearAllMocks()
     storageState.store.clear()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it("creates bounded packages and verifies read-back before returning the id", async () => {
@@ -113,6 +121,40 @@ describe("sidepanel chat handoff storage service", () => {
     expect(pkg.pageContext?.truncated).toBe(true)
     expect(storageState.set).toHaveBeenCalledWith(storageKey(pkg.id), pkg)
     expect(storageState.get).toHaveBeenCalledWith(storageKey(pkg.id))
+
+    await expect(readSidepanelChatHandoff(pkg.id)).resolves.toEqual(pkg)
+  })
+
+  it("bounds page metadata and route intent strings before writing", async () => {
+    const pkg = await createSidepanelChatHandoff({
+      draftText: "bounded metadata",
+      pageContext: {
+        title: "T".repeat(SIDEPANEL_CHAT_HANDOFF_MAX_TITLE_CHARS + 12),
+        url: `https://example.test/${"u".repeat(SIDEPANEL_CHAT_HANDOFF_MAX_URL_CHARS)}`,
+        snippets: []
+      },
+      routeIntent: {
+        path: `#/chat?${"p".repeat(SIDEPANEL_CHAT_HANDOFF_MAX_ROUTE_PATH_CHARS)}`,
+        mode: "character",
+        characterId: "c".repeat(
+          SIDEPANEL_CHAT_HANDOFF_MAX_ROUTE_CHARACTER_ID_CHARS + 10
+        )
+      }
+    })
+
+    expect(pkg.pageContext?.title).toHaveLength(
+      SIDEPANEL_CHAT_HANDOFF_MAX_TITLE_CHARS
+    )
+    expect(pkg.pageContext?.url).toHaveLength(SIDEPANEL_CHAT_HANDOFF_MAX_URL_CHARS)
+    expect(pkg.pageContext?.truncated).toBe(true)
+    expect(pkg.routeIntent?.path).toHaveLength(
+      SIDEPANEL_CHAT_HANDOFF_MAX_ROUTE_PATH_CHARS
+    )
+    expect(pkg.routeIntent?.path.startsWith("#/chat?")).toBe(true)
+    expect(pkg.routeIntent?.mode).toBe("character")
+    expect(pkg.routeIntent?.characterId).toHaveLength(
+      SIDEPANEL_CHAT_HANDOFF_MAX_ROUTE_CHARACTER_ID_CHARS
+    )
 
     await expect(readSidepanelChatHandoff(pkg.id)).resolves.toEqual(pkg)
   })
@@ -162,6 +204,29 @@ describe("sidepanel chat handoff storage service", () => {
     await expect(cleanupExpiredSidepanelChatHandoffs()).resolves.toBe(2)
     expect(storageState.store.has(storageKey("cleanup-expired"))).toBe(false)
     expect(storageState.store.has(storageKey("cleanup-malformed"))).toBe(false)
+  })
+
+  it("returns null and removes packages whose storage key id does not match the body id", async () => {
+    const readMismatch = buildStoredPackage({
+      id: "body-id",
+      draft: { text: "wrong key body" }
+    })
+    storageState.store.set(storageKey("requested-id"), readMismatch)
+
+    await expect(readSidepanelChatHandoff("requested-id")).resolves.toBeNull()
+    expect(storageState.store.has(storageKey("requested-id"))).toBe(false)
+
+    const cleanupMismatch = buildStoredPackage({
+      id: "cleanup-body-id",
+      draft: { text: "cleanup wrong key body" }
+    })
+    storageState.store.set(
+      storageKey("cleanup-key-id"),
+      JSON.stringify(cleanupMismatch)
+    )
+
+    await expect(cleanupExpiredSidepanelChatHandoffs()).resolves.toBe(1)
+    expect(storageState.store.has(storageKey("cleanup-key-id"))).toBe(false)
   })
 
   it("keeps valid serialized packages during cleanup and removes expired or malformed serialized packages", async () => {
@@ -222,6 +287,8 @@ describe("sidepanel chat handoff storage service", () => {
     const pkg = await createSidepanelChatHandoff({
       draftText: "selected-secret-draft",
       pageContext: {
+        title: "secret-page-title",
+        url: "https://secret.example.test/private",
         snippets: [{ kind: "selection", text: "snippet-secret-text" }]
       }
     })
@@ -234,8 +301,12 @@ describe("sidepanel chat handoff storage service", () => {
     expect(route).toContain(`handoff=${encodeURIComponent(pkg.id)}`)
     expect(route).not.toContain("selected-secret-draft")
     expect(route).not.toContain("snippet-secret-text")
+    expect(route).not.toContain("secret-page-title")
+    expect(route).not.toContain("secret.example.test")
     expect(route).not.toContain("draft")
     expect(route).not.toContain("snippet")
+    expect(route).not.toContain("title")
+    expect(route).not.toContain("url")
   })
 
   it("builds messageForModel with visible sidepanel context", () => {

@@ -7,6 +7,10 @@ export const SIDEPANEL_CHAT_HANDOFF_MAX_SNIPPETS = 4
 export const SIDEPANEL_CHAT_HANDOFF_MAX_SNIPPET_CHARS = 4_000
 export const SIDEPANEL_CHAT_HANDOFF_MAX_TOTAL_SNIPPET_CHARS = 16_000
 export const SIDEPANEL_CHAT_HANDOFF_MAX_DRAFT_CHARS = 32_000
+export const SIDEPANEL_CHAT_HANDOFF_MAX_TITLE_CHARS = 512
+export const SIDEPANEL_CHAT_HANDOFF_MAX_URL_CHARS = 2_048
+export const SIDEPANEL_CHAT_HANDOFF_MAX_ROUTE_PATH_CHARS = 2_048
+export const SIDEPANEL_CHAT_HANDOFF_MAX_ROUTE_CHARACTER_ID_CHARS = 512
 
 export type SidepanelChatHandoffSnippet = {
   kind: "selection" | "visible-context" | "captured-snippet"
@@ -50,6 +54,12 @@ export type CreateSidepanelChatHandoffInput = {
 const storage = createSafeStorage({ area: "local" })
 
 const storageKey = (id: string) => `${SIDEPANEL_CHAT_HANDOFF_STORAGE_PREFIX}${id}`
+
+const idFromStorageKey = (key: string): string | null => {
+  if (!key.startsWith(SIDEPANEL_CHAT_HANDOFF_STORAGE_PREFIX)) return null
+  const id = key.slice(SIDEPANEL_CHAT_HANDOFF_STORAGE_PREFIX.length)
+  return id.length > 0 ? id : null
+}
 
 const snippetKinds = new Set<SidepanelChatHandoffSnippet["kind"]>([
   "selection",
@@ -158,11 +168,23 @@ const buildPageContext = (
 ): SidepanelChatHandoffPageContext | undefined => {
   if (!pageContext) return undefined
 
-  const { snippets, truncated } = buildBoundedSnippets(pageContext.snippets)
+  const { snippets, truncated: snippetsTruncated } = buildBoundedSnippets(
+    pageContext.snippets
+  )
+  const title =
+    pageContext.title == null
+      ? undefined
+      : truncateText(pageContext.title, SIDEPANEL_CHAT_HANDOFF_MAX_TITLE_CHARS)
+  const url =
+    pageContext.url == null
+      ? undefined
+      : truncateText(pageContext.url, SIDEPANEL_CHAT_HANDOFF_MAX_URL_CHARS)
+  const truncated =
+    snippetsTruncated || Boolean(title?.truncated) || Boolean(url?.truncated)
 
   return {
-    ...(pageContext.title != null ? { title: pageContext.title } : {}),
-    ...(pageContext.url != null ? { url: pageContext.url } : {}),
+    ...(title ? { title: title.text } : {}),
+    ...(url ? { url: url.text } : {}),
     snippets,
     ...(truncated ? { truncated: true } : {})
   }
@@ -172,11 +194,22 @@ const buildRouteIntent = (
   routeIntent: CreateSidepanelChatHandoffInput["routeIntent"]
 ): SidepanelChatHandoffPackage["routeIntent"] => {
   if (!routeIntent) return undefined
+  const path = truncateText(
+    routeIntent.path,
+    SIDEPANEL_CHAT_HANDOFF_MAX_ROUTE_PATH_CHARS
+  )
+  const characterId =
+    routeIntent.characterId == null
+      ? undefined
+      : truncateText(
+          routeIntent.characterId,
+          SIDEPANEL_CHAT_HANDOFF_MAX_ROUTE_CHARACTER_ID_CHARS
+        )
 
   return {
-    path: routeIntent.path,
+    path: path.text,
     ...(routeIntent.mode === "character" ? { mode: "character" as const } : {}),
-    ...(routeIntent.characterId != null ? { characterId: routeIntent.characterId } : {})
+    ...(characterId ? { characterId: characterId.text } : {})
   }
 }
 
@@ -246,12 +279,14 @@ const normalizeStoredPackageValue = (value: unknown): unknown => {
 }
 
 const parsePackage = (
-  storedValue: unknown
+  storedValue: unknown,
+  expectedId?: string
 ): SidepanelChatHandoffPackage | null => {
   const value = normalizeStoredPackageValue(storedValue)
 
   if (!isRecord(value)) return null
   if (typeof value.id !== "string" || value.id.length === 0) return null
+  if (expectedId != null && value.id !== expectedId) return null
   if (value.source !== "sidepanel-chat") return null
   if (!isValidDateString(value.createdAt)) return null
   if (!isValidDateString(value.expiresAt)) return null
@@ -291,7 +326,7 @@ const readRawPackage = async (
   id: string
 ): Promise<SidepanelChatHandoffPackage | null> => {
   const raw = await storage.get(storageKey(id))
-  return parsePackage(raw)
+  return parsePackage(raw, id)
 }
 
 const isExpired = (pkg: SidepanelChatHandoffPackage, now = Date.now()) =>
@@ -311,8 +346,9 @@ export const cleanupExpiredSidepanelChatHandoffs = async (): Promise<number> => 
     const now = Date.now()
     const keysToRemove = Object.entries(entries)
       .filter(([key]) => key.startsWith(SIDEPANEL_CHAT_HANDOFF_STORAGE_PREFIX))
-      .filter(([, value]) => {
-        const pkg = parsePackage(value)
+      .filter(([key, value]) => {
+        const expectedId = idFromStorageKey(key)
+        const pkg = expectedId ? parsePackage(value, expectedId) : null
         return !pkg || pkg.consumedAt != null || isExpired(pkg, now)
       })
       .map(([key]) => key)
@@ -367,7 +403,7 @@ export const readSidepanelChatHandoff = async (
     const raw = await storage.get(key)
     if (raw == null) return null
 
-    const pkg = parsePackage(raw)
+    const pkg = parsePackage(raw, id)
     if (!pkg || pkg.consumedAt != null || isExpired(pkg)) {
       await removeKeyQuietly(key)
       return null
