@@ -149,17 +149,9 @@ async def enforce_ip_allowlist(request: Request) -> None:
     # name "testclient" which is not a valid IP address. Treat it as loopback so
     # that unit tests are not blocked by the allowlist when TEST_MODE/pytest
     # execution is detected.
-    if resolved_ip == "testclient":
+    test_runtime = is_explicit_pytest_runtime() or is_test_mode()
+    if test_runtime and (resolved_ip == "testclient" or resolved_ip is None):
         resolved_ip = "127.0.0.1"
-    else:
-        try:
-            if (resolved_ip is None and (
-                is_explicit_pytest_runtime() or
-                is_test_mode()
-            )):
-                resolved_ip = "127.0.0.1"
-        except Exception as loopback_error:
-            logger.debug("MCP IP filter loopback normalization failed", exc_info=loopback_error)
 
     if not controller.is_allowed(resolved_ip):
         logger.warning(

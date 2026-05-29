@@ -55,6 +55,8 @@ Verification:
 - `python -m ruff check ...` on the touched MCP files passed.
 - `python -m bandit -r ... -f json -o /tmp/bandit_mcp_stage3d_security_test_seams.json` completed with zero findings and zero errors.
 - `git diff --check` passed.
+Review-fix pass after rebase onto origin/dev 4be634b5f3. Confirmed open PR threads: guard test type hints, broad exception swallowing in new tests, and production spoof risk for unconditional testclient loopback normalization.
+Review fixes implemented after rebase: gated `testclient` IP normalization behind explicit test runtime, added a spoofed forwarded-header regression, annotated new test functions with `MonkeyPatch`/`-> None`, and replaced broad cache-clear exception swallowing in the new tests with a direct helper. Verification: focused pytest passed with 44 passed; Ruff passed on touched MCP files; Bandit returned zero findings; git diff --check passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -62,6 +64,7 @@ Verification:
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 MCP Unified config and security guard test-mode helpers now live inside the MCP package boundary instead of importing host-level testing helpers. Focused import-boundary and guard behavior coverage protects the seam and existing loopback/client-certificate test-mode behavior.
 PR: https://github.com/rmusser01/tldw_server/pull/2108
+Review-fix pass rebased on origin/dev 4be634b5f3: addressed Gemini spoofing concern and both Qodo findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

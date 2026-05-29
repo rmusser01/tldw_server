@@ -3,6 +3,7 @@
 import pytest
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from pytest import MonkeyPatch
 from starlette.requests import Request
 
 from tldw_Server_API.app.core.MCP_unified.security import ip_filter
@@ -29,6 +30,10 @@ def _build_guarded_app() -> FastAPI:
         return {"status": "ok"}
 
     return app
+
+
+def _clear_ip_access_controller_cache() -> None:
+    ip_filter.get_ip_access_controller.cache_clear()  # type: ignore[attr-defined]
 
 
 def test_enforce_http_security_rejects_large_payload(monkeypatch):
@@ -158,7 +163,9 @@ async def test_enforce_request_body_limit_handles_client_disconnect(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_ip_allowlist_normalizes_missing_client_ip_in_test_mode(monkeypatch):
+async def test_ip_allowlist_normalizes_missing_client_ip_in_test_mode(
+    monkeypatch: MonkeyPatch,
+) -> None:
     from types import SimpleNamespace
 
     cfg = SimpleNamespace(
@@ -177,10 +184,7 @@ async def test_ip_allowlist_normalizes_missing_client_ip_in_test_mode(monkeypatc
         "tldw_Server_API.app.core.MCP_unified.security.ip_filter.get_config",
         lambda: cfg,
     )
-    try:
-        ip_filter.get_ip_access_controller.cache_clear()  # type: ignore[attr-defined]
-    except Exception:
-        _ = None
+    _clear_ip_access_controller_cache()
 
     scope = {
         "type": "http",
@@ -196,7 +200,7 @@ async def test_ip_allowlist_normalizes_missing_client_ip_in_test_mode(monkeypatc
         "server": ("testserver", 80),
     }
 
-    async def _receive_empty():
+    async def _receive_empty() -> dict[str, object]:
         return {"type": "http.request", "body": b""}
 
     request = Request(scope, _receive_empty)
@@ -204,7 +208,61 @@ async def test_ip_allowlist_normalizes_missing_client_ip_in_test_mode(monkeypatc
     await ip_filter.enforce_ip_allowlist(request)
 
 
-def test_client_certificate_guard_allows_testclient_only_in_test_mode(monkeypatch):
+@pytest.mark.asyncio
+async def test_ip_allowlist_rejects_spoofed_testclient_forwarded_header_outside_test_mode(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    cfg = SimpleNamespace(
+        allowed_client_ips=["127.0.0.1"],
+        blocked_client_ips=[],
+        trust_x_forwarded_for=True,
+        trusted_proxy_depth=0,
+        trusted_proxy_ips=["127.0.0.1/32"],
+        http_max_body_bytes=524288,
+        client_cert_required=False,
+        client_cert_header=None,
+        client_cert_header_value=None,
+    )
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+    monkeypatch.setattr(ip_filter, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(ip_filter, "is_test_mode", lambda: False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.MCP_unified.security.ip_filter.get_config",
+        lambda: cfg,
+    )
+    _clear_ip_access_controller_cache()
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/v1/mcp/health",
+        "raw_path": b"/api/v1/mcp/health",
+        "query_string": b"",
+        "headers": [(b"x-forwarded-for", b"testclient")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+    }
+
+    async def _receive_empty() -> dict[str, object]:
+        return {"type": "http.request", "body": b""}
+
+    request = Request(scope, _receive_empty)
+
+    with pytest.raises(HTTPException) as rejected:
+        await ip_filter.enforce_ip_allowlist(request)
+
+    assert rejected.value.status_code == 403
+
+
+def test_client_certificate_guard_allows_testclient_only_in_test_mode(
+    monkeypatch: MonkeyPatch,
+) -> None:
     from types import SimpleNamespace
 
     cfg = SimpleNamespace(
@@ -228,10 +286,7 @@ def test_client_certificate_guard_allows_testclient_only_in_test_mode(monkeypatc
         "tldw_Server_API.app.core.MCP_unified.security.ip_filter.get_config",
         lambda: cfg,
     )
-    try:
-        ip_filter.get_ip_access_controller.cache_clear()  # type: ignore[attr-defined]
-    except Exception:
-        _ = None
+    _clear_ip_access_controller_cache()
 
     with pytest.raises(HTTPException) as rejected:
         enforce_client_certificate_headers(
