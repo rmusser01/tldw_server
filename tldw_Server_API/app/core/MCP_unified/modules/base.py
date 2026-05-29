@@ -8,12 +8,15 @@ import asyncio
 import contextlib
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar
 
 from loguru import logger
+
+T = TypeVar("T")
 
 
 class HealthStatus(str, Enum):
@@ -146,16 +149,20 @@ class _DefaultModuleCircuitBreaker:
         self.success_count = 0
         self._state = "closed"
         self._opened_at: float | None = None
+        self._half_open_in_flight = 0
         self._current_recovery_timeout = config.recovery_timeout
 
     def can_attempt(self) -> bool:
+        if self._state == "half_open":
+            return self._half_open_in_flight < self.config.half_open_max_calls
         if self._state != "open":
             return True
         if self._opened_at is None:
             return False
-        if time.monotonic() - self._opened_at >= self._current_recovery_timeout:
+        if time.time() - self._opened_at >= self._current_recovery_timeout:
             self._state = "half_open"
             self.success_count = 0
+            self._half_open_in_flight = 0
             return True
         return False
 
@@ -176,7 +183,8 @@ class _DefaultModuleCircuitBreaker:
             return
         self.failure_count = 0
 
-    async def call_async(self, operation):
+    async def call_async(self, operation: Callable[[], Awaitable[T]]) -> T:
+        """Execute operation if the fallback breaker state allows an attempt."""
         if not self.can_attempt():
             raise ModuleCircuitBreakerOpenError(
                 f"Circuit breaker '{self.name}' is open",
@@ -189,11 +197,17 @@ class _DefaultModuleCircuitBreaker:
                     else None
                 ),
             )
+        half_open_probe = self._state == "half_open"
+        if half_open_probe:
+            self._half_open_in_flight += 1
         try:
             result = await operation()
         except Exception:
             self.record_failure()
             raise
+        finally:
+            if half_open_probe:
+                self._half_open_in_flight = max(0, self._half_open_in_flight - 1)
         self.record_success()
         return result
 
@@ -204,11 +218,13 @@ class _DefaultModuleCircuitBreaker:
                 self.config.max_recovery_timeout,
             )
         self._state = "open"
-        self._opened_at = time.monotonic()
+        self._opened_at = time.time()
+        self._half_open_in_flight = 0
 
     def _close(self) -> None:
         self._state = "closed"
         self._opened_at = None
+        self._half_open_in_flight = 0
         self.failure_count = 0
         self.success_count = 0
         self._current_recovery_timeout = self.config.recovery_timeout
@@ -219,6 +235,7 @@ def _default_circuit_breaker_factory(*, name: str, config: Any) -> Any:
 
 
 def _is_circuit_breaker_open_error(exc: BaseException) -> bool:
+    """Return whether an exception is a local or host circuit-open rejection."""
     return isinstance(exc, ModuleCircuitBreakerOpenError) or (
         type(exc).__name__ == "CircuitBreakerOpenError"
         and hasattr(exc, "breaker_name")
