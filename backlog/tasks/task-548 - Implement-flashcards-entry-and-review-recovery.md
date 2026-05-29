@@ -4,7 +4,7 @@ title: Implement flashcards entry and review recovery
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-29 15:46'
+updated_date: '2026-05-29 20:33'
 labels:
   - ux
   - flashcards
@@ -50,6 +50,8 @@ Implemented:
 - Kept Re-rate last card visible after rating advances away from the answer branch and hardened its regression test against countdown timing flake.
 - Hid Practice again when no cram cards exist and changed caught-up availability to a 1-card cram probe before loading the full queue only in cram mode. The probe cap is applied to fetched backend cards before tutorial-residue filtering.
 - Added extension route coverage for the sidepanel /flashcards handoff and localized the handoff copy.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2130
 
 Final verification after rebase/final-review fixes:
 - cd apps/packages/ui && bunx vitest run src/routes/__tests__/route-registry.sidepanel-availability.test.ts src/routes/__tests__/route-registry.sidepanel-flashcards.test.ts src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx src/components/Flashcards/hooks/__tests__/useFlashcardQueries.cram-queue.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx src/components/Flashcards/__tests__/FlashcardsWorkspace.connection-state.test.tsx passed: 10 files, 87 tests.
