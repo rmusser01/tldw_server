@@ -63,6 +63,8 @@ Task 5 test-hardening follow-up completed: changed the rerate regression from an
 
 Task 6 completed: verified Practice again is absent in the caught-up completion state when cards exist but the cram queue is empty. Added regression coverage for has-cards true, zero due/new/learning counts, empty cram queue, and no accessible Practice again button. Updated ReviewTab to render the existing Practice again action only when cramQueue has cards; no new button was added.
 
+Task 6 code-quality follow-up completed: fixed the due-mode completion availability check so ReviewTab enables useCramQueueQuery when the active caught-up completion surface needs to decide whether Practice again should appear. The query remains disabled while an active due card is present or the due review query is still loading, and the button remains hidden until cramQueue data contains cards. Added create-CTA assertions for enabled=true in caught-up completion, hidden while cram availability is loading/undefined, and enabled=false during active/loading due review states.
+
 Verification:
 - RED Task 4: cd apps/packages/ui && bunx vitest run src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx failed on missing createInitialDeckId handoff and missing drawer initialDeckId behavior.
 - GREEN Task 4: same focused Vitest command passed, 36 tests.
@@ -85,6 +87,10 @@ Verification:
 - Focused Task 6: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx had ReviewTab.cram-mode.test.tsx pass, and ReviewTab.create-cta.test.tsx fail only on the known pre-existing queue-state badge snapshot mismatch.
 - Self-review Task 6: git diff --check passed; git diff --stat reviewed.
 - Bandit Task 6: skipped because Task 6 touched TypeScript UI code/tests and the Backlog task only, no Python touched.
+- RED Task 6 code-quality follow-up: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx failed the new enabled-state assertions because useCramQueueQuery was still called with enabled=false in caught-up due-mode completion.
+- Focused Task 6 code-quality follow-up: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx had ReviewTab.cram-mode.test.tsx pass, and ReviewTab.create-cta.test.tsx fail only on the known pre-existing queue-state badge snapshot mismatch.
+- Self-review Task 6 code-quality follow-up: git diff --check passed; git diff --stat reviewed.
+- Bandit Task 6 code-quality follow-up: skipped because the follow-up touched TypeScript UI code/tests and the Backlog task only, no Python touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

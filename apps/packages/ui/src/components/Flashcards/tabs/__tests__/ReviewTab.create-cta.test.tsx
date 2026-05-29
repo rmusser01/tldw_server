@@ -401,6 +401,9 @@ describe("ReviewTab create CTA visibility", () => {
     )
 
     expect(screen.queryByTestId("flashcards-review-create-cta")).not.toBeInTheDocument()
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: false })
+    )
     expect(screen.getByRole("combobox")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Show answer (Space)" })).toBeInTheDocument()
     const topbarPrimaryButtons = screen
@@ -524,6 +527,9 @@ describe("ReviewTab create CTA visibility", () => {
     )
 
     expect(useReviewAnalyticsSummaryQuery).toHaveBeenCalledWith(11, undefined)
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: false })
+    )
     expect(useReviewAnalyticsSummaryQuery).toHaveBeenCalledWith(
       null,
       expect.objectContaining({ enabled: false })
@@ -742,6 +748,37 @@ describe("ReviewTab create CTA visibility", () => {
       />
     )
 
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: true })
+    )
+    expect(screen.queryByRole("button", { name: /Practice again/i })).not.toBeInTheDocument()
+  })
+
+  it("keeps practice again hidden while caught-up cram availability is loading", () => {
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 0, new: 0, learning: 0, total: 0 }
+    } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isFetching: true
+    } as any)
+    vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: true })
+    )
     expect(screen.queryByRole("button", { name: /Practice again/i })).not.toBeInTheDocument()
   })
 
@@ -786,6 +823,10 @@ describe("ReviewTab create CTA visibility", () => {
         onReviewDeckChange={() => {}}
         isActive
       />
+    )
+
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: true })
     )
 
     fireEvent.click(screen.getByTestId("flashcards-review-open-scheduler"))

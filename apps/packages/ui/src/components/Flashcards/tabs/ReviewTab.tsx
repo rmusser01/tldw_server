@@ -205,10 +205,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     ...(directPathVisibilityOptions ?? {})
   })
   const cramTagFilter = cramTag.trim() || undefined
-  const cramQueueQuery = useCramQueueQuery(reviewDeckId, cramTagFilter, {
-    enabled: reviewMode === "cram",
-    ...(directPathVisibilityOptions ?? {})
-  })
   const reviewMutation = useReviewFlashcardMutation()
   const updateMutation = useUpdateFlashcardMutation()
   const resetSchedulingMutation = useResetFlashcardSchedulingMutation()
@@ -219,6 +215,24 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const hasCardsQuery = useHasCardsQuery(directPathVisibilityOptions)
   const nextDueQuery = useNextDueQuery(reviewDeckId, directPathVisibilityOptions)
   const endReviewSessionMutation = useEndFlashcardReviewSessionMutation()
+  const dueModeActiveCard = localOverrideCard ?? reviewOverrideCard ?? reviewQuery.data
+  const isReviewCardLoading =
+    reviewMode === "due" && (reviewQuery.isLoading || reviewQuery.isFetching)
+  const isDueModeCaughtUp =
+    reviewMode === "due" &&
+    !dueModeActiveCard &&
+    !isReviewCardLoading &&
+    hasCardsQuery.data === true &&
+    dueCountsQuery.data != null &&
+    (dueCountsQuery.data.due ?? 0) === 0 &&
+    (dueCountsQuery.data.new ?? 0) === 0 &&
+    (dueCountsQuery.data.learning ?? 0) === 0
+  const shouldLoadCramQueue =
+    reviewMode === "cram" || (isActive && isDueModeCaughtUp)
+  const cramQueueQuery = useCramQueueQuery(reviewDeckId, cramTagFilter, {
+    enabled: shouldLoadCramQueue,
+    ...(directPathVisibilityOptions ?? {})
+  })
   const nextDueInfo = nextDueQuery.data
   const nextDueRelativeLabel = nextDueInfo?.nextDueAt
     ? formatFlashcardRelativeTime(nextDueInfo.nextDueAt)
@@ -233,11 +247,9 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
       ? cramQueue[cramQueueIndex]
       : null
   const activeCard =
-    localOverrideCard ??
-    reviewOverrideCard ??
-    (reviewMode === "cram" ? cramQueueCard : reviewQuery.data)
-  const isReviewCardLoading =
-    reviewMode === "due" && (reviewQuery.isLoading || reviewQuery.isFetching)
+    reviewMode === "cram"
+      ? localOverrideCard ?? reviewOverrideCard ?? cramQueueCard
+      : dueModeActiveCard
   const isCramQueueLoading =
     reviewMode === "cram" && (cramQueueQuery.isLoading || cramQueueQuery.isFetching)
   const deckDashboardAnalyticsQuery = useReviewAnalyticsSummaryQuery(null, {
