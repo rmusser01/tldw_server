@@ -161,3 +161,13 @@ def test_load_registry_directory_path_returns_empty_config(tmp_path) -> None:
     from mcp_unified.federation.config_schema import load_external_server_registry
 
     assert load_external_server_registry(str(tmp_path)) == ExternalServerRegistryConfig()
+
+
+def test_load_registry_rejects_yaml_non_mapping_root(tmp_path) -> None:
+    from mcp_unified.federation.config_schema import load_external_server_registry
+
+    config_path = tmp_path / "external_servers.yaml"
+    config_path.write_text("- docs\n- ci\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must be a mapping"):
+        load_external_server_registry(str(config_path))

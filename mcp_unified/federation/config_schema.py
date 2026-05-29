@@ -252,7 +252,16 @@ def load_external_server_registry(
                 "PyYAML is required to load external MCP YAML config"
             ) from exc
         data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-        raw = data if isinstance(data, dict) else {}
+        if data is None:
+            raw = {}
+        elif isinstance(data, dict):
+            raw = data
+        else:
+            raise ValueError(
+                "External MCP config at "
+                f"{cfg_path} must be a mapping root; got "
+                f"{type(data).__name__}: {data!r}"
+            )
 
     cfg = parse_external_server_registry(raw)
     logger.info(
