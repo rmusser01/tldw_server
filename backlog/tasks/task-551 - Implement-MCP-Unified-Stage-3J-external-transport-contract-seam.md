@@ -4,12 +4,12 @@ title: Implement MCP Unified Stage 3J external transport contract seam
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-05-29 20:45
+updated_date: '2026-05-29 21:59'
 labels:
-- mcp
-- mcp-unified
-- standalone
-- stage3
+  - mcp
+  - mcp-unified
+  - standalone
+  - stage3
 dependencies: []
 ---
 
@@ -36,9 +36,7 @@ Docs/superpowers/plans/2026-05-29-mcp-unified-stage3j-external-transport-contrac
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+PR review follow-up: added docstrings to the two newly added package-boundary tests after Qodo flagged the repo docstring rule.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -65,9 +63,3 @@ Verification:
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR review follow-up: added docstrings to the two newly added package-boundary tests after Qodo flagged the repo docstring rule.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
