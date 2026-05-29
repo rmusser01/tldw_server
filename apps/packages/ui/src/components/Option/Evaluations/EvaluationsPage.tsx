@@ -14,7 +14,7 @@ import { useTranslation } from "react-i18next"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
-import { Alert as DesignSystemAlert } from "@/components/ui/primitives/Alert"
+import { Alert } from "@/components/ui/primitives/Alert"
 import { useEvaluationsStore, type EvaluationsTab as EvaluationsTabType } from "@/store/evaluations"
 import { DatasetsTab } from "./tabs/DatasetsTab"
 import { EvaluationsTab } from "./tabs/EvaluationsTab"
@@ -214,18 +214,16 @@ export const EvaluationsPage: React.FC = () => {
       />
 
       {tourActive && (
-        <DesignSystemAlert
+        <Alert
           variant="info"
-          title={t("evaluations:tourTitle", {
-            defaultValue: "Evaluations tour"
-          })}
+          title={t("evaluations:tourTitle", "Evaluations tour")}
           className="mb-6"
         >
-          {t("evaluations:tourDescription", {
-            defaultValue:
-              "Tour mode highlights key actions. Remove ?tour=1 from the URL to exit."
-          })}
-        </DesignSystemAlert>
+          {t(
+            "evaluations:tourDescription",
+            "Tour mode highlights key actions. Remove ?tour=1 from the URL to exit."
+          )}
+        </Alert>
       )}
 
       {tourActive && (
