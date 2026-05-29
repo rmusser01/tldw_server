@@ -1,10 +1,10 @@
 ---
 id: TASK-397
 title: Design llama.cpp managed runtime roadmap
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-16 01:20'
-updated_date: '2026-05-16 01:29'
+updated_date: '2026-05-29 05:45'
 labels:
   - llamacpp
   - design
@@ -45,14 +45,22 @@ Local consistency review completed: checked the spec for the requested compatibi
 Bandit not run for this task because the current change is documentation/backlog only and touches no Python code.
 
 Spec critique pass completed before implementation planning. Added design clarifications for backend-owned persistence vs config.txt, admin-only/deployment-global scope, multi-user provider-wiring constraints, asset identity and symlink allowlist handling, explicit port policy, default-profile migration behavior, per-profile lifecycle locking, shutdown/orphan behavior, reserved mode flags, local folder import semantics, and extra E2E coverage for duplicate ports and V1 wrapper behavior.
+
+Post-rollout closeout: the downstream managed-runtime implementation, asset inventory, model-family/mmproj metadata, capability visibility, profile editor, runtime reconciliation, validation hardening, API compatibility, docs, and smoke coverage have all landed through follow-up tasks. The unrelated completed Sync v2 attachment task that previously reused `TASK-397` was moved to `TASK-490.14`, so `TASK-397` is again the unambiguous llama.cpp managed-runtime roadmap parent.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The llama.cpp managed-runtime roadmap design is complete and has been carried through implementation follow-ups. The design spec covers backend-owned runtime/profile persistence, V1 default-profile compatibility, local asset import/register workflows, supervisor behavior, multimodal/mmproj/model-family boundaries, WebUI workflow, staged delivery, and test strategy. Follow-up tasks implemented and verified the planned runtime, inventory, profile, metadata, capability, reconciliation, compatibility, and rollout slices. Tracker cleanup also resolved the duplicate `TASK-397` ID collision by moving the unrelated Sync v2 attachment record to `TASK-490.14`.
+<!-- SECTION:FINAL_SUMMARY:END -->
