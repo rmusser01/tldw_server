@@ -117,6 +117,9 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     tone: "warning" | "error"
     message: string
   } | null>(null)
+  const continueInWebUIPendingRef = React.useRef(false)
+  const [continueInWebUIPending, setContinueInWebUIPending] =
+    React.useState(false)
   const [systemPromptOverride, setSystemPromptOverride] = React.useState<
     string | undefined
   >(undefined)
@@ -383,6 +386,8 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const hasDraftForHandoff = draftText.trim().length > 0
   const continueInWebUIEnabled =
     hasDraftForHandoff || hasVisiblePageContextForHandoff
+  const continueInWebUIButtonDisabled =
+    !continueInWebUIEnabled || continueInWebUIPending
   const activeCharacterIdForRouteIntent =
     selectedAssistant?.kind === "character"
       ? String(selectedAssistant.id ?? "").trim()
@@ -464,43 +469,50 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     )
 
   const continueInWebUI = async () => {
-    if (!continueInWebUIEnabled) return
+    if (!continueInWebUIEnabled || continueInWebUIPendingRef.current) return
+    continueInWebUIPendingRef.current = true
+    setContinueInWebUIPending(true)
     setHandoffFeedback(null)
 
-    let pageContext: SidepanelChatHandoffPageContext | undefined
     try {
-      pageContext = await getVisiblePageContextForHandoff?.()
-    } catch {
-      pageContext = undefined
-    }
+      let pageContext: SidepanelChatHandoffPageContext | undefined
+      try {
+        pageContext = await getVisiblePageContextForHandoff?.()
+      } catch {
+        pageContext = undefined
+      }
 
-    if (!hasDraftForHandoff && !pageContextHasVisibleContent(pageContext)) {
-      setHandoffFeedback({
-        tone: "warning",
-        message: t(
-          "sidepanel:controlRow.continueInWebUINothingToSend",
-          "Nothing to continue in WebUI"
-        )
-      })
-      return
-    }
+      if (!hasDraftForHandoff && !pageContextHasVisibleContent(pageContext)) {
+        setHandoffFeedback({
+          tone: "warning",
+          message: t(
+            "sidepanel:controlRow.continueInWebUINothingToSend",
+            "Nothing to continue in WebUI"
+          )
+        })
+        return
+      }
 
-    try {
-      const pkg = await createSidepanelChatHandoff({
-        draftText,
-        pageContext,
-        routeIntent
-      })
-      const handoffPath = buildSidepanelChatHandoffRoute(fullAppChatPath, pkg.id)
-      openFullAppPath(handoffPath)
-    } catch {
-      setHandoffFeedback({
-        tone: "error",
-        message: t(
-          "sidepanel:controlRow.continueInWebUIFailed",
-          "Could not continue in WebUI"
-        )
-      })
+      try {
+        const pkg = await createSidepanelChatHandoff({
+          draftText,
+          pageContext,
+          routeIntent
+        })
+        const handoffPath = buildSidepanelChatHandoffRoute(fullAppChatPath, pkg.id)
+        openFullAppPath(handoffPath)
+      } catch {
+        setHandoffFeedback({
+          tone: "error",
+          message: t(
+            "sidepanel:controlRow.continueInWebUIFailed",
+            "Could not continue in WebUI"
+          )
+        })
+      }
+    } finally {
+      continueInWebUIPendingRef.current = false
+      setContinueInWebUIPending(false)
     }
   }
 
@@ -900,11 +912,12 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         onClick={() => {
           void continueInWebUI()
         }}
-        disabled={!continueInWebUIEnabled}
-        aria-disabled={!continueInWebUIEnabled}
+        disabled={continueInWebUIButtonDisabled}
+        aria-disabled={continueInWebUIButtonDisabled}
+        aria-busy={continueInWebUIPending || undefined}
         data-testid="chat-continue-in-webui"
         className={`w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 ${
-          continueInWebUIEnabled
+          !continueInWebUIButtonDisabled
             ? "hover:bg-surface2"
             : "cursor-not-allowed opacity-50"
         }`}

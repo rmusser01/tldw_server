@@ -29,6 +29,16 @@ type MockInputProps = React.InputHTMLAttributes<HTMLInputElement> & {
   onPressEnter?: () => void
 }
 
+const createDeferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}
+
 const mocks = vi.hoisted(() => ({
   selectedAssistant: null as null | {
     kind: "character"
@@ -297,6 +307,43 @@ describe("ControlRow sidepanel chat handoff", () => {
     )
     expect(mocks.tabsCreate).toHaveBeenCalledWith({
       url: "chrome-extension://handoff/options.html#/chat?handoff=handoff-123"
+    })
+  })
+
+  it("ignores a second click while handoff creation is still pending", async () => {
+    const deferred = createDeferred<{
+      id: string
+      source: "sidepanel-chat"
+      createdAt: string
+      expiresAt: string
+      draft: { text: string }
+    }>()
+    mocks.createSidepanelChatHandoff.mockReturnValueOnce(deferred.promise)
+    render(<ControlRow {...defaultProps()} draftMessage="Summarize this" />)
+
+    const continueButton = screen.getByTestId("chat-continue-in-webui")
+    fireEvent.click(continueButton)
+    fireEvent.click(continueButton)
+
+    await waitFor(() => {
+      expect(mocks.createSidepanelChatHandoff).toHaveBeenCalledTimes(1)
+    })
+    expect(continueButton).toBeDisabled()
+    expect(mocks.tabsCreate).not.toHaveBeenCalled()
+
+    deferred.resolve({
+      id: "handoff-pending",
+      source: "sidepanel-chat",
+      createdAt: "2026-05-29T00:00:00.000Z",
+      expiresAt: "2026-05-29T00:10:00.000Z",
+      draft: { text: "Summarize this" }
+    })
+
+    await waitFor(() => {
+      expect(mocks.tabsCreate).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.tabsCreate).toHaveBeenCalledWith({
+      url: "chrome-extension://handoff/options.html#/chat?handoff=handoff-pending"
     })
   })
 
