@@ -18,24 +18,9 @@ from typing import Any, Optional
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
-from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
-from tldw_Server_API.app.core.testing import (
-    env_flag_enabled as _env_flag_enabled,
-)
-from tldw_Server_API.app.core.testing import (
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-)
-from tldw_Server_API.app.core.testing import (
-    is_test_mode as _is_test_mode,
-)
-from tldw_Server_API.app.core.testing import (
-    is_truthy as _is_truthy,
-)
-
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config, validate_config
-from .interfaces.runtime import MCPRuntimeDependencies
+from .interfaces.runtime import MCPRuntimeDependencies, WebSocketStream
 from .protocol import MCPProtocol, MCPRequest, MCPResponse, RequestContext
 from .security.ip_filter import get_ip_access_controller
 from .security.request_guards import enforce_client_certificate_headers
@@ -61,8 +46,6 @@ _MCP_SERVER_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
     HTTPException,
     WebSocketDisconnect,
-    InvalidTokenError,
-    TokenExpiredError,
     RateLimitExceeded,
 )
 
@@ -225,6 +208,8 @@ class MCPServer:
         self.permission_seeder = self.dependencies.permission_seeder
         self.module_config_provider = self.dependencies.module_config_provider
         self.policy_context_provider = self.dependencies.policy_context_provider
+        self.environment_flags_provider = self.dependencies.environment_flags_provider
+        self.websocket_stream_factory = self.dependencies.websocket_stream_factory
         self.jwt_manager = _JWTManagerProxy(self.auth_provider.get_mcp_jwt_manager())
         self.rbac_policy = self.dependencies.rbac_policy
         self.rate_limiter = self.dependencies.rate_limiter
@@ -284,6 +269,64 @@ class MCPServer:
             )
             return False
 
+    def _env_flag_enabled(self, name: str) -> bool:
+        """Return host-normalized boolean state for an environment flag."""
+        try:
+            return bool(self.environment_flags_provider.env_flag_enabled(name))
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(
+                "MCP environment flag resolution failed for {}: {}",
+                name,
+                self._mask_secrets(str(exc)),
+            )
+            return False
+
+    def _is_test_mode(self) -> bool:
+        """Return whether the host reports test mode for MCP behavior gates."""
+        try:
+            return bool(self.environment_flags_provider.is_test_mode())
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            return False
+
+    def _is_explicit_pytest_runtime(self) -> bool:
+        """Return whether the host reports an explicit pytest runtime."""
+        try:
+            return bool(self.environment_flags_provider.is_explicit_pytest_runtime())
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            return False
+
+    def _is_truthy(self, value: Any) -> bool:
+        """Return host-normalized truthiness, with a neutral local fallback."""
+        try:
+            return bool(self.environment_flags_provider.is_truthy(value))
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            return self._fallback_truthy(value)
+
+    def _is_authnz_access_token(self, token: str) -> bool:
+        """Return whether the injected auth provider recognizes an AuthNZ token."""
+        try:
+            return bool(self.auth_provider.is_authnz_access_token(token))
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(
+                "MCP AuthNZ token detection failed closed: {}",
+                self._mask_secrets(str(exc)),
+            )
+            return False
+
+    @staticmethod
+    def _fallback_truthy(value: Any) -> bool:
+        """Parse common boolean environment values without host imports."""
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+    @staticmethod
+    def _env_flag_explicitly_disabled(name: str) -> bool:
+        """Return True when an env flag is set to a common disabled value."""
+        return os.getenv(name, "").strip().lower() in {"0", "false", "off", "no", "n"}
+
     def _default_media_db_path(self) -> str:
         """Return the host-provided default media DB path for module config."""
         try:
@@ -294,6 +337,24 @@ class MCPServer:
                 self._mask_secrets(str(exc)),
             )
             return ""
+
+    def _create_websocket_stream(self, websocket: WebSocket) -> WebSocketStream:
+        """Create the host websocket stream wrapper for an accepted MCP session."""
+        return self.websocket_stream_factory(
+            websocket,
+            heartbeat_interval_s=(
+                float(self.config.ws_ping_interval)
+                if self.config.ws_ping_interval
+                else None
+            ),
+            idle_timeout_s=(
+                float(self.config.ws_idle_timeout_seconds)
+                if self.config.ws_idle_timeout_seconds
+                else None
+            ),
+            close_on_done=True,
+            labels={"component": "mcp", "endpoint": "mcp_ws"},
+        )
 
     def get_active_connection_count(self) -> int:
         return len(self.connections)
@@ -345,14 +406,14 @@ class MCPServer:
 
             try:
                 # Fail fast on insecure production configurations
-                _test_mode = _is_test_mode() or _is_explicit_pytest_runtime()
+                _test_mode = self._is_test_mode() or self._is_explicit_pytest_runtime()
                 if not self.config.debug_mode and not _test_mode:
                     ok = validate_config()
                     if not ok:
                         raise RuntimeError("MCP configuration validation failed; refusing to start in production")
                 # Warn if demo auth is enabled in a non-debug environment
                 try:
-                    if _env_flag_enabled("MCP_ENABLE_DEMO_AUTH") and not self.config.debug_mode:
+                    if self._env_flag_enabled("MCP_ENABLE_DEMO_AUTH") and not self.config.debug_mode:
                         logger.warning("MCP_ENABLE_DEMO_AUTH is enabled - for development only; DO NOT USE IN PRODUCTION")
                 except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
                     pass
@@ -462,8 +523,8 @@ class MCPServer:
                         logger.warning(f"Invalid MCP_MODULES item format: '{item}'")
 
             # 3) Optional default: enable media module if flag is set and nothing else specified
-            enable_media_flag = _env_flag_enabled("MCP_ENABLE_MEDIA_MODULE")
-            test_mode = _is_test_mode()
+            enable_media_flag = self._env_flag_enabled("MCP_ENABLE_MEDIA_MODULE")
+            test_mode = self._is_test_mode()
             if enable_media_flag and not modules_to_load:
                 default_media_path = self._default_media_db_path()
                 modules_to_load.append({
@@ -482,7 +543,7 @@ class MCPServer:
 
             # 4) Test convenience: default-enable media module when TEST_MODE unless explicitly disabled
             if test_mode and not any(m.get("id") == "media" for m in modules_to_load):
-                if os.getenv("MCP_ENABLE_MEDIA_MODULE", "").strip().lower() not in {"0", "false", "off", "no", "n"}:
+                if not self._env_flag_explicitly_disabled("MCP_ENABLE_MEDIA_MODULE"):
                     default_media_path = self._default_media_db_path()
                     modules_to_load.append({
                         "id": "media",
@@ -513,7 +574,7 @@ class MCPServer:
                     logger.info("MCP filesystem module enabled by default; queuing FilesystemModule for registration")
 
             # 6) Optional: Sandbox module (code interpreter) - disabled by default
-            if _env_flag_enabled("MCP_ENABLE_SANDBOX_MODULE"):
+            if self._env_flag_enabled("MCP_ENABLE_SANDBOX_MODULE"):
                 modules_to_load.append({
                     "id": "sandbox",
                     "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.sandbox_module:SandboxModule",
@@ -767,7 +828,9 @@ class MCPServer:
         resolved_ip = controller.resolve_client_ip(raw_remote_ip, forwarded_for, real_ip)
         # Test harness mapping and bypass: allow WS in pytest/TEST_MODE and map 'testclient' to loopback
         try:
-            _is_test_env = bool(_is_explicit_pytest_runtime() or _is_test_mode())
+            _is_test_env = bool(
+                self._is_explicit_pytest_runtime() or self._is_test_mode()
+            )
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             _is_test_env = False
         if resolved_ip == "testclient" or resolved_ip is None and _is_test_env:
@@ -859,9 +922,14 @@ class MCPServer:
                         metadata["roles"] = list(identity.roles)
                     if identity.permissions:
                         metadata["permissions"] = list(identity.permissions)
+                elif self._is_authnz_access_token(auth_token):
+                    authnz_token_failed = True
+                    if not api_key:
+                        await websocket.close(code=1008, reason="Authentication failed")
+                        return
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"AuthNZ JWT auth failed: {self._mask_secrets(str(e))}")
-                if self.auth_provider.is_authnz_access_token(auth_token):
+                if self._is_authnz_access_token(auth_token):
                     authnz_token_failed = True
                     if not api_key:
                         await websocket.close(code=1008, reason="Authentication failed")
@@ -929,7 +997,7 @@ class MCPServer:
                 import os as _os
                 override = _os.getenv("MCP_WS_AUTH_REQUIRED")
                 if override is not None:
-                    override_val = _is_truthy(override)
+                    override_val = self._is_truthy(override)
                     if self.config.ws_auth_required == self._ws_auth_required_initial:
                         ws_auth_required = override_val
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
@@ -1005,14 +1073,9 @@ class MCPServer:
         )
 
         # Initialize unified WS lifecycle (ping/idle/error) and accept the socket
-        stream: Optional[WebSocketStream] = WebSocketStream(
-            websocket,
-            heartbeat_interval_s=float(self.config.ws_ping_interval) if self.config.ws_ping_interval else None,
-            idle_timeout_s=float(self.config.ws_idle_timeout_seconds) if self.config.ws_idle_timeout_seconds else None,
-            close_on_done=True,
-            labels={"component": "mcp", "endpoint": "mcp_ws"},
-        )
+        stream: Optional[WebSocketStream] = None
         try:
+            stream = self._create_websocket_stream(websocket)
             await stream.start()
             # Handle messages (domain JSON-RPC payloads go through send_json; no event-wrapping)
             await self._handle_websocket_messages(connection, stream)
@@ -1050,7 +1113,11 @@ class MCPServer:
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                 self.metrics_collector.update_connection_count("websocket", len(self.connections))
 
-    async def _handle_websocket_messages(self, connection: WebSocketConnection, stream: WebSocketStream):
+    async def _handle_websocket_messages(
+        self,
+        connection: WebSocketConnection,
+        stream: WebSocketStream,
+    ) -> None:
         """Handle incoming WebSocket messages"""
         while True:
             sess: Optional[SessionData] = None

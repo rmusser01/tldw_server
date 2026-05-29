@@ -221,6 +221,52 @@ class PolicyContextProvider(Protocol):
     def is_policy_context_enabled(self) -> bool: ...
 
 
+class EnvironmentFlagsProvider(Protocol):
+    """Host environment/test-mode helper facade used by MCPServer."""
+
+    def env_flag_enabled(self, name: str) -> bool: ...
+
+    def is_test_mode(self) -> bool: ...
+
+    def is_explicit_pytest_runtime(self) -> bool: ...
+
+    def is_truthy(self, value: Any) -> bool: ...
+
+
+class WebSocketCloseTarget(Protocol):
+    """Minimal websocket close capability exposed through stream wrappers."""
+
+    async def close(self, code: int = 1000, reason: str = "") -> Any: ...
+
+
+class WebSocketStream(Protocol):
+    """Host-neutral websocket stream operations used by MCPServer."""
+
+    ws: WebSocketCloseTarget
+
+    async def start(self) -> None: ...
+
+    async def stop(self) -> None: ...
+
+    def mark_activity(self) -> None: ...
+
+    async def send_json(self, payload: dict[str, Any]) -> None: ...
+
+
+class WebSocketStreamFactory(Protocol):
+    """Factory for host websocket stream lifecycle wrappers."""
+
+    def __call__(
+        self,
+        websocket: Any,
+        *,
+        heartbeat_interval_s: float | None,
+        idle_timeout_s: float | None,
+        close_on_done: bool,
+        labels: dict[str, str],
+    ) -> WebSocketStream: ...
+
+
 @dataclass(slots=True)
 class MCPRuntimeDependencies:
     """Concrete dependency bundle passed into MCP runtime components."""
@@ -243,3 +289,5 @@ class MCPRuntimeDependencies:
     permission_seeder: PermissionSeeder
     module_config_provider: ModuleConfigProvider
     policy_context_provider: PolicyContextProvider
+    environment_flags_provider: EnvironmentFlagsProvider
+    websocket_stream_factory: WebSocketStreamFactory

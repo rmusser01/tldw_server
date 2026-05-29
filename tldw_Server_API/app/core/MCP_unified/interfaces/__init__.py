@@ -10,6 +10,7 @@ from mcp_unified.interfaces import (
     CredentialGrantStore,
     DatabasePathResolver,
     EffectivePolicyResolver,
+    EnvironmentFlagsProvider,
     ExternalAccessEvaluator,
     ExternalRegistryStore,
     LifecycleGuard,
@@ -27,6 +28,9 @@ from mcp_unified.interfaces import (
     RedisClientFactory,
     ServerAuthProvider,
     TelemetryProvider,
+    WebSocketCloseTarget,
+    WebSocketStream,
+    WebSocketStreamFactory,
 )
 
 __all__ = [
@@ -39,6 +43,7 @@ __all__ = [
     "CredentialGrantStore",
     "DatabasePathResolver",
     "EffectivePolicyResolver",
+    "EnvironmentFlagsProvider",
     "ExternalAccessEvaluator",
     "ExternalRegistryStore",
     "LifecycleGuard",
@@ -56,4 +61,7 @@ __all__ = [
     "RedisClientFactory",
     "ServerAuthProvider",
     "TelemetryProvider",
+    "WebSocketCloseTarget",
+    "WebSocketStream",
+    "WebSocketStreamFactory",
 ]

@@ -11,6 +11,7 @@ from .runtime import (
     AuthenticatedIdentity,
     CircuitBreakerFactory,
     DatabasePathResolver,
+    EnvironmentFlagsProvider,
     LifecycleGuard,
     MCPRuntimeDependencies,
     MetricsCollector,
@@ -23,6 +24,9 @@ from .runtime import (
     RedisClientFactory,
     ServerAuthProvider,
     TelemetryProvider,
+    WebSocketCloseTarget,
+    WebSocketStream,
+    WebSocketStreamFactory,
 )
 from .storage import (
     ApprovalPolicyStore,
@@ -43,6 +47,7 @@ __all__ = [
     "CredentialGrantStore",
     "DatabasePathResolver",
     "EffectivePolicyResolver",
+    "EnvironmentFlagsProvider",
     "ExternalAccessEvaluator",
     "ExternalRegistryStore",
     "LifecycleGuard",
@@ -60,4 +65,7 @@ __all__ = [
     "RedisClientFactory",
     "ServerAuthProvider",
     "TelemetryProvider",
+    "WebSocketCloseTarget",
+    "WebSocketStream",
+    "WebSocketStreamFactory",
 ]
