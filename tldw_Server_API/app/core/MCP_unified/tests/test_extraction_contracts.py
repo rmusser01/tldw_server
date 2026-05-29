@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import inspect
 from collections.abc import Callable
 from pathlib import Path
@@ -143,6 +144,22 @@ class _FakeAuthProvider:
         return ["fake.scope"] if info else []
 
 
+class _TelemetryManagerDouble:
+    """Telemetry manager double that exposes trace_context calls."""
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.trace_calls: list[tuple[str, dict[str, Any] | None]] = []
+
+    def trace_context(
+        self,
+        operation_name: str,
+        attributes: dict[str, Any] | None = None,
+    ) -> Any:
+        self.trace_calls.append((operation_name, attributes))
+        return contextlib.nullcontext(self.label)
+
+
 def _server_runtime_dependencies() -> SimpleNamespace:
     deps = _fake_runtime_dependencies()
     deps.module_registry = _RecordingModuleRegistry()
@@ -185,6 +202,17 @@ def _interface_boundary_violations_for(path: Path, interface_dir: Path) -> list[
     return violations
 
 
+def _absolute_import_sources_for(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imports: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            imports.append(node.module)
+    return imports
+
+
 def test_new_interface_modules_do_not_import_tldw_server_api() -> None:
     interface_dir = MCP_ROOT / "interfaces"
     assert interface_dir.exists()
@@ -196,6 +224,24 @@ def test_new_interface_modules_do_not_import_tldw_server_api() -> None:
         if violations:
             offenders[str(path)] = violations
     assert offenders == {}
+
+
+def test_protocol_uses_runtime_dependencies_for_stage3b_host_services() -> None:
+    forbidden_imports = {
+        "tldw_Server_API.app.core.Infrastructure.redis_factory",
+        "tldw_Server_API.app.core.Metrics.telemetry",
+        "tldw_Server_API.app.core.testing",
+    }
+
+    imports = _absolute_import_sources_for(MCP_ROOT / "protocol.py")
+    offenders = sorted(
+        source
+        for source in imports
+        if source in forbidden_imports
+        or any(source.startswith(f"{forbidden}.") for forbidden in forbidden_imports)
+    )
+
+    assert offenders == []
 
 
 def test_default_runtime_dependency_builder_exposes_core_dependencies() -> None:
@@ -459,24 +505,24 @@ def test_authnz_access_token_helper_documents_boolean_semantics() -> None:
 def test_default_server_protocol_uses_current_telemetry_manager(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.core.MCP_unified import protocol as protocol_mod
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
     from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 
-    first_manager = object()
-    second_manager = object()
-    deps = _fake_runtime_dependencies()
-    deps.telemetry_provider = first_manager
+    first_manager = _TelemetryManagerDouble("first")
+    second_manager = _TelemetryManagerDouble("second")
     current = {"manager": first_manager}
 
-    monkeypatch.setattr(protocol_mod, "build_default_runtime_dependencies", lambda: deps)
-    monkeypatch.setattr(protocol_mod, "get_telemetry_manager", lambda: current["manager"])
+    monkeypatch.setattr(tldw_runtime, "get_telemetry_manager", lambda: current["manager"])
 
     server = MCPServer()
 
-    assert server.dependencies is deps
-    assert server.protocol.telemetry is first_manager
+    with server.protocol.telemetry.trace_context("first-op", {"generation": 1}) as span:
+        assert span == "first"
     current["manager"] = second_manager
-    assert server.protocol.telemetry is second_manager
+    with server.protocol.telemetry.trace_context("second-op", {"generation": 2}) as span:
+        assert span == "second"
+    assert first_manager.trace_calls == [("first-op", {"generation": 1})]
+    assert second_manager.trace_calls == [("second-op", {"generation": 2})]
 
 
 def test_protocol_instances_do_not_share_prepared_call_secrets() -> None:
