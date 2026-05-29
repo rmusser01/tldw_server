@@ -472,6 +472,25 @@ def test_catalog_loader_delegates_to_standalone_package_loader() -> None:
     assert offenders == []
 
 
+def test_external_server_config_schema_delegates_to_standalone_package_schema() -> None:
+    """Host external registry config schema should be a package-wrapper seam."""
+    imports = _resolved_import_sources_for(
+        MCP_ROOT / "external_servers" / "config_schema.py",
+        f"{MCP_PACKAGE}.external_servers",
+        top_level_only=True,
+    )
+    forbidden_sources = {"fnmatch", "json", "loguru", "pydantic", "yaml"}
+    offenders = sorted(
+        source
+        for source in imports
+        if source in forbidden_sources
+        or any(source.startswith(f"{forbidden}.") for forbidden in forbidden_sources)
+    )
+
+    assert "mcp_unified.federation.config_schema" in imports
+    assert offenders == []
+
+
 def test_standalone_catalog_loader_uses_loguru_not_stdlib_logging() -> None:
     """Package catalog loader should use the project-standard Loguru logger."""
     imports = _resolved_import_sources_for(

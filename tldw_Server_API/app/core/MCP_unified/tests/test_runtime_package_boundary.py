@@ -58,6 +58,19 @@ def test_host_interface_shims_reexport_package_contracts() -> None:
     assert host_storage.ProfileStore is package_storage.ProfileStore
 
 
+def test_host_external_config_schema_shim_reexports_package_contracts() -> None:
+    package_schema = importlib.import_module("mcp_unified.federation.config_schema")
+    host_schema = importlib.import_module(
+        "tldw_Server_API.app.core.MCP_unified.external_servers.config_schema"
+    )
+
+    assert host_schema.ExternalAuthMode is package_schema.ExternalAuthMode
+    assert host_schema.ExternalMCPServerConfig is package_schema.ExternalMCPServerConfig
+    assert host_schema.ExternalServerRegistryConfig is package_schema.ExternalServerRegistryConfig
+    assert host_schema.ExternalTransportType is package_schema.ExternalTransportType
+    assert host_schema.parse_external_server_registry is package_schema.parse_external_server_registry
+
+
 def test_profile_defaults_are_safe_and_preserve_extension_metadata() -> None:
     from mcp_unified.profiles.models import MCPProfile
 
