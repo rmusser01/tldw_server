@@ -14,7 +14,7 @@ flashcard handoffs. It does not reopen the full flashcards audit backlog.
 The selected approach is:
 
 1. PR 1 fixes the direct entry and review-recovery issues: extension sidepanel
-   route registration, clearer create/import labeling, visible re-rate after a
+   route registration, clearer import/export labeling, visible re-rate after a
    rating, deck prefill when creating from a selected Study deck, and accurate
    completion actions.
 2. PR 2 fixes the remaining power-user behavior: all-deck Study starts at the
@@ -24,7 +24,8 @@ The selected approach is:
 
 1. Make the actual extension sidepanel able to reach the direct `/flashcards`
    handoff when the route is still missing.
-2. Replace the user-facing `Transfer` label with clearer task language.
+2. Replace remaining user-facing `Transfer` copy with clearer import/export
+   language.
 3. Keep the undo/re-rate affordance visible after rating a card.
 4. Preserve deck context when a user creates a card from a selected Study deck.
 5. Avoid showing `Practice again` when no cram or repeatable cards exist.
@@ -82,10 +83,11 @@ PR 1 should include only low to moderate risk route and interaction fixes:
 
 - Register the actual extension sidepanel `/flashcards` route if it is still
   missing.
-- Rename the create/import tab to `Create & Import`. In the current checkout the
-  visible tab already appears as `Import / Export` while stale test/docs wording
-  still references `Transfer`; the target acceptance criterion is the final
-  visible label, not the starting label in a particular branch.
+- Replace remaining user-facing `Transfer` wording with import/export language.
+  In the current checkout the visible tab already appears as `Import / Export`
+  while stale test/docs wording still references `Transfer`; keep `Import /
+  Export` as the tab label unless the target branch still visibly says
+  `Transfer`.
 - Keep undo/re-rate visible for the existing undo window after any rating.
 - Preselect the active Study deck when opening Create from a selected deck.
 - Suppress or keep absent `Practice again` when there are no cram or repeatable
@@ -101,18 +103,22 @@ register `/flashcards` in the app extension registry and open the existing
 options `/flashcards` page. This is a handoff route, not a new sidepanel-native
 flashcard editor.
 
-The visible tab label should be task-first. `Create & Import` is the preferred
-label because the flashcards setup workflow spans creation handoffs, import,
-export, generation, and image occlusion tooling. Internal names such as
+The visible tab label should avoid the vague term `Transfer`. `Import / Export`
+is the preferred top-level label for the current branch because manual card
+creation remains in Manage/Create, while this tab contains import, export,
+generation, and image occlusion tooling. User-facing summary copy such as
+`Transfer summary` should become `Import/export summary` or another context
+specific import/export/generation label. Internal names such as
 `ImportExportTab` and transfer-summary event types can remain as implementation
-details. This label change must not move manual card creation out of the
-existing Manage/Create flow; it only makes the top-level flashcards IA clearer.
+details.
 
-After a rating, the review UI should display a visible recovery affordance such
-as `Re-rate last card` or `Undo rating` for the same undo window currently used
-by shortcut logic. It must remain visible even when the review advances to the
-next card or reaches completion. `Ctrl/Cmd+Z` remains an accelerator, but the
-visible button is the primary recovery path.
+After a rating, the review UI should display a visible recovery affordance named
+`Re-rate last card` for the same window currently used by shortcut logic. Avoid
+`Undo rating` copy unless implementation proves the previous backend rating and
+schedule are actually rolled back or replaced. The affordance must remain
+visible even when the review advances to the next card or reaches completion.
+`Ctrl/Cmd+Z` remains an accelerator, but the visible button is the primary
+recovery path.
 
 When a user studies a specific deck and clicks Create, the create drawer should
 open with that deck selected. The user can still change decks. The selected deck
@@ -128,9 +134,11 @@ action such as `Create card`, `Manage deck`, or `Open scheduler`.
 
 - Add the missing lazy import and route entry in
   `apps/tldw-frontend/extension/routes/sidepanel-route-registry.tsx`.
-- Update locale keys and tab-label tests for the new user-facing label.
-- Render the undo/re-rate control independently from the current card display
-  branch in `ReviewTab.tsx`, reusing existing undo state:
+- Update locale keys, user-facing copy, and tests so remaining `Transfer`
+  wording becomes `Import / Export`, `Import/export summary`, or a more specific
+  import/export/generation label.
+- Render the `Re-rate last card` control independently from the current card
+  display branch in `ReviewTab.tsx`, reusing existing undo state:
   `showUndoButton`, `lastReviewedCard`, `undoCountdown`, and
   `handleUndoReview`.
 - Add a deck handoff state in `FlashcardsManager.tsx` for Study to
@@ -153,7 +161,8 @@ Focused automated coverage:
 - From Study with a selected deck, open Create and confirm the create drawer
   preselects that deck.
 - Completion does not show `Practice again` when no cram cards are available.
-- Existing tab-label consistency tests expect `Create & Import`.
+- Existing tab-label consistency tests keep `Import / Export`, and stale
+  Transfer-named tests or visible copy are renamed.
 
 Expected likely suites:
 
@@ -199,11 +208,14 @@ raw mode key.
 
 ### Data Design
 
-The preferred data contract is a preserved deck-name snapshot at the session
+PR 2 should start with a session payload inspection gate. If the existing
+review-session list/end payload already includes a user-facing deck name, use
+that contract and update only frontend normalization/rendering. If it does not,
+the preferred data contract is a preserved deck-name snapshot at the session
 summary boundary. The API or normalized frontend model should expose an optional
 field such as `deck_name_snapshot`, `deckNameSnapshot`, or an equivalent
-existing name if one already exists. Any new field must be nullable and
-backward-compatible for existing session records.
+existing name. Any new field must be nullable and backward-compatible for
+existing session records.
 
 Resolution order in the UI should be:
 
@@ -222,9 +234,17 @@ already returns enough data, use that contract instead of adding a new field.
   Because no reusable `DeckStudyDashboard` exists in the current checkout, PR 2
   should either extract a small dashboard component from the existing setup area
   or adapt the existing no-card branch directly.
+- Introduce an explicit local all-deck review-start state, such as
+  `allDeckReviewStarted`, so `reviewDeckId === null` can support both dashboard
+  mode and the intentional `Review all due` path. Reset this state when the
+  selected deck, review mode, workspace visibility, or other review scope inputs
+  change.
 - Preserve selected-deck and resume behavior so explicit contexts still reach a
   review card quickly.
-- Add or normalize the optional deck-name snapshot in the recent-session model.
+- Inspect the review-session payload before implementation. If no suitable
+  deck-name data exists, add the nullable backend/API/client field plus
+  migration or compatibility handling required for existing rows. If existing
+  data is sufficient, avoid backend schema work.
 - Update `RecentStudySessions.tsx` to use the resolution order above and remove
   raw technical deck labels from normal user-facing rows.
 - Add tests for dashboard-first all-deck Study, selected-deck fast path, and
@@ -235,11 +255,14 @@ already returns enough data, use that contract instead of adding a new field.
 Focused automated coverage:
 
 - All-deck Study renders a deck dashboard first.
+- The explicit `Review all due` dashboard action starts all-deck review while
+  keeping `reviewDeckId` unset.
+- All-deck dashboard-start state resets when review scope changes.
 - Selecting a specific deck from the dashboard starts the intended deck review.
 - Starting from an already selected deck bypasses the all-deck dashboard when
   that is the existing fast path.
 - Recent sessions render a preserved deck name when the current deck is missing
-  or renamed.
+  or renamed, with backend/API tests included if a new snapshot field is added.
 - Recent sessions render graceful fallback copy when no name exists.
 
 Backend or API-level coverage may be needed if a session-summary field is added.
@@ -283,6 +306,8 @@ For PR 1 specifically:
 For PR 2 specifically:
 
 - Browser or component proof that all-deck Study shows the deck dashboard first.
+- Test proof that `Review all due` can intentionally leave dashboard mode and
+  start all-deck review.
 - Test proof that recent sessions preserve or resolve deck names without raw
   IDs in normal rows.
 
@@ -298,12 +323,19 @@ For PR 2 specifically:
 
 - Risk: all-deck dashboard-first breaks resume or selected deck fast paths.
   Mitigation: scope the default change to no selected deck and no explicit
-  resume context. Add tests for the selected-deck path.
+  resume context, and add an explicit all-deck review-start state for the
+  `Review all due` action. Add tests for the selected-deck path and scope
+  resets.
 
 - Risk: preserving deck names requires backend schema work.
   Mitigation: first inspect the existing session summary payload. Add the
   smallest optional field only if current data cannot represent renamed/deleted
   deck names.
+
+- Risk: create drawer deck prefill is wiped by the drawer's open-time form
+  reset.
+  Mitigation: apply `initialDeckId` after the reset in the drawer's open effect,
+  and test open, close, and reopen behavior so stale deck context does not leak.
 
 - Risk: extension route registries have diverged.
   Mitigation: add a direct app-extension registry test, not only a shared
@@ -314,8 +346,9 @@ For PR 2 specifically:
 PR 1 is done when:
 
 - The actual extension sidepanel registry exposes `/flashcards`.
-- The visible create/import tab label is `Create & Import`.
-- A user can rate a card, see visible re-rate/undo, and re-rate the previous
+- Remaining user-facing `Transfer` copy is replaced with `Import / Export`,
+  `Import/export summary`, or a context-specific import/export/generation label.
+- A user can rate a card, see visible `Re-rate last card`, and re-rate the previous
   card within the supported window.
 - Create from a selected Study deck preselects that deck.
 - `Practice again` is not offered when it cannot produce cards.
@@ -324,6 +357,7 @@ PR 1 is done when:
 PR 2 is done when:
 
 - All-deck Study opens the deck dashboard first.
+- `Review all due` starts intentional all-deck review without selecting a deck.
 - Selected-deck Study still remains efficient.
 - Recent session rows show preserved or resolved deck names.
 - Recent session fallback copy is non-technical.
