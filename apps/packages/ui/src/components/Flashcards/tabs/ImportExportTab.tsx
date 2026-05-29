@@ -212,7 +212,7 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
       </Card>
       <Card
         title={t("option:flashcards.transferSummaryTitle", {
-          defaultValue: "Transfer summary"
+          defaultValue: "Import/export summary"
         })}
         data-testid="flashcards-transfer-summary"
       >

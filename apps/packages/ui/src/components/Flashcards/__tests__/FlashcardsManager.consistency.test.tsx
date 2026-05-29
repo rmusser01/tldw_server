@@ -195,7 +195,7 @@ describe("FlashcardsManager consistency standards", () => {
     )
   })
 
-  it("opens Transfer tab first when URL contains generate intent", () => {
+  it("opens Import / Export tab first when URL contains generate intent", () => {
     window.history.replaceState(
       {},
       "",
@@ -383,32 +383,32 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("review:21")
   })
 
-  it("uses Study/Manage/Transfer/Scheduler tab labels", () => {
+  it("uses Study/Manage/Import Export/Templates/Scheduler tab labels", () => {
     window.history.replaceState({}, "", "/flashcards")
     render(<FlashcardsManager />)
 
     expect(screen.getByText("Study")).toBeInTheDocument()
     expect(screen.getByText("Manage")).toBeInTheDocument()
-    expect(screen.getByText("Transfer")).toBeInTheDocument()
+    expect(screen.getByText("Import / Export")).toBeInTheDocument()
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.getByText("Scheduler")).toBeInTheDocument()
   })
 
-  it("defaults empty accounts to Study and keeps transfer available without implying LLM-only import", () => {
+  it("defaults empty accounts to Study and keeps import/export available without implying LLM-only import", () => {
     mocks.decks = []
     window.history.replaceState({}, "", "/flashcards")
 
     render(<FlashcardsManager />)
 
     expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
-    expect(screen.getByText("Transfer")).toBeInTheDocument()
+    expect(screen.getByText("Import / Export")).toBeInTheDocument()
     expect(screen.queryByText("LLM")).not.toBeInTheDocument()
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
     expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
 
-  it("still opens Transfer first for explicit generate and study-pack intents", () => {
+  it("still opens Import / Export first for explicit generate and study-pack intents", () => {
     mocks.decks = []
     window.history.replaceState(
       {},
