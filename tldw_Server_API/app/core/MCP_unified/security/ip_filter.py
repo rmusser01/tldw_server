@@ -13,8 +13,8 @@ from functools import lru_cache
 from fastapi import HTTPException, Request
 from loguru import logger
 
-from tldw_Server_API.app.core.testing import is_test_mode
 from ..config import get_config
+from ..environment import is_explicit_pytest_runtime, is_test_mode
 
 
 class IPAccessController:
@@ -153,9 +153,8 @@ async def enforce_ip_allowlist(request: Request) -> None:
         resolved_ip = "127.0.0.1"
     else:
         try:
-            import os as _os
             if (resolved_ip is None and (
-                _os.getenv("PYTEST_CURRENT_TEST") or
+                is_explicit_pytest_runtime() or
                 is_test_mode()
             )):
                 resolved_ip = "127.0.0.1"

@@ -1,12 +1,13 @@
 """Regression tests for HTTP-layer security guards."""
 
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from tldw_Server_API.app.core.MCP_unified.security import ip_filter
 from tldw_Server_API.app.core.MCP_unified.security.request_guards import (
+    enforce_client_certificate_headers,
     enforce_http_security,
     enforce_request_body_limit,
 )
@@ -154,6 +155,104 @@ async def test_enforce_request_body_limit_handles_client_disconnect(monkeypatch)
 
     # Should not propagate starlette.requests.ClientDisconnect
     await enforce_request_body_limit(request)
+
+
+@pytest.mark.asyncio
+async def test_ip_allowlist_normalizes_missing_client_ip_in_test_mode(monkeypatch):
+    from types import SimpleNamespace
+
+    cfg = SimpleNamespace(
+        allowed_client_ips=["127.0.0.1"],
+        blocked_client_ips=[],
+        trust_x_forwarded_for=False,
+        trusted_proxy_depth=0,
+        trusted_proxy_ips=[],
+        http_max_body_bytes=524288,
+        client_cert_required=False,
+        client_cert_header=None,
+        client_cert_header_value=None,
+    )
+    monkeypatch.setenv("TLDW_TEST_MODE", "1")
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.MCP_unified.security.ip_filter.get_config",
+        lambda: cfg,
+    )
+    try:
+        ip_filter.get_ip_access_controller.cache_clear()  # type: ignore[attr-defined]
+    except Exception:
+        _ = None
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/v1/mcp/health",
+        "raw_path": b"/api/v1/mcp/health",
+        "query_string": b"",
+        "headers": [],
+        "client": None,
+        "server": ("testserver", 80),
+    }
+
+    async def _receive_empty():
+        return {"type": "http.request", "body": b""}
+
+    request = Request(scope, _receive_empty)
+
+    await ip_filter.enforce_ip_allowlist(request)
+
+
+def test_client_certificate_guard_allows_testclient_only_in_test_mode(monkeypatch):
+    from types import SimpleNamespace
+
+    cfg = SimpleNamespace(
+        allowed_client_ips=[],
+        blocked_client_ips=[],
+        trust_x_forwarded_for=False,
+        trusted_proxy_depth=0,
+        trusted_proxy_ips=[],
+        http_max_body_bytes=524288,
+        client_cert_required=True,
+        client_cert_header="x-client-cert",
+        client_cert_header_value="verified",
+    )
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.MCP_unified.security.request_guards.get_config",
+        lambda: cfg,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.MCP_unified.security.ip_filter.get_config",
+        lambda: cfg,
+    )
+    try:
+        ip_filter.get_ip_access_controller.cache_clear()  # type: ignore[attr-defined]
+    except Exception:
+        _ = None
+
+    with pytest.raises(HTTPException) as rejected:
+        enforce_client_certificate_headers(
+            {"x-client-cert": "verified"},
+            remote_addr="testclient",
+        )
+    assert rejected.value.status_code == 403
+
+    monkeypatch.setenv("TLDW_TEST_MODE", "1")
+
+    enforce_client_certificate_headers(
+        {"x-client-cert": "verified"},
+        remote_addr="testclient",
+    )
+
+    with pytest.raises(HTTPException) as bad_cert:
+        enforce_client_certificate_headers(
+            {"x-client-cert": "denied"},
+            remote_addr="testclient",
+        )
+    assert bad_cert.value.status_code == 403
 
 
 def test_enforce_http_security_requires_client_certificate(monkeypatch):
