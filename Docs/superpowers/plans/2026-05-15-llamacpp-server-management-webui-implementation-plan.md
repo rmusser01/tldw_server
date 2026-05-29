@@ -916,7 +916,7 @@ git commit -m "feat: guide llama.cpp server management in admin UI"
 - Modify: `apps/tldw-frontend/e2e/workflows/tier-4-admin/admin-llamacpp.spec.ts`
 - Modify: `backlog/tasks/<implementation-task>.md` through Backlog MCP during execution.
 
-- [ ] **Step 1: Update llama.cpp integration docs**
+- [x] **Step 1: Update llama.cpp integration docs**
 
 Document:
 
@@ -926,7 +926,7 @@ Document:
 - warnings-first hardware guidance;
 - explicit `Use this in Chat`.
 
-- [ ] **Step 2: Update E2E smoke test**
+- [x] **Step 2: Update E2E smoke test**
 
 Mock backend responses for:
 
@@ -944,7 +944,7 @@ Assert the normal flow:
 4. provider wiring prompt appears;
 5. user confirms `Use this in Chat`.
 
-- [ ] **Step 3: Run backend focused suite**
+- [x] **Step 3: Run backend focused suite**
 
 Run:
 
@@ -963,7 +963,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 4: Run frontend focused suite**
+- [x] **Step 4: Run frontend focused suite**
 
 Run:
 
@@ -975,7 +975,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 5: Run E2E smoke if server harness is available**
+- [x] **Step 5: Run E2E smoke if server harness is available**
 
 Run the existing project command for the tier-4 admin llama.cpp spec. If the repo requires a running dev server, start it with the established `bun run dev` workflow and record the URL/port used.
 
@@ -987,7 +987,7 @@ bunx playwright test apps/tldw-frontend/e2e/workflows/tier-4-admin/admin-llamacp
 
 Expected: PASS, or document the environment blocker.
 
-- [ ] **Step 6: Run Bandit on touched backend scope**
+- [x] **Step 6: Run Bandit on touched backend scope**
 
 Run:
 
@@ -1007,7 +1007,7 @@ python -m bandit \
 
 Expected: no new high/medium findings in touched code. Fix new findings before finalizing.
 
-- [ ] **Step 7: Run whitespace check**
+- [x] **Step 7: Run whitespace check**
 
 Run:
 
@@ -1017,7 +1017,7 @@ git diff --check
 
 Expected: no whitespace errors.
 
-- [ ] **Step 8: Commit Task 6**
+- [x] **Step 8: Commit Task 6**
 
 ```bash
 git add \
@@ -1031,21 +1031,21 @@ git commit -m "docs: document llama.cpp admin management flow"
 
 ## Final Acceptance Checklist
 
-- [ ] `/admin/llamacpp` renders a guided readiness, inventory, and launch workflow.
-- [ ] Config facade reports saved config, active config, env overrides, and restart-required reasons.
-- [ ] Config updates use `setup_manager.update_config()` and refresh config caches.
-- [ ] Inventory supports bounded recursive GGUF scan and registered local paths.
-- [ ] `model_id` start path works without passing arbitrary absolute paths from the UI.
-- [ ] Existing `/llamacpp/start_server` filename flow still works.
-- [ ] Hardware snapshot warnings never hard-block launch.
-- [ ] `Use this in Chat` updates only `Local-API.llama_api_IP` after explicit confirmation.
-- [ ] Log tail endpoint is bounded and cannot read arbitrary paths.
-- [ ] New endpoints are admin-only and rate-limited consistently with existing lifecycle endpoints.
-- [ ] Focused backend tests pass.
-- [ ] Focused frontend tests pass.
-- [ ] E2E smoke either passes or has a documented environment blocker.
-- [ ] Bandit has no new actionable findings in touched backend code.
-- [ ] `git diff --check` passes.
+- [x] `/admin/llamacpp` renders a guided readiness, inventory, and launch workflow.
+- [x] Config facade reports saved config, active config, env overrides, and restart-required reasons.
+- [x] Config updates use `setup_manager.update_config()` and refresh config caches.
+- [x] Inventory supports bounded recursive GGUF scan and registered local paths.
+- [x] `model_id` start path works without passing arbitrary absolute paths from the UI.
+- [x] Existing `/llamacpp/start_server` filename flow still works.
+- [x] Hardware snapshot warnings never hard-block launch.
+- [x] `Use this in Chat` updates only `Local-API.llama_api_IP` after explicit confirmation.
+- [x] Log tail endpoint is bounded and cannot read arbitrary paths.
+- [x] New endpoints are admin-only and rate-limited consistently with existing lifecycle endpoints.
+- [x] Focused backend tests pass.
+- [x] Focused frontend tests pass.
+- [x] E2E smoke either passes or has a documented environment blocker.
+- [x] Bandit has no new actionable findings in touched backend code.
+- [x] `git diff --check` passes.
 
 ## Implementation Notes
 
@@ -1055,3 +1055,4 @@ git commit -m "docs: document llama.cpp admin management flow"
 - If `setup_manager.update_config()` rejects a new config key, add the key to `Config_Files/config.txt` before attempting to persist it.
 - If both `TldwApiClient.ts` and `domains/models-audio.ts` need methods, update both in the same commit to avoid client drift.
 - Do not resolve unrelated dirty files in the main worktree. Stage only files touched for this feature.
+- Final closeout verification on the post-merge `origin/dev` baseline passed: backend focused llama.cpp suite `180 passed`; package-local frontend llama.cpp/admin suite `58 passed`; tier-4 Playwright admin llama.cpp smoke `6 passed`; Bandit on touched backend scope reported zero findings; `git diff --check` passed.
