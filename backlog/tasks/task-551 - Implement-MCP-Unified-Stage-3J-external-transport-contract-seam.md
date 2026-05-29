@@ -4,12 +4,12 @@ title: Implement MCP Unified Stage 3J external transport contract seam
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-29 20:45'
+updated_date: 2026-05-29 20:45
 labels:
-  - mcp
-  - mcp-unified
-  - standalone
-  - stage3
+- mcp
+- mcp-unified
+- standalone
+- stage3
 dependencies: []
 ---
 
@@ -44,13 +44,14 @@ Docs/superpowers/plans/2026-05-29-mcp-unified-stage3j-external-transport-contrac
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Stage 3J external transport contract seam. Added standalone BrokeredExternalCredential with caller-owned copy behavior, made the host transport base re-export package ExternalToolDefinition, ExternalToolCallResult, and BrokeredExternalCredential, and added package-boundary regression tests.
+Implemented Stage 3J external transport contract seam. Added standalone BrokeredExternalCredential with caller-owned copy behavior, made the host transport base re-export package ExternalToolDefinition, ExternalToolCallResult, and BrokeredExternalCredential, and added package-boundary regression tests. Addressed Qodo review feedback by documenting the two newly added test functions.
 
 Verification:
 - RED: `.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -k external_transport -q` failed on duplicate host ExternalToolDefinition identity.
 - RED: `.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -k brokered_external_credential -q` failed because package BrokeredExternalCredential was missing.
 - GREEN: `.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py tldw_Server_API/app/core/MCP_unified/tests/test_federation_shell_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py tldw_Server_API/app/core/MCP_unified/tests/test_external_stdio_adapter.py tldw_Server_API/app/core/MCP_unified/tests/test_external_websocket_adapter.py tldw_Server_API/app/core/MCP_unified/tests/test_external_credential_broker_runtime.py -q` passed 48 tests.
-- Ruff passed on touched Python files.
+- REVIEW FIX: `.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -q` passed 7 tests.
+- Ruff passed on touched Python files, including the review-fix test file.
 - Bandit passed on touched runtime Python files with zero findings in `/tmp/bandit_mcp_stage3j_external_transport_contracts.json`.
 - `git diff --check` passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -64,3 +65,9 @@ Verification:
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+PR review follow-up: added docstrings to the two newly added package-boundary tests after Qodo flagged the repo docstring rule.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

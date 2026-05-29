@@ -72,6 +72,7 @@ def test_host_external_config_schema_shim_reexports_package_contracts() -> None:
 
 
 def test_host_external_transport_base_reexports_package_contracts() -> None:
+    """Host transport base must reuse the package-owned external contracts."""
     package_models = importlib.import_module("mcp_unified.federation.models")
     package_federation = importlib.import_module("mcp_unified.federation")
     host_base = importlib.import_module(
@@ -85,6 +86,7 @@ def test_host_external_transport_base_reexports_package_contracts() -> None:
 
 
 def test_brokered_external_credential_copy_returns_caller_owned_data() -> None:
+    """Brokered credential copies must not expose mutable source state."""
     package_models = importlib.import_module("mcp_unified.federation.models")
     credential = package_models.BrokeredExternalCredential(
         headers={"Authorization": "Bearer token"},
