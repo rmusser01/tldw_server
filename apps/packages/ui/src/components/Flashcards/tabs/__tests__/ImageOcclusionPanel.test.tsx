@@ -96,4 +96,25 @@ describe("ImageOcclusionPanel", () => {
     })
     expect(screen.getByTestId("image-occlusion-selected-region")).toHaveTextContent("Region 1")
   })
+
+  it("renders empty authoring notices with the design-system Alert", async () => {
+    render(<ImageOcclusionPanel />)
+
+    const awaitingImageNotice = screen.getByText(
+      "Choose an image to begin authoring occlusions."
+    )
+    expect(awaitingImageNotice.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("Upload image occlusion source"), {
+      target: {
+        files: [new File(["binary"], "diagram.png", { type: "image/png" })]
+      }
+    })
+
+    expect(await screen.findByAltText("Image occlusion source preview")).toBeInTheDocument()
+    const noRegionsNotice = screen.getByText(
+      "No regions yet. Draw on the image to add one."
+    )
+    expect(noRegionsNotice.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+  })
 })
