@@ -13,6 +13,8 @@ modified_files:
 - mcp_unified/federation/__init__.py
 - tldw_Server_API/app/core/MCP_unified/catalog_loader.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py
+- tldw_Server_API/tests/integration/test_first_run_setup_flow.py
+- tldw_Server_API/tests/unit/test_mcp_catalog_endpoints.py
 - tldw_Server_API/tests/unit/test_mcp_catalog_loader.py
 ---
 
@@ -37,14 +39,15 @@ Move MCP catalog YAML loader behavior into the standalone mcp_unified package wh
 - Re-exported catalog loader functions from `mcp_unified.federation` so standalone consumers can import load/list/get behavior without the host API package.
 - Replaced `tldw_Server_API.app.core.MCP_unified.catalog_loader` with a compatibility wrapper that imports the standalone implementation and shares the same cache object.
 - Added regression coverage for the host-wrapper package boundary, standalone exports, and shared host/package cache behavior.
-- Verification: RED boundary tests failed before implementation; focused pytest later reported 76 passed; Ruff passed; Bandit reported 0 findings; `git diff --check` was clean.
+- Addressed Qodo review findings by switching the standalone loader to Loguru, using slice assignment for cache replacement, skipping non-mapping YAML entries, and updating remaining cache-reset fixtures to mutate in place.
+- Verification: RED boundary tests failed before implementation; focused pytest later reported 94 passed; Ruff passed; Bandit reported 0 findings; `git diff --check` was clean.
 - PR: https://github.com/rmusser01/tldw_server/pull/2122
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the Stage 3G catalog loader package seam. The standalone `mcp_unified` package now owns catalog load/list/get behavior, while the existing host import path remains compatible through a thin wrapper. PR: https://github.com/rmusser01/tldw_server/pull/2122
+Implemented the Stage 3G catalog loader package seam and addressed Qodo's review findings. The standalone `mcp_unified` package now owns catalog load/list/get behavior, while the existing host import path remains compatible through a thin wrapper. PR: https://github.com/rmusser01/tldw_server/pull/2122
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

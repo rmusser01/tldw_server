@@ -56,6 +56,25 @@ _ONE_GOOD_ONE_BAD_YAML = textwrap.dedent("""\
         name: 12345
 """)
 
+_NON_MAPPING_ENTRIES_YAML = textwrap.dedent("""\
+    catalog:
+      - key: github
+        name: GitHub
+        description: Repositories, issues, PRs, and code search
+        url_template: https://api.github.com
+        auth_type: bearer
+        category: development
+      - null
+      - just-a-string
+      - []
+      - key: arxiv
+        name: arXiv
+        description: Academic paper search and retrieval
+        url_template: https://export.arxiv.org/api
+        auth_type: none
+        category: research
+""")
+
 
 # -- Fixtures ----------------------------------------------------------------
 
@@ -232,6 +251,15 @@ class TestMalformedEntries:
 
         assert len(result) == 1
         assert result[0].key == "github"
+
+    def test_non_mapping_entries_are_skipped(self, tmp_path: Path):
+        """Non-mapping YAML entries are malformed entries, not fatal errors."""
+        p = tmp_path / "catalog.yaml"
+        p.write_text(_NON_MAPPING_ENTRIES_YAML, encoding="utf-8")
+
+        result = load_mcp_catalog(p)
+
+        assert [entry.key for entry in result] == ["github", "arxiv"]
 
     def test_missing_file(self, tmp_path: Path):
         result = load_mcp_catalog(tmp_path / "does_not_exist.yaml")

@@ -11,6 +11,8 @@ from typing import Any, get_type_hints
 import pytest
 
 MCP_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[5]
+STANDALONE_MCP_ROOT = REPO_ROOT / "mcp_unified"
 MCP_PACKAGE = "tldw_Server_API.app.core.MCP_unified"
 EXPECTED_INTERFACE_FILES = {"runtime.py", "policy.py", "storage.py"}
 
@@ -468,6 +470,18 @@ def test_catalog_loader_delegates_to_standalone_package_loader() -> None:
 
     assert "mcp_unified.federation.catalog_loader" in imports
     assert offenders == []
+
+
+def test_standalone_catalog_loader_uses_loguru_not_stdlib_logging() -> None:
+    """Package catalog loader should use the project-standard Loguru logger."""
+    imports = _resolved_import_sources_for(
+        STANDALONE_MCP_ROOT / "federation" / "catalog_loader.py",
+        "mcp_unified.federation",
+        top_level_only=True,
+    )
+
+    assert "loguru" in imports
+    assert "logging" not in imports
 
 
 def test_protocol_boundary_scan_resolves_relative_imports(tmp_path: Path) -> None:

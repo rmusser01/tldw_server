@@ -38,8 +38,9 @@
 ## Verification Log
 
 - RED: `python -m pytest ...::test_catalog_loader_delegates_to_standalone_package_loader ...::test_standalone_package_exports_catalog_loader_functions ...::test_host_and_standalone_loader_paths_share_cache -q` failed as expected before implementation because the standalone loader module did not exist and the host loader still owned YAML/Pydantic parsing.
-- GREEN: `.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/tests/unit/test_mcp_catalog_loader.py tldw_Server_API/tests/unit/test_archetype_schemas.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -q` -> 76 passed.
-- Ruff: `.venv/bin/python -m ruff check mcp_unified/federation/catalog_loader.py mcp_unified/federation/__init__.py tldw_Server_API/app/core/MCP_unified/catalog_loader.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/tests/unit/test_mcp_catalog_loader.py` -> all checks passed.
+- GREEN: `.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/tests/unit/test_mcp_catalog_loader.py tldw_Server_API/tests/unit/test_mcp_catalog_endpoints.py tldw_Server_API/tests/integration/test_first_run_setup_flow.py tldw_Server_API/tests/unit/test_archetype_schemas.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -q` -> 94 passed.
+- Ruff: `.venv/bin/python -m ruff check mcp_unified/federation/catalog_loader.py mcp_unified/federation/__init__.py tldw_Server_API/app/core/MCP_unified/catalog_loader.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/tests/unit/test_mcp_catalog_loader.py tldw_Server_API/tests/unit/test_mcp_catalog_endpoints.py tldw_Server_API/tests/integration/test_first_run_setup_flow.py` -> all checks passed.
 - Bandit: `.venv/bin/python -m bandit -r mcp_unified/federation/catalog_loader.py mcp_unified/federation/__init__.py tldw_Server_API/app/core/MCP_unified/catalog_loader.py -f json -o /tmp/bandit_mcp_stage3g_catalog_loader.json` -> 0 findings.
 - Whitespace: `git diff --check` -> clean.
 - PR: https://github.com/rmusser01/tldw_server/pull/2122
+- Qodo review pass: addressed Loguru logging, in-place cache reset fixtures, non-mapping YAML entry skipping, and slice-assignment cache replacement.
