@@ -14,6 +14,7 @@ references:
 - Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
 - apps/packages/ui/src/components/Option/Evaluations/EvaluationsPage.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/pull/2129
 modified_files:
 - apps/packages/ui/src/components/Option/Evaluations/EvaluationsPage.tsx
 - apps/packages/ui/src/components/Option/Evaluations/__tests__/EvaluationsPage.recipe-tab.test.tsx
@@ -33,14 +34,6 @@ Replace the EvaluationsPage tour-mode product-state AntD Alert with the shared d
 - [x] #3 Focused EvaluationsPage test and design-system product-state verification pass; broader known TypeScript debt is checked for touched-path regressions if needed.
 <!-- AC:END -->
 
-## Implementation Plan
-
-<!-- SECTION:PLAN:BEGIN -->
-- Migrated the Evaluations page tour-mode notice from AntD Alert to the shared design-system Alert primitive while preserving the title, description, and `?tour=1` behavior.
-- Added focused regression coverage that simulates `?tour=1` and asserts the notice renders inside `[data-ds-component="Alert"]`.
-- Removed the single EvaluationsPage product-state baseline exception, reducing total baseline entries from 214 to 213 and Evaluations entries from 15 to 14.
-<!-- SECTION:PLAN:END -->
-
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
@@ -52,7 +45,7 @@ Replace the EvaluationsPage tour-mode product-state AntD Alert with the shared d
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the EvaluationsPage tour alert design-system migration. TDD red run: `bun run test src/components/Option/Evaluations/__tests__/EvaluationsPage.recipe-tab.test.tsx --reporter=dot` failed on the new `[data-ds-component="Alert"]` assertion before the production change. Verification after implementation: focused EvaluationsPage Vitest passed with 2 tests; scoped product-state guard for `src/components/Option/Evaluations/EvaluationsPage.tsx` reported no product-state issues; baseline JSON parses; `git diff --check` passed; `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` passed. Full `bun run verify:design-system-state` is currently blocked by unrelated existing dev findings in Integrations, Writing, Notes, ResearchWorkspace, and stale Integrations baseline entries; no blocked finding references the touched EvaluationsPage file. Bandit is not applicable because this slice touches TypeScript/TSX, JSON, and Backlog metadata only.
+Implemented the EvaluationsPage tour alert design-system migration in PR #2129. TDD red run: `bun run test src/components/Option/Evaluations/__tests__/EvaluationsPage.recipe-tab.test.tsx --reporter=dot` failed on the new `[data-ds-component="Alert"]` assertion before the production change. Verification after implementation: focused EvaluationsPage Vitest passed with 2 tests; scoped product-state guard for `src/components/Option/Evaluations/EvaluationsPage.tsx` reported no product-state issues; baseline JSON parses; `git diff --check` passed; `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` passed. Full `bun run verify:design-system-state` is currently blocked by unrelated existing dev findings in Integrations, Writing, Notes, ResearchWorkspace, and stale Integrations baseline entries; no blocked finding references the touched EvaluationsPage file. Bandit is not applicable because this slice touches TypeScript/TSX, JSON, and Backlog metadata only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
