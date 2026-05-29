@@ -440,6 +440,21 @@ def test_mcp_discovery_module_uses_package_local_environment_helpers() -> None:
     assert offenders == []
 
 
+def test_base_module_does_not_import_host_circuit_breaker() -> None:
+    forbidden_import = "tldw_Server_API.app.core.Infrastructure.circuit_breaker"
+    imports = _resolved_import_sources_for(
+        MCP_ROOT / "modules" / "base.py",
+        f"{MCP_PACKAGE}.modules",
+    )
+    offenders = sorted(
+        source
+        for source in imports
+        if source == forbidden_import or source.startswith(f"{forbidden_import}.")
+    )
+
+    assert offenders == []
+
+
 def test_catalog_loader_uses_standalone_catalog_schema() -> None:
     """Catalog loading must depend on standalone MCP package schemas."""
     forbidden_import = "tldw_Server_API.app.api.v1.schemas.archetype_schemas"
@@ -706,6 +721,28 @@ async def test_mcp_server_default_media_module_path_uses_injected_module_config_
     assert media_registration["config"].settings["db_path"] == (
         deps.module_config_provider.media_db_path
     )
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_default_module_configs_use_injected_circuit_breaker_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    monkeypatch.setenv("MCP_ENABLE_MEDIA_MODULE", "1")
+    monkeypatch.setenv("MCP_ENABLE_FILESYSTEM_MODULE", "0")
+    monkeypatch.setenv("MCP_MODULES_CONFIG", "/tmp/mcp-stage3-no-modules.yaml")
+    deps = _server_runtime_dependencies()
+    deps.environment_flags_provider = _FakeEnvironmentFlagsProvider(
+        flags={"MCP_ENABLE_MEDIA_MODULE": True}
+    )
+    server = MCPServer(dependencies=deps)
+
+    await server._register_default_modules()  # noqa: SLF001
+
+    assert deps.module_registry.registrations
+    for registration in deps.module_registry.registrations:
+        assert registration["config"].circuit_breaker_factory is deps.circuit_breaker_factory
 
 
 def test_mcp_server_uses_injected_auth_and_policy_context_helpers() -> None:

@@ -117,24 +117,112 @@ def _build_module_circuit_breaker_config(config: ModuleConfig) -> ModuleCircuitB
     )
 
 
-def _default_circuit_breaker_factory(*, name: str, config: Any) -> Any:
-    from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
-        CircuitBreaker,
-        CircuitBreakerConfig,
-    )
+class ModuleCircuitBreakerOpenError(Exception):
+    """Raised when the module fallback circuit breaker rejects a call."""
 
-    return CircuitBreaker(
-        name=name,
-        config=CircuitBreakerConfig(
-            failure_threshold=config.failure_threshold,
-            recovery_timeout=config.recovery_timeout,
-            backoff_factor=config.backoff_factor,
-            max_recovery_timeout=config.max_recovery_timeout,
-            half_open_max_calls=config.half_open_max_calls,
-            success_threshold=config.success_threshold,
-            category=config.category,
-            service=config.service,
-        ),
+    def __init__(
+        self,
+        message: str,
+        *,
+        breaker_name: str = "",
+        recovery_timeout: float = 0.0,
+        failure_count: int = 0,
+        recovery_at: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.breaker_name = breaker_name
+        self.recovery_timeout = recovery_timeout
+        self.failure_count = failure_count
+        self.recovery_at = recovery_at
+
+
+class _DefaultModuleCircuitBreaker:
+    """Small host-neutral async circuit breaker used when no host factory is injected."""
+
+    def __init__(self, *, name: str, config: ModuleCircuitBreakerConfig) -> None:
+        self.name = name
+        self.config = config
+        self.failure_count = 0
+        self.success_count = 0
+        self._state = "closed"
+        self._opened_at: float | None = None
+        self._current_recovery_timeout = config.recovery_timeout
+
+    def can_attempt(self) -> bool:
+        if self._state != "open":
+            return True
+        if self._opened_at is None:
+            return False
+        if time.monotonic() - self._opened_at >= self._current_recovery_timeout:
+            self._state = "half_open"
+            self.success_count = 0
+            return True
+        return False
+
+    def record_failure(self) -> None:
+        self.failure_count += 1
+        self.success_count = 0
+        if self._state == "half_open":
+            self._open(with_backoff=True)
+            return
+        if self.failure_count >= self.config.failure_threshold:
+            self._open(with_backoff=False)
+
+    def record_success(self) -> None:
+        if self._state == "half_open":
+            self.success_count += 1
+            if self.success_count >= self.config.success_threshold:
+                self._close()
+            return
+        self.failure_count = 0
+
+    async def call_async(self, operation):
+        if not self.can_attempt():
+            raise ModuleCircuitBreakerOpenError(
+                f"Circuit breaker '{self.name}' is open",
+                breaker_name=self.name,
+                recovery_timeout=self._current_recovery_timeout,
+                failure_count=self.failure_count,
+                recovery_at=(
+                    self._opened_at + self._current_recovery_timeout
+                    if self._opened_at is not None
+                    else None
+                ),
+            )
+        try:
+            result = await operation()
+        except Exception:
+            self.record_failure()
+            raise
+        self.record_success()
+        return result
+
+    def _open(self, *, with_backoff: bool) -> None:
+        if with_backoff:
+            self._current_recovery_timeout = min(
+                self._current_recovery_timeout * self.config.backoff_factor,
+                self.config.max_recovery_timeout,
+            )
+        self._state = "open"
+        self._opened_at = time.monotonic()
+
+    def _close(self) -> None:
+        self._state = "closed"
+        self._opened_at = None
+        self.failure_count = 0
+        self.success_count = 0
+        self._current_recovery_timeout = self.config.recovery_timeout
+
+
+def _default_circuit_breaker_factory(*, name: str, config: Any) -> Any:
+    return _DefaultModuleCircuitBreaker(name=name, config=config)
+
+
+def _is_circuit_breaker_open_error(exc: BaseException) -> bool:
+    return isinstance(exc, ModuleCircuitBreakerOpenError) or (
+        type(exc).__name__ == "CircuitBreakerOpenError"
+        and hasattr(exc, "breaker_name")
+        and hasattr(exc, "recovery_timeout")
     )
 
 
@@ -332,9 +420,6 @@ class BaseModule(ABC):
         The semaphore concurrency guard and timeout wrapping are applied
         as an inner wrapper around the operation.
         """
-        from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
-            CircuitBreakerOpenError,
-        )
         start_time = time.time()
 
         async def _guarded_operation():
@@ -361,10 +446,9 @@ class BaseModule(ABC):
             self._metrics.record_request(True, latency_ms)
             return result
 
-        except CircuitBreakerOpenError:
-            raise
-
         except Exception as e:
+            if _is_circuit_breaker_open_error(e):
+                raise
             latency_ms = (time.time() - start_time) * 1000
             self._metrics.record_request(False, latency_ms)
             logger.error(f"Operation failed in module {self.name}: {str(e)}")
