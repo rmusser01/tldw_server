@@ -89,6 +89,7 @@ class TestLoadMcpCatalog:
         assert keys == {"github", "arxiv"}
 
     def test_catalog_entry_schema_is_standalone_package_model(self, catalog_file: Path):
+        """Catalog loader entries use the standalone model re-exported by the API."""
         from mcp_unified.federation.models import (
             MCPCatalogEntry as StandaloneMCPCatalogEntry,
         )

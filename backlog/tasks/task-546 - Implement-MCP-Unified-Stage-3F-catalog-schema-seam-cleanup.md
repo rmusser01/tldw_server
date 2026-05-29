@@ -59,6 +59,11 @@ Verification:
 - `git diff --check` -> clean.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2115
+
+Rebase/review follow-up:
+- Rebasing onto origin/dev 7afa5191a6 completed without conflicts.
+- CodeRabbit pre-merge summary warned about docstring coverage and PR body template content. The broader docstring percentage includes existing test-file baseline, but the new regression tests now include explicit docstrings. PR body template content was updated with a Risk & Rollback section; the maintainer-owned summary placeholder remains because project policy requires the human maintainer to write it.
+- Follow-up verification: focused pytest -> 73 passed, 5 warnings; Ruff -> all checks passed; Bandit -> 0 findings; `git diff --check` -> clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
