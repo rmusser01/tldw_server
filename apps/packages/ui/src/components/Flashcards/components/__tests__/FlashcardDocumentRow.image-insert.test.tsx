@@ -122,4 +122,40 @@ describe("FlashcardDocumentRow image insertion", () => {
       )
     })
   })
+
+  it("renders upload failures with a design-system alert", async () => {
+    uploadFlashcardAsset.mockRejectedValue(new Error("Upload unavailable"))
+
+    render(
+      <FlashcardDocumentRow
+        card={makeFlashcard()}
+        decks={decks}
+        selected={false}
+        selectAllAcross={false}
+        filterContext={{
+          deckId: 1,
+          tags: ["bio"],
+          sortBy: "due",
+          dueStatus: "all"
+        }}
+        queryKey={["flashcards:document", 1]}
+        onToggleSelect={() => {}}
+        bulkUpdate={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("flashcards-document-row-front-display-row-1"))
+    await screen.findByTestId("flashcards-document-row-front-input-row-1")
+
+    const uploadInput = screen.getByLabelText("Upload image for Question row-1")
+    fireEvent.change(uploadInput, {
+      target: {
+        files: [new File(["binary"], "scan.png", { type: "image/png" })]
+      }
+    })
+
+    const alert = await screen.findByTestId("flashcards-document-row-upload-error-row-1")
+    expect(alert).toHaveAttribute("data-ds-component", "Alert")
+    expect(alert).toHaveTextContent("Upload unavailable")
+  })
 })

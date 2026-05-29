@@ -1,7 +1,8 @@
 import React from "react"
-import { Alert, Button, Checkbox, Input, Select, Tag, Typography, type InputRef } from "antd"
+import { Button, Checkbox, Input, Select, Typography, type InputRef } from "antd"
 import type { TextAreaRef } from "antd/es/input/TextArea"
 
+import { Alert, Badge } from "@/components/ui/primitives"
 import type { Deck, Flashcard, FlashcardBulkUpdateItem, FlashcardBulkUpdateResponse } from "@/services/flashcards"
 import { getFlashcardSourceMeta } from "../utils/source-reference"
 import { FlashcardQueueStateBadge } from "../utils/queue-state-badges"
@@ -87,6 +88,12 @@ export const FlashcardDocumentRow: React.FC<FlashcardDocumentRowProps> = ({
           `Deck ${savedCard.deck_id}`
         )
       : "No deck"
+  const modelBadgeLabel =
+    savedCard.model_type === "cloze"
+      ? "Fill-in-blank"
+      : savedCard.reverse
+        ? "Reversible"
+        : "Standard"
   const sourceMeta = getFlashcardSourceMeta(savedCard)
 
   const getFieldElement = React.useCallback(
@@ -198,7 +205,11 @@ export const FlashcardDocumentRow: React.FC<FlashcardDocumentRowProps> = ({
                 onError={(error) => setUploadError(error.message)}
               />
             )}
-            {status === "saving" && <Tag color="processing">Saving</Tag>}
+            {status === "saving" && (
+              <Badge variant="info" size="sm" dot>
+                Saving
+              </Badge>
+            )}
             {status === "saved" && undoSnapshot && (
               <Button
                 size="small"
@@ -246,19 +257,27 @@ export const FlashcardDocumentRow: React.FC<FlashcardDocumentRowProps> = ({
           </div>
         )}
         <div className="flex flex-wrap gap-1.5">
-          <Tag>{savedCard.model_type === "cloze" ? "Fill-in-blank" : savedCard.reverse ? "Reversible" : "Standard"}</Tag>
+          <Badge variant="secondary" size="sm">{modelBadgeLabel}</Badge>
           <FlashcardQueueStateBadge
             card={savedCard}
             testId={`flashcards-document-row-queue-state-${savedCard.uuid}`}
           />
-          <Tag color="blue">{deckLabel}</Tag>
+          <Badge variant="info" size="sm" outline>
+            {deckLabel}
+          </Badge>
           {(savedCard.tags || []).map((tag) => (
-            <Tag key={`${savedCard.uuid}-${tag}`}>{tag}</Tag>
+            <Badge key={`${savedCard.uuid}-${tag}`} variant="secondary" size="sm" outline>
+              {tag}
+            </Badge>
           ))}
           {sourceMeta && (
-            <Tag color={sourceMeta.unavailable ? "default" : "green"}>
+            <Badge
+              variant={sourceMeta.unavailable ? "secondary" : "success"}
+              size="sm"
+              outline={sourceMeta.unavailable}
+            >
               {sourceMeta.label}
-            </Tag>
+            </Badge>
           )}
         </div>
       </div>
@@ -412,8 +431,7 @@ export const FlashcardDocumentRow: React.FC<FlashcardDocumentRowProps> = ({
 
         {uploadError && (
           <Alert
-            type="error"
-            showIcon
+            variant="error"
             title={uploadError}
             data-testid={`flashcards-document-row-upload-error-${savedCard.uuid}`}
           />
@@ -421,46 +439,42 @@ export const FlashcardDocumentRow: React.FC<FlashcardDocumentRowProps> = ({
 
         {status === "conflict" && (
           <Alert
-            type="warning"
-            showIcon
+            variant="warning"
             title={errorMessage || "This row changed elsewhere."}
-            action={
-              <div className="flex gap-2">
-                <Button
-                  size="small"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    void reloadRow()
-                  }}
-                >
-                  Reload row
-                </Button>
-                <Button
-                  size="small"
-                  type="primary"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    void reapplyConflict()
-                  }}
-                >
-                  Reapply my edit
-                </Button>
-              </div>
-            }
             data-testid={`flashcards-document-row-conflict-${savedCard.uuid}`}
-          />
+          >
+            <div className="flex gap-2">
+              <Button
+                size="small"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  void reloadRow()
+                }}
+              >
+                Reload row
+              </Button>
+              <Button
+                size="small"
+                type="primary"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  void reapplyConflict()
+                }}
+              >
+                Reapply my edit
+              </Button>
+            </div>
+          </Alert>
         )}
 
         {(status === "validation_error" || status === "not_found") && (
           <Alert
-            type="error"
-            showIcon
+            variant="error"
             title={errorMessage || "This row could not be saved."}
-            description={
-              validationFields.length > 0 ? `Check: ${validationFields.join(", ")}` : undefined
-            }
             data-testid={`flashcards-document-row-error-${savedCard.uuid}`}
-          />
+          >
+            {validationFields.length > 0 ? `Check: ${validationFields.join(", ")}` : null}
+          </Alert>
         )}
       </div>
     </div>
