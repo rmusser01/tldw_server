@@ -1,9 +1,10 @@
 ---
-id: TASK-397
+id: TASK-490.14
 title: Add Sync v2 attachment persistence
 status: Done
 assignee: []
 created_date: '2026-05-16 01:12'
+updated_date: '2026-05-29 05:45'
 labels:
   - sync
   - server
@@ -43,6 +44,7 @@ Persist small encrypted Sync v2 attachment payloads server-side behind /api/v1/s
 ## Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+- Tracker hygiene: this completed Sync v2 record was originally created as `TASK-397`, which collided with the active llama.cpp managed-runtime roadmap parent and prevented normal Backlog MCP lookup for that parent. It was moved to completed storage and renumbered to `TASK-490.14` because the work belongs to the Sync v2 task series.
 - Added `Docs/superpowers/plans/2026-05-16-sync-v2-attachment-persistence.md`.
 - Verification: `python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_store.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py -q` passed with 86 tests.
 - Verification: `python -m bandit -q -r tldw_Server_API/app/api/v1/endpoints/sync.py tldw_Server_API/app/core/DB_Management/Sync_DB.py tldw_Server_API/app/core/Sync/v2/models.py tldw_Server_API/app/core/Sync/v2/service.py tldw_Server_API/app/core/Sync/v2/store.py` passed; Bandit printed existing `nosec encountered` warnings for annotated SQL lines but returned success.
