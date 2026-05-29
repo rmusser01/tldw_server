@@ -13,10 +13,11 @@ This must not replace the existing full-screen/open action. The current open act
 
 ## Approved Decisions
 
-- Add a separate **Continue in WebUI** action near the existing full-app/open action.
+- Add a separate **Continue in WebUI** action in the sidepanel composer `ControlRow` quick-actions area, near the existing full-app/open action.
 - Transfer only the current sidepanel draft and already-visible page context.
 - Prefill the WebUI `/chat` composer; do not send automatically.
-- Show a visible context indicator in `/chat` before send.
+- Show a visible imported-context banner in `/chat` before send.
+- Include imported context in the next chat request unless the user removes it before sending.
 - Use a one-time, short-lived handoff package keyed by an opaque ID.
 - Preserve the original sidepanel draft after handoff.
 - Keep role-play route intent compatible with the handoff URL when active.
@@ -29,6 +30,8 @@ This must not replace the existing full-screen/open action. The current open act
 - Sidepanel and WebUI composers already use separate draft keys through `useComposerText`, so sidepanel draft preservation matches the existing storage model.
 - `chat-surface-coordinator` currently tracks route/surface and optional panel engagement only; it is not a cross-surface state-transfer mechanism.
 - Existing sidepanel handoff tests assert route-only behavior and role-play route preservation, so the new behavior must be additive instead of mutating the current route-only contract.
+- `SidepanelHeaderSimple` does not currently receive composer draft/context props, while `ControlRow` already receives conversation-context composition props. The transfer action belongs in `ControlRow`, not the header.
+- Existing `createLocalRegistryBucket` storage writes swallow `set` errors. The handoff service must not reuse that helper for package creation because this flow must fail closed before opening `/chat?handoff=<id>`.
 
 ## User Experience Contract
 
@@ -44,7 +47,7 @@ The existing full-screen/open action keeps its current semantics:
 
 ### New Explicit Transfer Action
 
-Add a separate **Continue in WebUI** action.
+Add a separate **Continue in WebUI** action in the sidepanel composer `ControlRow` quick-actions menu.
 
 Suggested copy:
 
@@ -62,9 +65,10 @@ If neither exists, the action should be disabled or visually deemphasized with a
 
 When `/chat?handoff=<id>` opens and the handoff is valid:
 
-- WebUI consumes the handoff once.
+- WebUI reads and validates the handoff package.
 - The composer is prefilled with the transferred draft.
-- The imported page context appears as a visible context attachment/indicator near the composer or active context rail.
+- The imported page context appears as a visible imported-context banner above the composer.
+- The imported context is included in the next chat request unless the user removes it.
 - The user can edit the draft before sending.
 - Nothing is submitted until the user explicitly sends.
 
@@ -81,6 +85,8 @@ The context indicator must expose enough information for user trust:
 - snippet/selection count or short snippet preview when available,
 - a remove/dismiss control before send.
 
+If the user removes the imported context, the prefilled draft should remain. Removing context only removes the contextual attachment from the next request.
+
 ## Handoff Package
 
 The URL carries only an opaque handoff ID:
@@ -92,6 +98,13 @@ If role-play route intent is active, merge the handoff parameter into the existi
 `/options.html#/chat?mode=character&characterId=<id>&handoff=<handoffId>`
 
 The package should be stored in extension/browser storage, not encoded into the URL.
+
+Implementation storage contract:
+
+- Use a dedicated sidepanel chat handoff service backed by extension local storage, preferably through `createSafeStorage({ area: "local" })`.
+- Package creation must return success or throw/return a typed failure. Do not use storage helpers that silently swallow write failures for package creation.
+- Package creation should verify the package can be read back before opening `/chat?handoff=<id>`.
+- Package contents must not be logged.
 
 Proposed package shape:
 
@@ -112,7 +125,9 @@ type SidepanelChatHandoffPackage = {
       kind: "selection" | "visible-context" | "captured-snippet"
       text: string
       label?: string
+      truncated?: boolean
     }>
+    truncated?: boolean
   }
   routeIntent?: {
     path: "/chat" | string
@@ -126,17 +141,33 @@ For the first implementation slice, `pageContext` must be limited to context alr
 
 Payloads should be bounded:
 
-- cap the number of snippets,
-- cap each snippet length,
-- truncate with an explicit indicator when needed,
+- max 4 snippets,
+- max 4,000 characters per snippet,
+- max 16,000 total snippet characters,
+- max 32,000 draft characters in the handoff package,
+- drafts longer than the current `PASTED_TEXT_CHAR_LIMIT` of 1,500 characters should prefill through the existing large-draft/collapse behavior instead of expanding the composer unexpectedly,
+- truncate with `truncated: true` when needed,
 - reject malformed package shapes before prefill.
+
+## Imported Context Request Semantics
+
+Imported page context is not only a visual banner. It is first-class composer context for the next send:
+
+- The banner is rendered above the composer so the user can review or remove it before send.
+- The next chat request should include the imported context in the same request-composition path used for explicit composer context, or in a dedicated sidepanel-handoff context block if that is the smallest safe integration.
+- Imported context is consumed by one user send or by user dismissal. It should not silently persist across unrelated drafts after send.
+- The first implementation slice should not write imported context as durable saved-conversation metadata beyond whatever is already captured by the sent message/request path.
+- Tests must assert that the outgoing chat request includes imported page title, URL, and snippets when the banner is present, and omits them after removal.
 
 ## Lifecycle Rules
 
 - Handoff packages are one-time consume.
 - Default expiry should be short, for example 10 minutes.
 - Handoff IDs should be unguessable, for example `crypto.randomUUID()`.
-- Consuming `/chat?handoff=<id>` marks the package consumed or removes it.
+- Opening `/chat?handoff=<id>` should not immediately destroy the package. Read and validate first, then mark consumed or remove it only after one of these terminal outcomes:
+  - successful composer prefill/import,
+  - user chooses `Cancel import` in an existing-draft conflict,
+  - user acknowledges a malformed/unsupported-package error.
 - Expired or consumed packages must not prefill composer state.
 - The sidepanel draft remains unchanged after handoff creation and after WebUI consumption.
 - Handoff cleanup should remove expired records opportunistically when creating or consuming a package.
@@ -148,6 +179,7 @@ If the handoff is missing, expired, malformed, or already consumed:
 - `/chat` still opens normally.
 - Show non-blocking feedback such as `The sidepanel handoff expired. Start a new handoff from the sidepanel to continue that draft.`
 - Do not block normal chat usage.
+- Remove the `handoff` query parameter from the React Router location after the feedback is shown, so reloads do not repeat the same stale handoff attempt.
 
 If the draft can be recovered but page context cannot:
 
@@ -160,6 +192,13 @@ If storage write fails in the sidepanel:
 - Show a failure notification.
 - Do not open `/chat?handoff=<id>` with a missing package.
 
+If `/chat` already has a local unsent draft:
+
+- Show the import conflict choice before changing composer text.
+- `Insert handoff draft` appends or inserts the handoff text according to the existing composer insertion behavior.
+- `Replace current draft` replaces the local draft with the handoff draft.
+- `Cancel import` leaves the local draft unchanged and consumes/removes the handoff package so reload does not prompt repeatedly.
+
 ## Privacy And Security Constraints
 
 - Do not put draft text or page snippets in the URL.
@@ -168,6 +207,14 @@ If storage write fails in the sidepanel:
 - Do not send the draft automatically.
 - Treat handoff context as user-visible input, not hidden model metadata.
 - Avoid logging package contents in errors or analytics.
+- Do not silently overwrite an existing WebUI draft.
+
+## Routing Requirements
+
+- Parse handoff parameters through React Router route state, for example `location.search` for `/chat?handoff=<id>`.
+- Do not parse handoff parameters from `window.location.search`; this app uses hash routes such as `/options.html#/chat?handoff=<id>`, where the meaningful query string lives inside the hash route.
+- Remove `handoff` from the route after a terminal outcome with router-aware navigation or `history.replaceState` that edits the hash-route query, not the outer document query.
+- Preserve existing role-play query parameters when adding or removing `handoff`.
 
 ## Accessibility Requirements
 
@@ -177,6 +224,7 @@ If storage write fails in the sidepanel:
 - Disabled state must be announced when no transferable state exists.
 - The imported context indicator in `/chat` must be keyboard reachable.
 - The context remove/dismiss action must have an accessible name that identifies the imported page context.
+- The existing-draft conflict choice must be keyboard reachable and must not trap focus.
 - Non-blocking error feedback must be available to assistive technology, not only visual toast color.
 
 ## Test Contract
@@ -189,11 +237,16 @@ Focused regression tests should cover:
 - Draft text and page snippets are not serialized into the URL.
 - Sidepanel draft is preserved after handoff creation.
 - Role-play route intent preserves `mode=character&characterId=...` alongside `handoff=<id>` when applicable.
-- `/chat` consumes a valid handoff once and pre-fills the composer.
-- `/chat` displays a visible imported-context indicator before send.
+- Handoff package creation fails closed when storage write or read-back verification fails.
+- `/chat` reads and validates a valid handoff, pre-fills the composer, then consumes it after successful import.
+- `/chat` displays a visible imported-context banner before send.
+- The next outgoing chat request includes imported page title, URL, and snippets while the banner is present.
+- Removing the imported-context banner removes the imported context from the outgoing chat request without clearing the draft.
 - Existing WebUI composer draft is not silently overwritten by an arriving handoff.
+- Existing-draft import conflict supports insert, replace, and cancel outcomes.
 - Expired, missing, malformed, and already-consumed handoffs open `/chat` normally with non-blocking feedback.
 - A storage write failure does not open a broken handoff URL.
+- Hash-router cleanup removes only `handoff` and preserves role-play route parameters.
 
 ## Implementation Boundaries
 
@@ -210,16 +263,15 @@ This design does not require:
 ## Suggested Implementation Slices
 
 1. Add a storage service and unit tests for creating, reading, consuming, expiring, and cleaning sidepanel chat handoff packages.
-2. Add the sidepanel **Continue in WebUI** action and tests that assert route-only open remains unchanged.
-3. Add `/chat` handoff consumption, composer prefill, visible context indicator, and error feedback tests.
-4. Run packaged extension smoke to verify sidepanel action, WebUI arrival, role-play route compatibility, and stale handoff behavior.
+2. Add the sidepanel **Continue in WebUI** action in `ControlRow` and tests that assert route-only open remains unchanged.
+3. Add `/chat` handoff read/validate/import/consume, composer prefill, imported-context banner, request inclusion, hash-route cleanup, and error feedback tests.
+4. Run packaged extension smoke to verify sidepanel action, WebUI arrival, role-play route compatibility, request context inclusion, and stale handoff behavior.
 
 ## Open Questions
 
-- Which existing context indicator component should render the imported sidepanel page context in `/chat`: composer attachment UI, context rail, or a small imported-context banner?
-- Should handoff packages be stored in `browser.storage.local`, an existing extension storage helper, or a new thin service wrapping the current storage abstraction?
-- Should imported context become part of the next chat request only, or should it also be visible in saved conversation metadata after send?
-- Should there be a small visual acknowledgement in the sidepanel after successful package creation, or is opening the WebUI enough feedback?
+- Whether imported sidepanel context should later be promoted into durable saved-conversation metadata. First slice keeps it request-scoped.
+- Whether a future slice should support fresh readable-page capture at handoff time. First slice uses only already-visible or explicitly captured context.
+- Whether a future slice should add a success acknowledgement in the sidepanel after package creation. First slice treats opening the WebUI tab as success feedback and reserves notifications for failure.
 
 ## Verification For This Spec
 
