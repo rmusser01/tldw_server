@@ -4,7 +4,7 @@ title: Implement Quick Ingest UX remediation
 status: Done
 assignee: []
 created_date: '2026-05-16 00:41'
-updated_date: '2026-05-16 04:40'
+updated_date: '2026-05-29 04:11'
 labels:
   - quick-ingest
   - ux
@@ -36,15 +36,19 @@ Parent tracking task for executing the approved Quick Ingest UX remediation impl
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+Canonical record: this `backlog/completed/` file is the authoritative parent closeout for TASK-394. The matching `backlog/tasks/` file is retained as a tracker mirror for PR visibility and points back here.
+
 Implementation complete across TASK-394.1 through TASK-394.7. Scope stayed within active Quick Ingest shared WebUI/extension modal/process surfaces, launch/close/cancel/recovery/result handoff, validation, and focused tests. Large-file strategy used the approved Truthful limit fix: current browser-buffered Quick Ingest upload limit is 50 MB, with the 500 MB transport redesign left as future work.
 
 Final verification evidence: shared Quick Ingest Vitest passed with 15 files / 178 tests; final WebUI Quick Ingest Playwright passed with 11 tests outside the macOS sandbox; git diff --check passed. No backend Python code was touched, so Bandit is not applicable. Residual risk: extension Playwright focused specs were migrated to active wizard selectors but could not be executed because extension globalSetup/build failed/hung before tests ran; exact command/failure recorded in TASK-394.6 and TASK-394.7. PR-ready notes are recorded in the implementation plan, preserving the human-owned Change summary placeholder.
+
+Current verification on latest dev after PR #2114: `bun run test src/components/Common/QuickIngest/__tests__ src/services/__tests__/quick-ingest-batch.test.ts src/services/__tests__/quick-ingest-session-reattach.test.ts --maxWorkers=1 --no-file-parallelism` passed with 17 files / 208 tests. `npx playwright test e2e/workflows/media-ingest.spec.ts --grep "Quick Ingest" --project=chromium --reporter=line` passed with 13 tests in 4.8m. `git diff --check` passed after this Backlog-only closeout edit. Bandit remains not applicable because no Python code was touched. PR #2114 also fixed the stale WebUI completed-results assertion helper, so the final browser sweep now covers the current shared wizard summary format.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Quick Ingest UX remediation is complete for the active shared wizard path: first-open clarity, result handoff, recovery/progress semantics, validation, and current-flow WebUI coverage are implemented and verified. Remaining caveat is extension Playwright execution, blocked by the existing extension build/globalSetup harness before specs start; the targeted extension specs themselves were updated away from stale legacy selectors.
+Quick Ingest UX remediation is complete for the active shared wizard path: first-open clarity, result handoff, recovery/progress semantics, validation, and current-flow WebUI coverage are implemented and verified against the current 208-test/13-scenario sweep. Remaining caveat is extension Playwright execution, blocked by the existing extension build/globalSetup harness before specs start; the targeted extension specs themselves were updated away from stale legacy selectors.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
