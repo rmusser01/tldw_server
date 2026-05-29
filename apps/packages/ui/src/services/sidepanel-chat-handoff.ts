@@ -239,17 +239,31 @@ const parsePageContext = (
   value: unknown
 ): SidepanelChatHandoffPageContext | null => {
   if (!isRecord(value)) return null
-  if (value.title != null && typeof value.title !== "string") return null
-  if (value.url != null && typeof value.url !== "string") return null
+  let title: string | undefined
+  let url: string | undefined
+  let truncated: boolean | undefined
+
+  if (value.title != null) {
+    if (typeof value.title !== "string") return null
+    title = value.title
+  }
+  if (value.url != null) {
+    if (typeof value.url !== "string") return null
+    url = value.url
+  }
   if (!Array.isArray(value.snippets)) return null
   if (!value.snippets.every(isValidSnippet)) return null
-  if (value.truncated != null && typeof value.truncated !== "boolean") return null
+  const snippets: SidepanelChatHandoffSnippet[] = value.snippets
+  if (value.truncated != null) {
+    if (typeof value.truncated !== "boolean") return null
+    truncated = value.truncated
+  }
 
   return {
-    ...(value.title != null ? { title: value.title } : {}),
-    ...(value.url != null ? { url: value.url } : {}),
-    snippets: value.snippets,
-    ...(value.truncated != null ? { truncated: value.truncated } : {})
+    ...(title ? { title } : {}),
+    ...(url ? { url } : {}),
+    snippets,
+    ...(truncated != null ? { truncated } : {})
   }
 }
 
@@ -257,14 +271,21 @@ const parseRouteIntent = (
   value: unknown
 ): SidepanelChatHandoffPackage["routeIntent"] | null => {
   if (!isRecord(value)) return null
+  let characterId: string | undefined
+
   if (typeof value.path !== "string") return null
+  const path: string = value.path
   if (value.mode != null && value.mode !== "character") return null
-  if (value.characterId != null && typeof value.characterId !== "string") return null
+  const mode = value.mode === "character" ? value.mode : undefined
+  if (value.characterId != null) {
+    if (typeof value.characterId !== "string") return null
+    characterId = value.characterId
+  }
 
   return {
-    path: value.path,
-    ...(value.mode === "character" ? { mode: "character" } : {}),
-    ...(value.characterId != null ? { characterId: value.characterId } : {})
+    path,
+    ...(mode === "character" ? { mode: "character" } : {}),
+    ...(characterId != null ? { characterId } : {})
   }
 }
 
@@ -290,11 +311,20 @@ const parsePackage = (
   if (value.source !== "sidepanel-chat") return null
   if (!isValidDateString(value.createdAt)) return null
   if (!isValidDateString(value.expiresAt)) return null
-  if (value.consumedAt != null && !isValidDateString(value.consumedAt)) return null
+  let consumedAt: string | undefined
+  if (value.consumedAt != null) {
+    if (!isValidDateString(value.consumedAt)) return null
+    consumedAt = value.consumedAt
+  }
   if (!isRecord(value.draft)) return null
   if (typeof value.draft.text !== "string") return null
-  if (value.draft.truncated != null && typeof value.draft.truncated !== "boolean") {
-    return null
+  const draftText: string = value.draft.text
+  let draftTruncated: boolean | undefined
+  if (value.draft.truncated != null) {
+    if (typeof value.draft.truncated !== "boolean") {
+      return null
+    }
+    draftTruncated = value.draft.truncated
   }
 
   const pageContext =
@@ -310,12 +340,10 @@ const parsePackage = (
     source: "sidepanel-chat",
     createdAt: value.createdAt,
     expiresAt: value.expiresAt,
-    ...(value.consumedAt != null ? { consumedAt: value.consumedAt } : {}),
+    ...(consumedAt ? { consumedAt } : {}),
     draft: {
-      text: value.draft.text,
-      ...(value.draft.truncated != null
-        ? { truncated: value.draft.truncated }
-        : {})
+      text: draftText,
+      ...(draftTruncated != null ? { truncated: draftTruncated } : {})
     },
     ...(pageContext ? { pageContext } : {}),
     ...(routeIntent ? { routeIntent } : {})
