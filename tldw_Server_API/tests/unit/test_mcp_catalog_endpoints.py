@@ -7,12 +7,12 @@ import pytest
 from fastapi import HTTPException
 
 import tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint as mcp_endpoint
+import tldw_Server_API.app.core.MCP_unified.catalog_loader as _catalog_mod
 from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import (
     MCPConnectionTestRequest,
-    list_mcp_catalog,
     check_mcp_connection,
+    list_mcp_catalog,
 )
-import tldw_Server_API.app.core.MCP_unified.catalog_loader as _catalog_mod
 from tldw_Server_API.app.core.MCP_unified.catalog_loader import load_mcp_catalog
 
 pytestmark = pytest.mark.unit
@@ -28,10 +28,15 @@ _CATALOG_YAML = (
 @pytest.fixture(autouse=True)
 def _load_real_catalog():
     """Load the real catalog YAML before each test and clear after."""
-    _catalog_mod._CATALOG_CACHE = []
+    _catalog_mod._CATALOG_CACHE.clear()
     load_mcp_catalog(_CATALOG_YAML)
     yield
-    _catalog_mod._CATALOG_CACHE = []
+    _catalog_mod._CATALOG_CACHE.clear()
+
+
+def _allow_catalog_probe_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bypass DNS-backed URL safety checks in tests covering probe behavior."""
+    monkeypatch.setattr(mcp_endpoint, "assert_url_safe", lambda _url: None)
 
 
 # -- list_mcp_catalog --------------------------------------------------------
@@ -80,6 +85,7 @@ async def test_list_catalog_unknown_archetype_returns_empty():
 @pytest.mark.asyncio
 async def test_connection_unreachable(monkeypatch: pytest.MonkeyPatch):
     """Catalog connection failures should return a safe unreachable response."""
+    _allow_catalog_probe_url(monkeypatch)
     req = MCPConnectionTestRequest(url="https://api.github.com")
 
     async def _failing_probe(_url: str, _headers: dict[str, str]) -> None:
@@ -120,6 +126,7 @@ async def test_connection_failure_logs_canonical_url_without_request_secrets(
         probed_urls.append(url)
         raise OSError("network down")
 
+    _allow_catalog_probe_url(monkeypatch)
     monkeypatch.setattr(mcp_endpoint, "logger", _FakeLogger())
     monkeypatch.setattr(mcp_endpoint, "_is_private_ip", lambda _host: False)
     monkeypatch.setattr(mcp_endpoint, "_probe_mcp_connection", _failing_probe)
@@ -146,6 +153,7 @@ async def test_connection_uses_api_key_header(monkeypatch: pytest.MonkeyPatch):
         captured_headers.update(headers)
         return None
 
+    _allow_catalog_probe_url(monkeypatch)
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint._is_private_ip",
         lambda _host: False,

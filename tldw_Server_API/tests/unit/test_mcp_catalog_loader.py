@@ -56,6 +56,25 @@ _ONE_GOOD_ONE_BAD_YAML = textwrap.dedent("""\
         name: 12345
 """)
 
+_NON_MAPPING_ENTRIES_YAML = textwrap.dedent("""\
+    catalog:
+      - key: github
+        name: GitHub
+        description: Repositories, issues, PRs, and code search
+        url_template: https://api.github.com
+        auth_type: bearer
+        category: development
+      - null
+      - just-a-string
+      - []
+      - key: arxiv
+        name: arXiv
+        description: Academic paper search and retrieval
+        url_template: https://export.arxiv.org/api
+        auth_type: none
+        category: research
+""")
+
 
 # -- Fixtures ----------------------------------------------------------------
 
@@ -63,9 +82,9 @@ _ONE_GOOD_ONE_BAD_YAML = textwrap.dedent("""\
 @pytest.fixture(autouse=True)
 def _clear_cache():
     """Ensure the module-level cache is empty before and after each test."""
-    _catalog_mod._CATALOG_CACHE = []
+    _catalog_mod._CATALOG_CACHE.clear()
     yield
-    _catalog_mod._CATALOG_CACHE = []
+    _catalog_mod._CATALOG_CACHE.clear()
 
 
 @pytest.fixture()
@@ -102,6 +121,42 @@ class TestLoadMcpCatalog:
 
         assert ApiMCPCatalogEntry is StandaloneMCPCatalogEntry
         assert all(isinstance(e, StandaloneMCPCatalogEntry) for e in result)
+
+    def test_standalone_package_exports_catalog_loader_functions(
+        self,
+        catalog_file: Path,
+    ):
+        """Standalone package exports the same catalog loader functions."""
+        from mcp_unified.federation import load_mcp_catalog as package_load_mcp_catalog
+        from mcp_unified.federation.catalog_loader import (
+            get_catalog_entry as package_get_catalog_entry,
+        )
+
+        assert package_load_mcp_catalog is load_mcp_catalog
+
+        package_load_mcp_catalog(catalog_file)
+
+        assert package_get_catalog_entry("github") is not None
+        assert [entry.key for entry in list_catalog_entries()] == ["github", "arxiv"]
+
+    def test_host_and_standalone_loader_paths_share_cache(
+        self,
+        catalog_file: Path,
+        tmp_path: Path,
+    ):
+        """Host compatibility wrapper and standalone loader share cache state."""
+        from mcp_unified.federation import catalog_loader as package_catalog_mod
+
+        package_catalog_mod.load_mcp_catalog(catalog_file)
+
+        assert [entry.key for entry in _catalog_mod.list_catalog_entries()] == [
+            "github",
+            "arxiv",
+        ]
+
+        _catalog_mod.load_mcp_catalog(tmp_path / "missing.yaml")
+
+        assert package_catalog_mod.list_catalog_entries() == []
 
     def test_cache_is_populated(self, catalog_file: Path):
         load_mcp_catalog(catalog_file)
@@ -197,6 +252,15 @@ class TestMalformedEntries:
         assert len(result) == 1
         assert result[0].key == "github"
 
+    def test_non_mapping_entries_are_skipped(self, tmp_path: Path):
+        """Non-mapping YAML entries are malformed entries, not fatal errors."""
+        p = tmp_path / "catalog.yaml"
+        p.write_text(_NON_MAPPING_ENTRIES_YAML, encoding="utf-8")
+
+        result = load_mcp_catalog(p)
+
+        assert [entry.key for entry in result] == ["github", "arxiv"]
+
     def test_missing_file(self, tmp_path: Path):
         result = load_mcp_catalog(tmp_path / "does_not_exist.yaml")
 
@@ -214,7 +278,9 @@ class TestMalformedEntries:
         def boom(_raw: str):
             raise RuntimeError("unexpected parser failure")
 
-        monkeypatch.setattr(_catalog_mod.yaml, "safe_load", boom)
+        from mcp_unified.federation import catalog_loader as package_catalog_mod
+
+        monkeypatch.setattr(package_catalog_mod.yaml, "safe_load", boom)
 
         with pytest.raises(RuntimeError, match="unexpected parser failure"):
             load_mcp_catalog(catalog_file)
