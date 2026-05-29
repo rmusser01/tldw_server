@@ -1,7 +1,7 @@
 ---
 id: TASK-546
 title: Implement MCP Unified Stage 3F catalog schema seam cleanup
-status: In Progress
+status: Done
 labels:
 - mcp
 - mcp-unified
@@ -57,6 +57,8 @@ Verification:
 - `.venv/bin/python -m ruff check mcp_unified/federation/models.py tldw_Server_API/app/api/v1/schemas/archetype_schemas.py tldw_Server_API/app/core/MCP_unified/catalog_loader.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/tests/unit/test_mcp_catalog_loader.py` -> all checks passed.
 - `.venv/bin/python -m bandit -r mcp_unified/federation/models.py tldw_Server_API/app/api/v1/schemas/archetype_schemas.py tldw_Server_API/app/core/MCP_unified/catalog_loader.py -f json -o /tmp/bandit_mcp_stage3f_catalog_schema.json` -> 0 findings.
 - `git diff --check` -> clean.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2115
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

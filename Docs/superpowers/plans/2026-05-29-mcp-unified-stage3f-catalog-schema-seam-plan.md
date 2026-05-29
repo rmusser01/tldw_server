@@ -41,4 +41,4 @@
 
 - [x] Run focused pytest for extraction contracts, catalog loader, archetype schema tests, and standalone package boundary tests.
 - [x] Run Ruff and Bandit on touched files.
-- [ ] Update TASK-546 with verification, final summary, and PR link.
+- [x] Update TASK-546 with verification, final summary, and PR link.
