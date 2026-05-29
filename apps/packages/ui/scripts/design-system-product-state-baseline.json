@@ -1,49 +1,5 @@
 [
   {
-    "id": "antd-product-state-import:src/components/Flashcards/components/FlashcardDocumentRow.tsx:Alert#antd-alert-flashcarddocumentrow-type-error-line-414-o4coyq",
-    "path": "src/components/Flashcards/components/FlashcardDocumentRow.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Flashcards/components/FlashcardDocumentRow.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Flashcards/components/FlashcardDocumentRow.tsx:Alert#antd-alert-flashcarddocumentrow-type-error-line-455-1nwiluh",
-    "path": "src/components/Flashcards/components/FlashcardDocumentRow.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Flashcards/components/FlashcardDocumentRow.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Flashcards/components/FlashcardDocumentRow.tsx:Alert#antd-alert-flashcarddocumentrow-type-warning-reload-row-1h0zxtk",
-    "path": "src/components/Flashcards/components/FlashcardDocumentRow.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Flashcards/components/FlashcardDocumentRow.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Flashcards/components/FlashcardDocumentRow.tsx:Tag",
-    "path": "src/components/Flashcards/components/FlashcardDocumentRow.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Tag",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Tag product-state UI in src/components/Flashcards/components/FlashcardDocumentRow.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Admin/ApiKeyManagementPage.tsx:Alert#antd-alert-apikeymanagementpage-type-error-access-denied-1uep3es",
     "path": "src/components/Option/Admin/ApiKeyManagementPage.tsx",
     "rule": "antd-product-state-import",
