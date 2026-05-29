@@ -25,6 +25,9 @@ type PlaygroundQueuedSourceContext = {
   documents?: ChatDocuments
   imageBackendOverride?: string
   isImageCommand?: boolean
+  requestOverrides?: {
+    messageForModel?: string
+  }
 }
 
 type SubmissionIntent = {
@@ -351,6 +354,7 @@ export function usePlaygroundQueueManagement(
         requestOverrides: {
           selectedModel: item.snapshot.selectedModel,
           selectedSystemPrompt: item.snapshot.selectedSystemPrompt,
+          ...(sourceContext?.requestOverrides ?? {}),
           toolChoice:
             item.snapshot.toolChoice === "auto" ||
             item.snapshot.toolChoice === "required" ||
@@ -476,11 +480,15 @@ export function usePlaygroundQueueManagement(
     ({
       promptText,
       image,
-      intent
+      intent,
+      requestOverrides
     }: {
       promptText: string
       image: string
       intent: SubmissionIntent
+      requestOverrides?: {
+        messageForModel?: string
+      }
     }) => {
       const documents = buildQueuedDocuments()
       return queue.enqueue({
@@ -492,7 +500,8 @@ export function usePlaygroundQueueManagement(
           imageBackendOverride: intent.isImageCommand
             ? intent.imageBackendOverride
             : undefined,
-          isImageCommand: intent.isImageCommand
+          isImageCommand: intent.isImageCommand,
+          requestOverrides
         },
         blockedReason: isQueuedDispatchBlockedByComposerState
           ? "draft-attachments-conflict"

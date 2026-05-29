@@ -36,8 +36,10 @@ describe("useComposerSubmit", () => {
     const order: string[] = []
     const sendMessage = vi.fn(async () => {
       order.push("send")
+      return "submitted"
     })
-    const afterSend = vi.fn(() => {
+    const afterSend = vi.fn((result: string) => {
+      expect(result).toBe("submitted")
       order.push("after")
     })
 
@@ -48,6 +50,7 @@ describe("useComposerSubmit", () => {
     })
 
     expect(order).toEqual(["send", "after"])
+    expect(afterSend).toHaveBeenCalledWith("submitted")
   })
 
   it("runs both hooks in the expected order: before → send → after", async () => {
@@ -105,10 +108,12 @@ describe("useComposerSubmit", () => {
     const sendMessage = vi.fn(async () => "ok")
     const { result } = renderHook(() => useComposerSubmit({ sendMessage }))
 
+    let dispatchResult: string | undefined
     await act(async () => {
-      await result.current.dispatch({ message: "hi" })
+      dispatchResult = await result.current.dispatch({ message: "hi" })
     })
 
     expect(sendMessage).toHaveBeenCalledOnce()
+    expect(dispatchResult).toBe("ok")
   })
 })

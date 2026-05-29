@@ -17,6 +17,10 @@ import {
   deriveRolePlayCompatibility,
   type RolePlayCompatibility
 } from "../role-play-compatibility"
+import {
+  buildSidepanelHandoffMessageForModel,
+  type SidepanelChatHandoffPageContext
+} from "@/services/sidepanel-chat-handoff"
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -80,6 +84,7 @@ export interface UsePlaygroundRawPreviewDeps {
   }
   formImage: string
   formMessage: string
+  importedSidepanelContext?: SidepanelChatHandoffPageContext | null
   researchContext?: ChatResearchContext
   notificationApi: {
     error: (opts: { message: string; description?: string }) => void
@@ -136,6 +141,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     resolveSubmissionIntent,
     formImage,
     formMessage,
+    importedSidepanelContext,
     researchContext,
     notificationApi,
     t,
@@ -385,6 +391,18 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
       const pinnedText = formatPinnedResults(ragPinnedResults, "markdown")
       draftMessage = draftMessage ? `${draftMessage}\n\n${pinnedText}` : pinnedText
     }
+    const modelDraftMessage =
+      !intent.isImageCommand && importedSidepanelContext
+        ? buildSidepanelHandoffMessageForModel(
+            draftMessage.trim().length > 0
+              ? draftMessage.trim()
+              : t(
+                  "playground:sidepanelHandoff.contextOnlyDraft",
+                  "Summarize this page."
+                ),
+            importedSidepanelContext
+          )
+        : draftMessage
     const draftImage = intent.isImageCommand ? "" : String(formImage || "")
     const isCharacterFlow =
       Boolean(selectedCharacter?.id) &&
@@ -427,7 +445,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
       const chatIdHint = serverChatId || "<new-chat-id>"
       const messagePayload: Record<string, unknown> = {
         role: "user",
-        content: draftMessage
+        content: modelDraftMessage
       }
       const normalizedImage = String(formImage || "")
       if (normalizedImage.startsWith("data:")) {
@@ -513,7 +531,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     if (limitedModels.length === 1) {
       const preview = await buildNormalPreviewRequest(
         limitedModels[0],
-        draftMessage,
+        modelDraftMessage,
         draftImage
       )
       return {
@@ -528,7 +546,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
 
     const previews = await Promise.all(
       limitedModels.map((modelId) =>
-        buildNormalPreviewRequest(modelId, draftMessage, draftImage)
+        buildNormalPreviewRequest(modelId, modelDraftMessage, draftImage)
       )
     )
     return {
@@ -555,6 +573,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     formImage,
     formMessage,
     imageBackendDefaultTrimmed,
+    importedSidepanelContext,
     messageSteeringForceNarrate,
     messageSteeringMode,
     ragPinnedResults,
@@ -565,6 +584,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     serverChatId,
     serverChatSource,
     serverChatState,
+    t,
     temporaryChat
   ])
 

@@ -183,6 +183,7 @@ import {
   PlaygroundSendControl,
   type PlaygroundSendBlocker,
 } from "./PlaygroundSendControl";
+import { SidepanelImportedContextBanner } from "./SidepanelImportedContextBanner";
 import { PlaygroundToolsPopover } from "./PlaygroundToolsPopover";
 import type { RolePlaySetupApplyPayload } from "./RolePlaySetupDrawer";
 import { TokenProgressBar } from "./TokenProgressBar";
@@ -224,6 +225,7 @@ import {
   usePlaygroundVoiceChat,
   usePromptTemplates,
 } from "./hooks";
+import { useSidepanelChatHandoffImport } from "./hooks/useSidepanelChatHandoffImport";
 // SessionInsightsPanel moved to PlaygroundContextWindowModal
 import { type ModelRecommendationAction } from "./model-recommendations";
 import {
@@ -1857,6 +1859,19 @@ export const PlaygroundForm = ({
   } = composerInput;
 
   const hasDraft = (form.values.message || "").trim().length > 0;
+  const {
+    importedContext: importedSidepanelContext,
+    removeImportedContext: clearImportedSidepanelContext,
+    conflict: sidepanelHandoffConflict,
+    insertHandoffDraft,
+    replaceWithHandoffDraft,
+    cancelHandoffImport,
+  } = useSidepanelChatHandoffImport({
+    draftValue: form.values.message || "",
+    setMessageValue,
+    notificationApi,
+    t,
+  });
   useIsomorphicLayoutEffect(() => {
     onDraftPresenceChange?.(hasDraft);
   }, [hasDraft, onDraftPresenceChange]);
@@ -3017,6 +3032,8 @@ export const PlaygroundForm = ({
     resolvedMaxContext,
     jsonMode: Boolean(currentChatModelSettings.jsonMode),
     researchContext,
+    importedSidepanelContext,
+    clearImportedSidepanelContext,
     sendMessage,
     clearSelectedDocuments,
     clearUploadedFiles,
@@ -3585,6 +3602,7 @@ export const PlaygroundForm = ({
     resolveSubmissionIntent,
     formImage: form.values.image || "",
     formMessage: form.values.message || "",
+    importedSidepanelContext,
     researchContext: compareModeActive ? undefined : researchContext,
     notificationApi,
     t,
@@ -4788,6 +4806,99 @@ export const PlaygroundForm = ({
                 !isConnectionReady ? "opacity-80" : ""
               }`}
             >
+              {importedSidepanelContext
+                ? wrapComposerProfile(
+                    "sidepanel-imported-context",
+                    <SidepanelImportedContextBanner
+                      context={importedSidepanelContext}
+                      onRemove={clearImportedSidepanelContext}
+                      labels={{
+                        defaultTitle: t(
+                          "playground:sidepanelHandoff.importedContextTitle",
+                          "Imported sidepanel context",
+                        ),
+                        regionLabel: t(
+                          "playground:sidepanelHandoff.importedContextLabel",
+                          "Imported sidepanel context",
+                        ),
+                        removeContext: (title) =>
+                          t(
+                            "playground:sidepanelHandoff.removeContext",
+                            "Remove imported context from {{title}}",
+                            { title },
+                          ),
+                        snippetSummary: (count) =>
+                          t(
+                            "playground:sidepanelHandoff.snippetSummary",
+                            count === 1
+                              ? "{{count}} snippet"
+                              : "{{count}} snippets",
+                            { count },
+                          ),
+                        noSnippets: t(
+                          "playground:sidepanelHandoff.noSnippets",
+                          "No snippets",
+                        ),
+                      }}
+                    />,
+                  )
+                : null}
+              {sidepanelHandoffConflict ? (
+                <div
+                  role="status"
+                  aria-label={t(
+                    "playground:sidepanelHandoff.conflictLabel",
+                    "Sidepanel handoff conflict",
+                  )}
+                  className="mb-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium">
+                        {t(
+                          "playground:sidepanelHandoff.conflictTitle",
+                          "Import sidepanel draft?",
+                        )}
+                      </div>
+                      <div className="text-text-muted">
+                        {t(
+                          "playground:sidepanelHandoff.conflictDescription",
+                          "Your composer already has a draft. Insert the sidepanel draft, replace yours, or cancel the import.",
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={insertHandoffDraft}
+                        className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                      >
+                        {t(
+                          "playground:sidepanelHandoff.insert",
+                          "Insert handoff draft",
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={replaceWithHandoffDraft}
+                        className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                      >
+                        {t(
+                          "playground:sidepanelHandoff.replace",
+                          "Replace current draft",
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelHandoffImport}
+                        className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                      >
+                        {t("playground:sidepanelHandoff.cancel", "Cancel import")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               {/* Attachments summary (collapsed context management) */}
               {wrapComposerProfile(
                 "attachments-summary",

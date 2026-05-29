@@ -2870,6 +2870,7 @@ export const useChatActions = ({
           setIsProcessing(true)
 
           const compareChatModeParams = await buildChatModeParams({
+            ...(requestOverrides ?? {}),
             historyId: activeHistoryId,
             setHistory: () => {},
             setStreaming: () => {},
