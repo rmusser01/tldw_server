@@ -438,6 +438,19 @@ def test_mcp_discovery_module_uses_package_local_environment_helpers() -> None:
     assert offenders == []
 
 
+def test_catalog_loader_uses_standalone_catalog_schema() -> None:
+    """Catalog loading must depend on standalone MCP package schemas."""
+    forbidden_import = "tldw_Server_API.app.api.v1.schemas.archetype_schemas"
+    imports = _resolved_import_sources_for(MCP_ROOT / "catalog_loader.py", MCP_PACKAGE)
+    offenders = sorted(
+        source
+        for source in imports
+        if source == forbidden_import or source.startswith(f"{forbidden_import}.")
+    )
+
+    assert offenders == []
+
+
 def test_protocol_boundary_scan_resolves_relative_imports(tmp_path: Path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(

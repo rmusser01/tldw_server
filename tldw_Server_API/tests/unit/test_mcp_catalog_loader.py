@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.api.v1.schemas.archetype_schemas import MCPCatalogEntry
 import tldw_Server_API.app.core.MCP_unified.catalog_loader as _catalog_mod
+from tldw_Server_API.app.api.v1.schemas.archetype_schemas import MCPCatalogEntry
 from tldw_Server_API.app.core.MCP_unified.catalog_loader import (
     get_catalog_entry,
     list_catalog_entries,
@@ -87,6 +87,21 @@ class TestLoadMcpCatalog:
         assert all(isinstance(e, MCPCatalogEntry) for e in result)
         keys = {e.key for e in result}
         assert keys == {"github", "arxiv"}
+
+    def test_catalog_entry_schema_is_standalone_package_model(self, catalog_file: Path):
+        """Catalog loader entries use the standalone model re-exported by the API."""
+        from mcp_unified.federation.models import (
+            MCPCatalogEntry as StandaloneMCPCatalogEntry,
+        )
+
+        from tldw_Server_API.app.api.v1.schemas.archetype_schemas import (
+            MCPCatalogEntry as ApiMCPCatalogEntry,
+        )
+
+        result = load_mcp_catalog(catalog_file)
+
+        assert ApiMCPCatalogEntry is StandaloneMCPCatalogEntry
+        assert all(isinstance(e, StandaloneMCPCatalogEntry) for e in result)
 
     def test_cache_is_populated(self, catalog_file: Path):
         load_mcp_catalog(catalog_file)
