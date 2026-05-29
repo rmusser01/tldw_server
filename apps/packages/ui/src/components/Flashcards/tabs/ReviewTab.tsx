@@ -227,6 +227,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     ? formatFlashcardLongDateTime(nextDueInfo.nextDueAt)
     : null
   const cramQueue = cramQueueQuery.data || []
+  const hasCramPracticeCards = cramQueue.length > 0
   const cramQueueCard =
     reviewMode === "cram" && cramQueueIndex < cramQueue.length
       ? cramQueue[cramQueueIndex]
@@ -1816,19 +1817,21 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
 
                   {renderUndoRatingAction()}
                   <Space wrap>
-                    <Button
-                      type="primary"
-                      onClick={() => {
-                        setReviewMode("cram")
-                        setCramQueueIndex(0)
-                        setSelectedStudySessionId(null)
-                      }}
-                      data-testid="flashcards-review-practice-again"
-                    >
-                      {t("option:flashcards.practiceAgain", {
-                        defaultValue: "Practice again"
-                      })}
-                    </Button>
+                    {hasCramPracticeCards && (
+                      <Button
+                        type="primary"
+                        onClick={() => {
+                          setReviewMode("cram")
+                          setCramQueueIndex(0)
+                          setSelectedStudySessionId(null)
+                        }}
+                        data-testid="flashcards-review-practice-again"
+                      >
+                        {t("option:flashcards.practiceAgain", {
+                          defaultValue: "Practice again"
+                        })}
+                      </Button>
+                    )}
                     <Button onClick={onNavigateToCreate}>
                       {t("option:flashcards.createMoreCards", {
                         defaultValue: "Create card"
