@@ -1,7 +1,7 @@
 # Folder-To-Notes Sources UI Exposure Design
 
 Date: 2026-05-17
-Status: Critique pass applied, pending user review
+Status: Approved for implementation planning
 Owner: Codex brainstorming session
 Backlog: TASK-400
 
