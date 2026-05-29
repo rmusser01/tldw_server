@@ -235,7 +235,21 @@ const parseRouteIntent = (
   }
 }
 
-const parsePackage = (value: unknown): SidepanelChatHandoffPackage | null => {
+const normalizeStoredPackageValue = (value: unknown): unknown => {
+  if (typeof value !== "string") return value
+
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+const parsePackage = (
+  storedValue: unknown
+): SidepanelChatHandoffPackage | null => {
+  const value = normalizeStoredPackageValue(storedValue)
+
   if (!isRecord(value)) return null
   if (typeof value.id !== "string" || value.id.length === 0) return null
   if (value.source !== "sidepanel-chat") return null

@@ -164,6 +164,33 @@ describe("sidepanel chat handoff storage service", () => {
     expect(storageState.store.has(storageKey("cleanup-malformed"))).toBe(false)
   })
 
+  it("keeps valid serialized packages during cleanup and removes expired or malformed serialized packages", async () => {
+    const validSerialized = buildStoredPackage({ id: "serialized-valid" })
+    const expiredSerialized = buildStoredPackage({
+      id: "serialized-expired",
+      expiresAt: new Date(NOW.getTime() - 1).toISOString()
+    })
+
+    storageState.store.set(storageKey("serialized-valid"), JSON.stringify(validSerialized))
+    storageState.store.set(
+      storageKey("serialized-expired"),
+      JSON.stringify(expiredSerialized)
+    )
+    storageState.store.set(
+      storageKey("serialized-malformed"),
+      JSON.stringify({ id: "serialized-malformed" })
+    )
+
+    await expect(cleanupExpiredSidepanelChatHandoffs()).resolves.toBe(2)
+
+    expect(storageState.store.has(storageKey("serialized-valid"))).toBe(true)
+    expect(storageState.store.has(storageKey("serialized-expired"))).toBe(false)
+    expect(storageState.store.has(storageKey("serialized-malformed"))).toBe(false)
+    await expect(readSidepanelChatHandoff("serialized-valid")).resolves.toEqual(
+      validSerialized
+    )
+  })
+
   it("consumes a package exactly once", async () => {
     const pkg = await createSidepanelChatHandoff({
       draftText: "consume this once"
