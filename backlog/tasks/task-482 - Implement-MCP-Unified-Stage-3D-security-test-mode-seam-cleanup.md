@@ -16,6 +16,8 @@ modified_files:
 - tldw_Server_API/app/core/MCP_unified/security/ip_filter.py
 - tldw_Server_API/app/core/MCP_unified/security/request_guards.py
 - backlog/tasks/task-482 - Implement-MCP-Unified-Stage-3D-security-test-mode-seam-cleanup.md
+references:
+- https://github.com/rmusser01/tldw_server/pull/2108
 ---
 
 ## Description
@@ -59,6 +61,7 @@ Verification:
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 MCP Unified config and security guard test-mode helpers now live inside the MCP package boundary instead of importing host-level testing helpers. Focused import-boundary and guard behavior coverage protects the seam and existing loopback/client-certificate test-mode behavior.
+PR: https://github.com/rmusser01/tldw_server/pull/2108
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
