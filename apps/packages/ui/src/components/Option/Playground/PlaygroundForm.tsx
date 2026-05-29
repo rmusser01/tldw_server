@@ -3602,6 +3602,7 @@ export const PlaygroundForm = ({
     resolveSubmissionIntent,
     formImage: form.values.image || "",
     formMessage: form.values.message || "",
+    importedSidepanelContext,
     researchContext: compareModeActive ? undefined : researchContext,
     notificationApi,
     t,

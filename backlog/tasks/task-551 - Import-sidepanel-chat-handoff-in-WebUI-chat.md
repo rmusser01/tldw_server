@@ -57,10 +57,6 @@ Bandit: skipped because this task touched TypeScript/TSX and markdown only; Band
 Task 3 is implemented and locally verified. /chat now imports sidepanel handoffs, handles draft conflicts, shows removable source context, preserves context through normal, queued, context-only, and compare sends, and keeps context available when a resolved submit reports failure.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

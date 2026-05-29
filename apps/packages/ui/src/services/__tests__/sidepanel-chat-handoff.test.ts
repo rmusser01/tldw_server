@@ -125,6 +125,32 @@ describe("sidepanel chat handoff storage service", () => {
     await expect(readSidepanelChatHandoff(pkg.id)).resolves.toEqual(pkg)
   })
 
+  it("uses test fallback ids in jsdom tests without process env access", async () => {
+    const originalCrypto = globalThis.crypto
+    const originalNavigator = globalThis.navigator
+    const originalProcess = (globalThis as { process?: unknown }).process
+
+    vi.stubGlobal("crypto", { randomUUID: undefined })
+    vi.stubGlobal("navigator", {
+      ...originalNavigator,
+      userAgent: "Mozilla/5.0 (jsdom)"
+    })
+    vi.stubGlobal("process", undefined)
+
+    try {
+      const pkg = await createSidepanelChatHandoff({
+        draftText: "browser-style test id"
+      })
+
+      expect(pkg.id).toMatch(/^test-/)
+      await expect(readSidepanelChatHandoff(pkg.id)).resolves.toEqual(pkg)
+    } finally {
+      vi.stubGlobal("crypto", originalCrypto)
+      vi.stubGlobal("navigator", originalNavigator)
+      vi.stubGlobal("process", originalProcess)
+    }
+  })
+
   it("bounds page metadata and route intent strings before writing", async () => {
     const pkg = await createSidepanelChatHandoff({
       draftText: "bounded metadata",
@@ -281,6 +307,27 @@ describe("sidepanel chat handoff storage service", () => {
     expect(characterParams.get("mode")).toBe("character")
     expect(characterParams.get("characterId")).toBe("char-1")
     expect(characterParams.get("handoff")).toBe("handoff-character")
+  })
+
+  it("preserves route hash fragments while adding handoff query params", () => {
+    expect(buildSidepanelChatHandoffRoute("#/chat#draft", "handoff-hash")).toBe(
+      "#/chat?handoff=handoff-hash#draft"
+    )
+
+    const characterRoute = buildSidepanelChatHandoffRoute(
+      "#/chat?mode=character&characterId=char-1#draft",
+      "handoff-character-hash"
+    )
+    const query = characterRoute.slice(
+      characterRoute.indexOf("?") + 1,
+      characterRoute.indexOf("#draft")
+    )
+    const params = new URLSearchParams(query)
+
+    expect(characterRoute.endsWith("#draft")).toBe(true)
+    expect(params.get("mode")).toBe("character")
+    expect(params.get("characterId")).toBe("char-1")
+    expect(params.get("handoff")).toBe("handoff-character-hash")
   })
 
   it("never puts draft text or snippet text into the route", async () => {

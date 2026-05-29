@@ -56,6 +56,73 @@ const buildDeps = (overrides: Partial<any> = {}) => ({
 })
 
 describe("usePlaygroundRawPreview MCP tools", () => {
+  it("includes imported sidepanel context in the normal raw request preview", async () => {
+    const { result } = renderHook(() =>
+      usePlaygroundRawPreview(
+        buildDeps({
+          formMessage: "What changed?",
+          importedSidepanelContext: {
+            title: "Release Notes",
+            url: "https://example.test/releases",
+            snippets: [
+              {
+                kind: "selection",
+                label: "selected text",
+                text: "The sidepanel handoff carries selected page context."
+              }
+            ]
+          }
+        })
+      )
+    )
+
+    await act(async () => {
+      await result.current.refreshRawRequestSnapshot()
+    })
+
+    const body = result.current.rawRequestSnapshot?.body as any
+    const lastMessage = body.messages.at(-1)
+    expect(lastMessage.content).toBe(
+      [
+        "Sidepanel page context:",
+        "Title: Release Notes",
+        "URL: https://example.test/releases",
+        "Snippet 1 (selected text): The sidepanel handoff carries selected page context.",
+        "User draft:",
+        "What changed?"
+      ].join("\n")
+    )
+  })
+
+  it("uses the context-only sidepanel fallback in the raw request preview", async () => {
+    const { result } = renderHook(() =>
+      usePlaygroundRawPreview(
+        buildDeps({
+          formMessage: "",
+          importedSidepanelContext: {
+            title: "Empty Draft Page",
+            snippets: [
+              {
+                kind: "visible-context",
+                text: "This is the only available context."
+              }
+            ]
+          }
+        })
+      )
+    )
+
+    await act(async () => {
+      await result.current.refreshRawRequestSnapshot()
+    })
+
+    const body = result.current.rawRequestSnapshot?.body as any
+    const lastMessage = body.messages.at(-1)
+    expect(lastMessage.content).toContain("Title: Empty Draft Page")
+    expect(lastMessage.content).toContain("Snippet 1: This is the only available context.")
+    expect(lastMessage.content).toContain("User draft:\nSummarize this page.")
+  })
+
   it("normalizes chat tools in the raw request preview", async () => {
     const { result } = renderHook(() =>
       usePlaygroundRawPreview(

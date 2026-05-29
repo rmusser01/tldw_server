@@ -74,15 +74,22 @@ const isValidDateString = (value: unknown): value is string =>
   typeof value === "string" && Number.isFinite(Date.parse(value))
 
 const isTestEnvironment = () => {
-  const maybeProcess = (
-    globalThis as {
-      process?: { env?: Record<string, string | undefined> }
-    }
-  ).process
+  const maybeGlobal = globalThis as {
+    process?: { env?: Record<string, string | undefined> }
+    __vitest__?: unknown
+    vitest?: unknown
+  }
+  const userAgent =
+    typeof navigator !== "undefined" && typeof navigator.userAgent === "string"
+      ? navigator.userAgent.toLowerCase()
+      : ""
 
   return (
-    maybeProcess?.env?.VITEST === "true" ||
-    maybeProcess?.env?.NODE_ENV === "test"
+    maybeGlobal.process?.env?.VITEST === "true" ||
+    maybeGlobal.process?.env?.NODE_ENV === "test" ||
+    maybeGlobal.__vitest__ != null ||
+    maybeGlobal.vitest != null ||
+    userAgent.includes("jsdom")
   )
 }
 
@@ -460,11 +467,20 @@ export const buildSidepanelChatHandoffRoute = (
   baseChatPath: string,
   handoffId: string
 ): string => {
-  const [path, rawQuery = ""] = baseChatPath.split("?")
+  const hashSearchStart = baseChatPath.startsWith("#") ? 1 : 0
+  const hashIndex = baseChatPath.indexOf("#", hashSearchStart)
+  const baseWithoutHash =
+    hashIndex >= 0 ? baseChatPath.slice(0, hashIndex) : baseChatPath
+  const hash = hashIndex >= 0 ? baseChatPath.slice(hashIndex) : ""
+  const queryIndex = baseWithoutHash.indexOf("?")
+  const path =
+    queryIndex >= 0 ? baseWithoutHash.slice(0, queryIndex) : baseWithoutHash
+  const rawQuery =
+    queryIndex >= 0 ? baseWithoutHash.slice(queryIndex + 1) : ""
   const params = new URLSearchParams(rawQuery)
   params.set("handoff", handoffId)
   const query = params.toString()
-  return query ? `${path}?${query}` : path
+  return query ? `${path}?${query}${hash}` : `${path}${hash}`
 }
 
 export const buildSidepanelHandoffMessageForModel = (
