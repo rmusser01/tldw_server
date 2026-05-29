@@ -825,72 +825,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/components/CreateEvaluationWizard.tsx:Alert",
-    "path": "src/components/Option/Evaluations/components/CreateEvaluationWizard.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/components/CreateEvaluationWizard.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/components/DatasetUpload.tsx:Alert",
-    "path": "src/components/Option/Evaluations/components/DatasetUpload.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/components/DatasetUpload.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/components/RateLimitsWidget.tsx:Alert#antd-alert-ratelimitswidget-type-info-line-100-19cp72r",
-    "path": "src/components/Option/Evaluations/components/RateLimitsWidget.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/components/RateLimitsWidget.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/components/RateLimitsWidget.tsx:Alert#antd-alert-ratelimitswidget-type-warning-line-86-1f7w62a",
-    "path": "src/components/Option/Evaluations/components/RateLimitsWidget.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/components/RateLimitsWidget.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/components/VisualSpecBuilder.tsx:Alert#antd-alert-visualspecbuilder-type-info-line-93-19mulrg",
-    "path": "src/components/Option/Evaluations/components/VisualSpecBuilder.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/components/VisualSpecBuilder.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/components/VisualSpecBuilder.tsx:Alert#antd-alert-visualspecbuilder-type-warning-line-165-1xuibfu",
-    "path": "src/components/Option/Evaluations/components/VisualSpecBuilder.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/components/VisualSpecBuilder.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/recipe-configs/RagAnswerQualityConfig.tsx:Alert#antd-alert-raganswerqualityconfig-type-error-line-469-ctgble",
     "path": "src/components/Option/Evaluations/tabs/recipe-configs/RagAnswerQualityConfig.tsx",
     "rule": "antd-product-state-import",
@@ -2306,17 +2240,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing AntD Alert product-state UI in src/components/WorkflowEditor/NodePalette.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx:Alert",
-    "path": "src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing Alert product-state UI in src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx after the embeddings recipe flow merge; baseline refresh captures current dev debt.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   }

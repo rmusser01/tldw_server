@@ -1,20 +1,19 @@
 ---
 id: TASK-45.44.5
 title: 'Migrate design-system product state: Evaluations'
-status: To Do
+status: In Progress
 assignee: []
-created_date: '2026-05-14 03:19'
+created_date: 2026-05-14 03:19
 labels:
-  - design-system
-  - webui
-  - extension
-  - product-state
+- design-system
+- webui
+- extension
+- product-state
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/1662'
-  - >-
-    Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
-  - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/issues/1662
+- Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
+- apps/packages/ui/scripts/design-system-product-state-baseline.json
 parent_task_id: TASK-45.44
 priority: medium
 ---
@@ -28,9 +27,17 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 The linked GitHub issue owns current count and public status.
-- [ ] #2 Implementation PR tasks are created under this child when the area is too broad for one PR.
+- [x] #2 Implementation PR tasks are created under this child when the area is too broad for one PR.
 - [ ] #3 Backlog notes record PR links and before/after count evidence.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+- Created child `TASK-45.44.5.3` for the smaller Evaluations component Alert migration.
+- Before `TASK-45.44.5.3`, `bun run verify:design-system-state` reported `Evaluations: 14` baseline exceptions.
+- After `TASK-45.44.5.3`, the verifier reports `Evaluations: 7` baseline exceptions; the remaining Evaluations rows are the larger RAG recipe config alerts.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

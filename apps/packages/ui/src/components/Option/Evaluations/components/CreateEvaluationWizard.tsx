@@ -5,7 +5,6 @@
 
 import React, { useMemo, useState } from "react"
 import {
-  Alert,
   Button,
   Checkbox,
   Collapse,
@@ -19,6 +18,7 @@ import {
 import type { FormInstance } from "antd"
 import { ArrowLeft, ArrowRight } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { evalTypeOptions, getDefaultEvalSpecForType } from "../hooks/useEvaluations"
 import { JsonEditor } from "./JsonEditor"
 import { VisualSpecBuilder } from "./VisualSpecBuilder"
@@ -142,9 +142,8 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
       case 0:
         return (
           <div className="space-y-4">
-            <Alert
-              type="info"
-              showIcon
+            <DsAlert
+              variant="info"
               className="text-xs"
               title={t("evaluations:evalTypesHint", {
                 defaultValue:

@@ -1,10 +1,11 @@
 import React from "react"
-import { Alert, Button, Card, Checkbox, Input, InputNumber, Tag, Typography } from "antd"
+import { Button, Card, Checkbox, Input, InputNumber, Tag, Typography } from "antd"
 import type {
   DatasetSample,
   EmbeddingRecipeCandidateHint,
   RecipeManifest
 } from "@/services/evaluations"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useTranslation } from "react-i18next"
 import { useEmbeddingRecipeCandidates } from "../../hooks/useRecipes"
@@ -494,7 +495,9 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
                     </Button>
                   </div>
                   {searchErrors[index] && (
-                    <Alert className="mt-2" type="error" showIcon message={searchErrors[index]} />
+                    <DsAlert className="mt-2" variant="error">
+                      {searchErrors[index]}
+                    </DsAlert>
                   )}
                   {rowResults.length > 0 && (
                     <div className="mt-2 grid gap-2 md:grid-cols-2">
