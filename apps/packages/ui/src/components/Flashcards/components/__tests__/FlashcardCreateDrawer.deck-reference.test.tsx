@@ -292,6 +292,17 @@ describe("FlashcardCreateDrawer deck reference section", () => {
     expect(screen.getByText("Biology deck")).toBeInTheDocument()
   })
 
+  it("preselects the provided initial deck when opened", async () => {
+    currentDecks = [makeDeck(12, "Biology"), makeDeck(21, "Physics")]
+
+    renderDrawer({ initialDeckId: 12 })
+
+    await waitFor(() => {
+      expect(screen.getByText("Existing cards in this deck")).toBeInTheDocument()
+    })
+    expect(screen.getByText("Biology deck")).toBeInTheDocument()
+  })
+
   it("forwards workspace visibility options to the drawer deck reference hooks", async () => {
     renderDrawer({
       workspaceId: "workspace-123",

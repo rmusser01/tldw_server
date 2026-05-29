@@ -98,6 +98,10 @@ export const FlashcardsManager: React.FC = () => {
     key: string
     showWorkspaceDecks: boolean
   } | null>(null)
+  const [createDeckHandoff, setCreateDeckHandoff] = React.useState<{
+    deckId: number | null
+    showWorkspaceDecks: boolean
+  } | null>(null)
   const [schedulerDeckHandoff, setSchedulerDeckHandoff] = React.useState<{
     deckId: number
     key: string
@@ -113,8 +117,12 @@ export const FlashcardsManager: React.FC = () => {
   }, [])
   const clearDeckHandoffs = React.useCallback(() => {
     setManageDeckHandoff(null)
+    setCreateDeckHandoff(null)
     setSchedulerDeckHandoff(null)
     setExportDeckHandoff(null)
+  }, [])
+  const clearCreateDeckHandoff = React.useCallback(() => {
+    setCreateDeckHandoff(null)
   }, [])
   const discardSchedulerChanges = React.useCallback(() => {
     setSchedulerDirty(false)
@@ -181,9 +189,13 @@ export const FlashcardsManager: React.FC = () => {
   )
 
   const routeToCreateEntryPoint = React.useCallback(() => {
+    setCreateDeckHandoff({
+      deckId: reviewDeckId ?? currentStudyIntent?.deckId ?? null,
+      showWorkspaceDecks: currentStudyIntent?.forceShowWorkspaceItems ?? false
+    })
     setActiveTab("cards")
     setOpenCreateSignal((prev) => prev + 1)
-  }, [])
+  }, [currentStudyIntent?.deckId, currentStudyIntent?.forceShowWorkspaceItems, reviewDeckId])
   const navigateToManageDeck = React.useCallback(
     (deckId: number) => {
       applyReviewDeckChange(deckId)
@@ -343,6 +355,9 @@ export const FlashcardsManager: React.FC = () => {
                   manageDeckHandoff?.showWorkspaceDecks ??
                   (currentTab === "cards" ? (currentStudyIntent?.forceShowWorkspaceItems ?? false) : false)
                 }
+                createInitialDeckId={createDeckHandoff?.deckId ?? null}
+                createInitialShowWorkspaceDecks={createDeckHandoff?.showWorkspaceDecks ?? false}
+                onCreateHandoffConsumed={clearCreateDeckHandoff}
               />
             )
           },

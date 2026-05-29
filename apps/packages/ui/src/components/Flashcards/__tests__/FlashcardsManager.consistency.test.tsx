@@ -79,14 +79,22 @@ vi.mock("../tabs", () => ({
     initialDeckId?: number
     initialDeckHandoffKey?: string | null
     initialShowWorkspaceDecks?: boolean
+    createInitialDeckId?: number | null
+    createInitialShowWorkspaceDecks?: boolean
+    onCreateHandoffConsumed?: () => void
   }) => (
     <div data-testid="mock-manage-tab">
       <button onClick={props.onNavigateToImport}>Route Import</button>
       <button onClick={() => props.onReviewCard({ deck_id: 21 })}>Review Managed Card 21</button>
+      <button onClick={() => props.onCreateHandoffConsumed?.()}>Consume Create Handoff</button>
       <span data-testid="mock-open-create-signal">{String(props.openCreateSignal ?? 0)}</span>
       <span data-testid="mock-manage-initial-deck-id">{String(props.initialDeckId ?? "")}</span>
       <span data-testid="mock-manage-handoff-key">{String(props.initialDeckHandoffKey ?? "")}</span>
       <span data-testid="mock-manage-show-workspace">{String(props.initialShowWorkspaceDecks ?? false)}</span>
+      <span data-testid="mock-create-initial-deck-id">{String(props.createInitialDeckId ?? "")}</span>
+      <span data-testid="mock-create-show-workspace">
+        {String(props.createInitialShowWorkspaceDecks ?? false)}
+      </span>
     </div>
   ),
   ImportExportTab: (props: {
@@ -490,6 +498,29 @@ describe("FlashcardsManager consistency standards", () => {
     fireEvent.click(screen.getByText("Route Create"))
     expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
     expect(screen.getByTestId("mock-open-create-signal")).toHaveTextContent("1")
+  })
+
+  it("passes the selected Study deck to the Manage create drawer handoff", () => {
+    window.history.replaceState({}, "", "/flashcards?tab=review&deck_id=12")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Route Create"))
+
+    expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-open-create-signal")).toHaveTextContent("1")
+    expect(screen.getByTestId("mock-create-initial-deck-id")).toHaveTextContent("12")
+  })
+
+  it("clears the create drawer Study deck handoff after Manage consumes it", () => {
+    window.history.replaceState({}, "", "/flashcards?tab=review&deck_id=12")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Route Create"))
+    expect(screen.getByTestId("mock-create-initial-deck-id")).toHaveTextContent("12")
+
+    fireEvent.click(screen.getByText("Consume Create Handoff"))
+
+    expect(screen.getByTestId("mock-create-initial-deck-id")).toHaveTextContent("")
   })
 
   it("disables quiz CTA when handoff IDs are invalid", () => {
