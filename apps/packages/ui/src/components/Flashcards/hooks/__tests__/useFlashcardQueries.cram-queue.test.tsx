@@ -104,7 +104,7 @@ describe("useCramQueueQuery", () => {
     )
   })
 
-  it("caps the availability probe by fetched cards before filtering residue", async () => {
+  it("continues a single-card availability probe past filtered tutorial residue", async () => {
     vi.mocked(listFlashcards)
       .mockResolvedValueOnce({
         items: [
@@ -130,7 +130,20 @@ describe("useCramQueueQuery", () => {
       expect(result.current.isSuccess).toBe(true)
     })
 
-    expect(result.current.data).toEqual([])
-    expect(listFlashcards).toHaveBeenCalledTimes(1)
+    expect(result.current.data).toEqual([
+      expect.objectContaining({ uuid: "card-2" })
+    ])
+    expect(listFlashcards).toHaveBeenCalledTimes(2)
+    expect(listFlashcards).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        deck_id: 42,
+        due_status: "all",
+        include_workspace_items: false,
+        limit: 1,
+        offset: 1,
+        order_by: "due_at"
+      })
+    )
   })
 })

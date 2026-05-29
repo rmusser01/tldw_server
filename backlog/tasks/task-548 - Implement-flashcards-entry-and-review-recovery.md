@@ -37,7 +37,7 @@ Implemented PR 1 from the narrow flashcards UX remediation plan only. PR 2 dashb
 
 The branch was rebased onto latest origin/dev after implementation. The pre-existing ReviewTab.create-cta active-card snapshot mismatch was refreshed to match the current design-system Badge markup so the focused suite passes on the rebased branch.
 
-Final review follow-up: Practice again availability now uses useCramQueueQuery(..., { limit: 1 }) while due-mode is caught up, and full cram queue loading is reserved for actual cram mode. The limit caps fetched backend cards before tutorial-residue filtering so availability probes cannot keep paginating. The extension sidepanel handoff is now covered by an app-level render test and uses sidepanel i18n keys with English resources.
+Final review follow-up: Practice again availability now uses useCramQueueQuery(..., { limit: 1 }) while due-mode is caught up, and full cram queue loading is reserved for actual cram mode. The probe continues past filtered tutorial-residue cards until it finds one reviewable card or reaches a small fetch safety cap. The extension sidepanel handoff is now covered by an app-level render test and uses sidepanel i18n keys with English resources.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -48,21 +48,24 @@ Implemented:
 - Replaced direct flashcards import/export user-facing Transfer labels with Import / Export and Import/export summary, while preserving internal transfer type/key names.
 - Added a one-shot Study selected-deck Create handoff that preselects the drawer deck without leaking stale URL deck or workspace state after the Study selector is cleared.
 - Kept Re-rate last card visible after rating advances away from the answer branch and hardened its regression test against countdown timing flake.
-- Hid Practice again when no cram cards exist and changed caught-up availability to a 1-card cram probe before loading the full queue only in cram mode. The probe cap is applied to fetched backend cards before tutorial-residue filtering.
+- Hid Practice again when no cram cards exist and changed caught-up availability to a 1-card cram probe before loading the full queue only in cram mode.
+- Addressed PR review feedback by making the 1-card availability probe continue past filtered tutorial-residue cards until it finds one reviewable card or reaches a small fetch safety cap.
 - Added extension route coverage for the sidepanel /flashcards handoff and localized the handoff copy.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2130
 
-Final verification after rebase/final-review fixes:
-- cd apps/packages/ui && bunx vitest run src/routes/__tests__/route-registry.sidepanel-availability.test.ts src/routes/__tests__/route-registry.sidepanel-flashcards.test.ts src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx src/components/Flashcards/hooks/__tests__/useFlashcardQueries.cram-queue.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx src/components/Flashcards/__tests__/FlashcardsWorkspace.connection-state.test.tsx passed: 10 files, 87 tests.
+Final verification after rebase/review fixes:
+- cd apps/packages/ui && bunx vitest run src/components/Flashcards passed: 74 files, 406 tests.
+- cd apps/packages/ui && bunx vitest run src/components/Flashcards/hooks/__tests__/useFlashcardQueries.cram-queue.test.tsx passed after the review-thread regression update: 1 file, 2 tests.
 - cd apps/tldw-frontend && bunx vitest run __tests__/extension/sidepanel-flashcards-handoff.test.tsx passed: 1 file, 1 test.
-- cd apps/packages/ui && NODE_OPTIONS=--max-old-space-size=8192 bunx tsc -p tsconfig.json --noEmit passed. Earlier, the same command without the heap override OOMed before diagnostics.
+- cd apps/packages/ui && env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc -p tsconfig.json --noEmit passed. The same command without the heap override OOMed before diagnostics.
 - git diff --check passed.
 - Browser route check: http://127.0.0.1:18031/flashcards loaded the Flashcards page with Study/Manage/Import / Export/Templates/Scheduler navigation and the expected credentials-required state.
 
 Known skips and limits:
 - Browser data-dependent flows for deck preselect, re-rate, and cram availability were not live-verified because http://127.0.0.1:8000/api/v1/health was unavailable and the WebUI reported missing credentials. These flows are covered by focused React tests.
 - Bandit skipped: PR 1 touched frontend TypeScript/TSX, JSON, snapshot, and Backlog files only; no Python was modified.
+- PR CI full-suite remains red on unrelated backend Admin/Audio/Audit failures outside this flashcards UI/extension diff.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

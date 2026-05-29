@@ -357,10 +357,12 @@ export function useCramQueueQuery(
       const queue: Flashcard[] = []
       let offset = 0
       let fetchedCount = 0
+      const maxFetchedCount = queueLimit + 10
 
-      while (fetchedCount < queueLimit) {
-        const remaining = queueLimit - fetchedCount
-        const limit = Math.min(pageSize, remaining)
+      while (queue.length < queueLimit && fetchedCount < maxFetchedCount) {
+        const remainingQueueSlots = queueLimit - queue.length
+        const remainingFetchBudget = maxFetchedCount - fetchedCount
+        const limit = Math.min(pageSize, remainingQueueSlots, remainingFetchBudget)
         const res = await listFlashcards({
           deck_id: deckId ?? undefined,
           tag: tag || undefined,
