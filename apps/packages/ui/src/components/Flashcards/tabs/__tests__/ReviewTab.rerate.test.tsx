@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ReviewTab } from "../ReviewTab"
@@ -282,9 +282,10 @@ describe("ReviewTab re-rate action", () => {
     expect(screen.queryByText("Answer two")).not.toBeInTheDocument()
 
     const rerateButton = screen.getByRole("button", {
-      name: "Re-rate last card, 10 seconds remaining"
+      name: /Re-rate last card, \d+ seconds remaining/
     })
     expect(rerateButton).toBeInTheDocument()
+    expect(within(rerateButton).getByRole("timer")).toHaveTextContent(/\d+s/)
 
     fireEvent.click(rerateButton)
 

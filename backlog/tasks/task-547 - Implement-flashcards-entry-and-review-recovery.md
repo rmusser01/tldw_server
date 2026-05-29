@@ -59,6 +59,8 @@ Task 4 code-quality follow-up completed: fixed stale URL deck fallback in the cr
 
 Task 5 completed: kept the visible Re-rate last card control available after a rating advances to the next card's question side by rendering the shared undo action outside the answer-only branch, while retaining the existing completion-state undo action and keyboard shortcut behavior. Added focused regression coverage that rates a card, verifies the re-rate action remains visible on the next card, and confirms clicking it restores the reviewed card question and answer for re-rating.
 
+Task 5 test-hardening follow-up completed: changed the rerate regression from an exact 10-second accessible-name assertion to a countdown-tolerant accessible-name regex plus a separate rendered timer assertion, preserving the prior-card question and answer restoration assertion.
+
 Verification:
 - RED Task 4: cd apps/packages/ui && bunx vitest run src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx failed on missing createInitialDeckId handoff and missing drawer initialDeckId behavior.
 - GREEN Task 4: same focused Vitest command passed, 36 tests.
@@ -73,6 +75,9 @@ Verification:
 - Adjacent Task 5: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx had ReviewTab.cram-mode.test.tsx pass, and ReviewTab.create-cta.test.tsx fail only on the known pre-existing queue-state badge snapshot mismatch (expected AntD Tag vs rendered design-system Badge).
 - Self-review Task 5: git diff --check passed; git diff --stat reviewed.
 - Bandit Task 5: skipped because Task 5 touched TypeScript UI code/tests only, no Python touched.
+- GREEN Task 5 test-hardening follow-up: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx passed, 1 test.
+- Self-review Task 5 test-hardening follow-up: git diff --check passed; git diff --stat reviewed.
+- Bandit Task 5 test-hardening follow-up: skipped because the follow-up touched TypeScript UI test/backlog files only, no Python touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
