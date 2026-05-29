@@ -1,7 +1,6 @@
 import React from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
-  Alert,
   Badge,
   Button,
   Checkbox,
@@ -27,6 +26,7 @@ import { useTranslation } from "react-i18next"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { trackFlashcardsShortcutHintTelemetry } from "@/utils/flashcards-shortcut-hint-telemetry"
 import { processInChunks } from "@/utils/chunk-processing"
 import {
@@ -2696,9 +2696,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         centered
       >
         <div className="space-y-4">
-          <Alert
-            type="warning"
-            showIcon
+          <DsAlert
+            variant="warning"
             title={t("option:flashcards.bulkDeleteLargeWarning", {
               defaultValue: "These cards will move to Trash for {{seconds}} seconds.",
               seconds: DELETE_UNDO_SECONDS
