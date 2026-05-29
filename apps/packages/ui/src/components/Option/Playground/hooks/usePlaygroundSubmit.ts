@@ -11,7 +11,22 @@ import {
   projectTokenBudget
 } from "../usage-metrics"
 import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
+import {
+  isChatSubmitSuccess,
+  normalizeChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
 import type { ChatResearchContext } from "@/services/tldw/TldwApiClient"
+import {
+  buildSidepanelHandoffMessageForModel,
+  type SidepanelChatHandoffPageContext
+} from "@/services/sidepanel-chat-handoff"
+
+type PlaygroundQueueSubmissionArgs = {
+  promptText: string
+  image: string
+  intent: any
+  requestOverrides?: Record<string, unknown>
+}
 
 export type UsePlaygroundSubmitDeps = {
   form: any
@@ -32,6 +47,8 @@ export type UsePlaygroundSubmitDeps = {
   resolvedMaxContext: number
   jsonMode: boolean
   researchContext?: ChatResearchContext
+  importedSidepanelContext?: SidepanelChatHandoffPageContext | null
+  clearImportedSidepanelContext?: () => void
   sendMessage: (args: any) => Promise<any>
   clearSelectedDocuments: () => void
   clearUploadedFiles: () => void
@@ -39,7 +56,7 @@ export type UsePlaygroundSubmitDeps = {
   setLastSubmittedContext: (ctx: any) => void
   estimateTokensForText: (text: string) => number
   resolveSubmissionIntent: (message: string) => any
-  queueSubmission: (args: any) => void
+  queueSubmission: (args: PlaygroundQueueSubmissionArgs) => unknown
   validateSelectedChatModelsAvailability: (models: string[]) => boolean
   compareModelsSupportCapability: (models: string[], cap: string) => boolean
   notificationApi: any
@@ -66,6 +83,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     resolvedMaxContext,
     jsonMode,
     researchContext,
+    importedSidepanelContext,
+    clearImportedSidepanelContext,
     sendMessage,
     clearSelectedDocuments,
     clearUploadedFiles,
@@ -125,9 +144,28 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         ? nextMessage
         : buildPinnedMessage(nextMessage, options)
       const trimmed = combinedMessage.trim()
-      if (
+      const visiblePrompt =
         !intent.isImageCommand &&
         trimmed.length === 0 &&
+        importedSidepanelContext
+          ? t(
+              "playground:sidepanelHandoff.contextOnlyDraft",
+              "Summarize this page."
+            )
+          : trimmed
+      const messageForModel =
+        !intent.isImageCommand && importedSidepanelContext
+          ? buildSidepanelHandoffMessageForModel(
+              visiblePrompt,
+              importedSidepanelContext
+            )
+          : undefined
+      const requestOverrides = messageForModel
+        ? { messageForModel }
+        : undefined
+      if (
+        !intent.isImageCommand &&
+        visiblePrompt.length === 0 &&
         value.image.length === 0 &&
         selectedDocuments.length === 0 &&
         uploadedFiles.length === 0
@@ -190,11 +228,15 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       }
 
       if (shouldQueueInsteadOfSend) {
-        queueSubmission({
-          promptText: trimmed,
+        const queuedItem = queueSubmission({
+          promptText: visiblePrompt,
           image: value.image,
-          intent
+          intent,
+          requestOverrides
         })
+        if (queuedItem && messageForModel) {
+          clearImportedSidepanelContext?.()
+        }
         return
       }
 
@@ -215,7 +257,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           conversationTokenCount +
           characterContextTokenEstimate +
           pinnedSourceTokenEstimate,
-        draftTokens: estimateTokensForText(trimmed),
+        draftTokens: estimateTokensForText(messageForModel ?? visiblePrompt),
         maxTokens: resolvedMaxContext
       })
       if (projectedForSubmission.isOverLimit || projectedForSubmission.isNearLimit) {
@@ -233,9 +275,10 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         })
       }
       setLastSubmittedContext(currentContextSnapshot)
-      await dispatch({
+
+      const payload = {
         image: intent.isImageCommand ? "" : value.image,
-        message: trimmed,
+        message: visiblePrompt,
         docs: intent.isImageCommand
           ? []
           : selectedDocuments.map((doc: any) => ({
@@ -260,7 +303,19 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         researchContext:
           intent.isImageCommand || compareModeActive
             ? undefined
-            : researchContext
+            : researchContext,
+        ...(requestOverrides ? { requestOverrides } : {})
+      }
+
+      await dispatch(payload, {
+        afterSend: (result) => {
+          if (
+            messageForModel &&
+            isChatSubmitSuccess(normalizeChatSubmitResult(result as any))
+          ) {
+            clearImportedSidepanelContext?.()
+          }
+        }
       })
     })()
   }

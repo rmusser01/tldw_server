@@ -329,7 +329,7 @@ git commit -m "feat: add sidepanel continue in webui action"
 - Modify: `apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundSubmit.ts`
 
-- [ ] **Step 1: Write failing import tests**
+- [x] **Step 1: Write failing import tests**
 
 Use a small test harness around the hook plus submit behavior. Required cases:
 
@@ -343,7 +343,7 @@ it("omits imported page context after the user removes the banner", async () => 
 it("shows non-blocking feedback for expired or malformed handoffs", async () => {})
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -353,7 +353,7 @@ bun run test src/components/Option/Playground/__tests__/sidepanel-chat-handoff-i
 
 Expected: fail because hook/banner do not exist.
 
-- [ ] **Step 3: Implement banner component**
+- [x] **Step 3: Implement banner component**
 
 Render a compact source-aware product banner above `AttachmentsSummary`, not inside a modal:
 
@@ -395,7 +395,7 @@ export function SidepanelImportedContextBanner({
 
 Use existing token classes and avoid new visual styling systems.
 
-- [ ] **Step 4: Implement import hook**
+- [x] **Step 4: Implement import hook**
 
 Hook responsibilities:
 
@@ -420,17 +420,17 @@ The hook should return:
 }
 ```
 
-- [ ] **Step 5: Wire PlaygroundForm**
+- [x] **Step 5: Wire PlaygroundForm**
 
 In `PlaygroundForm.tsx`:
 
-- Import `useLocation` from `react-router-dom`.
+- Import the handoff import hook.
 - Call the hook after `setMessageValue` is defined.
 - Render `SidepanelImportedContextBanner` above `AttachmentsSummary` when `importedContext` is present.
 - Render the existing-draft conflict inline near the composer, or use an existing non-blocking inline state primitive. Avoid a modal unless no suitable inline pattern exists.
 - Pass `importedSidepanelContext` and `clearImportedSidepanelContext` into `usePlaygroundSubmit`.
 
-- [ ] **Step 6: Wire request inclusion in usePlaygroundSubmit**
+- [x] **Step 6: Wire request inclusion in usePlaygroundSubmit**
 
 Extend deps:
 
@@ -448,19 +448,21 @@ const messageForModel = importedSidepanelContext
 
 await dispatch({
   ...
-  requestOverrides: messageForModel
-    ? { messageForModel }
-    : undefined,
+  ...(messageForModel
+    ? { requestOverrides: { messageForModel } }
+    : {}),
+}, {
+  afterSend: () => {
+    if (messageForModel) {
+      clearImportedSidepanelContext?.()
+    }
+  },
 })
-
-if (importedSidepanelContext) {
-  clearImportedSidepanelContext?.()
-}
 ```
 
 If future code adds request overrides here, merge with them rather than overwriting.
 
-- [ ] **Step 7: Run focused WebUI import tests**
+- [x] **Step 7: Run focused WebUI import tests**
 
 Run:
 
@@ -470,7 +472,7 @@ bun run test src/components/Option/Playground/__tests__/sidepanel-chat-handoff-i
 
 Expected: pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Playground/SidepanelImportedContextBanner.tsx apps/packages/ui/src/components/Option/Playground/hooks/useSidepanelChatHandoffImport.ts apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundSubmit.ts apps/packages/ui/src/components/Option/Playground/__tests__/sidepanel-chat-handoff-import.test.tsx
