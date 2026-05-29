@@ -323,7 +323,9 @@ describe("ImportExportTab import result details", () => {
     })
     fireEvent.click(screen.getByTestId("flashcards-import-button"))
 
-    expect(await screen.findByText("Last import: 2 imported, 1 skipped")).toBeInTheDocument()
+    const lastResultAlert = await screen.findByTestId("flashcards-import-last-result")
+    expect(lastResultAlert).toHaveAttribute("data-ds-component", "Alert")
+    expect(screen.getByText("Last import: 2 imported, 1 skipped")).toBeInTheDocument()
     expect(screen.getByText("Line 15")).toBeInTheDocument()
     expect(screen.getByText("Missing required field: Front")).toBeInTheDocument()
     expect(
@@ -383,7 +385,9 @@ describe("ImportExportTab import result details", () => {
       }
     })
 
-    expect(screen.getByTestId("flashcards-import-preflight-warning")).toBeInTheDocument()
+    const preflightWarning = screen.getByTestId("flashcards-import-preflight-warning")
+    expect(preflightWarning).toBeInTheDocument()
+    expect(preflightWarning).toHaveAttribute("data-ds-component", "Alert")
     expect(
       screen.getByText(
         "Selected delimiter (Tab) may be incorrect. This sample looks Comma-delimited."
@@ -595,6 +599,49 @@ describe("ImportExportTab import result details", () => {
         reverse: false
       })
     ])
+  })
+
+  it("renders structured preview warnings with design-system alerts", async () => {
+    const previewMutateAsync = vi.fn().mockResolvedValue({
+      detected_format: "qa_labels",
+      skipped_blocks: 1,
+      errors: [{ line: 3, error: "Skipped unlabeled block" }],
+      drafts: [
+        {
+          front: "What is ATP?",
+          back: "Primary energy currency.",
+          line_start: 1,
+          line_end: 2,
+          tags: []
+        }
+      ]
+    })
+    vi.mocked(usePreviewStructuredQaImportMutation).mockReturnValue({
+      mutateAsync: previewMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+    await openImportTask()
+
+    const formatSelect = screen.getByTestId("flashcards-import-format")
+    fireEvent.mouseDown(
+      formatSelect.querySelector(".ant-select-selector") ?? formatSelect
+    )
+    fireEvent.click(screen.getByText("Structured Q&A"))
+
+    fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+      target: { value: "Q: What is ATP?\nA: Primary energy currency.\nNotes only." }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-structured-preview-button"))
+
+    const previewWarning = await screen.findByTestId(
+      "flashcards-structured-preview-errors"
+    )
+    expect(previewWarning).toHaveAttribute("data-ds-component", "Alert")
+    expect(previewWarning).toHaveTextContent("Preview warnings")
+    expect(previewWarning).toHaveTextContent("Line 3")
+    expect(previewWarning).toHaveTextContent("Skipped unlabeled block")
   })
 
   it("keeps selected invalid structured drafts in the editor when saving", async () => {

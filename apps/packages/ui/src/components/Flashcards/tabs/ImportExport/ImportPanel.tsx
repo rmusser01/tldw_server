@@ -1,7 +1,6 @@
 import React from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
-  Alert,
   Button,
   Card,
   Collapse,
@@ -16,6 +15,7 @@ import {
 } from "antd"
 import { useTranslation } from "react-i18next"
 
+import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import { processInChunks } from "@/utils/chunk-processing"
@@ -1097,14 +1097,14 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
       )}
       {importPreflightWarning && (
         <Alert
-          type="warning"
-          showIcon
+          variant="warning"
           data-testid="flashcards-import-preflight-warning"
           title={t("option:flashcards.importPreflightTitle", {
             defaultValue: "Check import format before continuing"
           })}
-          description={importPreflightWarning}
-        />
+        >
+          {importPreflightWarning}
+        </Alert>
       )}
       {importMode !== "structured" && (
         <>
@@ -1208,32 +1208,30 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
 
       {importMode === "structured" && structuredPreviewErrors.length > 0 && (
         <Alert
-          type="warning"
-          showIcon
+          variant="warning"
           data-testid="flashcards-structured-preview-errors"
           title={t("option:flashcards.structuredPreviewErrorsTitle", {
             defaultValue: "Preview warnings"
           })}
-          description={
-            <div className="space-y-1 text-xs">
-              {structuredPreviewErrors.map((error, index) => (
-                <div key={`${error.line ?? "line"}-${index}`}>
-                  <Text code>
-                    {typeof error.line === "number"
-                      ? t("option:flashcards.importErrorLine", {
-                          defaultValue: "Line {{line}}",
-                          line: error.line
-                        })
-                      : t("option:flashcards.importErrorRowUnknown", {
-                          defaultValue: "Unknown row"
-                        })}
-                  </Text>
-                  <Text className="ml-2">{error.error}</Text>
-                </div>
-              ))}
-            </div>
-          }
-        />
+        >
+          <div className="space-y-1 text-xs">
+            {structuredPreviewErrors.map((error, index) => (
+              <div key={`${error.line ?? "line"}-${index}`}>
+                <Text code>
+                  {typeof error.line === "number"
+                    ? t("option:flashcards.importErrorLine", {
+                        defaultValue: "Line {{line}}",
+                        line: error.line
+                      })
+                    : t("option:flashcards.importErrorRowUnknown", {
+                        defaultValue: "Unknown row"
+                      })}
+                </Text>
+                <Text className="ml-2">{error.error}</Text>
+              </div>
+            ))}
+          </div>
+        </Alert>
       )}
 
       {importMode === "structured" && structuredDrafts.length > 0 && (
@@ -1316,8 +1314,7 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
       {lastResult && (
         <Alert
           data-testid="flashcards-import-last-result"
-          showIcon
-          type={lastResult.errors.length > 0 ? "warning" : "success"}
+          variant={lastResult.errors.length > 0 ? "warning" : "success"}
           title={
             lastResult.errors.length > 0
               ? t("option:flashcards.lastImportPartial", {
@@ -1330,66 +1327,65 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
                   imported: lastResult.imported
                 })
           }
-          description={
-            lastResult.errors.length > 0 && (
-              <div className="mt-1 space-y-1 text-xs">
-                {lastResult.errors.slice(0, 6).map((err, idx) => {
-                  const location =
-                    typeof err.line === "number"
-                      ? t("option:flashcards.importErrorLine", {
-                          defaultValue: "Line {{line}}",
-                          line: err.line
+        >
+          {lastResult.errors.length > 0 && (
+            <div className="mt-1 space-y-1 text-xs">
+              {lastResult.errors.slice(0, 6).map((err, idx) => {
+                const location =
+                  typeof err.line === "number"
+                    ? t("option:flashcards.importErrorLine", {
+                        defaultValue: "Line {{line}}",
+                        line: err.line
+                      })
+                    : typeof err.index === "number"
+                      ? t("option:flashcards.importErrorItem", {
+                          defaultValue: "Item {{index}}",
+                          index: err.index
                         })
-                      : typeof err.index === "number"
-                        ? t("option:flashcards.importErrorItem", {
-                            defaultValue: "Item {{index}}",
-                            index: err.index
-                          })
-                        : t("option:flashcards.importErrorRowUnknown", {
-                            defaultValue: "Unknown row"
-                          })
-                  const guidance = getImportErrorGuidance(err.error, t)
-                  return (
-                    <div key={`${location}-${idx}`} className="space-y-1">
-                      <div>
-                        <Text code>{location}</Text>
-                        <Text className="ml-2">{err.error}</Text>
-                      </div>
-                      {guidance && (
-                        <div className="flex flex-wrap items-center gap-2 pl-1">
-                          <Text type="secondary" className="block">
-                            {guidance.copy}
-                          </Text>
-                          {guidance.helpAnchorId && (
-                            <Button
-                              type="link"
-                              size="small"
-                              className="!h-auto !p-0 text-xs"
-                              onClick={() => scrollToImportHelp(guidance.helpAnchorId)}
-                              data-testid={`flashcards-import-error-help-${idx}`}
-                            >
-                              {t("option:flashcards.importErrorHelpLink", {
-                                defaultValue: "View format help"
-                              })}
-                            </Button>
-                          )}
-                        </div>
-                      )}
+                      : t("option:flashcards.importErrorRowUnknown", {
+                          defaultValue: "Unknown row"
+                        })
+                const guidance = getImportErrorGuidance(err.error, t)
+                return (
+                  <div key={`${location}-${idx}`} className="space-y-1">
+                    <div>
+                      <Text code>{location}</Text>
+                      <Text className="ml-2">{err.error}</Text>
                     </div>
-                  )
-                })}
-                {lastResult.errors.length > 6 && (
-                  <Text type="secondary">
-                    {t("option:flashcards.importErrorsMore", {
-                      defaultValue: "+{{count}} more errors",
-                      count: lastResult.errors.length - 6
-                    })}
-                  </Text>
-                )}
-              </div>
-            )
-          }
-        />
+                    {guidance && (
+                      <div className="flex flex-wrap items-center gap-2 pl-1">
+                        <Text type="secondary" className="block">
+                          {guidance.copy}
+                        </Text>
+                        {guidance.helpAnchorId && (
+                          <Button
+                            type="link"
+                            size="small"
+                            className="!h-auto !p-0 text-xs"
+                            onClick={() => scrollToImportHelp(guidance.helpAnchorId)}
+                            data-testid={`flashcards-import-error-help-${idx}`}
+                          >
+                            {t("option:flashcards.importErrorHelpLink", {
+                              defaultValue: "View format help"
+                            })}
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              {lastResult.errors.length > 6 && (
+                <Text type="secondary">
+                  {t("option:flashcards.importErrorsMore", {
+                    defaultValue: "+{{count}} more errors",
+                    count: lastResult.errors.length - 6
+                  })}
+                </Text>
+              )}
+            </div>
+          )}
+        </Alert>
       )}
     </div>
   )
