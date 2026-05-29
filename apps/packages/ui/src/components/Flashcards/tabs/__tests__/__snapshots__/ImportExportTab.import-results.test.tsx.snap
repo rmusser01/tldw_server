@@ -2,44 +2,49 @@
 
 exports[`ImportExportTab import result details > matches baseline snapshot for import result state 1`] = `
 <div
-  class="ant-alert ant-alert-warning ant-alert-with-description css-var-root css-dev-only-do-not-override-3uaqrl"
-  data-show="true"
+  class="flex items-start gap-3 rounded-lg border p-3 border-warn/30 bg-warn/10"
+  data-ds-component="Alert"
   data-testid="flashcards-import-last-result"
   role="alert"
 >
   <span
-    class="ant-alert-icon"
+    aria-hidden="true"
+    class="mt-0.5 flex-shrink-0 text-warn"
   >
-    <span
-      aria-label="exclamation-circle"
-      class="anticon anticon-exclamation-circle"
-      role="img"
+    <svg
+      aria-hidden="true"
+      class="lucide lucide-triangle-alert size-4"
+      fill="none"
+      height="24"
+      stroke="currentColor"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      stroke-width="2"
+      viewBox="0 0 24 24"
+      width="24"
+      xmlns="http://www.w3.org/2000/svg"
     >
-      <svg
-        aria-hidden="true"
-        data-icon="exclamation-circle"
-        fill="currentColor"
-        focusable="false"
-        height="1em"
-        viewBox="64 64 896 896"
-        width="1em"
-      >
-        <path
-          d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm-32 232c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v272c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V296zm32 440a48.01 48.01 0 010-96 48.01 48.01 0 010 96z"
-        />
-      </svg>
-    </span>
+      <path
+        d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"
+      />
+      <path
+        d="M12 9v4"
+      />
+      <path
+        d="M12 17h.01"
+      />
+    </svg>
   </span>
   <div
-    class="ant-alert-section"
+    class="min-w-0 flex-1"
   >
-    <div
-      class="ant-alert-title"
+    <p
+      class="text-sm font-medium text-warn"
     >
       Last import: 2 imported, 1 skipped
-    </div>
+    </p>
     <div
-      class="ant-alert-description"
+      class="text-sm text-warn mt-1"
     >
       <div
         class="mt-1 space-y-1 text-xs"
