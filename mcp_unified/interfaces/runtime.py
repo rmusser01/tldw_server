@@ -7,8 +7,8 @@ host application. Embedders can satisfy them with local implementations, while
 
 from __future__ import annotations
 
-from collections.abc import Awaitable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from .policy import (
@@ -157,6 +157,71 @@ class CircuitBreakerFactory(Protocol):
 
 
 @dataclass(slots=True)
+class AuthenticatedIdentity:
+    """Host-authenticated identity projected into MCP request metadata."""
+
+    user_id: str
+    roles: list[str] = field(default_factory=list)
+    permissions: list[str] = field(default_factory=list)
+
+
+class ServerAuthProvider(Protocol):
+    """Host authentication operations needed by MCPServer transports."""
+
+    def get_mcp_jwt_manager(self) -> Any: ...
+
+    def is_authnz_access_token(self, token: str) -> bool: ...
+
+    async def authenticate_authnz_websocket_token(
+        self,
+        token: str,
+        *,
+        websocket: Any,
+    ) -> AuthenticatedIdentity | None: ...
+
+    async def validate_api_key(
+        self,
+        api_key: str,
+        *,
+        ip_address: str | None = None,
+    ) -> dict[str, Any] | None: ...
+
+    def normalize_api_key_permissions(self, info: dict[str, Any] | None) -> list[str]: ...
+
+
+class LifecycleGuard(Protocol):
+    """Host lifecycle guard for MCP transport startup and shutdown drains."""
+
+    def assert_may_start_work(self, app: Any, family: str) -> None: ...
+
+    def register_shutdown_transport_family(
+        self,
+        family: str,
+        *,
+        active_count: Callable[[], int],
+        drain: Callable[[float | None], Awaitable[None]],
+    ) -> None: ...
+
+
+class PermissionSeeder(Protocol):
+    """Host hook for seeding compatibility permissions during startup."""
+
+    async def seed_default_tool_permissions(self) -> None: ...
+
+
+class ModuleConfigProvider(Protocol):
+    """Host defaults used while building module configuration."""
+
+    def default_media_db_path(self) -> str: ...
+
+
+class PolicyContextProvider(Protocol):
+    """Host feature flag provider for MCP policy-context metadata."""
+
+    def is_policy_context_enabled(self) -> bool: ...
+
+
+@dataclass(slots=True)
 class MCPRuntimeDependencies:
     """Concrete dependency bundle passed into MCP runtime components."""
 
@@ -173,3 +238,8 @@ class MCPRuntimeDependencies:
     external_access_evaluator: ExternalAccessEvaluator
     redis_client_factory: RedisClientFactory
     circuit_breaker_factory: CircuitBreakerFactory
+    auth_provider: ServerAuthProvider
+    lifecycle_guard: LifecycleGuard
+    permission_seeder: PermissionSeeder
+    module_config_provider: ModuleConfigProvider
+    policy_context_provider: PolicyContextProvider
