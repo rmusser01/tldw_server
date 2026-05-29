@@ -71,6 +71,20 @@ class _ExplodingSqliteDb:
         raise RuntimeError(self.message)
 
 
+class _ToolCatalogLookupDb:
+    def __init__(self) -> None:
+        self.fetchone_calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.fetchall_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def fetchone(self, query: str, *args: Any) -> tuple[int]:
+        self.fetchone_calls.append((str(query), tuple(args)))
+        return (42,)
+
+    async def fetchall(self, query: str, *args: Any) -> list[Any]:
+        self.fetchall_calls.append((str(query), tuple(args)))
+        return [("media.search",), (), {"tool_name": "notes.search"}]
+
+
 async def _assert_tool_catalog_log_sanitized(
     call: Callable[[], Awaitable[Any]],
     *,
@@ -115,6 +129,28 @@ async def test_list_tool_catalogs_postgres_backend_selection_uses_fetch() -> Non
     assert "$1" in query and "$2" in query
     assert params[-2:] == (10, 0)
     assert rows and rows[0]["name"] == "pg-cat"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_resolve_tool_catalog_filter_names_handles_tuple_rows() -> None:
+    db = _ToolCatalogLookupDb()
+
+    resolved = await svc.resolve_tool_catalog_filter_names(
+        db,
+        catalog_name="A",
+        catalog_id=None,
+        metadata={"team_id": 7},
+        strict=True,
+    )
+
+    assert resolved == {"media.search", "notes.search"}
+    assert db.fetchone_calls == [
+        ("SELECT id FROM tool_catalogs WHERE name = ? AND team_id = ?", ("A", 7))
+    ]
+    assert db.fetchall_calls == [
+        ("SELECT tool_name FROM tool_catalog_entries WHERE catalog_id = ?", (42,))
+    ]
 
 
 @pytest.mark.asyncio
