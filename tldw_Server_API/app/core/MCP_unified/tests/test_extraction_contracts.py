@@ -24,6 +24,7 @@ def _fake_runtime_dependencies() -> SimpleNamespace:
         metrics_collector=object(),
         telemetry_provider=object(),
         database_path_resolver=object(),
+        tool_catalog_provider=object(),
         api_key_scope_normalizer=object(),
         effective_policy_resolver=object(),
         approval_evaluator=object(),
@@ -350,6 +351,36 @@ def test_protocol_uses_runtime_dependencies_for_stage3b_host_services() -> None:
     assert offenders == []
 
 
+def test_protocol_catalog_lookup_uses_runtime_dependencies() -> None:
+    forbidden_import = "tldw_Server_API.app.core.AuthNZ.database"
+
+    imports = _resolved_import_sources_for(MCP_ROOT / "protocol.py", MCP_PACKAGE)
+    offenders = sorted(
+        source
+        for source in imports
+        if source == forbidden_import or source.startswith(f"{forbidden_import}.")
+    )
+
+    assert offenders == []
+
+
+def test_tldw_runtime_catalog_provider_does_not_inline_tool_catalog_sql() -> None:
+    adapter = MCP_ROOT / "adapters" / "tldw_runtime.py"
+    tree = ast.parse(adapter.read_text(encoding="utf-8"), filename=str(adapter))
+    table_sql_constants = sorted(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and (
+            "tool_catalogs" in node.value
+            or "tool_catalog_entries" in node.value
+        )
+    )
+
+    assert table_sql_constants == []
+
+
 def test_server_uses_runtime_dependencies_for_stage3c_host_services() -> None:
     forbidden_imports = {
         "tldw_Server_API.app.core.AuthNZ.exceptions",
@@ -515,6 +546,7 @@ def test_stage3_runtime_contracts_are_exported_by_interface_packages() -> None:
         "PermissionSeeder",
         "PolicyContextProvider",
         "ServerAuthProvider",
+        "ToolCatalogProvider",
         "EnvironmentFlagsProvider",
         "WebSocketStream",
         "WebSocketStreamFactory",

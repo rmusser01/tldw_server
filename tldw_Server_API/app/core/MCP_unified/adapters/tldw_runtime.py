@@ -99,6 +99,48 @@ class TldwDatabasePathResolver:
             return {}
 
 
+class TldwToolCatalogProvider:
+    """Resolve host-managed tool catalog filters through the AuthNZ database."""
+
+    async def resolve_tool_names(
+        self,
+        *,
+        catalog_name: str | None,
+        catalog_id: Any,
+        metadata: dict[str, Any],
+        strict: bool,
+    ) -> set[str] | None:
+        """Return tool names for a catalog identifier or name, preserving legacy fallback semantics."""
+        try:
+            from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+            from tldw_Server_API.app.services.admin_tool_catalog_service import (
+                resolve_tool_catalog_filter_names,
+            )
+
+            pool = await get_db_pool()
+        except _TLDW_RUNTIME_ADAPTER_EXCEPTIONS as exc:
+            logger.debug(
+                "MCP catalog lookup unavailable; returning fallback: {}",
+                exc.__class__.__name__,
+            )
+            return set() if strict else None
+
+        try:
+            return await resolve_tool_catalog_filter_names(
+                pool,
+                catalog_name=catalog_name,
+                catalog_id=catalog_id,
+                metadata=metadata,
+                strict=strict,
+            )
+        except _TLDW_RUNTIME_ADAPTER_EXCEPTIONS as exc:
+            logger.debug(
+                "MCP catalog lookup failed; returning fallback: {}",
+                exc.__class__.__name__,
+            )
+            return set() if strict else None
+
+
 class TldwApiKeyScopeNormalizer:
     """Normalize tldw_server API-key scope payloads for MCP authorization."""
 
@@ -427,6 +469,7 @@ def build_default_runtime_dependencies() -> MCPRuntimeDependencies:
         metrics_collector=get_metrics_collector(),
         telemetry_provider=TldwTelemetryProvider(),
         database_path_resolver=TldwDatabasePathResolver(),
+        tool_catalog_provider=TldwToolCatalogProvider(),
         api_key_scope_normalizer=TldwApiKeyScopeNormalizer(),
         effective_policy_resolver=TldwEffectivePolicyResolver(),
         approval_evaluator=TldwApprovalEvaluator(),

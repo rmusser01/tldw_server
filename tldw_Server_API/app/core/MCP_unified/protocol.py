@@ -552,6 +552,7 @@ class MCPProtocol:
         self.module_registry = self.dependencies.module_registry
         self.rbac_policy = self.dependencies.rbac_policy
         self.rate_limiter = self.dependencies.rate_limiter
+        self.tool_catalog_provider = self.dependencies.tool_catalog_provider
         self.protocol_version = "2024-11-05"
         self.metrics = self.dependencies.metrics_collector
         # Strict tool name validation regex
@@ -1762,72 +1763,19 @@ class MCPProtocol:
         if catalog_name is None and catalog_id is None:
             return None
         try:
-            from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-            pool = await get_db_pool()
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            context.logger.debug(f"Catalog lookup unavailable: {exc}")
-            return None
-
-        resolved_id: Optional[int] = None
-        if catalog_id is not None:
-            try:
-                resolved_id = int(catalog_id)
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                resolved_id = None
-
-        if resolved_id is None and isinstance(catalog_name, str) and catalog_name.strip():
-            name = catalog_name.strip()
-            meta = getattr(context, "metadata", {}) or {}
-            team_id = meta.get("team_id")
-            org_id = meta.get("org_id")
-
-            row = None
-            try:
-                if team_id is not None:
-                    row = await pool.fetchone(
-                        "SELECT id FROM tool_catalogs WHERE name = ? AND team_id = ?",
-                        name,
-                        team_id,
-                    )
-                if row is None and org_id is not None:
-                    row = await pool.fetchone(
-                        "SELECT id FROM tool_catalogs WHERE name = ? AND org_id = ? AND team_id IS NULL",
-                        name,
-                        org_id,
-                    )
-                if row is None:
-                    row = await pool.fetchone(
-                        "SELECT id FROM tool_catalogs WHERE name = ? AND org_id IS NULL AND team_id IS NULL",
-                        name,
-                    )
-                if row and row.get("id") is not None:
-                    resolved_id = int(row.get("id"))
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-                context.logger.debug(f"Catalog lookup failed: {exc}")
-
-        if resolved_id is None:
-            return set() if strict else None
-
-        try:
-            rows = await pool.fetchall(
-                "SELECT tool_name FROM tool_catalog_entries WHERE catalog_id = ?",
-                resolved_id,
+            metadata = context.metadata if isinstance(getattr(context, "metadata", None), dict) else {}
+            return await self.tool_catalog_provider.resolve_tool_names(
+                catalog_name=catalog_name if isinstance(catalog_name, str) else None,
+                catalog_id=catalog_id,
+                metadata=metadata,
+                strict=strict,
             )
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            context.logger.debug(f"Catalog entries lookup failed: {exc}")
-            return None
-
-        names: set[str] = set()
-        for r in rows:
-            try:
-                val = r["tool_name"] if isinstance(r, dict) else r[0]
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                val = None
-            if isinstance(val, str):
-                names.add(val)
-        if names:
-            return names
-        return set() if strict else None
+            context.logger.debug(
+                "Catalog lookup unavailable; returning fallback: {}",
+                exc.__class__.__name__,
+            )
+            return set() if strict else None
 
     async def _handle_tools_list(
         self,

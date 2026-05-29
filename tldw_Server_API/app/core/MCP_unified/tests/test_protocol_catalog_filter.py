@@ -1,6 +1,204 @@
-import asyncio
 import os
+from collections.abc import Callable
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
+
+
+class _NoopRateLimiter:
+    async def check_rate_limit(self, _key: str, *, category: str = "default") -> None:
+        del category
+        return None
+
+
+class _NoopMetrics:
+    def __getattr__(self, _name: str) -> Callable[..., None]:
+        return lambda *args, **kwargs: None
+
+
+class _NoopTelemetry:
+    def trace_context(
+        self,
+        _operation_name: str,
+        _attributes: dict[str, Any] | None = None,
+    ) -> Any:
+        class _Context:
+            def __enter__(self) -> None:
+                return None
+
+            def __exit__(self, *_exc_info: Any) -> None:
+                return None
+
+        return _Context()
+
+
+def _protocol_dependencies(*, tool_catalog_provider: Any) -> SimpleNamespace:
+    return SimpleNamespace(
+        module_registry=object(),
+        rbac_policy=object(),
+        rate_limiter=_NoopRateLimiter(),
+        metrics_collector=_NoopMetrics(),
+        telemetry_provider=_NoopTelemetry(),
+        redis_client_factory=lambda **_kwargs: None,
+        tool_catalog_provider=tool_catalog_provider,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_protocol_catalog_resolution_uses_injected_provider() -> None:
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
+
+    class _ToolCatalogProvider:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def resolve_tool_names(
+            self,
+            *,
+            catalog_name: str | None,
+            catalog_id: Any,
+            metadata: dict[str, Any],
+            strict: bool,
+        ) -> set[str] | None:
+            self.calls.append(
+                {
+                    "catalog_name": catalog_name,
+                    "catalog_id": catalog_id,
+                    "metadata": metadata,
+                    "strict": strict,
+                }
+            )
+            return {"media.search"}
+
+    provider = _ToolCatalogProvider()
+    proto = MCPProtocol(dependencies=_protocol_dependencies(tool_catalog_provider=provider))
+    ctx = RequestContext(
+        request_id="catalog-provider",
+        user_id="1",
+        client_id="unit",
+        metadata={"team_id": 7, "org_id": 5},
+    )
+
+    resolved = await proto._resolve_catalog_tool_names(  # noqa: SLF001
+        {"catalog": "A", "catalog_id": "123", "catalog_strict": "yes"},
+        ctx,
+    )
+
+    assert resolved == {"media.search"}
+    assert provider.calls == [
+        {
+            "catalog_name": "A",
+            "catalog_id": "123",
+            "metadata": {"team_id": 7, "org_id": 5},
+            "strict": True,
+        }
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_protocol_catalog_provider_failure_honors_strict_mode() -> None:
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
+
+    class _FailingToolCatalogProvider:
+        async def resolve_tool_names(
+            self,
+            *,
+            catalog_name: str | None,
+            catalog_id: Any,
+            metadata: dict[str, Any],
+            strict: bool,
+        ) -> set[str] | None:
+            del catalog_name, catalog_id, metadata, strict
+            raise RuntimeError("catalog lookup failed at /private/authnz.db")
+
+    proto = MCPProtocol(
+        dependencies=_protocol_dependencies(tool_catalog_provider=_FailingToolCatalogProvider())
+    )
+    ctx = RequestContext(request_id="catalog-provider-failure", user_id="1", client_id="unit")
+
+    non_strict = await proto._resolve_catalog_tool_names(  # noqa: SLF001
+        {"catalog": "A"},
+        ctx,
+    )
+    strict = await proto._resolve_catalog_tool_names(  # noqa: SLF001
+        {"catalog": "A", "catalog_strict": True},
+        ctx,
+    )
+
+    assert non_strict is None
+    assert strict == set()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_tldw_tool_catalog_provider_handles_tuple_rows(monkeypatch):
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
+
+    class _PoolStub:
+        async def fetchone(self, query: str, *args):
+            assert "tool_catalogs" in query
+            assert args == ("A", 7)
+            return (123,)
+
+        async def fetchall(self, query: str, *args):
+            assert "tool_catalog_entries" in query
+            assert args == (123,)
+            return [("media.search",), (), {"tool_name": "notes.search"}]
+
+    async def _get_db_pool_stub():
+        return _PoolStub()
+
+    import tldw_Server_API.app.core.AuthNZ.database as db_mod
+
+    monkeypatch.setattr(db_mod, "get_db_pool", _get_db_pool_stub)
+
+    provider = tldw_runtime.TldwToolCatalogProvider()
+
+    resolved = await provider.resolve_tool_names(
+        catalog_name="A",
+        catalog_id=None,
+        metadata={"team_id": 7},
+        strict=True,
+    )
+
+    assert resolved == {"media.search", "notes.search"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_tldw_tool_catalog_provider_sanitizes_failure_logs(monkeypatch):
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
+
+    async def _get_db_pool_stub():
+        raise RuntimeError("catalog lookup failed at /private/authnz.db")
+
+    records: list[tuple[str, tuple[Any, ...]]] = []
+
+    def _debug(message: str, *args: Any, **_kwargs: Any) -> None:
+        records.append((message, args))
+
+    import tldw_Server_API.app.core.AuthNZ.database as db_mod
+
+    monkeypatch.setattr(db_mod, "get_db_pool", _get_db_pool_stub)
+    monkeypatch.setattr(tldw_runtime, "logger", SimpleNamespace(debug=_debug))
+
+    provider = tldw_runtime.TldwToolCatalogProvider()
+
+    resolved = await provider.resolve_tool_names(
+        catalog_name="A",
+        catalog_id=None,
+        metadata={},
+        strict=True,
+    )
+
+    logged = "\n".join([message + " " + " ".join(map(str, args)) for message, args in records])
+    assert resolved == set()
+    assert "RuntimeError" in logged
+    assert "/private/" not in logged
+    assert "catalog lookup failed" not in logged
 
 
 @pytest.mark.unit

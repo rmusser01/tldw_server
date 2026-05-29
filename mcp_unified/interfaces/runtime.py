@@ -138,6 +138,19 @@ class DatabasePathResolver(Protocol):
     def resolve_user_db_paths(self, user_id: str | int | None) -> dict[str, str]: ...
 
 
+class ToolCatalogProvider(Protocol):
+    """Resolver for host-managed tool catalog filters."""
+
+    async def resolve_tool_names(
+        self,
+        *,
+        catalog_name: str | None,
+        catalog_id: Any,
+        metadata: dict[str, Any],
+        strict: bool,
+    ) -> set[str] | None: ...
+
+
 class ApiKeyScopeNormalizer(Protocol):
     """Normalizer for API-key scope payloads from a host auth layer."""
 
@@ -277,6 +290,7 @@ class MCPRuntimeDependencies:
     metrics_collector: MetricsCollector
     telemetry_provider: TelemetryProvider
     database_path_resolver: DatabasePathResolver
+    tool_catalog_provider: ToolCatalogProvider
     api_key_scope_normalizer: ApiKeyScopeNormalizer
     effective_policy_resolver: EffectivePolicyResolver
     approval_evaluator: ApprovalEvaluator
