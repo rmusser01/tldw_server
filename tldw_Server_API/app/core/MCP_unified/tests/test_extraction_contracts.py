@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import inspect
 from collections.abc import Callable
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 import pytest
 
 MCP_ROOT = Path(__file__).resolve().parents[1]
+MCP_PACKAGE = "tldw_Server_API.app.core.MCP_unified"
 EXPECTED_INTERFACE_FILES = {"runtime.py", "policy.py", "storage.py"}
 
 
@@ -143,6 +145,22 @@ class _FakeAuthProvider:
         return ["fake.scope"] if info else []
 
 
+class _TelemetryManagerDouble:
+    """Telemetry manager double that exposes trace_context calls."""
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.trace_calls: list[tuple[str, dict[str, Any] | None]] = []
+
+    def trace_context(
+        self,
+        operation_name: str,
+        attributes: dict[str, Any] | None = None,
+    ) -> Any:
+        self.trace_calls.append((operation_name, attributes))
+        return contextlib.nullcontext(self.label)
+
+
 def _server_runtime_dependencies() -> SimpleNamespace:
     deps = _fake_runtime_dependencies()
     deps.module_registry = _RecordingModuleRegistry()
@@ -185,6 +203,36 @@ def _interface_boundary_violations_for(path: Path, interface_dir: Path) -> list[
     return violations
 
 
+def _resolve_import_from_source(package: str, module: str | None, level: int) -> str:
+    """Return an absolute module path for an ``ast.ImportFrom`` source."""
+    if level == 0:
+        return module or ""
+
+    package_parts = package.split(".")
+    base_parts = package_parts[: len(package_parts) - level + 1]
+    if module:
+        base_parts.extend(module.split("."))
+    return ".".join(base_parts)
+
+
+def _resolved_import_sources_for(
+    path: Path,
+    package: str,
+    *,
+    top_level_only: bool = False,
+) -> list[str]:
+    """Return import module sources from Python AST, resolving relative imports."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    nodes = tree.body if top_level_only else ast.walk(tree)
+    imports: list[str] = []
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            imports.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imports.append(_resolve_import_from_source(package, node.module, node.level))
+    return imports
+
+
 def test_new_interface_modules_do_not_import_tldw_server_api() -> None:
     interface_dir = MCP_ROOT / "interfaces"
     assert interface_dir.exists()
@@ -196,6 +244,50 @@ def test_new_interface_modules_do_not_import_tldw_server_api() -> None:
         if violations:
             offenders[str(path)] = violations
     assert offenders == {}
+
+
+def test_protocol_uses_runtime_dependencies_for_stage3b_host_services() -> None:
+    forbidden_imports = {
+        "tldw_Server_API.app.core.Infrastructure.redis_factory",
+        "tldw_Server_API.app.core.Metrics.telemetry",
+        "tldw_Server_API.app.core.testing",
+    }
+
+    imports = _resolved_import_sources_for(MCP_ROOT / "protocol.py", MCP_PACKAGE)
+    offenders = sorted(
+        source
+        for source in imports
+        if source in forbidden_imports
+        or any(source.startswith(f"{forbidden}.") for forbidden in forbidden_imports)
+    )
+
+    assert offenders == []
+
+
+def test_protocol_boundary_scan_resolves_relative_imports(tmp_path: Path) -> None:
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "from ..testing import is_truthy\n"
+        "from .adapters.tldw_runtime import build_default_runtime_dependencies\n",
+        encoding="utf-8",
+    )
+
+    imports = _resolved_import_sources_for(sample, MCP_PACKAGE)
+
+    assert imports == [
+        "tldw_Server_API.app.core.testing",
+        "tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime",
+    ]
+
+
+def test_protocol_import_time_boundary_does_not_load_tldw_runtime_adapter() -> None:
+    imports = _resolved_import_sources_for(
+        MCP_ROOT / "protocol.py",
+        MCP_PACKAGE,
+        top_level_only=True,
+    )
+
+    assert "tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime" not in imports
 
 
 def test_default_runtime_dependency_builder_exposes_core_dependencies() -> None:
@@ -459,24 +551,24 @@ def test_authnz_access_token_helper_documents_boolean_semantics() -> None:
 def test_default_server_protocol_uses_current_telemetry_manager(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.core.MCP_unified import protocol as protocol_mod
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
     from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 
-    first_manager = object()
-    second_manager = object()
-    deps = _fake_runtime_dependencies()
-    deps.telemetry_provider = first_manager
+    first_manager = _TelemetryManagerDouble("first")
+    second_manager = _TelemetryManagerDouble("second")
     current = {"manager": first_manager}
 
-    monkeypatch.setattr(protocol_mod, "build_default_runtime_dependencies", lambda: deps)
-    monkeypatch.setattr(protocol_mod, "get_telemetry_manager", lambda: current["manager"])
+    monkeypatch.setattr(tldw_runtime, "get_telemetry_manager", lambda: current["manager"])
 
     server = MCPServer()
 
-    assert server.dependencies is deps
-    assert server.protocol.telemetry is first_manager
+    with server.protocol.telemetry.trace_context("first-op", {"generation": 1}) as span:
+        assert span == "first"
     current["manager"] = second_manager
-    assert server.protocol.telemetry is second_manager
+    with server.protocol.telemetry.trace_context("second-op", {"generation": 2}) as span:
+        assert span == "second"
+    assert first_manager.trace_calls == [("first-op", {"generation": 1})]
+    assert second_manager.trace_calls == [("second-op", {"generation": 2})]
 
 
 def test_protocol_instances_do_not_share_prepared_call_secrets() -> None:

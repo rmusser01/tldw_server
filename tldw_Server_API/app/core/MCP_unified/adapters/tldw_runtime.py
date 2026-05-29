@@ -48,6 +48,27 @@ _TLDW_RUNTIME_ADAPTER_EXCEPTIONS = (
 )
 
 
+class TldwTelemetryProvider:
+    """Proxy the current tldw_server telemetry manager for MCP protocol spans."""
+
+    @staticmethod
+    def _current() -> Any:
+        """Return the current host telemetry manager."""
+        return get_telemetry_manager()
+
+    def trace_context(
+        self,
+        operation_name: str,
+        attributes: dict[str, Any] | None = None,
+    ) -> Any:
+        """Open a trace context through the current host telemetry manager."""
+        return self._current().trace_context(operation_name, attributes)
+
+    def __getattr__(self, name: str) -> Any:
+        """Forward compatibility methods to the current host telemetry manager."""
+        return getattr(self._current(), name)
+
+
 class TldwDatabasePathResolver:
     """Resolve per-user database paths through the tldw_server DB path helper."""
 
@@ -327,7 +348,7 @@ def build_default_runtime_dependencies() -> MCPRuntimeDependencies:
         rbac_policy=get_rbac_policy(),
         rate_limiter=get_rate_limiter(),
         metrics_collector=get_metrics_collector(),
-        telemetry_provider=get_telemetry_manager(),
+        telemetry_provider=TldwTelemetryProvider(),
         database_path_resolver=TldwDatabasePathResolver(),
         api_key_scope_normalizer=TldwApiKeyScopeNormalizer(),
         effective_policy_resolver=TldwEffectivePolicyResolver(),

@@ -5,11 +5,16 @@ Implements JSON-RPC 2.0 with enhanced error handling and request routing.
 """
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
+import inspect
 import json
+import re
 import secrets
+import time
 import uuid
+from collections import OrderedDict
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 from enum import IntEnum
@@ -26,23 +31,13 @@ except ImportError:  # Fallback for v1
         from pydantic import root_validator as model_validator  # type: ignore
     except ImportError:
         model_validator = None  # type: ignore
-import contextlib
-import inspect
-import re
-import time
-from collections import OrderedDict
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Infrastructure.redis_factory import create_async_redis_client
-from tldw_Server_API.app.core.Metrics.telemetry import get_telemetry_manager
-from tldw_Server_API.app.core.testing import is_truthy
-
 from .auth.authnz_rbac import Action, Resource
 from .auth.rate_limiter import RateLimitExceeded
-from .adapters.tldw_runtime import build_default_runtime_dependencies
 from .config import get_config
-from .interfaces.runtime import MCPRuntimeDependencies
+from .interfaces.runtime import MCPRuntimeDependencies, TelemetryProvider
 from .modules.base import BaseModule
 
 try:  # pragma: no cover - optional dependency
@@ -121,6 +116,20 @@ _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS = (
 )
 
 _MCP_TOOL_EXECUTION_ERROR = "tool_execution_error"
+_TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
+
+
+def _is_truthy(value: Any) -> bool:
+    """Parse host-neutral truthy flags without importing tldw_server helpers."""
+    try:
+        return str(value or "").strip().lower() in _TRUTHY_VALUES
+    except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+        return False
+
+
+async def _no_redis_client_factory(**_kwargs: Any) -> None:
+    """Fallback Redis factory used when embedders do not provide Redis support."""
+    return None
 
 
 class MCPRequest(BaseModel):
@@ -234,7 +243,7 @@ class IdempotencyManager:
         self._redis_ready = False
         self._redis_attempted = False
         self._redis_guard = asyncio.Lock()
-        self._redis_client_factory = redis_client_factory or create_async_redis_client
+        self._redis_client_factory = redis_client_factory or _no_redis_client_factory
 
     def _prune_local_locks(self) -> None:
         """Drop stale local locks once their cache/binding entries are gone."""
@@ -269,6 +278,14 @@ class IdempotencyManager:
                     context="mcp_idempotency",
                     redis_kwargs=params,
                 )
+                if self._redis_client is None:
+                    logger.warning(
+                        "MCP idempotency Redis unavailable; falling back to local locks. "
+                        "Error: Redis client factory returned None for context=mcp_idempotency",
+                    )
+                    self._redis_client = None
+                    self._redis_ready = False
+                    return False
                 self._redis_ready = True
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
                 logger.warning(
@@ -527,8 +544,11 @@ class MCPProtocol:
     """
 
     def __init__(self, dependencies: MCPRuntimeDependencies | None = None):
-        self._uses_default_telemetry_manager = dependencies is None
-        self.dependencies = dependencies or build_default_runtime_dependencies()
+        if dependencies is None:
+            from .adapters.tldw_runtime import build_default_runtime_dependencies
+
+            dependencies = build_default_runtime_dependencies()
+        self.dependencies = dependencies
         self.module_registry = self.dependencies.module_registry
         self.rbac_policy = self.dependencies.rbac_policy
         self.rate_limiter = self.dependencies.rate_limiter
@@ -565,10 +585,8 @@ class MCPProtocol:
         logger.info("MCP Protocol handler initialized")
 
     @property
-    def telemetry(self):
-        """Return current global telemetry by default, or the injected provider."""
-        if self._uses_default_telemetry_manager:
-            return get_telemetry_manager()
+    def telemetry(self) -> TelemetryProvider:
+        """Return the injected telemetry provider."""
         return self.dependencies.telemetry_provider
 
     async def _rbac_check(self, user_id: Optional[str], resource: Resource, action: Action, resource_id: Optional[str] = None) -> bool:
@@ -993,7 +1011,7 @@ class MCPProtocol:
         if isinstance(raw, (int, float)):
             return bool(raw)
         if isinstance(raw, str):
-            return is_truthy(raw)
+            return _is_truthy(raw)
         return False
 
     @staticmethod
@@ -1425,7 +1443,7 @@ class MCPProtocol:
             masked = self._mask_secrets(str(e))
             secret_redacted = bool(getattr(e, "_mcp_masked_secret", False)) or masked != str(e)
             if secret_redacted:
-                log.error(
+                log.error(  # noqa: TRY400 - avoid logging sanitized exception traceback.
                     f"MCP request failed: method={request.method}, error={masked}",
                     extra={"audit": True},
                 )
@@ -1459,7 +1477,7 @@ class MCPProtocol:
             masked = self._mask_secrets(str(e))
             secret_redacted = bool(getattr(e, "_mcp_masked_secret", False)) or masked != str(e)
             if secret_redacted:
-                log.error(
+                log.error(  # noqa: TRY400 - avoid logging sanitized exception traceback.
                     f"MCP request failed: method={request.method}, error={masked}",
                     extra={"audit": True},
                 )
@@ -1506,14 +1524,14 @@ class MCPProtocol:
         masked = self._mask_secrets(original)
         if masked == original:
             with contextlib.suppress(Exception):
-                setattr(exc, "_mcp_masked_secret", False)
+                exc._mcp_masked_secret = False
             return exc
         try:
             sanitized = exc.__class__(masked)
         except Exception:
             sanitized = RuntimeError(masked)
         with contextlib.suppress(Exception):
-            setattr(sanitized, "_mcp_masked_secret", True)
+            sanitized._mcp_masked_secret = True
         if hasattr(sanitized, "__dict__") and hasattr(exc, "__dict__"):
             with contextlib.suppress(Exception):
                 for attr in ("errno", "code", "name", "lineno"):
@@ -1522,7 +1540,7 @@ class MCPProtocol:
         with contextlib.suppress(Exception):
             sanitized.args = (masked,)
         with contextlib.suppress(Exception):
-            setattr(sanitized, "_mcp_masked_secret", True)
+            sanitized._mcp_masked_secret = True
         return sanitized
 
     @staticmethod
@@ -1533,7 +1551,7 @@ class MCPProtocol:
         except Exception:
             sanitized = RuntimeError(message)
         with contextlib.suppress(Exception):
-            setattr(sanitized, "_mcp_sanitized_error", True)
+            sanitized._mcp_sanitized_error = True
         return sanitized
 
     def _error_response(
@@ -1735,7 +1753,7 @@ class MCPProtocol:
             elif isinstance(raw_strict, (int, float)):
                 strict = bool(raw_strict)
             elif isinstance(raw_strict, str):
-                strict = is_truthy(raw_strict)
+                strict = _is_truthy(raw_strict)
         catalog_name = None
         catalog_id = None
         if isinstance(params, dict):
@@ -1948,7 +1966,7 @@ class MCPProtocol:
         metadata = getattr(context, "metadata", None)
         if not isinstance(metadata, dict):
             return None
-        if not is_truthy(metadata.get("mcp_policy_context_enabled")):
+        if not _is_truthy(metadata.get("mcp_policy_context_enabled")):
             return None
         cached = metadata.get("_mcp_effective_tool_policy")
         if isinstance(cached, dict):
@@ -2615,7 +2633,10 @@ class MCPProtocol:
                 return response_payload
 
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
-                context.logger.error("Tool execution failed", error_type=e.__class__.__name__)
+                context.logger.error(  # noqa: TRY400 - structured audit log records sanitized type only.
+                    "Tool execution failed",
+                    error_type=e.__class__.__name__,
+                )
                 try:
                     duration = max(0.0, time.time() - t0)
                     self.metrics.record_module_operation(module=getattr(module, "name", "unknown"), operation="tools_call", duration=duration, success=False)
