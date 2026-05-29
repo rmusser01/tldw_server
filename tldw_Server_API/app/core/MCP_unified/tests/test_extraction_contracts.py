@@ -390,6 +390,23 @@ def test_security_and_config_use_package_local_environment_helpers() -> None:
     assert offenders == {}
 
 
+def test_mcp_discovery_module_uses_package_local_environment_helpers() -> None:
+    forbidden_import = "tldw_Server_API.app.core.testing"
+    discovery_module = MCP_ROOT / "modules" / "implementations" / "mcp_discovery_module.py"
+
+    imports = _resolved_import_sources_for(
+        discovery_module,
+        f"{MCP_PACKAGE}.modules.implementations",
+    )
+    offenders = sorted(
+        source
+        for source in imports
+        if source == forbidden_import or source.startswith(f"{forbidden_import}.")
+    )
+
+    assert offenders == []
+
+
 def test_protocol_boundary_scan_resolves_relative_imports(tmp_path: Path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(

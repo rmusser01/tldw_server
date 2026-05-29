@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -17,10 +17,10 @@ class DummyModule(BaseModule):
     async def on_shutdown(self) -> None:
         return None
 
-    async def check_health(self) -> Dict[str, bool]:
+    async def check_health(self) -> dict[str, bool]:
         return {"ok": True}
 
-    async def get_tools(self) -> list[Dict[str, Any]]:
+    async def get_tools(self) -> list[dict[str, Any]]:
         return [
             create_tool_definition(
                 name="dummy.echo",
@@ -29,7 +29,7 @@ class DummyModule(BaseModule):
             )
         ]
 
-    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], context: Any | None = None) -> Any:
+    async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         return {"ok": True, "tool": tool_name, "args": arguments}
 
 
@@ -52,6 +52,28 @@ async def test_discovery_lists_modules_and_tools(monkeypatch):
 
     tools_res = await mod.execute_tool("mcp.tools.list", {"modules": ["dummy"]}, context=ctx)
     assert any(t.get("name") == "dummy.echo" for t in tools_res.get("tools", []))
+
+
+@pytest.mark.asyncio
+async def test_discovery_tools_list_parses_catalog_strict_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _handle_tools_list(
+        _self: MCPProtocol,
+        params: dict[str, Any],
+        _context: RequestContext,
+    ) -> dict[str, Any]:
+        captured.update(params)
+        return {"tools": []}
+
+    monkeypatch.setattr(MCPProtocol, "_handle_tools_list", _handle_tools_list)
+
+    mod = MCPDiscoveryModule(ModuleConfig(name="mcp_discovery"))
+    ctx = RequestContext(request_id="mcp-discovery-strict", user_id="1", metadata={})
+
+    await mod.execute_tool("mcp.tools.list", {"catalog_strict": "yes"}, context=ctx)
+
+    assert captured["catalog_strict"] is True
 
 
 @pytest.mark.asyncio
