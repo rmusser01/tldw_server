@@ -29,11 +29,11 @@
 **Goal:** Verify the slice and record the result.
 **Success Criteria:** Focused pytest, Ruff, Bandit, and diff whitespace checks pass or have documented non-slice blockers.
 **Tests:** Focused pytest, Ruff, Bandit, `git diff --check`.
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Run focused pytest for extraction contracts, catalog loader, archetype schema, and package boundary tests.
 - [x] Run Ruff and Bandit on touched code.
-- [ ] Update TASK-547 with verification, summary, and PR link.
+- [x] Update TASK-547 with verification, summary, and PR link.
 
 ## Verification Log
 
@@ -42,3 +42,4 @@
 - Ruff: `.venv/bin/python -m ruff check mcp_unified/federation/catalog_loader.py mcp_unified/federation/__init__.py tldw_Server_API/app/core/MCP_unified/catalog_loader.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/tests/unit/test_mcp_catalog_loader.py` -> all checks passed.
 - Bandit: `.venv/bin/python -m bandit -r mcp_unified/federation/catalog_loader.py mcp_unified/federation/__init__.py tldw_Server_API/app/core/MCP_unified/catalog_loader.py -f json -o /tmp/bandit_mcp_stage3g_catalog_loader.json` -> 0 findings.
 - Whitespace: `git diff --check` -> clean.
+- PR: https://github.com/rmusser01/tldw_server/pull/2122

@@ -1,7 +1,7 @@
 ---
 id: TASK-547
 title: Implement MCP Unified Stage 3G catalog loader package seam
-status: In Progress
+status: Done
 labels:
 - mcp
 - mcp-unified
@@ -38,12 +38,13 @@ Move MCP catalog YAML loader behavior into the standalone mcp_unified package wh
 - Replaced `tldw_Server_API.app.core.MCP_unified.catalog_loader` with a compatibility wrapper that imports the standalone implementation and shares the same cache object.
 - Added regression coverage for the host-wrapper package boundary, standalone exports, and shared host/package cache behavior.
 - Verification: RED boundary tests failed before implementation; focused pytest later reported 76 passed; Ruff passed; Bandit reported 0 findings; `git diff --check` was clean.
+- PR: https://github.com/rmusser01/tldw_server/pull/2122
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the Stage 3G catalog loader package seam. The standalone `mcp_unified` package now owns catalog load/list/get behavior, while the existing host import path remains compatible through a thin wrapper. PR link pending.
+Implemented the Stage 3G catalog loader package seam. The standalone `mcp_unified` package now owns catalog load/list/get behavior, while the existing host import path remains compatible through a thin wrapper. PR: https://github.com/rmusser01/tldw_server/pull/2122
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
