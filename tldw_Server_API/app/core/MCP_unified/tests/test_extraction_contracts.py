@@ -368,6 +368,28 @@ def test_server_uses_runtime_dependencies_for_stage3c_host_services() -> None:
     assert offenders == []
 
 
+def test_security_and_config_use_package_local_environment_helpers() -> None:
+    forbidden_import = "tldw_Server_API.app.core.testing"
+    targets = {
+        MCP_ROOT / "config.py": MCP_PACKAGE,
+        MCP_ROOT / "security" / "ip_filter.py": f"{MCP_PACKAGE}.security",
+        MCP_ROOT / "security" / "request_guards.py": f"{MCP_PACKAGE}.security",
+    }
+
+    offenders: dict[str, list[str]] = {}
+    for path, package in targets.items():
+        imports = _resolved_import_sources_for(path, package)
+        blocked = sorted(
+            source
+            for source in imports
+            if source == forbidden_import or source.startswith(f"{forbidden_import}.")
+        )
+        if blocked:
+            offenders[str(path.relative_to(MCP_ROOT))] = blocked
+
+    assert offenders == {}
+
+
 def test_protocol_boundary_scan_resolves_relative_imports(tmp_path: Path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(
