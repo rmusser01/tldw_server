@@ -34,11 +34,10 @@ except ImportError:  # Fallback for v1
 
 from loguru import logger
 
-from .adapters.tldw_runtime import build_default_runtime_dependencies
 from .auth.authnz_rbac import Action, Resource
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config
-from .interfaces.runtime import MCPRuntimeDependencies
+from .interfaces.runtime import MCPRuntimeDependencies, TelemetryProvider
 from .modules.base import BaseModule
 
 try:  # pragma: no cover - optional dependency
@@ -280,6 +279,11 @@ class IdempotencyManager:
                     redis_kwargs=params,
                 )
                 if self._redis_client is None:
+                    logger.warning(
+                        "MCP idempotency Redis unavailable; falling back to local locks. "
+                        "Error: Redis client factory returned None for context=mcp_idempotency",
+                    )
+                    self._redis_client = None
                     self._redis_ready = False
                     return False
                 self._redis_ready = True
@@ -540,7 +544,11 @@ class MCPProtocol:
     """
 
     def __init__(self, dependencies: MCPRuntimeDependencies | None = None):
-        self.dependencies = dependencies or build_default_runtime_dependencies()
+        if dependencies is None:
+            from .adapters.tldw_runtime import build_default_runtime_dependencies
+
+            dependencies = build_default_runtime_dependencies()
+        self.dependencies = dependencies
         self.module_registry = self.dependencies.module_registry
         self.rbac_policy = self.dependencies.rbac_policy
         self.rate_limiter = self.dependencies.rate_limiter
@@ -577,7 +585,7 @@ class MCPProtocol:
         logger.info("MCP Protocol handler initialized")
 
     @property
-    def telemetry(self):
+    def telemetry(self) -> TelemetryProvider:
         """Return the injected telemetry provider."""
         return self.dependencies.telemetry_provider
 

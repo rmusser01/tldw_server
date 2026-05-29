@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 MCP_ROOT = Path(__file__).resolve().parents[1]
+MCP_PACKAGE = "tldw_Server_API.app.core.MCP_unified"
 EXPECTED_INTERFACE_FILES = {"runtime.py", "policy.py", "storage.py"}
 
 
@@ -202,14 +203,33 @@ def _interface_boundary_violations_for(path: Path, interface_dir: Path) -> list[
     return violations
 
 
-def _absolute_import_sources_for(path: Path) -> list[str]:
+def _resolve_import_from_source(package: str, module: str | None, level: int) -> str:
+    """Return an absolute module path for an ``ast.ImportFrom`` source."""
+    if level == 0:
+        return module or ""
+
+    package_parts = package.split(".")
+    base_parts = package_parts[: len(package_parts) - level + 1]
+    if module:
+        base_parts.extend(module.split("."))
+    return ".".join(base_parts)
+
+
+def _resolved_import_sources_for(
+    path: Path,
+    package: str,
+    *,
+    top_level_only: bool = False,
+) -> list[str]:
+    """Return import module sources from Python AST, resolving relative imports."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    nodes = tree.body if top_level_only else ast.walk(tree)
     imports: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Import):
             imports.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            imports.append(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            imports.append(_resolve_import_from_source(package, node.module, node.level))
     return imports
 
 
@@ -233,7 +253,7 @@ def test_protocol_uses_runtime_dependencies_for_stage3b_host_services() -> None:
         "tldw_Server_API.app.core.testing",
     }
 
-    imports = _absolute_import_sources_for(MCP_ROOT / "protocol.py")
+    imports = _resolved_import_sources_for(MCP_ROOT / "protocol.py", MCP_PACKAGE)
     offenders = sorted(
         source
         for source in imports
@@ -242,6 +262,32 @@ def test_protocol_uses_runtime_dependencies_for_stage3b_host_services() -> None:
     )
 
     assert offenders == []
+
+
+def test_protocol_boundary_scan_resolves_relative_imports(tmp_path: Path) -> None:
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "from ..testing import is_truthy\n"
+        "from .adapters.tldw_runtime import build_default_runtime_dependencies\n",
+        encoding="utf-8",
+    )
+
+    imports = _resolved_import_sources_for(sample, MCP_PACKAGE)
+
+    assert imports == [
+        "tldw_Server_API.app.core.testing",
+        "tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime",
+    ]
+
+
+def test_protocol_import_time_boundary_does_not_load_tldw_runtime_adapter() -> None:
+    imports = _resolved_import_sources_for(
+        MCP_ROOT / "protocol.py",
+        MCP_PACKAGE,
+        top_level_only=True,
+    )
+
+    assert "tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime" not in imports
 
 
 def test_default_runtime_dependency_builder_exposes_core_dependencies() -> None:

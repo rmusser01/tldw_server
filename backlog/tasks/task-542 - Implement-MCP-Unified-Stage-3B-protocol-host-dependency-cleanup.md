@@ -40,6 +40,7 @@ Docs/superpowers/plans/2026-05-29-mcp-unified-stage3b-protocol-host-deps-plan.md
 - Added a dynamic telemetry regression test that monkeypatches the tldw runtime adapter and verifies trace calls dispatch to the current telemetry manager through the default dependency bundle.
 - Removed direct protocol imports for telemetry, Redis factory fallback, and testing truthiness parsing; added local neutral helpers for truthy parsing and no-Redis fallback behavior.
 - Added `TldwTelemetryProvider` to the host adapter bundle so default in-repo runtime dependencies preserve current telemetry manager lookup without protocol-level host imports.
+- Review fix pass: rebased onto current `origin/dev`, moved the tldw runtime dependency builder import out of protocol module import time, annotated `MCPProtocol.telemetry`, added import-boundary coverage for relative imports, and logged the Redis factory-None fallback.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -54,6 +55,13 @@ Verification:
 - Bandit: `.venv/bin/python -m bandit -r tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py mcp_unified/interfaces tldw_Server_API/app/core/MCP_unified/interfaces -f json -o /tmp/bandit_mcp_stage3b_protocol_host_deps.json` -> `"results": []`.
 
 Known skips or blockers: none.
+
+Review fix verification after rebasing on current `origin/dev`:
+- RED: `.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py::test_idempotency_warns_when_redis_factory_returns_none -q` failed as expected on the top-level adapter import and missing Redis factory-None warning.
+- GREEN: `.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py tldw_Server_API/app/core/MCP_unified/tests/test_stage2_context_session.py tldw_Server_API/app/core/MCP_unified/tests/test_scope_and_fallbacks.py -q` -> 68 passed, 5 warnings.
+- Ruff: `.venv/bin/python -m ruff check tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py mcp_unified/interfaces tldw_Server_API/app/core/MCP_unified/interfaces` -> all checks passed.
+- Bandit runtime scope: `.venv/bin/python -m bandit -r tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py mcp_unified/interfaces tldw_Server_API/app/core/MCP_unified/interfaces -f json -o /tmp/bandit_mcp_stage3b_review_fixes_runtime.json` -> `"results": []`.
+- Note: a test-inclusive Bandit run was also attempted and only surfaced the repo's existing pytest assert/temp-path baseline noise in MCP test modules.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
