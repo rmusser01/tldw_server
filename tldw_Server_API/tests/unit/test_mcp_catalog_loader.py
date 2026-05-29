@@ -63,9 +63,9 @@ _ONE_GOOD_ONE_BAD_YAML = textwrap.dedent("""\
 @pytest.fixture(autouse=True)
 def _clear_cache():
     """Ensure the module-level cache is empty before and after each test."""
-    _catalog_mod._CATALOG_CACHE = []
+    _catalog_mod._CATALOG_CACHE.clear()
     yield
-    _catalog_mod._CATALOG_CACHE = []
+    _catalog_mod._CATALOG_CACHE.clear()
 
 
 @pytest.fixture()
@@ -102,6 +102,42 @@ class TestLoadMcpCatalog:
 
         assert ApiMCPCatalogEntry is StandaloneMCPCatalogEntry
         assert all(isinstance(e, StandaloneMCPCatalogEntry) for e in result)
+
+    def test_standalone_package_exports_catalog_loader_functions(
+        self,
+        catalog_file: Path,
+    ):
+        """Standalone package exports the same catalog loader functions."""
+        from mcp_unified.federation import load_mcp_catalog as package_load_mcp_catalog
+        from mcp_unified.federation.catalog_loader import (
+            get_catalog_entry as package_get_catalog_entry,
+        )
+
+        assert package_load_mcp_catalog is load_mcp_catalog
+
+        package_load_mcp_catalog(catalog_file)
+
+        assert package_get_catalog_entry("github") is not None
+        assert [entry.key for entry in list_catalog_entries()] == ["github", "arxiv"]
+
+    def test_host_and_standalone_loader_paths_share_cache(
+        self,
+        catalog_file: Path,
+        tmp_path: Path,
+    ):
+        """Host compatibility wrapper and standalone loader share cache state."""
+        from mcp_unified.federation import catalog_loader as package_catalog_mod
+
+        package_catalog_mod.load_mcp_catalog(catalog_file)
+
+        assert [entry.key for entry in _catalog_mod.list_catalog_entries()] == [
+            "github",
+            "arxiv",
+        ]
+
+        _catalog_mod.load_mcp_catalog(tmp_path / "missing.yaml")
+
+        assert package_catalog_mod.list_catalog_entries() == []
 
     def test_cache_is_populated(self, catalog_file: Path):
         load_mcp_catalog(catalog_file)
@@ -214,7 +250,9 @@ class TestMalformedEntries:
         def boom(_raw: str):
             raise RuntimeError("unexpected parser failure")
 
-        monkeypatch.setattr(_catalog_mod.yaml, "safe_load", boom)
+        from mcp_unified.federation import catalog_loader as package_catalog_mod
+
+        monkeypatch.setattr(package_catalog_mod.yaml, "safe_load", boom)
 
         with pytest.raises(RuntimeError, match="unexpected parser failure"):
             load_mcp_catalog(catalog_file)

@@ -451,6 +451,25 @@ def test_catalog_loader_uses_standalone_catalog_schema() -> None:
     assert offenders == []
 
 
+def test_catalog_loader_delegates_to_standalone_package_loader() -> None:
+    """Host catalog loader should be a thin wrapper around package loader code."""
+    imports = _resolved_import_sources_for(
+        MCP_ROOT / "catalog_loader.py",
+        MCP_PACKAGE,
+        top_level_only=True,
+    )
+    forbidden_sources = {"yaml", "loguru", "pydantic"}
+    offenders = sorted(
+        source
+        for source in imports
+        if source in forbidden_sources
+        or any(source.startswith(f"{forbidden}.") for forbidden in forbidden_sources)
+    )
+
+    assert "mcp_unified.federation.catalog_loader" in imports
+    assert offenders == []
+
+
 def test_protocol_boundary_scan_resolves_relative_imports(tmp_path: Path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(
