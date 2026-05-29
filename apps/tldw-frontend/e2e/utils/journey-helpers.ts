@@ -524,7 +524,9 @@ export async function assertQuickIngestCompletedResults(
   }
 
   await expect(
-    dialog.getByText(/Total:\s*\d+\s+succeeded(?:,\s*\d+\s+skipped)?,\s*\d+\s+failed/i)
+    dialog.getByText(
+      /Total:\s*\d+\s+succeeded(?:,\s*\d+\s+skipped)?(?:,\s*\d+\s+not submitted)?,\s*\d+\s+failed(?:,\s*\d+\s+cancelled)?/i
+    )
   ).toBeVisible({
     timeout: timeoutMs,
   })
