@@ -70,7 +70,7 @@ _ENV_PLACEHOLDER_RE = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)(?::-(?P<default>.*)
 
 
 def _is_authnz_access_token(token: str) -> bool:
-    """Compatibility helper for endpoint code that still imports this symbol."""
+    """Return True when token is recognized as an MCP AuthNZ access token."""
     try:
         from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
             TldwServerAuthProvider,
@@ -266,21 +266,33 @@ class MCPServer:
         """Normalize API-key scope payloads through the injected host adapter."""
         try:
             return self.auth_provider.normalize_api_key_permissions(info)
-        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(
+                "MCP API-key permission normalization failed: {}",
+                self._mask_secrets(str(exc)),
+            )
             return []
 
     def _policy_context_enabled(self) -> bool:
         """Return whether host MCP Hub policy metadata should be attached."""
         try:
             return bool(self.policy_context_provider.is_policy_context_enabled())
-        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(
+                "MCP policy-context flag resolution failed: {}",
+                self._mask_secrets(str(exc)),
+            )
             return False
 
     def _default_media_db_path(self) -> str:
         """Return the host-provided default media DB path for module config."""
         try:
             return self.module_config_provider.default_media_db_path()
-        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(
+                "MCP default media DB path resolution failed: {}",
+                self._mask_secrets(str(exc)),
+            )
             return ""
 
     def get_active_connection_count(self) -> int:

@@ -49,12 +49,15 @@ Docs/superpowers/plans/2026-05-28-mcp-unified-stage3-host-adapter-shim-plan.md
 - Rebased PR #2096 onto latest origin/dev and reopened the task for PR review fixes.
 - Addressed Gemini review feedback by making AuthNZ websocket scope projection fail closed when websocket headers/client data are malformed.
 - Re-ran focused verification after the rebase/review fix: 52 focused MCP tests passed, Ruff passed on touched scope, and Bandit reported zero findings for touched code.
+- Reopened after PR re-check found three actionable Qodo review threads: permission seeder connection shape, silent server helper fallbacks, and a vague compatibility helper docstring.
+- Addressed Qodo review feedback by passing acquired AuthNZ DB connections into permission seeding, warning on host-adapter fallback exceptions, and documenting `_is_authnz_access_token` boolean semantics.
+- Re-ran focused verification after the Qodo fixes: 55 focused MCP tests passed, Ruff passed on touched scope, `git diff --check` passed, and Bandit reported zero findings for touched code.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the Stage 3 host-adapter shim slice for MCP Unified. MCPServer now accepts injected host services for auth, lifecycle, permission seeding, module config defaults, and policy-context flags while default tldw_server adapters preserve existing behavior. After rebasing PR #2096 onto the latest origin/dev, addressed review feedback so malformed AuthNZ websocket header/client scope projection fails closed before token verification. Verification: focused MCP pytest suite passed with 52 tests, Ruff passed on touched scope, and Bandit reported zero findings for touched code.
+Implemented the Stage 3 host-adapter shim slice for MCP Unified. MCPServer now accepts injected host services for auth, lifecycle, permission seeding, module config defaults, and policy-context flags while default tldw_server adapters preserve existing behavior. After rebasing PR #2096 onto the latest origin/dev, addressed Gemini feedback so malformed AuthNZ websocket header/client scope projection fails closed before token verification, and addressed Qodo feedback for permission seeding connection shape, host-adapter fallback logging, and `_is_authnz_access_token` docstring semantics. Verification: focused MCP pytest suite passed with 55 tests, Ruff passed on touched scope, `git diff --check` passed, and Bandit reported zero findings for touched code.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

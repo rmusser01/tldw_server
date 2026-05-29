@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import inspect
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -347,6 +348,112 @@ def test_mcp_server_uses_injected_auth_and_policy_context_helpers() -> None:
 
     assert server._extract_api_key_permissions({"scopes": "ignored"}) == ["fake.scope"]  # noqa: SLF001
     assert server._policy_context_enabled() is False  # noqa: SLF001
+
+
+def test_mcp_server_logs_host_adapter_fallbacks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified import server as server_mod
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    class _FailingAuthProvider(_FakeAuthProvider):
+        def normalize_api_key_permissions(self, info: dict[str, Any] | None) -> list[str]:
+            del info
+            raise RuntimeError("scope failure")
+
+    class _FailingPolicyContextProvider:
+        def is_policy_context_enabled(self) -> bool:
+            raise RuntimeError("policy failure")
+
+    class _FailingModuleConfigProvider:
+        def default_media_db_path(self) -> str:
+            raise RuntimeError("path failure")
+
+    warnings: list[str] = []
+
+    def _record_warning(message: str, *args: Any, **_kwargs: Any) -> None:
+        warnings.append(message.format(*args))
+
+    monkeypatch.setattr(server_mod.logger, "warning", _record_warning)
+    deps = _server_runtime_dependencies()
+    deps.auth_provider = _FailingAuthProvider()
+    deps.policy_context_provider = _FailingPolicyContextProvider()
+    deps.module_config_provider = _FailingModuleConfigProvider()
+    server = MCPServer(dependencies=deps)
+
+    assert server._extract_api_key_permissions({"scopes": "ignored"}) == []  # noqa: SLF001
+    assert server._policy_context_enabled() is False  # noqa: SLF001
+    assert server._default_media_db_path() == ""  # noqa: SLF001
+    assert warnings == [
+        "MCP API-key permission normalization failed: scope failure",
+        "MCP policy-context flag resolution failed: policy failure",
+        "MCP default media DB path resolution failed: path failure",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tldw_permission_seeder_uses_acquired_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
+
+    class _AcquireContext:
+        def __init__(self, conn: object) -> None:
+            self.conn = conn
+
+        async def __aenter__(self) -> object:
+            return self.conn
+
+        async def __aexit__(self, *_exc_info: Any) -> None:
+            return None
+
+    class _Pool:
+        def __init__(self) -> None:
+            self.conn = object()
+
+        def acquire(self) -> _AcquireContext:
+            return _AcquireContext(self.conn)
+
+    pool = _Pool()
+    ensure_calls: list[tuple[object, str, str, str]] = []
+
+    async def _get_db_pool() -> _Pool:
+        return pool
+
+    async def _ensure_permission(
+        db: object,
+        name: str,
+        description: str,
+        *,
+        category: str,
+    ) -> dict[str, Any]:
+        ensure_calls.append((db, name, description, category))
+        return {"id": 1, "name": name, "description": description, "category": category}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
+        _get_db_pool,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_roles_permissions_service.ensure_permission",
+        _ensure_permission,
+    )
+
+    await tldw_runtime.TldwPermissionSeeder().seed_default_tool_permissions()
+
+    assert ensure_calls == [
+        (pool.conn, "tools.execute:*", "Wildcard tool execution", "tools")
+    ]
+
+
+def test_authnz_access_token_helper_documents_boolean_semantics() -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import _is_authnz_access_token
+
+    doc = inspect.getdoc(_is_authnz_access_token)
+
+    assert doc is not None
+    assert "Return True" in doc
+    assert "MCP AuthNZ access token" in doc
 
 
 def test_default_server_protocol_uses_current_telemetry_manager(

@@ -261,12 +261,13 @@ class TldwPermissionSeeder:
         )
 
         pool = await get_db_pool()
-        await ensure_permission(
-            pool,
-            "tools.execute:*",
-            "Wildcard tool execution",
-            category="tools",
-        )
+        async with pool.acquire() as conn:
+            await ensure_permission(
+                conn,
+                "tools.execute:*",
+                "Wildcard tool execution",
+                category="tools",
+            )
 
 
 class TldwModuleConfigProvider:
