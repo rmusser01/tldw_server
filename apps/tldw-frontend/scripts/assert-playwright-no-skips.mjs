@@ -14,19 +14,29 @@ if (!fs.existsSync(reportPath)) {
   process.exit(2)
 }
 
-const report = JSON.parse(fs.readFileSync(reportPath, "utf8"))
+let report
+
+try {
+  report = JSON.parse(fs.readFileSync(reportPath, "utf8"))
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error)
+  console.error(`[playwright-no-skips] Unable to parse Playwright JSON report: ${message}`)
+  process.exit(2)
+}
+
 const stats = report?.stats || {}
 
-const passed = Number(stats.expected || 0)
+const expected = Number(stats.expected || 0)
 const skipped = Number(stats.skipped || 0)
 const unexpected = Number(stats.unexpected || 0)
 const flaky = Number(stats.flaky || 0)
+const executed = expected + skipped + unexpected + flaky
 
 console.log(
-  `[playwright-no-skips] passed=${passed} skipped=${skipped} unexpected=${unexpected} flaky=${flaky}`
+  `[playwright-no-skips] executed=${executed} expected=${expected} skipped=${skipped} unexpected=${unexpected} flaky=${flaky}`
 )
 
-if (passed <= 0) {
+if (executed <= 0) {
   console.error("[playwright-no-skips] No tests executed. Expected at least one executed test.")
   process.exit(1)
 }

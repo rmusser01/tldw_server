@@ -76,11 +76,23 @@ describe("frontend CI workflow networking", () => {
     expect(script).toContain("proves model provider confidence")
     expect(script).toContain("captures streaming stop and regenerate controls")
     expect(script).toContain("assert-playwright-no-skips.mjs")
+    expect(script).toContain("playwright_status=$?")
+    expect(script).toContain("assert_status=$?")
+    expect(script).toContain("if [ -f .chat-cockpit-real-focused-report.json ]; then")
 
     const workflow = readWorkflow("frontend-ux-gates.yml")
     const smokeGate = getJobBlock(workflow, "smoke-gate")
 
-    expect(smokeGate).toContain("OPENAI_API_KEY: sk-mock-key-12345")
+    expect(smokeGate).toContain(
+      "OPENAI_API_KEY: ${{ format('sk-mock-chat-cockpit-{0}-{1}', github.run_id, github.run_attempt) }}"
+    )
+    expect(smokeGate).toContain(
+      "CUSTOM_OPENAI_API_KEY: ${{ format('sk-mock-chat-cockpit-{0}-{1}', github.run_id, github.run_attempt) }}"
+    )
+    expect(smokeGate).toContain('for attempt in $(seq 1 30); do')
+    expect(smokeGate).toContain("Mock OpenAI server was not ready after ${attempt} attempts.")
+    expect(smokeGate).toContain('Authorization: Bearer ${OPENAI_API_KEY}')
+    expect(smokeGate).not.toContain(["sk", "mock", "key", "12345"].join("-"))
     expect(smokeGate).toContain("OPENAI_API_BASE_URL: http://127.0.0.1:18080/v1")
     expect(smokeGate).toContain("Start mock OpenAI server for /chat cockpit gate")
     expect(smokeGate).toContain("Run /chat real-server cockpit regression gate")
