@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef } from "react"
 import { Button } from "antd"
 import { ExternalLink } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { browser } from "wxt/browser"
 
 const SidepanelFlashcards = () => {
+  const { t } = useTranslation(["sidepanel"])
   const autoOpenedRef = useRef(false)
 
   const openOptionsHashRoute = useCallback((route: string) => {
@@ -36,10 +38,14 @@ const SidepanelFlashcards = () => {
       <section className="w-full max-w-sm rounded-lg border border-border bg-bg p-4 shadow-sm">
         <div className="space-y-3">
           <div>
-            <h1 className="text-base font-semibold">Opening Flashcards</h1>
+            <h1 className="text-base font-semibold">
+              {t("sidepanel:flashcards.opening", "Opening Flashcards")}
+            </h1>
             <p className="mt-1 text-sm text-text-muted">
-              Flashcards opens in the full extension workspace so review,
-              import, and deck management have enough room.
+              {t(
+                "sidepanel:flashcards.openedInTab",
+                "Flashcards opens in the full extension workspace so review, import, and deck management have enough room."
+              )}
             </p>
           </div>
           <Button
@@ -47,7 +53,7 @@ const SidepanelFlashcards = () => {
             icon={<ExternalLink className="size-4" />}
             onClick={() => openOptionsHashRoute("/flashcards")}
           >
-            Open Flashcards
+            {t("sidepanel:flashcards.openAgain", "Open Flashcards")}
           </Button>
         </div>
       </section>

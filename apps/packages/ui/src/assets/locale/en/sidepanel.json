@@ -36,6 +36,11 @@
     "modePrompts": "Prompts",
     "modeFlashcards": "Flashcards"
   },
+  "flashcards": {
+    "opening": "Opening Flashcards",
+    "openedInTab": "Flashcards opens in the full extension workspace so review, import, and deck management have enough room.",
+    "openAgain": "Open Flashcards"
+  },
   "controlRow": {
     "saveMode": "Save Mode",
     "ephemeral": "Ephemeral",

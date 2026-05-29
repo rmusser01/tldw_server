@@ -749,7 +749,7 @@ describe("ReviewTab create CTA visibility", () => {
     )
 
     expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
-      expect.objectContaining({ enabled: true })
+      expect.objectContaining({ enabled: true, limit: 1 })
     )
     expect(screen.queryByRole("button", { name: /Practice again/i })).not.toBeInTheDocument()
   })
@@ -777,7 +777,7 @@ describe("ReviewTab create CTA visibility", () => {
     )
 
     expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
-      expect.objectContaining({ enabled: true })
+      expect.objectContaining({ enabled: true, limit: 1 })
     )
     expect(screen.queryByRole("button", { name: /Practice again/i })).not.toBeInTheDocument()
   })
@@ -826,7 +826,7 @@ describe("ReviewTab create CTA visibility", () => {
     )
 
     expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
-      expect.objectContaining({ enabled: true })
+      expect.objectContaining({ enabled: true, limit: 1 })
     )
 
     fireEvent.click(screen.getByTestId("flashcards-review-open-scheduler"))
@@ -835,6 +835,9 @@ describe("ReviewTab create CTA visibility", () => {
     expect(schedulerRoute).toEqual(expect.stringContaining("deck_id=11"))
 
     fireEvent.click(screen.getByTestId("flashcards-review-practice-again"))
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.not.objectContaining({ limit: 1 })
+    )
     expect(screen.getByTestId("flashcards-review-cram-tag")).toBeInTheDocument()
   })
 

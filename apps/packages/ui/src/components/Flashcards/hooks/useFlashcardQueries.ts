@@ -79,6 +79,10 @@ export interface UseRecentFlashcardReviewSessionsQueryOptions extends UseFlashca
   status?: string | null
 }
 
+export interface UseCramQueueQueryOptions extends UseFlashcardQueriesOptions {
+  limit?: number
+}
+
 const invalidateFlashcardsQueries = (qc: ReturnType<typeof useQueryClient>) =>
   qc.invalidateQueries({
     predicate: (query) =>
@@ -329,37 +333,52 @@ export function useEndFlashcardReviewSessionMutation() {
 export function useCramQueueQuery(
   deckId: number | null | undefined,
   tag?: string | null,
-  options?: UseFlashcardQueriesOptions
+  options?: UseCramQueueQueryOptions
 ) {
   const { flashcardsEnabled } = useFlashcardsEnabled()
   const MAX_QUEUE_SIZE = 1000
   const PAGE_SIZE = 200
   const visibilityParams = buildWorkspaceVisibilityParams(options)
+  const queueLimit =
+    typeof options?.limit === "number" && Number.isFinite(options.limit)
+      ? Math.max(1, Math.trunc(options.limit))
+      : MAX_QUEUE_SIZE
+  const pageSize = Math.min(PAGE_SIZE, queueLimit)
 
   return useQuery({
-    queryKey: ["flashcards:review:cram-queue", deckId ?? null, tag ?? null, visibilityParams],
+    queryKey: [
+      "flashcards:review:cram-queue",
+      deckId ?? null,
+      tag ?? null,
+      visibilityParams,
+      queueLimit
+    ],
     queryFn: async (): Promise<Flashcard[]> => {
       const queue: Flashcard[] = []
       let offset = 0
+      let fetchedCount = 0
 
-      while (queue.length < MAX_QUEUE_SIZE) {
+      while (fetchedCount < queueLimit) {
+        const remaining = queueLimit - fetchedCount
+        const limit = Math.min(pageSize, remaining)
         const res = await listFlashcards({
           deck_id: deckId ?? undefined,
           tag: tag || undefined,
           due_status: "all",
           order_by: "due_at",
-          limit: PAGE_SIZE,
+          limit,
           offset,
           ...visibilityParams
         })
         const items = res.items || []
         if (items.length === 0) break
+        fetchedCount += items.length
         queue.push(...items.filter((card) => !isTutorialResidueCard(card)))
-        if (items.length < PAGE_SIZE) break
-        offset += PAGE_SIZE
+        if (items.length < limit) break
+        offset += items.length
       }
 
-      return queue.slice(0, MAX_QUEUE_SIZE)
+      return queue.slice(0, queueLimit)
     },
     enabled: options?.enabled ?? flashcardsEnabled
   })

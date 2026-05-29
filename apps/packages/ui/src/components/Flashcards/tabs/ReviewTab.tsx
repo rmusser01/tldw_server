@@ -76,6 +76,7 @@ import { buildQuizAssessmentRouteFromFlashcards } from "@/services/tldw/quiz-fla
 import { useFlashcardsShortcutHintDensity } from "../hooks/useFlashcardsShortcutHintDensity"
 
 const { Text, Title } = Typography
+const CRAM_AVAILABILITY_LIMIT = 1
 
 interface ReviewTabProps {
   onNavigateToCreate: () => void
@@ -231,6 +232,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     reviewMode === "cram" || (isActive && isDueModeCaughtUp)
   const cramQueueQuery = useCramQueueQuery(reviewDeckId, cramTagFilter, {
     enabled: shouldLoadCramQueue,
+    ...(reviewMode === "cram" ? {} : { limit: CRAM_AVAILABILITY_LIMIT }),
     ...(directPathVisibilityOptions ?? {})
   })
   const nextDueInfo = nextDueQuery.data
