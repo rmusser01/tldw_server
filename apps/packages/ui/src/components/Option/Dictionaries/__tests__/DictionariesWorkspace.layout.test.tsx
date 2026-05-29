@@ -9,7 +9,14 @@ const { useLayoutUiStoreMock } = vi.hoisted(() => ({
 }))
 
 const routerMocks = vi.hoisted(() => ({
-  navigate: vi.fn()
+  navigate: vi.fn(),
+  location: {
+    pathname: "/dictionaries",
+    search: "",
+    hash: "",
+    state: null,
+    key: "dictionaries-layout-test"
+  }
 }))
 
 const connectionMocks = vi.hoisted(() => ({
@@ -36,6 +43,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("react-router-dom", () => ({
+  useLocation: () => routerMocks.location,
   useNavigate: () => routerMocks.navigate
 }))
 
