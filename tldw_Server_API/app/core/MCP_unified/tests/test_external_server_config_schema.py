@@ -155,3 +155,9 @@ def test_host_loader_preserves_legacy_default_config_path(monkeypatch: pytest.Mo
     assert calls == [
         (None, "tldw_Server_API/Config_Files/mcp_external_servers.yaml"),
     ]
+
+
+def test_load_registry_directory_path_returns_empty_config(tmp_path) -> None:
+    from mcp_unified.federation.config_schema import load_external_server_registry
+
+    assert load_external_server_registry(str(tmp_path)) == ExternalServerRegistryConfig()

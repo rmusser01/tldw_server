@@ -232,6 +232,12 @@ def load_external_server_registry(
     if not cfg_path.exists():
         logger.info("External MCP config not found at {}; using empty registry", cfg_path)
         return ExternalServerRegistryConfig()
+    if not cfg_path.is_file():
+        logger.warning(
+            "External MCP config path is not a file at {}; using empty registry",
+            cfg_path,
+        )
+        return ExternalServerRegistryConfig()
 
     suffix = cfg_path.suffix.lower()
     raw: dict[str, Any]
