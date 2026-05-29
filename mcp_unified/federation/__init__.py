@@ -1,7 +1,23 @@
 """Standalone non-spawning external federation shell."""
 
-from . import catalog_loader
+from . import catalog_loader, config_schema
 from .catalog_loader import get_catalog_entry, list_catalog_entries, load_mcp_catalog
+from .config_schema import (
+    ExternalAuthConfig,
+    ExternalAuthMode,
+    ExternalCircuitBreakerConfig,
+    ExternalMCPServerConfig,
+    ExternalRetryConfig,
+    ExternalServerRegistryConfig,
+    ExternalServerRegistryPartialLoadError,
+    ExternalStdioConfig,
+    ExternalTimeoutConfig,
+    ExternalToolPolicy,
+    ExternalTransportType,
+    ExternalWebSocketConfig,
+    load_external_server_registry,
+    parse_external_server_registry,
+)
 from .manager import ExternalFederationManager
 from .models import (
     ExternalToolCallResult,
@@ -15,10 +31,22 @@ from .models import (
 from .transports import ExternalFederationTransport, FakeExternalTransport
 
 __all__ = [
+    "ExternalAuthConfig",
+    "ExternalAuthMode",
+    "ExternalCircuitBreakerConfig",
     "ExternalFederationManager",
     "ExternalFederationTransport",
+    "ExternalMCPServerConfig",
+    "ExternalRetryConfig",
+    "ExternalServerRegistryConfig",
+    "ExternalServerRegistryPartialLoadError",
+    "ExternalStdioConfig",
+    "ExternalTimeoutConfig",
+    "ExternalToolPolicy",
     "ExternalToolCallResult",
     "ExternalToolDefinition",
+    "ExternalTransportType",
+    "ExternalWebSocketConfig",
     "FakeExternalTransport",
     "FederatedToolResult",
     "FederationPolicyDenied",
@@ -26,7 +54,10 @@ __all__ = [
     "MCPCatalogEntry",
     "VirtualExternalTool",
     "catalog_loader",
+    "config_schema",
     "get_catalog_entry",
     "list_catalog_entries",
+    "load_external_server_registry",
     "load_mcp_catalog",
+    "parse_external_server_registry",
 ]
