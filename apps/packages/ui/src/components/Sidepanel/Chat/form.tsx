@@ -148,6 +148,7 @@ import type { QueuedRequest } from "@/utils/chat-request-queue"
 import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker"
 import { CharacterControlsSheet } from "@/components/Sidepanel/Chat/CharacterControlsSheet"
 import { getSidepanelOverlayResumeMarkerKey } from "@/utils/sidepanel-overlay-resume"
+import type { SidepanelChatHandoffPageContext } from "@/services/sidepanel-chat-handoff"
 
 type Props = {
   dropedFile: File | undefined
@@ -798,6 +799,55 @@ export const SidepanelForm = ({
         .join(" ")
     : ""
   const pageContextActive = chatMode === "rag" && chatWithWebsiteEmbedding
+  const getVisiblePageContextForHandoff = React.useCallback(async (): Promise<
+    SidepanelChatHandoffPageContext | undefined
+  > => {
+    const snippets = selectedDocuments.map((doc) => ({
+      kind: "visible-context" as const,
+      label: doc.title,
+      text: [`Title: ${doc.title}`, `URL: ${doc.url}`].join("\n")
+    }))
+
+    let activePage:
+      | {
+          title?: string
+          url?: string
+        }
+      | undefined
+
+    if (pageContextActive) {
+      try {
+        const tabs = await browser.tabs.query({
+          active: true,
+          currentWindow: true
+        })
+        const activeTab = tabs.find((tab) => tab.title || tab.url)
+        activePage = {
+          title:
+            typeof activeTab?.title === "string" &&
+            activeTab.title.trim().length > 0
+              ? activeTab.title
+              : undefined,
+          url:
+            typeof activeTab?.url === "string" && activeTab.url.trim().length > 0
+              ? activeTab.url
+              : undefined
+        }
+      } catch {
+        activePage = undefined
+      }
+    }
+
+    if (!activePage?.title && !activePage?.url && snippets.length === 0) {
+      return undefined
+    }
+
+    return {
+      ...(activePage?.title ? { title: activePage.title } : {}),
+      ...(activePage?.url ? { url: activePage.url } : {}),
+      snippets
+    }
+  }, [pageContextActive, selectedDocuments])
   const contextChips = [
     ...(replyTarget && isProMode
       ? [
@@ -3016,6 +3066,13 @@ export const SidepanelForm = ({
                               chatLoopStatus={chatLoopState.status}
                               pendingApprovalsCount={chatLoopState.pendingApprovals.length}
                               runningToolCount={chatLoopState.inflightToolCallIds.length}
+                              draftMessage={form.values.message}
+                              hasVisiblePageContextForHandoff={
+                                pageContextActive || selectedDocuments.length > 0
+                              }
+                              getVisiblePageContextForHandoff={
+                                getVisiblePageContextForHandoff
+                              }
                             />
                           )}
                           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">

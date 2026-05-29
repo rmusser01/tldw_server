@@ -26,6 +26,11 @@ import { browser } from "wxt/browser"
 import { useStorage } from "@plasmohq/storage/hook"
 import { fetchChatModels } from "@/services/tldw-server"
 import {
+  buildSidepanelChatHandoffRoute,
+  createSidepanelChatHandoff,
+  type SidepanelChatHandoffPageContext
+} from "@/services/sidepanel-chat-handoff"
+import {
   buildQuickIngestOpenDetailFromUrl,
   requestQuickIngestOpen,
   type QuickIngestOpenDetail
@@ -65,6 +70,12 @@ interface ControlRowProps {
   chatLoopStatus?: "idle" | "running" | "complete" | "error" | "cancelled"
   pendingApprovalsCount?: number
   runningToolCount?: number
+  draftMessage?: string
+  hasVisiblePageContextForHandoff?: boolean
+  getVisiblePageContextForHandoff?: () =>
+    | Promise<SidepanelChatHandoffPageContext | undefined>
+    | SidepanelChatHandoffPageContext
+    | undefined
   // Image upload
   onImageUpload: (file: File) => void
   // RAG toggle
@@ -92,6 +103,9 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   chatLoopStatus = "idle",
   pendingApprovalsCount = 0,
   runningToolCount = 0,
+  draftMessage = "",
+  hasVisiblePageContextForHandoff = false,
+  getVisiblePageContextForHandoff,
   onImageUpload,
   onToggleRag,
   isConnected
@@ -99,6 +113,10 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const { t } = useTranslation(["sidepanel", "playground", "common"])
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const [moreOpen, setMoreOpen] = React.useState(false)
+  const [handoffFeedback, setHandoffFeedback] = React.useState<{
+    tone: "warning" | "error"
+    message: string
+  } | null>(null)
   const [systemPromptOverride, setSystemPromptOverride] = React.useState<
     string | undefined
   >(undefined)
@@ -353,6 +371,38 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         "sidepanel:controlRow.openFullAppDescription",
         "Opens /chat in a new tab. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
       )
+  const continueInWebUIButtonLabel = t(
+    "sidepanel:controlRow.continueInWebUI",
+    "Continue in WebUI"
+  )
+  const continueInWebUIDescription = t(
+    "sidepanel:controlRow.continueInWebUIDescription",
+    "Creates a short-lived handoff with the sidepanel draft and visible page context, then opens /chat in the WebUI."
+  )
+  const draftText = draftMessage ?? ""
+  const hasDraftForHandoff = draftText.trim().length > 0
+  const continueInWebUIEnabled =
+    hasDraftForHandoff || hasVisiblePageContextForHandoff
+  const activeCharacterIdForRouteIntent =
+    selectedAssistant?.kind === "character"
+      ? String(selectedAssistant.id ?? "").trim()
+      : selectedAssistant?.kind === "persona"
+        ? ""
+      : selectedCharacterId == null
+        ? ""
+        : String(selectedCharacterId).trim()
+  const routeIntent = React.useMemo(
+    () => ({
+      path: fullAppChatPath,
+      ...(activeCharacterIdForRouteIntent
+        ? {
+            mode: "character" as const,
+            characterId: activeCharacterIdForRouteIntent
+          }
+        : {})
+    }),
+    [activeCharacterIdForRouteIntent, fullAppChatPath]
+  )
   const openRolePlayPicker = React.useCallback(() => {
     if (typeof window === "undefined") return
     window.dispatchEvent(
@@ -378,8 +428,8 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     requestAnimationFrame(() => moreBtnRef.current?.focus())
   }
 
-  const openFullApp = () => {
-    const path = `/options.html#${fullAppChatPath}`
+  const openFullAppPath = React.useCallback((routePath: string) => {
+    const path = `/options.html#${routePath}`
     try {
       const runtime = browser.runtime
       const url = runtime?.id && runtime.getURL ? runtime.getURL(path) : null
@@ -394,9 +444,64 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         return
       }
     } catch {}
-    window.open(fullAppChatPath, "_blank")
+    window.open(routePath, "_blank")
     setMoreOpen(false)
     requestAnimationFrame(() => moreBtnRef.current?.focus())
+  }, [])
+
+  const openFullApp = () => {
+    openFullAppPath(fullAppChatPath)
+  }
+
+  const pageContextHasVisibleContent = (
+    pageContext: SidepanelChatHandoffPageContext | undefined
+  ) =>
+    Boolean(
+      pageContext &&
+        (pageContext.title?.trim() ||
+          pageContext.url?.trim() ||
+          pageContext.snippets.some((snippet) => snippet.text.trim().length > 0))
+    )
+
+  const continueInWebUI = async () => {
+    if (!continueInWebUIEnabled) return
+    setHandoffFeedback(null)
+
+    let pageContext: SidepanelChatHandoffPageContext | undefined
+    try {
+      pageContext = await getVisiblePageContextForHandoff?.()
+    } catch {
+      pageContext = undefined
+    }
+
+    if (!hasDraftForHandoff && !pageContextHasVisibleContent(pageContext)) {
+      setHandoffFeedback({
+        tone: "warning",
+        message: t(
+          "sidepanel:controlRow.continueInWebUINothingToSend",
+          "Nothing to continue in WebUI"
+        )
+      })
+      return
+    }
+
+    try {
+      const pkg = await createSidepanelChatHandoff({
+        draftText,
+        pageContext,
+        routeIntent
+      })
+      const handoffPath = buildSidepanelChatHandoffRoute(fullAppChatPath, pkg.id)
+      openFullAppPath(handoffPath)
+    } catch {
+      setHandoffFeedback({
+        tone: "error",
+        message: t(
+          "sidepanel:controlRow.continueInWebUIFailed",
+          "Could not continue in WebUI"
+        )
+      })
+    }
   }
 
   const moreMenuContent = (
@@ -790,6 +895,34 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         <ExternalLink className="size-4 text-text-subtle" />
         {fullAppButtonLabel}
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          void continueInWebUI()
+        }}
+        disabled={!continueInWebUIEnabled}
+        aria-disabled={!continueInWebUIEnabled}
+        data-testid="chat-continue-in-webui"
+        className={`w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 ${
+          continueInWebUIEnabled
+            ? "hover:bg-surface2"
+            : "cursor-not-allowed opacity-50"
+        }`}
+        title={continueInWebUIDescription}
+      >
+        <ExternalLink className="size-4 text-text-subtle" />
+        {continueInWebUIButtonLabel}
+      </button>
+      {handoffFeedback && (
+        <div
+          role={handoffFeedback.tone === "error" ? "alert" : "status"}
+          className={`px-3 text-xs ${
+            handoffFeedback.tone === "error" ? "text-danger" : "text-warning"
+          }`}
+        >
+          {handoffFeedback.message}
+        </div>
+      )}
       <span id={fullAppHandoffDescriptionId} className="sr-only">
         {fullAppHandoffDescription}
       </span>
