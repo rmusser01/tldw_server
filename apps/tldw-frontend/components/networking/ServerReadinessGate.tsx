@@ -109,22 +109,25 @@ async function checkHealth(): Promise<ReadinessResult> {
       method: "GET",
       signal: AbortSignal.timeout(3000)
     })
+    const isEnterable = ENTERABLE_HTTP_STATUSES.has(res.status)
     let body: unknown
     let healthStatus: string | undefined
     try {
       body = await res.json()
       healthStatus = extractHealthStatus(body)
     } catch (err) {
-      return {
-        state: "blocked",
-        diagnostics: buildReadinessDiagnostics({
+      if (isEnterable) {
+        return {
           state: "blocked",
-          httpStatus: res.status,
-          errorMessage: err instanceof Error ? err.message : "Could not parse health response."
-        })
+          diagnostics: buildReadinessDiagnostics({
+            state: "blocked",
+            httpStatus: res.status,
+            errorMessage: err instanceof Error ? err.message : "Could not parse health response."
+          })
+        }
       }
     }
-    if (!ENTERABLE_HTTP_STATUSES.has(res.status)) {
+    if (!isEnterable) {
       return {
         state: "blocked",
         diagnostics: buildReadinessDiagnostics({
@@ -163,7 +166,8 @@ async function checkHealth(): Promise<ReadinessResult> {
       diagnostics: buildReadinessDiagnostics({
         state: "blocked",
         httpStatus: res.status,
-        healthStatus: status || undefined
+        // Empty status means the health JSON did not include a usable status field.
+        healthStatus: status !== "" ? status : undefined
       })
     }
   } catch (err) {
@@ -266,14 +270,20 @@ export const ServerReadinessGate: React.FC<{
     if (!state) return
 
     const emitTimer = window.setTimeout(() => {
+      const emittedDegradedChecks =
+        state === "degraded"
+          ? degradedChecks
+          : state === "blocked"
+            ? (lastReadinessState?.degradedChecks ?? [])
+            : []
       emitServerReadinessState({
         ...(lastReadinessState ??
           buildReadinessDiagnostics({
             state,
-            degradedChecks: state === "degraded" ? degradedChecks : []
+            degradedChecks: emittedDegradedChecks
           })),
         state,
-        degradedChecks: state === "degraded" ? degradedChecks : []
+        degradedChecks: emittedDegradedChecks
       })
     }, 0)
 

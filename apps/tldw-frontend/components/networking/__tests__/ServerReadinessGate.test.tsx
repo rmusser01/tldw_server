@@ -225,6 +225,92 @@ describe("ServerReadinessGate", () => {
     expect(screen.queryByText("App ready")).toBeNull()
   })
 
+  it("reports non-enterable non-json health responses by status", async () => {
+    vi.useFakeTimers()
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => {
+        throw new Error("Unexpected token <")
+      }
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(16_000)
+    })
+
+    expect(screen.getByText("App ready")).toBeInTheDocument()
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync()
+    })
+    expect(
+      (window as unknown as { __tldwServerReadinessState?: unknown })
+        .__tldwServerReadinessState
+    ).toEqual(
+      expect.objectContaining({
+        state: "blocked",
+        httpStatus: 503
+      })
+    )
+    expect(
+      (
+        window as unknown as {
+          __tldwServerReadinessState?: { errorMessage?: string }
+        }
+      )
+        .__tldwServerReadinessState?.errorMessage
+    ).toBeUndefined()
+  })
+
+  it("preserves degraded checks when timeout blocks an unaccepted degraded response", async () => {
+    vi.useFakeTimers()
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 206,
+      json: async () => ({
+        status: "degraded",
+        checks: { mcp: { status: "degraded" } }
+      })
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(16_000)
+    })
+
+    expect(screen.getByText("App ready")).toBeInTheDocument()
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync()
+    })
+    expect(
+      (window as unknown as { __tldwServerReadinessState?: unknown })
+        .__tldwServerReadinessState
+    ).toEqual(
+      expect.objectContaining({
+        state: "blocked",
+        healthStatus: "degraded",
+        degradedChecks: ["mcp"]
+      })
+    )
+  })
+
   it("restarts readiness checks when leaving a bypass route after timing out", async () => {
     vi.useFakeTimers()
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")

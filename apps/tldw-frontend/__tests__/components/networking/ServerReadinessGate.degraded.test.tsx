@@ -90,10 +90,10 @@ describe("ServerReadinessGate degraded health", () => {
       )
       expect(readinessListener).toHaveBeenCalledWith(
         expect.objectContaining({
-          detail: {
+          detail: expect.objectContaining({
             state: "degraded",
             degradedChecks: ["chacha_notes"]
-          }
+          })
         })
       )
     } finally {
@@ -124,10 +124,12 @@ describe("ServerReadinessGate degraded health", () => {
 
     expect(await screen.findByTestId("readiness-event-child")).toBeInTheDocument()
     await waitFor(() => {
-      expect(childReadinessListener).toHaveBeenCalledWith({
-        state: "degraded",
-        degradedChecks: ["chacha_notes"]
-      })
+      expect(childReadinessListener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: "degraded",
+          degradedChecks: ["chacha_notes"]
+        })
+      )
     })
   })
 
