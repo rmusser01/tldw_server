@@ -307,10 +307,13 @@ const parsePackage = (
 
   if (!isRecord(value)) return null
   if (typeof value.id !== "string" || value.id.length === 0) return null
-  if (expectedId != null && value.id !== expectedId) return null
+  const id = value.id
+  if (expectedId != null && id !== expectedId) return null
   if (value.source !== "sidepanel-chat") return null
   if (!isValidDateString(value.createdAt)) return null
+  const createdAt = value.createdAt
   if (!isValidDateString(value.expiresAt)) return null
+  const expiresAt = value.expiresAt
   let consumedAt: string | undefined
   if (value.consumedAt != null) {
     if (!isValidDateString(value.consumedAt)) return null
@@ -336,10 +339,10 @@ const parsePackage = (
   if (value.routeIntent != null && !routeIntent) return null
 
   return {
-    id: value.id,
+    id,
     source: "sidepanel-chat",
-    createdAt: value.createdAt,
-    expiresAt: value.expiresAt,
+    createdAt,
+    expiresAt,
     ...(consumedAt ? { consumedAt } : {}),
     draft: {
       text: draftText,

@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   runtimeGetURL: vi.fn((path: string) => `chrome-extension://handoff${path}`),
   tabsCreate: vi.fn(),
   createSidepanelChatHandoff: vi.fn(),
+  consumeSidepanelChatHandoff: vi.fn(),
   buildSidepanelChatHandoffRoute: vi.fn(
     (basePath: string, handoffId: string) => {
       const separator = basePath.includes("?") ? "&" : "?"
@@ -81,6 +82,7 @@ vi.mock("wxt/browser", () => ({
 
 vi.mock("@/services/sidepanel-chat-handoff", () => ({
   createSidepanelChatHandoff: mocks.createSidepanelChatHandoff,
+  consumeSidepanelChatHandoff: mocks.consumeSidepanelChatHandoff,
   buildSidepanelChatHandoffRoute: mocks.buildSidepanelChatHandoffRoute
 }))
 
@@ -463,5 +465,34 @@ describe("ControlRow sidepanel chat handoff", () => {
     )
     expect(mocks.tabsCreate).not.toHaveBeenCalled()
     expect(window.open).not.toHaveBeenCalled()
+  })
+
+  it("falls back to window.open when Continue in WebUI tab creation rejects", async () => {
+    mocks.tabsCreate.mockRejectedValueOnce(new Error("tab create blocked"))
+    vi.mocked(window.open).mockImplementationOnce(() => ({ closed: false }) as Window)
+    render(<ControlRow {...defaultProps()} draftMessage="Summarize this" />)
+
+    fireEvent.click(screen.getByTestId("chat-continue-in-webui"))
+
+    await waitFor(() => {
+      expect(window.open).toHaveBeenCalledWith(
+        "chrome-extension://handoff/options.html#/chat?handoff=handoff-123",
+        "_blank"
+      )
+    })
+    expect(mocks.consumeSidepanelChatHandoff).not.toHaveBeenCalled()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
+  it("consumes the handoff and shows an error when Continue in WebUI cannot open", async () => {
+    mocks.tabsCreate.mockRejectedValueOnce(new Error("tab create blocked"))
+    render(<ControlRow {...defaultProps()} draftMessage="Summarize this" />)
+
+    fireEvent.click(screen.getByTestId("chat-continue-in-webui"))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not continue in WebUI"
+    )
+    expect(mocks.consumeSidepanelChatHandoff).toHaveBeenCalledWith("handoff-123")
   })
 })

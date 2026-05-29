@@ -27,6 +27,7 @@ import { useStorage } from "@plasmohq/storage/hook"
 import { fetchChatModels } from "@/services/tldw-server"
 import {
   buildSidepanelChatHandoffRoute,
+  consumeSidepanelChatHandoff,
   createSidepanelChatHandoff,
   type SidepanelChatHandoffPageContext
 } from "@/services/sidepanel-chat-handoff"
@@ -433,29 +434,42 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     requestAnimationFrame(() => moreBtnRef.current?.focus())
   }
 
-  const openFullAppPath = React.useCallback((routePath: string) => {
+  const openFullAppPath = React.useCallback(async (routePath: string) => {
     const path = `/options.html#${routePath}`
+    const restoreFocus = () => {
+      setMoreOpen(false)
+      requestAnimationFrame(() => moreBtnRef.current?.focus())
+    }
+    const openFallback = (url: string) => {
+      const opened = window.open(url, "_blank")
+      if (opened) {
+        restoreFocus()
+        return true
+      }
+      return false
+    }
+
     try {
       const runtime = browser.runtime
       const url = runtime?.id && runtime.getURL ? runtime.getURL(path) : null
       if (url) {
         if (browser.tabs?.create) {
-          void browser.tabs.create({ url })
-        } else {
-          window.open(url, "_blank")
+          try {
+            await browser.tabs.create({ url })
+            restoreFocus()
+            return true
+          } catch {
+            return openFallback(url)
+          }
         }
-        setMoreOpen(false)
-        requestAnimationFrame(() => moreBtnRef.current?.focus())
-        return
+        return openFallback(url)
       }
     } catch {}
-    window.open(routePath, "_blank")
-    setMoreOpen(false)
-    requestAnimationFrame(() => moreBtnRef.current?.focus())
+    return openFallback(routePath)
   }, [])
 
   const openFullApp = () => {
-    openFullAppPath(fullAppChatPath)
+    void openFullAppPath(fullAppChatPath)
   }
 
   const pageContextHasVisibleContent = (
@@ -500,7 +514,17 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           routeIntent
         })
         const handoffPath = buildSidepanelChatHandoffRoute(fullAppChatPath, pkg.id)
-        openFullAppPath(handoffPath)
+        const opened = await openFullAppPath(handoffPath)
+        if (!opened) {
+          await consumeSidepanelChatHandoff(pkg.id).catch(() => undefined)
+          setHandoffFeedback({
+            tone: "error",
+            message: t(
+              "sidepanel:controlRow.continueInWebUIFailed",
+              "Could not continue in WebUI"
+            )
+          })
+        }
       } catch {
         setHandoffFeedback({
           tone: "error",

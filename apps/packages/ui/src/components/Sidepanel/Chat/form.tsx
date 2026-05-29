@@ -149,6 +149,7 @@ import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker"
 import { CharacterControlsSheet } from "@/components/Sidepanel/Chat/CharacterControlsSheet"
 import { getSidepanelOverlayResumeMarkerKey } from "@/utils/sidepanel-overlay-resume"
 import type { SidepanelChatHandoffPageContext } from "@/services/sidepanel-chat-handoff"
+import { buildVisibleDocumentHandoffSnippetText } from "./sidepanel-chat-handoff-context"
 
 type Props = {
   dropedFile: File | undefined
@@ -805,7 +806,7 @@ export const SidepanelForm = ({
     const snippets = selectedDocuments.map((doc) => ({
       kind: "visible-context" as const,
       label: doc.title,
-      text: [`Title: ${doc.title}`, `URL: ${doc.url}`].join("\n")
+      text: buildVisibleDocumentHandoffSnippetText(doc)
     }))
 
     let activePage:
