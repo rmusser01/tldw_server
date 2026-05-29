@@ -1,7 +1,7 @@
 ---
 id: TASK-549
 title: Implement sidepanel Continue in WebUI action
-status: To Do
+status: In Progress
 labels:
 - chat
 - extension
