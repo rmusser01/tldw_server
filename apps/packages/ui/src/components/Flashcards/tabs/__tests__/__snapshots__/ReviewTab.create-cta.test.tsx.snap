@@ -192,9 +192,16 @@ exports[`ReviewTab create CTA visibility > matches baseline snapshot for active 
             Standard
           </span>
           <span
-            class="ant-tag ant-tag-filled ant-tag-green css-dev-only-do-not-override-3uaqrl css-var-root"
+            class="inline-flex items-center gap-1 font-medium px-1.5 py-0.5 text-[10px] rounded-full bg-success/10 text-success"
+            data-ds-component="Badge"
+            data-ds-size="sm"
+            data-ds-variant="success"
             data-testid="flashcards-review-queue-state"
           >
+            <span
+              aria-hidden="true"
+              class="size-1.5 rounded-full bg-success"
+            />
             Review
           </span>
           <button
