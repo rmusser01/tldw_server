@@ -199,7 +199,7 @@ bun run test src/services/__tests__/sidepanel-chat-handoff.test.ts
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/sidepanel-chat-handoff.ts apps/packages/ui/src/services/__tests__/sidepanel-chat-handoff.test.ts
@@ -485,7 +485,7 @@ git commit -m "feat: import sidepanel chat handoff in webui"
 - Possibly modify: `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx` only if route cleanup needs an existing integration assertion.
 - Possibly modify: `tests/e2e/...` only if there is already a sidepanel packaged smoke test harness for chat handoff.
 
-- [ ] **Step 1: Run focused unit regression set**
+- [x] **Step 1: Run focused unit regression set**
 
 Run from `apps/packages/ui`:
 
@@ -495,7 +495,9 @@ bun run test src/services/__tests__/sidepanel-chat-handoff.test.ts src/component
 
 Expected: pass.
 
-- [ ] **Step 2: Run existing relevant playground/sidepanel tests**
+Result: Passed with `--maxWorkers=1 --no-file-parallelism` (5 files, 36 tests). Only the known Node localStorage ExperimentalWarning was emitted.
+
+- [x] **Step 2: Run existing relevant playground/sidepanel tests**
 
 Run from `apps/packages/ui`:
 
@@ -505,11 +507,15 @@ bun run test src/utils/__tests__/sidepanel-full-app-route.test.ts src/utils/__te
 
 Expected: pass, or document unrelated baseline failures with exact failing tests.
 
-- [ ] **Step 3: Type/build sanity**
+Result: Passed with `--maxWorkers=1 --no-file-parallelism` (4 files, 46 tests). Existing provider-status mock warnings were emitted but no tests failed.
+
+- [x] **Step 3: Type/build sanity**
 
 Run the narrowest repo-supported compile check available for `apps/packages/ui`. If no focused typecheck script exists, run the existing focused Vitest suite and document that full package typecheck is not available in `package.json`.
 
-- [ ] **Step 4: Packaged extension smoke**
+Result: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` passed from `apps/packages/ui`.
+
+- [x] **Step 4: Packaged extension smoke**
 
 If the local packaged extension harness used by `TASK-534` is available, verify:
 
@@ -523,7 +529,9 @@ If the local packaged extension harness used by `TASK-534` is available, verify:
 
 Record screenshot or terminal evidence in the implementation task.
 
-- [ ] **Step 5: Bandit**
+Result: Existing smoke harness was found and `.output/chrome-mv3` built successfully, but packaged browser assertions could not run on this host. Full smoke command skipped all 3 tests because extension launch was unavailable; JSON follow-up reported `browserType.launchPersistentContext: Timeout 30000ms exceeded`. Longer headful launch timed out before route assertions; CI-style headless launch skipped with `Could not determine extension id from [no extension targets]`.
+
+- [x] **Step 5: Bandit**
 
 No Python is expected. Record Bandit skipped for UI-only TypeScript changes. If the implementation unexpectedly touches Python, run Bandit on the touched Python paths from the repo root:
 
@@ -531,7 +539,9 @@ No Python is expected. Record Bandit skipped for UI-only TypeScript changes. If 
 source .venv/bin/activate && python -m bandit -r <touched_python_paths> -f json -o /tmp/bandit_sidepanel_chat_handoff.json
 ```
 
-- [ ] **Step 6: Final implementation task update**
+Result: Skipped because the verification/implementation scope touched TypeScript, TSX, and markdown only; no Python paths were changed.
+
+- [x] **Step 6: Final implementation task update**
 
 Update the implementation Backlog task with:
 
