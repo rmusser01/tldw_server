@@ -1,18 +1,18 @@
 ---
 id: TASK-223
 title: MCP Hub walkthrough remediation plan
-status: In Progress
+status: Done
 assignee: []
-created_date: '2026-05-10 06:13'
-updated_date: '2026-05-10 06:26'
+created_date: 2026-05-10 06:13
+updated_date: 2026-05-10 06:26
 labels:
-  - mcp
-  - webui
-  - ux
-  - planning
+- mcp
+- webui
+- ux
+- planning
 dependencies: []
 documentation:
-  - Docs/superpowers/specs/2026-05-10-mcp-hub-walkthrough-remediation-design.md
+- Docs/superpowers/specs/2026-05-10-mcp-hub-walkthrough-remediation-design.md
 priority: high
 ---
 

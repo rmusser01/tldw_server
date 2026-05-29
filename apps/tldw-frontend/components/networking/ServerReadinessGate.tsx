@@ -20,10 +20,25 @@ const RETRY_INTERVAL_MS = 2_000
 const OFFLINE_BYPASS_KEYS = ["__tldw_allow_offline", "__tldw_test_bypass"] as const
 
 type GateState = "checking" | "ready" | "waiting" | "timeout" | "degraded"
+type ServerReadinessPublishedState = {
+  state: "ready" | "degraded" | "blocked"
+  degradedChecks: string[]
+  healthUrl: string
+  httpStatus?: number
+  healthStatus?: string
+  errorMessage?: string
+  checkedAt: string
+}
 type ReadinessResult =
-  | { state: "ready" }
-  | { state: "degraded"; degradedChecks: string[] }
-  | { state: "blocked" }
+  | { state: "ready"; diagnostics: ServerReadinessPublishedState }
+  | { state: "degraded"; degradedChecks: string[]; diagnostics: ServerReadinessPublishedState }
+  | { state: "blocked"; diagnostics: ServerReadinessPublishedState }
+
+declare global {
+  interface Window {
+    __tldwServerReadinessState?: ServerReadinessPublishedState
+  }
+}
 
 const ENTERABLE_HTTP_STATUSES = new Set([200, 206])
 const READY_HEALTH_STATUSES = new Set(["healthy", "ok"])
@@ -58,41 +73,120 @@ function extractDegradedChecks(body: unknown): string[] {
     .map(([name]) => name)
 }
 
+function extractHealthStatus(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined
+  const status = (body as { status?: unknown }).status
+  return typeof status === "string" ? status.toLowerCase() : undefined
+}
+
+function buildReadinessDiagnostics({
+  state,
+  degradedChecks = [],
+  httpStatus,
+  healthStatus,
+  errorMessage
+}: {
+  state: "ready" | "degraded" | "blocked"
+  degradedChecks?: string[]
+  httpStatus?: number
+  healthStatus?: string
+  errorMessage?: string
+}): ServerReadinessPublishedState {
+  return {
+    state,
+    degradedChecks,
+    healthUrl: HEALTH_URL,
+    httpStatus,
+    healthStatus,
+    errorMessage,
+    checkedAt: new Date().toISOString()
+  }
+}
+
 async function checkHealth(): Promise<ReadinessResult> {
   try {
     const res = await fetch(HEALTH_URL, {
       method: "GET",
       signal: AbortSignal.timeout(3000)
     })
-    if (!ENTERABLE_HTTP_STATUSES.has(res.status)) {
-      return { state: "blocked" }
-    }
-    const body = await res.json()
-    const status =
-      typeof body?.status === "string" ? body.status.toLowerCase() : ""
-    if (READY_HEALTH_STATUSES.has(status)) {
-      return { state: "ready" }
-    }
-    if (status === "degraded") {
-      return {
-        state: "degraded",
-        degradedChecks: extractDegradedChecks(body)
+    const isEnterable = ENTERABLE_HTTP_STATUSES.has(res.status)
+    let body: unknown
+    let healthStatus: string | undefined
+    try {
+      body = await res.json()
+      healthStatus = extractHealthStatus(body)
+    } catch (err) {
+      if (isEnterable) {
+        return {
+          state: "blocked",
+          diagnostics: buildReadinessDiagnostics({
+            state: "blocked",
+            httpStatus: res.status,
+            errorMessage: err instanceof Error ? err.message : "Could not parse health response."
+          })
+        }
       }
     }
-    return { state: "blocked" }
-  } catch {
-    return { state: "blocked" }
+    if (!isEnterable) {
+      return {
+        state: "blocked",
+        diagnostics: buildReadinessDiagnostics({
+          state: "blocked",
+          httpStatus: res.status,
+          healthStatus
+        })
+      }
+    }
+    const status = healthStatus ?? ""
+    if (READY_HEALTH_STATUSES.has(status)) {
+      return {
+        state: "ready",
+        diagnostics: buildReadinessDiagnostics({
+          state: "ready",
+          httpStatus: res.status,
+          healthStatus: status
+        })
+      }
+    }
+    if (status === "degraded") {
+      const degradedChecks = extractDegradedChecks(body)
+      return {
+        state: "degraded",
+        degradedChecks,
+        diagnostics: buildReadinessDiagnostics({
+          state: "degraded",
+          degradedChecks,
+          httpStatus: res.status,
+          healthStatus: status
+        })
+      }
+    }
+    return {
+      state: "blocked",
+      diagnostics: buildReadinessDiagnostics({
+        state: "blocked",
+        httpStatus: res.status,
+        // Empty status means the health JSON did not include a usable status field.
+        healthStatus: status !== "" ? status : undefined
+      })
+    }
+  } catch (err) {
+    return {
+      state: "blocked",
+      diagnostics: buildReadinessDiagnostics({
+        state: "blocked",
+        errorMessage: err instanceof Error ? err.message : "Health request failed."
+      })
+    }
   }
 }
 
-function emitServerReadinessState(
-  state: "ready" | "degraded" | "blocked",
-  degradedChecks: string[] = []
-) {
+function emitServerReadinessState(detail: ServerReadinessPublishedState) {
   if (typeof window === "undefined") return
+  window.__tldwServerReadinessState = detail
   window.dispatchEvent(
     new CustomEvent(SERVER_READINESS_STATE_EVENT, {
-      detail: { state, degradedChecks }
+      detail
     })
   )
 }
@@ -106,6 +200,8 @@ export const ServerReadinessGate: React.FC<{
     shouldBypassReadinessForOffline() ? "ready" : "checking"
   )
   const [degradedChecks, setDegradedChecks] = React.useState<string[]>([])
+  const [lastReadinessState, setLastReadinessState] =
+    React.useState<ServerReadinessPublishedState | null>(null)
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
@@ -120,6 +216,7 @@ export const ServerReadinessGate: React.FC<{
 
     setGate((current) => (current === "ready" ? current : "checking"))
     setDegradedChecks([])
+    setLastReadinessState(null)
 
     let cancelled = false
     let retryTimer: number | undefined
@@ -128,6 +225,7 @@ export const ServerReadinessGate: React.FC<{
     const attempt = async () => {
       const result = await checkHealth()
       if (cancelled) return
+      setLastReadinessState(result.diagnostics)
 
       if (result.state === "ready") {
         setGate("ready")
@@ -172,16 +270,27 @@ export const ServerReadinessGate: React.FC<{
     if (!state) return
 
     const emitTimer = window.setTimeout(() => {
-      emitServerReadinessState(
+      const emittedDegradedChecks =
+        state === "degraded"
+          ? degradedChecks
+          : state === "blocked"
+            ? (lastReadinessState?.degradedChecks ?? [])
+            : []
+      emitServerReadinessState({
+        ...(lastReadinessState ??
+          buildReadinessDiagnostics({
+            state,
+            degradedChecks: emittedDegradedChecks
+          })),
         state,
-        state === "degraded" ? degradedChecks : []
-      )
+        degradedChecks: emittedDegradedChecks
+      })
     }, 0)
 
     return () => {
       window.clearTimeout(emitTimer)
     }
-  }, [bypass, degradedChecks, gate])
+  }, [bypass, degradedChecks, gate, lastReadinessState])
 
   if (bypass || gate === "ready" || gate === "timeout") {
     return <>{children}</>
