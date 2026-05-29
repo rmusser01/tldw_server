@@ -443,7 +443,7 @@ export const FlashcardDocumentRow: React.FC<FlashcardDocumentRowProps> = ({
             title={errorMessage || "This row changed elsewhere."}
             data-testid={`flashcards-document-row-conflict-${savedCard.uuid}`}
           >
-            <div className="flex gap-2">
+            <div className="mt-2 flex gap-2">
               <Button
                 size="small"
                 onClick={(event) => {
