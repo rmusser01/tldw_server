@@ -56,7 +56,9 @@ async def _resolve_tool_catalog_name(
     db: Any,
     *,
     name: str,
+    catalog_id: Any,
     metadata: Mapping[str, Any],
+    strict: bool,
 ) -> int | None:
     """Resolve a catalog name using team, org, then global precedence."""
     team_id = metadata.get("team_id")
@@ -83,7 +85,15 @@ async def _resolve_tool_catalog_name(
         value = _row_value(row, "id", 0)
         return int(value) if value is not None else None
     except _TOOL_CATALOG_LOOKUP_EXCEPTIONS as exc:
-        logger.debug("MCP catalog lookup failed: {}", exc.__class__.__name__)
+        logger.debug(
+            "MCP catalog lookup failed: error_type={} catalog_name={} catalog_id={} team_id={} org_id={} strict={}",
+            exc.__class__.__name__,
+            name,
+            catalog_id,
+            team_id,
+            org_id,
+            strict,
+        )
         return None
 
 
@@ -91,6 +101,8 @@ async def _resolve_tool_catalog_entries(
     db: Any,
     *,
     catalog_id: int,
+    catalog_name: str | None,
+    metadata: Mapping[str, Any],
     strict: bool,
 ) -> set[str] | None:
     """Return tool names for a resolved catalog id."""
@@ -100,7 +112,15 @@ async def _resolve_tool_catalog_entries(
             catalog_id,
         )
     except _TOOL_CATALOG_LOOKUP_EXCEPTIONS as exc:
-        logger.debug("MCP catalog entries lookup failed: {}", exc.__class__.__name__)
+        logger.debug(
+            "MCP catalog entries lookup failed: error_type={} catalog_name={} catalog_id={} team_id={} org_id={} strict={}",
+            exc.__class__.__name__,
+            catalog_name,
+            catalog_id,
+            metadata.get("team_id"),
+            metadata.get("org_id"),
+            strict,
+        )
         return set() if strict else None
 
     names: set[str] = set()
@@ -131,10 +151,13 @@ async def resolve_tool_catalog_filter_names(
     """
     resolved_id = _coerce_catalog_id(catalog_id)
     if resolved_id is None and isinstance(catalog_name, str) and catalog_name.strip():
+        lookup_metadata = metadata or {}
         resolved_id = await _resolve_tool_catalog_name(
             db,
             name=catalog_name.strip(),
-            metadata=metadata or {},
+            catalog_id=catalog_id,
+            metadata=lookup_metadata,
+            strict=strict,
         )
 
     if resolved_id is None:
@@ -143,5 +166,7 @@ async def resolve_tool_catalog_filter_names(
     return await _resolve_tool_catalog_entries(
         db,
         catalog_id=resolved_id,
+        catalog_name=catalog_name.strip() if isinstance(catalog_name, str) else None,
+        metadata=metadata or {},
         strict=strict,
     )
