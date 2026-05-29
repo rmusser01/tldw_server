@@ -1583,10 +1583,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                       </Button>
                     </div>
 
-                    {renderUndoRatingAction()}
                   </div>
                 </>
               )}
+              {renderUndoRatingAction()}
             </div>
           </div>
         </Card>
