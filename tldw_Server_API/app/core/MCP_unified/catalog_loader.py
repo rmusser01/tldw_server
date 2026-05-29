@@ -11,9 +11,8 @@ from pathlib import Path
 
 import yaml
 from loguru import logger
+from mcp_unified.federation.models import MCPCatalogEntry
 from pydantic import ValidationError
-
-from tldw_Server_API.app.api.v1.schemas.archetype_schemas import MCPCatalogEntry
 
 # Module-level cache
 _CATALOG_CACHE: list[MCPCatalogEntry] = []

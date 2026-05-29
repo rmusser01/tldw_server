@@ -4,7 +4,24 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+MCPAuthType = Literal["none", "bearer", "api_key"]
+
+
+class MCPCatalogEntry(BaseModel):
+    """One entry in the external MCP server catalog shown during setup."""
+
+    key: str
+    name: str
+    description: str
+    url_template: str
+    auth_type: MCPAuthType = "none"
+    category: str
+    logo_key: str | None = None
+    suggested_for: list[str] = Field(default_factory=list)
 
 
 def _copy_mapping(value: dict[str, Any] | None) -> dict[str, Any]:
