@@ -45,7 +45,7 @@ PR #2129 review-fix CI exposed unrelated full-suite backend flakes on Windows/ma
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Opened PR #2134 from `codex/task-549-full-suite-flakes` after rebasing onto `origin/dev`. The branch isolates the full-suite flake fixes exposed by PR #2129: deterministic invitation ordering for tied `created_at` timestamps, less race-prone audio heartbeat failure-log coverage, handled audit stop `LookupError` cleanup, and a bounded audit cleanup wait in tests. Verification passed locally: Admin invitation suite 32 tests, Audio transcription hotword suite 23 tests, Audit DB deps suite 17 tests, `py_compile` on touched Python files, `git diff --check`, and Bandit on touched backend code with 0 findings.
+Opened PR #2134 from `codex/task-549-full-suite-flakes` after rebasing onto `origin/dev`. The branch isolates the full-suite flake fixes exposed by PR #2129: deterministic invitation ordering for tied `created_at` timestamps, less race-prone audio heartbeat failure-log coverage, handled audit stop `LookupError` cleanup, and a bounded audit cleanup wait in tests. Review feedback on PR #2134 has been addressed by using reverse + stable sort for invitation ties and moving the audio heartbeat polling inside the `TestClient` lifetime. Verification passed locally: Admin invitation suite 32 tests, Audio transcription hotword suite 23 tests, Audit DB deps suite 17 tests, `py_compile` on touched Python files, `git diff --check`, and Bandit on touched backend code with 0 findings. Remote PR check rollup is pending rerun after push.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
