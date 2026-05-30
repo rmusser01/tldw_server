@@ -13,6 +13,8 @@ references:
 - TASK-45.44.5
 - https://github.com/rmusser01/tldw_server/issues/1662
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/pull/2138
+- https://github.com/rmusser01/tldw_server/issues/1662#issuecomment-4581909874
 modified_files:
 - apps/packages/ui/src/components/Option/Evaluations/tabs/recipe-configs/RagAnswerQualityConfig.tsx
 - apps/packages/ui/src/components/Option/Evaluations/tabs/recipe-configs/RagRetrievalTuningConfig.tsx
@@ -56,6 +58,8 @@ Close the remaining Evaluations product-state baseline debt by migrating the two
 - Verification: `bun run verify:design-system-state` -> exit 1 from unrelated global baseline debt, but Evaluations no longer appears in the product-area table; baseline exceptions are 193 and stale Settings/account-security entries remain unrelated.
 - Verification: `git diff --check` -> clean.
 - Bandit skipped: touched implementation is TS/TSX plus JSON/Backlog metadata; no Python backend code changed in this slice.
+- PR opened: https://github.com/rmusser01/tldw_server/pull/2138.
+- GitHub issue #1662 updated with PR #2138 and zero-Evaluations-count evidence: https://github.com/rmusser01/tldw_server/issues/1662#issuecomment-4581909874.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
