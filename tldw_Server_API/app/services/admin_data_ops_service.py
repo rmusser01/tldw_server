@@ -177,7 +177,7 @@ def _resolve_dataset_db_path(dataset: str, user_id: int | None) -> tuple[str, in
             fs_path = unquote(parsed.path or url)
             if fs_path.startswith("//"):
                 fs_path = fs_path[1:]
-            if re.match(r"^/[A-Za-z]:/", fs_path):
+            if re.match(r"^/[A-Za-z]:[\\/]", fs_path):
                 fs_path = fs_path[1:]
             if fs_path in {":memory:", "/:memory:"}:
                 return ":memory:", None

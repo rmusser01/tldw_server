@@ -803,28 +803,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Dictionaries/DictionaryVersionHistoryModal.tsx:Alert#antd-alert-dictionaryversionhistorymodal-type-error-vers-1pavdz5",
-    "path": "src/components/Option/Dictionaries/DictionaryVersionHistoryModal.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Dictionaries/DictionaryVersionHistoryModal.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Dictionaries/DictionaryVersionHistoryModal.tsx:Alert#antd-alert-dictionaryversionhistorymodal-type-success-re-1knmxw4",
-    "path": "src/components/Option/Dictionaries/DictionaryVersionHistoryModal.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Dictionaries/DictionaryVersionHistoryModal.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Integrations/IntegrationPolicyPanel.tsx:Alert#antd-alert-telegrampolicyeditor-type-error-line-336-tzh99k",
     "path": "src/components/Option/Integrations/IntegrationPolicyPanel.tsx",
     "rule": "antd-product-state-import",

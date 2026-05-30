@@ -154,6 +154,12 @@ def _setup_stubbed_audio_app(
     monkeypatch.setenv("SINGLE_USER_API_KEY", TEST_API_KEY)
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
 
+    from types import SimpleNamespace
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+        get_auth_principal,
+        get_db_transaction,
+    )
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
     import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
@@ -163,6 +169,26 @@ def _setup_stubbed_audio_app(
 
     async def _fake_get_request_user() -> User:
         return User(id=1, username="single_user")
+
+    async def _fake_get_auth_principal() -> AuthPrincipal:
+        return AuthPrincipal(
+            kind="user",
+            user_id=1,
+            api_key_id=None,
+            username="single_user",
+            email=None,
+            subject="single_user",
+            token_type=None,
+            jti=None,
+            roles=["admin"],
+            permissions=["*"],
+            is_admin=True,
+            org_ids=[],
+            team_ids=[],
+        )
+
+    async def _fake_get_db_transaction():
+        yield SimpleNamespace()
 
     async def _allow_job(*_args, **_kwargs):
         return True, None
@@ -216,6 +242,8 @@ def _setup_stubbed_audio_app(
 
     app = FastAPI()
     app.dependency_overrides[get_request_user] = _fake_get_request_user
+    app.dependency_overrides[get_auth_principal] = _fake_get_auth_principal
+    app.dependency_overrides[get_db_transaction] = _fake_get_db_transaction
     app.include_router(audio_router, prefix="/api/v1/audio")
     return app, captured
 
@@ -608,13 +636,15 @@ def test_audio_transcriptions_sanitizes_heartbeat_jobs_failure_log(
 
     original_shim_attr = audio_tx._audio_shim_attr
     heartbeat_calls = 0
+    heartbeat_observed = audio_tx.asyncio.Event()
 
     async def _slow_increment_jobs_started(*_args, **_kwargs):
-        await audio_tx.asyncio.sleep(0.01)
+        await audio_tx.asyncio.wait_for(heartbeat_observed.wait(), timeout=1.0)
 
     async def _failing_heartbeat_jobs(*_args, **_kwargs):
         nonlocal heartbeat_calls
         heartbeat_calls += 1
+        heartbeat_observed.set()
         if heartbeat_calls == 1:
             raise RuntimeError("heartbeat job leaked /private/rg-heartbeat")
         raise audio_tx.asyncio.CancelledError()

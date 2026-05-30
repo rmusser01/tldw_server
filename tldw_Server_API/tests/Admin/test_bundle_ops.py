@@ -56,6 +56,24 @@ async def _reset_state():
     admin_bundle_service._rate_limit_windows.clear()
 
 
+def test_authnz_backup_path_normalizes_windows_sqlite_url(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.services.admin_data_ops_service import _resolve_dataset_db_path
+
+    windows_path = "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\users_test_bundle_ops.db"
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{windows_path}")
+    reset_settings()
+
+    try:
+        db_path, user_id = _resolve_dataset_db_path("authnz", None)
+    finally:
+        reset_settings()
+
+    assert db_path == windows_path
+    assert user_id is None
+
+
 async def _seed_authnz_data() -> int:
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, is_postgres_backend
 
