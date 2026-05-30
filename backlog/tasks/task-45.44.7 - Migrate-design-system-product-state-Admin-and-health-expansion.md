@@ -63,26 +63,30 @@ documentation:
   \  - Admin path rows: 25 -> 23\n  - DataOpsPage target rows: 2 -> 0\n\nVerifier\
   \ evidence:\n  - scoped verifier log had no DataOpsPage findings\n  - full verifier\
   \ remains blocked by unrelated current-dev drift outside this slice"
+- "TASK-45.44.7.9 / PR #2156 migrated ServerAdminPage users, roles, and media budget\
+  \ inline error feedback from AntD Alert to the design-system Alert primitive.\n\
+  Baseline file evidence:\n  - total baseline rows: 181 -> 178\n  - Admin path rows:\
+  \ 23 -> 20\n  - ServerAdminPage target rows: 3 -> 0\n\nVerifier evidence:\n  - scoped\
+  \ verifier log had no ServerAdminPage findings\n  - full verifier remains blocked\
+  \ by unrelated current-dev IntegrationPolicyPanel baseline drift/stale rows outside\
+  \ this slice"
+- "TASK-45.44.7.10 / PR #2158 migrated MlxAdminPage admin guard, temporary-unavailable,\
+  \ active-model, and security-risk product-state UI from AntD Alert/Tag to the design-system\
+  \ Alert/Badge primitives.\nBaseline file evidence:\n  - total baseline rows: 178\
+  \ -> 174\n  - Admin path rows: 20 -> 16\n  - MlxAdminPage target rows: 4 -> 0\n\n\
+  Verifier evidence:\n  - scoped verifier log had no MlxAdminPage findings\n  - full\
+  \ verifier remains blocked by unrelated current-dev IntegrationPolicyPanel baseline\
+  \ drift/stale rows outside this slice"
 - |-
-  TASK-45.44.7.9 / PR #2156 migrated ServerAdminPage users, roles, and media budget inline error feedback from AntD Alert to the design-system Alert primitive.
+  TASK-45.44.7.11 / PR #2162 migrated ApiKeyManagementPage access denied, not-available, new-key-created, and key-load error feedback from AntD Alert to the design-system Alert primitive.
   Baseline file evidence:
-    - total baseline rows: 181 -> 178
-    - Admin path rows: 23 -> 20
-    - ServerAdminPage target rows: 3 -> 0
+    - total baseline rows: 174 -> 170
+    - Admin path rows: 16 -> 12
+    - ApiKeyManagementPage target rows: 4 -> 0
 
   Verifier evidence:
-    - scoped verifier log had no ServerAdminPage findings
-    - full verifier remains blocked by unrelated current-dev IntegrationPolicyPanel baseline drift/stale rows outside this slice
-- |-
-  TASK-45.44.7.10 / PR #2158 migrated MlxAdminPage admin guard, temporary-unavailable, active-model, and security-risk product-state UI from AntD Alert/Tag to the design-system Alert/Badge primitives.
-  Baseline file evidence:
-    - total baseline rows: 178 -> 174
-    - Admin path rows: 20 -> 16
-    - MlxAdminPage target rows: 4 -> 0
-
-  Verifier evidence:
-    - scoped verifier log had no MlxAdminPage findings
-    - full verifier remains blocked by unrelated current-dev IntegrationPolicyPanel baseline drift/stale rows outside this slice
+    - scoped verifier log had no ApiKeyManagementPage findings
+    - full verifier remains blocked by unrelated current-dev findings in IntegrationPolicyPanel, WritingActionBar, Notes, and ResearchWorkspace plus stale IntegrationPolicyPanel baseline entries outside this slice
 parent_task_id: TASK-45.44
 priority: medium
 ---
