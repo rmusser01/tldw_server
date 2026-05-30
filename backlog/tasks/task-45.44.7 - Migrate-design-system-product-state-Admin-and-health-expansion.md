@@ -4,7 +4,7 @@ title: 'Migrate design-system product state: Admin and health expansion'
 status: In Progress
 assignee: []
 created_date: '2026-05-14 03:19'
-updated_date: '2026-05-30 10:59'
+updated_date: '2026-05-30 11:02'
 labels:
   - design-system
   - webui
@@ -88,8 +88,9 @@ documentation:
       - scoped verifier log had no UsageAnalyticsPage findings
       - full verifier remains blocked by unrelated current-dev drift outside this slice
 
-    TASK-45.44.7.6 migrated BillingDashboardPage forbidden and unsupported-route
-    guard feedback from AntD Alert to the design-system Alert primitive.
+    TASK-45.44.7.6 / PR #2152 migrated BillingDashboardPage forbidden and
+    unsupported-route guard feedback from AntD Alert to the design-system Alert
+    primitive.
 
     Baseline file evidence:
       - total baseline rows: 187 -> 185
