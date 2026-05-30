@@ -22,6 +22,7 @@ import type { TFunction } from "i18next"
 import type {
   ArtifactReviewChecklistItem,
   ArtifactSourceCoverage,
+  ArtifactSkippedSource,
   ArtifactSourceLineage,
   ArtifactType,
   GeneratedArtifact,
@@ -174,6 +175,11 @@ type GenerationResult = {
 type StudioSourceContext = LiteratureWorkProductSourceContext & {
   title: string
   text: string
+}
+
+type StudioSourceContextLoadResult = {
+  sourceContexts: StudioSourceContext[]
+  skippedSources: ArtifactSkippedSource[]
 }
 
 type WorkspaceStudyMaterialsMode = StudyMaterialsPolicy | null | undefined
@@ -722,9 +728,33 @@ const extractUsageMetrics = (payload: unknown): UsageMetrics => {
 const buildMissingContentError = (label: string): Error =>
   new Error(`No usable ${label} content was returned.`)
 
-const loadStudioSourceContexts = async (
+const buildSkippedStudioSource = (
+  detail: {
+    sourceId: string
+    mediaId: number
+    title: string
+    sourceStatus?: WorkspaceSource["status"]
+  },
+  reason: ArtifactSkippedSource["reason"]
+): ArtifactSkippedSource => ({
+  sourceId: detail.sourceId,
+  mediaId: detail.mediaId,
+  title: detail.title,
+  reason
+})
+
+const getMissingTextSkipReason = (
+  sourceStatus: WorkspaceSource["status"] | undefined
+): ArtifactSkippedSource["reason"] => {
+  if (typeof sourceStatus !== "string") {
+    return "unknown"
+  }
+  return sourceStatus === "ready" ? "missing_text" : "unready"
+}
+
+const loadStudioSourceContextBundle = async (
   options: SourceContentGenerationOptions
-): Promise<StudioSourceContext[]> => {
+): Promise<StudioSourceContextLoadResult> => {
   const sourceByMediaId = new Map(
     options.selectedSources.map((source) => [source.mediaId, source])
   )
@@ -741,6 +771,7 @@ const loadStudioSourceContexts = async (
       return {
         sourceId: source?.id || `media-${mediaId}`,
         mediaId,
+        sourceStatus: source?.status,
         title:
           source?.title ||
           (typeof sourceMeta?.title === "string" ? sourceMeta.title : "") ||
@@ -752,14 +783,27 @@ const loadStudioSourceContexts = async (
 
   let remainingChars = STUDIO_TOTAL_SOURCE_CHAR_LIMIT
   const sourceContexts: StudioSourceContext[] = []
+  const skippedSources: ArtifactSkippedSource[] = []
   for (const detail of mediaDetails) {
-    if (!detail.text || remainingChars <= 0) {
+    const sourceText = detail.text.trim()
+    if (!sourceText) {
+      skippedSources.push(
+        buildSkippedStudioSource(
+          detail,
+          getMissingTextSkipReason(detail.sourceStatus)
+        )
+      )
       continue
     }
-    const clippedText = detail.text
+    if (remainingChars <= 0) {
+      skippedSources.push(buildSkippedStudioSource(detail, "context_limit"))
+      continue
+    }
+    const clippedText = sourceText
       .slice(0, Math.min(STUDIO_SOURCE_CHAR_LIMIT, remainingChars))
       .trim()
     if (!clippedText) {
+      skippedSources.push(buildSkippedStudioSource(detail, "context_limit"))
       continue
     }
     sourceContexts.push({
@@ -767,11 +811,18 @@ const loadStudioSourceContexts = async (
       mediaId: detail.mediaId,
       title: detail.title,
       text: clippedText,
-      truncated: detail.text.trim().length > clippedText.length
+      truncated: sourceText.length > clippedText.length
     })
     remainingChars -= clippedText.length
   }
 
+  return { sourceContexts, skippedSources }
+}
+
+const loadStudioSourceContexts = async (
+  options: SourceContentGenerationOptions
+): Promise<StudioSourceContext[]> => {
+  const { sourceContexts } = await loadStudioSourceContextBundle(options)
   return sourceContexts
 }
 
@@ -1752,10 +1803,12 @@ async function generateLiteratureMatrix(
     throw new Error("Select a chat model before generating a Literature Matrix.")
   }
 
-  const sourceContexts = await loadStudioSourceContexts(options)
+  const { sourceContexts, skippedSources } =
+    await loadStudioSourceContextBundle(options)
   const sourceCoverage = buildLiteratureSourceCoverage({
     selectedSources: options.selectedSources,
     usableContexts: sourceContexts,
+    skippedSources,
     minimumUsableSources: options.template.minUsableSources,
     sourceContextCharLimit: {
       perSource: STUDIO_SOURCE_CHAR_LIMIT,
@@ -1816,10 +1869,12 @@ async function generateCorpusGapFinder(
     throw new Error("Select a chat model before generating a Corpus Gap Finder.")
   }
 
-  const sourceContexts = await loadStudioSourceContexts(options)
+  const { sourceContexts, skippedSources } =
+    await loadStudioSourceContextBundle(options)
   const sourceCoverage = buildLiteratureSourceCoverage({
     selectedSources: options.selectedSources,
     usableContexts: sourceContexts,
+    skippedSources,
     minimumUsableSources: options.template.minUsableSources,
     sourceContextCharLimit: {
       perSource: STUDIO_SOURCE_CHAR_LIMIT,
@@ -1889,10 +1944,12 @@ async function generateEvidenceBoundHypotheses(
     )
   }
 
-  const sourceContexts = await loadStudioSourceContexts(options)
+  const { sourceContexts, skippedSources } =
+    await loadStudioSourceContextBundle(options)
   const sourceCoverage = buildLiteratureSourceCoverage({
     selectedSources: options.selectedSources,
     usableContexts: sourceContexts,
+    skippedSources,
     minimumUsableSources: options.template.minUsableSources,
     sourceContextCharLimit: {
       perSource: STUDIO_SOURCE_CHAR_LIMIT,
@@ -1979,10 +2036,12 @@ async function generateResearchProposalPack(
     throw new Error("Select a chat model before generating a Research Proposal Pack.")
   }
 
-  const sourceContexts = await loadStudioSourceContexts(options)
+  const { sourceContexts, skippedSources } =
+    await loadStudioSourceContextBundle(options)
   const sourceCoverage = buildLiteratureSourceCoverage({
     selectedSources: options.selectedSources,
     usableContexts: sourceContexts,
+    skippedSources,
     minimumUsableSources: options.template.minUsableSources,
     sourceContextCharLimit: {
       perSource: STUDIO_SOURCE_CHAR_LIMIT,

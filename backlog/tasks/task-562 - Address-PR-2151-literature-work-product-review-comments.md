@@ -7,6 +7,7 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/2151
 modified_files:
 - apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/literature-workproducts.ts
+- apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/hooks/useArtifactGeneration.tsx
 - apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx
 ---
 
@@ -21,8 +22,10 @@ Close out unresolved PR #2151 review comments for Research Workspace literature 
 - [x] #1 `isRecord` excludes arrays before treating values as records.
 - [x] #2 JSON payload extraction handles non-string runtime values without throwing.
 - [x] #3 Research Proposal markdown normalization handles non-string runtime values without throwing.
-- [x] #4 Focused UI tests and whitespace checks pass.
-- [x] #5 Unresolved PR #2151 review threads are addressed and resolved or explicitly documented.
+- [x] #4 Compatible prior artifact content is bounded before prompt interpolation.
+- [x] #5 Literature source coverage preserves `context_limit` and `unknown` skipped-source reasons.
+- [x] #6 Focused UI tests and whitespace checks pass.
+- [x] #7 Unresolved PR #2151 review threads are addressed and resolved or explicitly documented.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -34,12 +37,18 @@ Fixed the three Gemini review threads in `apps/packages/ui/src/components/Option
 - Research Proposal markdown normalization treats non-string runtime values as empty before validation.
 
 Added regression coverage in `StudioPane.literature-workproducts.test.tsx` for array row rejection, `null` matrix responses, and `undefined` proposal responses.
+
+Fixed the two Qodo review threads:
+- Compatible artifact content is capped before interpolation into Corpus Gap Finder, Evidence-Bound Hypotheses, and Research Proposal Pack prompts, with an explicit truncation note.
+- Literature source context loading now returns skipped-source diagnostics so coverage can report `context_limit` for sources excluded by the source budget and `unknown` for skipped sources without a status.
+
+Added regression coverage for prompt-context truncation and source coverage skip reasons.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Review comments addressed with focused regressions. Verification: `git diff --check` passed; `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage1.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage2.test.tsx src/workspace-templates/__tests__/work-product-templates.test.ts` passed with 4 files / 84 tests.
+Review comments addressed with focused regressions. Verification: `git diff --check` passed; `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage1.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage2.test.tsx src/workspace-templates/__tests__/work-product-templates.test.ts` passed with 4 files / 86 tests.
 Bandit skipped because this review fix touches TypeScript/UI tests and Backlog metadata only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 

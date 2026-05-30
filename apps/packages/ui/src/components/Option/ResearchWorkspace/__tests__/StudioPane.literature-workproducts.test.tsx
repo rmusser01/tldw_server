@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { AudioGenerationSettings } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
 import {
+  buildCorpusGapMessages,
+  buildEvidenceBoundHypothesesMessages,
+  buildResearchProposalMessages,
   normalizeLiteratureMatrixResponse,
   normalizeResearchProposalMarkdown
 } from "../StudioPane/literature-workproducts"
@@ -347,6 +350,45 @@ describe("StudioPane literature work products", () => {
     ).toThrow("Research Proposal Pack response was empty.")
   })
 
+  it("caps compatible artifact context before adding it to literature prompts", () => {
+    const sourceContexts = [
+      {
+        sourceId: "source-1",
+        mediaId: 101,
+        title: "Paper A",
+        text: "Paper A excerpt"
+      }
+    ]
+    const longArtifactContent = "matrix-content ".repeat(500)
+    const sourceCoverage = {
+      selectedSourceIds: ["source-1"],
+      usableSources: [{ sourceId: "source-1", mediaId: 101, title: "Paper A" }],
+      skippedSources: [],
+      truncatedSources: [],
+      sourceContextCharLimit: { perSource: 6000, total: 18000 },
+      minimumUsableSourcesMet: true
+    }
+
+    const gapPrompt = buildCorpusGapMessages(
+      sourceContexts,
+      longArtifactContent
+    ).user
+    const hypothesesPrompt = buildEvidenceBoundHypothesesMessages(
+      sourceContexts,
+      [{ label: "Literature Matrix", content: longArtifactContent }]
+    ).user
+    const proposalPrompt = buildResearchProposalMessages(
+      sourceContexts,
+      sourceCoverage,
+      [{ label: "Evidence-Bound Hypotheses", content: longArtifactContent }]
+    ).user
+
+    for (const prompt of [gapPrompt, hypothesesPrompt, proposalPrompt]) {
+      expect(prompt).toContain("truncated for context budget")
+      expect(prompt).not.toContain(longArtifactContent)
+    }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.removeItem("tldw:research-workspace:recent-output-types:v1")
@@ -596,6 +638,108 @@ describe("StudioPane literature work products", () => {
     expect(mockMessageSuccess).toHaveBeenCalledWith(
       expect.stringContaining("generated successfully")
     )
+  })
+
+  it("records context-limit and unknown skip reasons in literature source coverage", async () => {
+    workspaceStoreState.selectedSourceIds = [
+      "source-1",
+      "source-2",
+      "source-3",
+      "source-4",
+      "source-5"
+    ]
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "Paper A",
+        type: "pdf",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "source-2",
+        mediaId: 202,
+        title: "Paper B",
+        type: "pdf",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "source-3",
+        mediaId: 303,
+        title: "Paper C",
+        type: "pdf",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "source-4",
+        mediaId: 404,
+        title: "Paper D",
+        type: "pdf",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "source-5",
+        mediaId: 505,
+        title: "Paper E",
+        type: "pdf",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    mockGetMediaDetails.mockImplementation((mediaId: number) => {
+      if (mediaId === 404) {
+        return Promise.resolve(
+          sourceDetail("Paper D", "Paper D has usable text beyond the context limit.")
+        )
+      }
+      if (mediaId === 505) {
+        return Promise.resolve(sourceDetail("Paper E", ""))
+      }
+      return Promise.resolve(
+        sourceDetail(`Paper ${mediaId}`, "Long source text. ".repeat(1000))
+      )
+    })
+    mockCreateChatCompletion.mockResolvedValueOnce(
+      createChatCompletionResponse(
+        JSON.stringify({
+          rows: [
+            {
+              source: "Paper A",
+              methodology: "survey",
+              primary_finding: "Finding A",
+              evidence_references: "Paper A"
+            }
+          ]
+        })
+      )
+    )
+
+    renderStudioPane()
+    fireEvent.click(screen.getByRole("button", { name: /literature matrix/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        "artifact-1",
+        "completed",
+        expect.objectContaining({
+          sourceCoverage: expect.objectContaining({
+            skippedSources: expect.arrayContaining([
+              expect.objectContaining({
+                sourceId: "source-4",
+                reason: "context_limit"
+              }),
+              expect.objectContaining({
+                sourceId: "source-5",
+                reason: "unknown"
+              })
+            ])
+          })
+        })
+      )
+    })
   })
 
   it("fails cleanly when Literature Matrix returns invalid JSON", async () => {
