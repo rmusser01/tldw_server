@@ -731,7 +731,7 @@ Expected: PASS.
 Use package-local commands that already exist in `apps/packages/ui/package.json`.
 If a command has known unrelated baseline failures, record them explicitly.
 
-- [ ] **Step 7: Commit Stage 5**
+- [x] **Step 7: Commit Stage 5**
 
 ```bash
 git add apps/packages/ui/src/components/Option/ResearchWorkspace \
@@ -750,7 +750,7 @@ git commit -m "test: cover literature work product regressions"
 - Integration contract identifies launch seed, bundle import, and verification
   display paths.
 
-- [ ] **Step 1: Create follow-up Backlog tasks**
+- [x] **Step 1: Create follow-up Backlog tasks**
 
 Suggested follow-ups:
 
@@ -759,12 +759,12 @@ Suggested follow-ups:
 - Import Deep Research `bundle.json` back into Research Workspace artifacts.
 - Display Deep Research verification summaries next to proposal sections.
 
-- [ ] **Step 2: Link follow-ups from TASK-486 or the implementation parent**
+- [x] **Step 2: Link follow-ups from TASK-486 or the implementation parent**
 
 Use Backlog.md MCP or CLI. Do not manually edit task files unless MCP/CLI is not
 available.
 
-- [ ] **Step 3: Commit task/documentation updates**
+- [x] **Step 3: Commit task/documentation updates**
 
 ```bash
 git add backlog/tasks Docs/Product/Research_Workspace_Literature_Workproducts_PRD.md \
