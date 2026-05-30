@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Drawer, Skeleton, Tag, Descriptions, Table, Progress, Statistic } from "antd"
+import { Drawer, Skeleton, Descriptions, Table, Progress, Statistic } from "antd"
 import {
   BarChart3,
   CheckCircle2,
@@ -12,6 +12,7 @@ import {
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { getEvaluation, type PromptStudioEvaluation } from "@/services/prompt-studio"
+import { Badge } from "@/components/ui/primitives"
 
 type EvaluationDetailPanelProps = {
   open: boolean
@@ -48,30 +49,38 @@ export const EvaluationDetailPanel: React.FC<EvaluationDetailPanelProps> = ({
     switch (statusLower) {
       case "completed":
         return (
-          <Tag color="green" icon={<CheckCircle2 className="size-3" />}>
+          <Badge variant="success" size="sm">
+            <CheckCircle2 className="size-3" aria-hidden="true" />
             Completed
-          </Tag>
+          </Badge>
         )
       case "running":
         return (
-          <Tag color="blue" icon={<Loader2 className="size-3 animate-spin" />}>
+          <Badge variant="info" size="sm">
+            <Loader2 className="size-3 animate-spin" aria-hidden="true" />
             Running
-          </Tag>
+          </Badge>
         )
       case "pending":
         return (
-          <Tag color="default" icon={<Clock className="size-3" />}>
+          <Badge variant="secondary" size="sm">
+            <Clock className="size-3" aria-hidden="true" />
             Pending
-          </Tag>
+          </Badge>
         )
       case "failed":
         return (
-          <Tag color="red" icon={<XCircle className="size-3" />}>
+          <Badge variant="danger" size="sm">
+            <XCircle className="size-3" aria-hidden="true" />
             Failed
-          </Tag>
+          </Badge>
         )
       default:
-        return <Tag>{status}</Tag>
+        return (
+          <Badge variant="secondary" size="sm">
+            {status}
+          </Badge>
+        )
     }
   }
 
