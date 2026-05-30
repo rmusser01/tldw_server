@@ -7,7 +7,6 @@ import {
   Form,
   Tag,
   Space,
-  Alert,
   Select,
   Switch,
   Popconfirm,
@@ -19,6 +18,7 @@ import {
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 
 const { TextArea } = Input
 
@@ -345,10 +345,18 @@ const MaintenancePage: React.FC = () => {
   // ── Render ──
 
   if (adminGuard === "forbidden") {
-    return <Alert type="error" title="Access Denied" description="You don't have permission to access the maintenance console." showIcon />
+    return (
+      <DesignSystemAlert variant="error" title="Access Denied">
+        You don't have permission to access the maintenance console.
+      </DesignSystemAlert>
+    )
   }
   if (adminGuard === "notFound") {
-    return <Alert type="warning" title="Not Available" description="The maintenance console is not available on this server." showIcon />
+    return (
+      <DesignSystemAlert variant="warning" title="Not Available">
+        The maintenance console is not available on this server.
+      </DesignSystemAlert>
+    )
   }
 
   return (

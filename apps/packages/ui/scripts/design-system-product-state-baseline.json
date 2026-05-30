@@ -88,28 +88,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/MaintenancePage.tsx:Alert#antd-alert-maintenancepage-type-error-access-denied-you-jdy41q",
-    "path": "src/components/Option/Admin/MaintenancePage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/MaintenancePage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Admin/MaintenancePage.tsx:Alert#antd-alert-maintenancepage-type-warning-not-available-th-wmzruk",
-    "path": "src/components/Option/Admin/MaintenancePage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/MaintenancePage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Admin/MlxAdminPage.tsx:Alert#antd-alert-mlxadminpage-type-info-line-667-t3pi54",
     "path": "src/components/Option/Admin/MlxAdminPage.tsx",
     "rule": "antd-product-state-import",
