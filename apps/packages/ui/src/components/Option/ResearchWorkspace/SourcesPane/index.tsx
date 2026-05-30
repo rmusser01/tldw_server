@@ -2074,7 +2074,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                 ? t("playground:sources.statusProcessing", "Processing")
                 : sourceStatus === "error"
                   ? t("playground:sources.statusErrorShort", "Error")
-                  : t("playground:sources.statusReady", "Ready"))
+                  : t("playground:sources.statusReady", readyState.label))
             const statusReason =
               details?.statusReason ||
               details?.progressMessage ||
@@ -2274,7 +2274,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                 ? t("playground:sources.statusProcessing", "Processing")
                 : previewStatus === "error"
                   ? t("playground:sources.statusErrorShort", "Error")
-                  : t("playground:sources.statusReady", "Ready")
+                  : t("playground:sources.statusReady", readyState.label)
             const previewData =
               sourcePreviewState.sourceId === previewSource.id
                 ? sourcePreviewState.data

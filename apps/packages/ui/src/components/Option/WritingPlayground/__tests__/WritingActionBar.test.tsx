@@ -2,6 +2,7 @@ import React from "react"
 import { cleanup, fireEvent, render } from "@testing-library/react"
 import { JSDOM } from "jsdom"
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
+import { getDesignSystemState } from "@/design-system"
 import { WritingActionBar } from "../WritingActionBar"
 import { WRITING_REVISION_PRESETS } from "../writing-revision-presets"
 import type {
@@ -9,7 +10,31 @@ import type {
   WritingRevisionTarget
 } from "../writing-revision-types"
 
-const dom = new JSDOM("<!doctype html><html><body></body></html>")
+const registryLabels = vi.hoisted(() => ({
+  ready: "Registry Ready"
+}))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === "ready" ? registryLabels.ready : state.label
+        }
+      }
+    )
+  }
+})
+
+const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+  url: "http://localhost/"
+})
 const requestAnimationFrame = (callback: FrameRequestCallback) =>
   dom.window.setTimeout(() => callback(Date.now()), 0)
 const cancelAnimationFrame = (id: number) => {
@@ -114,6 +139,19 @@ describe("WritingActionBar", () => {
     expect(view.getByText(/generation unavailable/i)).toBeTruthy()
   })
 
+  it("uses the design-system registry label for ready generation status", () => {
+    const view = render(
+      <WritingActionBar
+        generationAvailable
+        target={selectionTarget}
+        onRequest={vi.fn()}
+      />
+    )
+
+    expect(view.getByText(registryLabels.ready)).toBeTruthy()
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("ready")
+  })
+
   it("renders the six workflow presets and shows the selected preset instruction", () => {
     const view = render(
       <WritingActionBar
@@ -200,6 +238,11 @@ describe("WritingActionBar", () => {
     fireEvent.click(view.getByRole("button", { name: /rewrite/i }))
     expect(onRequest).not.toHaveBeenCalled()
     expect(view.getAllByText(/this will rewrite the full draft/i).length).toBe(2)
+    expect(
+      view
+        .getAllByText(/this will rewrite the full draft/i)[1]
+        .closest('[data-ds-component="Alert"]')
+    ).toBeTruthy()
 
     fireEvent.click(
       view.getByLabelText(/confirm whole-document text change/i)

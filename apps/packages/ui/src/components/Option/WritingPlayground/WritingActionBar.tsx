@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Alert, Button, Checkbox, Input, Segmented, Space, Tag, Typography, type InputRef } from "antd"
+import { Button, Checkbox, Input, Segmented, Space, Tag, Typography, type InputRef } from "antd"
 import type { TextAreaRef } from "antd/es/input/TextArea"
 import {
   ArrowRight,
@@ -10,6 +10,8 @@ import {
   RefreshCw,
   SlidersHorizontal
 } from "lucide-react"
+import { getDesignSystemState } from "@/design-system"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { WRITING_REVISION_PRESETS, getWritingRevisionPreset } from "./writing-revision-presets"
 import type {
   WritingRevisionAction,
@@ -112,6 +114,7 @@ export function WritingActionBar({
     () => getWritingRevisionPreset(activePresetId) ?? WRITING_REVISION_PRESETS[0],
     [activePresetId]
   )
+  const readyLabel = getDesignSystemState("ready").label
   const targetIdentity = useMemo(() => getTargetIdentity(target), [target])
 
   useEffect(() => {
@@ -173,7 +176,7 @@ export function WritingActionBar({
     >
       <div className="flex flex-wrap items-center gap-2">
         <Tag color={generationAvailable ? "green" : "default"}>
-          {generationAvailable ? "Ready" : "Generation unavailable"}
+          {generationAvailable ? readyLabel : "Generation unavailable"}
         </Tag>
         <Text type="secondary" className="text-xs">
           Target:
@@ -217,8 +220,8 @@ export function WritingActionBar({
       ) : null}
 
       {confirmationWarning ? (
-        <Alert
-          type="warning"
+        <DsAlert
+          variant="warning"
           title={
             target.confirmationReason ??
             "Confirm before sending a broad text-changing request."

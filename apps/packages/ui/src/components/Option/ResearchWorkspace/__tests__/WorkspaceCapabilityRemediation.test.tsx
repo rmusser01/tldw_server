@@ -1,8 +1,37 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
+import { getDesignSystemState } from "@/design-system"
 import { WorkspaceCapabilityRemediation } from "../WorkspaceCapabilityRemediation"
 import type { WorkspaceCapabilitiesResponse } from "@/services/tldw/domains/workspace-api"
+
+const registryLabels = vi.hoisted(() => ({
+  blocked: "Registry Blocked",
+  degraded: "Registry Degraded"
+}))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label:
+            key === "blocked"
+              ? registryLabels.blocked
+              : key === "degraded"
+                ? registryLabels.degraded
+                : state.label
+        }
+      }
+    )
+  }
+})
 
 vi.mock("../WorkspaceSandboxDiagnosticsPanel", () => ({
   WorkspaceSandboxDiagnosticsPanel: ({ workspaceId }: { workspaceId: string }) => (
@@ -106,6 +135,7 @@ describe("WorkspaceCapabilityRemediation", () => {
     ).toHaveAttribute("href", "/acp-playground")
 
     expect(within(panel).getByText("Sandbox")).toBeInTheDocument()
+    expect(within(panel).getByText(registryLabels.blocked)).toBeInTheDocument()
     expect(
       within(panel).getByText("Enable a sandbox runtime before sandboxed actions can run.")
     ).toBeInTheDocument()
@@ -114,6 +144,7 @@ describe("WorkspaceCapabilityRemediation", () => {
     ).toHaveAttribute("href", "/admin/runtime-config")
 
     expect(within(panel).getByText("Model Provider")).toBeInTheDocument()
+    expect(within(panel).getByText(registryLabels.degraded)).toBeInTheDocument()
     expect(
       within(panel).getByText(
         "Only external providers are configured. Use a local provider for fully local answers."
@@ -122,6 +153,8 @@ describe("WorkspaceCapabilityRemediation", () => {
     expect(
       within(panel).getByRole("link", { name: "Open Model Settings" })
     ).toHaveAttribute("href", "/settings/model")
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("blocked")
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
   })
 
   it("does not expose raw reason codes or workspace-playground routes", () => {
@@ -197,6 +230,7 @@ describe("WorkspaceCapabilityRemediation", () => {
 
     const panel = screen.getByTestId("workspace-capability-remediation")
     expect(within(panel).getByText("Grounded answers")).toBeInTheDocument()
+    expect(within(panel).getAllByText(registryLabels.blocked).length).toBeGreaterThan(0)
     expect(
       within(panel).getByText(
         "Wait for extraction and indexing to finish before asking grounded questions."

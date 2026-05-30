@@ -2,6 +2,7 @@ import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { getDesignSystemState } from '@/design-system'
 import NotesManagerPage from '../NotesManagerPage'
 
 const {
@@ -25,6 +26,28 @@ const {
     mockConfirmDanger: vi.fn(),
     mockGetSetting: vi.fn(),
     mockClearSetting: vi.fn()
+  }
+})
+
+const registryLabels = vi.hoisted(() => ({
+  unavailable: 'Registry Unavailable'
+}))
+
+vi.mock('@/design-system', async (importActual) => {
+  const actual = await importActual<typeof import('@/design-system')>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === 'unavailable' ? registryLabels.unavailable : state.label
+        }
+      }
+    )
   }
 })
 
@@ -346,12 +369,13 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
 
     const relatedChip = await screen.findByTestId('notes-related-note-note-deleted')
     expect(relatedChip).toHaveTextContent('Archived target')
-    expect(relatedChip).toHaveTextContent('Unavailable')
+    expect(relatedChip).toHaveTextContent(registryLabels.unavailable)
     expect(within(relatedChip).getByRole('button', { name: /Archived target/i })).toBeDisabled()
 
     const manualLinkChip = await screen.findByTestId('notes-manual-link-e_deleted')
     expect(manualLinkChip).toHaveTextContent('Archived target')
-    expect(manualLinkChip).toHaveTextContent('Unavailable')
+    expect(manualLinkChip).toHaveTextContent(registryLabels.unavailable)
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith('unavailable')
     const manualOpenButton = within(manualLinkChip)
       .getAllByRole('button')
       .find((button) => button.getAttribute('aria-label')?.startsWith('Archived target'))
