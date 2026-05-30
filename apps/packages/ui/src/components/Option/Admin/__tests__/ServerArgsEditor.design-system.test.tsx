@@ -8,8 +8,8 @@ describe("ServerArgsEditor design-system states", () => {
   it("renders JSON validation feedback through the design-system Alert primitive", async () => {
     render(<ServerArgsEditor value={{ threads: 4 }} onChange={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole("switch"))
-    const editor = screen.getByRole("textbox")
+    fireEvent.click(screen.getByRole("switch", { name: /json mode/i }))
+    const editor = await screen.findByPlaceholderText('{"key": "value"}')
 
     fireEvent.change(editor, {
       target: { value: "{" }

@@ -125,6 +125,7 @@ export const ServerArgsEditor: React.FC<ServerArgsEditorProps> = ({
           </Text>
           <Switch
             size="small"
+            aria-label="Toggle JSON mode"
             checked={jsonMode}
             onChange={handleModeSwitch}
           />

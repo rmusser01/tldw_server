@@ -39,12 +39,14 @@ Continue the Admin and health expansion design-system migration by replacing Ser
 - Verification: focused ServerArgsEditor design-system Vitest passed; product-state guard unit test passed (54 tests); baseline JSON parsed; scoped verifier log at `/tmp/server-args-editor-design-state.log` has no `ServerArgsEditor` findings and reports baseline exceptions at 190.
 - Full `bun run verify:design-system-state` still exits 1 on current-dev drift outside this slice: IntegrationPolicyPanel, WritingActionBar, Notes, ResearchWorkspace, plus stale IntegrationPolicyPanel baseline entries.
 - Bandit skipped because this slice only touches frontend TypeScript/TSX, JSON baseline, and Backlog metadata.
+- Review fix: Qodo flagged the focused test's generic `switch` / `textbox` selectors as brittle. Added an accessible name to the JSON mode switch and tightened the test to query the named switch plus the JSON editor placeholder. Red verification failed on the unnamed switch, then focused Vitest passed after the component fix.
+- Review-fix verification: focused ServerArgsEditor design-system Vitest passed; product-state guard unit test passed (54 tests); baseline JSON parsed; `git diff --check` passed; scoped verifier log still has no `ServerArgsEditor` findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated ServerArgsEditor JSON validation feedback from AntD Alert to the shared design-system Alert primitive, added focused coverage for the design-system Alert marker and preserved copy, and removed the matching ServerArgsEditor product-state baseline exception. Focused component coverage, product-state guard unit coverage, baseline JSON parsing, and scoped verifier inspection were recorded. The full product-state verifier remains blocked by unrelated current-dev drift, with no ServerArgsEditor findings.
+Migrated ServerArgsEditor JSON validation feedback from AntD Alert to the shared design-system Alert primitive, added focused coverage for the design-system Alert marker and preserved copy, removed the matching ServerArgsEditor product-state baseline exception, and tightened the review-fix selectors by naming the JSON mode switch and querying the JSON editor directly. Focused component coverage, product-state guard unit coverage, baseline JSON parsing, whitespace checks, and scoped verifier inspection were recorded. The full product-state verifier remains blocked by unrelated current-dev drift, with no ServerArgsEditor findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
