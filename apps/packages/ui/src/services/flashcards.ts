@@ -442,6 +442,7 @@ export type FlashcardNextReviewResponse = {
 export type FlashcardReviewSessionSummary = {
   id: number
   deck_id?: number | null
+  deck_name_snapshot?: string | null
   review_mode: string
   tag_filter?: string | null
   scope_key: string

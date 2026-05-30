@@ -1640,6 +1640,7 @@ CREATE INDEX IF NOT EXISTS idx_flashcard_reviews_time ON flashcard_reviews(revie
 CREATE TABLE IF NOT EXISTS flashcard_review_sessions(
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
   deck_id          INTEGER REFERENCES decks(id) ON DELETE SET NULL,
+  deck_name_snapshot TEXT,
   review_mode      TEXT NOT NULL DEFAULT 'due',
   tag_filter       TEXT,
   scope_key        TEXT NOT NULL,
@@ -10817,6 +10818,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 CREATE TABLE IF NOT EXISTS flashcard_review_sessions(
                   id               INTEGER PRIMARY KEY AUTOINCREMENT,
                   deck_id          INTEGER REFERENCES decks(id) ON DELETE SET NULL,
+                  deck_name_snapshot TEXT,
                   review_mode      TEXT NOT NULL DEFAULT 'due',
                   tag_filter       TEXT,
                   scope_key        TEXT NOT NULL,
@@ -10837,6 +10839,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             }
             if "cards_reviewed" not in session_cols:
                 conn.execute("ALTER TABLE flashcard_review_sessions ADD COLUMN cards_reviewed INTEGER DEFAULT 0")
+            if "deck_name_snapshot" not in session_cols:
+                conn.execute("ALTER TABLE flashcard_review_sessions ADD COLUMN deck_name_snapshot TEXT")
             if "correct_count" not in session_cols:
                 conn.execute("ALTER TABLE flashcard_review_sessions ADD COLUMN correct_count INTEGER DEFAULT 0")
             if "source_bundle_json" not in session_cols:
@@ -11114,6 +11118,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 CREATE TABLE IF NOT EXISTS flashcard_review_sessions(
                   id BIGSERIAL PRIMARY KEY,
                   deck_id INTEGER REFERENCES decks(id) ON DELETE SET NULL,
+                  deck_name_snapshot TEXT,
                   review_mode TEXT NOT NULL DEFAULT 'due',
                   tag_filter TEXT,
                   scope_key TEXT NOT NULL,
@@ -11132,6 +11137,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             self.backend.execute(
                 "ALTER TABLE flashcard_review_sessions ADD COLUMN IF NOT EXISTS cards_reviewed INTEGER DEFAULT 0",
+                connection=conn,
+            )
+            self.backend.execute(
+                "ALTER TABLE flashcard_review_sessions ADD COLUMN IF NOT EXISTS deck_name_snapshot TEXT",
                 connection=conn,
             )
             self.backend.execute(
@@ -19829,16 +19838,34 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             item["correct_count"] = int(item["correct_count"])
         if item.get("study_pack_id") is not None:
             item["study_pack_id"] = int(item["study_pack_id"])
+        item["deck_name_snapshot"] = self._normalize_nullable_text(item.get("deck_name_snapshot"))
 
         normalized_bundle = self._normalize_flashcard_review_session_source_bundle(item.get("source_bundle_json"))
         item["source_bundle_json"] = normalized_bundle or None
         item["source_bundle"] = normalized_bundle
         return item
 
+    def _get_flashcard_review_session_deck_name_snapshot_for_conn(
+        self,
+        conn: Any,
+        deck_id: int | None,
+    ) -> str | None:
+        """Return the current deck name to snapshot when a review session starts."""
+        if deck_id is None:
+            return None
+        row = conn.execute("SELECT name FROM decks WHERE id = ?", (int(deck_id),)).fetchone()
+        if not row:
+            return None
+        try:
+            raw_name = row["name"]
+        except (KeyError, IndexError, TypeError):
+            raw_name = row[0]
+        return self._normalize_nullable_text(raw_name)
+
     def _get_flashcard_review_session_row_for_conn(self, conn: Any, session_id: int) -> dict[str, Any] | None:
         row = conn.execute(
             """
-            SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+            SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                    started_at, last_activity_at, completed_at, client_id,
                    cards_reviewed, correct_count, source_bundle_json, study_pack_id
               FROM flashcard_review_sessions
@@ -19923,7 +19950,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.abandon_stale_flashcard_review_sessions(scope_key=scope_key)
         query_parts = [
             """
-            SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+            SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                    started_at, last_activity_at, completed_at, client_id,
                    cards_reviewed, correct_count, source_bundle_json, study_pack_id
               FROM flashcard_review_sessions
@@ -19970,7 +19997,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as conn:
                 rows = conn.execute(
                     """
-                    SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+                    SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                            started_at, last_activity_at, completed_at, client_id,
                            cards_reviewed, correct_count, source_bundle_json, study_pack_id
                       FROM flashcard_review_sessions
@@ -19992,26 +20019,31 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         """
                         UPDATE flashcard_review_sessions
                            SET last_activity_at = ?
-                         WHERE id = ?
+                        WHERE id = ?
                         """,
                         (now, int(authoritative["id"])),
                     )
                     authoritative["last_activity_at"] = now
                     return authoritative
 
+                deck_name_snapshot = self._get_flashcard_review_session_deck_name_snapshot_for_conn(
+                    conn,
+                    deck_id,
+                )
                 if self.backend_type == BackendType.POSTGRESQL:
                     cursor = conn.execute(
                         """
                         INSERT INTO flashcard_review_sessions(
-                            deck_id, review_mode, tag_filter, scope_key, status,
+                            deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                             started_at, last_activity_at, completed_at, cards_reviewed,
                             correct_count, source_bundle_json, study_pack_id, client_id
                         )
-                        VALUES(?, ?, ?, ?, 'active', ?, ?, NULL, 0, 0, NULL, NULL, ?)
+                        VALUES(?, ?, ?, ?, ?, 'active', ?, ?, NULL, 0, 0, NULL, NULL, ?)
                         RETURNING id
                         """,
                         (
                             int(deck_id) if deck_id is not None else None,
+                            deck_name_snapshot,
                             normalized_mode,
                             normalized_tag_filter,
                             normalized_scope_key,
@@ -20026,14 +20058,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     cursor = conn.execute(
                         """
                         INSERT INTO flashcard_review_sessions(
-                            deck_id, review_mode, tag_filter, scope_key, status,
+                            deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                             started_at, last_activity_at, completed_at, cards_reviewed,
                             correct_count, source_bundle_json, study_pack_id, client_id
                         )
-                        VALUES(?, ?, ?, ?, 'active', ?, ?, NULL, 0, 0, NULL, NULL, ?)
+                        VALUES(?, ?, ?, ?, ?, 'active', ?, ?, NULL, 0, 0, NULL, NULL, ?)
                         """,
                         (
                             int(deck_id) if deck_id is not None else None,
+                            deck_name_snapshot,
                             normalized_mode,
                             normalized_tag_filter,
                             normalized_scope_key,
@@ -20047,7 +20080,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     raise CharactersRAGDBError("Failed to determine flashcard review session ID after insert")  # noqa: TRY003
                 row = conn.execute(
                     """
-                    SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+                    SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                            started_at, last_activity_at, completed_at, client_id,
                            cards_reviewed, correct_count, source_bundle_json, study_pack_id
                       FROM flashcard_review_sessions
@@ -20065,7 +20098,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Fetch a single flashcard review session by id, or None if not found."""
         cursor = self.execute_query(
             """
-            SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+            SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                    started_at, last_activity_at, completed_at, client_id,
                    cards_reviewed, correct_count, source_bundle_json, study_pack_id
               FROM flashcard_review_sessions
@@ -20095,7 +20128,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise ConflictError("Flashcard review session not found", entity="flashcard_review_sessions", entity_id=session_id)  # noqa: TRY003
             row = self.execute_query(
                 """
-                SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+                SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                        started_at, last_activity_at, completed_at, client_id,
                        cards_reviewed, correct_count, source_bundle_json, study_pack_id
                   FROM flashcard_review_sessions

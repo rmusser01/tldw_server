@@ -191,6 +191,91 @@ describe("RecentStudySessions", () => {
     expect(screen.queryByText("due:deck:12")).not.toBeInTheDocument()
   })
 
+  it("prefers the saved deck snapshot over the current deck name", () => {
+    mockRecentSessionsQuery({
+      data: [
+        {
+          id: 83,
+          deck_id: 12,
+          deck_name_snapshot: "Renal Biology",
+          review_mode: "due",
+          tag_filter: null,
+          scope_key: "due:deck:12",
+          status: "completed",
+          started_at: "2026-04-05T18:00:00Z",
+          last_activity_at: "2026-04-05T18:10:00Z",
+          completed_at: "2026-04-05T18:12:00Z",
+          cards_reviewed: 4,
+          client_id: "test"
+        }
+      ],
+      isLoading: false,
+      isFetching: false
+    })
+
+    render(
+      <RecentStudySessions
+        deckId={12}
+        selectedSessionId={null}
+        onOpenSession={sessionsMock}
+        isActive
+        decks={[
+          {
+            id: 12,
+            name: "Renamed Biology",
+            review_prompt_side: "front",
+            deleted: false,
+            client_id: "test",
+            version: 1,
+            scheduler_type: "sm2_plus",
+            scheduler_settings: DEFAULT_SCHEDULER_SETTINGS_ENVELOPE
+          }
+        ]}
+      />
+    )
+
+    expect(screen.getByText("Renal Biology")).toBeInTheDocument()
+    expect(screen.queryByText("Renamed Biology")).not.toBeInTheDocument()
+    expect(screen.queryByText("Deck 12")).not.toBeInTheDocument()
+  })
+
+  it("uses a non-technical fallback when a deck is no longer available", () => {
+    mockRecentSessionsQuery({
+      data: [
+        {
+          id: 84,
+          deck_id: 12,
+          deck_name_snapshot: null,
+          review_mode: "due",
+          tag_filter: null,
+          scope_key: "due:deck:12",
+          status: "completed",
+          started_at: "2026-04-05T18:00:00Z",
+          last_activity_at: "2026-04-05T18:10:00Z",
+          completed_at: "2026-04-05T18:12:00Z",
+          cards_reviewed: 2,
+          client_id: "test"
+        }
+      ],
+      isLoading: false,
+      isFetching: false
+    })
+
+    render(
+      <RecentStudySessions
+        deckId={12}
+        selectedSessionId={null}
+        onOpenSession={sessionsMock}
+        isActive
+        decks={[]}
+      />
+    )
+
+    expect(screen.getByText("Deck unavailable")).toBeInTheDocument()
+    expect(screen.queryByText("Deck 12")).not.toBeInTheDocument()
+    expect(screen.queryByText("due:deck:12")).not.toBeInTheDocument()
+  })
+
   it("uses the singular reviewed-count fallback when one card was reviewed", () => {
     mockRecentSessionsQuery({
       data: [

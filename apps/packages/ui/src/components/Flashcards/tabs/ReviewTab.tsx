@@ -165,6 +165,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const [isReviewOnboardingDismissed, setIsReviewOnboardingDismissed] = React.useState(false)
   const [activeReviewSessionId, setActiveReviewSessionId] = React.useState<number | null>(null)
   const [selectedStudySessionId, setSelectedStudySessionId] = React.useState<number | null>(null)
+  const [allDeckReviewStarted, setAllDeckReviewStarted] = React.useState(false)
   const [shortcutHintDensity, setShortcutHintDensity] = useFlashcardsShortcutHintDensity()
   const [sessionReviewPromptSide, setSessionReviewPromptSide] = React.useState<DeckReviewPromptSide | null>(null)
 
@@ -217,7 +218,16 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const nextDueQuery = useNextDueQuery(reviewDeckId, directPathVisibilityOptions)
   const endReviewSessionMutation = useEndFlashcardReviewSessionMutation()
   const activeCramTagFilter = reviewMode === "cram" ? cramTagFilter : undefined
-  const dueModeActiveCard = localOverrideCard ?? reviewOverrideCard ?? reviewQuery.data
+  const rawDueModeActiveCard = localOverrideCard ?? reviewOverrideCard ?? reviewQuery.data
+  const isAllDeckDueReview = reviewMode === "due" && reviewDeckId == null
+  const canShowAllDeckDashboard =
+    isAllDeckDueReview &&
+    hasCardsQuery.data !== false &&
+    rawDueModeActiveCard != null &&
+    !allDeckReviewStarted &&
+    !reviewOverrideCard &&
+    !localOverrideCard
+  const dueModeActiveCard = canShowAllDeckDashboard ? null : rawDueModeActiveCard
   const isReviewCardLoading =
     reviewMode === "due" && (reviewQuery.isLoading || reviewQuery.isFetching)
   const isDueModeCaughtUp =
@@ -275,7 +285,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           (dueCountsQuery.data.learning ?? 0)
         : undefined
   const isCramMode = reviewMode === "cram"
-  const showTopBarCreateCta = !activeCard
+  const showTopBarCreateCta = !activeCard && !canShowAllDeckDashboard
   const handleDashboardReviewDeck = React.useCallback(
     (deckId: number) => {
       onReviewDeckChange(deckId)
@@ -300,6 +310,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     },
     [onClearOverride, onReviewDeckChange, reviewOverrideCard]
   )
+  const handleStartAllDeckReview = React.useCallback(() => {
+    setAllDeckReviewStarted(true)
+    setSelectedStudySessionId(null)
+  }, [])
   const reviewScopeKey = React.useMemo(
     () => [
       reviewMode,
@@ -1043,6 +1057,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     setLastReviewedCard(null)
     setUndoCountdown(0)
     setSelectedStudySessionId(null)
+    setAllDeckReviewStarted(false)
     setSessionReviewPromptSide(null)
     autoEndSessionAttemptedRef.current = null
     autoRevealAnswerRef.current = false
@@ -1195,6 +1210,40 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           </Button>
         )}
       </div>
+
+      {canShowAllDeckDashboard && (
+        <div
+          className="mb-3 rounded border border-border bg-surface2 p-3"
+          data-testid="flashcards-review-deck-dashboard"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <Text strong className="block">
+                {t("option:flashcards.allDeckReviewDashboardTitle", {
+                  defaultValue: "Choose a study path"
+                })}
+              </Text>
+              <Text type="secondary" className="text-sm">
+                {t("option:flashcards.allDeckReviewDashboardDescription", {
+                  defaultValue:
+                    "Start with all due cards, or pick a specific deck below."
+                })}
+              </Text>
+            </div>
+            <Button
+              type="primary"
+              onClick={handleStartAllDeckReview}
+              loading={isReviewCardLoading}
+              disabled={!rawDueModeActiveCard}
+              data-testid="flashcards-review-all-due"
+            >
+              {t("option:flashcards.reviewAllDue", {
+                defaultValue: "Review all due"
+              })}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {!activeCard && (
         <DeckStudyDashboard
