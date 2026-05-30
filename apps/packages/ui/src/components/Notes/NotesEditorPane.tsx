@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import { getDesignSystemState } from '@/design-system'
+import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from '@/design-system'
 import NotesEditorHeader from '@/components/Notes/NotesEditorHeader'
 import NotesStudioView from '@/components/Notes/NotesStudioView'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
@@ -369,7 +369,8 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   applyWikilinkSuggestion,
 }) => {
   const { t } = useTranslation(['option', 'common'])
-  const unavailableStateLabel = getDesignSystemState('unavailable').label
+  const unavailableStateLabel =
+    getDesignSystemState('unavailable')?.label ?? UNAVAILABLE_STATE_LABEL
   const unavailableLabel = t('option:notesSearch.linkedNoteUnavailable', {
     defaultValue: unavailableStateLabel
   })

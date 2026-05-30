@@ -17,7 +17,7 @@ import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { useAntdMessage } from '@/hooks/useAntdMessage'
 import { useStoreMessageOption } from "@/store/option"
 import { useTutorialStore } from "@/store/tutorials"
-import { getDesignSystemState } from "@/design-system"
+import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from "@/design-system"
 import { shallow } from "zustand/shallow"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
@@ -380,7 +380,8 @@ const NotesManagerPage: React.FC = () => {
     }
   })
 
-  const unavailableStateLabel = getDesignSystemState('unavailable').label
+  const unavailableStateLabel =
+    getDesignSystemState('unavailable')?.label ?? UNAVAILABLE_STATE_LABEL
 
   const noteRelations = React.useMemo(() => {
     const selectedNormalized = normalizeGraphNoteId(ed.selectedId)

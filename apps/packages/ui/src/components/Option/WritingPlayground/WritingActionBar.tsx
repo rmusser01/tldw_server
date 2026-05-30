@@ -10,7 +10,7 @@ import {
   RefreshCw,
   SlidersHorizontal
 } from "lucide-react"
-import { getDesignSystemState } from "@/design-system"
+import { READY_STATE_LABEL, getDesignSystemState } from "@/design-system"
 import { Alert as DsAlert } from "@/components/ui/primitives"
 import { WRITING_REVISION_PRESETS, getWritingRevisionPreset } from "./writing-revision-presets"
 import type {
@@ -114,7 +114,7 @@ export function WritingActionBar({
     () => getWritingRevisionPreset(activePresetId) ?? WRITING_REVISION_PRESETS[0],
     [activePresetId]
   )
-  const readyLabel = getDesignSystemState("ready").label
+  const readyLabel = getDesignSystemState("ready")?.label ?? READY_STATE_LABEL
   const targetIdentity = useMemo(() => getTargetIdentity(target), [target])
 
   useEffect(() => {

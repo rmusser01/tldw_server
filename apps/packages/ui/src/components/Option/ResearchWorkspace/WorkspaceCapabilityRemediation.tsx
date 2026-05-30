@@ -1,7 +1,11 @@
 import React, { useState } from "react"
 import { AlertTriangle, ExternalLink } from "lucide-react"
 import { Link } from "react-router-dom"
-import { getDesignSystemState } from "@/design-system"
+import {
+  BLOCKED_STATE_LABEL,
+  DEGRADED_STATE_LABEL,
+  getDesignSystemState
+} from "@/design-system"
 import type {
   WorkspaceCapabilitiesResponse,
   WorkspaceCapabilityService,
@@ -92,8 +96,8 @@ const STATE_LABELS: Record<string, string> = {
   not_configured: "Not configured",
   needs_approval: "Needs approval",
   unknown: "Unknown",
-  blocked: getDesignSystemState("blocked").label,
-  degraded: getDesignSystemState("degraded").label,
+  blocked: getDesignSystemState("blocked")?.label ?? BLOCKED_STATE_LABEL,
+  degraded: getDesignSystemState("degraded")?.label ?? DEGRADED_STATE_LABEL,
   external_provider_warning: "External provider warning"
 }
 
@@ -275,7 +279,7 @@ const buildGroundedAnswersItem = (
   return {
     id: "ask_grounded_questions",
     label: "Grounded answers",
-    stateLabel: getDesignSystemState("blocked").label,
+    stateLabel: getDesignSystemState("blocked")?.label ?? BLOCKED_STATE_LABEL,
     reasonLabel,
     guidance,
     impact: "Source-backed chat",
