@@ -33,6 +33,16 @@ import BillingDashboardPage from "../BillingDashboardPage"
 const fetchMock = vi.fn()
 vi.stubGlobal("fetch", fetchMock)
 
+const expectDesignSystemAlertForTitle = async (titleText: string) => {
+  const title = await screen.findByText(titleText)
+  const alert = title.closest('[data-ds-component="Alert"]')
+
+  expect(alert).not.toBeNull()
+  const alertEl = alert as HTMLElement
+  expect(alertEl).toHaveAttribute("role", "alert")
+  return alertEl
+}
+
 describe("BillingDashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -57,11 +67,32 @@ describe("BillingDashboardPage", () => {
 
     render(<BillingDashboardPage />)
 
+    const alert = await expectDesignSystemAlertForTitle("Not Available")
     expect(
-      await screen.findByText("Billing endpoints are not available on this server.")
-    ).toBeInTheDocument()
+      alert
+    ).toHaveTextContent("Billing endpoints are not available on this server.")
     expect(mocks.getBillingOverview).not.toHaveBeenCalled()
     expect(mocks.listAllSubscriptions).not.toHaveBeenCalled()
     expect(mocks.listBillingEvents).not.toHaveBeenCalled()
+  })
+
+  it("renders forbidden guard feedback through the design-system Alert primitive", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        paths: {
+          "/api/v1/admin/billing/overview": {}
+        }
+      })
+    })
+    mocks.getBillingOverview.mockRejectedValueOnce({ status: 403 })
+    mocks.getStorageQuotaSummary.mockResolvedValueOnce({})
+
+    render(<BillingDashboardPage />)
+
+    const alert = await expectDesignSystemAlertForTitle("Access Denied")
+    expect(alert).toHaveTextContent(
+      "You do not have permission to view the billing dashboard."
+    )
   })
 })
