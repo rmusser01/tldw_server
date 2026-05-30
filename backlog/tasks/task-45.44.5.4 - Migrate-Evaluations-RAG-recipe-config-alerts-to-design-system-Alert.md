@@ -34,7 +34,7 @@ Close the remaining Evaluations product-state baseline debt by migrating the two
 - [x] #1 RagAnswerQualityConfig AntD Alert product-state findings are migrated to the shared design-system Alert primitive without changing user-facing behavior.
 - [x] #2 RagRetrievalTuningConfig AntD Alert product-state findings are migrated to the shared design-system Alert primitive without changing user-facing behavior.
 - [x] #3 Matching Evaluations RAG recipe config baseline exceptions are removed and the remaining Evaluations count is documented.
-- [x] #4 Focused tests pass and the design-system verifier confirms the migrated Evaluations RAG config findings do not reappear.
+- [x] #4 Focused tests pass and scoped product-area guard evidence confirms the migrated Evaluations RAG config findings do not reappear.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -52,10 +52,12 @@ Close the remaining Evaluations product-state baseline debt by migrating the two
 - TDD red pass: the focused tests initially failed after dependency install because the alert text existed but `closest('[data-ds-component="Alert"]')` was null for the remaining AntD Alert instances.
 - Migrated `RagAnswerQualityConfig` success, error, and answer-anchor info alerts to `DsAlert` while preserving title/body copy and visibility conditions.
 - Migrated `RagRetrievalTuningConfig` success, error, corpus-scope info, and approved-synthetic-query reminder alerts to `DsAlert` while preserving title/body copy and visibility conditions.
+- Addressed PR review feedback by wrapping the approved-synthetic-query reminder title in `t("evaluations:syntheticQueriesReviewReminder", ...)` for i18n consistency.
 - Removed the 7 matching Evaluations RAG recipe config exceptions from `design-system-product-state-baseline.json`; the Evaluations product-area count is now 0.
 - Verification: `bun run test src/components/Option/Evaluations/tabs/__tests__/RagAnswerQualityConfig.test.tsx src/components/Option/Evaluations/tabs/__tests__/RagRetrievalTuningConfig.test.tsx --maxWorkers=1 --no-file-parallelism` -> 2 files passed, 14 tests passed. LocalStorage experimental warnings only.
 - Verification: `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` -> exit 0 with no diagnostics.
-- Verification: `bun run verify:design-system-state` -> exit 1 from unrelated global baseline debt, but Evaluations no longer appears in the product-area table; baseline exceptions are 193 and stale Settings/account-security entries remain unrelated.
+- Verification: scoped product-state guard over `src/components/Option/Evaluations` using `runGuardOnSources` -> `No product-state guard issues found`.
+- Full repo guard caveat: `bun run verify:design-system-state` remains blocked by unrelated global baseline debt outside Evaluations, so this PR records the scoped product-area result instead of claiming repo-wide baseline closure.
 - Verification: `git diff --check` -> clean.
 - Bandit skipped: touched implementation is TS/TSX plus JSON/Backlog metadata; no Python backend code changed in this slice.
 - PR opened: https://github.com/rmusser01/tldw_server/pull/2138.
@@ -67,9 +69,9 @@ Close the remaining Evaluations product-state baseline debt by migrating the two
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Migrated the remaining Evaluations RAG recipe configuration product-state alerts from AntD Alert to the shared design-system Alert primitive. The change covers `RagAnswerQualityConfig` and `RagRetrievalTuningConfig`, preserving the existing success, error, and info copy while moving the state UI onto the shared primitive.
 
-Added focused tests that assert the RAG recipe config alert messages render inside `[data-ds-component="Alert"]`, then removed the 7 matching Evaluations baseline exceptions. The design-system verifier still exits non-zero because of unrelated repo-wide baseline debt, but Evaluations is now absent from the product-area table, which means this area is at 0 current exceptions.
+Added focused tests that assert the RAG recipe config alert messages render inside `[data-ds-component="Alert"]`, wrapped the remaining approved-synthetic-query reminder title in the existing i18n helper, and removed the 7 matching Evaluations baseline exceptions. A scoped product-state guard over `src/components/Option/Evaluations` now reports `No product-state guard issues found`.
 
-Verification recorded: focused Vitest passed with 14 tests, TypeScript passed with no diagnostics, `git diff --check` was clean, and Bandit was skipped because this slice did not touch Python code.
+Verification recorded: focused Vitest passed with 14 tests, TypeScript passed with no diagnostics, `git diff --check` was clean, and Bandit was skipped because this slice did not touch Python code. The full repo design-system verifier remains blocked by unrelated baseline debt outside Evaluations.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

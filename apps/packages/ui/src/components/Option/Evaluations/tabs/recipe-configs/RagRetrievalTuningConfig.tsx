@@ -1794,7 +1794,10 @@ export const RagRetrievalTuningConfig: React.FC<Props> = ({
         </div>
         <DsAlert
           variant="info"
-          title="Approved synthetic queries should be reviewed before they count toward recommendations."
+          title={t("evaluations:syntheticQueriesReviewReminder", {
+            defaultValue:
+              "Approved synthetic queries should be reviewed before they count toward recommendations."
+          })}
         />
       </div>
     </div>
