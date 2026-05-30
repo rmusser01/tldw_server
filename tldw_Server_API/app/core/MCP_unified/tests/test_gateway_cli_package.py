@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -155,8 +156,9 @@ def test_gateway_cli_show_preset_reports_full_builtin_profile(
     assert preset["version"] == profile["preset_version"]
     assert profile["id"] == "project-researcher"
     assert profile["name"] == "Project Researcher"
-    assert profile["created_at"] == "2026-05-27T00:00:00Z"
-    assert profile["updated_at"] == "2026-05-27T00:00:00Z"
+    expected_timestamp = datetime(2026, 5, 27, tzinfo=timezone.utc)
+    assert _parse_cli_timestamp(profile["created_at"]) == expected_timestamp
+    assert _parse_cli_timestamp(profile["updated_at"]) == expected_timestamp
     assert policy["capabilities"] == ["code_search", "filesystem.read", "docs.read"]
     assert policy["resource_constraints"] == {}
     assert profile["provenance"]["source"] == "builtin_preset"
@@ -191,3 +193,9 @@ def test_gateway_cli_project_script_is_registered() -> None:
         pyproject["project"]["scripts"]["mcp-unified-gateway"]
         == "mcp_unified.gateway.cli:main"
     )
+
+
+def _parse_cli_timestamp(value: str) -> datetime:
+    """Parse a JSON timestamp without depending on a specific UTC suffix."""
+
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))

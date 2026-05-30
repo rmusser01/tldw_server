@@ -36,12 +36,13 @@ Review follow-up:
 - Rebased onto origin/dev at 8b5fca0e68.
 - Renumbered this task from TASK-567 to TASK-568 after the rebase because origin/dev now contains a different TASK-567.
 - Verified Qodo's version/date drift finding against current code and fixed it by deriving PRESET_VERSION and PRESET_CREATED_AT from PRESET_RELEASE_DATE.
-- CodeRabbit had no actionable completed review findings at the time of the fix; its only visible comment was still a processing/status comment. Gemini was quota-limited.
+- Verified CodeRabbit's timestamp string-literal test finding against current code and fixed it by parsing CLI timestamps into aware datetimes before asserting equality. Gemini was quota-limited.
 
 Verification:
 - source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py -q (baseline: 6 passed; initial show-preset red path: 2 failed before implementation; after implementation: 8 passed)
 - source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py -q (timestamp determinism red path: 2 failed before fixed template timestamps; after implementation: 19 passed)
 - source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py::test_builtin_preset_template_timestamps_are_version_stable -q (red: failed before PRESET_RELEASE_DATE; green: 1 passed)
+- source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py::test_gateway_cli_show_preset_reports_full_builtin_profile -q (passes with timestamp parsing)
 - source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py -q (66 passed)
 - source .venv/bin/activate && python -m ruff check mcp_unified/gateway/cli.py mcp_unified/profiles/presets.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py (passed)
 - source .venv/bin/activate && python -m bandit -r mcp_unified/gateway mcp_unified/profiles -f json -o /tmp/bandit_mcp_stage4j_preset_details.json (0 findings)
