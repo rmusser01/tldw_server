@@ -40,7 +40,7 @@ Replace RuntimeConfigPage's forbidden and not-available admin guard AntD Alerts 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated RuntimeConfigPage forbidden and not-available guard feedback from AntD Alert to the shared design-system Alert primitive, added focused regression coverage for both guard states, and removed the two obsolete RuntimeConfigPage baseline exceptions. Focused tests, guard unit coverage, and UI TypeScript pass; the full design-state verifier remains blocked by unrelated current-dev product-state drift outside this slice.
+Migrated RuntimeConfigPage forbidden and not-available guard feedback from AntD Alert to the shared design-system Alert primitive, added focused regression coverage for both guard states, and removed the two obsolete RuntimeConfigPage baseline exceptions. Focused tests, guard unit coverage, and UI TypeScript pass; the full design-state verifier remains blocked by unrelated current-dev product-state drift outside this slice. PR: https://github.com/rmusser01/tldw_server/pull/2145.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
