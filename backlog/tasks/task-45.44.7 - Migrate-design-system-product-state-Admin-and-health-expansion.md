@@ -87,6 +87,16 @@ documentation:
   Verifier evidence:
     - scoped verifier log had no ApiKeyManagementPage findings
     - full verifier remains blocked by unrelated current-dev findings in IntegrationPolicyPanel, WritingActionBar, Notes, and ResearchWorkspace plus stale IntegrationPolicyPanel baseline entries outside this slice
+- |-
+  TASK-45.44.7.12 / PR #2165 migrated RateLimitingPage access denied, not-available, empty policy, empty coverage, and rate-limits unavailable feedback from AntD Alert to the design-system Alert primitive.
+  Baseline file evidence:
+    - total baseline rows: 170 -> 165
+    - Admin path rows: 12 -> 7
+    - RateLimitingPage target rows: 5 -> 0
+
+  Verifier evidence:
+    - scoped verifier log had no RateLimitingPage findings
+    - full verifier remains blocked by unrelated current-dev findings in IntegrationPolicyPanel, WritingActionBar, Notes, and ResearchWorkspace plus stale IntegrationPolicyPanel baseline entries outside this slice
 parent_task_id: TASK-45.44
 priority: medium
 ---
