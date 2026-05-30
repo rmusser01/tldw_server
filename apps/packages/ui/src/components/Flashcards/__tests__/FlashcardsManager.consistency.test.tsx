@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   useDecksQuery: vi.fn(),
   decks: [{ id: 1, name: "Biology" }],
-  locationKey: "initial-location"
+  locationKey: "initial-location",
+  translationKeys: [] as string[]
 }))
 
 vi.mock("react-i18next", () => ({
@@ -20,6 +21,7 @@ vi.mock("react-i18next", () => ({
             defaultValue?: string
           }
     ) => {
+      mocks.translationKeys.push(key)
       if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
       if (defaultValueOrOptions?.defaultValue) {
         return defaultValueOrOptions.defaultValue.replace(
@@ -64,6 +66,7 @@ vi.mock("../tabs", () => ({
       <button onClick={props.onNavigateToCreate}>Route Create</button>
       <button onClick={() => props.onReviewDeckChange(12)}>Select Deck 12</button>
       <button onClick={() => props.onReviewDeckChange(21)}>Select Deck 21</button>
+      <button onClick={() => props.onReviewDeckChange(undefined)}>Clear Deck</button>
       <button onClick={() => props.onNavigateToManageDeck?.(12)}>Route Manage Deck 12</button>
       <button onClick={() => props.onNavigateToManageDeck?.(21)}>Route Manage Deck 21</button>
       <button onClick={() => props.onNavigateToSchedulerDeck?.(12)}>Route Scheduler Deck 12</button>
@@ -79,14 +82,22 @@ vi.mock("../tabs", () => ({
     initialDeckId?: number
     initialDeckHandoffKey?: string | null
     initialShowWorkspaceDecks?: boolean
+    createInitialDeckId?: number | null
+    createInitialShowWorkspaceDecks?: boolean
+    onCreateHandoffConsumed?: () => void
   }) => (
     <div data-testid="mock-manage-tab">
       <button onClick={props.onNavigateToImport}>Route Import</button>
       <button onClick={() => props.onReviewCard({ deck_id: 21 })}>Review Managed Card 21</button>
+      <button onClick={() => props.onCreateHandoffConsumed?.()}>Consume Create Handoff</button>
       <span data-testid="mock-open-create-signal">{String(props.openCreateSignal ?? 0)}</span>
       <span data-testid="mock-manage-initial-deck-id">{String(props.initialDeckId ?? "")}</span>
       <span data-testid="mock-manage-handoff-key">{String(props.initialDeckHandoffKey ?? "")}</span>
       <span data-testid="mock-manage-show-workspace">{String(props.initialShowWorkspaceDecks ?? false)}</span>
+      <span data-testid="mock-create-initial-deck-id">{String(props.createInitialDeckId ?? "")}</span>
+      <span data-testid="mock-create-show-workspace">
+        {String(props.createInitialShowWorkspaceDecks ?? false)}
+      </span>
     </div>
   ),
   ImportExportTab: (props: {
@@ -169,6 +180,7 @@ describe("FlashcardsManager consistency standards", () => {
     mocks.navigate.mockReset()
     mocks.decks = [{ id: 1, name: "Biology" }]
     mocks.locationKey = "initial-location"
+    mocks.translationKeys = []
     mocks.useDecksQuery.mockClear()
     mocks.useDecksQuery.mockImplementation(() => ({
       data: mocks.decks,
@@ -195,7 +207,7 @@ describe("FlashcardsManager consistency standards", () => {
     )
   })
 
-  it("opens Transfer tab first when URL contains generate intent", () => {
+  it("opens Import / Export tab first when URL contains generate intent", () => {
     window.history.replaceState(
       {},
       "",
@@ -383,32 +395,34 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-scheduler-handoff-key")).toHaveTextContent("review:21")
   })
 
-  it("uses Study/Manage/Transfer/Scheduler tab labels", () => {
+  it("uses Study/Manage/Import Export/Templates/Scheduler tab labels", () => {
     window.history.replaceState({}, "", "/flashcards")
     render(<FlashcardsManager />)
 
     expect(screen.getByText("Study")).toBeInTheDocument()
     expect(screen.getByText("Manage")).toBeInTheDocument()
-    expect(screen.getByText("Transfer")).toBeInTheDocument()
+    expect(screen.getByText("Import / Export")).toBeInTheDocument()
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.getByText("Scheduler")).toBeInTheDocument()
+    expect(mocks.translationKeys).toContain("option:flashcards.importExport")
+    expect(mocks.translationKeys).not.toContain("option:flashcards.tabImportExport")
   })
 
-  it("defaults empty accounts to Study and keeps transfer available without implying LLM-only import", () => {
+  it("defaults empty accounts to Study and keeps import/export available without implying LLM-only import", () => {
     mocks.decks = []
     window.history.replaceState({}, "", "/flashcards")
 
     render(<FlashcardsManager />)
 
     expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
-    expect(screen.getByText("Transfer")).toBeInTheDocument()
+    expect(screen.getByText("Import / Export")).toBeInTheDocument()
     expect(screen.queryByText("LLM")).not.toBeInTheDocument()
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
     expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
 
-  it("still opens Transfer first for explicit generate and study-pack intents", () => {
+  it("still opens Import / Export first for explicit generate and study-pack intents", () => {
     mocks.decks = []
     window.history.replaceState(
       {},
@@ -490,6 +504,62 @@ describe("FlashcardsManager consistency standards", () => {
     fireEvent.click(screen.getByText("Route Create"))
     expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
     expect(screen.getByTestId("mock-open-create-signal")).toHaveTextContent("1")
+  })
+
+  it("passes the selected Study deck to the Manage create drawer handoff", () => {
+    window.history.replaceState({}, "", "/flashcards?tab=review&deck_id=12")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Route Create"))
+
+    expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-open-create-signal")).toHaveTextContent("1")
+    expect(screen.getByTestId("mock-create-initial-deck-id")).toHaveTextContent("12")
+  })
+
+  it("does not resurrect a URL Study deck after the live Study selection is cleared", () => {
+    window.history.replaceState({}, "", "/flashcards?tab=review&deck_id=12")
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-review-deck-id")).toHaveTextContent("12")
+    fireEvent.click(screen.getByText("Clear Deck"))
+    expect(screen.getByTestId("mock-review-deck-id")).toHaveTextContent("")
+
+    fireEvent.click(screen.getByText("Route Create"))
+
+    expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-create-initial-deck-id")).toBeEmptyDOMElement()
+  })
+
+  it("does not keep URL workspace visibility after the live Study selection is cleared", () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/flashcards?tab=review&deck_id=12&include_workspace_items=1"
+    )
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-review-deck-id")).toHaveTextContent("12")
+    fireEvent.click(screen.getByText("Clear Deck"))
+    expect(screen.getByTestId("mock-review-deck-id")).toHaveTextContent("")
+
+    fireEvent.click(screen.getByText("Route Create"))
+
+    expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-create-initial-deck-id")).toBeEmptyDOMElement()
+    expect(screen.getByTestId("mock-create-show-workspace")).toHaveTextContent("false")
+  })
+
+  it("clears the create drawer Study deck handoff after Manage consumes it", () => {
+    window.history.replaceState({}, "", "/flashcards?tab=review&deck_id=12")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Route Create"))
+    expect(screen.getByTestId("mock-create-initial-deck-id")).toHaveTextContent("12")
+
+    fireEvent.click(screen.getByText("Consume Create Handoff"))
+
+    expect(screen.getByTestId("mock-create-initial-deck-id")).toHaveTextContent("")
   })
 
   it("disables quiz CTA when handoff IDs are invalid", () => {

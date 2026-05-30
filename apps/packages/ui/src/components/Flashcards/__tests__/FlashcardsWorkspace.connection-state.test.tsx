@@ -26,17 +26,19 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   scrollToServerCard: vi.fn(),
   checkOnce: vi.fn(),
-  setupRequiredLabel: "Registry Setup Required"
+  setupRequiredLabel: "Registry Setup Required",
+  translationKeys: [] as string[]
 }))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
-      _key: string,
+      key: string,
       fallbackOrOptions?: string | { defaultValue?: string }
     ) => {
+      mocks.translationKeys.push(key)
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-      return fallbackOrOptions?.defaultValue ?? _key
+      return fallbackOrOptions?.defaultValue ?? key
     }
   })
 }))
@@ -105,6 +107,7 @@ describe("FlashcardsWorkspace connection states", () => {
     mocks.scrollToServerCard.mockReset()
     mocks.checkOnce.mockReset()
     mocks.setupRequiredLabel = "Registry Setup Required"
+    mocks.translationKeys = []
     vi.mocked(getDesignSystemState).mockClear()
   })
 
@@ -154,9 +157,11 @@ describe("FlashcardsWorkspace connection states", () => {
     expect(screen.getByText("Study workspace")).toBeInTheDocument()
 
     const modes = within(screen.getByRole("navigation", { name: "Flashcards modes" }))
-    for (const mode of ["Study", "Manage", "Transfer", "Templates", "Scheduler"]) {
+    for (const mode of ["Study", "Manage", "Import / Export", "Templates", "Scheduler"]) {
       expect(modes.getByText(mode)).toBeInTheDocument()
     }
+    expect(mocks.translationKeys).toContain("option:flashcards.importExport")
+    expect(mocks.translationKeys).not.toContain("option:flashcards.tabImportExport")
   })
 
   it("keeps demo preview visible while surfacing unreachable guidance", () => {

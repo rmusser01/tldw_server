@@ -77,6 +77,7 @@ interface FlashcardCreateDrawerProps {
   onClose: () => void
   decks?: Deck[]
   decksLoading?: boolean
+  initialDeckId?: number | null
   onSuccess?: () => void
 }
 
@@ -92,6 +93,7 @@ export const FlashcardCreateDrawer: React.FC<
   onClose,
   decks: propDecks,
   decksLoading: propDecksLoading,
+  initialDeckId = null,
   onSuccess,
   includeWorkspaceItems,
   workspaceId
@@ -219,6 +221,9 @@ export const FlashcardCreateDrawer: React.FC<
   React.useEffect(() => {
     if (open) {
       form.resetFields()
+      if (initialDeckId != null) {
+        form.setFieldsValue({ deck_id: initialDeckId })
+      }
       setShowPreview(false)
       setShowInlineCreate(false)
       setTemplateValueModalOpen(false)
@@ -227,7 +232,7 @@ export const FlashcardCreateDrawer: React.FC<
       setInlineDeckName("")
       inlineSchedulerDraft.resetToDefaults()
     }
-  }, [form, inlineSchedulerDraft.resetToDefaults, open])
+  }, [form, initialDeckId, inlineSchedulerDraft.resetToDefaults, open])
 
   // Create new deck (inline)
   const handleInlineCreateDeck = async () => {

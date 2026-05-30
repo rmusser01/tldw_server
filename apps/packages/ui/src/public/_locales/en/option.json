@@ -1778,6 +1778,9 @@
   "flashcards_importApkgMissingFile": {
     "message": "Select an APKG file before importing."
   },
+  "flashcards_transferSummaryTitle": {
+    "message": "Import/export summary"
+  },
   "flashcards_transferSummaryFormatsValue": {
     "message": "Import: CSV, TSV, JSON, JSONL, APKG · Export: TSV, CSV, APKG"
   },

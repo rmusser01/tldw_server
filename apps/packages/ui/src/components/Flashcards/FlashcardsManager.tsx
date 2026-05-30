@@ -98,6 +98,10 @@ export const FlashcardsManager: React.FC = () => {
     key: string
     showWorkspaceDecks: boolean
   } | null>(null)
+  const [createDeckHandoff, setCreateDeckHandoff] = React.useState<{
+    deckId: number | null
+    showWorkspaceDecks: boolean
+  } | null>(null)
   const [schedulerDeckHandoff, setSchedulerDeckHandoff] = React.useState<{
     deckId: number
     key: string
@@ -113,8 +117,12 @@ export const FlashcardsManager: React.FC = () => {
   }, [])
   const clearDeckHandoffs = React.useCallback(() => {
     setManageDeckHandoff(null)
+    setCreateDeckHandoff(null)
     setSchedulerDeckHandoff(null)
     setExportDeckHandoff(null)
+  }, [])
+  const clearCreateDeckHandoff = React.useCallback(() => {
+    setCreateDeckHandoff(null)
   }, [])
   const discardSchedulerChanges = React.useCallback(() => {
     setSchedulerDirty(false)
@@ -181,9 +189,15 @@ export const FlashcardsManager: React.FC = () => {
   )
 
   const routeToCreateEntryPoint = React.useCallback(() => {
+    const createDeckId = reviewDeckId ?? null
+    setCreateDeckHandoff({
+      deckId: createDeckId,
+      showWorkspaceDecks:
+        createDeckId != null && currentStudyIntent?.forceShowWorkspaceItems === true
+    })
     setActiveTab("cards")
     setOpenCreateSignal((prev) => prev + 1)
-  }, [])
+  }, [currentStudyIntent?.forceShowWorkspaceItems, reviewDeckId])
   const navigateToManageDeck = React.useCallback(
     (deckId: number) => {
       applyReviewDeckChange(deckId)
@@ -343,12 +357,15 @@ export const FlashcardsManager: React.FC = () => {
                   manageDeckHandoff?.showWorkspaceDecks ??
                   (currentTab === "cards" ? (currentStudyIntent?.forceShowWorkspaceItems ?? false) : false)
                 }
+                createInitialDeckId={createDeckHandoff?.deckId ?? null}
+                createInitialShowWorkspaceDecks={createDeckHandoff?.showWorkspaceDecks ?? false}
+                onCreateHandoffConsumed={clearCreateDeckHandoff}
               />
             )
           },
           {
             key: "importExport",
-            label: t("option:flashcards.tabTransfer", { defaultValue: "Transfer" }),
+            label: t("option:flashcards.importExport", { defaultValue: "Import / Export" }),
             children: (
               <ImportExportTab
                 generateIntent={currentGenerateIntent}

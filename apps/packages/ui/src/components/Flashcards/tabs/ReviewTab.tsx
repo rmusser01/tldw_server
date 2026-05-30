@@ -76,6 +76,7 @@ import { buildQuizAssessmentRouteFromFlashcards } from "@/services/tldw/quiz-fla
 import { useFlashcardsShortcutHintDensity } from "../hooks/useFlashcardsShortcutHintDensity"
 
 const { Text, Title } = Typography
+const CRAM_AVAILABILITY_LIMIT = 1
 
 interface ReviewTabProps {
   onNavigateToCreate: () => void
@@ -205,10 +206,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     ...(directPathVisibilityOptions ?? {})
   })
   const cramTagFilter = cramTag.trim() || undefined
-  const cramQueueQuery = useCramQueueQuery(reviewDeckId, cramTagFilter, {
-    enabled: reviewMode === "cram",
-    ...(directPathVisibilityOptions ?? {})
-  })
   const reviewMutation = useReviewFlashcardMutation()
   const updateMutation = useUpdateFlashcardMutation()
   const resetSchedulingMutation = useResetFlashcardSchedulingMutation()
@@ -219,6 +216,26 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const hasCardsQuery = useHasCardsQuery(directPathVisibilityOptions)
   const nextDueQuery = useNextDueQuery(reviewDeckId, directPathVisibilityOptions)
   const endReviewSessionMutation = useEndFlashcardReviewSessionMutation()
+  const activeCramTagFilter = reviewMode === "cram" ? cramTagFilter : undefined
+  const dueModeActiveCard = localOverrideCard ?? reviewOverrideCard ?? reviewQuery.data
+  const isReviewCardLoading =
+    reviewMode === "due" && (reviewQuery.isLoading || reviewQuery.isFetching)
+  const isDueModeCaughtUp =
+    reviewMode === "due" &&
+    !dueModeActiveCard &&
+    !isReviewCardLoading &&
+    hasCardsQuery.data === true &&
+    dueCountsQuery.data != null &&
+    (dueCountsQuery.data.due ?? 0) === 0 &&
+    (dueCountsQuery.data.new ?? 0) === 0 &&
+    (dueCountsQuery.data.learning ?? 0) === 0
+  const shouldLoadCramQueue =
+    reviewMode === "cram" || (isActive && isDueModeCaughtUp)
+  const cramQueueQuery = useCramQueueQuery(reviewDeckId, activeCramTagFilter, {
+    enabled: shouldLoadCramQueue,
+    ...(reviewMode === "cram" ? {} : { limit: CRAM_AVAILABILITY_LIMIT }),
+    ...(directPathVisibilityOptions ?? {})
+  })
   const nextDueInfo = nextDueQuery.data
   const nextDueRelativeLabel = nextDueInfo?.nextDueAt
     ? formatFlashcardRelativeTime(nextDueInfo.nextDueAt)
@@ -227,16 +244,15 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     ? formatFlashcardLongDateTime(nextDueInfo.nextDueAt)
     : null
   const cramQueue = cramQueueQuery.data || []
+  const hasCramPracticeCards = cramQueue.length > 0
   const cramQueueCard =
     reviewMode === "cram" && cramQueueIndex < cramQueue.length
       ? cramQueue[cramQueueIndex]
       : null
   const activeCard =
-    localOverrideCard ??
-    reviewOverrideCard ??
-    (reviewMode === "cram" ? cramQueueCard : reviewQuery.data)
-  const isReviewCardLoading =
-    reviewMode === "due" && (reviewQuery.isLoading || reviewQuery.isFetching)
+    reviewMode === "cram"
+      ? localOverrideCard ?? reviewOverrideCard ?? cramQueueCard
+      : dueModeActiveCard
   const isCramQueueLoading =
     reviewMode === "cram" && (cramQueueQuery.isLoading || cramQueueQuery.isFetching)
   const deckDashboardAnalyticsQuery = useReviewAnalyticsSummaryQuery(null, {
@@ -288,9 +304,9 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     () => [
       reviewMode,
       reviewDeckId != null ? `deck:${reviewDeckId}` : "global",
-      cramTagFilter ? `tag:${cramTagFilter}` : "untagged"
+      activeCramTagFilter ? `tag:${activeCramTagFilter}` : "untagged"
     ].join(":"),
-    [cramTagFilter, reviewDeckId, reviewMode]
+    [activeCramTagFilter, reviewDeckId, reviewMode]
   )
   const activeCardSource = React.useMemo(
     () => (activeCard ? getFlashcardSourceMeta(activeCard) : null),
@@ -1583,10 +1599,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                       </Button>
                     </div>
 
-                    {renderUndoRatingAction()}
                   </div>
                 </>
               )}
+              {renderUndoRatingAction()}
             </div>
           </div>
         </Card>
@@ -1816,19 +1832,21 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
 
                   {renderUndoRatingAction()}
                   <Space wrap>
-                    <Button
-                      type="primary"
-                      onClick={() => {
-                        setReviewMode("cram")
-                        setCramQueueIndex(0)
-                        setSelectedStudySessionId(null)
-                      }}
-                      data-testid="flashcards-review-practice-again"
-                    >
-                      {t("option:flashcards.practiceAgain", {
-                        defaultValue: "Practice again"
-                      })}
-                    </Button>
+                    {hasCramPracticeCards && (
+                      <Button
+                        type="primary"
+                        onClick={() => {
+                          setReviewMode("cram")
+                          setCramQueueIndex(0)
+                          setSelectedStudySessionId(null)
+                        }}
+                        data-testid="flashcards-review-practice-again"
+                      >
+                        {t("option:flashcards.practiceAgain", {
+                          defaultValue: "Practice again"
+                        })}
+                      </Button>
+                    )}
                     <Button onClick={onNavigateToCreate}>
                       {t("option:flashcards.createMoreCards", {
                         defaultValue: "Create card"

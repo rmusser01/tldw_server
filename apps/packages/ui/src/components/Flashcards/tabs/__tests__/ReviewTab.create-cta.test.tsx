@@ -401,6 +401,9 @@ describe("ReviewTab create CTA visibility", () => {
     )
 
     expect(screen.queryByTestId("flashcards-review-create-cta")).not.toBeInTheDocument()
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: false })
+    )
     expect(screen.getByRole("combobox")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Show answer (Space)" })).toBeInTheDocument()
     const topbarPrimaryButtons = screen
@@ -524,6 +527,9 @@ describe("ReviewTab create CTA visibility", () => {
     )
 
     expect(useReviewAnalyticsSummaryQuery).toHaveBeenCalledWith(11, undefined)
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: false })
+    )
     expect(useReviewAnalyticsSummaryQuery).toHaveBeenCalledWith(
       null,
       expect.objectContaining({ enabled: false })
@@ -612,6 +618,32 @@ describe("ReviewTab create CTA visibility", () => {
     vi.mocked(useDueCountsQuery).mockReturnValue({
       data: { due: 0, new: 0, learning: 0, total: 0 }
     } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({
+      data: [
+        {
+          uuid: "cram-card-snapshot",
+          deck_id: 11,
+          front: "Cram snapshot front",
+          back: "Cram snapshot back",
+          notes: null,
+          extra: null,
+          is_cloze: false,
+          tags: [],
+          ef: 2.5,
+          interval_days: 1,
+          repetitions: 1,
+          lapses: 0,
+          due_at: null,
+          last_reviewed_at: null,
+          last_modified: null,
+          deleted: false,
+          client_id: "test",
+          version: 1,
+          model_type: "basic",
+          reverse: false
+        }
+      ]
+    } as any)
     vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
 
     render(
@@ -698,10 +730,39 @@ describe("ReviewTab create CTA visibility", () => {
     })
   })
 
-  it("offers completion actions for practice again and selected-deck scheduling", () => {
+  it("does not offer practice again when caught up without cram cards", () => {
     vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
     vi.mocked(useDueCountsQuery).mockReturnValue({
       data: { due: 0, new: 0, learning: 0, total: 0 }
+    } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({ data: [] } as any)
+    vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: true, limit: 1 })
+    )
+    expect(screen.queryByRole("button", { name: /Practice again/i })).not.toBeInTheDocument()
+  })
+
+  it("keeps practice again hidden while caught-up cram availability is loading", () => {
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 0, new: 0, learning: 0, total: 0 }
+    } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isFetching: true
     } as any)
     vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
 
@@ -715,13 +776,99 @@ describe("ReviewTab create CTA visibility", () => {
       />
     )
 
-    fireEvent.click(screen.getByTestId("flashcards-review-practice-again"))
-    expect(screen.getByTestId("flashcards-review-cram-tag")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("flashcards-review-open-scheduler"))
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: true, limit: 1 })
+    )
+    expect(screen.queryByRole("button", { name: /Practice again/i })).not.toBeInTheDocument()
+  })
 
+  it("offers completion actions for practice again and selected-deck scheduling", () => {
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 0, new: 0, learning: 0, total: 0 }
+    } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({
+      data: [
+        {
+          uuid: "cram-card-completion",
+          deck_id: 11,
+          front: "Cram completion front",
+          back: "Cram completion back",
+          notes: null,
+          extra: null,
+          is_cloze: false,
+          tags: [],
+          ef: 2.5,
+          interval_days: 1,
+          repetitions: 1,
+          lapses: 0,
+          due_at: null,
+          last_reviewed_at: null,
+          last_modified: null,
+          deleted: false,
+          client_id: "test",
+          version: 1,
+          model_type: "basic",
+          reverse: false
+        }
+      ]
+    } as any)
+    vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: true, limit: 1 })
+    )
+
+    fireEvent.click(screen.getByTestId("flashcards-review-open-scheduler"))
     const schedulerRoute = navigateMock.mock.calls.at(-1)?.[0]
     expect(schedulerRoute).toEqual(expect.stringContaining("tab=scheduler"))
     expect(schedulerRoute).toEqual(expect.stringContaining("deck_id=11"))
+
+    fireEvent.click(screen.getByTestId("flashcards-review-practice-again"))
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.not.objectContaining({ limit: 1 })
+    )
+    expect(screen.getByTestId("flashcards-review-cram-tag")).toBeInTheDocument()
+  })
+
+  it("does not apply a hidden cram tag to caught-up due-mode availability probes", () => {
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 0, new: 0, learning: 0, total: 0 }
+    } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({ data: [] } as any)
+    vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    fireEvent.click(screen.getByText("Cram"))
+    fireEvent.change(screen.getByTestId("flashcards-review-cram-tag"), {
+      target: { value: "biology" }
+    })
+    fireEvent.click(screen.getByText("Due only"))
+
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[1]).toBeUndefined()
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: true, limit: 1 })
+    )
   })
 
   it("distinguishes scheduled due cards from the available study queue", () => {

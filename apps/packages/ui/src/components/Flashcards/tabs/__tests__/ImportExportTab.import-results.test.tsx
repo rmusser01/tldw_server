@@ -964,6 +964,8 @@ describe("ImportExportTab import result details", () => {
 
     render(<ImportExportTab />)
 
+    expect(screen.queryByText("Transfer summary")).not.toBeInTheDocument()
+    expect(screen.getByText("Import/export summary")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-transfer-summary")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-transfer-summary-formats")).toHaveTextContent(
       "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"

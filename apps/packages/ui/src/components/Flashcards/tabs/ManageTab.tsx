@@ -109,6 +109,9 @@ interface ManageTabProps {
   initialDeckId?: number
   initialDeckHandoffKey?: string | null
   initialShowWorkspaceDecks?: boolean
+  createInitialDeckId?: number | null
+  createInitialShowWorkspaceDecks?: boolean
+  onCreateHandoffConsumed?: () => void
 }
 
 export const buildFlashcardsWorkspaceVisibilityOptions = (
@@ -132,7 +135,10 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   isActive,
   initialDeckId,
   initialDeckHandoffKey = null,
-  initialShowWorkspaceDecks = false
+  initialShowWorkspaceDecks = false,
+  createInitialDeckId = null,
+  createInitialShowWorkspaceDecks = false,
+  onCreateHandoffConsumed
 }) => {
   const { t } = useTranslation(["option", "common"])
   const qc = useQueryClient()
@@ -1167,12 +1173,41 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
   // Create drawer
   const [createOpen, setCreateOpen] = React.useState(false)
+  const [createDrawerInitialDeckId, setCreateDrawerInitialDeckId] =
+    React.useState<number | null>(null)
+  const handledOpenCreateSignalRef = React.useRef<number | undefined>(undefined)
 
   React.useEffect(() => {
-    if (!openCreateSignal) return
+    if (!openCreateSignal || handledOpenCreateSignalRef.current === openCreateSignal) return
+    handledOpenCreateSignalRef.current = openCreateSignal
     setViewMode("cards")
+    setShowWorkspaceDecks(createInitialShowWorkspaceDecks)
+    setSelectedWorkspaceId(null)
+    if (createInitialDeckId != null) {
+      setMDeckId(createInitialDeckId)
+      setPage(1)
+    }
+    setCreateDrawerInitialDeckId(createInitialDeckId ?? null)
     setCreateOpen(true)
-  }, [openCreateSignal])
+    onCreateHandoffConsumed?.()
+  }, [
+    createInitialDeckId,
+    createInitialShowWorkspaceDecks,
+    onCreateHandoffConsumed,
+    openCreateSignal
+  ])
+
+  const openManualCreateDrawer = React.useCallback(() => {
+    setCreateDrawerInitialDeckId(null)
+    onCreateHandoffConsumed?.()
+    setCreateOpen(true)
+  }, [onCreateHandoffConsumed])
+
+  const closeCreateDrawer = React.useCallback(() => {
+    setCreateOpen(false)
+    setCreateDrawerInitialDeckId(null)
+    onCreateHandoffConsumed?.()
+  }, [onCreateHandoffConsumed])
 
   // Quick actions: duplicate
   const duplicateCard = async (card: Flashcard) => {
@@ -2056,7 +2091,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                         <>
                           <Button
                             type="primary"
-                            onClick={() => setCreateOpen(true)}
+                            onClick={openManualCreateDrawer}
                             data-testid="flashcards-manage-empty-create-cta"
                           >
                             {t("option:flashcards.noCardsCreateCta", {
@@ -2618,9 +2653,10 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       {/* Create Drawer */}
       <FlashcardCreateDrawer
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={closeCreateDrawer}
         decks={decksQuery.data || []}
         decksLoading={decksQuery.isLoading}
+        initialDeckId={createDrawerInitialDeckId}
         includeWorkspaceItems={workspaceVisibilityOptions.includeWorkspaceItems}
         workspaceId={workspaceVisibilityOptions.workspaceId}
       />
@@ -2634,7 +2670,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             size="large"
             icon={<Plus className="size-5" />}
             className="fixed bottom-6 right-6 z-50 shadow-lg !w-14 !h-14 flex items-center justify-center"
-            onClick={() => setCreateOpen(true)}
+            onClick={openManualCreateDrawer}
             data-testid="flashcards-fab-create"
           />
         </Tooltip>
