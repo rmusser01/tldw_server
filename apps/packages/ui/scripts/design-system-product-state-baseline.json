@@ -44,28 +44,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/BillingDashboardPage.tsx:Alert#antd-alert-billingdashboardpage-type-error-access-denied-1jl5m6e",
-    "path": "src/components/Option/Admin/BillingDashboardPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/BillingDashboardPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Admin/BillingDashboardPage.tsx:Alert#antd-alert-billingdashboardpage-type-warning-not-availab-15ux9fb",
-    "path": "src/components/Option/Admin/BillingDashboardPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/BillingDashboardPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Admin/DataOpsPage.tsx:Alert#antd-alert-dataopspage-type-error-access-denied-you-don-q5np3m",
     "path": "src/components/Option/Admin/DataOpsPage.tsx",
     "rule": "antd-product-state-import",
