@@ -25,6 +25,10 @@ Continue the tldw_server WebUI design-system migration by routing the Watchlists
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 ReportBuilderDrawer readiness success fallback uses READY_STATE_LABEL from the design-system state registry.
+- [x] #2 Focused ReportBuilderDrawer coverage proves the readiness label comes from the registry contract.
+- [x] #3 The matching canonical-state-label baseline entry is removed.
+- [x] #4 Verification results and inherited TypeScript baseline debt are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -41,10 +45,10 @@ Routed ReportBuilderDrawer's readiness success fallback through READY_STATE_LABE
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

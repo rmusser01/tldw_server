@@ -1,7 +1,7 @@
 ---
 id: TASK-551
 title: Stabilize audio transcription heartbeat test dependency overrides
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: '2026-05-30 06:45'
@@ -25,7 +25,7 @@ Fix the PR #2133 full-suite Audio test failure where the heartbeat create_task f
 - [x] #1 The hotwords audio test helper bypasses AuthNZ DB/principal dependencies for endpoint-level tests.
 - [x] #2 The failing heartbeat task startup regression test passes locally.
 - [x] #3 Existing design-system dictionary verification remains unchanged.
-- [ ] #4 PR #2133 CI no longer fails in the Audio full-suite module for this test.
+- [x] #4 PR #2133 CI no longer fails in the Audio full-suite module for this test.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -51,15 +51,15 @@ Additional local verification:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+PR #2133 merged on 2026-05-30 after the audio heartbeat dependency override and deterministic heartbeat jobs wait fixes were included. The original Audio full-suite failures no longer block the merged PR. Local verification covered the focused heartbeat startup failure test, the heartbeat jobs log test, the full hotwords audio test file, the dictionary design-system regression, diff whitespace, and Bandit for touched Admin/Audio files with only low-severity test assert findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
