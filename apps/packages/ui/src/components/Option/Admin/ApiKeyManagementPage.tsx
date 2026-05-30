@@ -8,7 +8,6 @@ import {
   Form,
   Tag,
   Space,
-  Alert,
   Select,
   Popconfirm,
   message
@@ -17,6 +16,7 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { Alert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 const ApiKeyManagementPage: React.FC = () => {
@@ -201,10 +201,18 @@ const ApiKeyManagementPage: React.FC = () => {
 
   // Render
   if (adminGuard === "forbidden") {
-    return <Alert type="error" message="Access Denied" description="You don't have permission to manage API keys." showIcon />
+    return (
+      <Alert variant="error" title="Access Denied">
+        You don't have permission to manage API keys.
+      </Alert>
+    )
   }
   if (adminGuard === "notFound") {
-    return <Alert type="warning" message="Not Available" description="API key management is not available on this server." showIcon />
+    return (
+      <Alert variant="warning" title="Not Available">
+        API key management is not available on this server.
+      </Alert>
+    )
   }
 
   return (
@@ -214,20 +222,19 @@ const ApiKeyManagementPage: React.FC = () => {
       {/* New key alert */}
       {newKeyValue && (
         <Alert
-          type="success"
-          message="New API Key Created"
-          description={
-            <div>
-              <p>Copy this key now -- it will not be shown again:</p>
-              <code style={{ fontSize: 14, padding: "8px 12px", background: "#f5f5f5", display: "block", wordBreak: "break-all" }}>
-                {newKeyValue}
-              </code>
-            </div>
-          }
-          closable
-          onClose={() => setNewKeyValue(null)}
-          style={{ marginBottom: 16 }}
-        />
+          variant="success"
+          title="New API Key Created"
+          dismissible
+          onDismiss={() => setNewKeyValue(null)}
+          className="mb-4"
+        >
+          <div>
+            <p>Copy this key now -- it will not be shown again:</p>
+            <code style={{ fontSize: 14, padding: "8px 12px", background: "#f5f5f5", display: "block", wordBreak: "break-all" }}>
+              {newKeyValue}
+            </code>
+          </div>
+        </Alert>
       )}
 
       {/* User selector */}
@@ -260,7 +267,11 @@ const ApiKeyManagementPage: React.FC = () => {
             </Button>
           }
         >
-          {keysError && <Alert type="error" message={keysError} style={{ marginBottom: 12 }} />}
+          {keysError && (
+            <Alert variant="error" className="mb-3">
+              {keysError}
+            </Alert>
+          )}
           <Table
             dataSource={keys}
             columns={keyColumns}
