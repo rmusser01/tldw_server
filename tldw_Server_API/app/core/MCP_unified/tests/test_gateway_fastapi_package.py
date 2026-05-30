@@ -62,6 +62,26 @@ class _FakeGatewayRuntime:
         }
 
 
+class _CustomExplodingGatewayRuntime(_FakeGatewayRuntime):
+    class RuntimeBackendError(Exception):
+        pass
+
+    async def list_tools(self, context: Any) -> list[dict[str, Any]]:
+        raise self.RuntimeBackendError("backend unavailable")
+
+
+def _assert_jsonrpc_error(
+    body: dict[str, Any],
+    *,
+    code: int,
+    request_id: Any,
+) -> None:
+    assert body["jsonrpc"] == "2.0"
+    assert body["id"] == request_id
+    assert body["error"]["code"] == code
+    assert "message" in body["error"]
+
+
 def test_gateway_package_does_not_import_tldw_server_api() -> None:
     assert GATEWAY_ROOT.exists()
     offenders: dict[str, list[str]] = {}
@@ -132,3 +152,98 @@ def test_gateway_fastapi_app_handles_basic_jsonrpc_flow() -> None:
         assert called_body["id"] == "call-1"
         assert called_body["result"]["content"][0]["text"] == "echo.search:hello"
         assert runtime.call_requests[-1][0] == "echo.search"
+
+
+def test_gateway_request_rejects_malformed_json_with_jsonrpc_parse_error() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            content=b"{not valid json",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 200
+    _assert_jsonrpc_error(response.json(), code=-32700, request_id=None)
+
+
+def test_gateway_request_rejects_missing_jsonrpc_member() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            json={"method": "ping", "id": "missing-version"},
+        )
+
+    assert response.status_code == 200
+    _assert_jsonrpc_error(response.json(), code=-32600, request_id="missing-version")
+
+
+def test_gateway_request_rejects_invalid_jsonrpc_id_type() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "ping", "id": {"bad": 1}},
+        )
+
+    assert response.status_code == 200
+    _assert_jsonrpc_error(response.json(), code=-32600, request_id=None)
+
+
+def test_gateway_request_rejects_non_object_params_without_coercion() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": [], "id": "bad-params"},
+        )
+
+    assert response.status_code == 200
+    _assert_jsonrpc_error(response.json(), code=-32602, request_id="bad-params")
+    assert runtime.list_contexts == []
+
+
+def test_gateway_request_rejects_non_object_tool_arguments_without_coercion() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": "echo.search",
+                    "arguments": [],
+                },
+                "id": "bad-args",
+            },
+        )
+
+    assert response.status_code == 200
+    _assert_jsonrpc_error(response.json(), code=-32602, request_id="bad-args")
+    assert runtime.call_requests == []
+
+
+def test_gateway_request_maps_custom_runtime_exceptions_to_jsonrpc_internal_error() -> None:
+    runtime = _CustomExplodingGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "explode"},
+        )
+
+    assert response.status_code == 200
+    _assert_jsonrpc_error(response.json(), code=-32603, request_id="explode")
