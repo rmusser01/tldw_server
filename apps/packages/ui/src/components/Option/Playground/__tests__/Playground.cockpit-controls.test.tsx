@@ -58,6 +58,7 @@ const messageOptionState = vi.hoisted(() => ({
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: true,
+    isSearchingInternet: false,
     selectedCharacter: { id: "character-1", name: "Mira Vale" },
     setSelectedCharacter: vi.fn(),
     selectedAssistant: {
@@ -407,6 +408,7 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.setHistory = vi.fn();
     messageOptionState.value.setMessages = vi.fn();
     messageOptionState.value.streaming = true;
+    messageOptionState.value.isSearchingInternet = false;
     messageOptionState.value.selectedSystemPrompt = "";
     messageOptionState.value.setSelectedSystemPrompt = vi.fn();
     messageOptionState.value.selectedQuickPrompt = null;
@@ -704,6 +706,22 @@ describe("Playground cockpit controls", () => {
       window.removeEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
     }
   }, 15000);
+
+  it("surfaces active web search progress in the cockpit status strip", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.isSearchingInternet = true;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
+
+    render(<Playground />);
+
+    const statusStrip = await screen.findByRole("status", {
+      name: "Chat status",
+    });
+    expect(statusStrip).toHaveTextContent("Searching web");
+    expect(statusStrip).toHaveTextContent("Web search on");
+    expect(statusStrip).not.toHaveTextContent("Ready");
+  });
 
   it("logs selected prompt lookup failures while keeping the prompt unavailable state visible", async () => {
     const promptLookupWarning = vi

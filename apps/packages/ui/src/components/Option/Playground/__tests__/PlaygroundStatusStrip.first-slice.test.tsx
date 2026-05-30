@@ -63,6 +63,31 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     expect(status).toHaveTextContent("2 files");
   });
 
+  it("shows web search progress instead of ready while search context is being gathered", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        webSearchInProgress
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={3}
+        sessionLabel="Server chat"
+        hasContext
+        contextSummary={["Web search on"]}
+        temporaryChat={false}
+        degradedChecks={[]}
+        errorMessage={null}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Searching web");
+    expect(status).toHaveTextContent("Gathering web results before the model responds.");
+    expect(status).toHaveTextContent("Web search on");
+    expect(status).not.toHaveTextContent("Ready");
+  });
+
   it("handles explicit null context summaries without throwing", () => {
     render(
       <PlaygroundStatusStrip

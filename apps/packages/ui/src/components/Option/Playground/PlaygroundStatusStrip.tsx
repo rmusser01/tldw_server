@@ -30,6 +30,7 @@ type PlaygroundStatusStripRuntimeState =
   | "error"
   | "server-blocked"
   | "streaming"
+  | "web-searching"
   | "loading"
   | "model-loading"
   | "missing-model"
@@ -60,6 +61,7 @@ export type PlaygroundStatusStripProps = {
   contextSummary?: string[] | null;
   temporaryChat?: boolean;
   characterChatActive?: boolean;
+  webSearchInProgress?: boolean;
   degraded?: boolean;
   degradedChecks?: string[];
   errorMessage?: string | null;
@@ -95,6 +97,7 @@ export const PlaygroundStatusStrip = ({
   contextSummary = [],
   temporaryChat,
   characterChatActive = false,
+  webSearchInProgress = false,
   degraded = false,
   degradedChecks = [],
   errorMessage,
@@ -142,17 +145,19 @@ export const PlaygroundStatusStrip = ({
       ? "server-blocked"
       : streaming
         ? "streaming"
-        : isContextLoading
-          ? "loading"
-          : blockingModelUsabilityState
-            ? blockingModelUsabilityState
-            : modelUnavailable
-              ? "model-unavailable"
-              : !hasSelectedModel
-                ? "missing-model"
-                : isDegraded
-                  ? "degraded"
-                  : "ready";
+        : webSearchInProgress
+          ? "web-searching"
+          : isContextLoading
+            ? "loading"
+            : blockingModelUsabilityState
+              ? blockingModelUsabilityState
+              : modelUnavailable
+                ? "model-unavailable"
+                : !hasSelectedModel
+                  ? "missing-model"
+                  : isDegraded
+                    ? "degraded"
+                    : "ready";
   const routeLabel =
     selectedProvider && hasSelectedModel
       ? `${selectedProvider}:${selectedModel}`
@@ -166,6 +171,8 @@ export const PlaygroundStatusStrip = ({
         ? t("cockpit.serverUnavailable", "Server unavailable")
         : runtimeState === "streaming"
           ? t("cockpit.streaming", "Streaming")
+          : runtimeState === "web-searching"
+            ? t("cockpit.searchingWeb", "Searching web")
           : runtimeState === "loading"
             ? t("cockpit.loadingContext", `${LOADING_STATE_LABEL} context`)
             : runtimeState === "model-loading"
@@ -236,6 +243,13 @@ export const PlaygroundStatusStrip = ({
           "Context preview is loading.",
         )
       : null;
+  const webSearchReason =
+    runtimeState === "web-searching"
+      ? t(
+          "cockpit.webSearchInProgress",
+          "Gathering web results before the model responds.",
+        )
+      : null;
   const normalizedSessionTitle = sessionTitle?.trim() || null;
   const normalizedSessionStatusLabel = sessionStatusLabel?.trim() || null;
   const normalizedSessionDetail = sessionDetail?.trim() || null;
@@ -303,6 +317,7 @@ export const PlaygroundStatusStrip = ({
                   runtimeState === "model-unavailable"
                 ? "border-warning/40 bg-warning/10 text-warning"
                 : runtimeState === "streaming" ||
+                    runtimeState === "web-searching" ||
                     runtimeState === "loading" ||
                     runtimeState === "model-loading"
                   ? "border-info/40 bg-info/10 text-info"
@@ -316,6 +331,7 @@ export const PlaygroundStatusStrip = ({
           runtimeState === "model-unavailable" ? (
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
           ) : runtimeState === "streaming" ||
+            runtimeState === "web-searching" ||
             runtimeState === "loading" ||
             runtimeState === "model-loading" ? (
             <Loader2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -384,6 +400,9 @@ export const PlaygroundStatusStrip = ({
             ) : null}
             {contextLoadingReason ? (
               <span className={pillClass}>{contextLoadingReason}</span>
+            ) : null}
+            {webSearchReason ? (
+              <span className={pillClass}>{webSearchReason}</span>
             ) : null}
             {!serverBlocked
               ? degradedChecks.map((check, index) => (
