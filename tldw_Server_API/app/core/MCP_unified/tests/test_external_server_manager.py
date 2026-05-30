@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from tldw_Server_API.app.core.MCP_unified.external_servers import manager as manager_mod
 from tldw_Server_API.app.core.MCP_unified.external_servers.config_schema import (
     ExternalServerRegistryPartialLoadError,
     parse_external_server_registry,
@@ -19,7 +20,6 @@ from tldw_Server_API.app.core.MCP_unified.external_servers.transports.base impor
     adapter_supports_runtime_auth,
     call_tool_with_ephemeral_adapter,
 )
-from tldw_Server_API.app.core.MCP_unified.external_servers import manager as manager_mod
 
 
 def _ensure(condition: bool, message: str) -> None:
@@ -164,6 +164,17 @@ def test_adapter_runtime_auth_compatibility_helper_handles_legacy_signature() ->
     )
 
 
+def test_runtime_auth_summary_treats_none_maps_as_empty() -> None:
+    credential = BrokeredExternalCredential()
+    runtime_credential = cast(Any, credential)
+    runtime_credential.headers = None
+    runtime_credential.env = None
+
+    summary = ExternalServerManager._summarize_runtime_auth(credential)
+
+    assert summary == {"headers": [], "env": []}
+
+
 @pytest.mark.asyncio
 async def test_legacy_adapter_omits_runtime_auth_metadata_when_runtime_auth_is_unsupported(
     monkeypatch: pytest.MonkeyPatch,
@@ -267,6 +278,77 @@ async def test_discovery_filters_tools_and_unknown_virtual_tool_is_rejected(
 
         with pytest.raises(ValueError, match="Unknown external virtual tool"):
             await manager.execute_virtual_tool("ext.docs.docs.delete", {})
+    finally:
+        await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_list_virtual_tools_returns_caller_owned_copies(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = _FakeAdapter(
+        server_id="docs",
+        tools=[
+            ExternalToolDefinition(
+                name="docs.search",
+                description="Search",
+                input_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+                metadata={"nested": {"source": "discovery"}},
+            )
+        ],
+    )
+    _patch_loader_and_adapter(
+        monkeypatch,
+        payload=_registry_payload(policy={"allow_tool_patterns": ["docs.*"]}),
+        adapter=adapter,
+    )
+
+    manager = ExternalServerManager()
+    try:
+        await manager.initialize()
+        listed = manager.list_virtual_tools()
+        listed[0].input_schema["properties"]["q"]["type"] = "number"
+        listed[0].metadata["nested"]["source"] = "changed"
+
+        refreshed = manager.list_virtual_tools()
+
+        assert refreshed[0].input_schema == {
+            "type": "object",
+            "properties": {"q": {"type": "string"}},
+        }
+        assert refreshed[0].metadata == {"nested": {"source": "discovery"}}
+    finally:
+        await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_get_virtual_tool_write_flag_returns_scalar(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = _FakeAdapter(
+        server_id="docs",
+        tools=[
+            ExternalToolDefinition(
+                name="docs.search",
+                description="Search",
+                metadata={"category": "read"},
+            ),
+            ExternalToolDefinition(
+                name="docs.update",
+                description="Update",
+                metadata={"category": "management"},
+            ),
+        ],
+    )
+    _patch_loader_and_adapter(
+        monkeypatch,
+        payload=_registry_payload(policy={"allow_tool_patterns": ["docs.*"]}),
+        adapter=adapter,
+    )
+
+    manager = ExternalServerManager()
+    try:
+        await manager.initialize()
+
+        assert manager.get_virtual_tool_write_flag("ext.docs.docs.search") is False  # nosec B101
+        assert manager.get_virtual_tool_write_flag("ext.docs.docs.update") is True  # nosec B101
+        assert manager.get_virtual_tool_write_flag("ext.docs.docs.missing") is None  # nosec B101
     finally:
         await manager.shutdown()
 

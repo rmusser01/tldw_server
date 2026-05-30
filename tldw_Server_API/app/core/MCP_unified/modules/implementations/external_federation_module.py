@@ -11,16 +11,16 @@ adapters are stubs in this phase.
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.MCP_unified.external_servers import ExternalServerManager
-from tldw_Server_API.app.services.mcp_hub_external_registry_service import (
-    get_mcp_hub_external_registry_service,
-)
 from tldw_Server_API.app.services.mcp_credential_broker_service import (
     get_mcp_credential_broker_service,
+)
+from tldw_Server_API.app.services.mcp_hub_external_registry_service import (
+    get_mcp_hub_external_registry_service,
 )
 
 from ..base import BaseModule, create_tool_definition
@@ -31,7 +31,7 @@ class ExternalFederationModule(BaseModule):
 
     def __init__(self, config):
         super().__init__(config)
-        self._manager: Optional[ExternalServerManager] = None
+        self._manager: ExternalServerManager | None = None
 
     async def on_initialize(self) -> None:
         config_path = str(
@@ -146,9 +146,9 @@ class ExternalFederationModule(BaseModule):
         """Classify federated virtual tools using discovery-time write metadata."""
 
         if tool_name.startswith("ext.") and self._manager is not None:
-            for virtual_tool in self._manager.list_virtual_tools():
-                if virtual_tool.virtual_name == tool_name:
-                    return bool(virtual_tool.is_write)
+            write_flag = self._manager.get_virtual_tool_write_flag(tool_name)
+            if write_flag is not None:
+                return write_flag
         return super().is_write_tool_call(tool_name, arguments, tool_def=tool_def)
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
@@ -186,7 +186,7 @@ class ExternalFederationModule(BaseModule):
         self,
         tool_name: str,
         arguments: dict[str, Any],
-        context: Optional[Any] = None,
+        context: Any | None = None,
     ) -> Any:
         args = self.sanitize_input({} if arguments is None else arguments)
         self.validate_tool_arguments(tool_name, args)

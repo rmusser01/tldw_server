@@ -94,6 +94,18 @@ class VirtualExternalTool:
     metadata: dict[str, Any] = field(default_factory=dict)
     is_write: bool = False
 
+    def copy(self) -> VirtualExternalTool:
+        """Return a caller-owned copy of this virtual tool definition."""
+        return VirtualExternalTool(
+            virtual_name=self.virtual_name,
+            server_id=self.server_id,
+            upstream_tool_name=self.upstream_tool_name,
+            description=self.description,
+            input_schema=_copy_mapping(self.input_schema),
+            metadata=_copy_mapping(self.metadata),
+            is_write=self.is_write,
+        )
+
 
 @dataclass(slots=True)
 class FederatedToolResult:

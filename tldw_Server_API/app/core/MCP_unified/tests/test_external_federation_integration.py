@@ -8,11 +8,11 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.MCP_unified.external_servers import manager as manager_mod
 from tldw_Server_API.app.core.MCP_unified.external_servers.config_schema import (
     parse_external_server_registry,
 )
 from tldw_Server_API.app.core.MCP_unified.external_servers.manager import ExternalServerManager
-from tldw_Server_API.app.core.MCP_unified.external_servers import manager as manager_mod
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.external_federation_module import (
     ExternalFederationModule,
@@ -28,7 +28,7 @@ class _StubExternalMCPServer:
     _server: Any
 
     @classmethod
-    async def start(cls) -> "_StubExternalMCPServer":
+    async def start(cls) -> _StubExternalMCPServer:
         calls: list[tuple[str, dict[str, Any]]] = []
 
         async def _handler(websocket, *_args):  # websockets version compatibility
@@ -247,6 +247,14 @@ async def test_external_federation_module_integration_exposes_and_executes_virtu
             assert "external.servers.list" in names  # nosec B101
             assert "external.tools.refresh" in names  # nosec B101
             assert "ext.docs.docs.search" in names  # nosec B101
+
+            search_tool = next(tool for tool in tools if tool["name"] == "ext.docs.docs.search")
+            search_tool["inputSchema"]["properties"]["q"]["type"] = "number"
+            refreshed_tools = await module.get_tools()
+            refreshed_search_tool = next(
+                tool for tool in refreshed_tools if tool["name"] == "ext.docs.docs.search"
+            )
+            assert refreshed_search_tool["inputSchema"]["properties"]["q"]["type"] == "string"  # nosec B101
 
             result = await module.execute_tool("ext.docs.docs.search", {"q": "from-module"})
             assert result["is_error"] is False  # nosec B101
