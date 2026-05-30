@@ -4,7 +4,7 @@ title: 'Migrate design-system product state: Settings and account/security'
 status: In Progress
 assignee: []
 created_date: '2026-05-14 03:19'
-updated_date: '2026-05-16 16:29'
+updated_date: '2026-05-30 07:41'
 labels:
   - design-system
   - webui
@@ -38,6 +38,10 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 
 <!-- SECTION:NOTES:BEGIN -->
 TASK-45.44.6.2 completed on codex/design-system-next-slice-8: migrated TldwConnectionSettings auth notices from AntD Alert to DesignSystemAlert. Baseline evidence: total product-state exceptions 400 -> 398; Settings/account-security exceptions 49 -> 47. PR: https://github.com/rmusser01/tldw_server/pull/1781.
+
+TASK-45.44.6.3 completed locally on codex/integration-policy-alerts-ds at d78018fd9b: migrated IntegrationPolicyPanel policy/pairing alerts from AntD Alert to the shared DS Alert primitive and removed four component baseline entries. Verification included focused IntegrationPolicyPanel DS Alert tests, IntegrationManagementPage tests, scoped product-state guard, TypeScript with 8GB heap, and git diff --check.
+
+TASK-45.44.6.4 completed locally on codex/integration-policy-alerts-ds: migrated TldwBillingSettings billing error/warning/usage alerts from AntD Alert to the shared DS Alert primitive and removed eight component baseline entries. Evidence: TldwBillingSettings baseline count is 0 and Settings-only product-state baseline count is 39. Verification included focused billing DS Alert tests, tldw-review-comments tests, scoped product-state guard, TypeScript with 8GB heap, and git diff --check.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
