@@ -13,6 +13,7 @@ import {
 } from "@/components/ui"
 import type {
   SuggestionAnchorType,
+  SuggestionStatus,
   StudySuggestionActionRequest,
   StudySuggestionActionResponse,
   StudySuggestionSnapshotResponse
@@ -22,17 +23,18 @@ const { Text } = Typography
 
 const normalizeLabel = (value: string): string => value.trim().replace(/\s+/g, " ")
 
-const getStatusBadgeVariant = (status: string): BadgeVariant => {
+const getStatusBadgeVariant = (status: SuggestionStatus): BadgeVariant => {
   switch (status) {
     case "failed":
       return "danger"
     case "pending":
       return "warning"
     case "ready":
-    case "active":
       return "success"
-    default:
+    case "none":
       return "secondary"
+    default:
+      return status satisfies never
   }
 }
 
@@ -365,7 +367,7 @@ export const StudySuggestionsPanel: React.FC<StudySuggestionsPanelProps> = ({
     await onActionResult?.(response, request)
   }
 
-  if (!snapshot && isLoading) {
+  if (!snapshot && (isLoading || status === "pending")) {
     return (
       <Card size="small" title="Study suggestions">
         <LoadingState

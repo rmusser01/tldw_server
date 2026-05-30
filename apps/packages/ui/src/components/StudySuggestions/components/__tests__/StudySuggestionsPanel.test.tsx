@@ -145,6 +145,25 @@ describe("StudySuggestionsPanel", () => {
     )
   })
 
+  it("keeps pending suggestions without a snapshot in the design-system LoadingState primitive", async () => {
+    vi.mocked(useStudySuggestions).mockReturnValue({
+      status: "pending",
+      snapshot: null,
+      isLoading: false,
+      isRefreshing: false,
+      refresh: mocks.refresh,
+      performAction: mocks.performAction
+    } as never)
+
+    render(<StudySuggestionsPanel anchorType="quiz_attempt" anchorId={101} />)
+
+    await expectDesignSystemComponentForText(
+      "Loading study suggestions...",
+      "LoadingState"
+    )
+    expect(screen.queryByText("No study suggestions yet.")).not.toBeInTheDocument()
+  })
+
   it("renders empty suggestions feedback through the design-system EmptyState primitive", async () => {
     vi.mocked(useStudySuggestions).mockReturnValue({
       status: "ready",
