@@ -73,6 +73,16 @@ documentation:
   Verifier evidence:
     - scoped verifier log had no ServerAdminPage findings
     - full verifier remains blocked by unrelated current-dev IntegrationPolicyPanel baseline drift/stale rows outside this slice
+- |-
+  TASK-45.44.7.10 / PR #2158 migrated MlxAdminPage admin guard, temporary-unavailable, active-model, and security-risk product-state UI from AntD Alert/Tag to the design-system Alert/Badge primitives.
+  Baseline file evidence:
+    - total baseline rows: 178 -> 174
+    - Admin path rows: 20 -> 16
+    - MlxAdminPage target rows: 4 -> 0
+
+  Verifier evidence:
+    - scoped verifier log had no MlxAdminPage findings
+    - full verifier remains blocked by unrelated current-dev IntegrationPolicyPanel baseline drift/stale rows outside this slice
 parent_task_id: TASK-45.44
 priority: medium
 ---
