@@ -49,6 +49,8 @@ Migrate the smaller Evaluations component AntD Alert product-state findings to t
 - Slice scope is smaller Evaluations components first; larger RAG recipe config
   alerts remain a separate follow-up unless the embeddings selector stays small.
 - PR: https://github.com/rmusser01/tldw_server/pull/2135.
+- Review follow-up kept the wizard hint text size on the Alert title content and
+  restored message-only prominence for the embeddings media-search error alert.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
@@ -64,5 +66,5 @@ Migrate the smaller Evaluations component AntD Alert product-state findings to t
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated the smaller Evaluations component AntD Alert product-state findings to the shared design-system Alert primitive in PR #2135: CreateEvaluationWizard, DatasetUpload, RateLimitsWidget, VisualSpecBuilder, and the EmbeddingsModelSelectionConfig media-search error. Added focused design-system assertions for those alert states and removed the seven matching baseline rows. `bun run verify:design-system-state` now reports Evaluations down from 14 to 7 baseline exceptions; the remaining Evaluations rows are the larger RAG recipe config alerts. Verification passed: focused Vitest suite 9 tests, `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false`, and `git diff --check`. The verifier still exits 1 due unrelated global baseline findings and the remaining RAG recipe config Evaluations rows. Bandit skipped because this slice touched TypeScript/TSX, JSON, and Backlog markdown only.
+Migrated the smaller Evaluations component AntD Alert product-state findings to the shared design-system Alert primitive in PR #2135: CreateEvaluationWizard, DatasetUpload, RateLimitsWidget, VisualSpecBuilder, and the EmbeddingsModelSelectionConfig media-search error. Added focused design-system assertions for those alert states and removed the seven matching baseline rows. Review follow-up preserved the wizard hint `text-xs` class on the rendered Alert title and restored message-only prominence for the embeddings media-search error. `bun run verify:design-system-state` now reports Evaluations down from 14 to 7 baseline exceptions; the remaining Evaluations rows are the larger RAG recipe config alerts. Verification passed: focused Vitest suite 9 tests, `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false`, and `git diff --check`. The verifier still exits 1 due unrelated global baseline findings and the remaining RAG recipe config Evaluations rows. Bandit skipped because this slice touched TypeScript/TSX, JSON, and Backlog markdown only.
 <!-- SECTION:FINAL_SUMMARY:END -->

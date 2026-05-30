@@ -498,12 +498,8 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
                     <DsAlert
                       className="mt-2"
                       variant="error"
-                      title={t("evaluations:embeddingRecipeMediaSearchErrorTitle", {
-                        defaultValue: "Search failed"
-                      })}
-                    >
-                      {searchErrors[index]}
-                    </DsAlert>
+                      title={searchErrors[index]}
+                    />
                   )}
                   {rowResults.length > 0 && (
                     <div className="mt-2 grid gap-2 md:grid-cols-2">

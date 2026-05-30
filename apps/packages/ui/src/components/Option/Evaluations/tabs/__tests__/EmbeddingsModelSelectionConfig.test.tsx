@@ -333,7 +333,8 @@ describe("EmbeddingsModelSelectionConfig", () => {
     await waitFor(() =>
       expect(screen.getByText("Media search failed.")).toBeInTheDocument()
     )
-    expect(screen.getByText("Search failed")).toBeInTheDocument()
+    expect(screen.queryByText("Search failed")).not.toBeInTheDocument()
+    expect(screen.getByText("Media search failed.")).toHaveClass("font-medium")
     expect(
       screen
         .getByText("Media search failed.")
