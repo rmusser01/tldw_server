@@ -44,7 +44,11 @@ Migrate the smaller Evaluations component AntD Alert product-state findings to t
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Before count from bun run verify:design-system-state on origin/dev: Evaluations 14 baseline exceptions. Slice scope is smaller Evaluations components first; larger RAG recipe config alerts remain a separate follow-up unless the embeddings selector stays small. PR: https://github.com/rmusser01/tldw_server/pull/2135.
+- Before count from `bun run verify:design-system-state` on `origin/dev`:
+  Evaluations 14 baseline exceptions.
+- Slice scope is smaller Evaluations components first; larger RAG recipe config
+  alerts remain a separate follow-up unless the embeddings selector stays small.
+- PR: https://github.com/rmusser01/tldw_server/pull/2135.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -74,6 +74,7 @@ describe("Evaluation component product-state alerts", () => {
     render(<CreateEvaluationWizardHarness />)
 
     expectDesignSystemAlert(/Supported: model_graded/)
+    expect(screen.getByText(/Supported: model_graded/)).toHaveClass("text-xs")
   })
 
   it("renders dataset upload parse failures with the design-system Alert", async () => {

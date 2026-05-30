@@ -495,7 +495,13 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
                     </Button>
                   </div>
                   {searchErrors[index] && (
-                    <DsAlert className="mt-2" variant="error">
+                    <DsAlert
+                      className="mt-2"
+                      variant="error"
+                      title={t("evaluations:embeddingRecipeMediaSearchErrorTitle", {
+                        defaultValue: "Search failed"
+                      })}
+                    >
                       {searchErrors[index]}
                     </DsAlert>
                   )}

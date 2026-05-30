@@ -144,11 +144,14 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
           <div className="space-y-4">
             <DsAlert
               variant="info"
-              className="text-xs"
-              title={t("evaluations:evalTypesHint", {
-                defaultValue:
-                  "Supported: model_graded, response_quality, rag, rag_pipeline, geval, exact_match, includes, fuzzy_match, proposition_extraction, qa3, label_choice, nli_factcheck, ocr."
-              })}
+              title={
+                <span className="text-xs">
+                  {t("evaluations:evalTypesHint", {
+                    defaultValue:
+                      "Supported: model_graded, response_quality, rag, rag_pipeline, geval, exact_match, includes, fuzzy_match, proposition_extraction, qa3, label_choice, nli_factcheck, ocr."
+                  })}
+                </span>
+              }
             />
             <Form.Item
               label={t("evaluations:evalNameLabel", { defaultValue: "Name" })}
