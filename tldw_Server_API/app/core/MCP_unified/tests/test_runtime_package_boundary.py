@@ -104,6 +104,46 @@ def test_brokered_external_credential_copy_returns_caller_owned_data() -> None:
     assert credential.metadata == {"nested": {"source": "broker"}}
 
 
+def test_host_external_manager_reexports_package_virtual_tool_contract() -> None:
+    """Host external manager must reuse the package-owned virtual tool contract."""
+    package_models = importlib.import_module("mcp_unified.federation.models")
+    package_federation = importlib.import_module("mcp_unified.federation")
+    host_external = importlib.import_module(
+        "tldw_Server_API.app.core.MCP_unified.external_servers"
+    )
+    host_manager = importlib.import_module(
+        "tldw_Server_API.app.core.MCP_unified.external_servers.manager"
+    )
+
+    assert host_manager.VirtualExternalTool is package_models.VirtualExternalTool
+    assert host_external.VirtualExternalTool is package_models.VirtualExternalTool
+    assert package_federation.VirtualExternalTool is package_models.VirtualExternalTool
+
+
+def test_virtual_external_tool_copy_returns_caller_owned_data() -> None:
+    """Virtual tool copies must not expose mutable source state."""
+    package_models = importlib.import_module("mcp_unified.federation.models")
+    virtual_tool = package_models.VirtualExternalTool(
+        virtual_name="ext.docs.search",
+        server_id="docs",
+        upstream_tool_name="search",
+        description="Search docs",
+        input_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+        metadata={"nested": {"source": "discovery"}},
+        is_write=False,
+    )
+
+    copied = virtual_tool.copy()
+    copied.input_schema["properties"]["q"]["type"] = "number"
+    copied.metadata["nested"]["source"] = "changed"
+
+    assert virtual_tool.input_schema == {
+        "type": "object",
+        "properties": {"q": {"type": "string"}},
+    }
+    assert virtual_tool.metadata == {"nested": {"source": "discovery"}}
+
+
 def test_profile_defaults_are_safe_and_preserve_extension_metadata() -> None:
     from mcp_unified.profiles.models import MCPProfile
 

@@ -6,10 +6,12 @@ import asyncio
 import inspect
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any
 
 from loguru import logger
+from mcp_unified.federation.models import VirtualExternalTool
 
 from .config_schema import (
     ExternalMCPServerConfig,
@@ -24,26 +26,12 @@ from .transports import (
     build_transport_adapter,
 )
 
-
 _EXTERNAL_SERVER_INITIALIZATION_FAILED = "external_server_initialization_failed"
 _EXTERNAL_SERVER_DISCOVERY_FAILED = "external_server_discovery_failed"
 _EXTERNAL_SERVER_HEALTH_CHECK_FAILED = "external_server_health_check_failed"
 _EXTERNAL_SERVER_CONNECT_FAILED = "external_server_connect_failed"
 _EXTERNAL_SERVER_CALL_TIMEOUT = "external_server_call_timeout"
 _EXTERNAL_SERVER_CALL_FAILED = "external_server_call_failed"
-
-
-@dataclass(slots=True)
-class VirtualExternalTool:
-    """External tool exposed through a namespaced virtual name."""
-
-    virtual_name: str
-    server_id: str
-    upstream_tool_name: str
-    description: str
-    input_schema: dict[str, Any]
-    metadata: dict[str, Any]
-    is_write: bool = False
 
 
 @dataclass(slots=True)
@@ -66,10 +54,10 @@ class ExternalServerTelemetry:
     total_connect_latency_ms: float = 0.0
     total_discovery_latency_ms: float = 0.0
     total_call_latency_ms: float = 0.0
-    last_connect_latency_ms: Optional[float] = None
-    last_discovery_latency_ms: Optional[float] = None
-    last_call_latency_ms: Optional[float] = None
-    last_error: Optional[str] = None
+    last_connect_latency_ms: float | None = None
+    last_discovery_latency_ms: float | None = None
+    last_call_latency_ms: float | None = None
+    last_error: str | None = None
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -115,7 +103,7 @@ class ExternalServerManager:
     the impacted external server and do not crash MCP Unified startup.
     """
 
-    def __init__(self, config_path: Optional[str] = None) -> None:
+    def __init__(self, config_path: str | None = None) -> None:
         self.config_path = config_path
         self._server_loader: Callable[[], Awaitable[list[ExternalMCPServerConfig]] | list[ExternalMCPServerConfig]] | None = None
         self._servers: dict[str, ExternalMCPServerConfig] = {}
@@ -130,14 +118,14 @@ class ExternalServerManager:
     def with_server_loader(
         self,
         server_loader: Callable[[], Awaitable[list[ExternalMCPServerConfig]] | list[ExternalMCPServerConfig]],
-    ) -> "ExternalServerManager":
+    ) -> ExternalServerManager:
         self._server_loader = server_loader
         return self
 
     def with_credential_broker(
         self,
         credential_broker: Callable[..., Awaitable[BrokeredExternalCredential | None] | BrokeredExternalCredential | None],
-    ) -> "ExternalServerManager":
+    ) -> ExternalServerManager:
         self._credential_broker = credential_broker
         return self
 
@@ -194,7 +182,7 @@ class ExternalServerManager:
             self._telemetry = {}
             self._initialized = False
 
-    async def refresh_discovery(self, server_id: Optional[str] = None) -> dict[str, Any]:
+    async def refresh_discovery(self, server_id: str | None = None) -> dict[str, Any]:
         """Refresh virtual tool cache for one server or all configured servers."""
 
         async with self._runtime_lock:
@@ -227,13 +215,13 @@ class ExternalServerManager:
                 "errors": errors,
             }
 
-    async def reconcile_servers(self, server_id: Optional[str] = None) -> dict[str, Any]:
+    async def reconcile_servers(self, server_id: str | None = None) -> dict[str, Any]:
         """Reconcile runtime adapters with current external-server configuration."""
 
         async with self._runtime_lock:
             return await self._reconcile_servers_unlocked(server_id=server_id)
 
-    async def _reconcile_servers_unlocked(self, server_id: Optional[str] = None) -> dict[str, Any]:
+    async def _reconcile_servers_unlocked(self, server_id: str | None = None) -> dict[str, Any]:
         servers, load_errors = await self._load_configured_server_snapshot()
         configured_by_id = {server.id: server for server in servers}
         enabled_by_id = {
@@ -388,7 +376,7 @@ class ExternalServerManager:
         self,
         virtual_tool_name: str,
         arguments: dict[str, Any],
-        context: Optional[Any] = None,
+        context: Any | None = None,
     ) -> dict[str, Any]:
         """Route a namespaced virtual tool execution to its external adapter."""
 
@@ -403,7 +391,7 @@ class ExternalServerManager:
         self,
         virtual_tool_name: str,
         arguments: dict[str, Any],
-        context: Optional[Any] = None,
+        context: Any | None = None,
     ) -> dict[str, Any]:
         virtual_tool = self._virtual_tools.get(virtual_tool_name)
         if virtual_tool is None:
@@ -640,7 +628,7 @@ class ExternalServerManager:
         adapter: ExternalMCPTransportAdapter,
         upstream_tool_name: str,
         call_args: dict[str, Any],
-        context: Optional[Any],
+        context: Any | None,
         runtime_auth: BrokeredExternalCredential | None,
     ) -> ExternalToolCallResult:
         telemetry = self._get_telemetry(server_id)
@@ -702,7 +690,7 @@ class ExternalServerManager:
         return public
 
     @staticmethod
-    def _extract_error_text(result: ExternalToolCallResult) -> Optional[str]:
+    def _extract_error_text(result: ExternalToolCallResult) -> str | None:
         content = result.content
         if isinstance(content, str):
             text = content.strip()
@@ -730,7 +718,7 @@ class ExternalServerManager:
         server_id: str,
         upstream_tool_name: str,
         call_args: dict[str, Any],
-        context: Optional[Any],
+        context: Any | None,
     ) -> BrokeredExternalCredential | None:
         if self._credential_broker is None:
             return None
@@ -756,8 +744,8 @@ class ExternalServerManager:
     @staticmethod
     def _summarize_runtime_auth(runtime_auth: BrokeredExternalCredential) -> dict[str, Any]:
         return {
-            "headers": sorted(str(name) for name in runtime_auth.headers.keys()),
-            "env": sorted(str(name) for name in runtime_auth.env.keys()),
+            "headers": sorted(str(name) for name in runtime_auth.headers),
+            "env": sorted(str(name) for name in runtime_auth.env),
         }
 
     @staticmethod
