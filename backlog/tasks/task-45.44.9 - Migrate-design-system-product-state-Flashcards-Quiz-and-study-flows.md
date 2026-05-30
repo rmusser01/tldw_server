@@ -36,6 +36,19 @@ documentation:
     to the design-system Alert primitive. Baseline evidence: total product-state exceptions
     263 -> 262; Flashcards/Quiz/study-flow exceptions 39 -> 38; ReviewTab target rows
     1 -> 0. Verification recorded in TASK-45.44.9.9.
+  - >-
+    TASK-45.44.9.11 / PR #2172 migrated StudySuggestionsPanel loading, empty,
+    failed, reused-result, and status feedback from AntD Alert/Empty/Tag to design-system
+    Alert, EmptyState, LoadingState, and Badge primitives. Baseline evidence:
+    total product-state exceptions 110 -> 107; Flashcards/Quiz/study-flow exceptions
+    24 -> 21; StudySuggestionsPanel target rows 3 -> 0. Verification recorded
+    in TASK-45.44.9.11.
+  - >-
+    TASK-45.44.9.12 / PR #2172 addressed review findings on StudySuggestionsPanel:
+    pending/no-snapshot status now remains in LoadingState instead of falling through
+    to EmptyState, and status badge variant mapping now uses the SuggestionStatus
+    union with the unreachable active case removed. Verification recorded in
+    TASK-45.44.9.12.
 ---
 
 ## Description

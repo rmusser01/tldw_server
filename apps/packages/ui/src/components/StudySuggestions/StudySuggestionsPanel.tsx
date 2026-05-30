@@ -1,11 +1,19 @@
 import React from "react"
-import { Alert, Button, Card, Descriptions, Empty, Space, Tag, Typography } from "antd"
+import { Button, Card, Descriptions, Space, Typography } from "antd"
 import { ReloadOutlined } from "@ant-design/icons"
 
 import { TopicBuilder, type TopicBuilderRankReason, type TopicBuilderTopic } from "./TopicBuilder"
 import { useStudySuggestions } from "./hooks/useStudySuggestions"
+import {
+  Alert,
+  Badge,
+  EmptyState,
+  LoadingState,
+  type BadgeVariant
+} from "@/components/ui"
 import type {
   SuggestionAnchorType,
+  SuggestionStatus,
   StudySuggestionActionRequest,
   StudySuggestionActionResponse,
   StudySuggestionSnapshotResponse
@@ -14,6 +22,21 @@ import type {
 const { Text } = Typography
 
 const normalizeLabel = (value: string): string => value.trim().replace(/\s+/g, " ")
+
+const getStatusBadgeVariant = (status: SuggestionStatus): BadgeVariant => {
+  switch (status) {
+    case "failed":
+      return "danger"
+    case "pending":
+      return "warning"
+    case "ready":
+      return "success"
+    case "none":
+      return "secondary"
+    default:
+      return status satisfies never
+  }
+}
 
 const normalizeSelectedLabels = (topics: TopicBuilderTopic[]): string[] => {
   const seen = new Set<string>()
@@ -344,12 +367,13 @@ export const StudySuggestionsPanel: React.FC<StudySuggestionsPanelProps> = ({
     await onActionResult?.(response, request)
   }
 
-  if (!snapshot && isLoading) {
+  if (!snapshot && (isLoading || status === "pending")) {
     return (
       <Card size="small" title="Study suggestions">
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="Loading study suggestions..."
+        <LoadingState
+          mode="inline"
+          label="Loading study suggestions..."
+          className="w-full justify-center py-4"
         />
       </Card>
     )
@@ -360,12 +384,15 @@ export const StudySuggestionsPanel: React.FC<StudySuggestionsPanelProps> = ({
       <Card
         size="small"
         title="Study suggestions"
-        extra={<Tag color="red">failed</Tag>}
+        extra={
+          <Badge variant="danger" size="sm">
+            failed
+          </Badge>
+        }
       >
         <Space orientation="vertical" size={16} className="w-full">
           <Alert
-            type="error"
-            showIcon
+            variant="error"
             title="Study suggestions are unavailable right now."
           />
           <Button
@@ -385,7 +412,12 @@ export const StudySuggestionsPanel: React.FC<StudySuggestionsPanelProps> = ({
   if (!snapshot) {
     return (
       <Card size="small" title="Study suggestions">
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No study suggestions yet." />
+        <EmptyState
+          variant="inline"
+          size="sm"
+          title="No study suggestions yet."
+          className="py-4"
+        />
       </Card>
     )
   }
@@ -394,23 +426,30 @@ export const StudySuggestionsPanel: React.FC<StudySuggestionsPanelProps> = ({
     <Card
       size="small"
       title="Study suggestions"
-      extra={<Tag color={status === "failed" ? "red" : status === "pending" ? "gold" : "green"}>{status}</Tag>}
+      extra={
+        <Badge variant={getStatusBadgeVariant(status)} size="sm">
+          {status}
+        </Badge>
+      }
     >
       <Space orientation="vertical" size={16} className="w-full">
         <div className="space-y-1">
           <Text strong>{sessionCopy}</Text>
           <div className="flex flex-wrap gap-2">
-            <Tag>{snapshot.snapshot.activity_type}</Tag>
+            <Badge variant="secondary" size="sm">
+              {snapshot.snapshot.activity_type}
+            </Badge>
             {snapshot.snapshot.refreshed_from_snapshot_id != null ? (
-              <Tag color="blue">Refreshed</Tag>
+              <Badge variant="info" size="sm">
+                Refreshed
+              </Badge>
             ) : null}
           </div>
         </div>
 
         {lastAction ? (
           <Alert
-            type={lastAction.disposition === "opened_existing" ? "info" : "success"}
-            showIcon
+            variant={lastAction.disposition === "opened_existing" ? "info" : "success"}
             title={lastAction.disposition === "opened_existing" ? "Open existing" : "Generated"}
           />
         ) : null}

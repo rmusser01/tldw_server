@@ -101,6 +101,17 @@ const v2Snapshot = {
   }
 }
 
+const expectDesignSystemComponentForText = async (
+  text: string | RegExp,
+  component: "Alert" | "Badge" | "EmptyState" | "LoadingState"
+) => {
+  const node = await screen.findByText(text)
+  const componentNode = node.closest(`[data-ds-component="${component}"]`)
+
+  expect(componentNode).not.toBeNull()
+  return componentNode as HTMLElement
+}
+
 describe("StudySuggestionsPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -114,6 +125,111 @@ describe("StudySuggestionsPanel", () => {
       refresh: mocks.refresh,
       performAction: mocks.performAction
     } as never)
+  })
+
+  it("renders loading feedback through the design-system LoadingState primitive", async () => {
+    vi.mocked(useStudySuggestions).mockReturnValue({
+      status: "pending",
+      snapshot: null,
+      isLoading: true,
+      isRefreshing: false,
+      refresh: mocks.refresh,
+      performAction: mocks.performAction
+    } as never)
+
+    render(<StudySuggestionsPanel anchorType="quiz_attempt" anchorId={101} />)
+
+    await expectDesignSystemComponentForText(
+      "Loading study suggestions...",
+      "LoadingState"
+    )
+  })
+
+  it("keeps pending suggestions without a snapshot in the design-system LoadingState primitive", async () => {
+    vi.mocked(useStudySuggestions).mockReturnValue({
+      status: "pending",
+      snapshot: null,
+      isLoading: false,
+      isRefreshing: false,
+      refresh: mocks.refresh,
+      performAction: mocks.performAction
+    } as never)
+
+    render(<StudySuggestionsPanel anchorType="quiz_attempt" anchorId={101} />)
+
+    await expectDesignSystemComponentForText(
+      "Loading study suggestions...",
+      "LoadingState"
+    )
+    expect(screen.queryByText("No study suggestions yet.")).not.toBeInTheDocument()
+  })
+
+  it("renders empty suggestions feedback through the design-system EmptyState primitive", async () => {
+    vi.mocked(useStudySuggestions).mockReturnValue({
+      status: "ready",
+      snapshot: null,
+      isLoading: false,
+      isRefreshing: false,
+      refresh: mocks.refresh,
+      performAction: mocks.performAction
+    } as never)
+
+    render(<StudySuggestionsPanel anchorType="quiz_attempt" anchorId={101} />)
+
+    await expectDesignSystemComponentForText(
+      "No study suggestions yet.",
+      "EmptyState"
+    )
+  })
+
+  it("renders failed feedback through the design-system Alert primitive", async () => {
+    vi.mocked(useStudySuggestions).mockReturnValue({
+      status: "failed",
+      snapshot: null,
+      isLoading: false,
+      isRefreshing: false,
+      refresh: mocks.refresh,
+      performAction: mocks.performAction
+    } as never)
+
+    render(<StudySuggestionsPanel anchorType="quiz_attempt" anchorId={101} />)
+
+    const alert = await expectDesignSystemComponentForText(
+      "Study suggestions are unavailable right now.",
+      "Alert"
+    )
+    expect(alert).toHaveAttribute("role", "alert")
+    await expectDesignSystemComponentForText("failed", "Badge")
+    expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument()
+  })
+
+  it("renders study status labels through the design-system Badge primitive", async () => {
+    render(<StudySuggestionsPanel anchorType="quiz_attempt" anchorId={101} />)
+
+    await expectDesignSystemComponentForText("ready", "Badge")
+    await expectDesignSystemComponentForText("quiz_attempt", "Badge")
+  })
+
+  it("renders refreshed labels through the design-system Badge primitive", async () => {
+    vi.mocked(useStudySuggestions).mockReturnValue({
+      status: "ready",
+      snapshot: {
+        ...initialSnapshot,
+        snapshot: {
+          ...initialSnapshot.snapshot,
+          id: 89,
+          refreshed_from_snapshot_id: 88
+        }
+      },
+      isLoading: false,
+      isRefreshing: false,
+      refresh: mocks.refresh,
+      performAction: mocks.performAction
+    } as never)
+
+    render(<StudySuggestionsPanel anchorType="quiz_attempt" anchorId={101} />)
+
+    await expectDesignSystemComponentForText("Refreshed", "Badge")
   })
 
   it("lets users add, rename, remove, and reset topics while showing manual topics as exploratory", async () => {
@@ -247,7 +363,11 @@ describe("StudySuggestionsPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Create flashcards" }))
 
-    expect(await screen.findByText("Open existing")).toBeInTheDocument()
+    const actionAlert = await expectDesignSystemComponentForText(
+      "Open existing",
+      "Alert"
+    )
+    expect(actionAlert).toHaveAttribute("role", "status")
     expect(mocks.performAction).toHaveBeenCalledWith(
       expect.objectContaining({
         targetService: "flashcards",
