@@ -42,12 +42,16 @@ import {
 import {
   LiteratureSourceCoverageError,
   buildCorpusGapMessages,
+  buildEvidenceBoundHypothesesMessages,
   buildLiteratureMatrixMessages,
   buildLiteratureSourceCoverage,
+  findCompatibleLiteratureArtifact,
   findCompatibleLiteratureMatrixArtifact,
+  formatEvidenceBoundHypothesesMarkdown,
   formatLiteratureMatrixMarkdown,
   isLiteratureSourceCoverageError,
   normalizeCorpusGapResponse,
+  normalizeEvidenceBoundHypothesesResponse,
   normalizeLiteratureMatrixResponse,
   type LiteratureWorkProductSourceContext
 } from "../literature-workproducts"
@@ -1870,6 +1874,98 @@ async function generateCorpusGapFinder(
   }
 }
 
+async function generateEvidenceBoundHypotheses(
+  options: SourceContentGenerationOptions & {
+    template: WorkProductTemplate
+    generatedArtifacts: GeneratedArtifact[]
+  }
+): Promise<GenerationResult> {
+  const model = typeof options.model === "string" ? options.model.trim() : ""
+  if (!model) {
+    throw new Error(
+      "Select a chat model before generating Evidence-Bound Hypotheses."
+    )
+  }
+
+  const sourceContexts = await loadStudioSourceContexts(options)
+  const sourceCoverage = buildLiteratureSourceCoverage({
+    selectedSources: options.selectedSources,
+    usableContexts: sourceContexts,
+    minimumUsableSources: options.template.minUsableSources,
+    sourceContextCharLimit: {
+      perSource: STUDIO_SOURCE_CHAR_LIMIT,
+      total: STUDIO_TOTAL_SOURCE_CHAR_LIMIT
+    }
+  })
+
+  if (!sourceCoverage.minimumUsableSourcesMet) {
+    throw new LiteratureSourceCoverageError(
+      `At least ${options.template.minUsableSources} usable source contexts are required for ${options.template.label}.`,
+      sourceCoverage
+    )
+  }
+
+  const compatibleMatrix = findCompatibleLiteratureArtifact(
+    options.generatedArtifacts,
+    sourceContexts,
+    "literature_matrix"
+  )
+  const compatibleGapFinder = findCompatibleLiteratureArtifact(
+    options.generatedArtifacts,
+    sourceContexts,
+    "corpus_gap_finder"
+  )
+  const messages = buildEvidenceBoundHypothesesMessages(
+    sourceContexts,
+    [
+      compatibleMatrix
+        ? { label: "Literature Matrix", content: compatibleMatrix.content ?? "" }
+        : null,
+      compatibleGapFinder
+        ? {
+            label: "Corpus Gap Finder",
+            content: compatibleGapFinder.content ?? ""
+          }
+        : null
+    ].filter(
+      (artifact): artifact is { label: string; content: string } =>
+        artifact !== null && artifact.content.trim().length > 0
+    )
+  )
+  const response = await tldwClient.createChatCompletion(
+    {
+      model,
+      api_provider: options.apiProvider,
+      messages: [
+        {
+          role: "system",
+          content: messages.system
+        },
+        {
+          role: "user",
+          content: messages.user
+        }
+      ],
+      temperature: options.temperature,
+      top_p: options.topP,
+      max_tokens: options.maxTokens,
+      response_format: { type: "json_object" }
+    },
+    { signal: options.abortSignal }
+  )
+
+  const { content: rawContent, usage } =
+    await readChatCompletionResponsePayload(response)
+  const hypotheses = normalizeEvidenceBoundHypothesesResponse(rawContent)
+
+  return {
+    content: formatEvidenceBoundHypothesesMarkdown(hypotheses),
+    data: { hypotheses },
+    sourceCoverage,
+    ...usage
+  }
+}
+
 async function generateDataTable(
   options: SourceContentGenerationOptions
 ): Promise<GenerationResult> {
@@ -2426,6 +2522,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           : null
         const isExecutiveBriefTemplate =
           workProductTemplate?.id === "executive_brief"
+        const isEvidenceBoundHypothesesTemplate =
+          workProductTemplate?.id === "evidence_bound_hypotheses"
         const templateMetadata = workProductTemplate
           ? {
               templateId: workProductTemplate.id,
@@ -2526,13 +2624,20 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               maxTokens: resolvedNumPredict,
               abortSignal: activeAbort.signal
             }
-            result =
-              isExecutiveBriefTemplate && workProductTemplate
-                ? await generateExecutiveBrief({
-                    ...reportOptions,
-                    template: workProductTemplate
-                  })
-                : await generateReport(reportOptions)
+            if (isExecutiveBriefTemplate && workProductTemplate) {
+              result = await generateExecutiveBrief({
+                ...reportOptions,
+                template: workProductTemplate
+              })
+            } else if (isEvidenceBoundHypothesesTemplate && workProductTemplate) {
+              result = await generateEvidenceBoundHypotheses({
+                ...reportOptions,
+                template: workProductTemplate,
+                generatedArtifacts
+              })
+            } else {
+              result = await generateReport(reportOptions)
+            }
             break
           }
           case "compare_sources":

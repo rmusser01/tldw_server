@@ -44,6 +44,8 @@ Stage -1/0 complete: implementation task exists before source edits; added liter
 Stage 1 complete: added Literature Matrix RED tests for source-count gating, usable-source coverage failure, and strict JSON generation; added pure literature work-product helper for source coverage, JSON validation/normalization, and markdown table formatting; routed the literature_matrix template through JSON chat completion with response_format and sourceCoverage metadata. Verification: `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/workspace-templates/__tests__/work-product-templates.test.ts` passed with 2 files / 8 tests.
 
 Stage 2 complete: added Corpus Gap Finder RED tests for strict JSON generation and compatible Literature Matrix context; added gap prompt/schema normalization, known gap-type normalization, conservative high-confidence downgrading for single-source support, and source-compatible matrix lookup. Verification: `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx` passed with 1 file / 6 tests.
+
+Stage 3 complete: added Evidence-Bound Hypotheses RED tests for strict JSON generation, source coverage, and compatible Matrix/Gap context; added hypothesis prompt/schema normalization, markdown report formatting, source-basis confidence guards, and report-template routing. Verification: `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx` passed with 1 file / 8 tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

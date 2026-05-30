@@ -18,6 +18,17 @@ export type LiteratureWorkProductTableData = {
   rows: string[][]
 }
 
+export type NormalizedEvidenceBoundHypothesis = {
+  hypothesis: string
+  supportingFindings: string[]
+  supportingSources: string[]
+  prediction: string
+  suggestedMethodology: string
+  threatsToValidity: string[]
+  whatWouldFalsifyIt: string
+  confidence: string
+}
+
 type SourceCoverageOptions = {
   selectedSources: WorkspaceSource[]
   usableContexts: LiteratureWorkProductSourceContext[]
@@ -88,6 +99,17 @@ const CORPUS_GAP_FIELD_KEYS: Array<readonly string[]> = [
   ["suggested_follow_up_question", "follow_up_question", "question"]
 ]
 
+const HYPOTHESIS_FIELD_KEYS = {
+  hypothesis: ["hypothesis", "testable_hypothesis"],
+  supportingFindings: ["supporting_findings", "findings", "evidence_basis"],
+  supportingSources: ["supporting_sources", "sources", "source_basis"],
+  prediction: ["prediction", "predicted_outcome"],
+  suggestedMethodology: ["suggested_methodology", "methodology", "method"],
+  threatsToValidity: ["threats_to_validity", "validity_risks", "risks"],
+  whatWouldFalsifyIt: ["what_would_falsify_it", "falsification", "stress_test"],
+  confidence: ["confidence"]
+} as const
+
 const KNOWN_CORPUS_GAP_TYPES = new Set([
   "unanswered_question",
   "underrepresented_population",
@@ -147,6 +169,24 @@ const normalizeConfidence = (value: string, sourceBasis: string): string => {
     .map((entry) => entry.trim())
     .filter(Boolean).length
   return sourceCount >= 2 ? "high" : "limited"
+}
+
+const readListValue = (
+  row: Record<string, unknown>,
+  candidateKeys: readonly string[]
+): string[] => {
+  for (const key of candidateKeys) {
+    if (!Object.prototype.hasOwnProperty.call(row, key)) {
+      continue
+    }
+    const value = row[key]
+    if (Array.isArray(value)) {
+      return value.map(normalizeCellValue).filter((entry) => entry !== "unknown")
+    }
+    const normalized = normalizeCellValue(value)
+    return normalized === "unknown" ? [] : [normalized]
+  }
+  return []
 }
 
 const extractJsonPayloadText = (value: string): string => {
@@ -283,6 +323,49 @@ ${sourceContexts
   }`
 })
 
+export const buildEvidenceBoundHypothesesMessages = (
+  sourceContexts: LiteratureWorkProductSourceContext[],
+  compatibleArtifacts: Array<{ label: string; content: string }>
+): { system: string; user: string } => ({
+  system:
+    "You are a source-grounded research hypothesis analyst. Use only the provided source excerpts and optional compatible prior work products. Return strict JSON only. Proposed hypotheses must be testable and must separate existing findings from predictions and methods.",
+  user: `Propose evidence-bound hypotheses that logically follow from the selected corpus.
+
+Return a JSON object with a "hypotheses" array. Each hypothesis must include:
+- hypothesis
+- supporting_findings
+- supporting_sources
+- prediction
+- suggested_methodology
+- threats_to_validity
+- what_would_falsify_it
+- confidence
+
+Rules:
+- Hypotheses must be testable.
+- Supporting findings must come from the selected sources or compatible prior artifacts.
+- Do not mark a hypothesis high confidence without a concrete source basis.
+- Keep predictions and methodology separate from existing findings.
+- Use "unknown" when a field is not present.
+
+Selected sources:
+${sourceContexts
+  .map(
+    (source, index) =>
+      `Source ${index + 1}: ${source.title}\n${source.text}`
+  )
+  .join("\n\n")}${
+    compatibleArtifacts.length > 0
+      ? `\n\n${compatibleArtifacts
+          .map(
+            (artifact) =>
+              `Compatible ${artifact.label}:\n${artifact.content}`
+          )
+          .join("\n\n")}`
+      : ""
+  }`
+})
+
 export const normalizeLiteratureMatrixResponse = (
   rawContent: string
 ): LiteratureWorkProductTableData => {
@@ -360,6 +443,72 @@ export const normalizeCorpusGapResponse = (
   }
 }
 
+export const normalizeEvidenceBoundHypothesesResponse = (
+  rawContent: string
+): NormalizedEvidenceBoundHypothesis[] => {
+  const payloadText = extractJsonPayloadText(rawContent)
+  if (!payloadText) {
+    throw new Error("Evidence-Bound Hypotheses JSON response was empty.")
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(payloadText)
+  } catch {
+    throw new Error("Evidence-Bound Hypotheses response was not valid JSON.")
+  }
+
+  if (!isRecord(parsed) || !Array.isArray(parsed.hypotheses)) {
+    throw new Error(
+      "Evidence-Bound Hypotheses JSON must include a hypotheses array."
+    )
+  }
+
+  const hypotheses = parsed.hypotheses
+    .filter(isRecord)
+    .map((row) => {
+      const supportingSources = readListValue(
+        row,
+        HYPOTHESIS_FIELD_KEYS.supportingSources
+      )
+      const confidence = normalizeConfidence(
+        readRowValue(row, HYPOTHESIS_FIELD_KEYS.confidence),
+        supportingSources.join("; ")
+      )
+      return {
+        hypothesis: readRowValue(row, HYPOTHESIS_FIELD_KEYS.hypothesis),
+        supportingFindings: readListValue(
+          row,
+          HYPOTHESIS_FIELD_KEYS.supportingFindings
+        ),
+        supportingSources,
+        prediction: readRowValue(row, HYPOTHESIS_FIELD_KEYS.prediction),
+        suggestedMethodology: readRowValue(
+          row,
+          HYPOTHESIS_FIELD_KEYS.suggestedMethodology
+        ),
+        threatsToValidity: readListValue(
+          row,
+          HYPOTHESIS_FIELD_KEYS.threatsToValidity
+        ),
+        whatWouldFalsifyIt: readRowValue(
+          row,
+          HYPOTHESIS_FIELD_KEYS.whatWouldFalsifyIt
+        ),
+        confidence
+      }
+    })
+    .filter((hypothesis) => hypothesis.hypothesis !== "unknown")
+
+  if (hypotheses.length === 0) {
+    throw new Error(
+      "Evidence-Bound Hypotheses JSON did not include any usable hypotheses."
+    )
+  }
+
+  return hypotheses
+}
+
 const escapeMarkdownCell = (value: string): string =>
   value.replace(/\n+/g, " ").replace(/\|/g, "\\|").trim()
 
@@ -374,16 +523,50 @@ export const formatLiteratureMatrixMarkdown = (
   return [header, separator, ...rows].join("\n")
 }
 
-export const findCompatibleLiteratureMatrixArtifact = (
+export const formatEvidenceBoundHypothesesMarkdown = (
+  hypotheses: NormalizedEvidenceBoundHypothesis[]
+): string =>
+  [
+    "## Evidence-Bound Hypotheses",
+    ...hypotheses.flatMap((entry, index) => [
+      "",
+      `### Hypothesis ${index + 1}`,
+      "",
+      entry.hypothesis,
+      "",
+      `- Supporting findings: ${
+        entry.supportingFindings.length > 0
+          ? entry.supportingFindings.join("; ")
+          : "unknown"
+      }`,
+      `- Supporting sources: ${
+        entry.supportingSources.length > 0
+          ? entry.supportingSources.join("; ")
+          : "unknown"
+      }`,
+      `- Prediction: ${entry.prediction}`,
+      `- Suggested methodology: ${entry.suggestedMethodology}`,
+      `- Threats to validity: ${
+        entry.threatsToValidity.length > 0
+          ? entry.threatsToValidity.join("; ")
+          : "unknown"
+      }`,
+      `- What would falsify it: ${entry.whatWouldFalsifyIt}`,
+      `- Confidence: ${entry.confidence}`
+    ])
+  ].join("\n")
+
+export const findCompatibleLiteratureArtifact = (
   artifacts: GeneratedArtifact[],
-  usableContexts: LiteratureWorkProductSourceContext[]
+  usableContexts: LiteratureWorkProductSourceContext[],
+  templateId: GeneratedArtifact["templateId"]
 ): GeneratedArtifact | null => {
   const usableSourceIds = new Set(usableContexts.map((context) => context.sourceId))
   return (
     artifacts.find((artifact) => {
       if (
         artifact.status !== "completed" ||
-        artifact.templateId !== "literature_matrix" ||
+        artifact.templateId !== templateId ||
         typeof artifact.content !== "string" ||
         !artifact.content.trim()
       ) {
@@ -401,6 +584,16 @@ export const findCompatibleLiteratureMatrixArtifact = (
     }) ?? null
   )
 }
+
+export const findCompatibleLiteratureMatrixArtifact = (
+  artifacts: GeneratedArtifact[],
+  usableContexts: LiteratureWorkProductSourceContext[]
+): GeneratedArtifact | null =>
+  findCompatibleLiteratureArtifact(
+    artifacts,
+    usableContexts,
+    "literature_matrix"
+  )
 
 export const isLiteratureSourceCoverageError = (
   error: unknown

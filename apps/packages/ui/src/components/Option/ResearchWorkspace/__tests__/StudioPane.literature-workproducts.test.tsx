@@ -705,4 +705,168 @@ describe("StudioPane literature work products", () => {
     expect(userPrompt).toContain("Compatible Literature Matrix")
     expect(userPrompt).toContain("Finding A")
   })
+
+  it("generates Evidence-Bound Hypotheses from strict JSON with source coverage", async () => {
+    mockCreateChatCompletion.mockResolvedValue(
+      createChatCompletionResponse(
+        JSON.stringify({
+          hypotheses: [
+            {
+              hypothesis:
+                "Rural care settings will show weaker transfer than urban clinics.",
+              supporting_findings: [
+                "Paper A studies urban clinics.",
+                "Paper B calls for broader care settings."
+              ],
+              supporting_sources: ["Paper A", "Paper B"],
+              prediction:
+                "Effect sizes will be lower in rural clinics than urban clinics.",
+              suggested_methodology:
+                "Matched cohort comparison across rural and urban clinics.",
+              threats_to_validity: ["Selection bias", "Clinic staffing differences"],
+              what_would_falsify_it:
+                "Rural clinics show equal or stronger outcomes.",
+              confidence: "medium"
+            }
+          ]
+        })
+      )
+    )
+
+    renderStudioPane()
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /evidence-bound hypotheses/i })
+    )
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        "artifact-1",
+        "completed",
+        expect.objectContaining({
+          templateId: "evidence_bound_hypotheses",
+          reviewStatus: "draft",
+          sourceCoverage: expect.objectContaining({
+            selectedSourceIds: ["source-1", "source-2"],
+            minimumUsableSourcesMet: true
+          }),
+          sourceLineage: [
+            { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+            { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+          ],
+          content: expect.stringContaining("## Evidence-Bound Hypotheses"),
+          data: expect.objectContaining({
+            hypotheses: [
+              expect.objectContaining({
+                hypothesis:
+                  "Rural care settings will show weaker transfer than urban clinics.",
+                confidence: "medium"
+              })
+            ]
+          })
+        })
+      )
+    })
+
+    expect(mockAddArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "report",
+        title: "Evidence-Bound Hypotheses",
+        status: "generating",
+        templateId: "evidence_bound_hypotheses"
+      })
+    )
+    expect(mockCreateChatCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        response_format: { type: "json_object" }
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it("includes compatible Matrix and Gap artifacts as optional context for Evidence-Bound Hypotheses", async () => {
+    workspaceStoreState.generatedArtifacts = [
+      {
+        id: "artifact-gap",
+        type: "data_table",
+        title: "Corpus Gap Finder",
+        status: "completed",
+        templateId: "corpus_gap_finder",
+        content: "| Gap | Evidence Basis |\n| --- | --- |\n| Rural settings missing | Papers A and B |",
+        sourceCoverage: {
+          selectedSourceIds: ["source-1", "source-2"],
+          usableSources: [
+            { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+            { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+          ],
+          skippedSources: [],
+          truncatedSources: [],
+          minimumUsableSourcesMet: true
+        },
+        createdAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "artifact-matrix",
+        type: "data_table",
+        title: "Literature Matrix",
+        status: "completed",
+        templateId: "literature_matrix",
+        content: "| Source | Primary Finding |\n| --- | --- |\n| Paper A | Finding A |",
+        sourceCoverage: {
+          selectedSourceIds: ["source-1", "source-2"],
+          usableSources: [
+            { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+            { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+          ],
+          skippedSources: [],
+          truncatedSources: [],
+          minimumUsableSourcesMet: true
+        },
+        createdAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    mockCreateChatCompletion.mockResolvedValue(
+      createChatCompletionResponse(
+        JSON.stringify({
+          hypotheses: [
+            {
+              hypothesis: "Rural settings require separate validation.",
+              supporting_findings: ["Rural settings are missing."],
+              supporting_sources: ["Paper A", "Paper B"],
+              prediction: "Rural outcomes will differ.",
+              suggested_methodology: "Rural validation cohort.",
+              threats_to_validity: ["Small rural sample"],
+              what_would_falsify_it: "No rural/urban difference.",
+              confidence: "medium"
+            }
+          ]
+        })
+      )
+    )
+
+    renderStudioPane()
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /evidence-bound hypotheses/i })
+    )
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        "artifact-1",
+        "completed",
+        expect.objectContaining({
+          templateId: "evidence_bound_hypotheses"
+        })
+      )
+    })
+
+    const request = mockCreateChatCompletion.mock.calls[0]?.[0] as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const userPrompt = request.messages?.find((message) => message.role === "user")
+      ?.content
+    expect(userPrompt).toContain("Compatible Literature Matrix")
+    expect(userPrompt).toContain("Compatible Corpus Gap Finder")
+    expect(userPrompt).toContain("Rural settings missing")
+  })
 })

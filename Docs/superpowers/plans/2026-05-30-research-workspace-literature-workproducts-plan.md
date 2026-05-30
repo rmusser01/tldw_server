@@ -463,7 +463,7 @@ bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.lit
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Stage 2**
+- [x] **Step 6: Commit Stage 2**
 
 ```bash
 git add apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane \
@@ -488,7 +488,7 @@ git commit -m "feat: generate corpus gap work product"
 
 - Add cases to `StudioPane.literature-workproducts.test.tsx`.
 
-- [ ] **Step 1: Add failing hypothesis tests**
+- [x] **Step 1: Add failing hypothesis tests**
 
 Mock JSON output containing:
 
@@ -517,7 +517,7 @@ Assert:
 - source lineage and source coverage exist
 - no hypothesis without source basis is treated as high confidence.
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 ```bash
 cd apps/packages/ui
@@ -526,7 +526,7 @@ bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.lit
 
 Expected: FAIL.
 
-- [ ] **Step 3: Add hypothesis prompt helpers**
+- [x] **Step 3: Add hypothesis prompt helpers**
 
 Modify:
 
@@ -542,7 +542,7 @@ Prompt must require:
 - falsification/stress-test notes.
 - strict JSON output with a `hypotheses` array.
 
-- [ ] **Step 4: Wire hypothesis generation**
+- [x] **Step 4: Wire hypothesis generation**
 
 Modify:
 
@@ -551,7 +551,7 @@ Modify:
 Include optional Matrix and Gap Finder artifacts when present. Do not require
 them. Do not silently include incompatible prior artifacts.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 ```bash
 cd apps/packages/ui
