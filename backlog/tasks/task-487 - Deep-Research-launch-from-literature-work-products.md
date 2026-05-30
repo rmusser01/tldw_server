@@ -30,12 +30,14 @@ Implemented a frontend-only Deep Research launch bridge for completed, traceable
 
 PR: https://github.com/rmusser01/tldw_server/pull/2159
 
+Review follow-up: addressed PR feedback by reserving truncation suffix space so raw launch queries strictly respect their caps, tolerating partial legacy source-coverage objects without runtime errors, and rendering the Deep Research launch as a React Router `Link` that opens in a separate tab to preserve the current workspace session.
+
 Verification:
-- `bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx` passed: 21 tests.
-- `bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage1.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage2.test.tsx src/workspace-templates/__tests__/work-product-templates.test.ts src/routes/__tests__/route-paths.research.test.ts` passed: 5 files / 94 tests.
-- `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --project tsconfig.json` passed. The first default-heap TypeScript run OOMed before this larger-heap pass.
+- `bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx` passed: 23 tests.
+- `bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage1.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage2.test.tsx src/workspace-templates/__tests__/work-product-templates.test.ts src/routes/__tests__/route-paths.research.test.ts` passed: 5 files / 96 tests.
+- `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --project tsconfig.json` passed.
 - `git diff --check` passed.
-- `bun run verify:design-system-state` failed on existing product-state baseline findings outside the new launch helper/action.
+- `bun run verify:design-system-state` failed on existing product-state baseline findings outside the launch helper/action review fixes.
 - Bandit skipped because this slice touched TypeScript/UI tests and Backlog metadata only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 

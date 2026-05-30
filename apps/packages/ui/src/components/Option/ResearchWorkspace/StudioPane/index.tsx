@@ -1,5 +1,6 @@
 import React, { Suspense, useState, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
+import { Link } from "react-router-dom"
 import {
   Headphones,
   FileText,
@@ -2533,11 +2534,13 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                             <Tooltip
                               title={t(
                                 "playground:studio.launchDeepResearch",
-                                "Launch Deep Research"
+                              "Launch Deep Research"
                               )}
                             >
-                              <a
-                                href={deepResearchLaunchHref}
+                              <Link
+                                to={deepResearchLaunchHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 className="rounded p-1 text-text-muted hover:bg-surface hover:text-text"
                                 aria-label={t(
                                   "playground:studio.launchDeepResearch",
@@ -2546,7 +2549,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                                 data-testid={`studio-artifact-deep-research-${artifact.id}`}
                               >
                                 <Microscope className="h-4 w-4" />
-                              </a>
+                              </Link>
                             </Tooltip>
                           )}
                           {artifact.content && (

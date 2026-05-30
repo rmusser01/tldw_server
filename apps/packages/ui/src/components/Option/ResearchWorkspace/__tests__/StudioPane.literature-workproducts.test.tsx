@@ -1,5 +1,6 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { AudioGenerationSettings, WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
@@ -11,6 +12,7 @@ import {
   normalizeResearchProposalMarkdown
 } from "../StudioPane/literature-workproducts"
 import {
+  buildLiteratureDeepResearchLaunchQuery,
   buildLiteratureDeepResearchLaunchPath,
   isDeepResearchLaunchableLiteratureArtifact
 } from "../StudioPane/literature-deep-research-launch"
@@ -325,7 +327,11 @@ const expandOutputTypesSection = () => {
 }
 
 const renderStudioPane = () => {
-  const renderResult = render(<StudioPane />)
+  const renderResult = render(
+    <MemoryRouter>
+      <StudioPane />
+    </MemoryRouter>
+  )
   expandOutputTypesSection()
   return renderResult
 }
@@ -400,7 +406,9 @@ describe("StudioPane literature work products", () => {
       title: "Literature Matrix",
       status: "completed",
       templateId: "literature_matrix",
-      content: "| Source | Finding |\n| --- | --- |\n| Paper A | Matrix row |",
+      content: "| Source | Finding |\n| --- | --- |\n| Paper A | Matrix row |\n".repeat(
+        200
+      ),
       sourceCoverage: {
         selectedSourceIds: ["source-1", "source-2", "source-3"],
         usableSources: [
@@ -433,7 +441,33 @@ describe("StudioPane literature work products", () => {
     expect(query).toContain("Paper A")
     expect(query).toContain("Paper C (missing_text)")
     expect(query).toContain("Matrix row")
+    expect(query).toContain("[Truncated for Deep Research launch context.]")
     expect(query.length).toBeLessThanOrEqual(2600)
+  })
+
+  it("strictly caps truncated Deep Research launch queries", () => {
+    const query = buildLiteratureDeepResearchLaunchQuery({
+      id: "artifact-long-query",
+      type: "data_table",
+      title: `Literature Matrix ${"long title segment ".repeat(300)}`,
+      status: "completed",
+      templateId: "literature_matrix",
+      content: "Matrix row",
+      sourceCoverage: {
+        selectedSourceIds: ["source-1", "source-2"],
+        usableSources: [
+          { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+          { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+        ],
+        skippedSources: [],
+        truncatedSources: [],
+        minimumUsableSourcesMet: true
+      },
+      createdAt: new Date("2026-02-18T00:00:00.000Z")
+    })
+
+    expect(query).toContain("[Truncated for Deep Research launch context.]")
+    expect(query?.length).toBeLessThanOrEqual(2600)
   })
 
   it("requires completed matrix or gap artifacts with source coverage for Deep Research launch", () => {
@@ -460,6 +494,44 @@ describe("StudioPane literature work products", () => {
         createdAt: new Date("2026-02-18T00:00:00.000Z")
       })
     ).toBeNull()
+
+    expect(
+      isDeepResearchLaunchableLiteratureArtifact({
+        id: "artifact-partial-coverage",
+        type: "data_table",
+        title: "Literature Matrix",
+        status: "completed",
+        templateId: "literature_matrix",
+        content: "Matrix content",
+        sourceCoverage: {
+          minimumUsableSourcesMet: true
+        } as any,
+        createdAt: new Date("2026-02-18T00:00:00.000Z")
+      })
+    ).toBe(false)
+  })
+
+  it("tolerates legacy source coverage objects when building Deep Research launch context", () => {
+    const query = buildLiteratureDeepResearchLaunchQuery({
+      id: "artifact-legacy-coverage",
+      type: "data_table",
+      title: "Literature Matrix",
+      status: "completed",
+      templateId: "literature_matrix",
+      content: "Matrix content",
+      sourceCoverage: {
+        usableSources: [
+          { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+          { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+        ],
+        minimumUsableSourcesMet: true
+      } as any,
+      createdAt: new Date("2026-02-18T00:00:00.000Z")
+    })
+
+    expect(query).toContain("Selected source IDs: none")
+    expect(query).toContain("Skipped sources: none")
+    expect(query).toContain("Truncated sources: none")
   })
 
   beforeEach(() => {
@@ -1436,6 +1508,8 @@ Proposal
         screen.getByTestId("studio-artifact-secondary-actions-artifact-matrix")
       ).getByRole("link", { name: /launch deep research/i })
     ).toHaveAttribute("href", expect.stringContaining("/research?"))
+    expect(links[0]).toHaveAttribute("target", "_blank")
+    expect(links[0]).toHaveAttribute("rel", "noopener noreferrer")
     expect(
       within(
         screen.getByTestId("studio-artifact-secondary-actions-artifact-proposal")

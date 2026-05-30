@@ -13,13 +13,20 @@ const LITERATURE_DEEP_RESEARCH_TEMPLATE_IDS = new Set([
 
 const ARTIFACT_EXCERPT_LIMIT = 1400
 const RESEARCH_QUERY_LIMIT = 2600
+const TRUNCATION_SUFFIX = "\n\n[Truncated for Deep Research launch context.]"
 
 const truncateForLaunch = (value: string, limit: number): string => {
   const trimmed = value.trim()
+  if (limit <= 0) {
+    return ""
+  }
   if (trimmed.length <= limit) {
     return trimmed
   }
-  return `${trimmed.slice(0, limit).trimEnd()}\n\n[Truncated for Deep Research launch context.]`
+  if (limit <= TRUNCATION_SUFFIX.length) {
+    return TRUNCATION_SUFFIX.slice(0, limit)
+  }
+  return `${trimmed.slice(0, limit - TRUNCATION_SUFFIX.length).trimEnd()}${TRUNCATION_SUFFIX}`
 }
 
 const formatCoverageEntry = (source: ArtifactSourceCoverageEntry): string =>
@@ -30,15 +37,17 @@ const formatSkippedSource = (source: ArtifactSkippedSource): string =>
 
 const formatSourceCoverage = (sourceCoverage: ArtifactSourceCoverage): string =>
   [
-    `Selected source IDs: ${sourceCoverage.selectedSourceIds.join(", ") || "none"}`,
+    `Selected source IDs: ${(sourceCoverage.selectedSourceIds ?? []).join(", ") || "none"}`,
     `Usable sources: ${
-      sourceCoverage.usableSources.map(formatCoverageEntry).join(", ") || "none"
+      (sourceCoverage.usableSources ?? []).map(formatCoverageEntry).join(", ") ||
+      "none"
     }`,
     `Skipped sources: ${
-      sourceCoverage.skippedSources.map(formatSkippedSource).join(", ") || "none"
+      (sourceCoverage.skippedSources ?? []).map(formatSkippedSource).join(", ") ||
+      "none"
     }`,
     `Truncated sources: ${
-      sourceCoverage.truncatedSources.map(formatCoverageEntry).join(", ") ||
+      (sourceCoverage.truncatedSources ?? []).map(formatCoverageEntry).join(", ") ||
       "none"
     }`
   ].join("\n")
@@ -58,7 +67,7 @@ export const isDeepResearchLaunchableLiteratureArtifact = (
   if (!artifact.sourceCoverage?.minimumUsableSourcesMet) {
     return false
   }
-  if (artifact.sourceCoverage.usableSources.length < 2) {
+  if ((artifact.sourceCoverage.usableSources?.length ?? 0) < 2) {
     return false
   }
   return typeof artifact.content === "string" && artifact.content.trim().length > 0
