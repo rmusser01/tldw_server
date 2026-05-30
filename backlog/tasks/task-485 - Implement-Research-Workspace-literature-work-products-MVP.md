@@ -1,7 +1,7 @@
 ---
 id: TASK-485
 title: Implement Research Workspace literature work products MVP
-status: In Progress
+status: Done
 documentation:
 - Docs/Product/Research_Workspace_Literature_Workproducts_PRD.md
 - Docs/superpowers/plans/2026-05-30-research-workspace-literature-workproducts-plan.md
@@ -58,7 +58,7 @@ Stage 6 complete: created Deep Research follow-up tasks TASK-487, TASK-488, TASK
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the Research Workspace literature work-products MVP: actionable Literature Matrix, Corpus Gap Finder, Evidence-Bound Hypotheses, and Research Proposal Pack templates; source coverage/lineage metadata; JSON-first validation for Matrix/Gap/Hypotheses; proposal Source Audit enforcement; Literature Review grouping; CSV/JSON table exports; and Deep Research follow-up tasks TASK-487 through TASK-490. Verification: focused Research Workspace Vitest suite passed with 4 files / 74 tests. `bun run verify:design-system-state` remains blocked by pre-existing product-state baseline findings outside touched work-product files. Bandit skipped because this slice touched UI/docs/backlog files only, with no Python code.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
