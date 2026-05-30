@@ -43,12 +43,23 @@ Verification recorded:
 - Ruff: `All checks passed!`.
 - Bandit: `/tmp/bandit_mcp_stage4c_gateway_websocket_transport.json` reported `"results": []`.
 - `git diff --check` exited cleanly.
+
+Review pass after PR #2143:
+- Rebasing onto latest `origin/dev` completed cleanly.
+- Open review threads found on binary/non-text WebSocket frames, Pydantic v1 JSON-safe serialization fallback, and disconnects during WebSocket send/processing; each was verified against current code before edits.
+- RED review test run: `2 failed, 20 passed, 3 warnings`; failures matched binary WebSocket frame handling and the Pydantic v1-like non-JSON-safe fallback.
+- Fixed the WebSocket receive loop to accept text and bytes frames, return JSON-RPC invalid-request errors for unsupported frame shapes, and absorb disconnect/closed-socket exceptions across receive, dispatch, and send.
+- Fixed the Pydantic v1 fallback path to JSON-encode the v1 `.dict()` payload before `send_json`.
+- GREEN gateway review run: `22 passed, 3 warnings`.
+- Review validation: host compatibility `47 passed, 4 warnings`; Ruff `All checks passed!`; Bandit `/tmp/bandit_mcp_stage4c_gateway_review_fix.json` reported `"results": []`; `git diff --check` exited cleanly.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Stage 4C adds the standalone package FastAPI WebSocket transport for JSON-RPC messages while keeping runtime dispatch, validation, notification behavior, and batch response filtering shared with the HTTP transport. This slice remains package-isolated and intentionally leaves auth/session policy, stdio, SQLite wiring, external lifecycle, and host route integration for later stages. No known skips or blockers.
+
+Post-PR review pass rebased the branch onto latest `origin/dev` and addressed the verified WebSocket reliability findings for binary frames, JSON-safe v1 serialization fallback, and disconnect handling.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -6,6 +6,7 @@ import json
 from typing import Any, Literal
 
 from fastapi import APIRouter, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
 
@@ -133,7 +134,7 @@ def _response_to_json(response: GatewayJSONRPCResponse) -> dict[str, Any]:
     try:
         return response.model_dump(mode="json")  # type: ignore[attr-defined]
     except AttributeError:  # pragma: no cover - pydantic v1 fallback
-        return response.dict()
+        return jsonable_encoder(response.dict())
 
 
 def _object_or_empty(value: Any, message: str) -> dict[str, Any]:
@@ -350,6 +351,23 @@ async def _send_websocket_response(
     await websocket.send_json(_response_to_json(response))
 
 
+def _websocket_message_payload(message: dict[str, Any]) -> str | bytes | None:
+    """Extract a JSON-RPC payload from a raw WebSocket ASGI message."""
+
+    if message.get("type") == "websocket.disconnect":
+        raise WebSocketDisconnect(
+            code=message.get("code", 1000),
+            reason=message.get("reason", ""),
+        )
+    raw_payload = message.get("text")
+    if raw_payload is not None:
+        return raw_payload
+    raw_payload = message.get("bytes")
+    if raw_payload is not None:
+        return raw_payload
+    return None
+
+
 def create_gateway_router(runtime: GatewayRuntime) -> APIRouter:
     """Create a package-owned FastAPI router for a standalone MCP runtime."""
 
@@ -383,17 +401,22 @@ def create_gateway_router(runtime: GatewayRuntime) -> APIRouter:
         """Process JSON-RPC messages over a standalone gateway WebSocket."""
 
         await websocket.accept()
-        while True:
-            try:
-                raw_payload = await websocket.receive_text()
-            except WebSocketDisconnect:
-                return
-            payload = _parse_json_payload(raw_payload)
-            if isinstance(payload, _GATEWAY_RESPONSE_TYPES):
-                await websocket.send_json(_response_to_json(payload))
-                continue
-            response = await _handle_jsonrpc(runtime, payload, websocket)
-            await _send_websocket_response(websocket, response)
+        try:
+            while True:
+                raw_payload = _websocket_message_payload(await websocket.receive())
+                if raw_payload is None:
+                    await websocket.send_json(
+                        _response_to_json(_jsonrpc_error(_INVALID_REQUEST, "Invalid WebSocket message", None))
+                    )
+                    continue
+                payload = _parse_json_payload(raw_payload)
+                if isinstance(payload, _GATEWAY_RESPONSE_TYPES):
+                    await websocket.send_json(_response_to_json(payload))
+                    continue
+                response = await _handle_jsonrpc(runtime, payload, websocket)
+                await _send_websocket_response(websocket, response)
+        except (WebSocketDisconnect, RuntimeError):
+            return
 
     return router
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -394,6 +395,18 @@ def test_gateway_websocket_maps_invalid_json_to_parse_error() -> None:
     assert "Parse error" in body["error"]["message"]
 
 
+def test_gateway_websocket_accepts_binary_json_frames() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/mcp/ws") as websocket:
+            websocket.send_bytes(b'{"jsonrpc":"2.0","method":"ping","id":"binary-ping"}')
+            body = websocket.receive_json()
+
+    assert body == {"jsonrpc": "2.0", "result": {"pong": True}, "id": "binary-ping"}
+
+
 def test_gateway_websocket_suppresses_notification_response() -> None:
     runtime = _FakeGatewayRuntime()
     app = create_gateway_app(runtime, prefix="/mcp")
@@ -422,6 +435,16 @@ def test_gateway_websocket_batch_omits_notification_responses() -> None:
             body = websocket.receive_json()
 
     assert body == [{"jsonrpc": "2.0", "result": {"pong": True}, "id": "batch-ping"}]
+
+
+def test_gateway_response_to_json_fallback_is_json_serializable() -> None:
+    class _PydanticV1LikeResponse:
+        def dict(self) -> dict[str, Any]:
+            return {"created_at": datetime(2026, 5, 30, 16, 0, tzinfo=timezone.utc)}
+
+    body = gateway_fastapi._response_to_json(_PydanticV1LikeResponse())  # noqa: SLF001
+
+    assert body == {"created_at": "2026-05-30T16:00:00+00:00"}
 
 
 def test_gateway_request_rejects_missing_jsonrpc_member() -> None:
