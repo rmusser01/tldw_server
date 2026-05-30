@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.7.11
 title: Migrate ApiKeyManagementPage alerts to design-system Alert
-status: In Progress
+status: Done
 priority: Medium
 parent_task_id: TASK-45.44.7
 modified_files:
@@ -16,6 +16,7 @@ labels:
 references:
 - https://github.com/rmusser01/tldw_server/issues/1664
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/pull/2162
 ---
 
 ## Description
@@ -26,11 +27,11 @@ Migrate ApiKeyManagementPage access denied, not-available, new-key-created, and 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ApiKeyManagementPage access denied and not-available guard states render through the design-system Alert primitive.
-- [ ] #2 ApiKeyManagementPage new API key success and key-load error feedback render through the design-system Alert primitive.
-- [ ] #3 The product-state baseline no longer contains ApiKeyManagementPage entries.
-- [ ] #4 Focused regression coverage proves the migration and the product-state guard has no ApiKeyManagementPage findings.
-- [ ] #5 Final summary added with verification evidence.
+- [x] #1 ApiKeyManagementPage access denied and not-available guard states render through the design-system Alert primitive.
+- [x] #2 ApiKeyManagementPage new API key success and key-load error feedback render through the design-system Alert primitive.
+- [x] #3 The product-state baseline no longer contains ApiKeyManagementPage entries.
+- [x] #4 Focused regression coverage proves the migration and the product-state guard has no ApiKeyManagementPage findings.
+- [x] #5 Final summary added with verification evidence.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -53,15 +54,15 @@ Migrate ApiKeyManagementPage access denied, not-available, new-key-created, and 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Migrated ApiKeyManagementPage access denied, not-available, new-key-created, and key-load error feedback from AntD Alert to the design-system Alert primitive in PR #2162. Added focused regression coverage for all four migrated feedback branches, removed the four ApiKeyManagementPage baseline exceptions, and recorded verification evidence. Focused Vitest, guard Vitest, package TypeScript, and diff checks passed; the full design-system verifier remains blocked by unrelated current-dev findings outside this slice, documented in Implementation Notes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
