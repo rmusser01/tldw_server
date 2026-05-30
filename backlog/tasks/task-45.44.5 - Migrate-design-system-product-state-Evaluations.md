@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.5
 title: 'Migrate design-system product state: Evaluations'
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-05-14 03:19
 labels:
@@ -47,14 +47,27 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 - Before `TASK-45.44.5.4`, the verifier reported `Evaluations: 7` baseline exceptions after PR #2135.
 - After `TASK-45.44.5.4`, `jq` reports 0 Evaluations entries in `design-system-product-state-baseline.json`, and `bun run verify:design-system-state` no longer lists Evaluations in the product-area summary. The verifier still exits 1 from unrelated global baseline debt.
 - GitHub issue #1662 updated after PR #2138 with zero-Evaluations-count evidence: https://github.com/rmusser01/tldw_server/issues/1662#issuecomment-4581909874. Parent remains In Progress until the PR lands on dev.
+- PR #2138 merged to dev as merge commit `5f794af24c` on 2026-05-30.
+- Post-merge verification on `origin/dev`: `jq -r '[.[] | select(.path | startswith("src/components/Option/Evaluations/"))] | length' apps/packages/ui/scripts/design-system-product-state-baseline.json` -> 0.
+- Post-merge verification on `origin/dev`: `git grep -n 'src/components/Option/Evaluations' -- apps/packages/ui/scripts/design-system-product-state-baseline.json` -> no matches.
+- Bandit skipped for this closeout because only Backlog tracker metadata is being updated.
+- Closed GitHub issue #1662 after the post-merge zero-count verification.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed the Evaluations product-state migration parent after PR #2138 landed on dev. The two implementation PRs moved the area from 14 baseline exceptions to 0: PR #2135 handled the smaller component alerts, and PR #2138 handled the remaining RAG recipe config alerts.
+
+Post-merge verification on `origin/dev` confirms there are no remaining `src/components/Option/Evaluations/` entries in `design-system-product-state-baseline.json`. GitHub issue #1662 was closed after recording the merged PR and zero-count evidence.
+<!-- SECTION:FINAL_SUMMARY:END -->
