@@ -4,9 +4,10 @@
  */
 
 import React, { useState } from "react"
-import { Alert, Upload } from "antd"
+import { Upload } from "antd"
 import { UploadCloud } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 
 interface DatasetUploadProps {
   onSamplesLoaded: (samples: any[]) => void
@@ -85,14 +86,14 @@ export const DatasetUpload: React.FC<DatasetUploadProps> = ({
         </p>
       </Upload.Dragger>
       {error && (
-        <Alert
-          type="error"
-          showIcon
+        <DsAlert
+          variant="error"
           title={t("evaluations:datasetUploadErrorTitle", {
             defaultValue: "Upload failed"
           })}
-          description={error}
-        />
+        >
+          {error}
+        </DsAlert>
       )}
     </div>
   )

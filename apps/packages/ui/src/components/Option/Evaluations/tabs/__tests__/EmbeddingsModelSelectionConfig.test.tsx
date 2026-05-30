@@ -309,4 +309,36 @@ describe("EmbeddingsModelSelectionConfig", () => {
       expect.objectContaining({ expected_ids: ["42"] })
     ])
   })
+
+  it("renders media search failures with the design-system Alert", async () => {
+    vi.mocked(tldwClient.searchMedia).mockRejectedValueOnce(
+      new Error("Media search failed.")
+    )
+
+    render(
+      <EmbeddingsModelSelectionConfig
+        datasetSource="inline"
+        dataset={[{ query_id: "q-1", input: "query", expected_ids: [] } as DatasetSample]}
+        runConfig={{ comparison_mode: "embedding_only", candidates: [] }}
+        manifest={manifest}
+        onDatasetChange={vi.fn()}
+        onRunConfigChange={vi.fn()}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText("Find expected sources for query 1"), {
+      target: { value: "launch notes" }
+    })
+
+    await waitFor(() =>
+      expect(screen.getByText("Media search failed.")).toBeInTheDocument()
+    )
+    expect(screen.queryByText("Search failed")).not.toBeInTheDocument()
+    expect(screen.getByText("Media search failed.")).toHaveClass("font-medium")
+    expect(
+      screen
+        .getByText("Media search failed.")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+  })
 })
