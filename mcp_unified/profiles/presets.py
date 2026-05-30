@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -10,8 +10,14 @@ from pydantic import BaseModel, ConfigDict
 
 from .models import MCPProfile, ProfilePolicy
 
-PRESET_VERSION = "2026.05.27"
-PRESET_CREATED_AT = datetime(2026, 5, 27, tzinfo=timezone.utc)
+PRESET_RELEASE_DATE = date(2026, 5, 27)
+PRESET_VERSION = PRESET_RELEASE_DATE.strftime("%Y.%m.%d")
+PRESET_CREATED_AT = datetime(
+    PRESET_RELEASE_DATE.year,
+    PRESET_RELEASE_DATE.month,
+    PRESET_RELEASE_DATE.day,
+    tzinfo=timezone.utc,
+)
 
 _PROCESS_CAPABILITIES = {
     "command.run",
