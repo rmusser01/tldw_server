@@ -484,6 +484,67 @@ describe('ResearchRunsPage', () => {
     });
   });
 
+  it('bounds unresolved question entries parsed from launch follow-up context', async () => {
+    const user = userEvent.setup();
+    const oversizedQuestion = 'x'.repeat(2200);
+    const followUp = {
+      question: 'Verify bounded unresolved questions.',
+      background: {
+        question: 'Verify bounded unresolved questions.',
+        outline: [{ title: 'Hypothesis 1', focus_area: 'hypothesis_1' }],
+        key_claims: [
+          {
+            claim_id: 'artifact-hypotheses:finding-1',
+            text: 'Evidence-supported finding: Paper A reports higher completion.'
+          }
+        ],
+        unresolved_questions: [
+          oversizedQuestion,
+          'Which claims still need a primary source?',
+          oversizedQuestion
+        ],
+        verification_summary: {
+          supported_claim_count: 1,
+          unsupported_claim_count: 1
+        },
+        source_trust_summary: {
+          high_trust_count: 2,
+          low_trust_count: 1
+        }
+      }
+    };
+    const params = new URLSearchParams({
+      query: 'Verify bounded unresolved questions.',
+      source_policy: 'local_first',
+      autonomy_mode: 'checkpointed',
+      follow_up: JSON.stringify(followUp),
+      from: 'research-workspace'
+    });
+    window.history.replaceState({}, '', `/research?${params.toString()}`);
+
+    renderWithProviders(<ResearchRunsPage />);
+
+    expect(
+      await screen.findByDisplayValue('Verify bounded unresolved questions.')
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Start run' }));
+
+    await waitFor(() => {
+      expect(mocks.createResearchRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          follow_up: expect.objectContaining({
+            background: expect.objectContaining({
+              unresolved_questions: [
+                'x'.repeat(1800),
+                'Which claims still need a primary source?',
+              ],
+            }),
+          }),
+        })
+      );
+    });
+  });
+
   it('auto-creates a run from launch params when autorun is enabled', async () => {
     mocks.createResearchRun.mockResolvedValue(
       makeRun({

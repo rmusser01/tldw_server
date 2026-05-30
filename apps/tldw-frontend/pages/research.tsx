@@ -489,6 +489,20 @@ function normalizeLaunchClaims(value: unknown): NonNullable<
     .slice(0, 5);
 }
 
+function normalizeLaunchUnresolvedQuestions(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized: string[] = [];
+  value.forEach((item) => {
+    const candidate = normalizeLaunchString(item, 1800);
+    if (candidate && !normalized.includes(candidate)) {
+      normalized.push(candidate);
+    }
+  });
+  return normalized.slice(0, 5);
+}
+
 function parseResearchLaunchFollowUp(raw: string | null): ResearchRunCreateRequest['follow_up'] | null {
   if (!raw) {
     return null;
@@ -519,7 +533,7 @@ function parseResearchLaunchFollowUp(raw: string | null): ResearchRunCreateReque
       question: normalizeLaunchString(backgroundRecord.question, 4000) || question,
       outline: normalizeLaunchOutline(backgroundRecord.outline),
       key_claims: normalizeLaunchClaims(backgroundRecord.key_claims),
-      unresolved_questions: normalizeStringList(backgroundRecord.unresolved_questions).slice(0, 5),
+      unresolved_questions: normalizeLaunchUnresolvedQuestions(backgroundRecord.unresolved_questions),
       verification_summary: {
         supported_claim_count: normalizeLaunchCount(verificationSummary?.supported_claim_count),
         unsupported_claim_count: normalizeLaunchCount(verificationSummary?.unsupported_claim_count),
