@@ -6,6 +6,7 @@ import {
   OPEN_ASSISTANT_SELECT_EVENT,
   OPEN_KNOWLEDGE_PANEL_EVENT,
   OPEN_MCP_SETTINGS_EVENT,
+  OPEN_MODEL_SELECTOR_EVENT,
   OPEN_MODEL_SETTINGS_EVENT,
   OPEN_PROMPT_SELECT_EVENT,
   SET_TEMPORARY_CHAT_EVENT,
@@ -13,6 +14,7 @@ import {
   openActorSettings,
   openAssistantSelector,
   openMcpSettings,
+  openModelSelector,
   openModelSettings,
   openPromptSelector,
   openSearchAndContext,
@@ -60,6 +62,25 @@ describe("playground cockpit actions", () => {
       detail: {
         returnFocusSelector: "[data-testid='cockpit-model-settings-trigger']",
         settingsScope: "openai:gpt-4o",
+      },
+    });
+  });
+
+  it("opens the compact model selector through a dedicated cockpit event", async () => {
+    const event = nextCustomEvent<{
+      returnFocusSelector: string;
+    }>(
+      OPEN_MODEL_SELECTOR_EVENT,
+    );
+
+    openModelSelector({
+      returnFocusSelector: "[data-testid='playground-chat-error-banner']",
+    });
+
+    await expect(event).resolves.toMatchObject({
+      type: OPEN_MODEL_SELECTOR_EVENT,
+      detail: {
+        returnFocusSelector: "[data-testid='playground-chat-error-banner']",
       },
     });
   });

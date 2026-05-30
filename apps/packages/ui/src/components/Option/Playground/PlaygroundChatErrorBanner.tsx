@@ -7,7 +7,10 @@ import {
   TLDW_ERROR_BUBBLE_PREFIX,
   type ChatErrorPayload
 } from "@/utils/chat-error-message"
-import { openModelSettings } from "./playground-cockpit-actions"
+import {
+  openModelSelector,
+  openModelSettings
+} from "./playground-cockpit-actions"
 
 type ChatErrorMessageCandidate = {
   id?: string | number | null
@@ -158,7 +161,16 @@ export const PlaygroundChatErrorBanner: React.FC<
   }
 
   const primaryAction =
-    error.recoveryAction === "open-model-settings"
+    error.recoveryAction === "open-model-selector"
+      ? {
+          label: error.recoveryLabel || "Choose another model",
+          ariaLabel: error.recoveryLabel || "Choose another model",
+          onClick: () =>
+            openModelSelector({
+              returnFocusSelector: "[data-testid='playground-chat-error-banner']"
+            })
+        }
+      : error.recoveryAction === "open-model-settings"
       ? {
           label: error.recoveryLabel || "Open model settings",
           ariaLabel: error.recoveryLabel || "Open model settings",

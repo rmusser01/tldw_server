@@ -67,4 +67,13 @@ describe("Playground cockpit regression guard", () => {
     expect(source).toContain("<PlaygroundModelCatalogControls");
     expect(source).toContain("catalogControls={modelCatalogControls}");
   });
+
+  it("keeps chat recovery wired to the existing compact model selector", () => {
+    const source = readFileSync(playgroundFormPath, "utf8");
+
+    expect(source).toContain("OPEN_MODEL_SELECTOR_EVENT");
+    expect(source).toContain("window.addEventListener(OPEN_MODEL_SELECTOR_EVENT");
+    expect(source).toContain("window.removeEventListener(OPEN_MODEL_SELECTOR_EVENT");
+    expect(source).toContain("openModelApiSelector();");
+  });
 });

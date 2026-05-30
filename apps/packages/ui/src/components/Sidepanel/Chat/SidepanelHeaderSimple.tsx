@@ -10,6 +10,7 @@ import { browser } from "wxt/browser"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { TtsClipsDrawer } from "./TtsClipsDrawer"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import { CHAT_PATH } from "@/routes/route-paths"
 
 type SidepanelHeaderSimpleProps = {
   sidebarOpen?: boolean
@@ -60,8 +61,8 @@ export const SidepanelHeaderSimple = ({
     "Open full chat in WebUI"
   )
   const openFullChatDescription = t(
-    "sidepanel:header.openFullChatWebuiRouteOnlyDescription",
-    "Opens /chat in a new tab. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+    "sidepanel:header.openFullChatWebuiDescription",
+    "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
   )
 
   const handleSidebarToggle = React.useCallback(() => {
@@ -103,7 +104,7 @@ export const SidepanelHeaderSimple = ({
   }, [activeTitle, draftTitle, onRenameTitle])
 
   const openFullScreen = React.useCallback(() => {
-    const url = browser.runtime.getURL("/options.html#/chat")
+    const url = browser.runtime.getURL(`/options.html#${CHAT_PATH}`)
     const showFailure = () => {
       notification.error({
         message: t(
