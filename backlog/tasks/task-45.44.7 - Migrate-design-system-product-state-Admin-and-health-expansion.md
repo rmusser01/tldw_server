@@ -64,7 +64,7 @@ documentation:
       - full verifier remains blocked by unrelated current-dev drift outside this slice
 
     TASK-45.44.7.4 migrated MaintenancePage forbidden and not-available guard
-    feedback from AntD Alert to the design-system Alert primitive.
+    feedback from AntD Alert to the design-system Alert primitive in PR #2148.
 
     Baseline file evidence:
       - total baseline rows: 191 -> 189
