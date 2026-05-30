@@ -636,13 +636,15 @@ def test_audio_transcriptions_sanitizes_heartbeat_jobs_failure_log(
 
     original_shim_attr = audio_tx._audio_shim_attr
     heartbeat_calls = 0
+    heartbeat_observed = audio_tx.asyncio.Event()
 
     async def _slow_increment_jobs_started(*_args, **_kwargs):
-        await audio_tx.asyncio.sleep(0.01)
+        await audio_tx.asyncio.wait_for(heartbeat_observed.wait(), timeout=1.0)
 
     async def _failing_heartbeat_jobs(*_args, **_kwargs):
         nonlocal heartbeat_calls
         heartbeat_calls += 1
+        heartbeat_observed.set()
         if heartbeat_calls == 1:
             raise RuntimeError("heartbeat job leaked /private/rg-heartbeat")
         raise audio_tx.asyncio.CancelledError()

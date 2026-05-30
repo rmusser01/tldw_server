@@ -4,7 +4,7 @@ title: Stabilize audio transcription heartbeat test dependency overrides
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-30 05:03'
+updated_date: '2026-05-30 06:45'
 labels:
   - ci
   - tests
@@ -39,19 +39,27 @@ Local verification:
 - `bunx vitest run src/components/Option/Dictionaries/__tests__/DictionaryVersionHistoryModal.design-system.test.tsx` passed: 2 tests.
 - `git diff --check` passed.
 - Bandit ran on the touched test file; remaining findings are existing low-severity test-file assert usage, with no B106 or medium/high findings after removing the token_type literal.
+
+Follow-up Windows full-suite Audio artifact for PR #2133 showed `test_audio_transcriptions_sanitizes_heartbeat_jobs_failure_log` racing the heartbeat task on Windows. Replaced the 10ms sleep in the mocked jobs-start increment with an event-gated wait that is released by the failing heartbeat callback, so the test deterministically observes the sanitized heartbeat log before request cleanup can cancel the task.
+
+Additional local verification:
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/Audio/test_audio_transcriptions_hotwords.py::test_audio_transcriptions_sanitizes_heartbeat_jobs_failure_log` passed.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/Audio/test_audio_transcriptions_hotwords.py` passed: 23 tests.
+- Bandit ran on touched Admin/Audio files; remaining findings are low-severity test assert usage only, with no B106 or medium/high findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
