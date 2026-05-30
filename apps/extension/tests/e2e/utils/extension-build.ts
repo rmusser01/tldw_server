@@ -4,7 +4,10 @@ import path from 'node:path'
 
 import { resolveExtensionHeadlessMode } from './extension-common'
 import { resolveExtensionId } from './extension-id'
-import { prioritizeExtensionBuildCandidates } from './extension-paths'
+import {
+  prepareExtensionLaunchPath,
+  prioritizeExtensionBuildCandidates
+} from './extension-paths'
 
 type LaunchOptions = {
   seedConfig?: Record<string, any>
@@ -252,6 +255,9 @@ export async function launchWithBuiltExtension(
   )
   const channel = resolvePlaywrightChannel()
   const headless = resolveExtensionHeadlessMode()
+  const launchExtensionPath = prepareExtensionLaunchPath(extensionPath, {
+    rootDir: path.join(userDataDir, "extension-launch")
+  })
   const context = await chromium.launchPersistentContext(userDataDir, {
     timeout: effectiveLaunchTimeoutMs,
     headless,
@@ -264,8 +270,8 @@ export async function launchWithBuiltExtension(
     },
     executablePath: executablePath || undefined,
     args: [
-      `--disable-extensions-except=${extensionPath}`,
-      `--load-extension=${extensionPath}`,
+      `--disable-extensions-except=${launchExtensionPath}`,
+      `--load-extension=${launchExtensionPath}`,
       '--no-crashpad',
       '--disable-crash-reporter',
       '--crash-dumps-dir=/tmp'

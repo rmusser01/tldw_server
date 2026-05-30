@@ -17,7 +17,7 @@ const EXT_PATH = path.resolve(
 const MODEL_ID = "mock-model"
 const MODEL_KEY = `tldw:${MODEL_ID}`
 const CHAT_HANDOFF_DESCRIPTION =
-  "Opens /chat in a new tab. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+  "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
 
 const buildSeedConfig = (
   baseUrl: string,
