@@ -7,7 +7,6 @@ import {
   Input,
   Modal,
   Select,
-  Alert,
   Space,
   Popconfirm,
   Form,
@@ -27,6 +26,7 @@ import {
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 
 // ── Types ──
 
@@ -768,13 +768,9 @@ const RbacEditorPage: React.FC = () => {
 
   if (guardError) {
     return (
-      <Alert
-        type="warning"
-        showIcon
-        message="Access Restricted"
-        description={guardError}
-        style={{ margin: 24 }}
-      />
+      <DesignSystemAlert variant="warning" title="Access Restricted" className="m-6">
+        {guardError}
+      </DesignSystemAlert>
     )
   }
 
