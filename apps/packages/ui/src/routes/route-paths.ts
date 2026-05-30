@@ -66,7 +66,19 @@ type BuildResearchLaunchPathOptions = {
   run?: string | null
   chatId?: string | null
   launchMessageId?: string | null
+  sourceWorkspaceId?: string | null
+  sourceArtifactId?: string | null
+  sourceArtifactTemplate?: string | null
+  sourceArtifactTitle?: string | null
   followUp?: Record<string, unknown> | null
+}
+
+type BuildResearchWorkspaceReturnPathOptions = {
+  sourceWorkspaceId?: string | null
+  sourceArtifactId?: string | null
+  sourceArtifactTemplate?: string | null
+  sourceArtifactTitle?: string | null
+  researchRunId?: string | null
 }
 
 type BuildChatThreadPathOptions = {
@@ -79,6 +91,8 @@ type BuildCharacterChatPathOptions = {
 }
 
 const MAX_RESEARCH_FOLLOW_UP_SEARCH_PARAM_LENGTH = 4096
+const MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH = 128
+const MAX_RESEARCH_SOURCE_TITLE_SEARCH_PARAM_LENGTH = 240
 
 const setTrimmedSearchParam = (
   params: URLSearchParams,
@@ -88,6 +102,24 @@ const setTrimmedSearchParam = (
   const trimmed = value?.trim()
   if (trimmed) {
     params.set(key, trimmed)
+  }
+}
+
+const setBoundedTrimmedSearchParam = (
+  params: URLSearchParams,
+  key: string,
+  value: string | null | undefined,
+  maxLength: number
+) => {
+  if (maxLength <= 0) {
+    return
+  }
+  const trimmed = value?.trim()
+  if (trimmed) {
+    const bounded = trimmed.slice(0, maxLength).trim()
+    if (bounded) {
+      params.set(key, bounded)
+    }
   }
 }
 
@@ -136,6 +168,30 @@ export const buildResearchLaunchPath = (
   setTrimmedSearchParam(params, "run", options.run)
   setTrimmedSearchParam(params, "chat_id", options.chatId)
   setTrimmedSearchParam(params, "launch_message_id", options.launchMessageId)
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_workspace_id",
+    options.sourceWorkspaceId,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_id",
+    options.sourceArtifactId,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_template",
+    options.sourceArtifactTemplate,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_title",
+    options.sourceArtifactTitle,
+    MAX_RESEARCH_SOURCE_TITLE_SEARCH_PARAM_LENGTH
+  )
   setJsonSearchParam(params, "follow_up", options.followUp, {
     maxEncodedLength: MAX_RESEARCH_FOLLOW_UP_SEARCH_PARAM_LENGTH
   })
@@ -144,6 +200,44 @@ export const buildResearchLaunchPath = (
   }
   const encoded = params.toString()
   return encoded ? `${RESEARCH_PATH}?${encoded}` : RESEARCH_PATH
+}
+
+export const buildResearchWorkspaceReturnPath = (
+  options: BuildResearchWorkspaceReturnPathOptions = {}
+): string => {
+  const params = new URLSearchParams()
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_workspace_id",
+    options.sourceWorkspaceId,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_id",
+    options.sourceArtifactId,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_template",
+    options.sourceArtifactTemplate,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_title",
+    options.sourceArtifactTitle,
+    MAX_RESEARCH_SOURCE_TITLE_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "research_run_id",
+    options.researchRunId,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  const encoded = params.toString()
+  return encoded ? `${RESEARCH_WORKSPACE_PATH}?${encoded}` : RESEARCH_WORKSPACE_PATH
 }
 
 export const buildChatThreadPath = (
