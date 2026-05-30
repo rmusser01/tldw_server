@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Modal, Table, Tag, Spin, Alert, Tooltip } from "antd"
+import { Modal, Table, Spin, Tooltip } from "antd"
 import type { ColumnsType } from "antd/es/table"
 import {
   Zap,
@@ -19,6 +19,7 @@ import {
   type StrategyInfo
 } from "@/services/prompt-studio"
 import { Button } from "@/components/Common/Button"
+import { Alert as DsAlert, Badge } from "@/components/ui/primitives"
 import { defaultOptimizationStrategies } from "./strategyMetadata"
 
 type CompareStrategiesModalProps = {
@@ -97,7 +98,9 @@ export const CompareStrategiesModal: React.FC<CompareStrategiesModalProps> = ({
                   : undefined
               }
             >
-              <Tag className="text-xs">{param}</Tag>
+              <Badge variant="secondary" size="sm" className="text-xs">
+                {param}
+              </Badge>
             </Tooltip>
           ))}
         </div>
@@ -203,9 +206,8 @@ export const CompareStrategiesModal: React.FC<CompareStrategiesModalProps> = ({
       }
     >
       <div className="space-y-4">
-        <Alert
-          type="info"
-          showIcon
+        <DsAlert
+          variant="info"
           title={t("managePrompts.studio.optimizations.compare.info", {
             defaultValue:
               "Compare different optimization strategies to find the best fit for your use case. Each strategy has different strengths depending on your prompt complexity and test case availability."
