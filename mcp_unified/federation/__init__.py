@@ -20,6 +20,7 @@ from .config_schema import (
 )
 from .manager import ExternalFederationManager
 from .models import (
+    BrokeredExternalCredential,
     ExternalToolCallResult,
     ExternalToolDefinition,
     FederatedToolResult,
@@ -31,6 +32,7 @@ from .models import (
 from .transports import ExternalFederationTransport, FakeExternalTransport
 
 __all__ = [
+    "BrokeredExternalCredential",
     "ExternalAuthConfig",
     "ExternalAuthMode",
     "ExternalCircuitBreakerConfig",

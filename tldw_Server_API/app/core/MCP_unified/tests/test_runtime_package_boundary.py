@@ -71,6 +71,39 @@ def test_host_external_config_schema_shim_reexports_package_contracts() -> None:
     assert host_schema.parse_external_server_registry is package_schema.parse_external_server_registry
 
 
+def test_host_external_transport_base_reexports_package_contracts() -> None:
+    """Host transport base must reuse the package-owned external contracts."""
+    package_models = importlib.import_module("mcp_unified.federation.models")
+    package_federation = importlib.import_module("mcp_unified.federation")
+    host_base = importlib.import_module(
+        "tldw_Server_API.app.core.MCP_unified.external_servers.transports.base"
+    )
+
+    assert host_base.ExternalToolDefinition is package_models.ExternalToolDefinition
+    assert host_base.ExternalToolCallResult is package_models.ExternalToolCallResult
+    assert host_base.BrokeredExternalCredential is package_models.BrokeredExternalCredential
+    assert package_federation.BrokeredExternalCredential is package_models.BrokeredExternalCredential
+
+
+def test_brokered_external_credential_copy_returns_caller_owned_data() -> None:
+    """Brokered credential copies must not expose mutable source state."""
+    package_models = importlib.import_module("mcp_unified.federation.models")
+    credential = package_models.BrokeredExternalCredential(
+        headers={"Authorization": "Bearer token"},
+        env={"TOKEN": "secret"},
+        metadata={"nested": {"source": "broker"}},
+    )
+
+    copied = credential.copy()
+    copied.headers["Authorization"] = "changed"
+    copied.env["TOKEN"] = "changed"
+    copied.metadata["nested"]["source"] = "changed"
+
+    assert credential.headers == {"Authorization": "Bearer token"}
+    assert credential.env == {"TOKEN": "secret"}
+    assert credential.metadata == {"nested": {"source": "broker"}}
+
+
 def test_profile_defaults_are_safe_and_preserve_extension_metadata() -> None:
     from mcp_unified.profiles.models import MCPProfile
 
