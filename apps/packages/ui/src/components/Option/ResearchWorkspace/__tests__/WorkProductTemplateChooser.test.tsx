@@ -87,6 +87,25 @@ describe("WorkProductTemplateChooser", () => {
     expect(screen.queryByText(/planned/i)).not.toBeInTheDocument()
   })
 
+  it("enables literature review templates when selected sources meet requirements", async () => {
+    const user = userEvent.setup()
+    const onSelectTemplate = vi.fn()
+    renderChooser({ selectedSourceCount: 2, onSelectTemplate })
+
+    for (const [name, templateId] of [
+      [/literature matrix/i, "literature_matrix"],
+      [/corpus gap finder/i, "corpus_gap_finder"],
+      [/evidence-bound hypotheses/i, "evidence_bound_hypotheses"],
+      [/research proposal pack/i, "research_proposal_pack"]
+    ] as const) {
+      const templateButton = screen.getByRole("button", { name })
+      expect(templateButton).toBeEnabled()
+      expect(templateButton).not.toHaveAttribute("aria-disabled", "true")
+      await user.click(templateButton)
+      expect(onSelectTemplate).toHaveBeenLastCalledWith(templateId)
+    }
+  })
+
   it("uses native disabled behavior while output generation is in flight", async () => {
     const user = userEvent.setup()
     const onSelectTemplate = vi.fn()

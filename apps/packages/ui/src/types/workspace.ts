@@ -195,6 +195,36 @@ export interface ArtifactSourceLineage {
   [key: string]: unknown
 }
 
+export type ArtifactSourceSkipReason =
+  | "missing_text"
+  | "unready"
+  | "context_limit"
+  | "unknown"
+
+export interface ArtifactSourceCoverageEntry {
+  sourceId: string
+  mediaId?: number
+  title?: string
+}
+
+export interface ArtifactSkippedSource extends ArtifactSourceCoverageEntry {
+  reason: ArtifactSourceSkipReason
+}
+
+export interface ArtifactSourceContextLimit {
+  perSource: number
+  total: number
+}
+
+export interface ArtifactSourceCoverage {
+  selectedSourceIds: string[]
+  usableSources: ArtifactSourceCoverageEntry[]
+  skippedSources: ArtifactSkippedSource[]
+  truncatedSources: ArtifactSourceCoverageEntry[]
+  sourceContextCharLimit?: ArtifactSourceContextLimit
+  minimumUsableSourcesMet: boolean
+}
+
 export interface ArtifactReviewChecklistItem {
   id: string
   label: string
@@ -302,6 +332,7 @@ export interface GeneratedArtifact {
   templateId?: WorkProductTemplateId
   reviewStatus?: ArtifactReviewStatus
   sourceLineage?: ArtifactSourceLineage[]
+  sourceCoverage?: ArtifactSourceCoverage
   reviewChecklist?: ArtifactReviewChecklistItem[]
   exportTargets?: ArtifactExportTarget[]
   version?: number
