@@ -74,6 +74,14 @@ vi.mock("@/design-system", async (importActual) => {
 
 import MonitoringDashboardPage from "../MonitoringDashboardPage"
 
+const expectDesignSystemAlertForText = async (text: string | RegExp) => {
+  const title = await screen.findByText(text)
+  const alert = title.closest('[data-ds-component="Alert"]')
+
+  expect(alert).not.toBeNull()
+  return alert as HTMLElement
+}
+
 describe("MonitoringDashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -131,12 +139,45 @@ describe("MonitoringDashboardPage", () => {
     })
   })
 
+  it("renders forbidden guard feedback through the design-system Alert primitive", async () => {
+    mocks.getSystemStats.mockRejectedValueOnce({ status: 403 })
+
+    render(<MonitoringDashboardPage />)
+
+    const alert = await expectDesignSystemAlertForText("Access Denied")
+    expect(alert).toHaveAttribute("role", "alert")
+    expect(alert).toHaveTextContent(
+      "You don't have permission to access the monitoring dashboard."
+    )
+  })
+
+  it("renders missing-endpoint guard feedback through the design-system Alert primitive", async () => {
+    mocks.getSystemStats.mockRejectedValueOnce({ status: 404 })
+
+    render(<MonitoringDashboardPage />)
+
+    const alert = await expectDesignSystemAlertForText("Not Available")
+    expect(alert).toHaveAttribute("role", "alert")
+    expect(alert).toHaveTextContent(
+      "The monitoring dashboard is not available on this server."
+    )
+  })
+
+  it("renders missing system data feedback through the design-system Alert primitive", async () => {
+    mocks.getSystemStats.mockResolvedValueOnce(null)
+    mocks.getSecurityAlertStatus.mockResolvedValueOnce(null)
+
+    render(<MonitoringDashboardPage />)
+
+    const alert = await expectDesignSystemAlertForText("No system data available yet.")
+    expect(alert).toHaveAttribute("role", "status")
+  })
+
   it("shows empty state with starter rules when no alert rules exist", async () => {
     render(<MonitoringDashboardPage />)
 
-    await waitFor(() => {
-      expect(screen.getByText("No alert rules configured")).toBeTruthy()
-    })
+    const alert = await expectDesignSystemAlertForText("No alert rules configured")
+    expect(alert).toHaveAttribute("role", "status")
     // Starter rule buttons should be visible
     expect(screen.getByText(/cpu_usage > 90/)).toBeTruthy()
     expect(screen.getByText(/memory_percent > 85/)).toBeTruthy()
@@ -213,10 +254,22 @@ describe("MonitoringDashboardPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Sandbox Runtime Isolation")).toBeTruthy()
     })
-    expect(screen.getByText("Host-local sandbox runtimes require operator review")).toBeTruthy()
+    const alert = await expectDesignSystemAlertForText(
+      "Host-local sandbox runtimes require operator review"
+    )
+    expect(alert).toHaveAttribute("role", "alert")
     expect(screen.getByText("seatbelt")).toBeTruthy()
     expect(screen.getByText("worktree")).toBeTruthy()
     expect(screen.getByText(/not VM-grade isolation/i)).toBeTruthy()
+  })
+
+  it("renders empty sandbox diagnostics feedback through the design-system Alert primitive", async () => {
+    render(<MonitoringDashboardPage />)
+
+    const alert = await expectDesignSystemAlertForText(
+      "No sandbox runtime diagnostics available yet."
+    )
+    expect(alert).toHaveAttribute("role", "status")
   })
 
   it("uses design-system state labels for sandbox readiness summary counts", async () => {
@@ -300,9 +353,22 @@ describe("MonitoringDashboardPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Sandbox diagnostics access denied")).toBeTruthy()
     })
+    const alert = await expectDesignSystemAlertForText(
+      "Sandbox diagnostics access denied"
+    )
+    expect(alert).toHaveAttribute("role", "alert")
     expect(screen.queryByText("Sandbox diagnostics unavailable")).toBeNull()
     expect(screen.getByText(/Request failed: 403/)).toBeTruthy()
     expect(screen.queryByText(/\/api\/v1\/sandbox\/admin\/runtime-diagnostics/)).toBeNull()
+  })
+
+  it("renders empty activity feedback through the design-system Alert primitive", async () => {
+    render(<MonitoringDashboardPage />)
+
+    const alert = await expectDesignSystemAlertForText(
+      "No recent activity data available."
+    )
+    expect(alert).toHaveAttribute("role", "status")
   })
 
   describe("MON-001: alert assignment uses correct user ID and field name", () => {

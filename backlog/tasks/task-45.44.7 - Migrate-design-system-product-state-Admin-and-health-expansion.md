@@ -97,6 +97,16 @@ documentation:
   Verifier evidence:
     - scoped verifier log had no RateLimitingPage findings
     - full verifier remains blocked by unrelated current-dev findings in IntegrationPolicyPanel, WritingActionBar, Notes, and ResearchWorkspace plus stale IntegrationPolicyPanel baseline entries outside this slice
+- |-
+  TASK-45.44.7.13 / PR #2167 migrated MonitoringDashboardPage access denied, not-available, empty system data, sandbox diagnostics error/empty, host-local sandbox warning, empty alert-rule, and empty activity feedback from AntD Alert to the design-system Alert primitive.
+  Baseline file evidence:
+    - total baseline rows: 125 -> 118
+    - Admin path rows: 7 -> 0
+    - MonitoringDashboardPage target rows: 7 -> 0
+
+  Verifier evidence:
+    - full design-system verifier passed with baseline exceptions 118
+    - product-state guard Vitest passed 54 tests
 parent_task_id: TASK-45.44
 priority: medium
 ---

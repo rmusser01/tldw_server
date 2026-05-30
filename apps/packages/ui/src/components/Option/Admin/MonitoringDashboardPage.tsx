@@ -9,7 +9,6 @@ import {
   Form,
   Tag,
   Space,
-  Alert,
   Select,
   Switch,
   Popconfirm,
@@ -22,6 +21,7 @@ import {
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
 import { CollapsibleSection } from "./CollapsibleSection"
+import { Alert } from "@/components/ui/primitives"
 import {
   tldwClient,
   type SandboxAdminRuntimeDiagnosticsItem,
@@ -520,10 +520,18 @@ const MonitoringDashboardPage: React.FC = () => {
   // ── Render ──
 
   if (adminGuard === "forbidden") {
-    return <Alert type="error" title="Access Denied" description="You don't have permission to access the monitoring dashboard." showIcon />
+    return (
+      <Alert variant="error" title="Access Denied">
+        You don't have permission to access the monitoring dashboard.
+      </Alert>
+    )
   }
   if (adminGuard === "notFound") {
-    return <Alert type="warning" title="Not Available" description="The monitoring dashboard is not available on this server." showIcon />
+    return (
+      <Alert variant="warning" title="Not Available">
+        The monitoring dashboard is not available on this server.
+      </Alert>
+    )
   }
 
   const activityEntries = Array.isArray(activity?.entries) ? activity.entries : Array.isArray(activity) ? activity : []
@@ -563,7 +571,7 @@ const MonitoringDashboardPage: React.FC = () => {
             </div>
           )}
           {!systemStats && !securityStatus && !statsLoading && !securityLoading && (
-            <Alert type="info" title="No system data available yet." showIcon />
+            <Alert title="No system data available yet." />
           )}
         </Space>
       </Card>
@@ -572,11 +580,11 @@ const MonitoringDashboardPage: React.FC = () => {
         <Space orientation="vertical" style={{ width: "100%" }} size="middle">
           {sandboxDiagnosticsError && (
             <Alert
-              type={sandboxDiagnosticsError.alertType}
+              variant={sandboxDiagnosticsError.alertType}
               title={sandboxDiagnosticsError.title}
-              description={sandboxDiagnosticsError.description}
-              showIcon
-            />
+            >
+              {sandboxDiagnosticsError.description}
+            </Alert>
           )}
           {sandboxDiagnostics?.summary && (
             <Descriptions size="small" column={5}>
@@ -599,16 +607,16 @@ const MonitoringDashboardPage: React.FC = () => {
           )}
           {hostLocalWarningRuntimes.length > 0 && (
             <Alert
-              type="warning"
+              variant="warning"
               title="Host-local sandbox runtimes require operator review"
-              description={
+            >
+              {
                 <span>
                   {hostLocalWarningRuntimes.join(", ")} run on host-local boundaries,
                   are not VM-grade isolation, and are not eligible for untrusted code.
                 </span>
               }
-              showIcon
-            />
+            </Alert>
           )}
           {sandboxRuntimeRows.length > 0 ? (
             <Table<SandboxAdminRuntimeDiagnosticsItem>
@@ -619,7 +627,7 @@ const MonitoringDashboardPage: React.FC = () => {
               size="small"
             />
           ) : !sandboxDiagnosticsLoading && !sandboxDiagnosticsError ? (
-            <Alert type="info" title="No sandbox runtime diagnostics available yet." showIcon />
+            <Alert title="No sandbox runtime diagnostics available yet." />
           ) : null}
         </Space>
       </Card>
@@ -652,7 +660,7 @@ const MonitoringDashboardPage: React.FC = () => {
           </Form>
         </div>
         {alertRules.length === 0 && !rulesLoading ? (
-          <Alert type="info" showIcon message="No alert rules configured" description={
+          <Alert title="No alert rules configured" className="mb-4">
             <div>
               <p style={{ marginBottom: 8 }}>Create your first rule using the form above, or try a starter rule:</p>
               <Space wrap>
@@ -664,7 +672,7 @@ const MonitoringDashboardPage: React.FC = () => {
               </Space>
               <p style={{ marginTop: 8 }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>These are common rules &mdash; your server may use different metric names.</Typography.Text></p>
             </div>
-          } style={{ marginBottom: 16 }} />
+          </Alert>
         ) : (
           <Table dataSource={alertRules} columns={ruleColumns} rowKey="id" loading={rulesLoading} pagination={false} size="small" />
         )}
@@ -687,7 +695,7 @@ const MonitoringDashboardPage: React.FC = () => {
             { title: "Details", dataIndex: "details", key: "details", render: (val: unknown) => formatStatValue(val) }
           ]} rowKey="_key" pagination={false} size="small" />
         ) : (
-          <Alert type="info" title="No recent activity data available." showIcon />
+          <Alert title="No recent activity data available." />
         )}
       </CollapsibleSection>
     </div>
