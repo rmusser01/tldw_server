@@ -576,6 +576,158 @@ def test_gateway_profile_bootstrap_rejects_unknown_default_preset() -> None:
         )
 
 
+def test_gateway_config_bootstrap_uses_memory_store_default_preset() -> None:
+    """Build a profile runtime from default memory-store config and preset."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileBootstrapConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(default_preset_id="project-researcher"),
+        )
+    )
+    app = create_gateway_app(bootstrap.runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        listed = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-config-memory"},
+        )
+
+    assert bootstrap.default_profile_id == "project-researcher"
+    assert bootstrap.seeded_profile_ids == ("project-researcher",)
+    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+
+
+def test_gateway_config_bootstrap_uses_sqlite_profile_store(tmp_path: Path) -> None:
+    """Build a profile runtime backed by the configured SQLite profile store."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+    from mcp_unified.storage.sqlite import SQLiteMCPStore
+
+    sqlite_path = tmp_path / "gateway.db"
+
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                default_preset_id="project-researcher",
+            ),
+        )
+    )
+    stored_profiles = asyncio.run(bootstrap.profile_store.list_profiles())
+
+    assert isinstance(bootstrap.profile_store, SQLiteMCPStore)
+    assert sqlite_path.exists()
+    assert [profile.id for profile in stored_profiles] == ["project-researcher"]
+    asyncio.run(bootstrap.profile_store.aclose())
+
+
+def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Path) -> None:
+    """Prefer caller-injected stores over config-selected store creation."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    sqlite_path = tmp_path / "unused.db"
+    profile = _profile_with_allowed_tools("reviewer", ["admin.delete"])
+    injected_store = InMemoryProfileStore([profile])
+
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                default_profile_id="reviewer",
+            ),
+            profile_store=injected_store,
+        )
+    )
+    app = create_gateway_app(bootstrap.runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        listed = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-config-injected"},
+        )
+
+    assert bootstrap.profile_store is injected_store
+    assert not sqlite_path.exists()
+    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["admin.delete"]
+
+
+def test_gateway_config_rejects_invalid_store_kind() -> None:
+    """Reject unsupported profile-store kinds during config construction."""
+
+    from mcp_unified.gateway.config import GatewayProfileStoreConfig
+
+    with pytest.raises(ValueError, match="Unsupported gateway profile store kind"):
+        GatewayProfileStoreConfig(kind="postgres")
+
+
+def test_gateway_config_rejects_sqlite_store_without_path() -> None:
+    """Reject SQLite profile-store config when no database path is supplied."""
+
+    from mcp_unified.gateway.config import GatewayProfileStoreConfig
+
+    with pytest.raises(ValueError, match="sqlite_path is required"):
+        GatewayProfileStoreConfig(kind="sqlite")
+
+
+@pytest.mark.parametrize("sqlite_path", ["", "   "])
+def test_gateway_config_rejects_blank_sqlite_store_path(sqlite_path: str) -> None:
+    """Reject blank SQLite profile-store paths before store construction."""
+
+    from mcp_unified.gateway.config import GatewayProfileStoreConfig
+
+    with pytest.raises(ValueError, match="sqlite_path cannot be empty"):
+        GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path)
+
+
+def test_gateway_config_bootstrap_copies_profile_mapping_inputs() -> None:
+    """Copy profile mapping inputs so later caller mutation cannot affect policy."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileBootstrapConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+
+    profile_payload = _profile_with_allowed_tools("reviewer", ["echo.search"]).model_dump(
+        mode="json"
+    )
+    config = GatewayProfileBootstrapConfig(
+        profiles=[profile_payload],
+        default_profile_id="reviewer",
+    )
+    profile_payload["policy_document"]["allowed_tools"] = ["admin.delete"]
+
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(_MultiToolGatewayRuntime(), config)
+    )
+    app = create_gateway_app(bootstrap.runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        listed = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-config-copy"},
+        )
+
+    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+
+
 def test_gateway_transport_profile_selector_handles_missing_request_attributes() -> None:
     class _BareRequest:
         """Request double without FastAPI transport attributes."""
