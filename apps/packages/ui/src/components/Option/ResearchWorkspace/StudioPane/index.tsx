@@ -1905,7 +1905,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   const template = getWorkProductTemplate(templateId)
                   setSelectedWorkProductTemplateId(templateId)
                   if (
-                    template.id !== "executive_brief" ||
+                    template.availability !== "actionable" ||
                     selectedMediaCount < template.minSelectedSources ||
                     isGeneratingOutput ||
                     generationPrerequisiteMessage
