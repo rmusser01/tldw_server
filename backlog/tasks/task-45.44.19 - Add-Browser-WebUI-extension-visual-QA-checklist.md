@@ -12,6 +12,7 @@ labels:
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1676'
+  - 'https://github.com/rmusser01/tldw_server/pull/2179'
   - >-
     Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
 documentation:
@@ -44,6 +45,8 @@ Verification:
 - `rg -n "Route Evidence Protocol|Visual QA|Extension Evidence|Known Skip|Closure Rule" Docs/Design/tldw_web_design_system_visual_qa_checklist.md`
 - `rg -n "tldw_web_design_system_visual_qa_checklist" Docs/Design/tldw_web_design_system_contract.md Docs/Design/tldw_web_design_system_baseline_reporting.md`
 - `git diff --check`
+
+PR: https://github.com/rmusser01/tldw_server/pull/2179
 
 Bandit skipped: documentation and Backlog markdown only; no Python code changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
