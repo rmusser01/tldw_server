@@ -3,6 +3,8 @@ import path from "node:path"
 
 const OUTPUT_SUFFIX = `${path.sep}.output${path.sep}chrome-mv3`
 const BUILD_SUFFIX = `${path.sep}build${path.sep}chrome-mv3`
+const DEFAULT_EXTENSION_LOCALE = "en"
+const LOCALE_NAME_PATTERN = /^[A-Za-z0-9_@-]+$/
 
 const classifyExtensionCandidate = (candidate: string): "custom" | "output" | "build" => {
   const normalized = String(candidate || "").trim()
@@ -48,6 +50,25 @@ const copyExtensionTreeWithoutLocales = (
   }
 }
 
+const resolveManifestDefaultLocale = (extensionPath: string): string => {
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(extensionPath, "manifest.json"), "utf8")
+    ) as { default_locale?: unknown }
+    const defaultLocale =
+      typeof manifest.default_locale === "string"
+        ? manifest.default_locale.trim()
+        : ""
+    if (defaultLocale && LOCALE_NAME_PATTERN.test(defaultLocale)) {
+      return defaultLocale
+    }
+  } catch {
+    return DEFAULT_EXTENSION_LOCALE
+  }
+
+  return DEFAULT_EXTENSION_LOCALE
+}
+
 export const prepareExtensionLaunchPath = (
   extensionPath: string,
   {
@@ -74,7 +95,11 @@ export const prepareExtensionLaunchPath = (
 
   copyExtensionTreeWithoutLocales(extensionPath, stagedPath)
 
-  const defaultLocaleDir = path.join(stagedPath, "_locales", "en")
+  const defaultLocaleDir = path.join(
+    stagedPath,
+    "_locales",
+    resolveManifestDefaultLocale(extensionPath)
+  )
   fs.mkdirSync(defaultLocaleDir, { recursive: true })
   fs.writeFileSync(path.join(defaultLocaleDir, "messages.json"), "{}\n", "utf8")
 

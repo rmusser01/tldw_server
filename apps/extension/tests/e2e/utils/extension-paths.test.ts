@@ -86,4 +86,36 @@ describe("prioritizeExtensionBuildCandidates", () => {
       )
     ).toEqual({})
   })
+
+  it("uses the manifest default locale when staging minimal locales", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-extension-paths-"))
+    tempRoots.push(tempRoot)
+    const extensionDir = path.join(tempRoot, "chrome-mv3")
+    fs.mkdirSync(path.join(extensionDir, "_locales", "ja"), { recursive: true })
+    fs.writeFileSync(
+      path.join(extensionDir, "manifest.json"),
+      JSON.stringify({ manifest_version: 3, default_locale: "ja" }),
+      "utf8"
+    )
+
+    const stagedPath = prepareExtensionLaunchPath(extensionDir, {
+      minimalLocales: true,
+      rootDir: path.join(tempRoot, "staged")
+    })
+
+    expect(
+      fs.existsSync(path.join(stagedPath, "_locales", "ja", "messages.json"))
+    ).toBe(true)
+    expect(
+      fs.existsSync(path.join(stagedPath, "_locales", "en", "messages.json"))
+    ).toBe(false)
+    expect(
+      JSON.parse(
+        fs.readFileSync(
+          path.join(stagedPath, "_locales", "ja", "messages.json"),
+          "utf8"
+        )
+      )
+    ).toEqual({})
+  })
 })
