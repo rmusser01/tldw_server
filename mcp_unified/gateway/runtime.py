@@ -6,6 +6,35 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 
+class GatewayPolicyDenied(PermissionError):
+    """Raised when gateway profile policy denies execution."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_code: str,
+        status: str = "denied",
+        provenance: dict[str, Any] | None = None,
+        warnings: list[dict[str, Any]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.status = status
+        self.provenance = provenance or {}
+        self.warnings = warnings or []
+
+    def to_error_data(self) -> dict[str, Any]:
+        """Return a JSON-serializable denial payload for JSON-RPC errors."""
+
+        return {
+            "status": self.status,
+            "reason_code": self.reason_code,
+            "provenance": self.provenance,
+            "warnings": self.warnings,
+        }
+
+
 @dataclass(slots=True)
 class GatewayRequestContext:
     """Host-neutral context passed from gateway transports to runtimes."""

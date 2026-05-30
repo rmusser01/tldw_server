@@ -2,16 +2,19 @@
 
 from typing import TYPE_CHECKING, Any
 
-from .runtime import GatewayRequestContext, GatewayRuntime
+from .profile_runtime import ProfileAwareGatewayRuntime
+from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 from .stdio import GatewayStdioServer, handle_stdio_line
 
 if TYPE_CHECKING:
     from .fastapi import create_gateway_app, create_gateway_router
 
 __all__ = [
+    "GatewayPolicyDenied",
     "GatewayRequestContext",
     "GatewayRuntime",
     "GatewayStdioServer",
+    "ProfileAwareGatewayRuntime",
     "create_gateway_app",
     "create_gateway_router",
     "handle_stdio_line",
