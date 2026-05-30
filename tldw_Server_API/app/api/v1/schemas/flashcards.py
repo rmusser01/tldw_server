@@ -420,6 +420,7 @@ class FlashcardReviewSessionSummary(BaseModel):
 
     id: int
     deck_id: Optional[int] = None
+    deck_name_snapshot: Optional[str] = None
     review_mode: str
     tag_filter: Optional[str] = None
     scope_key: str

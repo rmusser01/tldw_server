@@ -159,6 +159,30 @@ if (!(globalThis as any).ResizeObserver) {
   }
 }
 
+const createReviewCard = (overrides: Record<string, unknown> = {}) => ({
+  uuid: "active-card-1",
+  deck_id: 11,
+  front: "Question",
+  back: "Answer",
+  notes: null,
+  extra: null,
+  is_cloze: false,
+  tags: [],
+  ef: 2.5,
+  interval_days: 1,
+  repetitions: 1,
+  lapses: 0,
+  due_at: null,
+  last_reviewed_at: null,
+  last_modified: null,
+  deleted: false,
+  client_id: "test",
+  version: 1,
+  model_type: "basic",
+  reverse: false,
+  ...overrides
+})
+
 describe("ReviewTab create CTA visibility", () => {
   const originalMatchMedia = window.matchMedia
 
@@ -503,6 +527,177 @@ describe("ReviewTab create CTA visibility", () => {
     expect(onNavigateToManageDeck).toHaveBeenCalledWith(11)
     expect(onNavigateToSchedulerDeck).toHaveBeenCalledWith(11)
     expect(onNavigateToExportDeck).toHaveBeenCalledWith(11)
+  })
+
+  it("shows the all-deck dashboard before starting an all-deck due review", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: createReviewCard({ front: "Global due question" }),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 1, new: 0, learning: 0, total: 1 }
+    } as any)
+    vi.mocked(useReviewAnalyticsSummaryQuery).mockReturnValue({
+      data: {
+        reviewed_today: 0,
+        retention_rate_today: null,
+        lapse_rate_today: null,
+        avg_answer_time_ms_today: null,
+        study_streak_days: 0,
+        generated_at: "2026-02-18T12:00:00.000Z",
+        decks: [
+          {
+            deck_id: 11,
+            deck_name: "Biology",
+            total: 20,
+            new: 2,
+            learning: 1,
+            due: 1,
+            mature: 16
+          }
+        ]
+      },
+      isLoading: false
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={undefined}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-review-deck-dashboard")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-deck-study-dashboard")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Review all due" })).toBeInTheDocument()
+    expect(screen.queryByText("Global due question")).not.toBeInTheDocument()
+  })
+
+  it("starts the all-deck due review from the dashboard action", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: createReviewCard({ front: "Global due question" }),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 1, new: 0, learning: 0, total: 1 }
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={undefined}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Review all due" }))
+
+    expect(screen.getByTestId("flashcards-review-active-card")).toBeInTheDocument()
+    expect(screen.getByText("Global due question")).toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-review-deck-dashboard")).not.toBeInTheDocument()
+  })
+
+  it("keeps the selected-deck study path direct", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: createReviewCard({ front: "Selected deck question" }),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 1, new: 0, learning: 0, total: 1 }
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-review-active-card")).toBeInTheDocument()
+    expect(screen.getByText("Selected deck question")).toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-review-deck-dashboard")).not.toBeInTheDocument()
+  })
+
+  it("resets the all-deck dashboard gate after scope changes", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: createReviewCard({ front: "Global due question" }),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 1, new: 0, learning: 0, total: 1 }
+    } as any)
+
+    const { rerender } = render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={undefined}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Review all due" }))
+    expect(screen.getByText("Global due question")).toBeInTheDocument()
+
+    rerender(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+    expect(screen.getByTestId("flashcards-review-active-card")).toBeInTheDocument()
+
+    rerender(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={undefined}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-review-deck-dashboard")).toBeInTheDocument()
+    expect(screen.queryByText("Global due question")).not.toBeInTheDocument()
   })
 
   it("does not fetch dashboard analytics while the review card query is loading", () => {

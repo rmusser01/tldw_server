@@ -71,6 +71,28 @@ const getReviewedCountLabel = (
   })
 }
 
+const getDeckLabel = (
+  session: FlashcardReviewSessionSummary,
+  deckNamesById: Map<number, string>,
+  t: ReturnType<typeof useTranslation>["t"]
+) => {
+  const snapshotName = session.deck_name_snapshot?.trim()
+  if (snapshotName) return snapshotName
+
+  if (session.deck_id == null) {
+    return t("option:flashcards.recentStudySessionsAllDecks", {
+      defaultValue: "All decks"
+    })
+  }
+
+  return (
+    deckNamesById.get(session.deck_id) ??
+    t("option:flashcards.recentStudySessionsDeckUnavailable", {
+      defaultValue: "Deck unavailable"
+    })
+  )
+}
+
 /**
  * Shows recently completed flashcard review sessions and lets the user reopen one.
  */
@@ -151,18 +173,7 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
           dataSource={sessions}
           renderItem={(session) => {
             const isSelected = selectedSessionId === session.id
-            const deckName =
-              session.deck_id == null ? null : deckNamesById.get(session.deck_id) ?? null
-            const deckLabel =
-              deckName ??
-              (session.deck_id != null
-                ? t("option:flashcards.recentStudySessionsDeckFallback", {
-                    defaultValue: "Deck {{id}}",
-                    id: session.deck_id
-                  })
-                : t("option:flashcards.recentStudySessionsAllDecks", {
-                    defaultValue: "All decks"
-                  }))
+            const deckLabel = getDeckLabel(session, deckNamesById, t)
             const modeLabel = getSessionModeLabel(session, t)
             const reviewedCountLabel = getReviewedCountLabel(session, t)
             const completedAtLabel = formatFlashcardAbsoluteDateTime(

@@ -475,6 +475,7 @@ def test_review_sessions_list_route_returns_db_sessions_with_filters(
         scope_key=f"due:deck:{deck_id}:tag:renal",
     )
     db.mark_flashcard_review_session_completed(int(completed_session["id"]))
+    db.update_deck(deck_id, name="Renamed Review Route Deck")
 
     response = client.get(
         "/api/v1/flashcards/review-sessions",
@@ -488,6 +489,7 @@ def test_review_sessions_list_route_returns_db_sessions_with_filters(
     assert int(body[0]["id"]) == int(completed_session["id"])  # nosec B101
     assert body[0]["status"] == "completed"  # nosec B101
     assert body[0]["tag_filter"] == "renal"  # nosec B101
+    assert body[0]["deck_name_snapshot"] == "Review Route Deck"  # nosec B101
     assert int(active_session["id"]) != int(body[0]["id"])  # nosec B101
 
 
