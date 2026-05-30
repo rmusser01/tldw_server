@@ -30,6 +30,12 @@ class _FakeGatewayRuntime:
     def __init__(self) -> None:
         self.list_contexts: list[Any] = []
         self.call_requests: list[tuple[str, dict[str, Any], Any]] = []
+        self.resource_list_contexts: list[Any] = []
+        self.resource_read_requests: list[tuple[str, Any]] = []
+        self.prompt_list_contexts: list[Any] = []
+        self.prompt_get_requests: list[tuple[str, dict[str, Any], Any]] = []
+        self.module_list_contexts: list[Any] = []
+        self.module_health_contexts: list[Any] = []
 
     async def list_tools(self, context: Any) -> list[dict[str, Any]]:
         self.list_contexts.append(context)
@@ -60,6 +66,73 @@ class _FakeGatewayRuntime:
                     "text": f"{name}:{arguments['query']}",
                 }
             ]
+        }
+
+    async def list_resources(self, context: Any) -> list[dict[str, Any]]:
+        self.resource_list_contexts.append(context)
+        return [
+            {
+                "uri": "resource://unit/doc",
+                "name": "Unit Doc",
+                "mimeType": "text/plain",
+            }
+        ]
+
+    async def read_resource(self, uri: str, context: Any) -> dict[str, Any]:
+        self.resource_read_requests.append((uri, context))
+        return {
+            "contents": [
+                {
+                    "uri": uri,
+                    "mimeType": "text/plain",
+                    "text": "hello resource",
+                }
+            ]
+        }
+
+    async def list_prompts(self, context: Any) -> list[dict[str, Any]]:
+        self.prompt_list_contexts.append(context)
+        return [
+            {
+                "name": "review.prompt",
+                "description": "Review a focused topic.",
+            }
+        ]
+
+    async def get_prompt(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: Any,
+    ) -> dict[str, Any]:
+        self.prompt_get_requests.append((name, arguments, context))
+        topic = arguments.get("topic", "")
+        return {
+            "description": "Review a focused topic.",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {
+                        "type": "text",
+                        "text": f"{name}:{topic}",
+                    },
+                }
+            ],
+        }
+
+    async def list_modules(self, context: Any) -> list[dict[str, Any]]:
+        self.module_list_contexts.append(context)
+        return [{"module_id": "unit", "name": "Unit Module"}]
+
+    async def get_modules_health(self, context: Any) -> dict[str, Any]:
+        self.module_health_contexts.append(context)
+        return {
+            "unit": {
+                "status": "healthy",
+                "message": "ok",
+                "checks": {},
+                "last_check": None,
+            }
         }
 
 
@@ -138,6 +211,9 @@ def test_gateway_fastapi_app_handles_basic_jsonrpc_flow() -> None:
             "name": "unit-gateway",
             "version": "0.0-test",
         }
+        capabilities = initialized.json()["result"]["capabilities"]
+        assert capabilities["resources"]["available"] is True
+        assert capabilities["prompts"]["available"] is True
 
         listed = client.post(
             "/mcp/request",
@@ -183,6 +259,85 @@ def test_gateway_request_rejects_malformed_json_with_jsonrpc_parse_error() -> No
 
     assert response.status_code == 200
     _assert_jsonrpc_error(response.json(), code=-32700, request_id=None)
+
+
+def test_gateway_fastapi_app_handles_resource_prompt_and_module_methods() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        resources = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "resources/list", "params": {}, "id": "resources-1"},
+        )
+        assert resources.status_code == 200
+        resources_body = resources.json()
+        assert resources_body["id"] == "resources-1"
+        assert resources_body["result"]["resources"][0]["uri"] == "resource://unit/doc"
+        assert runtime.resource_list_contexts[-1].request_id == "resources-1"
+
+        resource = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "resources/read",
+                "params": {"uri": "resource://unit/doc"},
+                "id": "read-1",
+            },
+        )
+        assert resource.status_code == 200
+        resource_body = resource.json()
+        assert resource_body["id"] == "read-1"
+        assert resource_body["result"]["contents"][0]["text"] == "hello resource"
+        assert runtime.resource_read_requests[-1][0] == "resource://unit/doc"
+        assert runtime.resource_read_requests[-1][1].request_id == "read-1"
+
+        prompts = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "prompts/list", "params": {}, "id": "prompts-1"},
+        )
+        assert prompts.status_code == 200
+        prompts_body = prompts.json()
+        assert prompts_body["id"] == "prompts-1"
+        assert prompts_body["result"]["prompts"][0]["name"] == "review.prompt"
+        assert runtime.prompt_list_contexts[-1].request_id == "prompts-1"
+
+        prompt = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {"name": "review.prompt", "arguments": {"topic": "gateway"}},
+                "id": "prompt-1",
+            },
+        )
+        assert prompt.status_code == 200
+        prompt_body = prompt.json()
+        assert prompt_body["id"] == "prompt-1"
+        assert prompt_body["result"]["messages"][0]["content"]["text"] == "review.prompt:gateway"
+        assert runtime.prompt_get_requests[-1][0] == "review.prompt"
+        assert runtime.prompt_get_requests[-1][1] == {"topic": "gateway"}
+        assert runtime.prompt_get_requests[-1][2].request_id == "prompt-1"
+
+        modules = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "modules/list", "params": {}, "id": "modules-1"},
+        )
+        assert modules.status_code == 200
+        modules_body = modules.json()
+        assert modules_body["id"] == "modules-1"
+        assert modules_body["result"]["modules"][0]["module_id"] == "unit"
+        assert runtime.module_list_contexts[-1].request_id == "modules-1"
+
+        health = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "modules/health", "params": {}, "id": "health-1"},
+        )
+        assert health.status_code == 200
+        health_body = health.json()
+        assert health_body["id"] == "health-1"
+        assert health_body["result"]["health"]["unit"]["status"] == "healthy"
+        assert runtime.module_health_contexts[-1].request_id == "health-1"
 
 
 def test_gateway_request_rejects_missing_jsonrpc_member() -> None:
@@ -249,6 +404,81 @@ def test_gateway_request_rejects_non_object_tool_arguments_without_coercion() ->
     assert response.status_code == 200
     _assert_jsonrpc_error(response.json(), code=-32602, request_id="bad-args")
     assert runtime.call_requests == []
+
+
+def test_gateway_request_rejects_missing_resource_uri() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "resources/read", "params": {}, "id": "bad-resource"},
+        )
+
+    assert response.status_code == 200
+    _assert_jsonrpc_error(response.json(), code=-32602, request_id="bad-resource")
+    assert runtime.resource_read_requests == []
+
+
+def test_gateway_request_rejects_missing_prompt_name() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "prompts/get", "params": {}, "id": "bad-prompt"},
+        )
+
+    assert response.status_code == 200
+    _assert_jsonrpc_error(response.json(), code=-32602, request_id="bad-prompt")
+    assert runtime.prompt_get_requests == []
+
+
+def test_gateway_prompt_get_accepts_missing_arguments() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {"name": "review.prompt"},
+                "id": "prompt-no-args",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == "prompt-no-args"
+    assert body["result"]["messages"][0]["content"]["text"] == "review.prompt:"
+    assert runtime.prompt_get_requests[-1][1] == {}
+
+
+def test_gateway_request_rejects_non_object_prompt_arguments_without_coercion() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {
+                    "name": "review.prompt",
+                    "arguments": [],
+                },
+                "id": "bad-prompt-args",
+            },
+        )
+
+    assert response.status_code == 200
+    _assert_jsonrpc_error(response.json(), code=-32602, request_id="bad-prompt-args")
+    assert runtime.prompt_get_requests == []
 
 
 def test_gateway_request_maps_custom_runtime_exceptions_to_jsonrpc_internal_error() -> None:

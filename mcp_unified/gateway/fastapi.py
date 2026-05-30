@@ -136,6 +136,20 @@ def _object_or_empty(value: Any, message: str) -> dict[str, Any]:
     raise ValueError(message)
 
 
+def _required_string(value: Any, message: str) -> str:
+    """Return a stripped string value or reject missing and non-string input."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(message)
+    return value.strip()
+
+
+def _runtime_supports(runtime: GatewayRuntime, *method_names: str) -> bool:
+    """Return whether the injected runtime exposes each named method."""
+
+    return all(callable(getattr(runtime, method_name, None)) for method_name in method_names)
+
+
 def _request_context(
     payload: GatewayJSONRPCRequest,
     request: Request,
@@ -163,8 +177,8 @@ async def _handle_initialize(
         "protocolVersion": _PROTOCOL_VERSION,
         "capabilities": {
             "tools": {"available": True},
-            "resources": {"available": False},
-            "prompts": {"available": False},
+            "resources": {"available": _runtime_supports(runtime, "list_resources", "read_resource")},
+            "prompts": {"available": _runtime_supports(runtime, "list_prompts", "get_prompt")},
         },
         "serverInfo": {
             "name": _runtime_name(runtime),
@@ -197,9 +211,26 @@ async def _dispatch_jsonrpc(
             params.get("arguments"),
             "tools/call arguments must be an object",
         )
-        if not isinstance(tool_name, str) or not tool_name.strip():
-            raise ValueError("tools/call requires a non-empty string name")
+        tool_name = _required_string(tool_name, "tools/call requires a non-empty string name")
         return await runtime.call_tool(tool_name, arguments, context)
+    if method == "resources/list":
+        return {"resources": await runtime.list_resources(context)}
+    if method == "resources/read":
+        uri = _required_string(params.get("uri"), "resources/read requires a non-empty string uri")
+        return await runtime.read_resource(uri, context)
+    if method == "prompts/list":
+        return {"prompts": await runtime.list_prompts(context)}
+    if method == "prompts/get":
+        name = _required_string(params.get("name"), "prompts/get requires a non-empty string name")
+        arguments = _object_or_empty(
+            params.get("arguments"),
+            "prompts/get arguments must be an object",
+        )
+        return await runtime.get_prompt(name, arguments, context)
+    if method == "modules/list":
+        return {"modules": await runtime.list_modules(context)}
+    if method == "modules/health":
+        return {"health": await runtime.get_modules_health(context)}
 
     raise NotImplementedError(str(method))
 
