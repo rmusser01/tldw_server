@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react"
 import {
-  Alert,
   Button,
   Card,
   Descriptions,
@@ -29,6 +28,7 @@ import {
   RecoveryCallout,
   type CapabilityStateDescriptor
 } from "@/components/ui/state"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 
 type SharedPolicyPanelProps = {
   errorMessage?: string
@@ -197,10 +197,10 @@ const WorkspacePolicyEditor: React.FC<
           className="mb-4"
         />
       ) : errorMessage ? (
-        <Alert type="error" showIcon style={{ marginBottom: 16 }} title={errorMessage} />
+        <DsAlert variant="error" className="mb-4" title={errorMessage} />
       ) : null}
       {!errorMessage && !errorState && isUnavailable ? (
-        <Alert type="warning" showIcon style={{ marginBottom: 16 }} title={`${title} is unavailable`} />
+        <DsAlert variant="warning" className="mb-4" title={`${title} is unavailable`} />
       ) : null}
       <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
         {policyDescription.map((item) => (
@@ -372,7 +372,7 @@ const TelegramPolicyEditor: React.FC<
           className="mb-4"
         />
       ) : errorMessage ? (
-        <Alert type="error" showIcon style={{ marginBottom: 16 }} title={errorMessage} />
+        <DsAlert variant="error" className="mb-4" title={errorMessage} />
       ) : null}
       <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
         <Descriptions.Item label="Bot username">{bot?.bot_username ?? "—"}</Descriptions.Item>
@@ -406,20 +406,14 @@ const TelegramPolicyEditor: React.FC<
       </Form>
 
       {localPairingCode ? (
-        <Alert
-          type="success"
-          showIcon
-          style={{ marginTop: 16 }}
-          title="Pairing code generated"
-          description={
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <span>
-                <strong>{localPairingCode.pairing_code}</strong>
-              </span>
-              <span>Expires at {new Date(localPairingCode.expires_at).toLocaleString()}</span>
-            </div>
-          }
-        />
+        <DsAlert variant="success" className="mt-4" title="Pairing code generated">
+          <div className="flex flex-col">
+            <span>
+              <strong>{localPairingCode.pairing_code}</strong>
+            </span>
+            <span>Expires at {new Date(localPairingCode.expires_at).toLocaleString()}</span>
+          </div>
+        </DsAlert>
       ) : null}
 
       <div style={{ marginTop: 16 }}>

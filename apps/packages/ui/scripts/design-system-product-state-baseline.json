@@ -572,50 +572,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Integrations/IntegrationPolicyPanel.tsx:Alert#antd-alert-telegrampolicyeditor-type-error-line-336-tzh99k",
-    "path": "src/components/Option/Integrations/IntegrationPolicyPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Integrations/IntegrationPolicyPanel.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Integrations/IntegrationPolicyPanel.tsx:Alert#antd-alert-telegrampolicyeditor-type-success-pairing-cod-wfafza",
-    "path": "src/components/Option/Integrations/IntegrationPolicyPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Integrations/IntegrationPolicyPanel.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Integrations/IntegrationPolicyPanel.tsx:Alert#antd-alert-workspacepolicyeditor-type-error-line-178-ell3na",
-    "path": "src/components/Option/Integrations/IntegrationPolicyPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Integrations/IntegrationPolicyPanel.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Integrations/IntegrationPolicyPanel.tsx:Alert#antd-alert-workspacepolicyeditor-type-warning-line-181-1ukoiew",
-    "path": "src/components/Option/Integrations/IntegrationPolicyPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Integrations/IntegrationPolicyPanel.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Items/ItemsWorkspace.tsx:Empty",
     "path": "src/components/Option/Items/ItemsWorkspace.tsx",
     "rule": "antd-product-state-import",

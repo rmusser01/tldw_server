@@ -332,14 +332,13 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
     : null
   const telegramActorsState = telegramActorsQuery.isError
     ? buildCapabilityState({
-        featureName: "Telegram linked actors",
+        featureName: "Workspace integrations",
         capabilityName: "workspace Telegram linked actors",
         endpoint: WORKSPACE_TELEGRAM_LINKED_ACTORS_PATH,
         method: "GET",
         serverUrl: connectionConfig?.serverUrl,
         error: telegramActorsQuery.error,
-        title: "Unable to load Telegram linked actors",
-        message: "Telegram linked actors could not be loaded."
+        reason: "partial"
       })
     : null
 
