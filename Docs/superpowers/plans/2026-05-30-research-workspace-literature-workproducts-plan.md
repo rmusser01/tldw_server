@@ -228,7 +228,7 @@ bun run test -- src/workspace-templates/__tests__/work-product-templates.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit Stage 0**
+- [x] **Step 8: Commit Stage 0**
 
 ```bash
 git add apps/packages/ui/src/workspace-templates/types.ts \
@@ -260,7 +260,7 @@ git commit -m "feat: add literature work product templates"
 - `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx`
 - Existing `StudioPane.stage2.test.tsx` if the repo prefers extending current tests.
 
-- [ ] **Step 1: Write failing UI tests for source-count gating**
+- [x] **Step 1: Write failing UI tests for source-count gating**
 
 Test cases:
 
@@ -270,7 +270,7 @@ Test cases:
 - 2 selected sources but only 1 usable source context: generation fails before
   model call with a useful coverage error.
 
-- [ ] **Step 2: Write failing generation test**
+- [x] **Step 2: Write failing generation test**
 
 Mock selected source text and chat completion returning JSON:
 
@@ -304,7 +304,7 @@ Assert generated artifact:
 - `data.table.headers` is populated
 - review checklist exists
 
-- [ ] **Step 3: Run tests and confirm failure**
+- [x] **Step 3: Run tests and confirm failure**
 
 Run:
 
@@ -315,7 +315,7 @@ bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.lit
 
 Expected: FAIL because template-specific generation is missing.
 
-- [ ] **Step 4: Create literature work-products helper**
+- [x] **Step 4: Create literature work-products helper**
 
 Create:
 
@@ -335,7 +335,7 @@ Responsibilities:
 
 Keep this file pure where possible.
 
-- [ ] **Step 5: Wire Literature Matrix generation**
+- [x] **Step 5: Wire Literature Matrix generation**
 
 Modify:
 
@@ -350,7 +350,7 @@ Add a template-specific branch for `literature_matrix` that:
 - stores readable markdown/table content, lineage, and source coverage;
 - fails with a clear error when no usable table is returned.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run:
 

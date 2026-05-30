@@ -14,7 +14,10 @@ modified_files:
 - apps/packages/ui/src/types/workspace.ts
 - apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/WorkProductTemplateChooser.tsx
 - apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/index.tsx
+- apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/hooks/useArtifactGeneration.tsx
+- apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/literature-workproducts.ts
 - apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/WorkProductTemplateChooser.test.tsx
+- apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx
 ---
 
 ## Description
@@ -37,6 +40,8 @@ Implement the Research Workspace MVP literature work products from the approved 
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage -1/0 complete: implementation task exists before source edits; added literature-review work-product template IDs, availability/generation-strategy metadata, min usable source metadata, sourceCoverage artifact contract, chooser availability gating, and focused template/chooser tests. Verification: `cd apps/packages/ui && bun run test -- src/workspace-templates/__tests__/work-product-templates.test.ts src/components/Option/ResearchWorkspace/__tests__/WorkProductTemplateChooser.test.tsx` passed with 2 files / 11 tests.
+
+Stage 1 complete: added Literature Matrix RED tests for source-count gating, usable-source coverage failure, and strict JSON generation; added pure literature work-product helper for source coverage, JSON validation/normalization, and markdown table formatting; routed the literature_matrix template through JSON chat completion with response_format and sourceCoverage metadata. Verification: `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/workspace-templates/__tests__/work-product-templates.test.ts` passed with 2 files / 8 tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

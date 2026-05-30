@@ -21,6 +21,7 @@ import {
 import type { TFunction } from "i18next"
 import type {
   ArtifactReviewChecklistItem,
+  ArtifactSourceCoverage,
   ArtifactSourceLineage,
   ArtifactType,
   GeneratedArtifact,
@@ -38,6 +39,15 @@ import {
   type FlashcardDraft,
   type QuizQuestionDraft,
 } from "./useQuizParsing"
+import {
+  LiteratureSourceCoverageError,
+  buildLiteratureMatrixMessages,
+  buildLiteratureSourceCoverage,
+  formatLiteratureMatrixMarkdown,
+  isLiteratureSourceCoverageError,
+  normalizeLiteratureMatrixResponse,
+  type LiteratureWorkProductSourceContext
+} from "../literature-workproducts"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -149,9 +159,10 @@ type GenerationResult = {
   totalTokens?: number
   totalCostUsd?: number
   data?: Record<string, unknown>
+  sourceCoverage?: ArtifactSourceCoverage
 }
 
-type StudioSourceContext = {
+type StudioSourceContext = LiteratureWorkProductSourceContext & {
   title: string
   text: string
 }
@@ -719,6 +730,8 @@ const loadStudioSourceContexts = async (
       const source = sourceByMediaId.get(mediaId)
       const sourceMeta = isRecord(detail) && isRecord(detail.source) ? detail.source : null
       return {
+        sourceId: source?.id || `media-${mediaId}`,
+        mediaId,
         title:
           source?.title ||
           (typeof sourceMeta?.title === "string" ? sourceMeta.title : "") ||
@@ -741,8 +754,11 @@ const loadStudioSourceContexts = async (
       continue
     }
     sourceContexts.push({
+      sourceId: detail.sourceId,
+      mediaId: detail.mediaId,
       title: detail.title,
-      text: clippedText
+      text: clippedText,
+      truncated: detail.text.trim().length > clippedText.length
     })
     remainingChars -= clippedText.length
   }
@@ -1717,6 +1733,69 @@ Requirements:
   })
 }
 
+async function generateLiteratureMatrix(
+  options: SourceContentGenerationOptions & {
+    template: WorkProductTemplate
+  }
+): Promise<GenerationResult> {
+  const model = typeof options.model === "string" ? options.model.trim() : ""
+  if (!model) {
+    throw new Error("Select a chat model before generating a Literature Matrix.")
+  }
+
+  const sourceContexts = await loadStudioSourceContexts(options)
+  const sourceCoverage = buildLiteratureSourceCoverage({
+    selectedSources: options.selectedSources,
+    usableContexts: sourceContexts,
+    minimumUsableSources: options.template.minUsableSources,
+    sourceContextCharLimit: {
+      perSource: STUDIO_SOURCE_CHAR_LIMIT,
+      total: STUDIO_TOTAL_SOURCE_CHAR_LIMIT
+    }
+  })
+
+  if (!sourceCoverage.minimumUsableSourcesMet) {
+    throw new LiteratureSourceCoverageError(
+      `At least ${options.template.minUsableSources} usable source contexts are required for ${options.template.label}.`,
+      sourceCoverage
+    )
+  }
+
+  const messages = buildLiteratureMatrixMessages(sourceContexts)
+  const response = await tldwClient.createChatCompletion(
+    {
+      model,
+      api_provider: options.apiProvider,
+      messages: [
+        {
+          role: "system",
+          content: messages.system
+        },
+        {
+          role: "user",
+          content: messages.user
+        }
+      ],
+      temperature: options.temperature,
+      top_p: options.topP,
+      max_tokens: options.maxTokens,
+      response_format: { type: "json_object" }
+    },
+    { signal: options.abortSignal }
+  )
+
+  const { content: rawContent, usage } =
+    await readChatCompletionResponsePayload(response)
+  const table = normalizeLiteratureMatrixResponse(rawContent)
+
+  return {
+    content: formatLiteratureMatrixMarkdown(table),
+    data: { table },
+    sourceCoverage,
+    ...usage
+  }
+}
+
 async function generateDataTable(
   options: SourceContentGenerationOptions
 ): Promise<GenerationResult> {
@@ -2306,6 +2385,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               presentationId: undefined,
               presentationVersion: undefined,
               data: undefined,
+              sourceCoverage: undefined,
               errorMessage: undefined,
               ...templateMetadata
             })
@@ -2512,19 +2592,34 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             break
           }
           case "data_table":
-            result = await generateDataTable({
-              mediaIds,
-              selectedSources,
-              model: await resolveStudioChatModel(),
-              apiProvider:
-                normalizedApiProvider !== "__auto__"
-                  ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
-                  : undefined,
-              temperature: resolvedTemperature,
-              topP: resolvedTopP,
-              maxTokens: resolvedNumPredict,
-              abortSignal: activeAbort.signal
-            })
+            if (workProductTemplate?.id === "literature_matrix") {
+              const matrixRuntime = await resolveStudioChatRuntime()
+              result = await generateLiteratureMatrix({
+                mediaIds,
+                selectedSources,
+                model: matrixRuntime.model,
+                apiProvider: matrixRuntime.provider,
+                temperature: resolvedTemperature,
+                topP: resolvedTopP,
+                maxTokens: resolvedNumPredict,
+                abortSignal: activeAbort.signal,
+                template: workProductTemplate
+              })
+            } else {
+              result = await generateDataTable({
+                mediaIds,
+                selectedSources,
+                model: await resolveStudioChatModel(),
+                apiProvider:
+                  normalizedApiProvider !== "__auto__"
+                    ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
+                    : undefined,
+                temperature: resolvedTemperature,
+                topP: resolvedTopP,
+                maxTokens: resolvedNumPredict,
+                abortSignal: activeAbort.signal
+              })
+            }
             break
           default:
             throw new Error(`Unsupported output type: ${type}`)
@@ -2549,6 +2644,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           audioFormat: result.audioFormat,
           presentationId: result.presentationId,
           presentationVersion: result.presentationVersion,
+          sourceCoverage: result.sourceCoverage,
           totalTokens:
             result.totalTokens ||
             (result.content
@@ -2578,8 +2674,12 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
         )
       } catch (error) {
         const generationWasAborted = isAbortLikeError(error)
+        const sourceCoverage = isLiteratureSourceCoverageError(error)
+          ? error.sourceCoverage
+          : undefined
         if (artifact) {
           updateArtifactStatus(artifact.id, "failed", {
+            sourceCoverage,
             errorMessage: generationWasAborted
               ? t(
                   "playground:studio.generateCancelled",
