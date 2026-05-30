@@ -1,6 +1,7 @@
 import React from "react"
-import { Alert, Button, Card, Checkbox, Input, InputNumber, Typography } from "antd"
+import { Button, Card, Checkbox, Input, InputNumber, Typography } from "antd"
 import type { DatasetSample } from "@/services/evaluations"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { useTranslation } from "react-i18next"
 import { useGenerateSyntheticEvalDrafts } from "../../hooks/useSyntheticEval"
 
@@ -662,29 +663,29 @@ export const RagRetrievalTuningConfig: React.FC<Props> = ({
       >
         <div className="space-y-4">
           {generationSummary && (
-            <Alert
-              type="success"
-              showIcon
+            <DsAlert
+              variant="success"
               title={t("evaluations:syntheticGenerationSuccessInlineTitle", {
                 defaultValue: "Synthetic drafts created"
               })}
-              description={t("evaluations:syntheticGenerationSuccessInlineDescription", {
+            >
+              {t("evaluations:syntheticGenerationSuccessInlineDescription", {
                 defaultValue:
                   "Batch {{batchId}} created {{count}} drafts and is ready for review.",
                 batchId: generationSummary.batchId,
                 count: generationSummary.sampleCount
               })}
-            />
+            </DsAlert>
           )}
           {generationError && (
-            <Alert
-              type="error"
-              showIcon
+            <DsAlert
+              variant="error"
               title={t("evaluations:syntheticGenerationErrorTitle", {
                 defaultValue: "Failed to generate synthetic drafts"
               })}
-              description={generationError}
-            />
+            >
+              {generationError}
+            </DsAlert>
           )}
 
           <div className="space-y-2">
@@ -710,20 +711,20 @@ export const RagRetrievalTuningConfig: React.FC<Props> = ({
             </div>
           </div>
 
-          <Alert
-            type="info"
-            showIcon
+          <DsAlert
+            variant="info"
             title={t("evaluations:syntheticRetrievalCorpusSummaryLabel", {
               defaultValue: "Current corpus scope"
             })}
-            description={t("evaluations:syntheticRetrievalCorpusSummaryDescription", {
+          >
+            {t("evaluations:syntheticRetrievalCorpusSummaryDescription", {
               defaultValue:
                 "{{mediaCount}} media IDs, {{noteCount}} note IDs, indexing fixed: {{indexingFixed}}",
               mediaCount: corpusScope.media_ids.length,
               noteCount: corpusScope.note_ids.length,
               indexingFixed: corpusScope.indexing_fixed ? "yes" : "no"
             })}
-          />
+          </DsAlert>
 
           <div className="space-y-2">
             <Text strong>
@@ -1791,9 +1792,8 @@ export const RagRetrievalTuningConfig: React.FC<Props> = ({
             />
           </div>
         </div>
-        <Alert
-          type="info"
-          showIcon
+        <DsAlert
+          variant="info"
           title="Approved synthetic queries should be reviewed before they count toward recommendations."
         />
       </div>
