@@ -4,6 +4,7 @@ import ast
 from pathlib import Path
 from typing import Any
 
+import mcp_unified.gateway.fastapi as gateway_fastapi
 from fastapi.testclient import TestClient
 from mcp_unified.gateway import create_gateway_app
 
@@ -68,6 +69,19 @@ class _CustomExplodingGatewayRuntime(_FakeGatewayRuntime):
 
     async def list_tools(self, context: Any) -> list[dict[str, Any]]:
         raise self.RuntimeBackendError("backend unavailable")
+
+
+class _FakeLogger:
+    def __init__(self) -> None:
+        self.opt_calls: list[dict[str, Any]] = []
+        self.error_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    def opt(self, **kwargs: Any) -> _FakeLogger:
+        self.opt_calls.append(kwargs)
+        return self
+
+    def error(self, message: str, *args: Any) -> None:
+        self.error_calls.append((message, args))
 
 
 def _assert_jsonrpc_error(
@@ -152,6 +166,8 @@ def test_gateway_fastapi_app_handles_basic_jsonrpc_flow() -> None:
         assert called_body["id"] == "call-1"
         assert called_body["result"]["content"][0]["text"] == "echo.search:hello"
         assert runtime.call_requests[-1][0] == "echo.search"
+        assert runtime.call_requests[-1][1] == {"query": "hello"}
+        assert runtime.call_requests[-1][2].request_id == "call-1"
 
 
 def test_gateway_request_rejects_malformed_json_with_jsonrpc_parse_error() -> None:
@@ -247,3 +263,53 @@ def test_gateway_request_maps_custom_runtime_exceptions_to_jsonrpc_internal_erro
 
     assert response.status_code == 200
     _assert_jsonrpc_error(response.json(), code=-32603, request_id="explode")
+
+
+def test_gateway_request_logs_custom_runtime_exceptions(monkeypatch: Any) -> None:
+    runtime = _CustomExplodingGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(gateway_fastapi, "logger", fake_logger, raising=False)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "explode"},
+        )
+
+    assert response.status_code == 200
+    assert fake_logger.opt_calls == [{"exception": True}]
+    assert fake_logger.error_calls == [
+        ("Gateway runtime error while handling method={!r} request_id={!r}", ("tools/list", "explode"))
+    ]
+
+
+def test_gateway_notification_runtime_errors_do_not_return_jsonrpc_response() -> None:
+    runtime = _CustomExplodingGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}},
+        )
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+def test_gateway_batch_omits_notification_runtime_errors() -> None:
+    runtime = _CustomExplodingGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/mcp/request",
+            json=[
+                {"jsonrpc": "2.0", "method": "tools/list", "params": {}},
+                {"jsonrpc": "2.0", "method": "ping", "id": "ok"},
+            ],
+        )
+
+    assert response.status_code == 200
+    assert response.json() == [{"jsonrpc": "2.0", "result": {"pong": True}, "id": "ok"}]

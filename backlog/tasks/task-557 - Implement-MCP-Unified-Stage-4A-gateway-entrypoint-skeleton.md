@@ -49,7 +49,7 @@ Implemented the Stage 4A gateway skeleton as package-owned code under mcp_unifie
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Stage 4A gateway entrypoint skeleton complete. Verification: RED gateway test failed on missing mcp_unified.gateway; focused gateway package test passed (2 passed, 3 warnings); host extraction/http compatibility passed (47 passed, 4 warnings); Ruff passed; Bandit reported 0 findings for mcp_unified/gateway; git diff --check clean. Known note: the fresh worktree has no local .venv symlink, so verification used the main repo venv at /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python.
+Stage 4A gateway entrypoint skeleton complete. Verification: RED gateway test failed on missing mcp_unified.gateway; focused gateway package test passed (2 passed, 3 warnings); host extraction/http compatibility passed (47 passed, 4 warnings); Ruff passed; Bandit reported 0 findings for mcp_unified/gateway; git diff --check clean. Known note: verification used the repository virtualenv because the fresh worktree had no local .venv symlink.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

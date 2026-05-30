@@ -6,6 +6,7 @@ import json
 from typing import Any, Literal
 
 from fastapi import APIRouter, FastAPI, Request, Response
+from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
 
 try:
@@ -235,15 +236,24 @@ async def _handle_single_jsonrpc(
     try:
         result = await _dispatch_jsonrpc(runtime, gateway_request, request)
     except ValueError as exc:
-        return _jsonrpc_error(_INVALID_PARAMS, str(exc), request_id)
+        error = _jsonrpc_error(_INVALID_PARAMS, str(exc), request_id)
     except NotImplementedError:
-        return _jsonrpc_error(_METHOD_NOT_FOUND, f"Method not found: {gateway_request.method}", request_id)
+        error = _jsonrpc_error(_METHOD_NOT_FOUND, f"Method not found: {gateway_request.method}", request_id)
     except _GATEWAY_RUNTIME_ERRORS as exc:  # noqa: BLE001 - JSON-RPC requires mapping runtime failures to -32603.
-        return _jsonrpc_error(_INTERNAL_ERROR, "Internal server error", request_id, data=exc.__class__.__name__)
+        logger.opt(exception=True).error(
+            "Gateway runtime error while handling method={!r} request_id={!r}",
+            gateway_request.method,
+            request_id,
+        )
+        error = _jsonrpc_error(_INTERNAL_ERROR, "Internal server error", request_id, data=exc.__class__.__name__)
+    else:
+        if request_id is None:
+            return Response(status_code=204)
+        return _jsonrpc_result(result, request_id)
 
     if request_id is None:
         return Response(status_code=204)
-    return _jsonrpc_result(result, request_id)
+    return error
 
 
 async def _handle_jsonrpc(
