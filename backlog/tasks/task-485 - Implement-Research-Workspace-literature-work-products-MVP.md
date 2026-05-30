@@ -42,6 +42,8 @@ Implement the Research Workspace MVP literature work products from the approved 
 Stage -1/0 complete: implementation task exists before source edits; added literature-review work-product template IDs, availability/generation-strategy metadata, min usable source metadata, sourceCoverage artifact contract, chooser availability gating, and focused template/chooser tests. Verification: `cd apps/packages/ui && bun run test -- src/workspace-templates/__tests__/work-product-templates.test.ts src/components/Option/ResearchWorkspace/__tests__/WorkProductTemplateChooser.test.tsx` passed with 2 files / 11 tests.
 
 Stage 1 complete: added Literature Matrix RED tests for source-count gating, usable-source coverage failure, and strict JSON generation; added pure literature work-product helper for source coverage, JSON validation/normalization, and markdown table formatting; routed the literature_matrix template through JSON chat completion with response_format and sourceCoverage metadata. Verification: `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/workspace-templates/__tests__/work-product-templates.test.ts` passed with 2 files / 8 tests.
+
+Stage 2 complete: added Corpus Gap Finder RED tests for strict JSON generation and compatible Literature Matrix context; added gap prompt/schema normalization, known gap-type normalization, conservative high-confidence downgrading for single-source support, and source-compatible matrix lookup. Verification: `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx` passed with 1 file / 6 tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

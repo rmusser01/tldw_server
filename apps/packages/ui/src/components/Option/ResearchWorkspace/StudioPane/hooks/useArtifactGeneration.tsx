@@ -41,10 +41,13 @@ import {
 } from "./useQuizParsing"
 import {
   LiteratureSourceCoverageError,
+  buildCorpusGapMessages,
   buildLiteratureMatrixMessages,
   buildLiteratureSourceCoverage,
+  findCompatibleLiteratureMatrixArtifact,
   formatLiteratureMatrixMarkdown,
   isLiteratureSourceCoverageError,
+  normalizeCorpusGapResponse,
   normalizeLiteratureMatrixResponse,
   type LiteratureWorkProductSourceContext
 } from "../literature-workproducts"
@@ -1796,6 +1799,77 @@ async function generateLiteratureMatrix(
   }
 }
 
+async function generateCorpusGapFinder(
+  options: SourceContentGenerationOptions & {
+    template: WorkProductTemplate
+    generatedArtifacts: GeneratedArtifact[]
+  }
+): Promise<GenerationResult> {
+  const model = typeof options.model === "string" ? options.model.trim() : ""
+  if (!model) {
+    throw new Error("Select a chat model before generating a Corpus Gap Finder.")
+  }
+
+  const sourceContexts = await loadStudioSourceContexts(options)
+  const sourceCoverage = buildLiteratureSourceCoverage({
+    selectedSources: options.selectedSources,
+    usableContexts: sourceContexts,
+    minimumUsableSources: options.template.minUsableSources,
+    sourceContextCharLimit: {
+      perSource: STUDIO_SOURCE_CHAR_LIMIT,
+      total: STUDIO_TOTAL_SOURCE_CHAR_LIMIT
+    }
+  })
+
+  if (!sourceCoverage.minimumUsableSourcesMet) {
+    throw new LiteratureSourceCoverageError(
+      `At least ${options.template.minUsableSources} usable source contexts are required for ${options.template.label}.`,
+      sourceCoverage
+    )
+  }
+
+  const compatibleMatrix = findCompatibleLiteratureMatrixArtifact(
+    options.generatedArtifacts,
+    sourceContexts
+  )
+  const messages = buildCorpusGapMessages(
+    sourceContexts,
+    compatibleMatrix?.content
+  )
+  const response = await tldwClient.createChatCompletion(
+    {
+      model,
+      api_provider: options.apiProvider,
+      messages: [
+        {
+          role: "system",
+          content: messages.system
+        },
+        {
+          role: "user",
+          content: messages.user
+        }
+      ],
+      temperature: options.temperature,
+      top_p: options.topP,
+      max_tokens: options.maxTokens,
+      response_format: { type: "json_object" }
+    },
+    { signal: options.abortSignal }
+  )
+
+  const { content: rawContent, usage } =
+    await readChatCompletionResponsePayload(response)
+  const table = normalizeCorpusGapResponse(rawContent)
+
+  return {
+    content: formatLiteratureMatrixMarkdown(table),
+    data: { table },
+    sourceCoverage,
+    ...usage
+  }
+}
+
 async function generateDataTable(
   options: SourceContentGenerationOptions
 ): Promise<GenerationResult> {
@@ -2604,6 +2678,20 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
                 maxTokens: resolvedNumPredict,
                 abortSignal: activeAbort.signal,
                 template: workProductTemplate
+              })
+            } else if (workProductTemplate?.id === "corpus_gap_finder") {
+              const gapRuntime = await resolveStudioChatRuntime()
+              result = await generateCorpusGapFinder({
+                mediaIds,
+                selectedSources,
+                model: gapRuntime.model,
+                apiProvider: gapRuntime.provider,
+                temperature: resolvedTemperature,
+                topP: resolvedTopP,
+                maxTokens: resolvedNumPredict,
+                abortSignal: activeAbort.signal,
+                template: workProductTemplate,
+                generatedArtifacts
               })
             } else {
               result = await generateDataTable({

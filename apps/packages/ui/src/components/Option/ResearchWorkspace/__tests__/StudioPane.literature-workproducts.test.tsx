@@ -569,4 +569,140 @@ describe("StudioPane literature work products", () => {
       expect.stringContaining("generated successfully")
     )
   })
+
+  it("generates a Corpus Gap Finder artifact from strict JSON with lineage and source coverage", async () => {
+    mockCreateChatCompletion.mockResolvedValue(
+      createChatCompletionResponse(
+        JSON.stringify({
+          gaps: [
+            {
+              gap: "Rural care settings are underrepresented.",
+              gap_type: "underrepresented_context",
+              evidence_basis:
+                "Paper A studies urban clinics while Paper B recommends broader care settings.",
+              sources: ["Paper A", "Paper B"],
+              missing_area: "Rural clinics",
+              why_it_matters: "The effect may not transfer to rural care.",
+              confidence: "high",
+              suggested_follow_up_question:
+                "Do the same outcomes hold in rural clinics?"
+            }
+          ]
+        })
+      )
+    )
+
+    renderStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: /corpus gap finder/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        "artifact-1",
+        "completed",
+        expect.objectContaining({
+          templateId: "corpus_gap_finder",
+          reviewStatus: "draft",
+          sourceLineage: [
+            { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+            { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+          ],
+          sourceCoverage: expect.objectContaining({
+            selectedSourceIds: ["source-1", "source-2"],
+            usableSources: [
+              { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+              { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+            ],
+            minimumUsableSourcesMet: true
+          }),
+          data: expect.objectContaining({
+            table: expect.objectContaining({
+              headers: expect.arrayContaining([
+                "Gap",
+                "Gap Type",
+                "Evidence Basis",
+                "Sources",
+                "Missing Area",
+                "Why It Matters",
+                "Confidence",
+                "Suggested Follow-up Question"
+              ])
+            })
+          })
+        })
+      )
+    })
+
+    expect(mockCreateChatCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        response_format: { type: "json_object" }
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it("uses a compatible Literature Matrix artifact as optional context for Corpus Gap Finder", async () => {
+    workspaceStoreState.generatedArtifacts = [
+      {
+        id: "artifact-matrix",
+        type: "data_table",
+        title: "Literature Matrix",
+        status: "completed",
+        templateId: "literature_matrix",
+        content: "| Source | Primary Finding |\n| --- | --- |\n| Paper A | Finding A |",
+        sourceCoverage: {
+          selectedSourceIds: ["source-1", "source-2"],
+          usableSources: [
+            { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+            { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+          ],
+          skippedSources: [],
+          truncatedSources: [],
+          minimumUsableSourcesMet: true
+        },
+        createdAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    mockCreateChatCompletion.mockResolvedValue(
+      createChatCompletionResponse(
+        JSON.stringify({
+          gaps: [
+            {
+              gap: "No rural care comparison.",
+              gap_type: "missing_comparison",
+              evidence_basis: "The matrix has no rural comparison rows.",
+              sources: ["Paper A"],
+              missing_area: "Rural comparison",
+              why_it_matters: "Generalizability is unclear.",
+              confidence: "medium",
+              suggested_follow_up_question:
+                "How do rural and urban care settings compare?"
+            }
+          ]
+        })
+      )
+    )
+
+    renderStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: /corpus gap finder/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        "artifact-1",
+        "completed",
+        expect.objectContaining({
+          templateId: "corpus_gap_finder"
+        })
+      )
+    })
+
+    const request = mockCreateChatCompletion.mock.calls[0]?.[0] as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const userPrompt = request.messages?.find((message) => message.role === "user")
+      ?.content
+    expect(userPrompt).toContain("Compatible Literature Matrix")
+    expect(userPrompt).toContain("Finding A")
+  })
 })

@@ -362,7 +362,7 @@ bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.lit
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Stage 1**
+- [x] **Step 7: Commit Stage 1**
 
 ```bash
 git add apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane \
@@ -389,7 +389,7 @@ git commit -m "feat: generate literature matrix work product"
 
 - Add cases to `StudioPane.literature-workproducts.test.tsx`.
 
-- [ ] **Step 1: Add failing tests for gap generation**
+- [x] **Step 1: Add failing tests for gap generation**
 
 Mock a JSON response with fields:
 
@@ -409,7 +409,7 @@ Assert:
 - high-confidence gaps include source basis;
 - single-source inferred gaps are marked low or limited confidence.
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 ```bash
 cd apps/packages/ui
@@ -418,7 +418,7 @@ bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.lit
 
 Expected: FAIL.
 
-- [ ] **Step 3: Add gap prompt and schema helpers**
+- [x] **Step 3: Add gap prompt and schema helpers**
 
 Modify:
 
@@ -438,7 +438,7 @@ Add:
   - `missing_comparison`
   - `future_work_pattern`
 
-- [ ] **Step 4: Wire gap generation**
+- [x] **Step 4: Wire gap generation**
 
 Modify:
 
@@ -454,7 +454,7 @@ Compatibility requires:
 - matrix usable source IDs are the same as or a subset of the current usable
   source IDs.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 ```bash
 cd apps/packages/ui
