@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from "react"
 import {
-  Alert,
   Button,
   Card,
   Divider,
@@ -18,6 +17,7 @@ import {
 } from "antd"
 import type { InputRef } from "antd"
 import { DeleteOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 
 import {
@@ -1708,16 +1708,15 @@ export function FamilyGuardrailsWizard({
         return (
           <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
             {savedDraftsSupported === false ? (
-              <Alert
-                showIcon
-                type="info"
+              <DsAlert
+                variant="info"
                 title="Saved household drafts unavailable"
-                description="This server does not expose family wizard draft endpoints yet. Start a new household to continue."
-              />
+              >
+                This server does not expose family wizard draft endpoints yet. Start a new household to continue.
+              </DsAlert>
             ) : loadingDraftList ? (
-              <Alert
-                showIcon
-                type="info"
+              <DsAlert
+                variant="info"
                 title="Checking for saved household drafts..."
               />
             ) : savedDrafts.length ? (
@@ -1814,9 +1813,8 @@ export function FamilyGuardrailsWizard({
       case 1:
         return (
           <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-            <Alert
-              showIcon
-              type="info"
+            <DsAlert
+              variant="info"
               title={
                 mode === "institutional"
                   ? "Add every caregiver who can manage alerts and safety settings."
@@ -1983,9 +1981,8 @@ export function FamilyGuardrailsWizard({
       case 2:
         return (
           <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-            <Alert
-              showIcon
-              type="info"
+            <DsAlert
+              variant="info"
               title="Choose whether each dependent already has an account or needs a new invite."
             />
             <span style={{ display: "none" }}>
@@ -1998,12 +1995,12 @@ export function FamilyGuardrailsWizard({
               Use each dependent account user ID exactly as it appears at sign-in so invites can be accepted.
             </span>
             {mappingFixTargetLabel ? (
-              <Alert
-                showIcon
-                type="warning"
+              <DsAlert
+                variant="warning"
                 title={`Fixing mapping for ${mappingFixTargetLabel}.`}
-                description="Update dependent account details as needed, then continue to regenerate relationship mapping."
-              />
+              >
+                Update dependent account details as needed, then continue to regenerate relationship mapping.
+              </DsAlert>
             ) : null}
             {showDependentInlineErrors && incompleteDependentCount > 0 ? (
               <Text type="secondary">
@@ -2369,12 +2366,12 @@ export function FamilyGuardrailsWizard({
               {`Map each dependent to a ${guardianEntityLabelLower}. For shared households, dependents can be mapped to different ${guardianEntityLabelPluralLower}.`}
             </Paragraph>
             {mappingFixTargetLabel ? (
-              <Alert
-                showIcon
-                type="warning"
+              <DsAlert
+                variant="warning"
                 title={`Fixing mapping for ${mappingFixTargetLabel}.`}
-                description="Remap the dependent guardian assignment below, then continue to refresh activation readiness."
-              />
+              >
+                Remap the dependent guardian assignment below, then continue to refresh activation readiness.
+              </DsAlert>
             ) : null}
             {dependents.map((dependent) => (
               <Card key={dependent.key} size="small">
@@ -2398,23 +2395,21 @@ export function FamilyGuardrailsWizard({
       case 4:
         return (
           <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-            <Alert
-              showIcon
-              type="info"
+            <DsAlert
+              variant="info"
               title="Apply a template first, then customize if needed."
             />
             {templateReviewTargetLabel ? (
-              <Alert
-                showIcon
-                type="warning"
+              <DsAlert
+                variant="warning"
                 title={`Reviewing template for ${templateReviewTargetLabel}.`}
-                description="Adjust template or advanced overrides, then continue to re-check activation status."
-              />
+              >
+                Adjust template or advanced overrides, then continue to re-check activation status.
+              </DsAlert>
             ) : null}
             {guardians.length <= 1 ? (
-              <Alert
-                showIcon
-                type="info"
+              <DsAlert
+                variant="info"
                 title={`Relationship mapping was auto-applied to ${primaryGuardianName} for all dependents.`}
               />
             ) : null}
@@ -2522,12 +2517,12 @@ export function FamilyGuardrailsWizard({
       case 6:
         return (
           <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-            <Alert
-              showIcon
-              type={trackerGuidance.type}
+            <DsAlert
+              variant={trackerGuidance.type}
               title={trackerGuidance.message}
-              description={trackerGuidance.description}
-            />
+            >
+              {trackerGuidance.description}
+            </DsAlert>
             <Space>
               <Button icon={<ReloadOutlined />} onClick={() => void refreshInviteTracker()}>
                 Refresh statuses
@@ -2658,12 +2653,12 @@ export function FamilyGuardrailsWizard({
       default:
         return (
           <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-            <Alert
-              showIcon
-              type={reviewGuidance.type}
+            <DsAlert
+              variant={reviewGuidance.type}
               title={reviewGuidance.message}
-              description={reviewGuidance.description}
-            />
+            >
+              {reviewGuidance.description}
+            </DsAlert>
             <Card size="small">
               <Space orientation="vertical" style={{ width: "100%" }}>
                 <Text>
