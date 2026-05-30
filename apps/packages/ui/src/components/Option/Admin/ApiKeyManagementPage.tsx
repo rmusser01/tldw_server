@@ -230,7 +230,7 @@ const ApiKeyManagementPage: React.FC = () => {
         >
           <div>
             <p>Copy this key now -- it will not be shown again:</p>
-            <code style={{ fontSize: 14, padding: "8px 12px", background: "#f5f5f5", display: "block", wordBreak: "break-all" }}>
+            <code className="block break-all rounded border border-border bg-surface2 px-3 py-2 font-mono text-sm text-foreground">
               {newKeyValue}
             </code>
           </div>

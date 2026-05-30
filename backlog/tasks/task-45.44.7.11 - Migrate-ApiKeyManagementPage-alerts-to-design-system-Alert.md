@@ -49,12 +49,14 @@ Migrate ApiKeyManagementPage access denied, not-available, new-key-created, and 
 - `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` passed.
 - `bun run verify:design-system-state` remains blocked by unrelated current-dev findings in IntegrationPolicyPanel, WritingActionBar, Notes, and ResearchWorkspace plus stale IntegrationPolicyPanel baseline entries; the filtered log contains no ApiKeyManagementPage findings.
 - Bandit skipped because this slice only touches TypeScript, TSX, JSON, and Backlog markdown.
+- Addressed PR #2162 Gemini review feedback by replacing the one-time API key code block's hardcoded inline colors/padding with tokenized design-system classes.
+- Review-fix verification: `bunx vitest run src/components/Option/Admin/__tests__/ApiKeyManagementPage.design-system.test.tsx --reporter=dot`, `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false`, and `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated ApiKeyManagementPage access denied, not-available, new-key-created, and key-load error feedback from AntD Alert to the design-system Alert primitive in PR #2162. Added focused regression coverage for all four migrated feedback branches, removed the four ApiKeyManagementPage baseline exceptions, and recorded verification evidence. Focused Vitest, guard Vitest, package TypeScript, and diff checks passed; the full design-system verifier remains blocked by unrelated current-dev findings outside this slice, documented in Implementation Notes.
+Migrated ApiKeyManagementPage access denied, not-available, new-key-created, and key-load error feedback from AntD Alert to the design-system Alert primitive in PR #2162. Added focused regression coverage for all four migrated feedback branches, removed the four ApiKeyManagementPage baseline exceptions, addressed review feedback on tokenized API key code-block styling, and recorded verification evidence. Focused Vitest, guard Vitest, package TypeScript, and diff checks passed; the full design-system verifier remains blocked by unrelated current-dev findings outside this slice, documented in Implementation Notes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
