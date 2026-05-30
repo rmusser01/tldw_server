@@ -104,6 +104,16 @@ const resolveBaseAdminCalls = () => {
   })
 }
 
+const expectDesignSystemAlertForTitle = async (titleText: string) => {
+  const title = await screen.findByText(titleText)
+  const alert = title.closest('[data-ds-component="Alert"]')
+
+  expect(alert).not.toBeNull()
+  const alertEl = alert as HTMLElement
+  expect(alertEl).toHaveAttribute("role", "alert")
+  return alertEl
+}
+
 describe("ServerAdminPage design-system states", () => {
   const docsUrl = "https://github.com/rmusser01/tldw_server#documentation--resources"
 
@@ -196,5 +206,36 @@ describe("ServerAdminPage design-system states", () => {
     expect(
       screen.getByText("Select a user to inspect media ingestion limits and usage.")
     ).toBeInTheDocument()
+  })
+
+  it("renders user-load errors through the design-system Alert primitive", async () => {
+    apiMock.listAdminUsers.mockRejectedValueOnce(new Error("Users exploded"))
+
+    render(<ServerAdminPage />)
+
+    const alert = await expectDesignSystemAlertForTitle("Unable to load users")
+    expect(alert).toHaveTextContent("Users exploded")
+  })
+
+  it("renders role-load errors through the design-system Alert primitive", async () => {
+    apiMock.listAdminRoles.mockRejectedValueOnce(new Error("Roles exploded"))
+
+    render(<ServerAdminPage />)
+
+    const alert = await expectDesignSystemAlertForTitle("Unable to load roles")
+    expect(alert).toHaveTextContent("Roles exploded")
+  })
+
+  it("renders media budget diagnostic errors through the design-system Alert primitive", async () => {
+    apiMock.getMediaIngestionBudgetDiagnostics.mockRejectedValueOnce(
+      new Error("Budget exploded")
+    )
+
+    render(<ServerAdminPage />)
+
+    const alert = await expectDesignSystemAlertForTitle(
+      "Unable to load media ingestion budget diagnostics"
+    )
+    expect(alert).toHaveTextContent("Budget exploded")
   })
 })

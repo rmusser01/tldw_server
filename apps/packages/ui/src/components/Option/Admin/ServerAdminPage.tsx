@@ -5,7 +5,6 @@ import {
   Descriptions,
   Button,
   Space,
-  Alert,
   Table,
   Tag,
   Select,
@@ -36,6 +35,7 @@ import {
   RecoveryCallout,
   StatePanel
 } from "@/components/ui/state"
+import { Alert } from "@/components/ui/primitives"
 
 const { Title, Text } = Typography
 const SYSTEM_STATS_TIMEOUT_MS = 10_000
@@ -654,11 +654,10 @@ export const ServerAdminPage: React.FC = () => {
               <Space orientation="vertical" size="middle" className="w-full">
                 {usersError && (
                   <Alert
-                    type="error"
-                    title={t("settings:admin.usersError", "Unable to load users")}
-                    description={usersError}
-                    showIcon
-                  />
+                    variant="error"
+                    title={t("settings:admin.usersError", "Unable to load users")}>
+                    {usersError}
+                  </Alert>
                 )}
                 <Space align="center" wrap>
                   <Text strong>
@@ -736,11 +735,10 @@ export const ServerAdminPage: React.FC = () => {
 
                 {rolesError && (
                   <Alert
-                    type="error"
-                    title={t("settings:admin.rolesError", "Unable to load roles")}
-                    description={rolesError}
-                    showIcon
-                  />
+                    variant="error"
+                    title={t("settings:admin.rolesError", "Unable to load roles")}>
+                    {rolesError}
+                  </Alert>
                 )}
 
                 <Space orientation="vertical" size="small" className="w-full">
@@ -905,14 +903,13 @@ export const ServerAdminPage: React.FC = () => {
 
                 {mediaBudgetError && (
                   <Alert
-                    type="error"
-                    showIcon
+                    variant="error"
                     title={t(
                       "settings:admin.mediaBudget.errorTitle",
                       "Unable to load media ingestion budget diagnostics"
-                    )}
-                    description={mediaBudgetError}
-                  />
+                    )}>
+                    {mediaBudgetError}
+                  </Alert>
                 )}
 
                 {mediaBudget ? (
