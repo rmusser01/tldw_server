@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Preserve existing tracked character/persona chats while adding snapshot-based, non-destructive character/persona personality overlays for normal `/chat` conversations, with the main control surface in a side rail.
+**Status:** Reconciled on 2026-05-30. This plan is historical and should not be executed as written.
 
-**Architecture:** Keep the current tracked chat contract intact and add a separate `assistantOverlay` settings contract for normal chats. Resolve effective assistant mode from tracked chat metadata plus chat settings, route tracked and overlay sends differently, and add a right-rail control surface that reuses the existing picker and chat shell instead of replacing them.
+**Goal:** Preserve existing tracked character/persona chats while adding snapshot-based, non-destructive character/persona personality overlays for normal `/chat` conversations, with the main control surface in the existing cockpit runtime/context rails.
+
+**Architecture:** Keep the current tracked chat contract intact and add a separate `assistantOverlay` settings contract for normal chats. Resolve effective assistant mode from tracked chat metadata plus chat settings, route tracked and overlay sends differently, and use the existing runtime/context cockpit rails as the assistant control surface.
 
 **Tech Stack:** React, TypeScript, Next.js route wrappers, shared `@/components` UI package, Plasmo/local storage utilities, FastAPI, Pydantic validation, pytest, Vitest, Testing Library, Browser plugin or Playwright for final UI verification.
 
@@ -15,6 +17,18 @@
 - Design spec: `Docs/superpowers/specs/2026-05-22-chat-character-overlay-and-tracked-identity-design.md`
 - Design Backlog task: `TASK-444`
 
+## 2026-05-30 Reconciliation
+
+Do not create `CharacterControlRail`, `CharacterControlRailSheet`, or a new `character-control` coordinator panel from this plan. The current `dev` branch already includes the durable parts of this plan:
+
+- `assistantOverlay` typing, normalization, sync, and backend validation;
+- effective assistant-state resolution;
+- snapshot-on-apply overlay helpers;
+- runtime/context rail assistant selection, clear, context-source, tracked-start, and reload proof;
+- real-server tests asserting `character-control-rail` is absent.
+
+Tasks 1-3 below are retained as historical implementation context. Tasks 4-5 are superseded by the current cockpit runtime/context rail implementation and should not be used to reintroduce a standalone rail.
+
 ## Scope Constraints
 
 - Keep existing tracked character chats and tracked persona chats behaviorally unchanged.
@@ -24,7 +38,7 @@
 - No route split for character chat.
 - No removal of the existing composer, left sidebar, knowledge section, or artifacts panel.
 - No backend tracked chat contract rewrite.
-- Extension parity should reuse the same state contract, but desktop rail work lands first.
+- Extension parity should reuse the same state contract, but desktop runtime/context rail work lands first.
 
 ## File Map
 
@@ -50,22 +64,22 @@
   - Inject overlay personality snapshot with deterministic prompt ordering.
 
 - `apps/packages/ui/src/components/Common/AssistantSelect.tsx`
-  - Keep summary picker behavior intact while supporting rail-driven overlay apply.
+  - Keep summary picker behavior intact while supporting runtime/context rail-driven overlay apply.
 
 - `apps/packages/ui/src/components/Option/Playground/Playground.tsx`
-  - Render the desktop character-control rail inside the existing `/chat` shell.
+  - Historical note: the original plan proposed rendering a desktop character-control rail. The reconciled direction keeps this inside the existing cockpit runtime/context rails.
 
 - `apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx`
-  - Add rail entry/status wiring where needed without rehoming the composer.
+  - Add runtime/context rail entry/status wiring where needed without rehoming the composer.
 
 - `apps/packages/ui/src/store/chat-surface-coordinator.ts`
-  - Add rail panel state.
+  - Historical note: the original plan proposed rail panel state. The reconciled direction does not add a standalone character panel.
 
 - `apps/packages/ui/src/routes/sidepanel-chat.tsx`
   - Reuse the same effective-mode and overlay settings contract for extension chat flows.
 
 - `apps/packages/ui/src/components/Sidepanel/Chat/form.tsx`
-  - Add sheet/drawer presentation for character controls if the sidepanel requires local UI glue.
+  - Reuse shared assistant state where sidepanel chat exposes assistant controls.
 
 - `tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py`
   - Validate `assistantOverlay` in chat settings payloads.
@@ -78,11 +92,10 @@
 - `apps/packages/ui/src/utils/assistant-overlay.ts`
   - Build snapshot-on-apply overlay payloads from full character/persona detail.
 
-- `apps/packages/ui/src/components/Option/Playground/CharacterControlRail.tsx`
-  - Main desktop character/persona control surface for `/chat`.
+Do not create these files from this plan:
 
+- `apps/packages/ui/src/components/Option/Playground/CharacterControlRail.tsx`
 - `apps/packages/ui/src/components/Option/Playground/CharacterControlRailSheet.tsx`
-  - Mobile/compact presentation wrapper if `Playground` already uses sheet patterns elsewhere.
 
 ### New Or Modified Tests
 
@@ -91,7 +104,7 @@
 - `apps/packages/ui/src/hooks/chat/__tests__/effective-assistant-state.test.ts`
 - `apps/packages/ui/src/hooks/__tests__/useMessageOption.assistant-overlay.test.tsx`
 - `apps/packages/ui/src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts`
-- `apps/packages/ui/src/components/Option/Playground/__tests__/CharacterControlRail.test.tsx`
+- `apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx`
 - `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx`
 - `apps/packages/ui/src/store/__tests__/chat-surface-coordinator.test.ts`
 - `apps/packages/ui/src/components/Common/__tests__/AssistantSelect.behavior.test.tsx`
@@ -402,185 +415,27 @@ git add apps/packages/ui/src/utils/assistant-overlay.ts apps/packages/ui/src/uti
 git commit -m "feat: add snapshot-based assistant overlay send path"
 ```
 
-## Task 4: Add The Desktop Character Control Rail
+## Task 4: Superseded Standalone Character Control Rail
 
-**Files:**
-- Create: `apps/packages/ui/src/components/Option/Playground/CharacterControlRail.tsx`
-- Modify: `apps/packages/ui/src/components/Option/Playground/Playground.tsx`
-- Modify: `apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx`
-- Modify: `apps/packages/ui/src/store/chat-surface-coordinator.ts`
-- Test: `apps/packages/ui/src/components/Option/Playground/__tests__/CharacterControlRail.test.tsx`
-- Test: `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx`
-- Test: `apps/packages/ui/src/store/__tests__/chat-surface-coordinator.test.ts`
+Do not execute the original desktop-rail slice. Current `dev` intentionally keeps character/persona controls inside `PlaygroundRuntimeInspector`, `PlaygroundContextRail`, and the existing cockpit mobile tabs.
 
-- [ ] **Step 1: Write failing rail panel-state tests**
+Current proof points:
 
-Cover:
-- new `character-control` panel id registers cleanly
-- opening the rail does not break existing panel exclusivity rules
+- `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts` asserts `CharacterControlRail` is absent.
+- `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts` asserts `character-control-rail` has count `0` while proving runtime-rail character/persona selection, clear, tracked start, and reload.
+- `apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx` covers the runtime assistant controls that replaced the standalone rail direction.
 
-Run:
-```bash
-bunx vitest run apps/packages/ui/src/store/__tests__/chat-surface-coordinator.test.ts
-```
+Future assistant UI work should extend those existing cockpit rail components unless a new product decision explicitly reopens a separate panel.
 
-Expected:
-- FAIL because the new panel id does not yet exist.
+## Task 5: Superseded Sidepanel/Mobile Rail Sheet
 
-- [ ] **Step 2: Write failing UI tests for overlay/tracked actions**
+Do not create a `CharacterControlRailSheet`. Mobile `/chat` uses the existing cockpit context/runtime tabs, and the extension sidepanel handoff is currently route-only. Any future sidepanel assistant-state work should start from the shared `assistantOverlay` and effective-assistant-state contract, not from this rail-sheet plan.
 
-Cover:
-- rail shows current mode summary
-- apply overlay action writes overlay
-- clear overlay preserves the thread
-- tracked actions are clearly separate from overlay actions
+Keep these proof gates when touching the assistant workflow:
 
-Run:
-```bash
-bunx vitest run apps/packages/ui/src/components/Option/Playground/__tests__/CharacterControlRail.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx
-```
-
-Expected:
-- FAIL because the rail does not exist.
-
-- [ ] **Step 3: Implement the rail shell and panel wiring**
-
-Implement:
-- new panel id in `chat-surface-coordinator.ts`
-- desktop rail rendering in `Playground.tsx`
-- minimal integration points in `PlaygroundForm.tsx` for status/entry
-
-Keep:
-- left history sidebar unchanged
-- composer available
-- no starter cards or route-level mode split
-
-- [ ] **Step 4: Implement rail actions**
-
-Wire:
-- `Apply overlay`
-- `Change overlay`
-- `Clear overlay`
-- `Start tracked character chat`
-- `Start tracked persona chat`
-- `Open tracked session`
-
-Honor:
-- tracked defaults win on tracked-start actions
-- overlay writes stay in settings only
-
-- [ ] **Step 5: Run targeted tests**
-
-Run:
-```bash
-bunx vitest run apps/packages/ui/src/store/__tests__/chat-surface-coordinator.test.ts apps/packages/ui/src/components/Option/Playground/__tests__/CharacterControlRail.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx
-```
-
-Expected:
-- PASS with no regressions in existing coordinator behavior.
-
-- [ ] **Step 6: Commit the desktop-rail slice**
-
-Run:
-```bash
-git add apps/packages/ui/src/components/Option/Playground/CharacterControlRail.tsx apps/packages/ui/src/components/Option/Playground/Playground.tsx apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx apps/packages/ui/src/store/chat-surface-coordinator.ts apps/packages/ui/src/store/__tests__/chat-surface-coordinator.test.ts apps/packages/ui/src/components/Option/Playground/__tests__/CharacterControlRail.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx
-git commit -m "feat: add chat character control rail"
-```
-
-## Task 5: Add Sidepanel/Mobile Parity, Then Verify End-To-End
-
-**Files:**
-- Create if needed: `apps/packages/ui/src/components/Option/Playground/CharacterControlRailSheet.tsx`
-- Modify: `apps/packages/ui/src/routes/sidepanel-chat.tsx`
-- Modify: `apps/packages/ui/src/components/Sidepanel/Chat/form.tsx`
-- Modify as needed: `apps/packages/ui/src/components/Sidepanel/Chat/CharacterSelect.tsx`
-- Test: `apps/packages/ui/src/components/Sidepanel/Chat/__tests__/form.mobile-toolbar.contract.test.ts`
-- Test: `apps/packages/ui/src/routes/__tests__/sidepanel-chat.background-storage-stability.guard.test.ts`
-- Test: `apps/packages/ui/src/routes/__tests__/sidepanel-chat-resume.test.ts`
-
-- [ ] **Step 1: Write failing parity tests**
-
-Cover:
-- sidepanel can read the same effective assistant mode contract
-- overlay state survives sidepanel/local-chat hydration
-- mobile/sheet entry exposes overlay apply/change/clear actions
-
-Run:
-```bash
-bunx vitest run apps/packages/ui/src/components/Sidepanel/Chat/__tests__/form.mobile-toolbar.contract.test.ts apps/packages/ui/src/routes/__tests__/sidepanel-chat.background-storage-stability.guard.test.ts apps/packages/ui/src/routes/__tests__/sidepanel-chat-resume.test.ts
-```
-
-Expected:
-- FAIL because sidepanel does not yet reuse the new contract everywhere it needs to.
-
-- [ ] **Step 2: Implement compact/sheet presentation and shared state wiring**
-
-Implement:
-- sheet/drawer wrapper if required for narrow layouts
-- sidepanel glue that reuses the same resolver and overlay settings contract
-
-Do not:
-- fork the overlay state model for extension
-- invent a separate route mode for character overlay
-
-- [ ] **Step 3: Run targeted frontend regression tests**
-
-Run:
-```bash
-bunx vitest run apps/packages/ui/src/components/Sidepanel/Chat/__tests__/form.mobile-toolbar.contract.test.ts apps/packages/ui/src/routes/__tests__/sidepanel-chat.background-storage-stability.guard.test.ts apps/packages/ui/src/routes/__tests__/sidepanel-chat-resume.test.ts apps/packages/ui/src/components/Option/Playground/__tests__/Playground.responsive-parity.guard.test.ts
-```
-
-Expected:
-- PASS with shared overlay semantics across desktop and sidepanel chat.
-
-- [ ] **Step 4: Run backend and frontend focused verification sweep**
-
-Run:
-```bash
-bunx vitest run apps/packages/ui/src/services/__tests__/chat-settings.overlay.test.ts apps/packages/ui/src/hooks/chat/__tests__/effective-assistant-state.test.ts apps/packages/ui/src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts apps/packages/ui/src/components/Option/Playground/__tests__/CharacterControlRail.test.tsx apps/packages/ui/src/components/Sidepanel/Chat/__tests__/form.mobile-toolbar.contract.test.ts
-source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_settings_merge.py -k "assistant_overlay or overlay" -v
-```
-
-Expected:
-- PASS on all targeted suites.
-
-- [ ] **Step 5: Run Bandit on touched backend scope**
-
-Run:
-```bash
-source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py -f json -o /tmp/bandit_chat_overlay.json
-```
-
-Expected:
-- No new findings in touched backend code.
-- If findings appear, fix them before moving on.
-
-- [ ] **Step 6: Verify in the browser**
-
-Use Browser plugin or Playwright against the local WebUI:
-
-Desktop checks:
-1. Open `/chat`.
-2. Start a plain chat, apply overlay before first send, reload, verify overlay persists.
-3. Send messages, change overlay mid-thread, verify history/chat id stay stable.
-4. Open a tracked character chat and verify existing tracked behavior is unchanged.
-
-Sidepanel/mobile checks:
-1. Open sidepanel chat.
-2. Apply overlay from compact controls.
-3. Verify no thread reset and correct rehydration.
-
-Expected:
-- Overlay and tracked modes remain clearly distinct.
-- No starter-card dependency appears.
-
-- [ ] **Step 7: Commit parity/hardening**
-
-Run:
-```bash
-git add <CharacterControlRailSheet.tsx if created> apps/packages/ui/src/routes/sidepanel-chat.tsx apps/packages/ui/src/components/Sidepanel/Chat/form.tsx apps/packages/ui/src/components/Sidepanel/Chat/CharacterSelect.tsx apps/packages/ui/src/components/Sidepanel/Chat/__tests__/form.mobile-toolbar.contract.test.ts apps/packages/ui/src/routes/__tests__/sidepanel-chat.background-storage-stability.guard.test.ts apps/packages/ui/src/routes/__tests__/sidepanel-chat-resume.test.ts
-git commit -m "feat: add chat overlay parity and verification coverage"
-```
+- focused overlay/settings tests: `chat-settings.overlay`, `chat-settings.sync`, `effective-assistant-state`, `normalChatMode.overlay`, and `assistant-overlay`;
+- focused cockpit tests: `PlaygroundRuntimeInspector.first-slice`, `Playground.cockpit-regression.guard`, `Playground.cockpit-controls`;
+- real-server proof for runtime rail character/persona selection, clear, tracked start, reload, and absence of `character-control-rail`.
 
 ## Done Checklist
 
@@ -590,7 +445,7 @@ git commit -m "feat: add chat overlay parity and verification coverage"
 - [ ] Overlay changes do not reset thread state.
 - [ ] Overlay is snapshot-on-apply, not live re-resolution.
 - [ ] Tracked-start actions use tracked defaults rather than carrying plain-chat overlay state forward.
-- [ ] Desktop `/chat` exposes the character rail without replacing existing UI.
+- [ ] Desktop `/chat` exposes runtime/context cockpit rails without replacing existing UI.
 - [ ] Sidepanel/mobile surfaces reuse the same state contract.
 - [ ] Targeted frontend and backend tests pass.
 - [ ] Bandit result recorded.

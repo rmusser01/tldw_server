@@ -2,10 +2,23 @@
 
 **Date:** 2026-05-22
 **Surface:** WebUI `/chat` and extension sidepanel chat flows
-**Status:** Approved in-session
+**Status:** Reconciled on 2026-05-30
 **Backlog:** TASK-444
 
 ---
+
+## 2026-05-30 Reconciliation
+
+This spec's data-model decision remains current: tracked character/persona identity and normal-chat assistant overlay must stay separate.
+
+The original UI direction is superseded. Do not add or reintroduce a standalone `CharacterControlRail`. The current `dev` implementation intentionally routes character/persona controls through the existing `/chat` cockpit rails:
+
+- the runtime rail shows assistant state, selection, clear, Scene Director access, and tracked-start behavior;
+- the context rail shows assistant/context sources and clear affordances;
+- mobile uses the existing cockpit rail tabs rather than a separate character sheet;
+- regression coverage asserts `CharacterControlRail` remains absent from `/chat`.
+
+The implementation plan linked from this task is retained as historical context for the state split and overlay contract, but its standalone rail stage is not executable.
 
 ## Goal
 
@@ -16,7 +29,7 @@ The end state is one chat surface with a clearer contract:
 - tracked character/persona chats still behave as tracked chats;
 - normal chats can borrow character/persona personality without becoming tracked chats;
 - assistant switching in a normal chat does not reset the thread;
-- the main character/persona control surface lives in a side rail, not in starter cards, not in a drawer-first setup flow, and not primarily in the composer.
+- the main character/persona control surface lives in the existing cockpit runtime/context rails, not in starter cards, not in a drawer-first setup flow, not primarily in the composer, and not in a standalone character rail.
 
 ## Product Decision
 
@@ -41,9 +54,9 @@ The implementation must support both of these behaviors at the same time:
 1. Existing character/persona chats continue to be tracked to the selected character/persona exactly as they are today.
 2. A user can add, change, or clear a character/persona on an existing non-character/persona conversation and use it only for assistant personality, without resetting or reclassifying the chat.
 
-## Problem
+## Original Problem
 
-The current `/chat` flow conflates tracked identity with UI selection and send-time routing:
+At original authoring time, `/chat` conflated tracked identity with UI selection and send-time routing:
 
 - assistant selection is stored globally in [useSelectedAssistant.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/useSelectedAssistant.ts:59);
 - tracked chat hydration writes back into that same global selection in [useSelectServerChat.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useSelectServerChat.ts:151);
@@ -98,7 +111,7 @@ Use these terms consistently:
 | Plain chat | A conversation with neither tracked identity nor overlay. |
 | Tracked character chat | A conversation owned by a character. |
 | Tracked persona chat | A conversation owned by a persona. |
-| Character rail | The side-rail control surface for identity, behavior, scene, context, saved setups, and session actions. |
+| Runtime assistant controls | The existing cockpit runtime/context rail controls for assistant identity, selection, clear/change actions, Scene Director access, context visibility, and tracked session actions. |
 
 Do not describe overlay state as "the chat is now a character chat." It is still a normal chat.
 
@@ -166,7 +179,7 @@ assistantOverlay?: {
   id: string
   name: string
   avatar_url?: string | null
-  system_prompt?: string | null
+  system_prompt_snapshot?: string | null
   updatedAt: string
 } | null
 ```
@@ -226,29 +239,28 @@ This resolver should replace ad hoc assistant checks in:
 
 The UI must expose the split between tracked identity and overlay directly, rather than hiding it behind one generic assistant picker.
 
-### Character Rail
+### Runtime Assistant Controls
 
-Add a persistent right-side character rail to `/chat`.
+Use the existing `/chat` cockpit rails as the character/persona control plane.
 
 Placement:
 
-- desktop: beside the transcript using the same shell pattern currently used for the artifacts panel in [Playground.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/Playground.tsx:1813);
-- mobile and narrow sidepanel layouts: sheet/drawer variant with the same state model.
+- desktop: inside the existing runtime and context rails rendered by the cockpit shell;
+- mobile and narrow layouts: inside the existing cockpit context/runtime tabs;
+- extension sidepanel: keep the route-only handoff contract and reuse the shared state model where sidepanel chat exposes assistant controls.
 
-The rail is an additive control plane. It does not replace the existing composer or left sidebar.
+Do not create a separate persistent `CharacterControlRail`, a replacement character workspace, or a drawer-first setup flow for this task.
 
-### Rail Sections
+### Cockpit Sections
 
-The rail should own:
+The existing cockpit rails should own:
 
 1. current assistant mode and summary;
 2. identity picker and clear/change actions;
-3. behavior prompt summary;
-4. style/preset summary;
-5. scene summary;
-6. context summary;
-7. saved setups;
-8. tracked recent sessions.
+3. Scene Director entry when a character-backed mode supports it;
+4. context source summary and assistant context sources;
+5. runtime/provider/model state;
+6. tracked recent/session entry points where currently exposed.
 
 ### Existing UI Preservation
 
@@ -261,13 +273,13 @@ Keep:
 
 But change their role:
 
-- the rail becomes the main character/persona control surface;
+- the runtime/context cockpit rails become the main character/persona control surface;
 - the composer remains usable but secondary for identity control;
-- `AssistantSelect` becomes the picker the rail invokes, not the workflow container.
+- `AssistantSelect` becomes the picker the runtime rail invokes, not the workflow container.
 
-## Rail Actions
+## Runtime/Context Rail Actions
 
-Each rail action must map to one write path.
+Each assistant action must map to one write path.
 
 ### Apply Overlay
 
@@ -374,11 +386,9 @@ The assistant-switch reset block in [useMessageOption.tsx](/Users/macbook-dev/Do
 
 [useSelectServerChat.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useSelectServerChat.ts:151) should continue to hydrate tracked chat metadata, but it should not make global assistant selection the active source of truth for the loaded chat.
 
-### 4. Add New Rail Panel State
+### 4. Do Not Add Standalone Character Rail Panel State
 
-Extend [chat-surface-coordinator.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/store/chat-surface-coordinator.ts:6) with a new optional panel id for the character rail.
-
-This keeps the new rail within the same panel-ownership model already used for server history, model catalog, and artifacts-adjacent layout.
+The reconciled direction does not require a new `character-control` panel id. Keep assistant controls inside the existing cockpit runtime/context rail ownership model unless a future product decision explicitly reopens a separate panel.
 
 ## Backend Architecture Changes
 
@@ -396,7 +406,7 @@ Extend [_validate_chat_settings_payload](/Users/macbook-dev/Documents/GitHub/tld
 - `assistantOverlay.id`
 - `assistantOverlay.name`
 - optional `assistantOverlay.avatar_url`
-- optional `assistantOverlay.system_prompt`
+- optional `assistantOverlay.system_prompt_snapshot`
 - `assistantOverlay.updatedAt`
 
 The settings merge path in [update_chat_settings](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py:5787) should remain the persistence mechanism.
@@ -443,7 +453,7 @@ This keeps:
 
 - character/persona session history accurate;
 - plain chat history accurate;
-- rail actions understandable.
+- runtime/context rail actions understandable.
 
 ## Extension And Sidepanel Parity
 
@@ -453,8 +463,8 @@ Requirements:
 
 - tracked chat metadata keeps working in extension handoff;
 - `assistantOverlay` persists through shared chat settings flows;
-- desktop WebUI can use a persistent right rail;
-- extension sidepanel and mobile surfaces can render the same controls in a sheet/drawer form;
+- desktop WebUI can use the persistent runtime/context rails;
+- extension sidepanel and mobile surfaces can render the same controls through their existing compact rail/tab patterns;
 - neither surface should rely on starter cards or route-level character mode.
 
 ## Risks
@@ -506,19 +516,18 @@ The frontend currently attempts persona memory mode updates from [ConversationTa
 - overlay chats use current conversation id and history;
 - overlay visibly changes assistant behavior.
 
-## Stage 3: Character Rail
+## Stage 3: Cockpit Runtime/Context Rail Integration
 
-**Goal:** Add the main character/persona control surface without replacing existing chat UI.
+**Goal:** Keep the main character/persona control surface in the existing cockpit rails without replacing existing chat UI.
 
 **Scope:**
 
-- add new right-rail panel component;
-- wire rail actions to overlay writes and tracked session actions;
+- wire runtime/context rail actions to overlay writes and tracked session actions;
 - keep composer and sidebar intact.
 
 **Success Criteria:**
 
-- desktop `/chat` exposes a persistent rail for identity controls;
+- desktop `/chat` exposes persistent runtime/context rails for identity controls;
 - users can apply/change/clear overlay from the rail;
 - users can start or open tracked sessions from the rail.
 
@@ -529,7 +538,7 @@ The frontend currently attempts persona memory mode updates from [ConversationTa
 **Scope:**
 
 - reload restoration for tracked and overlay states;
-- mobile/sidepanel sheet version of the rail;
+- mobile/sidepanel presentation through existing compact cockpit controls;
 - recent-session and saved-setup classification fixes.
 
 **Success Criteria:**
@@ -556,7 +565,7 @@ The frontend currently attempts persona memory mode updates from [ConversationTa
 
 ### UI
 
-- rail apply/change/clear flows
+- runtime/context rail apply/change/clear flows
 - tracked-session open flows
 - saved setup apply-in-place vs tracked-open behavior
 - desktop and mobile layout coverage
@@ -576,4 +585,4 @@ The frontend currently attempts persona memory mode updates from [ConversationTa
 - Clearing overlay mid-chat does not reset the conversation.
 - Overlay state persists through chat settings and reload.
 - Overlay chats are not reclassified as tracked character/persona sessions.
-- The main character/persona control surface is a side rail, while the existing `/chat` UI remains in place.
+- The main character/persona control surface is the existing runtime/context cockpit rails, while the rest of the `/chat` UI remains in place.
