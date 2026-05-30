@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,8 @@ def test_gateway_cli_validate_config_reports_unexpected_loader_errors_as_json(
     config_path.write_text("{}", encoding="utf-8")
 
     def _raise_runtime_error(*args: object, **kwargs: object) -> object:
+        """Simulate an unexpected loader failure from the config boundary."""
+
         raise RuntimeError("loader failed")
 
     monkeypatch.setattr(
@@ -136,6 +139,52 @@ def test_gateway_cli_list_presets_reports_builtin_summary(
     )
 
 
+def test_gateway_cli_show_preset_reports_full_builtin_profile(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Show one bundled preset with its full profile policy document."""
+
+    exit_code = gateway_cli.main(["show-preset", "project-researcher"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    preset = payload["preset"]
+    profile = preset["profile"]
+    policy = profile["policy_document"]
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert preset["id"] == "project-researcher"
+    assert preset["version"] == profile["preset_version"]
+    assert profile["id"] == "project-researcher"
+    assert profile["name"] == "Project Researcher"
+    expected_timestamp = datetime(2026, 5, 27, tzinfo=timezone.utc)
+    assert _parse_cli_timestamp(profile["created_at"]) == expected_timestamp
+    assert _parse_cli_timestamp(profile["updated_at"]) == expected_timestamp
+    assert policy["capabilities"] == ["code_search", "filesystem.read", "docs.read"]
+    assert policy["resource_constraints"] == {}
+    assert profile["provenance"]["source"] == "builtin_preset"
+
+
+def test_gateway_cli_show_preset_reports_unknown_id_as_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report unknown preset ids as JSON errors without tracebacks."""
+
+    exit_code = gateway_cli.main(["show-preset", "unknown-mode"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload == {
+        "error": "Unknown MCP profile preset: unknown-mode",
+        "ok": False,
+        "preset_id": "unknown-mode",
+    }
+    assert "Traceback" not in captured.err
+
+
 def test_gateway_cli_project_script_is_registered() -> None:
     """Expose the package CLI through the installed project scripts."""
 
@@ -146,3 +195,9 @@ def test_gateway_cli_project_script_is_registered() -> None:
         pyproject["project"]["scripts"]["mcp-unified-gateway"]
         == "mcp_unified.gateway.cli:main"
     )
+
+
+def _parse_cli_timestamp(value: str) -> datetime:
+    """Parse a JSON timestamp without depending on a specific UTC suffix."""
+
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))

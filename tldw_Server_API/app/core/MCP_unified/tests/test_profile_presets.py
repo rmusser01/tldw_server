@@ -115,6 +115,23 @@ def test_get_builtin_preset_returns_stable_profile_template() -> None:
     assert preset.profile.credential_grants == []
 
 
+def test_builtin_preset_template_timestamps_are_version_stable() -> None:
+    """Keep built-in preset provenance timestamps tied to the release date."""
+
+    bundled = presets.list_builtin_presets()
+
+    assert presets.PRESET_RELEASE_DATE.strftime("%Y.%m.%d") == presets.PRESET_VERSION
+    assert presets.PRESET_CREATED_AT.date() == presets.PRESET_RELEASE_DATE
+    assert all(
+        preset.profile.created_at == presets.PRESET_CREATED_AT
+        for preset in bundled
+    )
+    assert all(
+        preset.profile.updated_at == presets.PRESET_CREATED_AT
+        for preset in bundled
+    )
+
+
 def test_duplicate_builtin_preset_returns_editable_profile_with_provenance() -> None:
     profile = presets.duplicate_builtin_preset(
         "architect",
