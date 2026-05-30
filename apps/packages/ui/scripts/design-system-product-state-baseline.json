@@ -1133,39 +1133,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/StudySuggestions/StudySuggestionsPanel.tsx:Alert",
-    "path": "src/components/StudySuggestions/StudySuggestionsPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/StudySuggestions/StudySuggestionsPanel.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/StudySuggestions/StudySuggestionsPanel.tsx:Empty",
-    "path": "src/components/StudySuggestions/StudySuggestionsPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Empty",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Empty product-state UI in src/components/StudySuggestions/StudySuggestionsPanel.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/StudySuggestions/StudySuggestionsPanel.tsx:Tag",
-    "path": "src/components/StudySuggestions/StudySuggestionsPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Tag",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Tag product-state UI in src/components/StudySuggestions/StudySuggestionsPanel.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/WorkflowEditor/ExecutionPanel.tsx:Alert#antd-alert-executionpanel-type-error-execution-error-lin-14y38x7",
     "path": "src/components/WorkflowEditor/ExecutionPanel.tsx",
     "rule": "antd-product-state-import",
