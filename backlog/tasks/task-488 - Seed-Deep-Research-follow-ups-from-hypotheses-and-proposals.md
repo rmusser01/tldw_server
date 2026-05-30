@@ -29,6 +29,7 @@ Follow-up after the Research Workspace literature work-products MVP. Seed Deep R
 - Added source-coverage claims and explicit evidence-supported versus proposed-work follow-up questions so Deep Research starts with the right separation instead of treating proposal text as verified fact.
 - Added follow_up query-param support to shared research launch paths and taught /research to parse, sanitize, and forward that seed during manual and autorun create-run flows.
 - Addressed PR review comments by preserving nested markdown subheading content inside proposal follow-up sections and replacing launch-context truncation for claim_id values with a clean 128-character slice.
+- Addressed follow-up PR review comments by keeping edited launch queries aligned across follow_up.question and follow_up.background.question, and by dropping oversized follow_up URL params before building /research launch paths.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -41,6 +42,8 @@ Verification:
 - `bunx vitest run __tests__/pages/research-run-console.test.tsx` passed with 16 tests.
 - After review fixes, `bunx vitest run src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/routes/__tests__/route-paths.research.test.ts` passed with 32 tests.
 - After review fixes, `bunx vitest run __tests__/pages/research-run-console.test.tsx` passed with 16 tests.
+- After Qodo review fixes, `bunx vitest run src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/routes/__tests__/route-paths.research.test.ts` passed with 34 tests.
+- After Qodo review fixes, `bunx vitest run __tests__/pages/research-run-console.test.tsx` passed with 17 tests.
 - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` passed in `apps/packages/ui`.
 - `git diff --check` passed.
 - `bunx tsc --noEmit --pretty false` in `apps/tldw-frontend` still fails on existing e2e/admin baseline type errors outside the touched research page.

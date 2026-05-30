@@ -536,6 +536,21 @@ function buildResearchRunCreatePayload(
   query: string,
   launchParams: ResearchLaunchParams | null
 ): ResearchRunCreateRequest {
+  const followUp = launchParams?.followUp
+    ? {
+        ...launchParams.followUp,
+        question: query,
+        ...(launchParams.followUp.background
+          ? {
+              background: {
+                ...launchParams.followUp.background,
+                question: query,
+              },
+            }
+          : {}),
+      }
+    : null;
+
   return {
     query,
     source_policy: launchParams?.sourcePolicy ?? 'balanced',
@@ -548,12 +563,9 @@ function buildResearchRunCreatePayload(
           },
         }
       : {}),
-    ...(launchParams?.followUp
+    ...(followUp
       ? {
-          follow_up: {
-            ...launchParams.followUp,
-            question: query,
-          },
+          follow_up: followUp,
         }
       : {}),
   };

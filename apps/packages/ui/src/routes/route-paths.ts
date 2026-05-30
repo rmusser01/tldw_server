@@ -78,6 +78,8 @@ type BuildCharacterChatPathOptions = {
   characterId?: string | number | null
 }
 
+const MAX_RESEARCH_FOLLOW_UP_SEARCH_PARAM_LENGTH = 4096
+
 const setTrimmedSearchParam = (
   params: URLSearchParams,
   key: string,
@@ -92,15 +94,24 @@ const setTrimmedSearchParam = (
 const setJsonSearchParam = (
   params: URLSearchParams,
   key: string,
-  value: Record<string, unknown> | null | undefined
+  value: Record<string, unknown> | null | undefined,
+  options: { maxEncodedLength?: number } = {}
 ) => {
   if (!value) {
     return
   }
   const serialized = JSON.stringify(value)
-  if (serialized !== "{}") {
-    params.set(key, serialized)
+  if (serialized === "{}") {
+    return
   }
+  const encodedLength = new URLSearchParams({ [key]: serialized }).toString().length
+  if (
+    options.maxEncodedLength !== undefined &&
+    encodedLength > options.maxEncodedLength
+  ) {
+    return
+  }
+  params.set(key, serialized)
 }
 
 export const buildSourcesNewPath = (
@@ -125,7 +136,9 @@ export const buildResearchLaunchPath = (
   setTrimmedSearchParam(params, "run", options.run)
   setTrimmedSearchParam(params, "chat_id", options.chatId)
   setTrimmedSearchParam(params, "launch_message_id", options.launchMessageId)
-  setJsonSearchParam(params, "follow_up", options.followUp)
+  setJsonSearchParam(params, "follow_up", options.followUp, {
+    maxEncodedLength: MAX_RESEARCH_FOLLOW_UP_SEARCH_PARAM_LENGTH
+  })
   if (options.autorun) {
     params.set("autorun", "1")
   }
