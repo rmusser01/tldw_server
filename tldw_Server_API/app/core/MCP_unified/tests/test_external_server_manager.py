@@ -320,6 +320,40 @@ async def test_list_virtual_tools_returns_caller_owned_copies(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
+async def test_get_virtual_tool_write_flag_returns_scalar(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = _FakeAdapter(
+        server_id="docs",
+        tools=[
+            ExternalToolDefinition(
+                name="docs.search",
+                description="Search",
+                metadata={"category": "read"},
+            ),
+            ExternalToolDefinition(
+                name="docs.update",
+                description="Update",
+                metadata={"category": "management"},
+            ),
+        ],
+    )
+    _patch_loader_and_adapter(
+        monkeypatch,
+        payload=_registry_payload(policy={"allow_tool_patterns": ["docs.*"]}),
+        adapter=adapter,
+    )
+
+    manager = ExternalServerManager()
+    try:
+        await manager.initialize()
+
+        assert manager.get_virtual_tool_write_flag("ext.docs.docs.search") is False  # nosec B101
+        assert manager.get_virtual_tool_write_flag("ext.docs.docs.update") is True  # nosec B101
+        assert manager.get_virtual_tool_write_flag("ext.docs.docs.missing") is None  # nosec B101
+    finally:
+        await manager.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_write_tool_blocked_when_allow_writes_false(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = _FakeAdapter(
         server_id="docs",

@@ -372,6 +372,14 @@ class ExternalServerManager:
 
         return [self._virtual_tools[name].copy() for name in sorted(self._virtual_tools)]
 
+    def get_virtual_tool_write_flag(self, virtual_tool_name: str) -> bool | None:
+        """Return a virtual tool's write flag without copying catalog entries."""
+
+        virtual_tool = self._virtual_tools.get(virtual_tool_name)
+        if virtual_tool is None:
+            return None
+        return bool(virtual_tool.is_write)
+
     async def execute_virtual_tool(
         self,
         virtual_tool_name: str,

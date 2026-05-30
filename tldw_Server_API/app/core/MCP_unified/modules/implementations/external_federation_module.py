@@ -119,7 +119,6 @@ class ExternalFederationModule(BaseModule):
             return tools
 
         for virtual_tool in self._manager.list_virtual_tools():
-            virtual_tool = virtual_tool.copy()
             tools.append(
                 {
                     "name": virtual_tool.virtual_name,
@@ -147,9 +146,9 @@ class ExternalFederationModule(BaseModule):
         """Classify federated virtual tools using discovery-time write metadata."""
 
         if tool_name.startswith("ext.") and self._manager is not None:
-            for virtual_tool in self._manager.list_virtual_tools():
-                if virtual_tool.virtual_name == tool_name:
-                    return bool(virtual_tool.is_write)
+            write_flag = self._manager.get_virtual_tool_write_flag(tool_name)
+            if write_flag is not None:
+                return write_flag
         return super().is_write_tool_call(tool_name, arguments, tool_def=tool_def)
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
