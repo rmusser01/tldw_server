@@ -659,7 +659,7 @@ bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.lit
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Stage 4**
+- [x] **Step 7: Commit Stage 4**
 
 ```bash
 git add apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane \
@@ -687,24 +687,24 @@ git commit -m "feat: generate research proposal work product"
 - `StudioPane.literature-workproducts.test.tsx`
 - Existing Research Workspace layout/mobile tests as needed.
 
-- [ ] **Step 1: Add discoverability tests**
+- [x] **Step 1: Add discoverability tests**
 
 Assert the Studio work-product chooser shows a Literature Review grouping or
 clear labels/descriptions for the four new templates.
 
-- [ ] **Step 2: Add parse-failure test**
+- [x] **Step 2: Add parse-failure test**
 
 Mock invalid JSON for Literature Matrix or Gap Finder. Assert the artifact fails
 cleanly with a validation error and does not mark the artifact completed with
 invented table data.
 
-- [ ] **Step 3: Add source-lineage regression test**
+- [x] **Step 3: Add source-lineage regression test**
 
 Assert every completed new artifact has `sourceLineage` for selected sources.
 Assert every completed new artifact also has `sourceCoverage` describing usable,
 skipped, and truncated sources.
 
-- [ ] **Step 4: Add export-scope tests**
+- [x] **Step 4: Add export-scope tests**
 
 Assert:
 
@@ -714,7 +714,7 @@ Assert:
 - Proposal Pack preserves existing markdown/text download and save-to-note
   behavior.
 
-- [ ] **Step 5: Run Research Workspace focused suite**
+- [x] **Step 5: Run Research Workspace focused suite**
 
 ```bash
 cd apps/packages/ui
@@ -726,7 +726,7 @@ bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.lit
 
 Expected: PASS.
 
-- [ ] **Step 6: Run formatting/type checks used by the package**
+- [x] **Step 6: Run formatting/type checks used by the package**
 
 Use package-local commands that already exist in `apps/packages/ui/package.json`.
 If a command has known unrelated baseline failures, record them explicitly.

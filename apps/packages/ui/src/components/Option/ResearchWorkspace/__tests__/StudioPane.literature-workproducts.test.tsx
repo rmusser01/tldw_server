@@ -447,6 +447,12 @@ describe("StudioPane literature work products", () => {
     ).toBeEnabled()
   })
 
+  it("labels literature-review work products as a discoverable group", () => {
+    renderStudioPane()
+
+    expect(screen.getByText("Literature Review")).toBeInTheDocument()
+  })
+
   it("fails Literature Matrix generation before the model call when fewer than two usable source contexts remain", async () => {
     mockGetMediaDetails.mockImplementation((mediaId: number) =>
       Promise.resolve(
@@ -567,6 +573,32 @@ describe("StudioPane literature work products", () => {
     )
     expect(mockMessageSuccess).toHaveBeenCalledWith(
       expect.stringContaining("generated successfully")
+    )
+  })
+
+  it("fails cleanly when Literature Matrix returns invalid JSON", async () => {
+    mockCreateChatCompletion.mockResolvedValue(
+      createChatCompletionResponse("not valid json")
+    )
+
+    renderStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: /literature matrix/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        "artifact-1",
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("not valid JSON")
+        })
+      )
+    })
+
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalledWith(
+      "artifact-1",
+      "completed",
+      expect.anything()
     )
   })
 
@@ -1043,5 +1075,63 @@ Proposal
     expect(userPrompt).toContain("Compatible Corpus Gap Finder")
     expect(userPrompt).toContain("Compatible Evidence-Bound Hypotheses")
     expect(userPrompt).toContain("Source coverage")
+  })
+
+  it("exports structured literature tables as CSV and JSON without advertising XLSX", async () => {
+    const createObjectUrlSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:literature-table")
+    const revokeObjectUrlSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {})
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {})
+
+    workspaceStoreState.generatedArtifacts = [
+      {
+        id: "artifact-literature-table",
+        type: "data_table",
+        title: "Literature Matrix",
+        status: "completed",
+        templateId: "literature_matrix",
+        content:
+          "| Source | Methodology | Primary Finding |\n| --- | --- | --- |\n| Paper A | Survey | Finding A |",
+        data: {
+          table: {
+            headers: ["Source", "Methodology", "Primary Finding"],
+            rows: [["Paper A", "Survey", "Finding A"]]
+          }
+        },
+        createdAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+
+    renderStudioPane()
+    fireEvent.click(screen.getByRole("button", { name: "View" }))
+
+    expect(await screen.findByRole("button", { name: "Export CSV" }))
+      .toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Export JSON" }))
+      .toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /xlsx/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Export JSON" }))
+
+    await waitFor(() => {
+      expect(createObjectUrlSpy).toHaveBeenCalled()
+    })
+    expect(anchorClickSpy).toHaveBeenCalled()
+    expect(revokeObjectUrlSpy).toHaveBeenCalled()
+
+    const jsonBlob = createObjectUrlSpy.mock.calls.at(-1)?.[0] as Blob & {
+      type?: string
+    }
+    expect(jsonBlob).toBeTruthy()
+    expect(jsonBlob.type).toContain("application/json")
+
+    createObjectUrlSpy.mockRestore()
+    revokeObjectUrlSpy.mockRestore()
+    anchorClickSpy.mockRestore()
   })
 })

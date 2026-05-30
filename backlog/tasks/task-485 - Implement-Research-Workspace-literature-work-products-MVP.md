@@ -12,6 +12,7 @@ modified_files:
 - apps/packages/ui/src/workspace-templates/work-product-templates.ts
 - apps/packages/ui/src/workspace-templates/__tests__/work-product-templates.test.ts
 - apps/packages/ui/src/types/workspace.ts
+- apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/ArtifactModalContent.tsx
 - apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/WorkProductTemplateChooser.tsx
 - apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/index.tsx
 - apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/hooks/useArtifactGeneration.tsx
@@ -48,6 +49,8 @@ Stage 2 complete: added Corpus Gap Finder RED tests for strict JSON generation a
 Stage 3 complete: added Evidence-Bound Hypotheses RED tests for strict JSON generation, source coverage, and compatible Matrix/Gap context; added hypothesis prompt/schema normalization, markdown report formatting, source-basis confidence guards, and report-template routing. Verification: `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx` passed with 1 file / 8 tests.
 
 Stage 4 complete: added Research Proposal Pack RED tests for Source Audit/source coverage and compatible Matrix/Gap/Hypothesis context; added proposal-specific markdown prompt, source coverage notes, Source Audit validation, and report-template routing without JSON response_format. Verification: `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage2.test.tsx -t "literature work products|saves artifact content to note draft"` passed with 2 files / 11 tests, 25 skipped by the name filter.
+
+Stage 5 complete: added discoverability, invalid JSON, source-lineage/source-coverage, and export-scope regression coverage; labeled Literature Review templates in the chooser; added JSON export for parsed data-table artifacts while keeping XLSX absent. Verification: `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage1.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage2.test.tsx src/workspace-templates/__tests__/work-product-templates.test.ts` passed with 4 files / 74 tests. `bun run verify:design-system-state` failed on existing product-state baseline findings outside touched work-product files; no new touched-file finding was identified in the blocked list.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -169,6 +169,24 @@ export const DataTableArtifactViewer: React.FC<{
     downloadBlobFile(csvBlob, `${title || "data-table"}.csv`)
   }
 
+  const handleDownloadJson = () => {
+    if (!tableData) return
+    const jsonBlob = new Blob(
+      [
+        JSON.stringify(
+          {
+            title: title || "Data Table",
+            table: tableData
+          },
+          null,
+          2
+        )
+      ],
+      { type: "application/json;charset=utf-8" }
+    )
+    downloadBlobFile(jsonBlob, `${title || "data-table"}.json`)
+  }
+
   if (!tableData) {
     return (
       <div className="max-h-[70vh] overflow-y-auto whitespace-pre-wrap rounded border border-border bg-surface p-3 text-sm">
@@ -189,6 +207,9 @@ export const DataTableArtifactViewer: React.FC<{
         />
         <Button size="small" onClick={handleDownloadCsv}>
           Export CSV
+        </Button>
+        <Button size="small" onClick={handleDownloadJson}>
+          Export JSON
         </Button>
       </div>
       <AntTable
