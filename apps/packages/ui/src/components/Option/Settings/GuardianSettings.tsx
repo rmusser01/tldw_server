@@ -1,6 +1,5 @@
 import React, { useState, useCallback } from "react"
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -39,6 +38,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -642,18 +642,18 @@ function SelfMonitoringTab({ online }: { online: boolean }) {
 
   if (selfMonitoringSupported === false || apiUnavailable) {
     return (
-      <Alert
-        type="info"
-        showIcon
+      <DsAlert
+        variant="info"
         title={t(
           "guardian.selfMonitoring.unavailableTitle",
           "Self-Monitoring endpoints unavailable"
         )}
-        description={t(
+      >
+        {t(
           "guardian.selfMonitoring.unavailableDescription",
           "Your connected server does not expose self-monitoring endpoints yet. Upgrade the server to use Guardian monitoring rules."
         )}
-      />
+      </DsAlert>
     )
   }
 
@@ -1432,18 +1432,18 @@ function GuardianControlsTab({ online }: { online: boolean }) {
 
   if (apiUnavailable) {
     return (
-      <Alert
-        type="info"
-        showIcon
+      <DsAlert
+        variant="info"
         title={t(
           "guardian.controls.unavailableTitle",
           "Guardian controls endpoints unavailable"
         )}
-        description={t(
+      >
+        {t(
           "guardian.controls.unavailableDescription",
           "This server does not expose guardian relationship APIs yet. Upgrade the server to manage guardian controls."
         )}
-      />
+      </DsAlert>
     )
   }
 
@@ -1730,18 +1730,18 @@ function CrisisResourcesTab({ online }: { online: boolean }) {
 
   if (apiUnavailable) {
     return (
-      <Alert
-        type="info"
-        showIcon
+      <DsAlert
+        variant="info"
         title={t(
           "guardian.crisis.unavailableTitle",
           "Crisis resources endpoint unavailable"
         )}
-        description={t(
+      >
+        {t(
           "guardian.crisis.unavailableDescription",
           "Your connected server does not expose crisis resources yet. Upgrade the server to access this support panel."
         )}
-      />
+      </DsAlert>
     )
   }
 
@@ -1752,12 +1752,12 @@ function CrisisResourcesTab({ online }: { online: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {data?.disclaimer && (
-        <Alert
-          type="info"
-          showIcon
+        <DsAlert
+          variant="info"
           title={t("guardian.crisis.disclaimer", "Disclaimer")}
-          description={data.disclaimer}
-        />
+        >
+          {data.disclaimer}
+        </DsAlert>
       )}
 
       {(!data?.resources || data.resources.length === 0) ? (
@@ -1808,15 +1808,15 @@ export function GuardianSettings() {
 
   if (!capabilitiesLoading && !guardianRoutesAvailable) {
     return (
-      <Alert
-        type="info"
-        showIcon
+      <DsAlert
+        variant="info"
         title={t("guardian.unavailableTitle", "Guardian settings unavailable")}
-        description={t(
+      >
+        {t(
           "guardian.unavailableDescription",
           "Your current server does not expose Guardian or Self-Monitoring endpoints."
         )}
-      />
+      </DsAlert>
     )
   }
 
@@ -1824,74 +1824,70 @@ export function GuardianSettings() {
     !online && uxState !== "testing"
       ? uxState === "error_auth" || uxState === "configuring_auth"
         ? (
-      <Alert
-        type="warning"
-        showIcon
-        title={t("guardian.authRequiredTitle", "Add your credentials to manage Guardian settings.")}
-        description={t(
-          "guardian.authRequiredDescription",
-          "Your server is reachable, but Guardian settings require valid credentials before they can be managed."
-        )}
-        action={
-          <Button size="small" onClick={() => navigate("/settings/tldw")}>
-            {t("guardian.openSettings", "Open Settings")}
-          </Button>
-        }
-        style={{ marginBottom: 16 }}
-      />
+          <DsAlert
+            variant="warning"
+            title={t("guardian.authRequiredTitle", "Add your credentials to manage Guardian settings.")}
+            action={{
+              label: t("guardian.openSettings", "Open Settings"),
+              onClick: () => navigate("/settings/tldw")
+            }}
+            className="mb-4"
+          >
+            {t(
+              "guardian.authRequiredDescription",
+              "Your server is reachable, but Guardian settings require valid credentials before they can be managed."
+            )}
+          </DsAlert>
           )
         : uxState === "unconfigured" || uxState === "configuring_url"
           ? (
-      <Alert
-        type="warning"
-        showIcon
-        title={t("guardian.setupRequiredTitle", "Finish setup to manage Guardian settings.")}
-        description={t(
-          "guardian.setupRequiredDescription",
-          "Complete the tldw server setup flow, then return here to manage Guardian and Self-Monitoring settings."
-        )}
-        action={
-          <Button size="small" onClick={() => navigate("/")}>
-            {t("guardian.finishSetup", "Finish Setup")}
-          </Button>
-        }
-        style={{ marginBottom: 16 }}
-      />
+            <DsAlert
+              variant="warning"
+              title={t("guardian.setupRequiredTitle", "Finish setup to manage Guardian settings.")}
+              action={{
+                label: t("guardian.finishSetup", "Finish Setup"),
+                onClick: () => navigate("/")
+              }}
+              className="mb-4"
+            >
+              {t(
+                "guardian.setupRequiredDescription",
+                "Complete the tldw server setup flow, then return here to manage Guardian and Self-Monitoring settings."
+              )}
+            </DsAlert>
             )
           : uxState === "error_unreachable"
             ? (
-      <Alert
-        type="warning"
-        showIcon
-        title={t("guardian.unreachableTitle", "Can't reach your tldw server right now.")}
-        description={t(
-          "guardian.unreachableDescription",
-          "Your server settings are saved, but Guardian settings cannot reach the tldw server right now."
-        )}
-        action={
-          <Space size="small">
-            <Button size="small" onClick={() => navigate("/settings/health")}>
-              {t("guardian.diagnostics", "Health & diagnostics")}
-            </Button>
-            <Button size="small" onClick={() => navigate("/settings/tldw")}>
-              {t("guardian.openSettings", "Open Settings")}
-            </Button>
-          </Space>
-        }
-        style={{ marginBottom: 16 }}
-      />
+              <DsAlert
+                variant="warning"
+                title={t("guardian.unreachableTitle", "Can't reach your tldw server right now.")}
+                action={{
+                  label: t("guardian.diagnostics", "Health & diagnostics"),
+                  onClick: () => navigate("/settings/health")
+                }}
+                secondaryAction={{
+                  label: t("guardian.openSettings", "Open Settings"),
+                  onClick: () => navigate("/settings/tldw")
+                }}
+                className="mb-4"
+              >
+                {t(
+                  "guardian.unreachableDescription",
+                  "Your server settings are saved, but Guardian settings cannot reach the tldw server right now."
+                )}
+              </DsAlert>
               )
             : (
-      <Alert
-        type="warning"
-        showIcon
-        title={t("guardian.serverOfflineTitle", "Server offline")}
-        description={t(
-          "guardian.serverOffline",
-          "Connect to your tldw server to manage guardian and monitoring settings."
-        )}
-        style={{ marginBottom: 16 }}
-      />
+              <DsAlert
+                variant="warning"
+                title={t("guardian.serverOfflineTitle", "Server offline")}
+                className="mb-4"
+              >
+                {t(
+                  "guardian.serverOffline",
+                  "Connect to your tldw server to manage guardian and monitoring settings."
+                )}
+              </DsAlert>
               )
       : null
 
