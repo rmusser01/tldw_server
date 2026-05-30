@@ -8,7 +8,7 @@ labels:
 - gateway
 priority: medium
 references:
-- https://github.com/rmusser01/tldw_server/pull/2141
+- https://github.com/rmusser01/tldw_server/pull/2143
 - Docs/superpowers/specs/2026-05-26-mcp-unified-standalone-library-gateway-design.md
 - Docs/superpowers/plans/2026-05-30-mcp-unified-stage4b-gateway-protocol-surface-plan.md
 ---
