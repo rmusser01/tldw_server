@@ -34,3 +34,36 @@ class GatewayRuntime(Protocol):
     ) -> dict[str, Any]:
         """Execute a tool call for the current request context."""
         ...
+
+    async def list_resources(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
+        """Return resources visible to the current request context."""
+        ...
+
+    async def read_resource(
+        self,
+        uri: str,
+        context: GatewayRequestContext,
+    ) -> dict[str, Any]:
+        """Read one resource for the current request context."""
+        ...
+
+    async def list_prompts(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
+        """Return prompts visible to the current request context."""
+        ...
+
+    async def get_prompt(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: GatewayRequestContext,
+    ) -> dict[str, Any]:
+        """Return one prompt result for the current request context."""
+        ...
+
+    async def list_modules(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
+        """Return module registrations visible to the current request context."""
+        ...
+
+    async def get_modules_health(self, context: GatewayRequestContext) -> dict[str, Any]:
+        """Return module health details visible to the current request context."""
+        ...
