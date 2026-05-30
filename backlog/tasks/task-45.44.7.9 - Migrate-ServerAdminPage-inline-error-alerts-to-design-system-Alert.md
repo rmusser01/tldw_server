@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.7.9
 title: Migrate ServerAdminPage inline error alerts to design-system Alert
-status: In Progress
+status: Done
 labels:
 - design-system
 - webui
@@ -10,6 +10,7 @@ priority: medium
 parent_task_id: TASK-45.44.7
 references:
 - https://github.com/rmusser01/tldw_server/issues/1664
+- https://github.com/rmusser01/tldw_server/pull/2156
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
 modified_files:
 - apps/packages/ui/src/components/Option/Admin/ServerAdminPage.tsx
@@ -29,7 +30,7 @@ Migrate the remaining ServerAdminPage inline user, role, and media budget error 
 - [x] #1 ServerAdminPage users, roles, and media budget inline error states render through the design-system Alert primitive.
 - [x] #2 The product-state baseline no longer contains ServerAdminPage entries.
 - [x] #3 Focused regression coverage proves these error states use the design-system Alert contract.
-- [ ] #4 PR link, verification results, known skips, and final summary are recorded before closeout.
+- [x] #4 PR link, verification results, known skips, and final summary are recorded before closeout.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -52,15 +53,15 @@ Migrate the remaining ServerAdminPage inline user, role, and media budget error 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Migrated ServerAdminPage users, roles, and media budget diagnostic inline error feedback from AntD Alert to the design-system Alert primitive in PR #2156. Added focused regression coverage for all three error branches, removed the three ServerAdminPage baseline exceptions, and recorded verification evidence. Package-wide TypeScript and the full design-system verifier remain blocked by unrelated current-dev debt outside this slice, documented in Implementation Notes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
