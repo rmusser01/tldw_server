@@ -430,7 +430,7 @@ describe("StudioPane literature work products", () => {
   })
 
   it("keeps Literature Matrix disabled until at least two sources are selected", () => {
-    workspaceStoreState.selectedSourceIds = []
+    workspaceStoreState.selectedSourceIds = ["source-1"]
 
     renderStudioPane()
 
