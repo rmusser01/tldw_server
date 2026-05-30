@@ -11,6 +11,7 @@ from typing import Any
 
 import mcp_unified.gateway.fastapi as gateway_fastapi
 import mcp_unified.gateway.jsonrpc as gateway_jsonrpc
+import pytest
 from fastapi.testclient import TestClient
 from mcp_unified.gateway import create_gateway_app
 
@@ -456,6 +457,123 @@ def test_gateway_profile_runtime_treats_non_list_backend_tools_as_empty() -> Non
     )
 
     assert asyncio.run(runtime.list_tools(GatewayRequestContext(request_id="non-list-tools"))) == []
+
+
+def test_gateway_profile_bootstrap_seeds_default_builtin_preset_profile() -> None:
+    from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
+
+    backend = _MultiToolGatewayRuntime()
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway(
+            backend,
+            default_preset_id="project-researcher",
+        )
+    )
+    app = create_gateway_app(bootstrap.runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        listed = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-bootstrap"},
+        )
+        allowed = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "echo.search", "arguments": {"query": "bootstrap"}},
+                "id": "call-bootstrap",
+            },
+        )
+
+    assert bootstrap.default_profile_id == "project-researcher"
+    assert bootstrap.seeded_profile_ids == ("project-researcher",)
+    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+    assert allowed.json()["result"]["content"][0]["text"] == "echo.search:bootstrap"
+
+
+def test_gateway_profile_bootstrap_uses_caller_profiles_as_default() -> None:
+    from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
+
+    backend = _MultiToolGatewayRuntime()
+    profile = _profile_with_allowed_tools("reviewer", ["echo.search"])
+
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway(
+            backend,
+            profiles=[profile],
+            default_profile_id="reviewer",
+        )
+    )
+    stored_profiles = asyncio.run(bootstrap.profile_store.list_profiles())
+    app = create_gateway_app(bootstrap.runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        listed = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-caller-default"},
+        )
+
+    assert bootstrap.default_profile_id == "reviewer"
+    assert bootstrap.seeded_profile_ids == ()
+    assert [profile.id for profile in stored_profiles] == ["reviewer"]
+    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+
+
+def test_gateway_profile_bootstrap_keeps_explicit_default_when_seeding_preset() -> None:
+    from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
+
+    backend = _MultiToolGatewayRuntime()
+    profile = _profile_with_allowed_tools("reviewer", ["admin.delete"])
+
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway(
+            backend,
+            profiles=[profile],
+            default_profile_id="reviewer",
+            default_preset_id="project-researcher",
+        )
+    )
+    stored_profiles = asyncio.run(bootstrap.profile_store.list_profiles())
+    app = create_gateway_app(bootstrap.runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        listed = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-caller-plus-preset"},
+        )
+
+    assert bootstrap.default_profile_id == "reviewer"
+    assert bootstrap.seeded_profile_ids == ("project-researcher",)
+    assert {profile.id for profile in stored_profiles} == {"reviewer", "project-researcher"}
+    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["admin.delete"]
+
+
+def test_gateway_profile_bootstrap_rejects_existing_preset_profile_collision() -> None:
+    from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
+
+    profile = _profile_with_allowed_tools("project-researcher", ["admin.delete"])
+
+    with pytest.raises(ValueError, match="profile id 'project-researcher' already exists"):
+        asyncio.run(
+            bootstrap_profile_gateway(
+                _MultiToolGatewayRuntime(),
+                profiles=[profile],
+                default_preset_id="project-researcher",
+            )
+        )
+
+
+def test_gateway_profile_bootstrap_rejects_unknown_default_preset() -> None:
+    from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
+
+    with pytest.raises(ValueError, match="Unknown MCP profile preset"):
+        asyncio.run(
+            bootstrap_profile_gateway(
+                _MultiToolGatewayRuntime(),
+                default_preset_id="not-a-preset",
+            )
+        )
 
 
 def test_gateway_transport_profile_selector_handles_missing_request_attributes() -> None:

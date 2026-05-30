@@ -2,6 +2,11 @@
 
 from typing import TYPE_CHECKING, Any
 
+from .bootstrap import (
+    GatewayProfileBootstrap,
+    bootstrap_profile_gateway,
+    build_profile_gateway_runtime,
+)
 from .profile_runtime import ProfileAwareGatewayRuntime
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 from .stdio import GatewayStdioServer, handle_stdio_line
@@ -11,10 +16,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "GatewayPolicyDenied",
+    "GatewayProfileBootstrap",
     "GatewayRequestContext",
     "GatewayRuntime",
     "GatewayStdioServer",
     "ProfileAwareGatewayRuntime",
+    "bootstrap_profile_gateway",
+    "build_profile_gateway_runtime",
     "create_gateway_app",
     "create_gateway_router",
     "handle_stdio_line",
