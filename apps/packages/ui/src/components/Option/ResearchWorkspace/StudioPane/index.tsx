@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Square,
   MessageCircle,
+  Microscope,
   StickyNote,
   Pencil,
   Trash2,
@@ -102,6 +103,7 @@ import {
   type ResearchWorkspaceCapabilityMode,
   type ResearchWorkspaceCapabilitiesResponse
 } from "../research-workspace-capabilities"
+import { buildLiteratureDeepResearchLaunchPath } from "./literature-deep-research-launch"
 
 // Re-export for external consumers
 export { estimateGenerationSeconds, estimateGenerationTokens, estimateGenerationCostUsd } from "./hooks/useArtifactGeneration"
@@ -2287,6 +2289,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                 const Icon = ARTIFACT_TYPE_ICONS[artifact.type] || FileText
                 const StatusConfig = STATUS_ICONS[artifact.status]
                 const StatusIcon = StatusConfig.icon
+                const deepResearchLaunchHref =
+                  buildLiteratureDeepResearchLaunchPath(artifact)
                 const failedStatusDeleteLabel = t(
                   "playground:studio.deleteFailedOutput",
                   "Delete failed output"
@@ -2525,6 +2529,26 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                               <MessageCircle className="h-4 w-4" />
                             </button>
                           </Tooltip>
+                          {deepResearchLaunchHref && (
+                            <Tooltip
+                              title={t(
+                                "playground:studio.launchDeepResearch",
+                                "Launch Deep Research"
+                              )}
+                            >
+                              <a
+                                href={deepResearchLaunchHref}
+                                className="rounded p-1 text-text-muted hover:bg-surface hover:text-text"
+                                aria-label={t(
+                                  "playground:studio.launchDeepResearch",
+                                  "Launch Deep Research"
+                                )}
+                                data-testid={`studio-artifact-deep-research-${artifact.id}`}
+                              >
+                                <Microscope className="h-4 w-4" />
+                              </a>
+                            </Tooltip>
+                          )}
                           {artifact.content && (
                             <Dropdown
                               trigger={["click"]}
