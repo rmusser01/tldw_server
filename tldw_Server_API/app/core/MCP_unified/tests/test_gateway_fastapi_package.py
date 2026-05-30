@@ -505,6 +505,44 @@ def test_gateway_stdio_suppresses_notification_response() -> None:
     assert response_line is None
 
 
+def test_gateway_stdio_ignores_blank_lines() -> None:
+    from mcp_unified.gateway.stdio import handle_stdio_line
+
+    runtime = _FakeGatewayRuntime()
+
+    assert asyncio.run(handle_stdio_line(runtime, "\n")) is None
+    assert asyncio.run(handle_stdio_line(runtime, "  \t\r\n")) is None
+    assert asyncio.run(handle_stdio_line(runtime, b"\r\n")) is None
+
+
+def test_gateway_stdio_metadata_keeps_reserved_transport_values() -> None:
+    from mcp_unified.gateway.stdio import handle_stdio_line
+
+    runtime = _FakeGatewayRuntime()
+
+    response_line = asyncio.run(
+        handle_stdio_line(
+            runtime,
+            '{"jsonrpc":"2.0","method":"resources/list","params":{},"id":"stdio-metadata"}\n',
+            metadata={
+                "transport": "user-override",
+                "path": "user-path",
+                "method": "user-method",
+                "client_host": "user-client",
+                "extra": "kept",
+            },
+        )
+    )
+
+    assert response_line is not None
+    context_metadata = runtime.resource_list_contexts[-1].metadata
+    assert context_metadata["transport"] == "stdio"
+    assert context_metadata["path"] == "stdio://stdin"
+    assert context_metadata["method"] == "resources/list"
+    assert "client_host" not in context_metadata
+    assert context_metadata["extra"] == "kept"
+
+
 def test_gateway_stdio_batch_omits_notification_responses() -> None:
     from mcp_unified.gateway.stdio import handle_stdio_line
 

@@ -1,9 +1,12 @@
 """Standalone MCP gateway entrypoint helpers."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .runtime import GatewayRequestContext, GatewayRuntime
 from .stdio import GatewayStdioServer, handle_stdio_line
+
+if TYPE_CHECKING:
+    from .fastapi import create_gateway_app, create_gateway_router
 
 __all__ = [
     "GatewayRequestContext",

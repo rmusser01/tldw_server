@@ -122,3 +122,34 @@ Record RED/GREEN and final verification evidence in this plan and TASK-561. Chec
 - [x] **Step 4: Commit, push, and open PR**
 
 Commit the plan, gateway/test changes, and Backlog task update together, push the branch, and open a PR against `dev`.
+
+### Task 4: PR Review Closeout
+
+**Files:**
+- Modify: `mcp_unified/gateway/jsonrpc.py`
+- Modify: `mcp_unified/gateway/stdio.py`
+- Modify: `mcp_unified/gateway/__init__.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py`
+- Modify: `backlog/tasks/task-561 - Implement-MCP-Unified-Stage-4D-gateway-stdio-transport.md`
+
+- [x] **Step 1: Rebase onto latest dev**
+
+Rebased `codex/mcp-unified-stage4d-gateway-stdio-transport` onto `origin/dev` commit `cdd2e3821d41f9499810a78a6e41c0aab3e45572`.
+
+- [x] **Step 2: Verify and fix still-valid review findings**
+
+Validated all current PR comments. Qodo's `_before_validator` return hint and `_validate_id` `cls` annotation findings were valid and fixed. Qodo/CodeRabbit's reserved metadata override finding was valid and fixed by making stdio transport identity and request-context reserved fields authoritative. Gemini's whitespace-only stdio line and `TYPE_CHECKING` static-analysis comments were valid and fixed.
+
+Added regression tests for whitespace-only stdio lines and metadata override attempts. RED evidence: focused tests failed with a parse-error response for blank lines and `transport == "user-override"` before the fix. GREEN evidence: focused tests passed with `2 passed, 3 warnings` after the fix.
+
+CodeRabbit's top-level docstring coverage warning was reviewed and not changed: all touched source gateway classes and functions have docstrings, and the remaining signal is driven by the existing test-module style where test helpers and test cases are not individually docstringed. Adding broad test docstring churn would not improve the package API or runtime behavior for this slice.
+
+- [x] **Step 3: Re-run validation**
+
+Review closeout validation:
+
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py -q` passed with `29 passed, 4 warnings`.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py -q` passed with `47 passed, 4 warnings`.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check mcp_unified/gateway tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py` passed with `All checks passed!`.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r mcp_unified/gateway -f json -o /tmp/bandit_mcp_stage4d_gateway_stdio_transport_review.json` reported `0` findings and no errors.
+- `git diff --check` exited cleanly.

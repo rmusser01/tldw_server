@@ -36,6 +36,9 @@ class GatewayStdioServer:
     async def handle_line(self, line: str | bytes) -> str | None:
         """Handle one JSON-RPC input line and return one output line when needed."""
 
+        if not line.strip():
+            return None
+
         payload = _parse_json_payload(line)
         if isinstance(payload, _GATEWAY_RESPONSE_TYPES):
             response: GatewayJSONRPCResult = payload
@@ -44,7 +47,7 @@ class GatewayStdioServer:
                 self.runtime,
                 payload,
                 path=self.path,
-                metadata={"transport": "stdio", **self.metadata},
+                metadata={**self.metadata, "transport": "stdio"},
             )
         if isinstance(response, GatewayNoResponse):
             return None

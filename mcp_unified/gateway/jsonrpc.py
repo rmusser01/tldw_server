@@ -18,14 +18,14 @@ try:
 except ImportError:  # pragma: no cover - pydantic v1 fallback
     from pydantic import validator as _pydantic_validator  # type: ignore
 
-    def _before_validator(*fields: str):
+    def _before_validator(*fields: str) -> Any:
         """Create a pydantic v1 pre-validation decorator."""
 
         return _pydantic_validator(*fields, pre=True, allow_reuse=True)
 
 else:
 
-    def _before_validator(*fields: str):
+    def _before_validator(*fields: str) -> Any:
         """Create a pydantic v2 before-validation decorator."""
 
         return _pydantic_field_validator(*fields, mode="before")
@@ -47,6 +47,7 @@ INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 _GATEWAY_RUNTIME_ERRORS = Exception
 _JSON_PARSE_ERRORS = (json.JSONDecodeError, UnicodeDecodeError)
+_RESERVED_CONTEXT_METADATA_KEYS = frozenset({"client_host", "method", "path"})
 
 
 class GatewayJSONRPCRequest(BaseModel):
@@ -58,7 +59,7 @@ class GatewayJSONRPCRequest(BaseModel):
     id: str | int | None = None
 
     @_before_validator("id")
-    def _validate_id(cls, value: Any) -> str | int | None:
+    def _validate_id(cls: type[GatewayJSONRPCRequest], value: Any) -> str | int | None:
         """Reject JSON-RPC ids that cannot be safely echoed for correlation."""
 
         return validate_request_id(value)
@@ -207,13 +208,18 @@ def request_context(
     """Derive the host-neutral gateway request context from a JSON-RPC request."""
 
     context_metadata: dict[str, Any] = {
-        "method": payload.method,
-        "path": path,
+        key: value
+        for key, value in (metadata or {}).items()
+        if key not in _RESERVED_CONTEXT_METADATA_KEYS
     }
+    context_metadata.update(
+        {
+            "method": payload.method,
+            "path": path,
+        }
+    )
     if client_host is not None:
         context_metadata["client_host"] = client_host
-    if metadata:
-        context_metadata.update(metadata)
     return GatewayRequestContext(
         request_id=str(payload.id if payload.id is not None else "notification"),
         metadata=context_metadata,
