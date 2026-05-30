@@ -17,6 +17,7 @@ import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { useAntdMessage } from '@/hooks/useAntdMessage'
 import { useStoreMessageOption } from "@/store/option"
 import { useTutorialStore } from "@/store/tutorials"
+import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from "@/design-system"
 import { shallow } from "zustand/shallow"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
@@ -379,6 +380,9 @@ const NotesManagerPage: React.FC = () => {
     }
   })
 
+  const unavailableStateLabel =
+    getDesignSystemState('unavailable')?.label ?? UNAVAILABLE_STATE_LABEL
+
   const noteRelations = React.useMemo(() => {
     const selectedNormalized = normalizeGraphNoteId(ed.selectedId)
     const nodes = Array.isArray(noteNeighborsData?.nodes) ? noteNeighborsData.nodes : []
@@ -400,7 +404,7 @@ const NotesManagerPage: React.FC = () => {
           title: String(node?.label || node?.title || `Note ${normalizedId}`),
           available: !deleted,
           unavailableReason: deleted
-            ? t('option:notesSearch.linkedNoteDeleted', { defaultValue: 'Unavailable' })
+            ? t('option:notesSearch.linkedNoteDeleted', { defaultValue: unavailableStateLabel })
             : null
         })
         continue
@@ -450,7 +454,9 @@ const NotesManagerPage: React.FC = () => {
         unavailableReason: node?.unavailableReason || (
           node
             ? null
-            : t('option:notesSearch.linkedNoteUnavailable', { defaultValue: 'Unavailable' })
+            : t('option:notesSearch.linkedNoteUnavailable', {
+                defaultValue: unavailableStateLabel
+              })
         )
       }
     }
@@ -577,7 +583,7 @@ const NotesManagerPage: React.FC = () => {
       ),
       sources: sourceItems
     }
-  }, [noteNeighborsData, ed.selectedId, t])
+  }, [noteNeighborsData, ed.selectedId, t, unavailableStateLabel])
 
   const manualLinkOptions = React.useMemo(() => {
     const selectedNormalized = normalizeGraphNoteId(ed.selectedId)

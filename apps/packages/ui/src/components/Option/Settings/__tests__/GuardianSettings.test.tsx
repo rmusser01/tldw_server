@@ -5,6 +5,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { GuardianSettings } from "../GuardianSettings"
 
+const expectDesignSystemAlert = (text: string | RegExp) => {
+  const node =
+    typeof text === "string"
+      ? screen.getByText(text, { exact: false })
+      : screen.getByText(text)
+
+  expect(node.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+}
+
 const {
   useQueryMock,
   useMutationMock,
@@ -147,6 +156,10 @@ describe("GuardianSettings", () => {
       updated_at: "2026-01-01T00:00:00Z"
     }
   ]
+  let crisisResources = {
+    disclaimer: "If someone is in immediate danger, contact local emergency services.",
+    resources: []
+  }
 
   const setQueryMock = () => {
     vi.mocked(useQuery).mockImplementation((options: any) => {
@@ -171,6 +184,11 @@ describe("GuardianSettings", () => {
       if (queryKey[0] === "guardian" && queryKey[1] === "governance") {
         return makeQueryResult({
           data: { items: governancePolicies, total: governancePolicies.length }
+        })
+      }
+      if (queryKey[0] === "guardian" && queryKey[1] === "crisis") {
+        return makeQueryResult({
+          data: crisisResources
         })
       }
       return makeQueryResult()
@@ -274,6 +292,10 @@ describe("GuardianSettings", () => {
         updated_at: "2026-01-01T00:00:00Z"
       }
     ]
+    crisisResources = {
+      disclaimer: "If someone is in immediate danger, contact local emergency services.",
+      resources: []
+    }
 
     vi.mocked(useQueryClient).mockReturnValue({
       invalidateQueries: invalidateQueriesMock
@@ -293,6 +315,10 @@ describe("GuardianSettings", () => {
     render(<GuardianSettings />)
 
     expect(screen.getByText("Guardian settings unavailable")).toBeInTheDocument()
+    expectDesignSystemAlert("Guardian settings unavailable")
+    expectDesignSystemAlert(
+      "Your current server does not expose Guardian or Self-Monitoring endpoints."
+    )
     expect(screen.queryByRole("tab", { name: /Self-Monitoring/i })).not.toBeInTheDocument()
   })
 
@@ -325,6 +351,10 @@ describe("GuardianSettings", () => {
     expect(
       await screen.findByText("Self-Monitoring endpoints unavailable")
     ).toBeInTheDocument()
+    expectDesignSystemAlert("Self-Monitoring endpoints unavailable")
+    expectDesignSystemAlert(
+      "Your connected server does not expose self-monitoring endpoints yet. Upgrade the server to use Guardian monitoring rules."
+    )
   })
 
   it("shows self-monitoring fallback guidance without probing missing endpoints when OpenAPI lacks them", async () => {
@@ -351,6 +381,49 @@ describe("GuardianSettings", () => {
       )
 
     expect((rulesQueryCall?.[0] as any)?.enabled).toBe(false)
+  })
+
+  it("shows guardian controls fallback guidance through the design-system alert", async () => {
+    const notFoundError = Object.assign(new Error("Request failed: 404"), {
+      status: 404
+    })
+    vi.mocked(useQuery).mockImplementation((options: any) => {
+      const queryKey = Array.isArray(options?.queryKey) ? options.queryKey : []
+      if (queryKey[0] === "guardian" && queryKey[1] === "relationships") {
+        return makeQueryResult({
+          data: undefined,
+          error: notFoundError,
+          isError: true
+        })
+      }
+      return makeQueryResult({
+        data: { items: [], total: 0 }
+      })
+    })
+
+    render(<GuardianSettings />)
+
+    fireEvent.click(screen.getByRole("tab", { name: /Guardian Controls/i }))
+
+    expect(
+      await screen.findByText("Guardian controls endpoints unavailable")
+    ).toBeInTheDocument()
+    expectDesignSystemAlert("Guardian controls endpoints unavailable")
+    expectDesignSystemAlert(
+      "This server does not expose guardian relationship APIs yet. Upgrade the server to manage guardian controls."
+    )
+  })
+
+  it("shows crisis disclaimer guidance through the design-system alert", async () => {
+    render(<GuardianSettings />)
+
+    fireEvent.click(screen.getByRole("tab", { name: /Crisis Resources/i }))
+
+    expect(await screen.findByText("Disclaimer")).toBeInTheDocument()
+    expectDesignSystemAlert("Disclaimer")
+    expectDesignSystemAlert(
+      "If someone is in immediate danger, contact local emergency services."
+    )
   })
 
   it("does not offer warn as a self-monitoring rule action", async () => {

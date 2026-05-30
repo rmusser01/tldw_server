@@ -28,7 +28,7 @@ import {
   Popconfirm,
   Modal
 } from "antd"
-import { getDesignSystemState } from "@/design-system"
+import { READY_STATE_LABEL, getDesignSystemState } from "@/design-system"
 import { useWorkspaceStore } from "@/store/workspace"
 import type {
   WorkspaceSource,
@@ -386,7 +386,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   statusProjectionError = null
 }) => {
   const { t } = useTranslation(["playground", "common"])
-  const readyState = getDesignSystemState("ready")
+  const readyStateLabel = getDesignSystemState("ready")?.label ?? READY_STATE_LABEL
   const [messageApi, messageContextHolder] = message.useMessage()
   const patchSourceListViewState = React.useCallback(
     (patch: Partial<SourceListViewState>) => {
@@ -1441,7 +1441,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       ? t("playground:sources.statusProcessing", "Processing")
       : isError
         ? t("playground:sources.statusErrorShort", "Error")
-        : readyState.label
+        : readyStateLabel
     const sourceStatusClass = isProcessing
       ? "border-primary/30 bg-primary/10 text-primary"
       : isError
@@ -2074,7 +2074,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                 ? t("playground:sources.statusProcessing", "Processing")
                 : sourceStatus === "error"
                   ? t("playground:sources.statusErrorShort", "Error")
-                  : t("playground:sources.statusReady", "Ready"))
+                  : t("playground:sources.statusReady", readyStateLabel))
             const statusReason =
               details?.statusReason ||
               details?.progressMessage ||
@@ -2274,7 +2274,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                 ? t("playground:sources.statusProcessing", "Processing")
                 : previewStatus === "error"
                   ? t("playground:sources.statusErrorShort", "Error")
-                  : t("playground:sources.statusReady", "Ready")
+                  : t("playground:sources.statusReady", readyStateLabel)
             const previewData =
               sourcePreviewState.sourceId === previewSource.id
                 ? sourcePreviewState.data

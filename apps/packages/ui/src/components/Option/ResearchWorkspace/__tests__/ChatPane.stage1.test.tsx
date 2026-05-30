@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import { MemoryRouter } from "react-router-dom"
+import { getDesignSystemState } from "@/design-system"
 import { ConnectionPhase } from "@/types/connection"
 import { CHAT_PATH, LOREBOOK_DEBUG_FOCUS } from "@/routes/route-paths"
 import { ChatPane } from "../ChatPane"
@@ -36,12 +37,42 @@ const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
     mockUndoWorkspaceAction: vi.fn()
   })
 )
+const registryLabels = vi.hoisted(() => ({
+  ready: "Registry Ready",
+  degraded: "Registry Degraded"
+}))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label:
+            key === "ready"
+              ? registryLabels.ready
+              : key === "degraded"
+                ? registryLabels.degraded
+                : state.label
+        }
+      }
+    )
+  }
+})
 
 const connectionStoreState = {
   state: {
     phase: ConnectionPhase.CONNECTED,
     isChecking: false,
-    lastError: null
+    lastError: null,
+    isConnected: true,
+    errorKind: "none" as "none" | "partial",
+    knowledgeStatus: "ready" as const
   },
   checkOnce: mockCheckConnectionOnce
 }
@@ -288,6 +319,9 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     connectionStoreState.state.phase = ConnectionPhase.CONNECTED
     connectionStoreState.state.isChecking = false
     connectionStoreState.state.lastError = null
+    connectionStoreState.state.isConnected = true
+    connectionStoreState.state.errorKind = "none"
+    connectionStoreState.state.knowledgeStatus = "ready"
 
     workspaceStoreState.workspaceId = "workspace-a"
     workspaceStoreState.workspaceChatReferenceId = "workspace-a"
@@ -331,6 +365,24 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     fireEvent.click(stopButton)
 
     expect(mockStopStreamingRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses the design-system registry label for connected provider status", () => {
+    renderChatPane()
+
+    const selector = screen.getByTestId("model-selector")
+    expect(selector).toHaveTextContent(registryLabels.ready)
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("ready")
+  })
+
+  it("uses the design-system registry label for degraded provider status", () => {
+    connectionStoreState.state.errorKind = "partial"
+
+    renderChatPane()
+
+    const selector = screen.getByTestId("model-selector")
+    expect(selector).toHaveTextContent(registryLabels.degraded)
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
   })
 
   it("submits the composer with Cmd/Ctrl+Enter", async () => {

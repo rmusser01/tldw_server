@@ -4,6 +4,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { GuardianSettings } from "../GuardianSettings"
 
+const expectDesignSystemAlert = (text: string | RegExp) => {
+  const node =
+    typeof text === "string"
+      ? screen.getByText(text, { exact: false })
+      : screen.getByText(text)
+
+  expect(node.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+}
+
 const {
   useQueryMock,
   useMutationMock,
@@ -125,6 +134,10 @@ describe("GuardianSettings connection warning", () => {
     expect(
       screen.getByText("Add your credentials to manage Guardian settings.")
     ).toBeInTheDocument()
+    expectDesignSystemAlert("Add your credentials to manage Guardian settings.")
+    expectDesignSystemAlert(
+      "Your server is reachable, but Guardian settings require valid credentials before they can be managed."
+    )
 
     fireEvent.click(screen.getByRole("button", { name: "Open Settings" }))
     expect(connectionState.navigate).toHaveBeenCalledWith("/settings/tldw")
@@ -139,9 +152,44 @@ describe("GuardianSettings connection warning", () => {
     expect(
       screen.getByText("Finish setup to manage Guardian settings.")
     ).toBeInTheDocument()
+    expectDesignSystemAlert("Finish setup to manage Guardian settings.")
+    expectDesignSystemAlert(
+      "Complete the tldw server setup flow, then return here to manage Guardian and Self-Monitoring settings."
+    )
 
     fireEvent.click(screen.getByRole("button", { name: "Finish Setup" }))
     expect(connectionState.navigate).toHaveBeenCalledWith("/")
+  })
+
+  it("shows unreachable server guidance through the design-system alert", () => {
+    connectionState.online = false
+    connectionState.uxState = "error_unreachable"
+
+    render(<GuardianSettings />)
+
+    expect(
+      screen.getByText("Can't reach your tldw server right now.")
+    ).toBeInTheDocument()
+    expectDesignSystemAlert("Can't reach your tldw server right now.")
+    expectDesignSystemAlert(
+      "Your server settings are saved, but Guardian settings cannot reach the tldw server right now."
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Health & diagnostics" }))
+    expect(connectionState.navigate).toHaveBeenCalledWith("/settings/health")
+  })
+
+  it("shows generic offline guidance through the design-system alert", () => {
+    connectionState.online = false
+    connectionState.uxState = "connected_ok"
+
+    render(<GuardianSettings />)
+
+    expect(screen.getByText("Server offline")).toBeInTheDocument()
+    expectDesignSystemAlert("Server offline")
+    expectDesignSystemAlert(
+      "Connect to your tldw server to manage guardian and monitoring settings."
+    )
   })
 
   it("suppresses the warning while connection checks are still testing", () => {

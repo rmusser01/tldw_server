@@ -19,6 +19,11 @@ import {
   WifiOff
 } from "lucide-react"
 import { Modal, Tag, Tooltip, Input, Slider, Switch, Button, message } from "antd"
+import {
+  DEGRADED_STATE_LABEL,
+  READY_STATE_LABEL,
+  getDesignSystemState
+} from "@/design-system"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key"
 import { useWorkspaceStore } from "@/store/workspace"
@@ -2847,9 +2852,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       return t("playground:composer.providerStatusOffline", "Offline")
     }
     if (connectionUxState === "connected_degraded") {
-      return t("playground:composer.providerStatusDegraded", "Degraded")
+      return t(
+        "playground:composer.providerStatusDegraded",
+        getDesignSystemState("degraded")?.label ?? DEGRADED_STATE_LABEL
+      )
     }
-    return t("playground:composer.providerStatusReady", "Ready")
+    return t(
+      "playground:composer.providerStatusReady",
+      getDesignSystemState("ready")?.label ?? READY_STATE_LABEL
+    )
   }, [connectionUxState, isConnectionReady, t])
   const connectionStatusWarning =
     !isConnectionReady || connectionUxState === "connected_degraded"
