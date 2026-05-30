@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.7.10
 title: Migrate MlxAdminPage alerts and security badge to design-system primitives
-status: In Progress
+status: Done
 labels:
 - design-system
 - webui
@@ -10,6 +10,7 @@ priority: medium
 parent_task_id: TASK-45.44.7
 references:
 - https://github.com/rmusser01/tldw_server/issues/1664
+- https://github.com/rmusser01/tldw_server/pull/2158
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
 modified_files:
 - apps/packages/ui/src/components/Option/Admin/MlxAdminPage.tsx
@@ -29,7 +30,7 @@ Migrate MlxAdminPage admin guard, unavailable, loaded-model, and security-risk p
 - [x] #1 MlxAdminPage admin guard, status-unavailable, active-model notice, and trust-remote-code security risk product-state UI render through design-system primitives.
 - [x] #2 The product-state baseline no longer contains MlxAdminPage entries.
 - [x] #3 Focused regression coverage proves the relevant Alert/Badge design-system contracts.
-- [ ] #4 PR link, verification results, known skips, and final summary are recorded before closeout.
+- [x] #4 PR link, verification results, known skips, and final summary are recorded before closeout.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -52,15 +53,15 @@ Migrate MlxAdminPage admin guard, unavailable, loaded-model, and security-risk p
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Migrated MlxAdminPage admin guard, temporary-unavailable, active-model, and security-risk product-state UI from AntD Alert/Tag to the design-system Alert/Badge primitives in PR #2158. Added focused regression coverage for all migrated product-state branches, removed the four MlxAdminPage baseline exceptions, and recorded verification evidence. Package-wide TypeScript and the full design-system verifier remain blocked by unrelated current-dev debt outside this slice, documented in Implementation Notes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
