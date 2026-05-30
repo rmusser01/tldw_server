@@ -77,61 +77,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/RateLimitingPage.tsx:Alert#antd-alert-ratelimitingpage-type-error-access-denied-you-snzu3t",
-    "path": "src/components/Option/Admin/RateLimitingPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/RateLimitingPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Admin/RateLimitingPage.tsx:Alert#antd-alert-ratelimitingpage-type-info-line-304-1ygiko7",
-    "path": "src/components/Option/Admin/RateLimitingPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/RateLimitingPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Admin/RateLimitingPage.tsx:Alert#antd-alert-ratelimitingpage-type-info-no-coverage-data-l-w560el",
-    "path": "src/components/Option/Admin/RateLimitingPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/RateLimitingPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Admin/RateLimitingPage.tsx:Alert#antd-alert-ratelimitingpage-type-info-no-policy-data-loa-v2yfeq",
-    "path": "src/components/Option/Admin/RateLimitingPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/RateLimitingPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Admin/RateLimitingPage.tsx:Alert#antd-alert-ratelimitingpage-type-warning-not-available-r-nd5eoc",
-    "path": "src/components/Option/Admin/RateLimitingPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/RateLimitingPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/AudiobookStudio/AudiobookStudioPage.tsx:Tag",
     "path": "src/components/Option/AudiobookStudio/AudiobookStudioPage.tsx",
     "rule": "antd-product-state-import",
