@@ -17,7 +17,8 @@
 **Status**: Complete
 
 **Verification**:
-- `.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py tldw_Server_API/app/core/MCP_unified/tests/test_federation_shell_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py tldw_Server_API/app/core/MCP_unified/tests/test_external_credential_broker_runtime.py -q` -> 37 passed, 2 skipped, 3 warnings.
-- `.venv/bin/python -m ruff check mcp_unified/federation/models.py tldw_Server_API/app/core/MCP_unified/external_servers/manager.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py` -> All checks passed.
+- `.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py::test_runtime_auth_summary_treats_none_maps_as_empty -q` -> 1 passed, 3 warnings.
+- `.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py tldw_Server_API/app/core/MCP_unified/tests/test_federation_shell_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py tldw_Server_API/app/core/MCP_unified/tests/test_external_credential_broker_runtime.py -q` -> 38 passed, 2 skipped, 3 warnings.
+- `.venv/bin/python -m ruff check mcp_unified/federation/models.py tldw_Server_API/app/core/MCP_unified/external_servers/manager.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py` -> All checks passed.
 - `.venv/bin/python -m bandit -r mcp_unified/federation/models.py tldw_Server_API/app/core/MCP_unified/external_servers/manager.py -f json -o /tmp/bandit_mcp_stage3k_virtual_tool_contracts.json` -> 0 findings.
 - `git diff --check` -> clean.

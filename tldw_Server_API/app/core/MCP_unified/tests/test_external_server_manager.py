@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from tldw_Server_API.app.core.MCP_unified.external_servers import manager as manager_mod
 from tldw_Server_API.app.core.MCP_unified.external_servers.config_schema import (
     ExternalServerRegistryPartialLoadError,
     parse_external_server_registry,
@@ -19,7 +20,6 @@ from tldw_Server_API.app.core.MCP_unified.external_servers.transports.base impor
     adapter_supports_runtime_auth,
     call_tool_with_ephemeral_adapter,
 )
-from tldw_Server_API.app.core.MCP_unified.external_servers import manager as manager_mod
 
 
 def _ensure(condition: bool, message: str) -> None:
@@ -162,6 +162,17 @@ def test_adapter_runtime_auth_compatibility_helper_handles_legacy_signature() ->
         adapter_supports_runtime_auth(adapter) is False,
         "legacy adapter signature should not be treated as runtime-auth aware",
     )
+
+
+def test_runtime_auth_summary_treats_none_maps_as_empty() -> None:
+    credential = BrokeredExternalCredential()
+    runtime_credential = cast(Any, credential)
+    runtime_credential.headers = None
+    runtime_credential.env = None
+
+    summary = ExternalServerManager._summarize_runtime_auth(credential)
+
+    assert summary == {"headers": [], "env": []}
 
 
 @pytest.mark.asyncio

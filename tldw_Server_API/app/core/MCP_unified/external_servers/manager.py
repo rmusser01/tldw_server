@@ -744,8 +744,8 @@ class ExternalServerManager:
     @staticmethod
     def _summarize_runtime_auth(runtime_auth: BrokeredExternalCredential) -> dict[str, Any]:
         return {
-            "headers": sorted(str(name) for name in runtime_auth.headers),
-            "env": sorted(str(name) for name in runtime_auth.env),
+            "headers": sorted(str(name) for name in (runtime_auth.headers or {})),
+            "env": sorted(str(name) for name in (runtime_auth.env or {})),
         }
 
     @staticmethod

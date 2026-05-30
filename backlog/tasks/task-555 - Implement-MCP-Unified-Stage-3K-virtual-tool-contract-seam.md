@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: ''
-updated_date: '2026-05-30 02:25'
+updated_date: '2026-05-30 02:33'
 labels:
   - mcp-unified
   - standalone-extraction
@@ -42,13 +42,15 @@ Use TDD. First add failing package-boundary tests proving host VirtualExternalTo
 <!-- SECTION:NOTES:BEGIN -->
 Implemented Stage 3K with a narrow contract seam. Host external server manager now imports mcp_unified.federation.models.VirtualExternalTool instead of defining a duplicate dataclass. Package VirtualExternalTool now exposes copy() with caller-owned nested input_schema and metadata. Added package-boundary regression tests for host/package identity and virtual-tool copy isolation.
 
-Verification: focused MCP suite 37 passed, 2 skipped, 3 warnings; Ruff all checks passed; Bandit 0 findings on touched implementation files; git diff --check clean.
+Review fix: addressed Gemini review comment by making _summarize_runtime_auth() tolerate runtime_auth.headers/env being None and added a focused regression test for that path.
+
+Verification: targeted review regression 1 passed, 3 warnings; focused MCP suite 38 passed, 2 skipped, 3 warnings; Ruff all checks passed; Bandit 0 findings on touched implementation files; git diff --check clean.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Stage 3K complete. Host external federation now reuses the standalone package VirtualExternalTool contract, the package contract supports caller-owned copies, and focused MCP package-boundary/external federation tests plus Ruff, Bandit, and git diff --check verification pass.
+Stage 3K complete. Host external federation now reuses the standalone package VirtualExternalTool contract, the package contract supports caller-owned copies, the Gemini runtime-auth summary review comment is addressed, and focused MCP package-boundary/external federation tests plus Ruff, Bandit, and git diff --check verification pass.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
