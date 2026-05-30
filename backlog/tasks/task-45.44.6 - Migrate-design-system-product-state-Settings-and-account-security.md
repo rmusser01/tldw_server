@@ -4,7 +4,7 @@ title: 'Migrate design-system product state: Settings and account/security'
 status: In Progress
 assignee: []
 created_date: '2026-05-14 03:19'
-updated_date: '2026-05-30 16:18'
+updated_date: '2026-05-30 16:24'
 labels:
   - design-system
   - webui
@@ -48,6 +48,8 @@ TASK-45.44.6.5 completed locally on codex/integration-policy-alerts-ds: migrated
 TASK-45.44.6.6 completed locally on codex/integration-policy-alerts-ds: migrated GuardianSettings global unavailable, self-monitoring unavailable, guardian controls unavailable, crisis resources, and offline/auth/setup warning alerts from AntD Alert to the shared DS Alert primitive and removed nine component baseline entries. Evidence: GuardianSettings baseline count is 0, Settings path product-state baseline count is 21, and total baseline count is 165. Verification included red/green GuardianSettings focused tests, scoped product-state guard, baseline JSON parse, TypeScript with 8GB heap, and git diff --check; full verify:design-system-state remains red on unrelated existing blocked findings outside this slice.
 
 TASK-45.44.6.7 completed locally: migrated Evaluations settings auth/setup/unreachable/offline/API-test alerts to the design-system Alert primitive, removed the Evaluations settings baseline exceptions, and verified focused tests plus scoped guard/TypeScript. Full design-system verifier remains blocked by unrelated WritingPlayground, Notes, and ResearchWorkspace findings.
+
+TASK-45.44.6.8 completed locally: migrated General settings extension promotion and OCR asset alerts to the design-system Alert primitive, removed the General settings baseline exceptions, and verified focused tests plus scoped guard/TypeScript. Evidence: general-settings.tsx baseline count 0, Settings path count 14, total baseline count 158. Full design-system verifier remains blocked by unrelated WritingPlayground, Notes, and ResearchWorkspace findings.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
