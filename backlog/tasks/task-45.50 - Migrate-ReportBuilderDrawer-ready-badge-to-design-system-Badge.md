@@ -24,6 +24,10 @@ Continue the tldw_server WebUI design-system migration by replacing ReportBuilde
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 ReportBuilderDrawer readiness success tag is replaced with the shared design-system Badge primitive.
+- [x] #2 The ready badge preserves READY_STATE_LABEL and the existing watchlists i18n key.
+- [x] #3 Focused ReportBuilderDrawer coverage asserts the ready label renders inside a success design-system Badge.
+- [x] #4 Product-state guard verification and inherited TypeScript baseline debt are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -40,10 +44,10 @@ Replaced ReportBuilderDrawer's ready readiness AntD Tag with the shared design-s
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

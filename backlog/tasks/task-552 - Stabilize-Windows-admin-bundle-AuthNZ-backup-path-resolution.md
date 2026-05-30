@@ -1,7 +1,7 @@
 ---
 id: TASK-552
 title: Stabilize Windows admin bundle AuthNZ backup path resolution
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: '2026-05-30 06:45'
@@ -24,7 +24,7 @@ Fix PR #2133 Windows full-suite failure where Admin bundle export returns export
 <!-- AC:BEGIN -->
 - [x] #1 Windows-style sqlite DATABASE_URL paths like sqlite:///C:\\... resolve to a valid filesystem path for AuthNZ backups.
 - [x] #2 The Admin authnz-only bundle test still passes locally.
-- [ ] #3 PR #2133 CI no longer fails the Admin full-suite module for this path.
+- [x] #3 PR #2133 CI no longer fails the Admin full-suite module for this path.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -41,15 +41,15 @@ Local verification:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+PR #2133 merged on 2026-05-30 after the Windows sqlite AuthNZ path normalization fix was included. The Admin full-suite bundle failure no longer blocks the merged PR. Local verification covered the focused Windows-style sqlite URL regression, the authnz-only bundle test, diff whitespace, and Bandit for touched Admin/Audio files with only low-severity test assert findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
