@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import ast
+import asyncio
+import json
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import mcp_unified.gateway.fastapi as gateway_fastapi
+import mcp_unified.gateway.jsonrpc as gateway_jsonrpc
 from fastapi.testclient import TestClient
 from mcp_unified.gateway import create_gateway_app
 
@@ -183,6 +188,22 @@ def test_gateway_package_does_not_import_tldw_server_api() -> None:
             offenders[str(path.relative_to(REPO_ROOT))] = blocked
 
     assert offenders == {}
+
+
+def test_gateway_stdio_submodule_import_does_not_eagerly_import_fastapi_transport() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import mcp_unified.gateway.stdio; print('mcp_unified.gateway.fastapi' in sys.modules)",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip() == "False"
 
 
 def test_gateway_fastapi_app_handles_basic_jsonrpc_flow() -> None:
@@ -437,6 +458,91 @@ def test_gateway_websocket_batch_omits_notification_responses() -> None:
     assert body == [{"jsonrpc": "2.0", "result": {"pong": True}, "id": "batch-ping"}]
 
 
+def test_gateway_stdio_handles_initialize_and_request_context() -> None:
+    from mcp_unified.gateway.stdio import handle_stdio_line
+
+    runtime = _FakeGatewayRuntime()
+
+    initialized_line = asyncio.run(
+        handle_stdio_line(
+            runtime,
+            '{"jsonrpc":"2.0","method":"initialize","params":{"clientInfo":{"name":"pytest-stdio"}},"id":"stdio-init"}\n',
+        )
+    )
+    assert initialized_line is not None
+    assert initialized_line.endswith("\n")
+    assert not initialized_line.endswith("\n\n")
+    initialized = json.loads(initialized_line)
+    assert initialized["jsonrpc"] == "2.0"
+    assert initialized["id"] == "stdio-init"
+    assert initialized["result"]["serverInfo"] == {
+        "name": "unit-gateway",
+        "version": "0.0-test",
+    }
+
+    resources_line = asyncio.run(
+        handle_stdio_line(
+            runtime,
+            '{"jsonrpc":"2.0","method":"resources/list","params":{},"id":"stdio-resources"}\n',
+        )
+    )
+    assert resources_line is not None
+    resources = json.loads(resources_line)
+    assert resources["id"] == "stdio-resources"
+    assert resources["result"]["resources"][0]["uri"] == "resource://unit/doc"
+    assert runtime.resource_list_contexts[-1].request_id == "stdio-resources"
+    assert runtime.resource_list_contexts[-1].metadata["path"] == "stdio://stdin"
+    assert runtime.resource_list_contexts[-1].metadata["transport"] == "stdio"
+
+
+def test_gateway_stdio_suppresses_notification_response() -> None:
+    from mcp_unified.gateway.stdio import handle_stdio_line
+
+    runtime = _FakeGatewayRuntime()
+
+    response_line = asyncio.run(handle_stdio_line(runtime, '{"jsonrpc":"2.0","method":"ping"}\n'))
+
+    assert response_line is None
+
+
+def test_gateway_stdio_batch_omits_notification_responses() -> None:
+    from mcp_unified.gateway.stdio import handle_stdio_line
+
+    runtime = _FakeGatewayRuntime()
+
+    response_line = asyncio.run(
+        handle_stdio_line(
+            runtime,
+            json.dumps(
+                [
+                    {"jsonrpc": "2.0", "method": "ping"},
+                    {"jsonrpc": "2.0", "method": "ping", "id": "stdio-batch"},
+                ]
+            )
+            + "\n",
+        )
+    )
+
+    assert response_line is not None
+    assert response_line.endswith("\n")
+    assert json.loads(response_line) == [{"jsonrpc": "2.0", "result": {"pong": True}, "id": "stdio-batch"}]
+
+
+def test_gateway_stdio_maps_invalid_json_to_parse_error() -> None:
+    from mcp_unified.gateway.stdio import handle_stdio_line
+
+    runtime = _FakeGatewayRuntime()
+
+    response_line = asyncio.run(handle_stdio_line(runtime, "not-json\n"))
+
+    assert response_line is not None
+    body = json.loads(response_line)
+    assert body["jsonrpc"] == "2.0"
+    assert body["id"] is None
+    assert body["error"]["code"] == -32700
+    assert "Parse error" in body["error"]["message"]
+
+
 def test_gateway_response_to_json_fallback_is_json_serializable() -> None:
     class _PydanticV1LikeResponse:
         def dict(self) -> dict[str, Any]:
@@ -606,7 +712,7 @@ def test_gateway_request_logs_custom_runtime_exceptions(monkeypatch: Any) -> Non
     runtime = _CustomExplodingGatewayRuntime()
     app = create_gateway_app(runtime, prefix="/mcp")
     fake_logger = _FakeLogger()
-    monkeypatch.setattr(gateway_fastapi, "logger", fake_logger, raising=False)
+    monkeypatch.setattr(gateway_jsonrpc, "logger", fake_logger, raising=False)
 
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.post(
