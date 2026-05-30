@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 Owner: Codex brainstorming session
-Status: Ready for user review
+Status: Design complete; implementation deferred
 Backlog: TASK-426
 
 ## Summary
