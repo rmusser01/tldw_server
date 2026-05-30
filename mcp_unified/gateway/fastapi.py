@@ -144,6 +144,12 @@ def _required_string(value: Any, message: str) -> str:
     return value.strip()
 
 
+def _runtime_supports(runtime: GatewayRuntime, *method_names: str) -> bool:
+    """Return whether the injected runtime exposes each named method."""
+
+    return all(callable(getattr(runtime, method_name, None)) for method_name in method_names)
+
+
 def _request_context(
     payload: GatewayJSONRPCRequest,
     request: Request,
@@ -171,8 +177,8 @@ async def _handle_initialize(
         "protocolVersion": _PROTOCOL_VERSION,
         "capabilities": {
             "tools": {"available": True},
-            "resources": {"available": False},
-            "prompts": {"available": False},
+            "resources": {"available": _runtime_supports(runtime, "list_resources", "read_resource")},
+            "prompts": {"available": _runtime_supports(runtime, "list_prompts", "get_prompt")},
         },
         "serverInfo": {
             "name": _runtime_name(runtime),

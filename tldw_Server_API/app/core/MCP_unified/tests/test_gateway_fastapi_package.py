@@ -106,6 +106,7 @@ class _FakeGatewayRuntime:
         context: Any,
     ) -> dict[str, Any]:
         self.prompt_get_requests.append((name, arguments, context))
+        topic = arguments.get("topic", "")
         return {
             "description": "Review a focused topic.",
             "messages": [
@@ -113,7 +114,7 @@ class _FakeGatewayRuntime:
                     "role": "user",
                     "content": {
                         "type": "text",
-                        "text": f"{name}:{arguments['topic']}",
+                        "text": f"{name}:{topic}",
                     },
                 }
             ],
@@ -210,6 +211,9 @@ def test_gateway_fastapi_app_handles_basic_jsonrpc_flow() -> None:
             "name": "unit-gateway",
             "version": "0.0-test",
         }
+        capabilities = initialized.json()["result"]["capabilities"]
+        assert capabilities["resources"]["available"] is True
+        assert capabilities["prompts"]["available"] is True
 
         listed = client.post(
             "/mcp/request",
@@ -430,6 +434,28 @@ def test_gateway_request_rejects_missing_prompt_name() -> None:
     assert response.status_code == 200
     _assert_jsonrpc_error(response.json(), code=-32602, request_id="bad-prompt")
     assert runtime.prompt_get_requests == []
+
+
+def test_gateway_prompt_get_accepts_missing_arguments() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "prompts/get",
+                "params": {"name": "review.prompt"},
+                "id": "prompt-no-args",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == "prompt-no-args"
+    assert body["result"]["messages"][0]["content"]["text"] == "review.prompt:"
+    assert runtime.prompt_get_requests[-1][1] == {}
 
 
 def test_gateway_request_rejects_non_object_prompt_arguments_without_coercion() -> None:

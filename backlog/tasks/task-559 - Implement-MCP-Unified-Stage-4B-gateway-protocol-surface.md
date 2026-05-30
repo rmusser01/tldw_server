@@ -42,12 +42,23 @@ Verification recorded:
 - Ruff: `All checks passed!`.
 - Bandit: `/tmp/bandit_mcp_stage4b_gateway_protocol_surface.json` reported `"results": []`.
 - `git diff --check` exited cleanly.
+
+Review pass after PR #2141:
+- Rebasing onto latest `origin/dev` completed cleanly.
+- Open review threads found on initialize capability advertisement and optional prompt arguments in the fake runtime; both verified against current code before edits.
+- RED review test run: `2 failed, 14 passed, 3 warnings`; failures matched stale initialize capability flags and prompt fake runtime `KeyError` with missing arguments.
+- Fixed initialize capability advertisement to derive resource and prompt availability from the injected runtime method surface.
+- Fixed the fake runtime prompt result to tolerate omitted optional prompt arguments and added regression coverage for that path.
+- GREEN gateway review run: `16 passed, 3 warnings`.
+- Review validation: host compatibility `47 passed, 4 warnings`; Ruff `All checks passed!`; Bandit `/tmp/bandit_mcp_stage4b_gateway_review_fix.json` reported `"results": []`; `git diff --check` exited cleanly.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Stage 4B adds the standalone gateway protocol surface for resources, prompts, and module discovery/health through the injected runtime contract. The slice remains package-isolated, preserves host compatibility tests, and intentionally leaves storage wiring, stdio transport, external lifecycle, profile policy, and host route integration for later stages. No known skips or blockers.
+
+Post-PR review pass rebased the branch onto latest `origin/dev` and addressed the verified Qodo/CodeRabbit initialize capability finding plus the Gemini fake runtime optional-arguments finding.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
