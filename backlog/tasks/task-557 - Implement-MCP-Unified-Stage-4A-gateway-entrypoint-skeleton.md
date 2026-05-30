@@ -4,12 +4,14 @@ title: Implement MCP Unified Stage 4A gateway entrypoint skeleton
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-30 06:17'
+updated_date: '2026-05-30 06:29'
 labels:
   - mcp-unified
   - standalone-extraction
   - stage-4
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2139'
 documentation:
   - >-
     Docs/superpowers/specs/2026-05-26-mcp-unified-standalone-library-gateway-design.md
