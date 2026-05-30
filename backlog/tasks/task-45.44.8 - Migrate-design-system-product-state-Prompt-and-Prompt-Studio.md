@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.8
 title: 'Migrate design-system product state: Prompt and Prompt Studio'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-14 03:19'
 labels:

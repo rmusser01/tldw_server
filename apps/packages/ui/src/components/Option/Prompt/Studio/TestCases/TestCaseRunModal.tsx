@@ -10,7 +10,7 @@ import {
   type TestRunResult
 } from "@/services/prompt-studio"
 import { Button } from "@/components/Common/Button"
-import { Alert as DsAlert, Badge } from "@/components/ui/primitives"
+import { Alert, Badge } from "@/components/ui/primitives"
 
 type TestCaseRunModalProps = {
   open: boolean
@@ -84,6 +84,49 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
   const passCount = results?.filter((r) => r.passed).length ?? 0
   const failCount = results?.filter((r) => r.passed === false).length ?? 0
 
+  const renderResultStatusBadge = (record: TestRunResult) => {
+    if (record.error) {
+      return (
+        <Badge variant="danger" size="sm">
+          <XCircle className="size-3" aria-hidden="true" />
+          {t("managePrompts.studio.testCases.results.error", {
+            defaultValue: "Error"
+          })}
+        </Badge>
+      )
+    }
+
+    if (record.passed) {
+      return (
+        <Badge variant="success" size="sm">
+          <CheckCircle2 className="size-3" aria-hidden="true" />
+          {t("managePrompts.studio.testCases.results.pass", {
+            defaultValue: "Pass"
+          })}
+        </Badge>
+      )
+    }
+
+    if (record.passed === false) {
+      return (
+        <Badge variant="warning" size="sm">
+          <XCircle className="size-3" aria-hidden="true" />
+          {t("managePrompts.studio.testCases.results.fail", {
+            defaultValue: "Fail"
+          })}
+        </Badge>
+      )
+    }
+
+    return (
+      <Badge size="sm">
+        {t("managePrompts.studio.testCases.results.run", {
+          defaultValue: "Run"
+        })}
+      </Badge>
+    )
+  }
+
   return (
     <Modal
       open={open}
@@ -103,7 +146,7 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
       <div className="mt-4 space-y-4">
         {!results && (
           <>
-            <DsAlert
+            <Alert
               variant="info"
               title={t("managePrompts.studio.testCases.runInfo", {
                 defaultValue:
@@ -159,12 +202,18 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
               </span>
               <Badge variant="success" size="sm">
                 <CheckCircle2 className="size-3" aria-hidden="true" />
-                {passCount} passed
+                {t("managePrompts.studio.testCases.results.passedCount", {
+                  defaultValue: "{{count}} passed",
+                  count: passCount
+                })}
               </Badge>
               {failCount > 0 && (
                 <Badge variant="danger" size="sm">
                   <XCircle className="size-3" aria-hidden="true" />
-                  {failCount} failed
+                  {t("managePrompts.studio.testCases.results.failedCount", {
+                    defaultValue: "{{count}} failed",
+                    count: failCount
+                  })}
                 </Badge>
               )}
             </div>
@@ -191,27 +240,7 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
                   }),
                   key: "status",
                   width: 80,
-                  render: (_, record) =>
-                    record.error ? (
-                      <Badge variant="danger" size="sm">
-                        <XCircle className="size-3" aria-hidden="true" />
-                        Error
-                      </Badge>
-                    ) : record.passed ? (
-                      <Badge variant="success" size="sm">
-                        <CheckCircle2 className="size-3" aria-hidden="true" />
-                        Pass
-                      </Badge>
-                    ) : record.passed === false ? (
-                      <Badge variant="warning" size="sm">
-                        <XCircle className="size-3" aria-hidden="true" />
-                        Fail
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" size="sm">
-                        Run
-                      </Badge>
-                    )
+                  render: (_, record) => renderResultStatusBadge(record)
                 },
                 {
                   title: t("managePrompts.studio.testCases.columns.output", {
