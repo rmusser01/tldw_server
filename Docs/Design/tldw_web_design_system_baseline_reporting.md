@@ -49,6 +49,9 @@ must actively remove stale rows before recording final counts.
    count, after count, rule split, verifier command, and PR link.
 7. Update the Backlog task with the same evidence and note that GitHub owns the
    canonical current count.
+8. For visual-impact shared UI changes, record the visual QA evidence required
+   by `Docs/Design/tldw_web_design_system_visual_qa_checklist.md`, or explain
+   why the change is non-visual.
 
 ## Closure Rules
 
@@ -60,4 +63,3 @@ must actively remove stale rows before recording final counts.
 - If a new baseline exception is intentionally introduced, the baseline reason
   must include the owning tracker issue, and the `migrationQueue` must match the
   tracker queue slug.
-

@@ -379,7 +379,9 @@ Recommended enforcement sequence:
 
 1. Focused Vitest coverage for proof-surface states.
 2. Static guards for canonical state labels and shared exports.
-3. Optional Storybook or visual-regression coverage after the contract has
+3. Browser-observed visual QA for shared visual changes, using
+   `Docs/Design/tldw_web_design_system_visual_qa_checklist.md`.
+4. Optional Storybook or visual-regression coverage after the contract has
    stabilized.
 
 ## Rollout Plan
