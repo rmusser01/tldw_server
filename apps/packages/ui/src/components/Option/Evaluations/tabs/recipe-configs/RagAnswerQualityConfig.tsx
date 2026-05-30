@@ -1,6 +1,7 @@
 import React from "react"
-import { Alert, Button, Card, Input, Typography } from "antd"
+import { Button, Card, Input, Typography } from "antd"
 import type { DatasetSample } from "@/services/evaluations"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { useTranslation } from "react-i18next"
 import { useGenerateSyntheticEvalDrafts } from "../../hooks/useSyntheticEval"
 
@@ -451,29 +452,29 @@ export const RagAnswerQualityConfig: React.FC<Props> = ({
       >
         <div className="space-y-4">
           {generationSummary && (
-            <Alert
-              type="success"
-              showIcon
+            <DsAlert
+              variant="success"
               title={t("evaluations:syntheticGenerationSuccessInlineTitle", {
                 defaultValue: "Synthetic drafts created"
               })}
-              description={t("evaluations:syntheticGenerationSuccessInlineDescription", {
+            >
+              {t("evaluations:syntheticGenerationSuccessInlineDescription", {
                 defaultValue:
                   "Batch {{batchId}} created {{count}} drafts and is ready for review.",
                 batchId: generationSummary.batchId,
                 count: generationSummary.sampleCount
               })}
-            />
+            </DsAlert>
           )}
           {generationError && (
-            <Alert
-              type="error"
-              showIcon
+            <DsAlert
+              variant="error"
               title={t("evaluations:syntheticGenerationErrorTitle", {
                 defaultValue: "Failed to generate synthetic drafts"
               })}
-              description={generationError}
-            />
+            >
+              {generationError}
+            </DsAlert>
           )}
 
           <div className="space-y-2">
@@ -499,13 +500,13 @@ export const RagAnswerQualityConfig: React.FC<Props> = ({
             </div>
           </div>
 
-          <Alert
-            type="info"
-            showIcon
+          <DsAlert
+            variant="info"
             title={t("evaluations:syntheticAnswerAnchorSummaryLabel", {
               defaultValue: "Current answer-quality anchor"
             })}
-            description={
+          >
+            {
               normalizedRunConfig.evaluation_mode === "fixed_context"
                 ? t("evaluations:syntheticAnswerAnchorSummaryDescriptionFixed", {
                     defaultValue: "Fixed-context mode using {{anchor}}",
@@ -520,7 +521,7 @@ export const RagAnswerQualityConfig: React.FC<Props> = ({
                       "no retrieval baseline selected"
                   })
             }
-          />
+          </DsAlert>
 
           <div className="space-y-2">
             <Text strong>
