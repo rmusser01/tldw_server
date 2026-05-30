@@ -133,6 +133,7 @@ describe("launchWithExtension", () => {
           timeout: 90000,
           channel: "chromium",
           headless: true,
+          ignoreDefaultArgs: ["--disable-extensions"],
         }),
       )
     } finally {

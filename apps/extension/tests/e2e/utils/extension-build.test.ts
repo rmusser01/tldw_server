@@ -111,6 +111,7 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
     fs.writeFileSync(path.join(extensionDir, "sidepanel.html"), "<html></html>", "utf8")
 
     vi.doMock("./extension-paths", () => ({
+      prepareExtensionLaunchPath: (extensionPath: string) => extensionPath,
       prioritizeExtensionBuildCandidates: () => [extensionDir],
     }))
 

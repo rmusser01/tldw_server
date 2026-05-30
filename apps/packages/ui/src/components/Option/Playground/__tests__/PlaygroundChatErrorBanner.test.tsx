@@ -99,6 +99,46 @@ describe("PlaygroundChatErrorBanner", () => {
     }
   })
 
+  it("uses the compact model selector for switch-model recovery", () => {
+    const modelSelectorListener = vi.fn()
+    const modelSettingsListener = vi.fn()
+    window.addEventListener("tldw:open-model-selector", modelSelectorListener)
+    window.addEventListener("tldw:open-model-settings", modelSettingsListener)
+
+    try {
+      render(
+        <MemoryRouter>
+          <PlaygroundChatErrorBanner
+            error={{
+              summary: "The selected model is not available.",
+              hint: "Choose a different model and try again.",
+              detail: "model_not_found",
+              recoveryAction: "open-model-selector",
+              recoveryLabel: "Choose another model",
+              key: "assistant-error-1:model-selector"
+            } as any}
+            diagnosticsLabel="Health & diagnostics"
+            dismissLabel="Dismiss error"
+            onDismiss={() => undefined}
+          />
+        </MemoryRouter>
+      )
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Choose another model" })
+      )
+
+      expect(modelSelectorListener).toHaveBeenCalledTimes(1)
+      expect(modelSettingsListener).not.toHaveBeenCalled()
+      expect(
+        screen.queryByRole("button", { name: "Health & diagnostics" })
+      ).toBeNull()
+    } finally {
+      window.removeEventListener("tldw:open-model-selector", modelSelectorListener)
+      window.removeEventListener("tldw:open-model-settings", modelSettingsListener)
+    }
+  })
+
   it("resolves the newest encoded assistant error", () => {
     const latest = getLatestChatErrorBannerEntry([
       {

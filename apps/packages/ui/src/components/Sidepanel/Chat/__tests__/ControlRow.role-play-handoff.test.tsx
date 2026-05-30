@@ -263,7 +263,7 @@ describe("ControlRow role-play handoff behavior", () => {
     const openFullApp = screen.getByTestId("chat-open-full-app")
 
     expect(openFullApp).toHaveAccessibleDescription(
-      "Opens /chat in a new tab with the active role-play route. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+      "Opens /chat in a new tab with the active role-play route. Use Continue in WebUI to carry a draft or page context."
     )
 
     fireEvent.click(openFullApp)

@@ -369,11 +369,11 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const fullAppHandoffDescription = rolePlayActive
     ? t(
         "sidepanel:controlRow.openRolePlayFullAppDescription",
-        "Opens /chat in a new tab with the active role-play route. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+        "Opens /chat in a new tab with the active role-play route. Use Continue in WebUI to carry a draft or page context."
       )
     : t(
         "sidepanel:controlRow.openFullAppDescription",
-        "Opens /chat in a new tab. Sidepanel draft, current page context, and unsaved chat state stay in the sidepanel."
+        "Opens /chat in a new tab. Use Continue in WebUI to carry a draft or page context."
       )
   const continueInWebUIButtonLabel = t(
     "sidepanel:controlRow.continueInWebUI",

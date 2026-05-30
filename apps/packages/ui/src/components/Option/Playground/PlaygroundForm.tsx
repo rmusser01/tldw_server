@@ -194,11 +194,13 @@ import {
   OPEN_KNOWLEDGE_PANEL_EVENT,
   OPEN_MCP_SETTINGS_EVENT,
   OPEN_MCP_TOOLS_EVENT,
+  OPEN_MODEL_SELECTOR_EVENT,
   OPEN_MODEL_SETTINGS_EVENT,
   OPEN_TURN_TOOLS_EVENT,
   SET_TEMPORARY_CHAT_EVENT,
   TOGGLE_WEB_SEARCH_EVENT,
   type McpSettingsOpenDetail,
+  type ModelSelectorOpenDetail,
   type ModelSettingsOpenDetail,
 } from "./playground-cockpit-actions";
 import { deriveRolePlayState, type RolePlayIdentity } from "./role-play-state";
@@ -632,6 +634,7 @@ export const PlaygroundForm = ({
   const [modelSettingsScopeOverride, setModelSettingsScopeOverride] =
     React.useState<string | null>(null);
   const modelSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
+  const modelSelectorReturnFocusSelectorRef = React.useRef<string | null>(null);
   const mcpSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const [openActorSettings, setOpenActorSettings] = React.useState(false);
   const [rolePlaySetupOpen, setRolePlaySetupOpen] = React.useState(false);
@@ -1334,6 +1337,22 @@ export const PlaygroundForm = ({
     setSelectedModel,
     navigate,
   });
+  const restoreModelSelectorFocus = React.useCallback(() => {
+    const returnFocusSelector = modelSelectorReturnFocusSelectorRef.current;
+    if (!returnFocusSelector) return;
+    modelSelectorReturnFocusSelectorRef.current = null;
+
+    scheduleFocusFirstVisibleElement(returnFocusSelector);
+  }, []);
+  const setModelDropdownOpenWithFocusRestore = React.useCallback(
+    (nextOpen: boolean) => {
+      setModelDropdownOpen(nextOpen);
+      if (!nextOpen) {
+        restoreModelSelectorFocus();
+      }
+    },
+    [restoreModelSelectorFocus, setModelDropdownOpen],
+  );
   React.useEffect(() => {
     setActiveChatModelSettingsScope(selectedModelKey ?? null);
   }, [selectedModelKey, setActiveChatModelSettingsScope]);
@@ -1344,7 +1363,7 @@ export const PlaygroundForm = ({
         setContextToolsOpen(false);
       }
       if (activePopover !== "model") {
-        setModelDropdownOpen(false);
+        setModelDropdownOpenWithFocusRestore(false);
       }
       if (activePopover !== "mcp") {
         setMcpPopoverOpen(false);
@@ -1363,7 +1382,7 @@ export const PlaygroundForm = ({
       setAttachmentMenuOpen,
       setContextToolsOpen,
       setMcpPopoverOpen,
-      setModelDropdownOpen,
+      setModelDropdownOpenWithFocusRestore,
       setSendMenuOpen,
       setToolsPopoverOpen,
     ],
@@ -1990,8 +2009,23 @@ export const PlaygroundForm = ({
   );
   const openModelApiSelector = React.useCallback(() => {
     closeComposerPopoversExcept("model");
-    setModelDropdownOpen(true);
-  }, [closeComposerPopoversExcept, setModelDropdownOpen]);
+    setModelDropdownOpenWithFocusRestore(true);
+  }, [closeComposerPopoversExcept, setModelDropdownOpenWithFocusRestore]);
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<ModelSelectorOpenDetail>).detail;
+      modelSelectorReturnFocusSelectorRef.current = normalizeFocusSelector(
+        detail?.returnFocusSelector,
+      );
+      openModelApiSelector();
+      scheduleFocusFirstVisibleElement("[data-testid='model-selector']");
+    };
+    window.addEventListener(OPEN_MODEL_SELECTOR_EVENT, handler);
+    return () => {
+      window.removeEventListener(OPEN_MODEL_SELECTOR_EVENT, handler);
+    };
+  }, [openModelApiSelector]);
   const getModelRecommendationActionLabel = React.useCallback(
     (action: ModelRecommendationAction) => {
       if (action === "enable_json_mode") {
@@ -2193,7 +2227,7 @@ export const PlaygroundForm = ({
       modelSortMode={modelSortMode}
       resolvedProviderKey={resolvedProviderKey}
       selectedModel={selectedModel}
-      setModelDropdownOpen={setModelDropdownOpen}
+      setModelDropdownOpen={setModelDropdownOpenWithFocusRestore}
       setModelSearchQuery={setModelSearchQuery}
       setModelSortMode={setModelSortMode}
     />
