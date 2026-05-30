@@ -283,6 +283,43 @@ async def test_discovery_filters_tools_and_unknown_virtual_tool_is_rejected(
 
 
 @pytest.mark.asyncio
+async def test_list_virtual_tools_returns_caller_owned_copies(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = _FakeAdapter(
+        server_id="docs",
+        tools=[
+            ExternalToolDefinition(
+                name="docs.search",
+                description="Search",
+                input_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+                metadata={"nested": {"source": "discovery"}},
+            )
+        ],
+    )
+    _patch_loader_and_adapter(
+        monkeypatch,
+        payload=_registry_payload(policy={"allow_tool_patterns": ["docs.*"]}),
+        adapter=adapter,
+    )
+
+    manager = ExternalServerManager()
+    try:
+        await manager.initialize()
+        listed = manager.list_virtual_tools()
+        listed[0].input_schema["properties"]["q"]["type"] = "number"
+        listed[0].metadata["nested"]["source"] = "changed"
+
+        refreshed = manager.list_virtual_tools()
+
+        assert refreshed[0].input_schema == {
+            "type": "object",
+            "properties": {"q": {"type": "string"}},
+        }
+        assert refreshed[0].metadata == {"nested": {"source": "discovery"}}
+    finally:
+        await manager.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_write_tool_blocked_when_allow_writes_false(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = _FakeAdapter(
         server_id="docs",

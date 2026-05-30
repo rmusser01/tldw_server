@@ -370,7 +370,7 @@ class ExternalServerManager:
     def list_virtual_tools(self) -> list[VirtualExternalTool]:
         """Return all currently discovered virtual tools."""
 
-        return [self._virtual_tools[name] for name in sorted(self._virtual_tools.keys())]
+        return [self._virtual_tools[name].copy() for name in sorted(self._virtual_tools)]
 
     async def execute_virtual_tool(
         self,
