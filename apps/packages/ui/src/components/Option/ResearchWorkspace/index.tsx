@@ -88,7 +88,10 @@ import {
   type WorkspaceGlobalSearchResult
 } from "./workspace-global-search"
 import {
+  getResearchWorkspaceDeepResearchReturnContext,
+  getResearchWorkspaceSearchFromLocation,
   getResearchWorkspaceTabFromSearch,
+  isResearchWorkspaceDeepResearchReturnForWorkspace,
   parseResearchWorkspaceTab,
   RESEARCH_WORKSPACE_DEFAULT_TAB,
   readResearchWorkspaceLastMobileTab,
@@ -1042,15 +1045,23 @@ const ResearchWorkspaceBody: React.FC = () => {
   const [leftDrawerOpen, setLeftDrawerOpen] = React.useState(false)
   const [rightDrawerOpen, setRightDrawerOpen] = React.useState(false)
 
-  const initialRouteTabRef = React.useRef<WorkspaceTabKey | null>(
-    getResearchWorkspaceTabFromSearch(
-      typeof window === "undefined" ? "" : window.location.search
+  const initialRouteSearchRef = React.useRef(
+    getResearchWorkspaceSearchFromLocation(
+      typeof window === "undefined" ? null : window.location
     )
+  )
+  const initialRouteTabRef = React.useRef<WorkspaceTabKey | null>(
+    getResearchWorkspaceTabFromSearch(initialRouteSearchRef.current)
   )
   const initialStoredMobileTabRef = React.useRef<WorkspaceTabKey | null>(
     initialRouteTabRef.current ? null : readResearchWorkspaceLastMobileTab()
   )
   const initialRouteTabAppliedRef = React.useRef(false)
+  const initialDeepResearchReturnContextRef =
+    React.useRef(
+      getResearchWorkspaceDeepResearchReturnContext(initialRouteSearchRef.current)
+    )
+  const deepResearchReturnAppliedRef = React.useRef(false)
 
   // Mobile tab state
   const [activeTab, setActiveTab] = React.useState<WorkspaceTabKey>(
@@ -1167,7 +1178,9 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   React.useEffect(() => {
     try {
-      const params = new URLSearchParams(window.location.search)
+      const params = new URLSearchParams(
+        getResearchWorkspaceSearchFromLocation(window.location)
+      )
       const shareIdStr = params.get("shared")
       if (shareIdStr) {
         const sid = parseInt(shareIdStr, 10)
@@ -1199,6 +1212,13 @@ const ResearchWorkspaceBody: React.FC = () => {
   // Workspace store
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
   const workspaceName = useWorkspaceStore((s) => s.workspaceName) || ""
+  const activeDeepResearchReturnContext =
+    isResearchWorkspaceDeepResearchReturnForWorkspace(
+      initialDeepResearchReturnContextRef.current,
+      workspaceId
+    )
+      ? initialDeepResearchReturnContextRef.current
+      : null
   const workspaceBanner = useWorkspaceStore((s) => s.workspaceBanner) || {
     title: "",
     subtitle: "",
@@ -2199,6 +2219,14 @@ const ResearchWorkspaceBody: React.FC = () => {
     focusWorkspacePane(initialRouteTab)
   }, [focusWorkspacePane])
 
+  React.useEffect(() => {
+    if (deepResearchReturnAppliedRef.current) return
+    if (!activeDeepResearchReturnContext) return
+
+    deepResearchReturnAppliedRef.current = true
+    focusWorkspacePane("studio")
+  }, [activeDeepResearchReturnContext, focusWorkspacePane])
+
   const handleOpenSplitWorkspace = React.useCallback(() => {
     if (readyEffectiveSelectedSourceEntries.length === 0) {
       focusWorkspacePane("sources")
@@ -3104,6 +3132,47 @@ const ResearchWorkspaceBody: React.FC = () => {
       </div>
     </div>
   ) : null
+  const deepResearchReturnSourceLabel =
+    activeDeepResearchReturnContext?.sourceArtifactTitle ||
+    activeDeepResearchReturnContext?.sourceArtifactId ||
+    activeDeepResearchReturnContext?.sourceArtifactTemplate ||
+    t("playground:studio.deepResearchReturnFallbackSource", "source artifact")
+  const deepResearchReturnBanner = activeDeepResearchReturnContext ? (
+    <div
+      data-testid="workspace-deep-research-return-handoff"
+      className="mx-3 mt-2 flex flex-wrap items-center justify-between gap-2 rounded border border-primary/30 bg-primary/10 px-3 py-2.5 text-sm text-text"
+      role="status"
+      aria-live="polite"
+    >
+      <span className="min-w-0">
+        <span className="font-medium">
+          {t(
+            "playground:studio.deepResearchReturnReady",
+            "Deep Research return ready"
+          )}
+        </span>
+        <span className="mx-1 text-text-subtle">|</span>
+        <span className="text-text-muted">
+          {t("playground:studio.sourceArtifactLabel", "Source artifact")}:
+        </span>{" "}
+        <span className="font-medium">{deepResearchReturnSourceLabel}</span>
+        <span className="mx-1 text-text-subtle">|</span>
+        <span className="text-text-muted">
+          {t("playground:studio.deepResearchRunLabel", "Run")}:
+        </span>{" "}
+        <span className="font-mono text-xs">
+          {activeDeepResearchReturnContext.researchRunId}
+        </span>
+      </span>
+      <button
+        type="button"
+        className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-surface2"
+        onClick={() => focusWorkspacePane("studio")}
+      >
+        {t("playground:studio.openStudio", "Open Studio")}
+      </button>
+    </div>
+  ) : null
 
   const focusSkipTarget = (
     event: React.MouseEvent<HTMLAnchorElement>,
@@ -3332,6 +3401,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             isMobile
           />
           <SharedWorkspaceBanner />
+          {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
 
@@ -3383,6 +3453,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             isMobile={false}
           />
           <SharedWorkspaceBanner />
+          {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
 

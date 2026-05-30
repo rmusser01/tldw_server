@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY,
   getInitialResearchWorkspaceTab,
+  getResearchWorkspaceSearchFromLocation,
   getResearchWorkspaceTabFromSearch,
   parseResearchWorkspaceTab,
   readResearchWorkspaceLastMobileTab,
@@ -34,6 +35,27 @@ describe("Research Workspace route state", () => {
       "sources"
     )
     expect(getResearchWorkspaceTabFromSearch("?tab=banana&tab=studio")).toBeNull()
+  })
+
+  it("reads query params from normal and hash-router locations", () => {
+    expect(
+      getResearchWorkspaceSearchFromLocation({
+        search: "?tab=studio",
+        hash: "#/research-workspace?tab=sources"
+      })
+    ).toBe("?tab=studio")
+    expect(
+      getResearchWorkspaceSearchFromLocation({
+        search: "",
+        hash: "#/research-workspace?tab=studio&shared=123"
+      })
+    ).toBe("?tab=studio&shared=123")
+    expect(
+      getResearchWorkspaceSearchFromLocation({
+        search: "",
+        hash: "#/research-workspace"
+      })
+    ).toBe("")
   })
 
   it("falls back to Chat for missing or invalid route state", () => {
