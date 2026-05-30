@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   useDecksQuery: vi.fn(),
   decks: [{ id: 1, name: "Biology" }],
-  locationKey: "initial-location"
+  locationKey: "initial-location",
+  translationKeys: [] as string[]
 }))
 
 vi.mock("react-i18next", () => ({
@@ -20,6 +21,7 @@ vi.mock("react-i18next", () => ({
             defaultValue?: string
           }
     ) => {
+      mocks.translationKeys.push(key)
       if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
       if (defaultValueOrOptions?.defaultValue) {
         return defaultValueOrOptions.defaultValue.replace(
@@ -178,6 +180,7 @@ describe("FlashcardsManager consistency standards", () => {
     mocks.navigate.mockReset()
     mocks.decks = [{ id: 1, name: "Biology" }]
     mocks.locationKey = "initial-location"
+    mocks.translationKeys = []
     mocks.useDecksQuery.mockClear()
     mocks.useDecksQuery.mockImplementation(() => ({
       data: mocks.decks,
@@ -401,6 +404,8 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByText("Import / Export")).toBeInTheDocument()
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.getByText("Scheduler")).toBeInTheDocument()
+    expect(mocks.translationKeys).toContain("option:flashcards.importExport")
+    expect(mocks.translationKeys).not.toContain("option:flashcards.tabImportExport")
   })
 
   it("defaults empty accounts to Study and keeps import/export available without implying LLM-only import", () => {

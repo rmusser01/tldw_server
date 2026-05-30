@@ -1595,9 +1595,6 @@
   "flashcards_importExport": {
     "message": "Import / Export"
   },
-  "flashcards_tabImportExport": {
-    "message": "Import / Export"
-  },
   "flashcards_emptyConnectTitle": {
     "message": "Connect to use Flashcards"
   },

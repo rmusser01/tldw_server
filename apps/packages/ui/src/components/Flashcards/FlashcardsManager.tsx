@@ -365,7 +365,7 @@ export const FlashcardsManager: React.FC = () => {
           },
           {
             key: "importExport",
-            label: t("option:flashcards.tabImportExport", { defaultValue: "Import / Export" }),
+            label: t("option:flashcards.importExport", { defaultValue: "Import / Export" }),
             children: (
               <ImportExportTab
                 generateIntent={currentGenerateIntent}

@@ -344,6 +344,7 @@ export function useCramQueueQuery(
       ? Math.max(1, Math.trunc(options.limit))
       : MAX_QUEUE_SIZE
   const pageSize = Math.min(PAGE_SIZE, queueLimit)
+  const residueFetchBuffer = queueLimit <= 5 ? 50 : 10
 
   return useQuery({
     queryKey: [
@@ -357,7 +358,7 @@ export function useCramQueueQuery(
       const queue: Flashcard[] = []
       let offset = 0
       let fetchedCount = 0
-      const maxFetchedCount = queueLimit + 10
+      const maxFetchedCount = Math.min(MAX_QUEUE_SIZE, queueLimit + residueFetchBuffer)
 
       while (queue.length < queueLimit && fetchedCount < maxFetchedCount) {
         const remainingQueueSlots = queueLimit - queue.length

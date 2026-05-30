@@ -216,6 +216,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const hasCardsQuery = useHasCardsQuery(directPathVisibilityOptions)
   const nextDueQuery = useNextDueQuery(reviewDeckId, directPathVisibilityOptions)
   const endReviewSessionMutation = useEndFlashcardReviewSessionMutation()
+  const activeCramTagFilter = reviewMode === "cram" ? cramTagFilter : undefined
   const dueModeActiveCard = localOverrideCard ?? reviewOverrideCard ?? reviewQuery.data
   const isReviewCardLoading =
     reviewMode === "due" && (reviewQuery.isLoading || reviewQuery.isFetching)
@@ -230,7 +231,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     (dueCountsQuery.data.learning ?? 0) === 0
   const shouldLoadCramQueue =
     reviewMode === "cram" || (isActive && isDueModeCaughtUp)
-  const cramQueueQuery = useCramQueueQuery(reviewDeckId, cramTagFilter, {
+  const cramQueueQuery = useCramQueueQuery(reviewDeckId, activeCramTagFilter, {
     enabled: shouldLoadCramQueue,
     ...(reviewMode === "cram" ? {} : { limit: CRAM_AVAILABILITY_LIMIT }),
     ...(directPathVisibilityOptions ?? {})
@@ -303,9 +304,9 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     () => [
       reviewMode,
       reviewDeckId != null ? `deck:${reviewDeckId}` : "global",
-      cramTagFilter ? `tag:${cramTagFilter}` : "untagged"
+      activeCramTagFilter ? `tag:${activeCramTagFilter}` : "untagged"
     ].join(":"),
-    [cramTagFilter, reviewDeckId, reviewMode]
+    [activeCramTagFilter, reviewDeckId, reviewMode]
   )
   const activeCardSource = React.useMemo(
     () => (activeCard ? getFlashcardSourceMeta(activeCard) : null),

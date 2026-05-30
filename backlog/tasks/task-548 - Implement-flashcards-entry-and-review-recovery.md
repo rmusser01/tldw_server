@@ -4,7 +4,7 @@ title: Implement flashcards entry and review recovery
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-29 20:33'
+updated_date: '2026-05-29 23:48'
 labels:
   - ux
   - flashcards
@@ -38,6 +38,8 @@ Implemented PR 1 from the narrow flashcards UX remediation plan only. PR 2 dashb
 The branch was rebased onto latest origin/dev after implementation. The pre-existing ReviewTab.create-cta active-card snapshot mismatch was refreshed to match the current design-system Badge markup so the focused suite passes on the rebased branch.
 
 Final review follow-up: Practice again availability now uses useCramQueueQuery(..., { limit: 1 }) while due-mode is caught up, and full cram queue loading is reserved for actual cram mode. The probe continues past filtered tutorial-residue cards until it finds one reviewable card or reaches a small fetch safety cap. The extension sidepanel handoff is now covered by an app-level render test and uses sidepanel i18n keys with English resources.
+
+Post-rebase review follow-up: Rebasing onto latest origin/dev completed without conflicts. The Qodo import/export localization thread was addressed by using the existing option:flashcards.importExport key and removing the unused English-only tabImportExport key. The Qodo cram-probe false negative was addressed by giving small availability probes a larger bounded residue buffer and adding a >10 tutorial-residue regression. The CodeRabbit stale hidden cram tag concern was addressed by passing the cram tag filter only while the visible review mode is cram and adding a due-mode regression.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -50,13 +52,14 @@ Implemented:
 - Kept Re-rate last card visible after rating advances away from the answer branch and hardened its regression test against countdown timing flake.
 - Hid Practice again when no cram cards exist and changed caught-up availability to a 1-card cram probe before loading the full queue only in cram mode.
 - Addressed PR review feedback by making the 1-card availability probe continue past filtered tutorial-residue cards until it finds one reviewable card or reaches a small fetch safety cap.
+- Addressed post-rebase review feedback for the import/export localization key, small-limit cram availability probe residue buffer, and hidden cram tag leakage in due-mode availability checks.
 - Added extension route coverage for the sidepanel /flashcards handoff and localized the handoff copy.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2130
 
-Final verification after rebase/review fixes:
-- cd apps/packages/ui && bunx vitest run src/components/Flashcards passed: 74 files, 406 tests.
-- cd apps/packages/ui && bunx vitest run src/components/Flashcards/hooks/__tests__/useFlashcardQueries.cram-queue.test.tsx passed after the review-thread regression update: 1 file, 2 tests.
+Final verification after post-rebase review fixes:
+- cd apps/packages/ui && bunx vitest run src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/__tests__/FlashcardsWorkspace.connection-state.test.tsx src/components/Flashcards/hooks/__tests__/useFlashcardQueries.cram-queue.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx passed: 4 files, 54 tests.
+- cd apps/packages/ui && bunx vitest run src/components/Flashcards passed: 74 files, 408 tests.
 - cd apps/tldw-frontend && bunx vitest run __tests__/extension/sidepanel-flashcards-handoff.test.tsx passed: 1 file, 1 test.
 - cd apps/packages/ui && env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc -p tsconfig.json --noEmit passed. The same command without the heap override OOMed before diagnostics.
 - git diff --check passed.

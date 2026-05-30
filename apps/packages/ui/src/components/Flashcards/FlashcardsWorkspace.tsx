@@ -43,7 +43,7 @@ const FlashcardsStudyFrame = ({
     },
     {
       key: "importExport",
-      label: t("option:flashcards.tabImportExport", {
+      label: t("option:flashcards.importExport", {
         defaultValue: "Import / Export"
       })
     },

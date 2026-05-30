@@ -146,4 +146,47 @@ describe("useCramQueueQuery", () => {
       })
     )
   })
+
+  it("continues a single-card availability probe past more than ten filtered tutorial residue cards", async () => {
+    for (let index = 0; index < 11; index += 1) {
+      vi.mocked(listFlashcards).mockResolvedValueOnce({
+        items: [
+          {
+            ...buildFlashcard(`tutorial-residue-${index}`),
+            front: "Tips for effective flashcard use"
+          }
+        ],
+        count: 1,
+        total: 500
+      })
+    }
+    vi.mocked(listFlashcards).mockResolvedValueOnce({
+      items: [buildFlashcard("card-after-residue")],
+      count: 1,
+      total: 500
+    })
+
+    const { result } = renderHook(() => useCramQueueQuery(42, null, { limit: 1 }), {
+      wrapper: buildWrapper()
+    })
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true)
+    })
+
+    expect(result.current.data).toEqual([
+      expect.objectContaining({ uuid: "card-after-residue" })
+    ])
+    expect(listFlashcards).toHaveBeenCalledTimes(12)
+    expect(listFlashcards).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        deck_id: 42,
+        due_status: "all",
+        include_workspace_items: false,
+        limit: 1,
+        offset: 11,
+        order_by: "due_at"
+      })
+    )
+  })
 })
