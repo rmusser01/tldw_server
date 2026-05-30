@@ -470,6 +470,140 @@ describe("StudioPane literature work products", () => {
     expect(query?.length).toBeLessThanOrEqual(2600)
   })
 
+  it("seeds Deep Research follow-up context from evidence-bound hypotheses", () => {
+    const href = buildLiteratureDeepResearchLaunchPath({
+      id: "artifact-hypotheses",
+      type: "report",
+      title: "Evidence-Bound Hypotheses",
+      status: "completed",
+      templateId: "evidence_bound_hypotheses",
+      content: "## Evidence-Bound Hypotheses\n\n### Hypothesis 1\n\nPeer coaching improves retention.",
+      data: {
+        hypotheses: [
+          {
+            hypothesis: "Peer coaching improves retention for adult learners.",
+            supportingFindings: [
+              "Paper A reports higher weekly practice completion.",
+              "Paper B identifies social accountability as a retention factor."
+            ],
+            supportingSources: ["Paper A", "Paper B"],
+            prediction: "Cohorts with peer coaching retain more learners after 8 weeks.",
+            suggestedMethodology: "Matched cohort study",
+            threatsToValidity: ["Self-selection into coaching groups"],
+            whatWouldFalsifyIt: "No retention difference after controlling for prior motivation.",
+            confidence: "medium"
+          }
+        ]
+      },
+      sourceCoverage: {
+        selectedSourceIds: ["source-1", "source-2", "source-3"],
+        usableSources: [
+          { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+          { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+        ],
+        skippedSources: [
+          {
+            sourceId: "source-3",
+            mediaId: 303,
+            title: "Paper C",
+            reason: "missing_text"
+          }
+        ],
+        truncatedSources: [],
+        minimumUsableSourcesMet: true
+      },
+      createdAt: new Date("2026-02-18T00:00:00.000Z")
+    })
+
+    expect(href).not.toBeNull()
+    const parsed = new URL(href!, "https://example.local")
+    const followUp = JSON.parse(parsed.searchParams.get("follow_up") || "{}")
+
+    expect(parsed.pathname).toBe("/research")
+    expect(parsed.searchParams.get("from")).toBe("research-workspace")
+    expect(parsed.searchParams.get("query")).toContain("Peer coaching")
+    expect(followUp.question).toContain("Peer coaching improves retention")
+    expect(followUp.background.outline).toEqual([
+      {
+        title: "Hypothesis 1",
+        focus_area: "hypothesis_1"
+      }
+    ])
+    expect(followUp.background.key_claims[0].text).toContain(
+      "Paper A reports higher weekly practice completion."
+    )
+    expect(followUp.background.key_claims[1].text).toContain(
+      "usable sources: Paper A, Paper B"
+    )
+    expect(followUp.background.key_claims[1].text).toContain(
+      "skipped sources: Paper C (missing_text)"
+    )
+    expect(followUp.background.unresolved_questions).toContain(
+      "Which parts of the hypothesis are evidence-supported versus proposed work?"
+    )
+  })
+
+  it("seeds Deep Research follow-up context from proposal packs", () => {
+    const href = buildLiteratureDeepResearchLaunchPath({
+      id: "artifact-proposal",
+      type: "report",
+      title: "Research Proposal Pack",
+      status: "completed",
+      templateId: "research_proposal_pack",
+      content: [
+        "## Source Audit",
+        "All cited claims are derived from Paper A and Paper B.",
+        "",
+        "## Literature Overview",
+        "Peer coaching appears related to adult learner retention.",
+        "",
+        "## Proposed Hypothesis",
+        "Peer coaching will improve eight-week retention.",
+        "",
+        "## Methodology",
+        "Run a matched cohort study with retention tracking."
+      ].join("\n"),
+      sourceCoverage: {
+        selectedSourceIds: ["source-1", "source-2"],
+        usableSources: [
+          { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+          { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+        ],
+        skippedSources: [],
+        truncatedSources: [{ sourceId: "source-2", mediaId: 202, title: "Paper B" }],
+        minimumUsableSourcesMet: true
+      },
+      createdAt: new Date("2026-02-18T00:00:00.000Z")
+    })
+
+    expect(href).not.toBeNull()
+    const parsed = new URL(href!, "https://example.local")
+    const followUp = JSON.parse(parsed.searchParams.get("follow_up") || "{}")
+
+    expect(parsed.searchParams.get("query")).toContain(
+      "Verify and expand this Research Workspace proposal"
+    )
+    expect(followUp.background.outline).toEqual([
+      {
+        title: "Literature evidence",
+        focus_area: "evidence_supported_claims"
+      },
+      {
+        title: "Proposed work",
+        focus_area: "proposed_work"
+      }
+    ])
+    expect(followUp.background.key_claims[0].text).toContain(
+      "Evidence-supported proposal excerpt"
+    )
+    expect(followUp.background.key_claims[1].text).toContain(
+      "Proposed-work excerpt"
+    )
+    expect(followUp.background.key_claims[2].text).toContain(
+      "truncated sources: Paper B"
+    )
+  })
+
   it("requires completed matrix or gap artifacts with source coverage for Deep Research launch", () => {
     expect(
       isDeepResearchLaunchableLiteratureArtifact({

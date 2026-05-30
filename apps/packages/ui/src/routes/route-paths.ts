@@ -66,6 +66,7 @@ type BuildResearchLaunchPathOptions = {
   run?: string | null
   chatId?: string | null
   launchMessageId?: string | null
+  followUp?: Record<string, unknown> | null
 }
 
 type BuildChatThreadPathOptions = {
@@ -85,6 +86,20 @@ const setTrimmedSearchParam = (
   const trimmed = value?.trim()
   if (trimmed) {
     params.set(key, trimmed)
+  }
+}
+
+const setJsonSearchParam = (
+  params: URLSearchParams,
+  key: string,
+  value: Record<string, unknown> | null | undefined
+) => {
+  if (!value) {
+    return
+  }
+  const serialized = JSON.stringify(value)
+  if (serialized !== "{}") {
+    params.set(key, serialized)
   }
 }
 
@@ -110,6 +125,7 @@ export const buildResearchLaunchPath = (
   setTrimmedSearchParam(params, "run", options.run)
   setTrimmedSearchParam(params, "chat_id", options.chatId)
   setTrimmedSearchParam(params, "launch_message_id", options.launchMessageId)
+  setJsonSearchParam(params, "follow_up", options.followUp)
   if (options.autorun) {
     params.set("autorun", "1")
   }

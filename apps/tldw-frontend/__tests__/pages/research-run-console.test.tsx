@@ -373,6 +373,58 @@ describe('ResearchRunsPage', () => {
     expect(mocks.createResearchRun).not.toHaveBeenCalled();
   });
 
+  it('carries launch follow-up context into manual run creation', async () => {
+    const user = userEvent.setup();
+    const followUp = {
+      question: 'Verify the peer coaching retention hypothesis.',
+      background: {
+        question: 'Verify the peer coaching retention hypothesis.',
+        outline: [{ title: 'Hypothesis 1', focus_area: 'hypothesis_1' }],
+        key_claims: [
+          {
+            claim_id: 'artifact-hypotheses:finding-1',
+            text: 'Evidence-supported finding: Paper A reports higher completion.'
+          }
+        ],
+        unresolved_questions: [
+          'Which parts of the hypothesis are evidence-supported versus proposed work?'
+        ],
+        verification_summary: {
+          supported_claim_count: 1,
+          unsupported_claim_count: 1
+        },
+        source_trust_summary: {
+          high_trust_count: 2,
+          low_trust_count: 1
+        }
+      }
+    };
+    const params = new URLSearchParams({
+      query: 'Verify the peer coaching retention hypothesis.',
+      source_policy: 'local_first',
+      autonomy_mode: 'checkpointed',
+      follow_up: JSON.stringify(followUp),
+      from: 'research-workspace'
+    });
+    window.history.replaceState({}, '', `/research?${params.toString()}`);
+
+    renderWithProviders(<ResearchRunsPage />);
+
+    expect(
+      await screen.findByDisplayValue('Verify the peer coaching retention hypothesis.')
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Start run' }));
+
+    await waitFor(() => {
+      expect(mocks.createResearchRun).toHaveBeenCalledWith({
+        query: 'Verify the peer coaching retention hypothesis.',
+        source_policy: 'local_first',
+        autonomy_mode: 'checkpointed',
+        follow_up: followUp,
+      });
+    });
+  });
+
   it('auto-creates a run from launch params when autorun is enabled', async () => {
     mocks.createResearchRun.mockResolvedValue(
       makeRun({
