@@ -2291,7 +2291,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                 const StatusConfig = STATUS_ICONS[artifact.status]
                 const StatusIcon = StatusConfig.icon
                 const deepResearchLaunchHref =
-                  buildLiteratureDeepResearchLaunchPath(artifact)
+                  buildLiteratureDeepResearchLaunchPath(artifact, {
+                    workspaceId
+                  })
                 const failedStatusDeleteLabel = t(
                   "playground:studio.deleteFailedOutput",
                   "Delete failed output"

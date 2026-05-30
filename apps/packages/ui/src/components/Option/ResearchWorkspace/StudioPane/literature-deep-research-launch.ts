@@ -49,6 +49,10 @@ type ResearchFollowUpSeed = {
   }
 }
 
+type LiteratureDeepResearchLaunchOptions = {
+  workspaceId?: string | null
+}
+
 const truncateForLaunch = (value: string, limit: number): string => {
   const trimmed = value.trim()
   if (limit <= 0) {
@@ -430,7 +434,8 @@ export const buildLiteratureDeepResearchLaunchQuery = (
 }
 
 export const buildLiteratureDeepResearchLaunchPath = (
-  artifact: GeneratedArtifact
+  artifact: GeneratedArtifact,
+  options: LiteratureDeepResearchLaunchOptions = {}
 ): string | null => {
   const query = buildLiteratureDeepResearchLaunchQuery(artifact)
   if (!query) {
@@ -446,6 +451,10 @@ export const buildLiteratureDeepResearchLaunchPath = (
     sourcePolicy: "local_first",
     autonomyMode: "checkpointed",
     from: "research-workspace",
+    sourceWorkspaceId: options.workspaceId,
+    sourceArtifactId: artifact.id,
+    sourceArtifactTemplate: artifact.templateId,
+    sourceArtifactTitle: artifact.title,
     followUp: buildLiteratureDeepResearchFollowUp(artifact, sourceCoverage)
   })
 }

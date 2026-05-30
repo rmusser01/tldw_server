@@ -1,7 +1,10 @@
 import React, { useEffect, useReducer, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { buildChatThreadPath } from '@/routes/route-paths';
+import {
+  buildChatThreadPath,
+  buildResearchWorkspaceReturnPath,
+} from '@/routes/route-paths';
 import { useToast } from '@web/components/ui/ToastProvider';
 import {
   approveResearchCheckpoint,
@@ -42,15 +45,22 @@ const TRUST_ARTIFACT_NAMES = [
 
 const TRUST_READY_PHASES = new Set(['awaiting_outline_review', 'packaging', 'completed']);
 const TRUST_INVALIDATION_PHASES = new Set(['collecting', 'synthesizing']);
+const MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH = 128;
+const MAX_RESEARCH_SOURCE_TITLE_SEARCH_PARAM_LENGTH = 240;
 
 type ResearchLaunchParams = {
   query: string | null;
   sourcePolicy: string | null;
   autonomyMode: string | null;
   autorun: boolean;
+  from: string | null;
   runId: string | null;
   chatId: string | null;
   launchMessageId: string | null;
+  sourceWorkspaceId: string | null;
+  sourceArtifactId: string | null;
+  sourceArtifactTemplate: string | null;
+  sourceArtifactTitle: string | null;
   followUp: ResearchRunCreateRequest['follow_up'] | null;
 };
 
@@ -395,32 +405,69 @@ function deriveTrustView(
   };
 }
 
+function parseBoundedLaunchSearchParam(
+  params: URLSearchParams,
+  key: string,
+  maxLength: number
+): string | null {
+  const trimmed = params.get(key)?.trim();
+  return trimmed ? trimmed.slice(0, maxLength).trim() || null : null;
+}
+
 function parseResearchLaunchParams(search: string): ResearchLaunchParams {
   const params = new URLSearchParams(search);
   const query = params.get('query')?.trim() || null;
   const sourcePolicy = params.get('source_policy')?.trim() || null;
   const autonomyMode = params.get('autonomy_mode')?.trim() || null;
+  const from = params.get('from')?.trim() || null;
   const runId = params.get('run')?.trim() || null;
   const chatId = params.get('chat_id')?.trim() || null;
   const launchMessageId = params.get('launch_message_id')?.trim() || null;
+  const sourceWorkspaceId = parseBoundedLaunchSearchParam(
+    params,
+    'source_workspace_id',
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  );
+  const sourceArtifactId = parseBoundedLaunchSearchParam(
+    params,
+    'source_artifact_id',
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  );
+  const sourceArtifactTemplate = parseBoundedLaunchSearchParam(
+    params,
+    'source_artifact_template',
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  );
+  const sourceArtifactTitle = parseBoundedLaunchSearchParam(
+    params,
+    'source_artifact_title',
+    MAX_RESEARCH_SOURCE_TITLE_SEARCH_PARAM_LENGTH
+  );
   const followUp = parseResearchLaunchFollowUp(params.get('follow_up'));
   return {
     query,
     sourcePolicy,
     autonomyMode,
     autorun: params.get('autorun') === '1',
+    from,
     runId,
     chatId,
     launchMessageId,
+    sourceWorkspaceId,
+    sourceArtifactId,
+    sourceArtifactTemplate,
+    sourceArtifactTitle,
     followUp,
   };
 }
 
-function replaceResearchLaunchUrl(runId: string | null) {
+function replaceResearchLaunchUrl(runId: string | null, launchParams: ResearchLaunchParams | null) {
   if (typeof window === 'undefined') {
     return;
   }
   const nextUrl = new URL(window.location.href);
+  const sourceWorkspaceId =
+    launchParams?.from === 'research-workspace' ? launchParams.sourceWorkspaceId : null;
   nextUrl.searchParams.delete('query');
   nextUrl.searchParams.delete('source_policy');
   nextUrl.searchParams.delete('autonomy_mode');
@@ -429,6 +476,23 @@ function replaceResearchLaunchUrl(runId: string | null) {
   nextUrl.searchParams.delete('chat_id');
   nextUrl.searchParams.delete('launch_message_id');
   nextUrl.searchParams.delete('follow_up');
+  nextUrl.searchParams.delete('source_workspace_id');
+  nextUrl.searchParams.delete('source_artifact_id');
+  nextUrl.searchParams.delete('source_artifact_template');
+  nextUrl.searchParams.delete('source_artifact_title');
+  if (sourceWorkspaceId) {
+    nextUrl.searchParams.set('from', 'research-workspace');
+    nextUrl.searchParams.set('source_workspace_id', sourceWorkspaceId);
+    if (launchParams?.sourceArtifactId) {
+      nextUrl.searchParams.set('source_artifact_id', launchParams.sourceArtifactId);
+    }
+    if (launchParams?.sourceArtifactTemplate) {
+      nextUrl.searchParams.set('source_artifact_template', launchParams.sourceArtifactTemplate);
+    }
+    if (launchParams?.sourceArtifactTitle) {
+      nextUrl.searchParams.set('source_artifact_title', launchParams.sourceArtifactTitle);
+    }
+  }
   if (runId) {
     nextUrl.searchParams.set('run', runId);
   } else {
@@ -998,7 +1062,7 @@ export default function ResearchRunsPage() {
         setSelectedRunId(createdRun.id);
         dispatch({ type: 'replace-run', run: createdRun });
         setQuestion('');
-        replaceResearchLaunchUrl(createdRun.id);
+        replaceResearchLaunchUrl(createdRun.id, launchParams);
         setLaunchParams((current) =>
           current
             ? {
@@ -1076,6 +1140,26 @@ export default function ResearchRunsPage() {
         researchReturnRunId: selectedRun.id,
       })
     : null;
+  const hasResearchWorkspaceReturnContext =
+    launchParams?.from === 'research-workspace' && Boolean(launchParams.sourceWorkspaceId);
+  const researchWorkspaceReturnRunId = selectedRun?.id ?? launchParams?.runId ?? null;
+  const researchWorkspaceReturnHref =
+    hasResearchWorkspaceReturnContext
+      ? buildResearchWorkspaceReturnPath({
+          sourceWorkspaceId: launchParams?.sourceWorkspaceId,
+          sourceArtifactId: launchParams?.sourceArtifactId,
+          sourceArtifactTemplate: launchParams?.sourceArtifactTemplate,
+          sourceArtifactTitle: launchParams?.sourceArtifactTitle,
+          researchRunId: researchWorkspaceReturnRunId,
+        })
+      : null;
+  const researchWorkspaceSourceLabel =
+    hasResearchWorkspaceReturnContext
+      ? launchParams?.sourceArtifactTitle ||
+        launchParams?.sourceArtifactTemplate ||
+        launchParams?.sourceArtifactId ||
+        null
+      : null;
   const trustView = deriveTrustView(state.bundle, state.artifactContents);
   const loadedTrustArtifactNames = TRUST_ARTIFACT_NAMES.filter(
     (artifactName) => state.artifactContents[artifactName] !== undefined
@@ -1129,7 +1213,7 @@ export default function ResearchRunsPage() {
       setSelectedRunId(createdRun.id);
       dispatch({ type: 'replace-run', run: createdRun });
       setQuestion('');
-      replaceResearchLaunchUrl(createdRun.id);
+      replaceResearchLaunchUrl(createdRun.id, launchParams);
       setLaunchParams((current) =>
         current
           ? {
@@ -1480,6 +1564,11 @@ export default function ResearchRunsPage() {
                   {selectedRun.status} · {selectedRun.phase} · {selectedRun.control_state}
                 </p>
               )}
+              {researchWorkspaceSourceLabel && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Source artifact: {researchWorkspaceSourceLabel}
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               {backToChatHref && (
@@ -1488,6 +1577,14 @@ export default function ResearchRunsPage() {
                   href={backToChatHref}
                 >
                   Back to Chat
+                </a>
+              )}
+              {researchWorkspaceReturnHref && (
+                <a
+                  className="rounded-full border border-border px-3 py-2 text-sm hover:bg-muted"
+                  href={researchWorkspaceReturnHref}
+                >
+                  Back to Research Workspace
                 </a>
               )}
               <button

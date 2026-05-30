@@ -360,6 +360,51 @@ describe('ResearchRunsPage', () => {
     expect(screen.queryByRole('link', { name: 'Back to Chat' })).not.toBeInTheDocument();
   });
 
+  it('preserves Research Workspace source context after manual run creation', async () => {
+    const user = userEvent.setup();
+    const params = new URLSearchParams({
+      query: 'Verify matrix gaps',
+      source_policy: 'local_first',
+      autonomy_mode: 'checkpointed',
+      from: 'research-workspace',
+      source_workspace_id: 'workspace-literature',
+      source_artifact_id: 'artifact-gap',
+      source_artifact_template: 'corpus_gap_finder',
+      source_artifact_title: 'Corpus Gap Finder',
+    });
+    window.history.replaceState({}, '', `/research?${params.toString()}`);
+
+    renderWithProviders(<ResearchRunsPage />);
+
+    expect(await screen.findByDisplayValue('Verify matrix gaps')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Start run' }));
+
+    await waitFor(() => {
+      expect(mocks.createResearchRun).toHaveBeenCalledWith({
+        query: 'Verify matrix gaps',
+        source_policy: 'local_first',
+        autonomy_mode: 'checkpointed',
+      });
+    });
+    await waitFor(() => {
+      expect(window.location.search).toContain('run=rs_new');
+      expect(window.location.search).toContain('from=research-workspace');
+      expect(window.location.search).toContain('source_workspace_id=workspace-literature');
+      expect(window.location.search).toContain('source_artifact_id=artifact-gap');
+      expect(window.location.search).toContain('source_artifact_template=corpus_gap_finder');
+      expect(window.location.search).not.toContain('query=');
+    });
+
+    const returnLink = await screen.findByRole('link', {
+      name: 'Back to Research Workspace',
+    });
+    expect(returnLink).toHaveAttribute(
+      'href',
+      '/research-workspace?source_workspace_id=workspace-literature&source_artifact_id=artifact-gap&source_artifact_template=corpus_gap_finder&source_artifact_title=Corpus+Gap+Finder&research_run_id=rs_new'
+    );
+    expect(screen.getByText('Source artifact: Corpus Gap Finder')).toBeInTheDocument();
+  });
+
   it('prefills the research question from launch query params', async () => {
     window.history.replaceState(
       {},

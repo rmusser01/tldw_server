@@ -445,6 +445,46 @@ describe("StudioPane literature work products", () => {
     expect(query.length).toBeLessThanOrEqual(2600)
   })
 
+  it("adds Research Workspace origin metadata to Deep Research launch paths", () => {
+    const href = buildLiteratureDeepResearchLaunchPath(
+      {
+        id: "artifact-gap",
+        type: "data_table",
+        title: "Corpus Gap Finder",
+        status: "completed",
+        templateId: "corpus_gap_finder",
+        content: "| Gap | Evidence Basis |\n| --- | --- |\n| Rural settings | Paper A; Paper B |",
+        sourceCoverage: {
+          selectedSourceIds: ["source-1", "source-2"],
+          usableSources: [
+            { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+            { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+          ],
+          skippedSources: [],
+          truncatedSources: [],
+          minimumUsableSourcesMet: true
+        },
+        createdAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      { workspaceId: "workspace-literature" }
+    )
+
+    expect(href).not.toBeNull()
+    const parsed = new URL(href!, "https://example.local")
+
+    expect(parsed.searchParams.get("from")).toBe("research-workspace")
+    expect(parsed.searchParams.get("source_workspace_id")).toBe(
+      "workspace-literature"
+    )
+    expect(parsed.searchParams.get("source_artifact_id")).toBe("artifact-gap")
+    expect(parsed.searchParams.get("source_artifact_template")).toBe(
+      "corpus_gap_finder"
+    )
+    expect(parsed.searchParams.get("source_artifact_title")).toBe(
+      "Corpus Gap Finder"
+    )
+  })
+
   it("strictly caps truncated Deep Research launch queries", () => {
     const query = buildLiteratureDeepResearchLaunchQuery({
       id: "artifact-long-query",
@@ -1736,7 +1776,18 @@ Proposal
       within(
         screen.getByTestId("studio-artifact-secondary-actions-artifact-matrix")
       ).getByRole("link", { name: /launch deep research/i })
-    ).toHaveAttribute("href", expect.stringContaining("/research?"))
+    ).toHaveAttribute(
+      "href",
+      expect.stringContaining("source_workspace_id=workspace-literature")
+    )
+    expect(
+      within(
+        screen.getByTestId("studio-artifact-secondary-actions-artifact-matrix")
+      ).getByRole("link", { name: /launch deep research/i })
+    ).toHaveAttribute(
+      "href",
+      expect.stringContaining("source_artifact_id=artifact-matrix")
+    )
     expect(links[0]).toHaveAttribute("target", "_blank")
     expect(links[0]).toHaveAttribute("rel", "noopener noreferrer")
     expect(
