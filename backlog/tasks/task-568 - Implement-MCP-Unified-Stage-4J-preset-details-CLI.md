@@ -66,3 +66,19 @@ Implemented the Stage 4J standalone gateway CLI preset detail slice and PR revie
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Review follow-up:
+- Verified CodeRabbit's touched-scope docstring coverage warning against current code and added a docstring for the nested CLI loader failure helper.
+
+Verification:
+- source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py -q (8 passed)
+- local AST docstring scan for new/changed Python functions in this PR (clean)
+- git diff --check (passed)
+Review follow-up:
+- Added a docstring to the new preset timestamp stability test so all newly added Python functions in this PR have docstrings.
+Review follow-up:
+- Rebased again onto origin/dev at b3f0465bc14f8d02532dc61153e78c5619ebdbaf after dev advanced.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -116,6 +116,8 @@ def test_get_builtin_preset_returns_stable_profile_template() -> None:
 
 
 def test_builtin_preset_template_timestamps_are_version_stable() -> None:
+    """Keep built-in preset provenance timestamps tied to the release date."""
+
     bundled = presets.list_builtin_presets()
 
     assert presets.PRESET_RELEASE_DATE.strftime("%Y.%m.%d") == presets.PRESET_VERSION

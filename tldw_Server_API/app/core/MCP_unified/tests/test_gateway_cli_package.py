@@ -80,6 +80,8 @@ def test_gateway_cli_validate_config_reports_unexpected_loader_errors_as_json(
     config_path.write_text("{}", encoding="utf-8")
 
     def _raise_runtime_error(*args: object, **kwargs: object) -> object:
+        """Simulate an unexpected loader failure from the config boundary."""
+
         raise RuntimeError("loader failed")
 
     monkeypatch.setattr(
