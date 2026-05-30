@@ -350,6 +350,7 @@ export const Playground = () => {
     createChatBranch,
     streaming,
     isProcessing,
+    isSearchingInternet,
     selectedCharacter,
     setSelectedCharacter,
     compareMode,
@@ -2964,6 +2965,7 @@ export const Playground = () => {
       contextSummary={statusContextSummary}
       temporaryChat={temporaryChat}
       characterChatActive={characterWorkflowActive}
+      webSearchInProgress={isSearchingInternet}
       degraded={serverReadinessState === "degraded"}
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
