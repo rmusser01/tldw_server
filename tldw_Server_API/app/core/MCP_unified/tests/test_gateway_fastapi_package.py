@@ -150,6 +150,47 @@ class _CustomExplodingGatewayRuntime(_FakeGatewayRuntime):
         raise self.RuntimeBackendError("backend unavailable")
 
 
+class _MultiToolGatewayRuntime(_FakeGatewayRuntime):
+    """Fake runtime that advertises multiple tools for profile filtering tests."""
+
+    async def list_tools(self, context: Any) -> list[dict[str, Any]]:
+        """Return tools with distinct capabilities so profiles can filter them."""
+
+        self.list_contexts.append(context)
+        return [
+            {
+                "name": "echo.search",
+                "description": "Echo a query.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+                "metadata": {"category": "test", "capability": "code_search"},
+            },
+            {
+                "name": "admin.delete",
+                "description": "Delete an admin resource.",
+                "inputSchema": {"type": "object", "properties": {}},
+                "metadata": {"category": "test", "capability": "admin.delete"},
+            },
+        ]
+
+
+class _CustomToolListGatewayRuntime(_FakeGatewayRuntime):
+    """Fake runtime that returns caller-supplied tool discovery payloads."""
+
+    def __init__(self, tools: Any) -> None:
+        super().__init__()
+        self._tools = tools
+
+    async def list_tools(self, context: Any) -> Any:
+        """Return the configured discovery payload without normalizing it."""
+
+        self.list_contexts.append(context)
+        return self._tools
+
+
 class _FakeLogger:
     def __init__(self) -> None:
         self.opt_calls: list[dict[str, Any]] = []
@@ -173,6 +214,30 @@ def _assert_jsonrpc_error(
     assert body["id"] == request_id
     assert body["error"]["code"] == code
     assert "message" in body["error"]
+
+
+def _profile_with_allowed_tools(profile_id: str, allowed_tools: list[str]) -> Any:
+    """Build a profile that allows only the supplied explicit tool names."""
+
+    from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
+
+    return MCPProfile(
+        id=profile_id,
+        name=f"Profile {profile_id}",
+        policy_document=ProfilePolicy(allowed_tools=allowed_tools),
+    )
+
+
+def _profile_with_capabilities(profile_id: str, capabilities: list[str]) -> Any:
+    """Build a profile that allows tools by advertised capability metadata."""
+
+    from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
+
+    return MCPProfile(
+        id=profile_id,
+        name=f"Profile {profile_id}",
+        policy_document=ProfilePolicy(capabilities=capabilities),
+    )
 
 
 def test_gateway_package_does_not_import_tldw_server_api() -> None:
@@ -204,6 +269,257 @@ def test_gateway_stdio_submodule_import_does_not_eagerly_import_fastapi_transpor
     )
 
     assert result.stdout.strip() == "False"
+
+
+def test_gateway_profile_runtime_requires_profile_for_tool_execution() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _MultiToolGatewayRuntime()
+    runtime = ProfileAwareGatewayRuntime(backend, profile_store=InMemoryProfileStore())
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        listed = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-profile"},
+        )
+        called = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "echo.search", "arguments": {"query": "hello"}},
+                "id": "call-profile",
+            },
+        )
+
+    assert listed.status_code == 200
+    assert listed.json()["result"]["tools"] == []
+    assert called.status_code == 200
+    body = called.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="call-profile")
+    assert body["error"]["data"]["reason_code"] == "profile_required"
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_filters_and_allows_default_profile_tools() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _MultiToolGatewayRuntime()
+    profile = _profile_with_allowed_tools("reviewer", ["echo.search"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="reviewer",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        listed = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-default"},
+        )
+        allowed = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "echo.search", "arguments": {"query": "hello"}},
+                "id": "call-allowed",
+            },
+        )
+        denied = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "admin.delete", "arguments": {}},
+                "id": "call-denied",
+            },
+        )
+
+    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+    assert allowed.json()["result"]["content"][0]["text"] == "echo.search:hello"
+    assert backend.call_requests[-1][0] == "echo.search"
+    denied_body = denied.json()
+    _assert_jsonrpc_error(denied_body, code=-32001, request_id="call-denied")
+    assert denied_body["error"]["data"]["reason_code"] == "tool_not_allowed"
+    assert all(call[0] != "admin.delete" for call in backend.call_requests)
+
+
+def test_gateway_profile_runtime_denies_explicit_tool_before_backend_discovery() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomExplodingGatewayRuntime()
+    profile = _profile_with_allowed_tools("reviewer", ["echo.search"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="reviewer",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "admin.delete", "arguments": {}},
+                "id": "call-denied-without-discovery",
+            },
+        )
+
+    denied_body = denied.json()
+    _assert_jsonrpc_error(
+        denied_body,
+        code=-32001,
+        request_id="call-denied-without-discovery",
+    )
+    assert denied_body["error"]["data"]["reason_code"] == "tool_not_allowed"
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_fails_closed_when_capability_discovery_fails() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomExplodingGatewayRuntime()
+    profile = _profile_with_capabilities("researcher", ["code_search"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="researcher",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = client.post(
+            "/mcp/request",
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "echo.search", "arguments": {"query": "hello"}},
+                "id": "capability-discovery-failed",
+            },
+        )
+
+    denied_body = denied.json()
+    _assert_jsonrpc_error(
+        denied_body,
+        code=-32001,
+        request_id="capability-discovery-failed",
+    )
+    assert denied_body["error"]["data"]["reason_code"] == "tool_metadata_unavailable"
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_ignores_invalid_backend_tool_descriptors() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime(
+        [
+            None,
+            "not-a-tool",
+            {"name": "  "},
+            {"name": "echo.search", "metadata": {"capability": "code_search"}},
+        ]
+    )
+    profile = _profile_with_capabilities("researcher", ["code_search"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="researcher",
+    )
+
+    tools = asyncio.run(runtime.list_tools(GatewayRequestContext(request_id="invalid-tools")))
+
+    assert [tool["name"] for tool in tools] == ["echo.search"]
+
+
+def test_gateway_profile_runtime_treats_non_list_backend_tools_as_empty() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime(None)
+    profile = _profile_with_allowed_tools("reviewer", ["echo.search"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="reviewer",
+    )
+
+    assert asyncio.run(runtime.list_tools(GatewayRequestContext(request_id="non-list-tools"))) == []
+
+
+def test_gateway_transport_profile_selector_handles_missing_request_attributes() -> None:
+    class _BareRequest:
+        """Request double without FastAPI transport attributes."""
+
+    assert gateway_fastapi._profile_id_from_transport(_BareRequest()) is None
+
+
+def test_gateway_profile_runtime_selects_profile_from_http_header() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _MultiToolGatewayRuntime()
+    profile = _profile_with_allowed_tools("reviewer", ["echo.search"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            headers={"X-MCP-Profile": "reviewer"},
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "echo.search", "arguments": {"query": "header"}},
+                "id": "call-header-profile",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["result"]["content"][0]["text"] == "echo.search:header"
+    assert backend.call_requests[-1][2].metadata["profile_id"] == "reviewer"
+
+
+def test_gateway_profile_runtime_selects_profile_from_websocket_query() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _MultiToolGatewayRuntime()
+    profile = _profile_with_allowed_tools("reviewer", ["echo.search"])
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/mcp/ws?profile_id=reviewer") as websocket:
+            websocket.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {"name": "echo.search", "arguments": {"query": "ws"}},
+                    "id": "call-ws-profile",
+                }
+            )
+            body = websocket.receive_json()
+
+    assert body["result"]["content"][0]["text"] == "echo.search:ws"
+    assert backend.call_requests[-1][2].metadata["profile_id"] == "reviewer"
 
 
 def test_gateway_fastapi_app_handles_basic_jsonrpc_flow() -> None:

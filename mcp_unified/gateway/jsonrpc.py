@@ -35,7 +35,7 @@ try:
 except ImportError:  # pragma: no cover - defensive fallback for future pydantic changes
     _pydantic_encoder = None
 
-from .runtime import GatewayRequestContext, GatewayRuntime
+from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 
 PROTOCOL_VERSION = "2024-11-05"
 JSONRPC_VERSION = "2.0"
@@ -45,6 +45,7 @@ INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
+POLICY_DENIED = -32001
 _GATEWAY_RUNTIME_ERRORS = Exception
 _JSON_PARSE_ERRORS = (json.JSONDecodeError, UnicodeDecodeError)
 _RESERVED_CONTEXT_METADATA_KEYS = frozenset({"client_host", "method", "path"})
@@ -336,6 +337,8 @@ async def handle_single_jsonrpc(
             client_host=client_host,
             metadata=metadata,
         )
+    except GatewayPolicyDenied as exc:
+        error = jsonrpc_error(POLICY_DENIED, str(exc), request_id, data=exc.to_error_data())
     except ValueError as exc:
         error = jsonrpc_error(INVALID_PARAMS, str(exc), request_id)
     except NotImplementedError:
@@ -408,6 +411,7 @@ def parse_json_payload(payload: str | bytes) -> Any | GatewayJSONRPCErrorRespons
 __all__ = [
     "GATEWAY_RESPONSE_TYPES",
     "INVALID_REQUEST",
+    "POLICY_DENIED",
     "GatewayJSONRPCError",
     "GatewayJSONRPCErrorResponse",
     "GatewayJSONRPCRequest",

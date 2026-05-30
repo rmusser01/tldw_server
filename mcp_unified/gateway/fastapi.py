@@ -35,6 +35,9 @@ from .jsonrpc import (
 )
 from .runtime import GatewayRuntime
 
+_PROFILE_HEADER_NAMES = ("x-mcp-profile", "x-mcp-profile-id")
+_PROFILE_QUERY_NAMES = ("profile_id", "profileId")
+
 
 async def _parse_json_body(request: Request) -> Any:
     """Parse raw JSON so malformed bodies return JSON-RPC parse errors."""
@@ -48,6 +51,35 @@ def _client_host(request: Request | WebSocket) -> str | None:
     if request.client is None:
         return None
     return request.client.host
+
+
+def _request_metadata(request: Request | WebSocket) -> dict[str, Any]:
+    """Build host-neutral metadata from lightweight transport selectors."""
+
+    metadata: dict[str, Any] = {}
+    profile_id = _profile_id_from_transport(request)
+    if profile_id is not None:
+        metadata["profile_id"] = profile_id
+    return metadata
+
+
+def _profile_id_from_transport(request: Request | WebSocket) -> str | None:
+    """Return an optional profile id selected by header or query parameter."""
+
+    headers = getattr(request, "headers", None)
+    if headers is not None:
+        for header_name in _PROFILE_HEADER_NAMES:
+            value = headers.get(header_name)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+    query_params = getattr(request, "query_params", None)
+    if query_params is not None:
+        for query_name in _PROFILE_QUERY_NAMES:
+            value = query_params.get(query_name)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
 
 
 async def _send_websocket_response(
@@ -120,6 +152,7 @@ def create_gateway_router(runtime: GatewayRuntime) -> APIRouter:
             payload,
             path=str(request.url.path),
             client_host=_client_host(request),
+            metadata=_request_metadata(request),
         )
         return _to_http_response(response)
 
@@ -145,6 +178,7 @@ def create_gateway_router(runtime: GatewayRuntime) -> APIRouter:
                     payload,
                     path=str(websocket.url.path),
                     client_host=_client_host(websocket),
+                    metadata=_request_metadata(websocket),
                 )
                 await _send_websocket_response(websocket, response)
         except (WebSocketDisconnect, RuntimeError):
