@@ -8,10 +8,12 @@ from .bootstrap import (
     build_profile_gateway_runtime,
 )
 from .config import (
+    GatewayConfigFormat,
     GatewayProfileBootstrapConfig,
     GatewayProfileStoreConfig,
     GatewayProfileStoreKind,
     bootstrap_profile_gateway_from_config,
+    load_gateway_profile_bootstrap_config,
 )
 from .profile_runtime import ProfileAwareGatewayRuntime
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
@@ -22,6 +24,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "GatewayPolicyDenied",
+    "GatewayConfigFormat",
     "GatewayProfileBootstrap",
     "GatewayProfileBootstrapConfig",
     "GatewayRequestContext",
@@ -36,6 +39,7 @@ __all__ = [
     "create_gateway_app",
     "create_gateway_router",
     "handle_stdio_line",
+    "load_gateway_profile_bootstrap_config",
 ]
 
 

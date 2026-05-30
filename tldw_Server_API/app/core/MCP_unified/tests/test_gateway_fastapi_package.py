@@ -728,6 +728,153 @@ def test_gateway_config_bootstrap_copies_profile_mapping_inputs() -> None:
     assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
 
 
+def test_gateway_config_loader_reads_json_and_bootstraps_default_preset(tmp_path: Path) -> None:
+    """Load JSON gateway config and feed it into the config bootstrap helper."""
+
+    from mcp_unified.gateway import load_gateway_profile_bootstrap_config
+    from mcp_unified.gateway.config import bootstrap_profile_gateway_from_config
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "default_preset_id": "project-researcher",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_gateway_profile_bootstrap_config(config_path)
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(_MultiToolGatewayRuntime(), config)
+    )
+    app = create_gateway_app(bootstrap.runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        listed = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-config-json"},
+        )
+
+    assert bootstrap.default_profile_id == "project-researcher"
+    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
+
+
+def test_gateway_config_loader_reads_toml_store_config(tmp_path: Path) -> None:
+    """Load TOML gateway config into validated profile bootstrap config."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        load_gateway_profile_bootstrap_config,
+    )
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = tmp_path / "gateway.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                'default_profile_id = "reviewer"',
+                "",
+                "[store]",
+                'kind = "sqlite"',
+                f'sqlite_path = "{sqlite_path}"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_gateway_profile_bootstrap_config(config_path)
+
+    assert isinstance(config.store, GatewayProfileStoreConfig)
+    assert config.store.kind == "sqlite"
+    assert config.store.sqlite_path == str(sqlite_path)
+    assert config.default_profile_id == "reviewer"
+
+
+@pytest.mark.parametrize("suffix", [".yaml", ".txt"])
+def test_gateway_config_loader_rejects_unsupported_suffix(tmp_path: Path, suffix: str) -> None:
+    """Reject config files whose format cannot be inferred safely."""
+
+    from mcp_unified.gateway.config import load_gateway_profile_bootstrap_config
+
+    config_path = tmp_path / f"gateway{suffix}"
+    config_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Unsupported gateway config format"):
+        load_gateway_profile_bootstrap_config(config_path)
+
+
+@pytest.mark.parametrize(
+    ("suffix", "content", "message"),
+    [
+        (".json", "{", "Invalid gateway config JSON"),
+        (".toml", "[store", "Invalid gateway config TOML"),
+    ],
+)
+def test_gateway_config_loader_rejects_malformed_files(
+    tmp_path: Path,
+    suffix: str,
+    content: str,
+    message: str,
+) -> None:
+    """Reject malformed config files with parser-specific error context."""
+
+    from mcp_unified.gateway.config import load_gateway_profile_bootstrap_config
+
+    config_path = tmp_path / f"gateway{suffix}"
+    config_path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        load_gateway_profile_bootstrap_config(config_path)
+
+
+def test_gateway_config_loader_json_parse_error_reports_location(tmp_path: Path) -> None:
+    """Include JSON parser location details in malformed config errors."""
+
+    from mcp_unified.gateway.config import load_gateway_profile_bootstrap_config
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text("{", encoding="utf-8")
+
+    with pytest.raises(ValueError) as exc_info:
+        load_gateway_profile_bootstrap_config(config_path)
+
+    assert "Invalid gateway config JSON" in str(exc_info.value)
+    assert "line 1 column" in str(exc_info.value)
+
+
+def test_gateway_config_loader_rejects_non_object_top_level_payload(tmp_path: Path) -> None:
+    """Reject JSON config payloads that are not top-level objects."""
+
+    from mcp_unified.gateway.config import load_gateway_profile_bootstrap_config
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(json.dumps([{"store": {"kind": "memory"}}]), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Gateway config file must contain an object"):
+        load_gateway_profile_bootstrap_config(config_path)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"unexpected": True},
+        {"store": []},
+    ],
+)
+def test_gateway_config_loader_wraps_schema_type_errors(tmp_path: Path, payload: dict[str, Any]) -> None:
+    """Report config schema/type failures as deterministic ValueErrors."""
+
+    from mcp_unified.gateway.config import load_gateway_profile_bootstrap_config
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Invalid gateway config schema or types"):
+        load_gateway_profile_bootstrap_config(config_path)
+
+
 def test_gateway_transport_profile_selector_handles_missing_request_attributes() -> None:
     class _BareRequest:
         """Request double without FastAPI transport attributes."""

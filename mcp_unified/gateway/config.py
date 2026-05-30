@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from json import JSONDecodeError
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from mcp_unified.interfaces.storage import ProfileStore
 from mcp_unified.profiles.models import MCPProfile
@@ -14,6 +16,12 @@ from mcp_unified.profiles.store import InMemoryProfileStore
 from .bootstrap import GatewayProfileBootstrap, bootstrap_profile_gateway
 from .runtime import GatewayRuntime
 
+try:  # pragma: no cover - Python <3.11 fallback is exercised only on older runtimes.
+    import tomllib as _tomllib
+except ModuleNotFoundError:  # pragma: no cover - defensive for unsupported runtimes.
+    _tomllib = None
+
+GatewayConfigFormat = Literal["json", "toml"]
 GatewayProfileStoreKind = Literal["memory", "sqlite"]
 
 
@@ -93,6 +101,36 @@ async def bootstrap_profile_gateway_from_config(
     )
 
 
+def load_gateway_profile_bootstrap_config(
+    path: str | Path,
+    *,
+    format: GatewayConfigFormat | str | None = None,
+) -> GatewayProfileBootstrapConfig:
+    """Load gateway profile bootstrap config from a JSON or TOML file.
+
+    The file format is inferred from `.json` or `.toml` suffixes unless an
+    explicit `format` is supplied. The parsed payload must be a top-level
+    object accepted by `GatewayProfileBootstrapConfig`. Invalid formats,
+    unreadable files, malformed payloads, non-object payloads, and config
+    schema/type errors raise `ValueError` with user-facing context.
+    """
+
+    config_path = Path(path)
+    config_format = _detect_config_format(config_path, format)
+    try:
+        raw_payload = config_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Unable to read gateway config file: {config_path}") from exc
+
+    payload = _parse_config_payload(raw_payload, config_format)
+    if not isinstance(payload, Mapping):
+        raise ValueError("Gateway config file must contain an object")
+    try:
+        return GatewayProfileBootstrapConfig(**payload)
+    except TypeError as exc:
+        raise ValueError(f"Invalid gateway config schema or types: {exc}") from exc
+
+
 def _validate_bootstrap_config(
     config: GatewayProfileBootstrapConfig | Mapping[str, Any] | None,
 ) -> GatewayProfileBootstrapConfig:
@@ -103,6 +141,50 @@ def _validate_bootstrap_config(
     if isinstance(config, GatewayProfileBootstrapConfig):
         return config
     return GatewayProfileBootstrapConfig(**config)
+
+
+def _detect_config_format(
+    path: Path,
+    explicit_format: GatewayConfigFormat | str | None,
+) -> GatewayConfigFormat:
+    """Infer or validate the gateway config file format."""
+
+    if explicit_format is not None:
+        normalized_format = str(explicit_format).strip().lower()
+        if normalized_format in {"json", "toml"}:
+            return cast(GatewayConfigFormat, normalized_format)
+        raise ValueError(
+            f"Unsupported gateway config format: {explicit_format!r}"
+        )
+
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        return "json"
+    if suffix == ".toml":
+        return "toml"
+    raise ValueError(
+        f"Unsupported gateway config format for path: {path}"
+    )
+
+
+def _parse_config_payload(raw_payload: str, config_format: GatewayConfigFormat) -> Any:
+    """Parse one gateway config payload by validated format."""
+
+    if config_format == "json":
+        try:
+            return json.loads(raw_payload)
+        except JSONDecodeError as exc:
+            raise ValueError(f"Invalid gateway config JSON: {exc}") from exc
+
+    if config_format == "toml":
+        if _tomllib is None:
+            raise ValueError("Gateway TOML config loading requires Python 3.11 tomllib")
+        try:
+            return _tomllib.loads(raw_payload)
+        except ValueError as exc:
+            raise ValueError(f"Invalid gateway config TOML: {exc}") from exc
+
+    raise ValueError(f"Unsupported gateway config format: {config_format!r}")
 
 
 def _build_profile_store(store_config: GatewayProfileStoreConfig) -> ProfileStore:
@@ -131,8 +213,10 @@ def _copy_profile(profile: MCPProfile | Mapping[str, Any]) -> MCPProfile:
 
 
 __all__ = [
+    "GatewayConfigFormat",
     "GatewayProfileBootstrapConfig",
     "GatewayProfileStoreConfig",
     "GatewayProfileStoreKind",
     "bootstrap_profile_gateway_from_config",
+    "load_gateway_profile_bootstrap_config",
 ]
