@@ -604,6 +604,101 @@ describe("StudioPane literature work products", () => {
     )
   })
 
+  it("preserves nested proposal section content in Deep Research follow-up seeds", () => {
+    const href = buildLiteratureDeepResearchLaunchPath({
+      id: "artifact-proposal-nested",
+      type: "report",
+      title: "Research Proposal Pack",
+      status: "completed",
+      templateId: "research_proposal_pack",
+      content: [
+        "## Literature Overview",
+        "Adult learner retention improves when support is timely.",
+        "",
+        "### Mechanism",
+        "Peer coaching adds accountability beyond reminder emails.",
+        "",
+        "## Proposed Hypothesis",
+        "Peer coaching will improve eight-week retention.",
+        "",
+        "### Prediction",
+        "Retention will increase for learners with matched peer coaches.",
+        "",
+        "## Methodology",
+        "Run a matched cohort study."
+      ].join("\n"),
+      sourceCoverage: {
+        selectedSourceIds: ["source-1", "source-2"],
+        usableSources: [
+          { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+          { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+        ],
+        skippedSources: [],
+        truncatedSources: [],
+        minimumUsableSourcesMet: true
+      },
+      createdAt: new Date("2026-02-18T00:00:00.000Z")
+    })
+
+    const parsed = new URL(href!, "https://example.local")
+    const followUp = JSON.parse(parsed.searchParams.get("follow_up") || "{}")
+
+    expect(followUp.background.key_claims[0].text).toContain(
+      "Peer coaching adds accountability beyond reminder emails."
+    )
+    expect(followUp.background.key_claims[1].text).toContain(
+      "Retention will increase for learners with matched peer coaches."
+    )
+  })
+
+  it("keeps generated Deep Research follow-up claim IDs clean when artifact IDs are long", () => {
+    const href = buildLiteratureDeepResearchLaunchPath({
+      id: `artifact-${"long-id-segment-".repeat(20)}`,
+      type: "report",
+      title: "Evidence-Bound Hypotheses",
+      status: "completed",
+      templateId: "evidence_bound_hypotheses",
+      content: "## Evidence-Bound Hypotheses\n\n### Hypothesis 1\n\nPeer coaching improves retention.",
+      data: {
+        hypotheses: [
+          {
+            hypothesis: "Peer coaching improves retention for adult learners.",
+            supportingFindings: ["Paper A reports higher weekly practice completion."],
+            supportingSources: ["Paper A"],
+            prediction: "Retention improves after 8 weeks.",
+            suggestedMethodology: "Matched cohort study",
+            threatsToValidity: [],
+            whatWouldFalsifyIt: "No retention difference.",
+            confidence: "medium"
+          }
+        ]
+      },
+      sourceCoverage: {
+        selectedSourceIds: ["source-1", "source-2"],
+        usableSources: [
+          { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+          { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+        ],
+        skippedSources: [],
+        truncatedSources: [],
+        minimumUsableSourcesMet: true
+      },
+      createdAt: new Date("2026-02-18T00:00:00.000Z")
+    })
+
+    const parsed = new URL(href!, "https://example.local")
+    const followUp = JSON.parse(parsed.searchParams.get("follow_up") || "{}")
+    const claimIds = followUp.background.key_claims.map(
+      (claim: { claim_id: string }) => claim.claim_id
+    )
+
+    for (const claimId of claimIds) {
+      expect(claimId).toHaveLength(128)
+      expect(claimId).not.toContain("\n")
+      expect(claimId).not.toContain("Truncated for Deep Research")
+    }
+  })
+
   it("requires completed matrix or gap artifacts with source coverage for Deep Research launch", () => {
     expect(
       isDeepResearchLaunchableLiteratureArtifact({

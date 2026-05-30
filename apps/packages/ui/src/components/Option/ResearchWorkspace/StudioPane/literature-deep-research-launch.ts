@@ -132,8 +132,10 @@ const normalizeHypotheses = (
     .filter((entry) => entry.hypothesis.length > 0)
 }
 
-const makeClaimId = (artifact: GeneratedArtifact, suffix: string): string =>
-  truncateForLaunch(`${artifact.id}:${suffix}`, 128)
+const makeClaimId = (artifact: GeneratedArtifact, suffix: string): string => {
+  const rawId = `${artifact.id}:${suffix}`
+  return rawId.length <= 128 ? rawId : rawId.slice(0, 128)
+}
 
 const buildCommonUnresolvedQuestions = (subject: string): string[] => [
   `Which parts of the ${subject} are evidence-supported versus proposed work?`,
@@ -225,15 +227,22 @@ const buildHypothesesFollowUp = (
 const extractMarkdownSection = (content: string, headings: RegExp[]): string => {
   const lines = content.split(/\r?\n/)
   let collecting = false
+  let startLevel = 0
   const collected: string[] = []
 
   for (const line of lines) {
-    if (/^#{1,6}\s+/.test(line)) {
+    const headingMatch = line.match(/^(#{1,6})\s+/)
+    if (headingMatch) {
+      const headingLevel = headingMatch[1].length
       if (collecting) {
-        break
+        if (headingLevel <= startLevel) {
+          break
+        }
+      } else if (headings.some((heading) => heading.test(line))) {
+        collecting = true
+        startLevel = headingLevel
+        continue
       }
-      collecting = headings.some((heading) => heading.test(line))
-      continue
     }
     if (collecting) {
       collected.push(line)
