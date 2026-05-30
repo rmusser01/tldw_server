@@ -121,7 +121,7 @@ const KNOWN_CORPUS_GAP_TYPES = new Set([
 ])
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
+  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const normalizeCellValue = (value: unknown): string => {
   if (Array.isArray(value)) {
@@ -190,6 +190,10 @@ const readListValue = (
 }
 
 const extractJsonPayloadText = (value: string): string => {
+  if (typeof value !== "string") {
+    return ""
+  }
+
   const trimmed = value.trim()
   if (!trimmed) {
     return ""
@@ -573,7 +577,7 @@ export const normalizeEvidenceBoundHypothesesResponse = (
 }
 
 export const normalizeResearchProposalMarkdown = (rawContent: string): string => {
-  const content = rawContent.trim()
+  const content = typeof rawContent === "string" ? rawContent.trim() : ""
   if (!content) {
     throw new Error("Research Proposal Pack response was empty.")
   }

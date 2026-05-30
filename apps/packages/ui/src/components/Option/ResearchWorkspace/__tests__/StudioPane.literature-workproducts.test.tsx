@@ -3,6 +3,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { AudioGenerationSettings } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
+import {
+  normalizeLiteratureMatrixResponse,
+  normalizeResearchProposalMarkdown
+} from "../StudioPane/literature-workproducts"
 
 const {
   mockAddArtifact,
@@ -325,6 +329,24 @@ const sourceDetail = (title: string, text: string) => ({
 })
 
 describe("StudioPane literature work products", () => {
+  it("rejects array rows instead of treating them as literature matrix records", () => {
+    expect(() =>
+      normalizeLiteratureMatrixResponse(JSON.stringify({ rows: [["Paper A"]] }))
+    ).toThrow("Literature Matrix JSON did not include any usable rows.")
+  })
+
+  it("handles non-string literature matrix responses as empty output", () => {
+    expect(() =>
+      normalizeLiteratureMatrixResponse(null as unknown as string)
+    ).toThrow("Literature Matrix JSON response was empty.")
+  })
+
+  it("handles non-string research proposal responses as empty output", () => {
+    expect(() =>
+      normalizeResearchProposalMarkdown(undefined as unknown as string)
+    ).toThrow("Research Proposal Pack response was empty.")
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.removeItem("tldw:research-workspace:recent-output-types:v1")
