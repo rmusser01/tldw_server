@@ -4,7 +4,7 @@ title: 'Migrate design-system product state: Settings and account/security'
 status: In Progress
 assignee: []
 created_date: '2026-05-14 03:19'
-updated_date: '2026-05-30 16:24'
+updated_date: '2026-05-30 16:32'
 labels:
   - design-system
   - webui
@@ -50,6 +50,8 @@ TASK-45.44.6.6 completed locally on codex/integration-policy-alerts-ds: migrated
 TASK-45.44.6.7 completed locally: migrated Evaluations settings auth/setup/unreachable/offline/API-test alerts to the design-system Alert primitive, removed the Evaluations settings baseline exceptions, and verified focused tests plus scoped guard/TypeScript. Full design-system verifier remains blocked by unrelated WritingPlayground, Notes, and ResearchWorkspace findings.
 
 TASK-45.44.6.8 completed locally: migrated General settings extension promotion and OCR asset alerts to the design-system Alert primitive, removed the General settings baseline exceptions, and verified focused tests plus scoped guard/TypeScript. Evidence: general-settings.tsx baseline count 0, Settings path count 14, total baseline count 158. Full design-system verifier remains blocked by unrelated WritingPlayground, Notes, and ResearchWorkspace findings.
+
+TASK-45.44.6.9 completed locally: migrated Prompt Studio settings capability, status-error, and unavailable alerts to the design-system Alert primitive, removed the Prompt Studio settings baseline exceptions, and verified focused tests plus scoped guard/TypeScript. Evidence: prompt-studio.tsx baseline count 0, Settings path count 11, total baseline count 154. Full design-system verifier remains blocked by unrelated WritingPlayground, Notes, and ResearchWorkspace findings.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
