@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from fastapi import APIRouter, FastAPI, Request, Response
+from fastapi import APIRouter, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
 
@@ -38,6 +38,7 @@ _INVALID_PARAMS = -32602
 _INTERNAL_ERROR = -32603
 _GATEWAY_RUNTIME_ERRORS = Exception
 _JSON_PARSE_ERRORS = (json.JSONDecodeError, UnicodeDecodeError)
+_REQUEST_LIKE_TYPES = Request | WebSocket
 
 
 class GatewayJSONRPCRequest(BaseModel):
@@ -126,6 +127,15 @@ def _jsonrpc_error(
     )
 
 
+def _response_to_json(response: GatewayJSONRPCResponse) -> dict[str, Any]:
+    """Return a JSON-serializable response mapping for WebSocket sends."""
+
+    try:
+        return response.model_dump(mode="json")  # type: ignore[attr-defined]
+    except AttributeError:  # pragma: no cover - pydantic v1 fallback
+        return response.dict()
+
+
 def _object_or_empty(value: Any, message: str) -> dict[str, Any]:
     """Return an object payload or reject non-object values without coercion."""
 
@@ -152,7 +162,7 @@ def _runtime_supports(runtime: GatewayRuntime, *method_names: str) -> bool:
 
 def _request_context(
     payload: GatewayJSONRPCRequest,
-    request: Request,
+    request: _REQUEST_LIKE_TYPES,
 ) -> GatewayRequestContext:
     """Derive the host-neutral gateway request context from a JSON-RPC request."""
 
@@ -190,7 +200,7 @@ async def _handle_initialize(
 async def _dispatch_jsonrpc(
     runtime: GatewayRuntime,
     payload: GatewayJSONRPCRequest,
-    request: Request,
+    request: _REQUEST_LIKE_TYPES,
 ) -> Any:
     """Dispatch one validated JSON-RPC request to the injected runtime."""
 
@@ -247,7 +257,7 @@ def _validate_jsonrpc_request(payload: dict[str, Any]) -> GatewayJSONRPCRequest:
 async def _handle_single_jsonrpc(
     runtime: GatewayRuntime,
     payload: Any,
-    request: Request,
+    request: _REQUEST_LIKE_TYPES,
 ) -> GatewayJSONRPCResponse | Response:
     """Handle one JSON-RPC request, including notifications and error mapping."""
 
@@ -290,7 +300,7 @@ async def _handle_single_jsonrpc(
 async def _handle_jsonrpc(
     runtime: GatewayRuntime,
     payload: Any,
-    request: Request,
+    request: _REQUEST_LIKE_TYPES,
 ) -> GatewayJSONRPCResponse | list[GatewayJSONRPCResponse] | Response:
     """Handle single or batch JSON-RPC payloads for the gateway endpoint."""
 
@@ -309,16 +319,35 @@ async def _handle_jsonrpc(
     return await _handle_single_jsonrpc(runtime, payload, request)
 
 
+def _parse_json_payload(payload: str | bytes) -> Any | GatewayJSONRPCErrorResponse:
+    """Parse a raw JSON-RPC payload or return a JSON-RPC parse error."""
+
+    if not payload:
+        return _jsonrpc_error(_PARSE_ERROR, "Parse error: Empty request body", None)
+    try:
+        return json.loads(payload)
+    except _JSON_PARSE_ERRORS:
+        return _jsonrpc_error(_PARSE_ERROR, "Parse error: Invalid JSON", None)
+
+
 async def _parse_json_body(request: Request) -> Any | GatewayJSONRPCErrorResponse:
     """Parse raw JSON so malformed bodies return JSON-RPC parse errors."""
 
-    body = await request.body()
-    if not body:
-        return _jsonrpc_error(_PARSE_ERROR, "Parse error: Empty request body", None)
-    try:
-        return json.loads(body)
-    except _JSON_PARSE_ERRORS:
-        return _jsonrpc_error(_PARSE_ERROR, "Parse error: Invalid JSON", None)
+    return _parse_json_payload(await request.body())
+
+
+async def _send_websocket_response(
+    websocket: WebSocket,
+    response: GatewayJSONRPCResponse | list[GatewayJSONRPCResponse] | Response,
+) -> None:
+    """Send JSON-RPC responses while suppressing notification-only results."""
+
+    if isinstance(response, Response):
+        return
+    if isinstance(response, list):
+        await websocket.send_json([_response_to_json(item) for item in response])
+        return
+    await websocket.send_json(_response_to_json(response))
 
 
 def create_gateway_router(runtime: GatewayRuntime) -> APIRouter:
@@ -348,6 +377,23 @@ def create_gateway_router(runtime: GatewayRuntime) -> APIRouter:
         if isinstance(payload, _GATEWAY_RESPONSE_TYPES):
             return payload
         return await _handle_jsonrpc(runtime, payload, request)
+
+    @router.websocket("/ws")
+    async def gateway_websocket(websocket: WebSocket) -> None:
+        """Process JSON-RPC messages over a standalone gateway WebSocket."""
+
+        await websocket.accept()
+        while True:
+            try:
+                raw_payload = await websocket.receive_text()
+            except WebSocketDisconnect:
+                return
+            payload = _parse_json_payload(raw_payload)
+            if isinstance(payload, _GATEWAY_RESPONSE_TYPES):
+                await websocket.send_json(_response_to_json(payload))
+                continue
+            response = await _handle_jsonrpc(runtime, payload, websocket)
+            await _send_websocket_response(websocket, response)
 
     return router
 

@@ -340,6 +340,90 @@ def test_gateway_fastapi_app_handles_resource_prompt_and_module_methods() -> Non
         assert runtime.module_health_contexts[-1].request_id == "health-1"
 
 
+def test_gateway_websocket_handles_basic_jsonrpc_flow() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/mcp/ws") as websocket:
+            websocket.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "initialize",
+                    "params": {"clientInfo": {"name": "pytest-ws"}},
+                    "id": "ws-init",
+                }
+            )
+            initialized = websocket.receive_json()
+            assert initialized["jsonrpc"] == "2.0"
+            assert initialized["id"] == "ws-init"
+            assert initialized["result"]["protocolVersion"] == "2024-11-05"
+
+            websocket.send_json({"jsonrpc": "2.0", "method": "ping", "id": "ws-ping"})
+            ping = websocket.receive_json()
+            assert ping == {"jsonrpc": "2.0", "result": {"pong": True}, "id": "ws-ping"}
+
+            websocket.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "resources/list",
+                    "params": {},
+                    "id": "ws-resources",
+                }
+            )
+            resources = websocket.receive_json()
+            assert resources["jsonrpc"] == "2.0"
+            assert resources["id"] == "ws-resources"
+            assert resources["result"]["resources"][0]["uri"] == "resource://unit/doc"
+            assert runtime.resource_list_contexts[-1].request_id == "ws-resources"
+            assert runtime.resource_list_contexts[-1].metadata["path"] == "/mcp/ws"
+
+
+def test_gateway_websocket_maps_invalid_json_to_parse_error() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/mcp/ws") as websocket:
+            websocket.send_text("not-json")
+            body = websocket.receive_json()
+
+    assert body["jsonrpc"] == "2.0"
+    assert body["id"] is None
+    assert body["error"]["code"] == -32700
+    assert "Parse error" in body["error"]["message"]
+
+
+def test_gateway_websocket_suppresses_notification_response() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/mcp/ws") as websocket:
+            websocket.send_json({"jsonrpc": "2.0", "method": "ping"})
+            websocket.send_json({"jsonrpc": "2.0", "method": "ping", "id": "after-notification"})
+            body = websocket.receive_json()
+
+    assert body == {"jsonrpc": "2.0", "result": {"pong": True}, "id": "after-notification"}
+
+
+def test_gateway_websocket_batch_omits_notification_responses() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/mcp/ws") as websocket:
+            websocket.send_json(
+                [
+                    {"jsonrpc": "2.0", "method": "ping"},
+                    {"jsonrpc": "2.0", "method": "ping", "id": "batch-ping"},
+                ]
+            )
+            body = websocket.receive_json()
+
+    assert body == [{"jsonrpc": "2.0", "result": {"pong": True}, "id": "batch-ping"}]
+
+
 def test_gateway_request_rejects_missing_jsonrpc_member() -> None:
     runtime = _FakeGatewayRuntime()
     app = create_gateway_app(runtime, prefix="/mcp")
