@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from .models import MCPProfile, ProfilePolicy
 
 PRESET_VERSION = "2026.05.27"
+PRESET_CREATED_AT = datetime(2026, 5, 27, tzinfo=timezone.utc)
 
 _PROCESS_CAPABILITIES = {
     "command.run",
@@ -110,6 +111,8 @@ def _profile(
             "preset_version": PRESET_VERSION,
             **(provenance or {}),
         },
+        created_at=PRESET_CREATED_AT,
+        updated_at=PRESET_CREATED_AT,
     )
 
 

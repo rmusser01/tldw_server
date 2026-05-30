@@ -136,6 +136,51 @@ def test_gateway_cli_list_presets_reports_builtin_summary(
     )
 
 
+def test_gateway_cli_show_preset_reports_full_builtin_profile(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Show one bundled preset with its full profile policy document."""
+
+    exit_code = gateway_cli.main(["show-preset", "project-researcher"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    preset = payload["preset"]
+    profile = preset["profile"]
+    policy = profile["policy_document"]
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert preset["id"] == "project-researcher"
+    assert preset["version"] == profile["preset_version"]
+    assert profile["id"] == "project-researcher"
+    assert profile["name"] == "Project Researcher"
+    assert profile["created_at"] == "2026-05-27T00:00:00Z"
+    assert profile["updated_at"] == "2026-05-27T00:00:00Z"
+    assert policy["capabilities"] == ["code_search", "filesystem.read", "docs.read"]
+    assert policy["resource_constraints"] == {}
+    assert profile["provenance"]["source"] == "builtin_preset"
+
+
+def test_gateway_cli_show_preset_reports_unknown_id_as_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report unknown preset ids as JSON errors without tracebacks."""
+
+    exit_code = gateway_cli.main(["show-preset", "unknown-mode"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload == {
+        "error": "Unknown MCP profile preset: unknown-mode",
+        "ok": False,
+        "preset_id": "unknown-mode",
+    }
+    assert "Traceback" not in captured.err
+
+
 def test_gateway_cli_project_script_is_registered() -> None:
     """Expose the package CLI through the installed project scripts."""
 

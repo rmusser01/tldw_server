@@ -1,0 +1,60 @@
+---
+id: TASK-567
+title: Implement MCP Unified Stage 4J preset details CLI
+status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-05-30 21:32'
+labels:
+  - mcp-unified
+  - stage-4
+  - cli
+  - profiles
+dependencies: []
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Add a narrow standalone gateway CLI command for deterministic full built-in preset inspection so front-ends can inspect role/profile policy documents before applying a profile.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 mcp-unified-gateway exposes a command to show one built-in preset as deterministic JSON.
+- [x] #2 Unknown preset ids return machine-readable JSON errors without tracebacks.
+- [x] #3 The command output includes the preset id/version and full profile policy data needed by front-ends.
+- [x] #4 Focused CLI tests, extraction contract tests, lint, diff check, and Bandit touched-scope validation are run.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-05-30-mcp-unified-stage4j-preset-details-cli-plan.md
+
+Verification:
+- source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py -q (baseline: 6 passed; initial show-preset red path: 2 failed before implementation; after implementation: 8 passed)
+- source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py -q (timestamp determinism red path: 2 failed before fixed template timestamps; after implementation: 19 passed)
+- source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py -q (66 passed)
+- source .venv/bin/activate && python -m ruff check mcp_unified/gateway/cli.py mcp_unified/profiles/presets.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py (passed)
+- source .venv/bin/activate && python -m bandit -r mcp_unified/gateway mcp_unified/profiles -f json -o /tmp/bandit_mcp_stage4j_preset_details.json (0 findings)
+- git diff --check (passed)
+
+Skipped/blocked: none.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the Stage 4J standalone gateway CLI preset detail slice by adding mcp-unified-gateway show-preset <preset_id>. The command emits deterministic JSON with full built-in preset/profile policy data, returns machine-readable unknown-preset errors without tracebacks, and uses fixed built-in preset template timestamps so the output is stable across processes.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

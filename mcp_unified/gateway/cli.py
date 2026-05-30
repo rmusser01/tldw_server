@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, NoReturn, TextIO
 
-from mcp_unified.profiles.presets import list_builtin_presets
+from mcp_unified.profiles.presets import get_builtin_preset, list_builtin_presets
 
 from .config import (
     GatewayConfigFormat,
@@ -108,6 +108,16 @@ def _build_parser() -> _JsonArgumentParser:
     )
     list_presets.set_defaults(handler=_handle_list_presets)
 
+    show_preset = subparsers.add_parser(
+        "show-preset",
+        help="Show one bundled MCP profile preset.",
+    )
+    show_preset.add_argument(
+        "preset_id",
+        help="Bundled preset id to inspect.",
+    )
+    show_preset.set_defaults(handler=_handle_show_preset)
+
     return parser
 
 
@@ -152,6 +162,32 @@ def _handle_list_presets(_args: argparse.Namespace) -> int:
                 }
                 for preset in presets
             ]
+        },
+        sys.stdout,
+    )
+    return 0
+
+
+def _handle_show_preset(args: argparse.Namespace) -> int:
+    """Emit one bundled profile preset with its full profile policy."""
+
+    preset_id: str = args.preset_id
+    preset = get_builtin_preset(preset_id)
+    if preset is None:
+        _emit_json(
+            {
+                "error": f"Unknown MCP profile preset: {preset_id}",
+                "ok": False,
+                "preset_id": preset_id,
+            },
+            sys.stderr,
+        )
+        return 1
+
+    _emit_json(
+        {
+            "ok": True,
+            "preset": preset.model_dump(mode="json"),
         },
         sys.stdout,
     )
