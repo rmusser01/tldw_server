@@ -560,7 +560,7 @@ bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.lit
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Stage 3**
+- [x] **Step 6: Commit Stage 3**
 
 ```bash
 git add apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane \
@@ -586,7 +586,7 @@ git commit -m "feat: generate evidence-bound hypotheses"
 - Add cases to `StudioPane.literature-workproducts.test.tsx`.
 - Extend export/save tests only if current coverage does not exercise report artifacts.
 
-- [ ] **Step 1: Add failing proposal tests**
+- [x] **Step 1: Add failing proposal tests**
 
 Mock markdown with headings:
 
@@ -610,7 +610,7 @@ Assert:
 - review checklist exists
 - output contains Source Audit section.
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 ```bash
 cd apps/packages/ui
@@ -619,7 +619,7 @@ bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.lit
 
 Expected: FAIL.
 
-- [ ] **Step 3: Add proposal prompt helper**
+- [x] **Step 3: Add proposal prompt helper**
 
 Modify:
 
@@ -634,7 +634,7 @@ The prompt must:
 - include source coverage notes and list which prior artifacts, if any, were
   used as context.
 
-- [ ] **Step 4: Wire proposal generation**
+- [x] **Step 4: Wire proposal generation**
 
 Modify:
 
@@ -644,13 +644,13 @@ Use selected usable sources plus optional Matrix, Gap Finder, and Hypothesis
 artifacts when compatible. Keep the proposal artifact valid even when no prior work
 products exist.
 
-- [ ] **Step 5: Verify save/export behavior**
+- [x] **Step 5: Verify save/export behavior**
 
 Run existing artifact export tests relevant to report artifacts. If none exist,
 add a focused test that the proposal artifact appears in the artifact list and
 uses existing view/download actions.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 ```bash
 cd apps/packages/ui

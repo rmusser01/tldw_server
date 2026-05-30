@@ -869,4 +869,179 @@ describe("StudioPane literature work products", () => {
     expect(userPrompt).toContain("Compatible Corpus Gap Finder")
     expect(userPrompt).toContain("Rural settings missing")
   })
+
+  it("generates a Research Proposal Pack with source coverage and a source audit", async () => {
+    mockCreateChatCompletion.mockResolvedValue(
+      createChatCompletionResponse(`# Title
+Rural Transfer Study
+
+## Research Question
+Do rural settings show the same transfer as urban clinics?
+
+## Literature Overview
+Paper A and Paper B provide the current evidence base.
+
+## Evidence Matrix Summary
+The selected studies cover urban and hospital settings.
+
+## Identified Gaps
+Rural settings are underrepresented.
+
+## Proposed Hypothesis
+Rural transfer effects will differ from urban transfer effects.
+
+## Methodology
+Run a matched rural and urban cohort comparison.
+
+## Expected Results Or Decision Value
+The study clarifies generalizability.
+
+## Contribution
+It expands the evidence base into an underrepresented context.
+
+## Risks And Limitations
+Rural sample size may be limited.
+
+## Source Audit
+- Paper A
+- Paper B`)
+    )
+
+    renderStudioPane()
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /research proposal pack/i })
+    )
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        "artifact-1",
+        "completed",
+        expect.objectContaining({
+          templateId: "research_proposal_pack",
+          reviewStatus: "draft",
+          content: expect.stringContaining("## Source Audit"),
+          sourceCoverage: expect.objectContaining({
+            selectedSourceIds: ["source-1", "source-2"],
+            minimumUsableSourcesMet: true
+          }),
+          sourceLineage: [
+            { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+            { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+          ]
+        })
+      )
+    })
+
+    expect(mockAddArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "report",
+        title: "Research Proposal Pack",
+        status: "generating",
+        templateId: "research_proposal_pack"
+      })
+    )
+    expect(mockCreateChatCompletion).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        response_format: expect.anything()
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it("includes compatible Matrix, Gap, and Hypothesis artifacts as proposal context", async () => {
+    workspaceStoreState.generatedArtifacts = [
+      {
+        id: "artifact-hypothesis",
+        type: "report",
+        title: "Evidence-Bound Hypotheses",
+        status: "completed",
+        templateId: "evidence_bound_hypotheses",
+        content: "## Evidence-Bound Hypotheses\nRural settings require validation.",
+        sourceCoverage: {
+          selectedSourceIds: ["source-1", "source-2"],
+          usableSources: [
+            { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+            { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+          ],
+          skippedSources: [],
+          truncatedSources: [],
+          minimumUsableSourcesMet: true
+        },
+        createdAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "artifact-gap",
+        type: "data_table",
+        title: "Corpus Gap Finder",
+        status: "completed",
+        templateId: "corpus_gap_finder",
+        content: "| Gap | Evidence Basis |\n| --- | --- |\n| Rural settings missing | Papers A and B |",
+        sourceCoverage: {
+          selectedSourceIds: ["source-1", "source-2"],
+          usableSources: [
+            { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+            { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+          ],
+          skippedSources: [],
+          truncatedSources: [],
+          minimumUsableSourcesMet: true
+        },
+        createdAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "artifact-matrix",
+        type: "data_table",
+        title: "Literature Matrix",
+        status: "completed",
+        templateId: "literature_matrix",
+        content: "| Source | Primary Finding |\n| --- | --- |\n| Paper A | Finding A |",
+        sourceCoverage: {
+          selectedSourceIds: ["source-1", "source-2"],
+          usableSources: [
+            { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+            { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+          ],
+          skippedSources: [],
+          truncatedSources: [],
+          minimumUsableSourcesMet: true
+        },
+        createdAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    mockCreateChatCompletion.mockResolvedValue(
+      createChatCompletionResponse(`# Title
+Proposal
+
+## Source Audit
+- Paper A
+- Paper B`)
+    )
+
+    renderStudioPane()
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /research proposal pack/i })
+    )
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        "artifact-1",
+        "completed",
+        expect.objectContaining({
+          templateId: "research_proposal_pack"
+        })
+      )
+    })
+
+    const request = mockCreateChatCompletion.mock.calls[0]?.[0] as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const userPrompt = request.messages?.find((message) => message.role === "user")
+      ?.content
+    expect(userPrompt).toContain("Compatible Literature Matrix")
+    expect(userPrompt).toContain("Compatible Corpus Gap Finder")
+    expect(userPrompt).toContain("Compatible Evidence-Bound Hypotheses")
+    expect(userPrompt).toContain("Source coverage")
+  })
 })

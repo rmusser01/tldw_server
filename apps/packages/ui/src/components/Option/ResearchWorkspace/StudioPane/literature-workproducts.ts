@@ -366,6 +366,69 @@ ${sourceContexts
   }`
 })
 
+export const buildResearchProposalMessages = (
+  sourceContexts: LiteratureWorkProductSourceContext[],
+  sourceCoverage: ArtifactSourceCoverage,
+  compatibleArtifacts: Array<{ label: string; content: string }>
+): { system: string; user: string } => ({
+  system:
+    "You are a source-grounded research proposal drafter. Use only the provided source excerpts and optional compatible prior work products. Separate source-grounded evidence from proposed work. Do not make publication-ready claims or invent citations.",
+  user: `Create a concise research proposal draft in markdown with these exact section headings:
+# Title
+## Research Question
+## Literature Overview
+## Evidence Matrix Summary
+## Identified Gaps
+## Proposed Hypothesis
+## Methodology
+## Expected Results Or Decision Value
+## Contribution
+## Risks And Limitations
+## Source Audit
+
+Rules:
+- Clearly mark source-grounded claims.
+- Clearly separate proposed work from established evidence.
+- Include source coverage notes in Source Audit.
+- Include which compatible prior artifacts were used as context.
+- Do not omit Source Audit.
+
+Source coverage:
+- selected: ${sourceCoverage.selectedSourceIds.join(", ") || "none"}
+- usable: ${
+    sourceCoverage.usableSources
+      .map((source) => source.title || source.sourceId)
+      .join(", ") || "none"
+  }
+- skipped: ${
+    sourceCoverage.skippedSources
+      .map((source) => `${source.title || source.sourceId} (${source.reason})`)
+      .join(", ") || "none"
+  }
+- truncated: ${
+    sourceCoverage.truncatedSources
+      .map((source) => source.title || source.sourceId)
+      .join(", ") || "none"
+  }
+
+Selected sources:
+${sourceContexts
+  .map(
+    (source, index) =>
+      `Source ${index + 1}: ${source.title}\n${source.text}`
+  )
+  .join("\n\n")}${
+    compatibleArtifacts.length > 0
+      ? `\n\n${compatibleArtifacts
+          .map(
+            (artifact) =>
+              `Compatible ${artifact.label}:\n${artifact.content}`
+          )
+          .join("\n\n")}`
+      : ""
+  }`
+})
+
 export const normalizeLiteratureMatrixResponse = (
   rawContent: string
 ): LiteratureWorkProductTableData => {
@@ -507,6 +570,17 @@ export const normalizeEvidenceBoundHypothesesResponse = (
   }
 
   return hypotheses
+}
+
+export const normalizeResearchProposalMarkdown = (rawContent: string): string => {
+  const content = rawContent.trim()
+  if (!content) {
+    throw new Error("Research Proposal Pack response was empty.")
+  }
+  if (!/^#{1,3}\s+Source Audit\b/im.test(content)) {
+    throw new Error("Research Proposal Pack must include a Source Audit section.")
+  }
+  return content
 }
 
 const escapeMarkdownCell = (value: string): string =>

@@ -45,6 +45,7 @@ import {
   buildEvidenceBoundHypothesesMessages,
   buildLiteratureMatrixMessages,
   buildLiteratureSourceCoverage,
+  buildResearchProposalMessages,
   findCompatibleLiteratureArtifact,
   findCompatibleLiteratureMatrixArtifact,
   formatEvidenceBoundHypothesesMarkdown,
@@ -53,6 +54,7 @@ import {
   normalizeCorpusGapResponse,
   normalizeEvidenceBoundHypothesesResponse,
   normalizeLiteratureMatrixResponse,
+  normalizeResearchProposalMarkdown,
   type LiteratureWorkProductSourceContext
 } from "../literature-workproducts"
 
@@ -1966,6 +1968,105 @@ async function generateEvidenceBoundHypotheses(
   }
 }
 
+async function generateResearchProposalPack(
+  options: SourceContentGenerationOptions & {
+    template: WorkProductTemplate
+    generatedArtifacts: GeneratedArtifact[]
+  }
+): Promise<GenerationResult> {
+  const model = typeof options.model === "string" ? options.model.trim() : ""
+  if (!model) {
+    throw new Error("Select a chat model before generating a Research Proposal Pack.")
+  }
+
+  const sourceContexts = await loadStudioSourceContexts(options)
+  const sourceCoverage = buildLiteratureSourceCoverage({
+    selectedSources: options.selectedSources,
+    usableContexts: sourceContexts,
+    minimumUsableSources: options.template.minUsableSources,
+    sourceContextCharLimit: {
+      perSource: STUDIO_SOURCE_CHAR_LIMIT,
+      total: STUDIO_TOTAL_SOURCE_CHAR_LIMIT
+    }
+  })
+
+  if (!sourceCoverage.minimumUsableSourcesMet) {
+    throw new LiteratureSourceCoverageError(
+      `At least ${options.template.minUsableSources} usable source contexts are required for ${options.template.label}.`,
+      sourceCoverage
+    )
+  }
+
+  const compatibleArtifacts = [
+    {
+      label: "Literature Matrix",
+      artifact: findCompatibleLiteratureArtifact(
+        options.generatedArtifacts,
+        sourceContexts,
+        "literature_matrix"
+      )
+    },
+    {
+      label: "Corpus Gap Finder",
+      artifact: findCompatibleLiteratureArtifact(
+        options.generatedArtifacts,
+        sourceContexts,
+        "corpus_gap_finder"
+      )
+    },
+    {
+      label: "Evidence-Bound Hypotheses",
+      artifact: findCompatibleLiteratureArtifact(
+        options.generatedArtifacts,
+        sourceContexts,
+        "evidence_bound_hypotheses"
+      )
+    }
+  ]
+    .map(({ label, artifact }) =>
+      artifact?.content ? { label, content: artifact.content } : null
+    )
+    .filter(
+      (artifact): artifact is { label: string; content: string } =>
+        artifact !== null && artifact.content.trim().length > 0
+    )
+
+  const messages = buildResearchProposalMessages(
+    sourceContexts,
+    sourceCoverage,
+    compatibleArtifacts
+  )
+  const response = await tldwClient.createChatCompletion(
+    {
+      model,
+      api_provider: options.apiProvider,
+      messages: [
+        {
+          role: "system",
+          content: messages.system
+        },
+        {
+          role: "user",
+          content: messages.user
+        }
+      ],
+      temperature: options.temperature,
+      top_p: options.topP,
+      max_tokens: options.maxTokens
+    },
+    { signal: options.abortSignal }
+  )
+
+  const { content: rawContent, usage } =
+    await readChatCompletionResponsePayload(response)
+
+  return {
+    content: normalizeResearchProposalMarkdown(rawContent),
+    sourceCoverage,
+    ...usage
+  }
+}
+
 async function generateDataTable(
   options: SourceContentGenerationOptions
 ): Promise<GenerationResult> {
@@ -2524,6 +2625,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           workProductTemplate?.id === "executive_brief"
         const isEvidenceBoundHypothesesTemplate =
           workProductTemplate?.id === "evidence_bound_hypotheses"
+        const isResearchProposalTemplate =
+          workProductTemplate?.id === "research_proposal_pack"
         const templateMetadata = workProductTemplate
           ? {
               templateId: workProductTemplate.id,
@@ -2631,6 +2734,12 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               })
             } else if (isEvidenceBoundHypothesesTemplate && workProductTemplate) {
               result = await generateEvidenceBoundHypotheses({
+                ...reportOptions,
+                template: workProductTemplate,
+                generatedArtifacts
+              })
+            } else if (isResearchProposalTemplate && workProductTemplate) {
+              result = await generateResearchProposalPack({
                 ...reportOptions,
                 template: workProductTemplate,
                 generatedArtifacts
