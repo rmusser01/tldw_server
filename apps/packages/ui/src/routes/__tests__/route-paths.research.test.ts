@@ -35,6 +35,72 @@ describe("route-paths deep research launch", () => {
     expect(parsed.searchParams.get("chat_id")).toBe("chat_123")
   })
 
+  it("includes bounded follow-up context for research launches", () => {
+    const followUp = {
+      question: "Verify the peer coaching retention hypothesis.",
+      background: {
+        question: "Verify the peer coaching retention hypothesis.",
+        outline: [{ title: "Hypothesis 1", focus_area: "hypothesis_1" }],
+        key_claims: [
+          {
+            claim_id: "artifact-hypotheses:finding-1",
+            text: "Evidence-supported finding: Paper A reports higher completion."
+          }
+        ],
+        unresolved_questions: [
+          "Which parts are evidence-supported versus proposed work?"
+        ],
+        verification_summary: {
+          supported_claim_count: 1,
+          unsupported_claim_count: 1
+        },
+        source_trust_summary: {
+          high_trust_count: 2,
+          low_trust_count: 1
+        }
+      }
+    }
+    const href = buildResearchLaunchPath({
+      query: "Verify the peer coaching retention hypothesis.",
+      followUp
+    })
+    const parsed = new URL(href, "https://example.local")
+
+    expect(parsed.searchParams.get("follow_up")).toBe(JSON.stringify(followUp))
+  })
+
+  it("drops oversized follow-up context instead of building an unsafe URL", () => {
+    const href = buildResearchLaunchPath({
+      query: "Verify a large proposal seed.",
+      followUp: {
+        question: "Verify a large proposal seed.",
+        background: {
+          question: "Verify a large proposal seed.",
+          outline: [{ title: "Proposal", focus_area: "proposal" }],
+          key_claims: [
+            {
+              claim_id: "oversized-proposal-excerpt",
+              text: "x".repeat(12000)
+            }
+          ],
+          unresolved_questions: ["Which claims still need verification?"],
+          verification_summary: {
+            supported_claim_count: 1,
+            unsupported_claim_count: 1
+          },
+          source_trust_summary: {
+            high_trust_count: 1,
+            low_trust_count: 0
+          }
+        }
+      }
+    })
+    const parsed = new URL(href, "https://example.local")
+
+    expect(parsed.searchParams.get("query")).toBe("Verify a large proposal seed.")
+    expect(parsed.searchParams.get("follow_up")).toBeNull()
+  })
+
   it("omits empty launch fields", () => {
     const href = buildResearchLaunchPath({
       query: "   ",

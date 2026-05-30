@@ -18,6 +18,7 @@ import {
   type ResearchBundle,
   type ResearchCheckpointSummary,
   type ResearchContradiction,
+  type ResearchRunCreateRequest,
   type ResearchOutlineCheckpointPayload,
   type ResearchOutlineSeedSection,
   type ResearchPlanCheckpointPayload,
@@ -50,6 +51,7 @@ type ResearchLaunchParams = {
   runId: string | null;
   chatId: string | null;
   launchMessageId: string | null;
+  followUp: ResearchRunCreateRequest['follow_up'] | null;
 };
 
 type ConsoleState = {
@@ -401,6 +403,7 @@ function parseResearchLaunchParams(search: string): ResearchLaunchParams {
   const runId = params.get('run')?.trim() || null;
   const chatId = params.get('chat_id')?.trim() || null;
   const launchMessageId = params.get('launch_message_id')?.trim() || null;
+  const followUp = parseResearchLaunchFollowUp(params.get('follow_up'));
   return {
     query,
     sourcePolicy,
@@ -409,6 +412,7 @@ function parseResearchLaunchParams(search: string): ResearchLaunchParams {
     runId,
     chatId,
     launchMessageId,
+    followUp,
   };
 }
 
@@ -424,6 +428,7 @@ function replaceResearchLaunchUrl(runId: string | null) {
   nextUrl.searchParams.delete('from');
   nextUrl.searchParams.delete('chat_id');
   nextUrl.searchParams.delete('launch_message_id');
+  nextUrl.searchParams.delete('follow_up');
   if (runId) {
     nextUrl.searchParams.set('run', runId);
   } else {
@@ -431,6 +436,153 @@ function replaceResearchLaunchUrl(runId: string | null) {
   }
   const search = nextUrl.searchParams.toString();
   window.history.replaceState({}, '', `${nextUrl.pathname}${search ? `?${search}` : ''}${nextUrl.hash}`);
+}
+
+function normalizeLaunchString(value: unknown, maxLength: number): string {
+  return String(value ?? '').trim().slice(0, maxLength).trim();
+}
+
+function normalizeLaunchCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0;
+}
+
+function normalizeLaunchOutline(value: unknown): NonNullable<
+  NonNullable<ResearchRunCreateRequest['follow_up']>['background']
+>['outline'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(asObjectRecord(item)))
+    .map((item) => {
+      const title = normalizeLaunchString(item.title, 500);
+      const focusArea = normalizeLaunchString(item.focus_area, 200);
+      return {
+        title,
+        ...(focusArea ? { focus_area: focusArea } : {}),
+      };
+    })
+    .filter((item) => item.title.length > 0)
+    .slice(0, 7);
+}
+
+function normalizeLaunchClaims(value: unknown): NonNullable<
+  NonNullable<ResearchRunCreateRequest['follow_up']>['background']
+>['key_claims'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(asObjectRecord(item)))
+    .map((item, index) => {
+      const claimId =
+        normalizeLaunchString(item.claim_id, 128) || `launch-follow-up-claim-${index + 1}`;
+      const text = normalizeLaunchString(item.text, 4000);
+      return {
+        claim_id: claimId,
+        text,
+      };
+    })
+    .filter((item) => item.text.length > 0)
+    .slice(0, 5);
+}
+
+function normalizeLaunchUnresolvedQuestions(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized: string[] = [];
+  value.forEach((item) => {
+    const candidate = normalizeLaunchString(item, 1800);
+    if (candidate && !normalized.includes(candidate)) {
+      normalized.push(candidate);
+    }
+  });
+  return normalized.slice(0, 5);
+}
+
+function parseResearchLaunchFollowUp(raw: string | null): ResearchRunCreateRequest['follow_up'] | null {
+  if (!raw) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const record = asObjectRecord(parsed);
+  if (!record) {
+    return null;
+  }
+  const question = normalizeLaunchString(record.question, 4000);
+  if (!question) {
+    return null;
+  }
+  const backgroundRecord = asObjectRecord(record.background);
+  if (!backgroundRecord) {
+    return { question };
+  }
+  const verificationSummary = asObjectRecord(backgroundRecord.verification_summary);
+  const sourceTrustSummary = asObjectRecord(backgroundRecord.source_trust_summary);
+  return {
+    question,
+    background: {
+      question: normalizeLaunchString(backgroundRecord.question, 4000) || question,
+      outline: normalizeLaunchOutline(backgroundRecord.outline),
+      key_claims: normalizeLaunchClaims(backgroundRecord.key_claims),
+      unresolved_questions: normalizeLaunchUnresolvedQuestions(backgroundRecord.unresolved_questions),
+      verification_summary: {
+        supported_claim_count: normalizeLaunchCount(verificationSummary?.supported_claim_count),
+        unsupported_claim_count: normalizeLaunchCount(verificationSummary?.unsupported_claim_count),
+      },
+      source_trust_summary: {
+        high_trust_count: normalizeLaunchCount(sourceTrustSummary?.high_trust_count),
+        low_trust_count: normalizeLaunchCount(sourceTrustSummary?.low_trust_count),
+      },
+    },
+  };
+}
+
+function buildResearchRunCreatePayload(
+  query: string,
+  launchParams: ResearchLaunchParams | null
+): ResearchRunCreateRequest {
+  const followUp = launchParams?.followUp
+    ? {
+        ...launchParams.followUp,
+        question: query,
+        ...(launchParams.followUp.background
+          ? {
+              background: {
+                ...launchParams.followUp.background,
+                question: query,
+              },
+            }
+          : {}),
+      }
+    : null;
+
+  return {
+    query,
+    source_policy: launchParams?.sourcePolicy ?? 'balanced',
+    autonomy_mode: launchParams?.autonomyMode ?? 'checkpointed',
+    ...(launchParams?.chatId
+      ? {
+          chat_handoff: {
+            chat_id: launchParams.chatId,
+            ...(launchParams.launchMessageId ? { launch_message_id: launchParams.launchMessageId } : {}),
+          },
+        }
+      : {}),
+    ...(followUp
+      ? {
+          follow_up: followUp,
+        }
+      : {}),
+  };
 }
 
 type PlanCheckpointEditorState = {
@@ -834,21 +986,9 @@ export default function ResearchRunsPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const createdRun = await createResearchRun({
-          query: launchParams.query!,
-          source_policy: launchParams.sourcePolicy ?? 'balanced',
-          autonomy_mode: launchParams.autonomyMode ?? 'checkpointed',
-          ...(launchParams.chatId
-            ? {
-                chat_handoff: {
-                  chat_id: launchParams.chatId,
-                  ...(launchParams.launchMessageId
-                    ? { launch_message_id: launchParams.launchMessageId }
-                    : {}),
-                },
-              }
-            : {}),
-        });
+        const createdRun = await createResearchRun(
+          buildResearchRunCreatePayload(launchParams.query!, launchParams)
+        );
         if (cancelled) {
           return;
         }
@@ -868,6 +1008,7 @@ export default function ResearchRunsPage() {
                 runId: createdRun.id,
                 chatId: null,
                 launchMessageId: null,
+                followUp: null,
               }
             : current
         );
@@ -979,17 +1120,29 @@ export default function ResearchRunsPage() {
       return;
     }
     try {
-      const createdRun = await createResearchRun({
-        query: trimmed,
-        source_policy: 'balanced',
-        autonomy_mode: 'checkpointed',
-      });
+      const createdRun = await createResearchRun(
+        buildResearchRunCreatePayload(trimmed, launchParams)
+      );
       queryClient.setQueryData<ResearchRunListItem[]>(['research-runs'], (current) =>
         upsertListItem(current, createdRun, trimmed)
       );
       setSelectedRunId(createdRun.id);
       dispatch({ type: 'replace-run', run: createdRun });
       setQuestion('');
+      replaceResearchLaunchUrl(createdRun.id);
+      setLaunchParams((current) =>
+        current
+          ? {
+              ...current,
+              autorun: false,
+              query: null,
+              runId: createdRun.id,
+              chatId: null,
+              launchMessageId: null,
+              followUp: null,
+            }
+          : current
+      );
     } catch (error) {
       show({
         title: 'Run creation failed',
