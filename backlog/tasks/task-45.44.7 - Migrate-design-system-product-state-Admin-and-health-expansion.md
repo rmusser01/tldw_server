@@ -50,6 +50,18 @@ documentation:
     Verifier evidence:
       - scoped verifier log had no RbacEditorPage findings
       - full verifier remains blocked by unrelated current-dev drift outside this slice
+
+    TASK-45.44.7.3 migrated RuntimeConfigPage forbidden and not-available guard
+    feedback from AntD Alert to the design-system Alert primitive.
+
+    Baseline file evidence:
+      - total baseline rows: 193 -> 191
+      - Admin path rows: 35 -> 33
+      - RuntimeConfigPage target rows: 2 -> 0
+
+    Verifier evidence:
+      - scoped verifier log had no RuntimeConfigPage findings
+      - full verifier remains blocked by unrelated current-dev drift outside this slice
 parent_task_id: TASK-45.44
 priority: medium
 ---

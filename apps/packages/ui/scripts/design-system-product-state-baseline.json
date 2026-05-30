@@ -308,28 +308,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Admin/RuntimeConfigPage.tsx:Alert#antd-alert-runtimeconfigpage-type-error-forbidden-you-do-1f85wr6",
-    "path": "src/components/Option/Admin/RuntimeConfigPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/RuntimeConfigPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Admin/RuntimeConfigPage.tsx:Alert#antd-alert-runtimeconfigpage-type-warning-not-available-1s74nym",
-    "path": "src/components/Option/Admin/RuntimeConfigPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Admin/RuntimeConfigPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Admin/ServerAdminPage.tsx:Alert#antd-alert-serveradminpage-type-error-line-656-1j15pps",
     "path": "src/components/Option/Admin/ServerAdminPage.tsx",
     "rule": "antd-product-state-import",
