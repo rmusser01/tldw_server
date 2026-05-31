@@ -9,6 +9,7 @@ labels:
 - security
 documentation:
 - Docs/superpowers/specs/2026-05-31-mcp-unified-stage4n-external-lifecycle-runtime-design.md
+- Docs/superpowers/plans/2026-05-31-mcp-unified-stage4n-external-lifecycle-runtime-implementation-plan.md
 ---
 
 ## Description
@@ -25,6 +26,12 @@ Implement the next MCP Unified slice after external registry management: real up
 - [ ] #4 Focused unit/integration tests cover lifecycle state transitions, credential redaction/resolution, install/update success and failure paths, and package boundary behavior.
 - [ ] #5 Bandit on touched Python source, focused pytest suite, and git diff --check pass before PR.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-05-31-mcp-unified-stage4n-external-lifecycle-runtime-implementation-plan.md
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
