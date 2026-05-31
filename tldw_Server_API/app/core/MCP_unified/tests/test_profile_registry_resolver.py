@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import ast
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
+import mcp_unified.gateway.profiles as gateway_profiles_module
 import mcp_unified.profiles as profiles_pkg
 import pytest
 from mcp_unified.profiles.models import MCPProfile
@@ -39,11 +41,12 @@ def _tldw_imports_for(path: Path) -> list[str]:
     return imports
 
 
-def test_profile_store_and_resolver_modules_have_no_tldw_server_imports() -> None:
-    package_root = Path(profiles_pkg.__file__).resolve().parent
+def test_profile_and_gateway_profile_modules_have_no_tldw_server_imports() -> None:
+    profiles_root = Path(profiles_pkg.__file__).resolve().parent
+    gateway_profile_path = Path(gateway_profiles_module.__file__).resolve()
 
     offenders: dict[str, list[str]] = {}
-    for path in package_root.rglob("*.py"):
+    for path in [*profiles_root.rglob("*.py"), gateway_profile_path]:
         imports = _tldw_imports_for(path)
         if imports:
             offenders[str(path)] = imports
@@ -251,6 +254,53 @@ async def test_assignment_backed_resolver_falls_back_when_no_assignment_exists()
     assert result.profile.id == "fallback"
     assert result.provenance["used_default_assignment"] is False
     assert result.provenance["used_default_profile"] is True
+
+
+@pytest.mark.asyncio
+async def test_assignment_backed_resolver_ignores_scoped_default_assignments() -> None:
+    profile_store = InMemoryProfileStore(
+        [
+            MCPProfile(id="global-default", name="Global Default"),
+            MCPProfile(id="principal-default", name="Principal Default"),
+            MCPProfile(id="workspace-default", name="Workspace Default"),
+        ]
+    )
+    assignment_store = InMemoryProfileAssignmentStore(
+        [
+            ProfileAssignment(
+                id="scoped-principal",
+                profile_id="principal-default",
+                principal_id="user-1",
+                is_default=True,
+                updated_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
+            ),
+            ProfileAssignment(
+                id="scoped-workspace",
+                profile_id="workspace-default",
+                workspace_id="workspace-1",
+                is_default=True,
+                updated_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
+            ),
+            ProfileAssignment(
+                id="gateway-default",
+                profile_id="global-default",
+                is_default=True,
+                updated_at=datetime(2026, 5, 31, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    resolver = AssignmentBackedProfileResolver(
+        profile_store,
+        assignment_store=assignment_store,
+        fallback_default_profile_id=None,
+    )
+
+    result = await resolver.resolve_profile_result(None)
+
+    assert result.status == "resolved"
+    assert result.profile is not None
+    assert result.profile.id == "global-default"
+    assert result.provenance["default_assignment_id"] == "gateway-default"
 
 
 @pytest.mark.asyncio

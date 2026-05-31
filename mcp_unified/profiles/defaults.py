@@ -14,7 +14,14 @@ def select_gateway_default_assignment(
     assignments: Iterable[ProfileAssignment],
 ) -> ProfileAssignment | None:
     """Return the effective enabled gateway default assignment, if configured."""
-    enabled_defaults = [assignment for assignment in assignments if assignment.is_default and assignment.enabled]
+    enabled_defaults = [
+        assignment
+        for assignment in assignments
+        if assignment.is_default
+        and assignment.enabled
+        and assignment.principal_id is None
+        and assignment.workspace_id is None
+    ]
     if not enabled_defaults:
         return None
     max_updated_at = max(assignment.updated_at for assignment in enabled_defaults)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -109,6 +109,13 @@ class GatewayProfileManager:
         )
         profile = await self._get_profile(normalized_profile_id)
         if profile is None:
+            await self._audit_expected_failure(
+                "profile.show_failed",
+                reason_code="profile_not_found",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
             raise self._error(
                 f"Profile not found: {normalized_profile_id}",
                 reason_code="profile_not_found",
@@ -286,7 +293,10 @@ class GatewayProfileManager:
             )
 
         existing = await self._get_assignment(GATEWAY_DEFAULT_ASSIGNMENT_ID)
+        current_default = await self._load_default_assignment()
         now = datetime.now(timezone.utc)
+        if current_default is not None and current_default.updated_at >= now:
+            now = current_default.updated_at + timedelta(microseconds=1)
         assignment = ProfileAssignment(
             id=GATEWAY_DEFAULT_ASSIGNMENT_ID,
             profile_id=normalized_profile_id,

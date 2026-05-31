@@ -122,6 +122,26 @@ async def test_gateway_profile_manager_shows_json_safe_copy_isolated_profile() -
 
 
 @pytest.mark.asyncio
+async def test_gateway_profile_manager_audits_missing_show_profile() -> None:
+    audit_store = InMemoryAuditStore()
+    manager = _manager(InMemoryProfileStore(), audit_store=audit_store)
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.show_profile("missing-profile")
+
+    assert exc_info.value.reason_code == "profile_not_found"
+    assert exc_info.value.to_payload()["profile_id"] == "missing-profile"
+    assert [event.event_type for event in audit_store.events] == ["profile.show_failed"]
+    assert audit_store.events[0].target_type == "profile"
+    assert audit_store.events[0].target_id == "missing-profile"
+    assert audit_store.events[0].payload == {
+        "profile_id": "missing-profile",
+        "reason_code": "profile_not_found",
+    }
+    assert "policy_document" not in json.dumps(audit_store.events[0].payload)
+
+
+@pytest.mark.asyncio
 async def test_duplicate_preset_uses_preset_id_as_default_stored_id() -> None:
     store = InMemoryProfileStore()
     manager = _manager(store)
@@ -238,6 +258,39 @@ async def test_set_default_profile_overwrites_gateway_default_assignment() -> No
     assert assignments[0].profile_id == "architect"
     assert assignments[0].created_at == first_assignment.created_at
     assert assignments[0].updated_at >= first_assignment.updated_at
+
+
+@pytest.mark.asyncio
+async def test_set_default_profile_becomes_effective_with_future_legacy_default() -> None:
+    future_updated_at = datetime(2099, 1, 1, tzinfo=UTC)
+    store = InMemoryProfileStore(
+        [
+            MCPProfile(id="reviewer", name="Reviewer"),
+            MCPProfile(id="legacy", name="Legacy"),
+        ]
+    )
+    assignment_store = InMemoryProfileAssignmentStore(
+        [
+            ProfileAssignment(
+                id="legacy-future",
+                profile_id="legacy",
+                is_default=True,
+                updated_at=future_updated_at,
+            )
+        ]
+    )
+    manager = _manager(store, assignment_store)
+
+    set_payload = await manager.set_default_profile("reviewer")
+    default_payload = await manager.get_default_profile()
+
+    assert set_payload["assignment"]["id"] == "gateway-default"
+    assert default_payload["profile"]["id"] == "reviewer"
+    assert default_payload["assignment"]["id"] == "gateway-default"
+
+    gateway_default = await assignment_store.get_assignment("gateway-default")
+    assert gateway_default is not None
+    assert gateway_default.updated_at > future_updated_at
 
 
 @pytest.mark.asyncio
