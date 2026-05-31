@@ -347,7 +347,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_externa
 
 Expected: all runtime and credential tests pass.
 
-- [ ] **Step 6: Commit credential handling**
+- [x] **Step 6: Commit credential handling**
 
 ```bash
 git add mcp_unified/gateway/external_runtime.py mcp_unified/federation/transports.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime.py
@@ -362,7 +362,7 @@ git commit -m "feat: add external runtime credential brokering"
 - Modify: `mcp_unified/gateway/external_runtime.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime.py`
 
-- [ ] **Step 1: Add red tests for default install/update responses**
+- [x] **Step 1: Add red tests for default install/update responses**
 
 Assert:
 
@@ -374,14 +374,14 @@ assert install["reason_code"] == "external_server_install_not_configured"
 assert update["reason_code"] == "external_server_update_not_configured"
 ```
 
-- [ ] **Step 2: Add red tests for unsupported injected installer**
+- [x] **Step 2: Add red tests for unsupported injected installer**
 
 Create a test installer that returns unsupported for the server and assert the
 manager returns `external_server_install_unsupported` and
 `external_server_update_unsupported` without mutating registry or active
 transport state.
 
-- [ ] **Step 3: Implement installer protocol**
+- [x] **Step 3: Implement installer protocol**
 
 Create:
 
@@ -395,13 +395,13 @@ class ExternalServerInstaller(Protocol):
 Create `NullExternalServerInstaller` that returns not-configured responses and
 `available: False` status.
 
-- [ ] **Step 4: Wire manager methods**
+- [x] **Step 4: Wire manager methods**
 
 `install_server()` and `update_server()` should load the registry definition and
 delegate to the configured installer. Unknown/disabled semantics should match
 lifecycle methods unless tests prove update should work for disabled drafts.
 
-- [ ] **Step 5: Run installer tests**
+- [x] **Step 5: Run installer tests**
 
 Run:
 

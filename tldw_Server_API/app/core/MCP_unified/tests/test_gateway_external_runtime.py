@@ -11,6 +11,7 @@ from mcp_unified.federation.models import (
     ExternalToolDefinition,
     FederationPolicyDenied,
 )
+from mcp_unified.federation.installers import ExternalServerInstaller
 from mcp_unified.gateway.external_runtime import (
     GatewayExternalRuntimeError,
     GatewayExternalRuntimeManager,
@@ -177,6 +178,49 @@ class RecordingCredentialBroker:
         """Record one broker request and return the configured result."""
         self.calls.append(dict(kwargs))
         return None if self.result is None else self.result.copy()
+
+
+class UnsupportedInstaller(ExternalServerInstaller):
+    """Installer fake that reports unsupported operations."""
+
+    def __init__(self) -> None:
+        self.install_calls: list[tuple[str, Any]] = []
+        self.update_calls: list[tuple[str, Any]] = []
+
+    async def install_server(
+        self,
+        server: ExternalServerDefinition,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Return an unsupported install response."""
+        self.install_calls.append((server.id, context))
+        return {
+            "ok": False,
+            "reason_code": "external_server_install_unsupported",
+            "server_id": server.id,
+        }
+
+    async def update_server(
+        self,
+        server: ExternalServerDefinition,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Return an unsupported update response."""
+        self.update_calls.append((server.id, context))
+        return {
+            "ok": False,
+            "reason_code": "external_server_update_unsupported",
+            "server_id": server.id,
+        }
+
+    async def get_status(
+        self,
+        server: ExternalServerDefinition,
+    ) -> dict[str, Any]:
+        """Return unavailable fake installer status."""
+        return {"available": False, "server_id": server.id}
 
 
 def _server(**overrides: Any) -> ExternalServerDefinition:
@@ -550,3 +594,52 @@ async def test_external_runtime_required_credentials_fail_closed_when_broker_ret
     assert exc_info.value.reason_code == "required_credential_grant_missing"
     assert broker.calls
     assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_default_install_update_are_not_configured() -> None:
+    store = InMemoryExternalRegistryStore([_server()])
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: RecordingExternalTransport(server_id=server.id),
+    )
+
+    install = await manager.install_server("research")
+    update = await manager.update_server("research")
+
+    assert install["reason_code"] == "external_server_install_not_configured"
+    assert update["reason_code"] == "external_server_update_not_configured"
+    assert install["available"] is False
+    assert update["available"] is False
+    assert store.mutations == 0
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_installer_unsupported_does_not_mutate_runtime_state() -> None:
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    installer = UnsupportedInstaller()
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+        installer=installer,
+    )
+    await manager.start_server("research")
+
+    install = await manager.install_server("research", context={"request_id": "install"})
+    update = await manager.update_server("research", context={"request_id": "update"})
+    rows = await manager.list_runtime_servers()
+    tools = await manager.list_virtual_tools()
+
+    assert install["reason_code"] == "external_server_install_unsupported"
+    assert update["reason_code"] == "external_server_update_unsupported"
+    assert installer.install_calls == [("research", {"request_id": "install"})]
+    assert installer.update_calls == [("research", {"request_id": "update"})]
+    assert store.mutations == 0
+    assert transport.connect_count == 1
+    assert transport.close_count == 0
+    assert rows["servers"][0]["status"] == "healthy"
+    assert [tool.virtual_name for tool in tools] == ["ext.research.search"]

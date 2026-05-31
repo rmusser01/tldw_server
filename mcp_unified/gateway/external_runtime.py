@@ -18,6 +18,10 @@ from mcp_unified.federation.models import (
     FederationPolicyDenied,
     VirtualExternalTool,
 )
+from mcp_unified.federation.installers import (
+    ExternalServerInstaller,
+    NullExternalServerInstaller,
+)
 from mcp_unified.federation.transports import ExternalFederationTransport
 from mcp_unified.interfaces.storage import AuditStore, ExternalRegistryStore
 from mcp_unified.storage import AuditEvent, ExternalServerDefinition
@@ -76,11 +80,13 @@ class GatewayExternalRuntimeManager:
         transport_factory: Callable[[ExternalServerDefinition], ExternalFederationTransport],
         audit_store: AuditStore | None = None,
         credential_broker: ExternalCredentialBroker | Callable[..., Any] | None = None,
+        installer: ExternalServerInstaller | None = None,
     ) -> None:
         self._external_registry_store = external_registry_store
         self._transport_factory = transport_factory
         self._audit_store = audit_store
         self._credential_broker = credential_broker
+        self._installer = installer or NullExternalServerInstaller()
         self._servers: dict[str, ExternalServerDefinition] = {}
         self._transports: dict[str, ExternalFederationTransport] = {}
         self._virtual_tools: dict[str, VirtualExternalTool] = {}
@@ -308,6 +314,46 @@ class GatewayExternalRuntimeManager:
                 self._virtual_tools[name].copy()
                 for name in sorted(self._virtual_tools)
             ]
+
+    async def install_server(
+        self,
+        server_id: str,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Delegate optional install work to the configured installer adapter."""
+        async with self._lock:
+            server = await self._load_server(server_id)
+            self._require_enabled(server)
+            payload = await self._installer.install_server(
+                server.model_copy(deep=True),
+                context=context,
+            )
+            return self._installer_payload(
+                payload,
+                server=server,
+                fallback_reason_code="external_server_install_not_configured",
+            )
+
+    async def update_server(
+        self,
+        server_id: str,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Delegate optional update work to the configured installer adapter."""
+        async with self._lock:
+            server = await self._load_server(server_id)
+            self._require_enabled(server)
+            payload = await self._installer.update_server(
+                server.model_copy(deep=True),
+                context=context,
+            )
+            return self._installer_payload(
+                payload,
+                server=server,
+                fallback_reason_code="external_server_update_not_configured",
+            )
 
     async def execute_virtual_tool(
         self,
@@ -561,6 +607,20 @@ class GatewayExternalRuntimeManager:
 
     def _count_tools_for_server(self, server_id: str) -> int:
         return sum(1 for tool in self._virtual_tools.values() if tool.server_id == server_id)
+
+    @staticmethod
+    def _installer_payload(
+        payload: dict[str, Any],
+        *,
+        server: ExternalServerDefinition,
+        fallback_reason_code: str,
+    ) -> dict[str, Any]:
+        result = deepcopy(payload or {})
+        result.setdefault("ok", False)
+        result.setdefault("available", False)
+        result.setdefault("reason_code", fallback_reason_code)
+        result.setdefault("server_id", server.id)
+        return result
 
     async def _resolve_runtime_auth(
         self,
