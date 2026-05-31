@@ -4,7 +4,7 @@ title: MCP Unified Stage 4L editable profile CRUD design
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-31 15:32'
+updated_date: '2026-05-31 15:36'
 labels:
   - mcp-unified
   - design
@@ -36,8 +36,13 @@ Design-only task. After human and reviewer approval, invoke the writing-plans sk
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Spec drafted at Docs/superpowers/specs/2026-05-31-mcp-unified-stage4l-editable-profile-crud-design.md. Awaiting reviewer loop.
+Spec drafted at Docs/superpowers/specs/2026-05-31-mcp-unified-stage4l-editable-profile-crud-design.md. Spec reviewer approved with no blocking issues; advisory clarifications for disabled default create, scoped delete guards, malformed JSON tests, and the disabled-default-create manager test were incorporated.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -48,9 +53,3 @@ Spec drafted at Docs/superpowers/specs/2026-05-31-mcp-unified-stage4l-editable-p
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->

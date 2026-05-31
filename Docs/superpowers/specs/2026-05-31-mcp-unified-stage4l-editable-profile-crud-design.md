@@ -98,6 +98,12 @@ compact audit event.
 Create is not an upsert. If a profile with the requested ID already exists, the
 operation fails with a deterministic `profile_already_exists` reason.
 
+Creating disabled profiles is allowed except when the new profile ID is already
+selected by the current gateway default assignment or bootstrap fallback default.
+In that case, creating the disabled profile would make the effective gateway
+default disabled, so the manager must reject it. Callers should either create an
+enabled profile for that ID or move the default first.
+
 The manager should preserve a valid provided `created_at` value. `updated_at`
 should be set to the current time during create so the stored document reflects
 the mutation time.
@@ -155,6 +161,12 @@ Delete fails when:
 The manager should not rely on SQLite foreign-key cascade behavior for safety.
 The user-visible contract is that the control plane refuses unsafe deletion
 before storage mutation.
+
+Deletion safety is scoped to the current Stage 4L ownership boundary: default
+profile resolution and profile assignments. SQLite may cascade future-owned rows
+such as approval policy or credential grant records, but Stage 4L does not expose
+or inspect those surfaces. Those references should be handled by the later
+approval/grant lifecycle slice.
 
 ## FastAPI Contract
 
@@ -314,6 +326,8 @@ Manager tests should cover:
 
 - Creating a valid profile and auditing success.
 - Rejecting duplicate profile IDs.
+- Rejecting creation of a disabled profile whose ID matches the current default
+  assignment or fallback default.
 - Patching allowed fields and preserving omitted fields.
 - Replacing `metadata` and individual policy fields rather than merging them.
 - Rejecting unsupported patch fields.
@@ -326,6 +340,7 @@ Manager tests should cover:
 FastAPI tests should cover:
 
 - `POST /profiles` success and duplicate failure.
+- Malformed JSON or invalid Pydantic body handling for `POST /profiles`.
 - `PATCH /profiles/{profile_id}` success.
 - Blocked default disable through `PATCH /profiles/{profile_id}`.
 - `DELETE /profiles/{profile_id}` success.
@@ -336,6 +351,7 @@ CLI tests should cover:
 
 - `create-profile --profile-file`.
 - `create-profile --profile-file -`.
+- Malformed JSON handling for `--profile-file` and `--patch-file` input.
 - `patch-profile <profile_id> --patch-file`.
 - `patch-profile <profile_id> --patch-file -`.
 - `delete-profile <profile_id>`.
