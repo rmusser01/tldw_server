@@ -42,7 +42,7 @@ Started Task 1 subagent-driven slice: backend first-run state store and setup sc
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 1 stale-lock cleanup slice: stale lock recovery now falls back to lock file mtime when metadata is empty or malformed, so crash-created lock files can be recovered without manual deletion. The duplicate Backlog final-summary closing markers were also removed. TASK-490 remains In Progress because Task 2 endpoint/access-boundary work is intentionally not implemented. Red phase captured 2 expected failures in test_first_run_state.py before production changes: empty and malformed stale lock files timed out. Verification after fix: test_first_run_state.py - 19 passed; test_setup_manager_masking.py - 1 passed; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings; git diff --check passed.
+Task 1 secret-redaction marker fix slice: first-run step_data redaction now covers private_key, access_key, and auth_key normalized variants without adding a broad suffix rule. TASK-490 remains In Progress because Task 2 endpoint/access-boundary work is intentionally not implemented. Red phase captured 1 expected failure in test_first_run_state.py before production changes: private_key/access_key/auth_key values persisted raw. Verification after fix: test_first_run_state.py - 19 passed; test_setup_manager_masking.py - 1 passed; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

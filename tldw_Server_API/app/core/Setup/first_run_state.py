@@ -38,6 +38,9 @@ TERMINAL_STATE_REASONS = {
 SECRET_KEY_MARKERS = (
     "api_key",
     "apikey",
+    "private_key",
+    "access_key",
+    "auth_key",
     "secret",
     "token",
     "password",

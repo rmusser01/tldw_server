@@ -44,7 +44,9 @@ def test_step_data_secrets_are_redacted_before_persistence(tmp_path: Path):
         "providers",
         {
             "api_key": "sk-secret-raw",
-            "nested": {"refresh_token": "tok-raw"},
+            "private_key": "private-key-raw",
+            "access_key": "access-key-raw",
+            "nested": {"refresh_token": "tok-raw", "auth_key": "auth-key-raw"},
             "default_provider": "openai",
             "acknowledged": True,
         },
@@ -54,8 +56,14 @@ def test_step_data_secrets_are_redacted_before_persistence(tmp_path: Path):
     serialized_step_data = json.dumps(state.step_data)
     assert "sk-secret-raw" not in serialized_step_data
     assert "tok-raw" not in serialized_step_data
+    assert "private-key-raw" not in serialized_step_data
+    assert "access-key-raw" not in serialized_step_data
+    assert "auth-key-raw" not in serialized_step_data
     assert state.step_data["providers"]["api_key"] == "********"
+    assert state.step_data["providers"]["private_key"] == "********"
+    assert state.step_data["providers"]["access_key"] == "********"
     assert state.step_data["providers"]["nested"]["refresh_token"] == "********"
+    assert state.step_data["providers"]["nested"]["auth_key"] == "********"
     assert state.step_data["providers"]["default_provider"] == "openai"
     assert state.step_data["providers"]["acknowledged"] is True
 
