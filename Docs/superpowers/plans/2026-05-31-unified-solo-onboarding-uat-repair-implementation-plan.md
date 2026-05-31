@@ -102,7 +102,7 @@ function buildFirstRunSetupRoute(entryIntent: FirstRunEntryIntent | null): strin
 - New or existing `apps/packages/ui/src/services/__tests__/tldw-api-client*.test.ts`
 - Makefile dry-run or targeted command inspection with a fake `.env`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -116,19 +116,19 @@ function buildFirstRunSetupRoute(entryIntent: FirstRunEntryIntent | null): strin
 
 ### Red Tests
 
-- [ ] Add a quickstart networking test showing the `start-docker-single` Makefile recipe supplies `NEXT_PUBLIC_X_API_KEY` to the WebUI compose command from the same `SINGLE_USER_API_KEY` source used by the backend.
-- [ ] Add a quickstart networking test or dry-run assertion showing the recipe does not print the resolved key value.
-- [ ] Preserve or tighten the existing runtime-bootstrap test coverage where `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart`, `NEXT_PUBLIC_API_URL` is empty, and `NEXT_PUBLIC_X_API_KEY` is present. This may already pass; keep it as a regression check rather than forcing a redundant red test.
-- [ ] Preserve or tighten the existing runtime-bootstrap test showing no automatic generated-key behavior when deployment mode is not `quickstart` and no explicit public key is provided.
-- [ ] Add a `TldwApiClient` initialization test showing a first-run client with no stored config creates usable config from `NEXT_PUBLIC_X_API_KEY` and the quickstart API URL origin.
-- [ ] Add a `TldwApiClient` test showing missing key still returns the existing explicit missing-key error.
-- [ ] Run the focused tests and confirm the new Makefile handoff and `TldwApiClient` first-run seeding assertions fail before implementation.
+- [x] Add a quickstart networking test showing the `start-docker-single` Makefile recipe supplies `NEXT_PUBLIC_X_API_KEY` to the WebUI compose command from the same `SINGLE_USER_API_KEY` source used by the backend.
+- [x] Add a quickstart networking test or dry-run assertion showing the recipe does not print the resolved key value.
+- [x] Preserve or tighten the existing runtime-bootstrap test coverage where `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart`, `NEXT_PUBLIC_API_URL` is empty, and `NEXT_PUBLIC_X_API_KEY` is present. This may already pass; keep it as a regression check rather than forcing a redundant red test.
+- [x] Preserve or tighten the existing runtime-bootstrap test showing no automatic generated-key behavior when deployment mode is not `quickstart` and no explicit public key is provided.
+- [x] Add a `TldwApiClient` initialization test showing a first-run client with no stored config creates usable config from `NEXT_PUBLIC_X_API_KEY` and the quickstart API URL origin.
+- [x] Add a `TldwApiClient` test showing missing key still returns the existing explicit missing-key error.
+- [x] Run the focused tests and confirm the new Makefile handoff and `TldwApiClient` first-run seeding assertions fail before implementation.
 
 ### Implementation
 
-- [ ] Update `start-docker-single` so it reads `SINGLE_USER_API_KEY` from `$(TLDW_ENV_FILE)` and passes it to the WebUI compose as `NEXT_PUBLIC_X_API_KEY` only when the caller did not set `NEXT_PUBLIC_X_API_KEY`. Mirror the existing `Helper_Scripts/run-frontend-integration.sh` precedence: explicit `NEXT_PUBLIC_X_API_KEY` wins, otherwise use `SINGLE_USER_API_KEY`.
-- [ ] Keep the Makefile command structured so the key is not echoed. Use shell variable assignment inside the recipe rather than printing the resolved key.
-- [ ] If the env file has no usable `SINGLE_USER_API_KEY`, fail with a clear setup message instead of launching a WebUI that cannot authenticate.
+- [x] Update `start-docker-single` so it reads `SINGLE_USER_API_KEY` from `$(TLDW_ENV_FILE)` and passes it to the WebUI compose as `NEXT_PUBLIC_X_API_KEY` only when the caller did not set `NEXT_PUBLIC_X_API_KEY`. Mirror the existing `Helper_Scripts/run-frontend-integration.sh` precedence: explicit `NEXT_PUBLIC_X_API_KEY` wins, otherwise use `SINGLE_USER_API_KEY`.
+- [x] Keep the Makefile command structured so the key is not echoed. Use shell variable assignment inside the recipe rather than printing the resolved key.
+- [x] If the env file has no usable `SINGLE_USER_API_KEY`, fail with a clear setup message instead of launching a WebUI that cannot authenticate.
 - [ ] Preserve explicit caller overrides:
 
 ```make
@@ -137,14 +137,14 @@ NEXT_PUBLIC_X_API_KEY="$${NEXT_PUBLIC_X_API_KEY:-$$API_KEY}" \
 docker compose --env-file "$(TLDW_ENV_FILE)" ...
 ```
 
-- [ ] Keep `Dockerfiles/docker-compose.webui.yml` accepting `NEXT_PUBLIC_X_API_KEY` as a WebUI build arg and environment value; add a short comment if needed to document that Make local quickstart supplies it.
-- [ ] Do not expand this PR into a new Next.js server-side auth proxy. The current WebUI already documents `NEXT_PUBLIC_X_API_KEY` as browser-visible single-user auth; keep this repair scoped to making the existing local quickstart contract work, and record server-side proxy auth as a future hardening option if desired.
-- [ ] Extend `runtime-bootstrap.ts` to treat `NEXT_PUBLIC_X_API_KEY` as the local quickstart bootstrap key and persist it through the same existing config path.
-- [ ] Extend `TldwApiClient.getEnvApiKey()` so it also reads `process.env.NEXT_PUBLIC_X_API_KEY`.
-- [ ] Extend `TldwApiClient.initialize()` so a true first-run client creates a config when env URL/key material is present, instead of leaving `config=null`.
-- [ ] Ensure config seeding never logs secrets.
-- [ ] Run the focused tests and confirm they pass.
-- [ ] Commit with message `fix: seed quickstart webui auth config`.
+- [x] Keep `Dockerfiles/docker-compose.webui.yml` accepting `NEXT_PUBLIC_X_API_KEY` as a WebUI build arg and environment value; add a short comment if needed to document that Make local quickstart supplies it.
+- [x] Do not expand this PR into a new Next.js server-side auth proxy. The current WebUI already documents `NEXT_PUBLIC_X_API_KEY` as browser-visible single-user auth; keep this repair scoped to making the existing local quickstart contract work, and record server-side proxy auth as a future hardening option if desired.
+- [x] Extend `runtime-bootstrap.ts` to treat `NEXT_PUBLIC_X_API_KEY` as the local quickstart bootstrap key and persist it through the same existing config path.
+- [x] Extend `TldwApiClient.getEnvApiKey()` so it also reads `process.env.NEXT_PUBLIC_X_API_KEY`.
+- [x] Extend `TldwApiClient.initialize()` so a true first-run client creates a config when env URL/key material is present, instead of leaving `config=null`.
+- [x] Ensure config seeding never logs secrets.
+- [x] Run the focused tests and confirm they pass.
+- [x] Commit with message `fix: seed quickstart webui auth config`.
 
 ---
 

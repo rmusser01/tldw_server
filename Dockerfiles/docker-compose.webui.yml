@@ -33,5 +33,8 @@ services:
       - HOSTNAME=0.0.0.0
       - PORT=3000
       - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-}
+      # Local quickstart supplies this from SINGLE_USER_API_KEY in the Makefile
+      # so the first WebUI load can authenticate without manual browser config.
+      - NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY:-}
       - NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=${NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE:-quickstart}
       - TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN:-http://app:8000}

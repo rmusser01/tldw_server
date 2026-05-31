@@ -1358,9 +1358,12 @@ export class TldwApiClientBase {
   private getEnvApiKey(): string | null {
     try {
       const env: any = (import.meta as any)?.env || {}
+      const processEnv: Record<string, string | undefined> =
+        typeof process === "undefined" ? {} : process.env || {}
       const raw =
         (env?.VITE_TLDW_API_KEY as string | undefined) ??
-        (env?.VITE_TLDW_DEFAULT_API_KEY as string | undefined)
+        (env?.VITE_TLDW_DEFAULT_API_KEY as string | undefined) ??
+        processEnv.NEXT_PUBLIC_X_API_KEY
       const key = (raw || "").trim()
       return key || null
     } catch {
@@ -1612,10 +1615,20 @@ export class TldwApiClientBase {
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
 
     if (!stored) {
-      // True first-run: leave config null so callers (like the connection
-      // store) can distinguish an unconfigured state from a misconfigured
-      // or unreachable server.
-      this.config = null
+      if (quickstartWebUiServerUrl && envApiKey) {
+        const hydrated: TldwConfig = {
+          authMode: "single-user",
+          serverUrl: quickstartWebUiServerUrl,
+          apiKey: envApiKey
+        }
+        this.config = hydrated
+        await this.storage.set("tldwConfig", hydrated)
+        await this.syncConnectionServerUrl(hydrated.serverUrl)
+      } else {
+        // True first-run without quickstart auth material: leave config null so
+        // callers can distinguish unconfigured from misconfigured/unreachable.
+        this.config = null
+      }
     } else {
       const hydrated: TldwConfig = {
         ...stored,
