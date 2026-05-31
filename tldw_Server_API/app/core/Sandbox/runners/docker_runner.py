@@ -242,36 +242,6 @@ class DockerRunner:
             startup_budget = 20
         deadline = datetime.utcnow() + timedelta(seconds=max(1, startup_budget))
 
-        # Prepare tar stream from inline files (session workspace integration TBD)
-        import io
-        import tarfile
-        import time
-        tar_buf = io.BytesIO()
-        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
-            # Session workspace files (if any)
-            if session_workspace and os.path.isdir(session_workspace):
-                base_len = len(session_workspace.rstrip("/"))
-                for root, _dirs, files in os.walk(session_workspace):
-                    for fname in files:
-                        fpath = os.path.join(root, fname)
-                        rel = fpath[base_len+1:]
-                        try:
-                            st = os.stat(fpath)
-                            ti = tarfile.TarInfo(name=rel)
-                            ti.size = st.st_size
-                            ti.mtime = int(st.st_mtime)
-                            with open(fpath, "rb") as rf:
-                                tf.addfile(ti, rf)
-                        except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(f"Skipping workspace file {rel}: {e}")
-            for (path, data) in (spec.files_inline or []):
-                safe_path = path.lstrip("/\\").replace("..", "_")
-                ti = tarfile.TarInfo(name=safe_path)
-                ti.size = len(data)
-                ti.mtime = int(time.time())
-                tf.addfile(ti, io.BytesIO(data))
-        tar_buf.seek(0)
-
         # Step 1: docker create
         cmd: list[str] = ["docker", "create"]
         # Keep STDIN open for interactive runs
@@ -396,12 +366,71 @@ class DockerRunner:
             os.getenv("SANDBOX_DOCKER_BIND_WORKSPACE")
             or str(getattr(app_settings, "SANDBOX_DOCKER_BIND_WORKSPACE", ""))
         )
+
+        staged_input_tmpdir: tempfile.TemporaryDirectory[str] | None = None
+        staged_input_dir: str | None = None
+
+        def _cleanup_staged_inputs() -> None:
+            nonlocal staged_input_tmpdir, staged_input_dir
+            if staged_input_tmpdir is None:
+                return
+            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
+                staged_input_tmpdir.cleanup()
+            staged_input_tmpdir = None
+            staged_input_dir = None
+
+        def _safe_workspace_path(path: str) -> str:
+            return path.lstrip("/\\").replace("..", "_")
+
+        def _copy_workspace_contents(src_dir: str, dst_dir: str) -> None:
+            base_dir = os.path.abspath(src_dir)
+            for root, _dirs, files in os.walk(base_dir):
+                rel_root = os.path.relpath(root, base_dir)
+                for fname in files:
+                    src_path = os.path.join(root, fname)
+                    rel_path = fname if rel_root == "." else os.path.join(rel_root, fname)
+                    safe_rel_path = _safe_workspace_path(rel_path)
+                    dst_path = os.path.join(dst_dir, safe_rel_path)
+                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                    shutil.copy2(src_path, dst_path)
+
+        def _write_inline_files(dst_dir: str) -> None:
+            for path, data in spec.files_inline or []:
+                safe_path = _safe_workspace_path(path)
+                full_path = os.path.join(dst_dir, safe_path)
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                with open(full_path, "wb") as file_handle:
+                    file_handle.write(data)
+
+        session_workspace_dir = (
+            os.path.abspath(session_workspace)
+            if session_workspace and os.path.isdir(session_workspace)
+            else None
+        )
+        container_workspace_is_bind = bool(bind_workspace and session_workspace_dir)
+        needs_staged_inputs = bool(spec.files_inline) or bool(
+            session_workspace_dir and not container_workspace_is_bind
+        )
+        if needs_staged_inputs:
+            staged_input_tmpdir = tempfile.TemporaryDirectory(prefix="tldw_docker_inputs_")
+            staged_input_dir = staged_input_tmpdir.name
+            # The container runs as a configured non-root uid/gid; this random
+            # input-only dir is read-only mounted and removed after the run.
+            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
+                os.chmod(staged_input_dir, 0o755)  # nosec B103
+            if session_workspace_dir and not container_workspace_is_bind:
+                _copy_workspace_contents(session_workspace_dir, staged_input_dir)
+            if spec.files_inline:
+                _write_inline_files(staged_input_dir)
+
         # tmpfs workdir and tmp (skip workspace tmpfs when bind-mounting)
         ws_cap = int(getattr(app_settings, "SANDBOX_WORKSPACE_CAP_MB", 256))
-        if bind_workspace and session_workspace:
-            cmd += ["--mount", f"type=bind,src={session_workspace},dst=/workspace"]
+        if container_workspace_is_bind and session_workspace_dir:
+            cmd += ["--mount", f"type=bind,src={session_workspace_dir},dst=/workspace"]
         else:
             cmd += ["--tmpfs", f"/workspace:rw,noexec,nodev,nosuid,uid={uid},gid={gid},size={ws_cap}m"]
+        if staged_input_dir:
+            cmd += ["--mount", f"type=bind,src={staged_input_dir},dst=/tldw-staged-workspace,readonly"]
         # Container-scoped tmpfs mount path, not host temp-dir creation.
         cmd += ["--tmpfs", f"/tmp:rw,noexec,nodev,nosuid,uid={uid},gid={gid},size=64m"]  # nosec B108
         # Working dir
@@ -446,13 +475,19 @@ class DockerRunner:
         image = spec.base_image or "python:3.11-slim"
         cmd.append(image)
         if not spec.command:
+            _cleanup_staged_inputs()
             raise RuntimeError("No command provided for docker create/start")
         # Run in shell to ensure environment and path; safely quote user command
         import shlex
         user_cmd = " ".join(shlex.quote(x) for x in list(spec.command))
         # In granular enforcement mode, add a short delay to allow host iptables to be applied
         delay_prefix = "sleep 1 && " if (net_policy == "allowlist" and enforced and granular) else ""
-        shell_str = f"mkdir -p /workspace && {delay_prefix}exec {user_cmd}"
+        staged_input_prefix = (
+            "cp -a /tldw-staged-workspace/. /workspace/ && "
+            if staged_input_dir
+            else ""
+        )
+        shell_str = f"mkdir -p /workspace && {staged_input_prefix}{delay_prefix}exec {user_cmd}"
         cmd += ["sh", "-lc", shell_str]
 
         logger.info(f"Starting docker run: {' '.join(cmd)}")
@@ -468,10 +503,12 @@ class DockerRunner:
             remaining = max(1, int((deadline - datetime.utcnow()).total_seconds()))
             cid = subprocess.check_output(cmd, text=True, timeout=remaining).strip()
         except FileNotFoundError:
+            _cleanup_staged_inputs()
             self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
             self._clear_run_tracking(run_id)
             raise RuntimeError("docker binary not found in PATH") from None
         except subprocess.TimeoutExpired:
+            _cleanup_staged_inputs()
             self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
             self._clear_run_tracking(run_id)
             finished = datetime.utcnow()
@@ -502,10 +539,12 @@ class DockerRunner:
                     cmd_wo_sec = [c for c in cmd if c not in security_opts]
                     cid = subprocess.check_output(cmd_wo_sec, text=True).strip()
                 except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e2:
+                    _cleanup_staged_inputs()
                     self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
                     self._clear_run_tracking(run_id)
                     raise RuntimeError(f"docker create failed (without security opts): {e2}") from e2
             else:
+                _cleanup_staged_inputs()
                 self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
                 self._clear_run_tracking(run_id)
                 raise RuntimeError(f"docker create failed: {e}") from e
@@ -520,69 +559,13 @@ class DockerRunner:
         except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
             pass
 
-        # Step 2: copy session workspace and inline files using docker cp
-        try:
-            # Ensure /workspace exists via create flags; proceed to cp
-            if session_workspace and os.path.isdir(session_workspace) and not bind_workspace:
-                remaining = max(1, int((deadline - datetime.utcnow()).total_seconds()))
-                subprocess.check_call(["docker", "cp", f"{session_workspace}/.", f"{cid}:/workspace/"], timeout=remaining)
-            # Stage inline files into a temp dir and copy
-            if spec.files_inline:
-                staging = tempfile.mkdtemp(prefix="tldw_inline_")
-                try:
-                    for (path, data) in (spec.files_inline or []):
-                        safe_path = path.lstrip("/\\").replace("..", "_")
-                        full = os.path.join(staging, safe_path)
-                        os.makedirs(os.path.dirname(full), exist_ok=True)
-                        with open(full, "wb") as f:
-                            f.write(data)
-                    remaining = max(1, int((deadline - datetime.utcnow()).total_seconds()))
-                    subprocess.check_call(["docker", "cp", f"{staging}/.", f"{cid}:/workspace/"], timeout=remaining)
-                finally:
-                    with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                        shutil.rmtree(staging, ignore_errors=True)
-        except subprocess.TimeoutExpired:
-            # Cleanup container
-            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                subprocess.check_call(["docker", "rm", "-f", cid])
-            self._cleanup_tracked_egress_resources(run_id, cleanup_rules=False)
-            self._clear_run_tracking(run_id)
-            finished = datetime.utcnow()
-            hub.publish_event(run_id, "end", {"exit_code": None, "reason": "startup_timeout"})
-            # Attempt a best-effort CPU usage readback from cgroup before removal
-            try:
-                cpu_sec_cp = self._read_cgroup_cpu_time_sec_by_cid(cid)
-            except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-                cpu_sec_cp = None
-            usage = {
-                "cpu_time_sec": int(max(0, (cpu_sec_cp or 0))),
-                "wall_time_sec": int(max(0.0, (finished - started).total_seconds())),
-                "peak_rss_mb": 0,
-                "log_bytes": int(get_hub().get_log_bytes(run_id)),
-                "artifact_bytes": 0,
-            }
-            return RunStatus(
-                id="",
-                phase=RunPhase.timed_out,
-                started_at=started,
-                finished_at=finished,
-                exit_code=None,
-                message="startup_timeout",
-                resource_usage=usage,
-            )
-        except subprocess.CalledProcessError as e:
-            # Cleanup container
-            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                subprocess.check_call(["docker", "rm", "-f", cid])
-            self._cleanup_tracked_egress_resources(run_id, cleanup_rules=False)
-            self._clear_run_tracking(run_id)
-            raise RuntimeError(f"docker cp failed: {e}") from e
-
-        # Step 3: start container and stream logs
+        # Step 2: start container and stream logs. Input files are mounted from a
+        # read-only staging dir and copied into the /workspace tmpfs by shell_str.
         try:
             remaining = max(1, int((deadline - datetime.utcnow()).total_seconds()))
             subprocess.check_call(["docker", "start", cid], timeout=remaining)
         except subprocess.TimeoutExpired:
+            _cleanup_staged_inputs()
             finished = datetime.utcnow()
             hub.publish_event(run_id, "end", {"exit_code": None, "reason": "startup_timeout"})
             # Even if start timed out, try to read any cgroup CPU used (should be minimal)
@@ -612,6 +595,7 @@ class DockerRunner:
                 resource_usage=usage,
             )
         except subprocess.CalledProcessError as e:
+            _cleanup_staged_inputs()
             with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
                 subprocess.check_call(["docker", "rm", "-f", cid])
             self._cleanup_tracked_egress_resources(run_id, cleanup_rules=False)
@@ -809,6 +793,7 @@ class DockerRunner:
                 subprocess.check_call(["docker", "rm", "-f", cid])
             self._cleanup_tracked_egress_resources(run_id)
             self._clear_run_tracking(run_id)
+            _cleanup_staged_inputs()
             return RunStatus(
                 id="",
                 phase=RunPhase.timed_out,
@@ -841,15 +826,20 @@ class DockerRunner:
         artifact_counters: dict[str, int] = {}
         try:
             if spec.capture_patterns:
-                host_ws = tempfile.mkdtemp(prefix="tldw_ws_copy_")
-                try:
-                    subprocess.check_call(["docker", "cp", f"{cid}:/workspace/.", f"{host_ws}/"])
-                    artifact_result = collect_runner_artifacts(host_ws, spec.capture_patterns)
+                if container_workspace_is_bind and session_workspace_dir:
+                    artifact_result = collect_runner_artifacts(session_workspace_dir, spec.capture_patterns)
                     artifacts_map = artifact_result.artifacts
                     artifact_counters = artifact_result.counters
-                finally:
-                    with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                        shutil.rmtree(host_ws, ignore_errors=True)
+                else:
+                    host_ws = tempfile.mkdtemp(prefix="tldw_ws_copy_")
+                    try:
+                        subprocess.check_call(["docker", "cp", f"{cid}:/workspace/.", f"{host_ws}/"])
+                        artifact_result = collect_runner_artifacts(host_ws, spec.capture_patterns)
+                        artifacts_map = artifact_result.artifacts
+                        artifact_counters = artifact_result.counters
+                    finally:
+                        with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
+                            shutil.rmtree(host_ws, ignore_errors=True)
         except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"Artifact collection failed: {e}")
 
@@ -899,6 +889,7 @@ class DockerRunner:
         if net_policy == "allowlist" and enforced and granular:
             self._cleanup_tracked_egress_resources(run_id)
         self._clear_run_tracking(run_id)
+        _cleanup_staged_inputs()
         return RunStatus(
             id="",
             phase=phase,

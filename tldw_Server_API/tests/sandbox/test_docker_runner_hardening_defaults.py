@@ -59,6 +59,44 @@ def test_docker_runner_defaults_to_non_root_uid_gid_and_read_only_rootfs(monkeyp
 
 
 @pytest.mark.unit
+def test_docker_runner_bind_mounts_staged_workspace_for_inline_files(monkeypatch) -> None:
+    monkeypatch.delenv("SANDBOX_DOCKER_BIND_WORKSPACE", raising=False)
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "/workspace/hello.py"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+        files_inline=[("hello.py", b"print('ok')\n")],
+    )
+
+    create_cmd = _capture_docker_create_command(monkeypatch, spec)
+
+    staged_mounts = [
+        create_cmd[idx + 1]
+        for idx, token in enumerate(create_cmd[:-1])
+        if token == "--mount" and "dst=/tldw-staged-workspace" in create_cmd[idx + 1]
+    ]
+    workspace_tmpfs = [
+        create_cmd[idx + 1]
+        for idx, token in enumerate(create_cmd[:-1])
+        if token == "--tmpfs" and create_cmd[idx + 1].startswith("/workspace:")
+    ]
+    if not staged_mounts:
+        pytest.fail(f"Expected read-only staged input mount, got: {create_cmd!r}")
+    if "readonly" not in staged_mounts[0]:
+        pytest.fail(f"Expected staged input mount to be readonly, got: {staged_mounts[0]!r}")
+    if not workspace_tmpfs:
+        pytest.fail(f"Expected hardened /workspace tmpfs to remain, got: {create_cmd!r}")
+    shell_cmd = create_cmd[-1]
+    if "/tldw-staged-workspace/." not in shell_cmd:
+        pytest.fail(f"Expected shell prelude to copy staged inputs, got: {shell_cmd!r}")
+
+
+@pytest.mark.unit
 def test_docker_runner_uses_configured_non_root_uid_gid(monkeypatch) -> None:
     monkeypatch.setenv("SANDBOX_DOCKER_DEFAULT_UID", "2001")
     monkeypatch.setenv("SANDBOX_DOCKER_DEFAULT_GID", "3002")
