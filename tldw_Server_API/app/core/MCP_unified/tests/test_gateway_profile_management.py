@@ -16,6 +16,8 @@ from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.profiles.store import (
     InMemoryProfileAssignmentStore,
     InMemoryProfileStore,
+    ProfileAlreadyExistsError,
+    ProfileStoreUnavailableError,
 )
 from mcp_unified.storage.models import AuditEvent, ProfileAssignment
 from mcp_unified.storage.sqlite import SQLiteMCPStore
@@ -59,6 +61,37 @@ class FailingAuditStore(InMemoryAuditStore):
 
     async def append_event(self, event: AuditEvent) -> AuditEvent:
         raise RuntimeError(f"audit unavailable for {event.event_type}")
+
+
+class ConflictingCreateProfileStore(InMemoryProfileStore):
+    """Profile store double that reports an atomic create conflict."""
+
+    async def create_profile(self, profile: MCPProfile) -> MCPProfile:
+        raise ProfileAlreadyExistsError(profile.id)
+
+
+class UnavailableGuardedDeleteProfileStore(InMemoryProfileStore):
+    """Profile store double whose guarded delete backend is unavailable."""
+
+    async def delete_profile_if_unassigned(
+        self,
+        profile_id: str,
+        *,
+        effective_default_profile_id: str | None,
+    ) -> str:
+        raise ProfileStoreUnavailableError(f"guarded delete unavailable: {profile_id}")
+
+
+class UnknownGuardedDeleteProfileStore(InMemoryProfileStore):
+    """Profile store double that violates the guarded-delete status contract."""
+
+    async def delete_profile_if_unassigned(
+        self,
+        profile_id: str,
+        *,
+        effective_default_profile_id: str | None,
+    ) -> str:
+        return "surprise"
 
 
 def _manager(
@@ -255,6 +288,43 @@ async def test_create_profile_rejects_duplicate_id() -> None:
     assert stored is not None
     assert stored.name == "Existing"
     assert stored.metadata == {"owner": "original"}
+
+
+@pytest.mark.asyncio
+async def test_create_profile_normalizes_profile_id_and_name() -> None:
+    store = InMemoryProfileStore()
+    manager = _manager(store)
+
+    payload = await manager.create_profile(
+        {"id": " reviewer ", "name": "  Reviewer  "}
+    )
+
+    assert payload["profile"]["id"] == "reviewer"
+    assert payload["profile"]["name"] == "Reviewer"
+    assert await store.get_profile(" reviewer ") is None
+    stored = await store.get_profile("reviewer")
+    assert stored is not None
+    assert stored.name == "Reviewer"
+
+
+@pytest.mark.asyncio
+async def test_create_profile_duplicate_detection_uses_store_create_conflict() -> None:
+    audit_store = InMemoryAuditStore()
+    manager = _manager(
+        ConflictingCreateProfileStore(),
+        audit_store=audit_store,
+    )
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.create_profile({"id": "existing", "name": "Existing"})
+
+    assert exc_info.value.reason_code == "profile_already_exists"
+    assert exc_info.value.to_payload()["profile_id"] == "existing"
+    assert [event.event_type for event in audit_store.events] == ["profile.create_failed"]
+    assert audit_store.events[0].payload == {
+        "profile_id": "existing",
+        "reason_code": "profile_already_exists",
+    }
 
 
 @pytest.mark.asyncio
@@ -714,6 +784,25 @@ async def test_patch_profile_preserves_omitted_policy_document_field() -> None:
 
 
 @pytest.mark.asyncio
+async def test_patch_profile_policy_document_handles_missing_stored_policy() -> None:
+    original = MCPProfile(id="reviewer", name="Reviewer").model_copy(
+        update={"policy_document": None},
+    )
+    store = InMemoryProfileStore([original])
+    manager = _manager(store)
+
+    payload = await manager.patch_profile(
+        "reviewer",
+        {"policy_document": {"allowed_tools": ["review.run"]}},
+    )
+
+    assert payload["profile"]["policy_document"]["allowed_tools"] == ["review.run"]
+    stored = await store.get_profile("reviewer")
+    assert stored is not None
+    assert stored.policy_document.allowed_tools == ["review.run"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "patch_document",
     [
@@ -729,6 +818,7 @@ async def test_patch_profile_preserves_omitted_policy_document_field() -> None:
         {"created_at": "2026-05-31T12:00:00+00:00"},
         {"updated_at": "2026-05-31T12:00:00+00:00"},
         {"policy_document": {"unknown_policy_field": True}},
+        {"name": "   "},
         {},
         {"policy_document": {}},
     ],
@@ -917,6 +1007,48 @@ async def test_delete_profile_rejects_assigned_profile() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delete_profile_translates_guarded_delete_store_unavailable() -> None:
+    audit_store = InMemoryAuditStore()
+    manager = _manager(
+        UnavailableGuardedDeleteProfileStore([MCPProfile(id="temporary", name="Temporary")]),
+        audit_store=audit_store,
+    )
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.delete_profile("temporary")
+
+    assert exc_info.value.reason_code == "profile_store_unavailable"
+    assert exc_info.value.to_payload()["profile_id"] == "temporary"
+    assert [event.event_type for event in audit_store.events] == ["profile.delete_failed"]
+    assert audit_store.events[0].payload == {
+        "profile_id": "temporary",
+        "reason_code": "profile_store_unavailable",
+    }
+
+
+@pytest.mark.asyncio
+async def test_delete_profile_rejects_unknown_guarded_delete_status() -> None:
+    audit_store = InMemoryAuditStore()
+    manager = _manager(
+        UnknownGuardedDeleteProfileStore([MCPProfile(id="temporary", name="Temporary")]),
+        audit_store=audit_store,
+    )
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.delete_profile("temporary")
+
+    assert exc_info.value.reason_code == "unexpected_delete_result"
+    assert exc_info.value.to_payload()["profile_id"] == "temporary"
+    assert "surprise" in str(exc_info.value)
+    assert [event.event_type for event in audit_store.events] == ["profile.delete_failed"]
+    assert audit_store.events[0].payload == {
+        "delete_result": "surprise",
+        "profile_id": "temporary",
+        "reason_code": "unexpected_delete_result",
+    }
+
+
+@pytest.mark.asyncio
 async def test_profile_crud_failure_audits_are_compact_and_expected() -> None:
     audit_store = InMemoryAuditStore()
     assignment_store = InMemoryProfileAssignmentStore(
@@ -1024,6 +1156,28 @@ async def test_delete_profile_sqlite_guard_preserves_assigned_profile(tmp_path: 
         assert exc_info.value.reason_code == "profile_has_assignments"
         assert await store.get_profile("assigned") is not None
         assert await store.get_assignment("workspace-assignment") is not None
+    finally:
+        await store.aclose()
+
+
+@pytest.mark.asyncio
+async def test_create_profile_sqlite_reports_atomic_duplicate_conflict(tmp_path: Path) -> None:
+    store = SQLiteMCPStore(tmp_path / "mcp.db")
+    try:
+        await store.upsert_profile(MCPProfile(id="existing", name="Existing"))
+        manager = GatewayProfileManager(
+            profile_store=store,
+            assignment_store=store,
+            store_metadata=GatewayProfileStoreMetadata(kind="sqlite", persistent=True),
+        )
+
+        with pytest.raises(GatewayProfileManagementError) as exc_info:
+            await manager.create_profile({"id": "existing", "name": "Duplicate"})
+
+        assert exc_info.value.reason_code == "profile_already_exists"
+        stored = await store.get_profile("existing")
+        assert stored is not None
+        assert stored.name == "Existing"
     finally:
         await store.aclose()
 

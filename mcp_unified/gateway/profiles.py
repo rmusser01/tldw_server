@@ -22,6 +22,7 @@ from mcp_unified.profiles.defaults import (
 from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.profiles.presets import duplicate_builtin_preset, get_builtin_preset
 from mcp_unified.profiles.store import (
+    ProfileAlreadyExistsError,
     ProfileAssignmentStoreUnavailableError,
     ProfileStoreUnavailableError,
 )
@@ -230,25 +231,18 @@ class GatewayProfileManager:
                 if isinstance(profile_document, MCPProfile)
                 else MCPProfile.model_validate(profile_document)
             )
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise self._error(
                 "Invalid profile request",
                 reason_code="invalid_profile_request",
             ) from exc
 
-        if await self._get_profile(profile.id) is not None:
-            await self._audit_expected_failure(
-                "profile.create_failed",
-                reason_code="profile_already_exists",
-                profile_id=profile.id,
-                target_type="profile",
-                target_id=profile.id,
-            )
-            raise self._error(
-                f"Profile already exists: {profile.id}",
-                reason_code="profile_already_exists",
-                profile_id=profile.id,
-            )
+        normalized_profile_id = self._require_text(profile.id, field="profile_id")
+        normalized_name = self._require_text(profile.name, field="name")
+        profile = profile.model_copy(
+            update={"id": normalized_profile_id, "name": normalized_name},
+            deep=True,
+        )
 
         effective_default_id = await self._effective_default_profile_id()
         if not profile.enabled and profile.id == effective_default_id:
@@ -268,7 +262,20 @@ class GatewayProfileManager:
         now = datetime.now(timezone.utc)
         profile = profile.model_copy(update={"updated_at": now}, deep=True)
         try:
-            stored = await self.profile_store.upsert_profile(profile)
+            stored = await self.profile_store.create_profile(profile)
+        except ProfileAlreadyExistsError as exc:
+            await self._audit_expected_failure(
+                "profile.create_failed",
+                reason_code="profile_already_exists",
+                profile_id=exc.profile_id,
+                target_type="profile",
+                target_id=exc.profile_id,
+            )
+            raise self._error(
+                f"Profile already exists: {exc.profile_id}",
+                reason_code="profile_already_exists",
+                profile_id=exc.profile_id,
+            ) from exc
         except ProfileStoreUnavailableError as exc:
             raise self._error(
                 "Profile store unavailable",
@@ -408,16 +415,51 @@ class GatewayProfileManager:
             None,
         )
         if callable(guarded_delete):
-            result = await guarded_delete(
-                normalized_profile_id,
-                effective_default_profile_id=effective_default_id,
-            )
+            try:
+                result = await guarded_delete(
+                    normalized_profile_id,
+                    effective_default_profile_id=effective_default_id,
+                )
+            except ProfileStoreUnavailableError as exc:
+                await self._audit_expected_failure(
+                    "profile.delete_failed",
+                    reason_code="profile_store_unavailable",
+                    profile_id=normalized_profile_id,
+                    target_type="profile",
+                    target_id=normalized_profile_id,
+                )
+                raise self._error(
+                    "Profile store unavailable",
+                    reason_code="profile_store_unavailable",
+                    profile_id=normalized_profile_id,
+                ) from exc
+            except RuntimeError as exc:
+                await self._audit_expected_failure(
+                    "profile.delete_failed",
+                    reason_code="profile_store_unavailable",
+                    profile_id=normalized_profile_id,
+                    target_type="profile",
+                    target_id=normalized_profile_id,
+                )
+                raise self._error(
+                    "Profile store unavailable",
+                    reason_code="profile_store_unavailable",
+                    profile_id=normalized_profile_id,
+                ) from exc
         elif not self.store_metadata.persistent:
             result = await self._manager_guarded_delete(normalized_profile_id)
         else:
+            await self._audit_expected_failure(
+                "profile.delete_failed",
+                reason_code="profile_store_unavailable",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
             raise self._error(
                 "Profile store unavailable",
                 reason_code="profile_store_unavailable",
+                profile_id=normalized_profile_id,
             )
 
         if result == "deleted":
@@ -459,17 +501,31 @@ class GatewayProfileManager:
                 reason_code="profile_has_assignments",
                 profile_id=normalized_profile_id,
             )
+        if result == "is_default":
+            await self._audit_expected_failure(
+                "profile.delete_failed",
+                reason_code="profile_is_default",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
+            raise self._error(
+                f"Profile is the effective default: {normalized_profile_id}",
+                reason_code="profile_is_default",
+                profile_id=normalized_profile_id,
+            )
 
         await self._audit_expected_failure(
             "profile.delete_failed",
-            reason_code="profile_is_default",
+            reason_code="unexpected_delete_result",
             profile_id=normalized_profile_id,
             target_type="profile",
             target_id=normalized_profile_id,
+            details={"delete_result": result},
         )
         raise self._error(
-            f"Profile is the effective default: {normalized_profile_id}",
-            reason_code="profile_is_default",
+            f"Unexpected guarded delete status {result!r} for profile {normalized_profile_id}",
+            reason_code="unexpected_delete_result",
             profile_id=normalized_profile_id,
         )
 
@@ -654,6 +710,7 @@ class GatewayProfileManager:
         assignment_id: str | None = None,
         target_type: str | None = None,
         target_id: str | None = None,
+        details: Mapping[str, Any] | None = None,
     ) -> None:
         payload: dict[str, Any] = {"reason_code": reason_code}
         if profile_id is not None:
@@ -662,6 +719,8 @@ class GatewayProfileManager:
             payload["preset_id"] = preset_id
         if assignment_id is not None:
             payload["assignment_id"] = assignment_id
+        if details:
+            payload.update(details)
         await self._append_audit_event(
             event_type,
             profile_id=profile_id,
@@ -770,6 +829,14 @@ class GatewayProfileManager:
                     reason_code="invalid_profile_patch",
                 )
             normalized["policy_document"] = policy_patch
+        if "name" in normalized:
+            name = normalized["name"]
+            if not isinstance(name, str) or not name.strip():
+                raise self._error(
+                    "Invalid profile patch",
+                    reason_code="invalid_profile_patch",
+                )
+            normalized["name"] = name.strip()
         return normalized
 
     def _apply_profile_patch(
@@ -781,14 +848,18 @@ class GatewayProfileManager:
         profile_payload = profile.model_dump(mode="python")
         for field, value in patch.items():
             if field == "policy_document":
-                policy_payload = profile.policy_document.model_dump(mode="python")
+                policy_payload = (
+                    profile.policy_document.model_dump(mode="python")
+                    if profile.policy_document is not None
+                    else {}
+                )
                 policy_payload.update(dict(value))
                 profile_payload["policy_document"] = policy_payload
             else:
                 profile_payload[field] = value
         try:
             updated = MCPProfile.model_validate(profile_payload)
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise self._error(
                 "Invalid profile patch",
                 reason_code="invalid_profile_patch",
@@ -825,10 +896,14 @@ class GatewayProfileManager:
         return normalized
 
     @staticmethod
-    def _optional_text(value: str | None, *, field: str) -> str | None:
-        del field
+    def _optional_text(value: object | None, *, field: str) -> str | None:
         if value is None:
             return None
+        if not isinstance(value, str):
+            raise GatewayProfileManagementError(
+                f"Invalid profile request: {field} must be text",
+                reason_code="invalid_profile_request",
+            )
         normalized = value.strip()
         if not normalized:
             raise GatewayProfileManagementError(

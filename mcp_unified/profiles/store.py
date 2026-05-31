@@ -14,6 +14,14 @@ class ProfileStoreUnavailableError(RuntimeError):
     """Raised when a profile store cannot serve requests."""
 
 
+class ProfileAlreadyExistsError(RuntimeError):
+    """Raised when an atomic profile create conflicts with an existing id."""
+
+    def __init__(self, profile_id: str) -> None:
+        super().__init__(f"Profile already exists: {profile_id}")
+        self.profile_id = profile_id
+
+
 class ProfileAssignmentStoreUnavailableError(RuntimeError):
     """Raised when a profile-assignment store cannot serve requests."""
 
@@ -47,6 +55,17 @@ class InMemoryProfileStore:
     ) -> MCPProfile:
         """Store a profile document and return a copy-isolated stored value."""
         validated = self._validate_profile(profile)
+        self._profiles[validated.id] = validated
+        return validated.model_copy(deep=True)
+
+    async def create_profile(
+        self,
+        profile: MCPProfile | Mapping[str, Any],
+    ) -> MCPProfile:
+        """Create a profile only when its id is absent."""
+        validated = self._validate_profile(profile)
+        if validated.id in self._profiles:
+            raise ProfileAlreadyExistsError(validated.id)
         self._profiles[validated.id] = validated
         return validated.model_copy(deep=True)
 

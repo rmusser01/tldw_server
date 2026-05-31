@@ -54,6 +54,7 @@ _PROFILE_MANAGEMENT_STATUS_CODES = {
     "invalid_profile_patch": 422,
     "profile_store_unavailable": 503,
     "assignment_store_unavailable": 503,
+    "unexpected_delete_result": 500,
 }
 
 

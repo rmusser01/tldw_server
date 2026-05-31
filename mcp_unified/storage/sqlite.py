@@ -31,9 +31,11 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
 from mcp_unified.profiles.models import MCPProfile
+from mcp_unified.profiles.store import ProfileAlreadyExistsError
 from mcp_unified.storage.models import (
     ApprovalPolicyDocument,
     AuditEvent,
@@ -102,6 +104,13 @@ class SQLiteMCPStore:
     ) -> MCPProfile:
         """Store a profile document and return the persisted model."""
         return await self._run_db(self._upsert_profile_sync, profile)
+
+    async def create_profile(
+        self,
+        profile: MCPProfile | Mapping[str, Any],
+    ) -> MCPProfile:
+        """Create a profile only when its id is absent."""
+        return await self._run_db(self._create_profile_sync, profile)
 
     async def delete_profile(self, profile_id: str) -> bool:
         """Delete a profile by id and return whether it existed."""
@@ -280,6 +289,32 @@ class SQLiteMCPStore:
             },
             update_columns=("enabled", "updated_at", "payload"),
         )
+        return self._load_model(payload, MCPProfile)
+
+    def _create_profile_sync(
+        self,
+        profile: MCPProfile | Mapping[str, Any],
+    ) -> MCPProfile:
+        validated = self._validate_profile(profile)
+        payload = self._dump_model(validated)
+        profiles_table = self._table("mcp_profiles")
+        statement = sqlite_insert(profiles_table).values(
+            id=validated.id,
+            enabled=int(validated.enabled),
+            updated_at=validated.updated_at.isoformat(),
+            payload=payload,
+        )
+        try:
+            with self._engine.begin() as connection:
+                result = connection.execute(
+                    statement.on_conflict_do_nothing(
+                        index_elements=[profiles_table.c.id],
+                    )
+                )
+        except IntegrityError as exc:
+            raise ProfileAlreadyExistsError(validated.id) from exc
+        if not result.rowcount:
+            raise ProfileAlreadyExistsError(validated.id)
         return self._load_model(payload, MCPProfile)
 
     def _delete_profile_sync(self, profile_id: str) -> bool:

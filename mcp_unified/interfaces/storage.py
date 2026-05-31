@@ -31,6 +31,11 @@ class ProfileStore(Protocol):
         profile: MCPProfile,
     ) -> MCPProfile: ...
 
+    async def create_profile(
+        self,
+        profile: MCPProfile,
+    ) -> MCPProfile: ...
+
     async def delete_profile(self, profile_id: str) -> bool: ...
 
 

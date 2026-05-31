@@ -17,7 +17,11 @@ from .resolution import (
     build_effective_policy_result,
 )
 from .resolver import ProfileResolver, StoreBackedProfileResolver
-from .store import InMemoryProfileStore, ProfileStoreUnavailableError
+from .store import (
+    InMemoryProfileStore,
+    ProfileAlreadyExistsError,
+    ProfileStoreUnavailableError,
+)
 
 __all__ = [
     "EffectivePolicy",
@@ -25,6 +29,7 @@ __all__ = [
     "EffectivePolicyStatus",
     "InMemoryProfileStore",
     "MCPProfile",
+    "ProfileAlreadyExistsError",
     "ProfilePolicy",
     "ProfilePreset",
     "ProfileResolver",
