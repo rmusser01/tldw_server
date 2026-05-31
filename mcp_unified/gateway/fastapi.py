@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from .bootstrap import GatewayProfileBootstrap
 from .jsonrpc import (
@@ -47,10 +47,14 @@ _PROFILE_MANAGEMENT_STATUS_CODES = {
     "preset_not_found": 404,
     "default_profile_not_configured": 404,
     "profile_disabled": 409,
+    "profile_is_default": 409,
+    "profile_has_assignments": 409,
     "profile_already_exists": 409,
     "invalid_profile_request": 422,
+    "invalid_profile_patch": 422,
     "profile_store_unavailable": 503,
     "assignment_store_unavailable": 503,
+    "unexpected_delete_result": 500,
 }
 
 
@@ -66,6 +70,21 @@ class SetDefaultProfileRequest(BaseModel):
     """Request body for changing the gateway default profile."""
 
     profile_id: str
+
+
+class CreateProfileRequest(BaseModel):
+    """Request body for creating a user-editable gateway profile."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+
+
+class PatchProfileRequest(BaseModel):
+    """Request body for patching a user-editable gateway profile."""
+
+    model_config = ConfigDict(extra="allow")
 
 
 class StoreMetadataResponse(BaseModel):
@@ -108,6 +127,14 @@ class DefaultProfileResponse(BaseModel):
     profile: dict[str, Any]
     assignment: dict[str, Any] | None
     default: dict[str, Any]
+    store: StoreMetadataResponse
+
+
+class DeleteProfileResponse(BaseModel):
+    """Response body for deleting one stored gateway profile."""
+
+    ok: bool
+    profile_id: str
     store: StoreMetadataResponse
 
 
@@ -245,8 +272,41 @@ def _mount_profile_management_routes(
 
     @router.get("/profiles", response_model=ProfileListResponse)
     async def list_profiles() -> ProfileListResponse | JSONResponse:
+        """Return editable MCP profiles from the configured profile manager."""
         try:
             return await manager.list_profiles()
+        except GatewayProfileManagementError as exc:
+            return _profile_management_error_response(exc)
+
+    @router.post("/profiles", response_model=ProfileResponse)
+    async def create_profile(
+        request: CreateProfileRequest,
+    ) -> ProfileResponse | JSONResponse:
+        """Create a user-editable MCP profile."""
+        try:
+            return await manager.create_profile(request.model_dump(mode="json"))
+        except GatewayProfileManagementError as exc:
+            return _profile_management_error_response(exc)
+
+    @router.patch("/profiles/{profile_id}", response_model=ProfileResponse)
+    async def patch_profile(
+        profile_id: str,
+        request: PatchProfileRequest,
+    ) -> ProfileResponse | JSONResponse:
+        """Apply an allowed semantic patch to an editable MCP profile."""
+        try:
+            return await manager.patch_profile(
+                profile_id,
+                request.model_dump(mode="json", exclude_unset=True),
+            )
+        except GatewayProfileManagementError as exc:
+            return _profile_management_error_response(exc)
+
+    @router.delete("/profiles/{profile_id}", response_model=DeleteProfileResponse)
+    async def delete_profile(profile_id: str) -> DeleteProfileResponse | JSONResponse:
+        """Delete an unassigned, non-default editable MCP profile."""
+        try:
+            return await manager.delete_profile(profile_id)
         except GatewayProfileManagementError as exc:
             return _profile_management_error_response(exc)
 
@@ -254,6 +314,7 @@ def _mount_profile_management_routes(
     async def duplicate_preset(
         request: DuplicatePresetRequest,
     ) -> DuplicatePresetResponse | JSONResponse:
+        """Duplicate a built-in profile preset into editable profile storage."""
         try:
             payload = await manager.duplicate_preset(
                 request.preset_id,
@@ -266,6 +327,7 @@ def _mount_profile_management_routes(
 
     @router.get("/profiles/default", response_model=DefaultProfileResponse)
     async def get_default_profile() -> DefaultProfileResponse | JSONResponse:
+        """Return the currently effective default MCP profile."""
         try:
             return await manager.get_default_profile()
         except GatewayProfileManagementError as exc:
@@ -275,6 +337,7 @@ def _mount_profile_management_routes(
     async def set_default_profile(
         request: SetDefaultProfileRequest,
     ) -> DefaultProfileResponse | JSONResponse:
+        """Set the gateway default MCP profile assignment."""
         try:
             return await manager.set_default_profile(request.profile_id)
         except GatewayProfileManagementError as exc:
@@ -282,6 +345,7 @@ def _mount_profile_management_routes(
 
     @router.get("/profiles/{profile_id}", response_model=ProfileResponse)
     async def show_profile(profile_id: str) -> ProfileResponse | JSONResponse:
+        """Return a single editable MCP profile by id."""
         try:
             return await manager.show_profile(profile_id)
         except GatewayProfileManagementError as exc:

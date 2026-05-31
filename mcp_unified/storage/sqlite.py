@@ -31,9 +31,11 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
 from mcp_unified.profiles.models import MCPProfile
+from mcp_unified.profiles.store import ProfileAlreadyExistsError
 from mcp_unified.storage.models import (
     ApprovalPolicyDocument,
     AuditEvent,
@@ -103,9 +105,29 @@ class SQLiteMCPStore:
         """Store a profile document and return the persisted model."""
         return await self._run_db(self._upsert_profile_sync, profile)
 
+    async def create_profile(
+        self,
+        profile: MCPProfile | Mapping[str, Any],
+    ) -> MCPProfile:
+        """Create a profile only when its id is absent."""
+        return await self._run_db(self._create_profile_sync, profile)
+
     async def delete_profile(self, profile_id: str) -> bool:
         """Delete a profile by id and return whether it existed."""
         return await self._run_db(self._delete_profile_sync, profile_id)
+
+    async def delete_profile_if_unassigned(
+        self,
+        profile_id: str,
+        *,
+        effective_default_profile_id: str | None,
+    ) -> str:
+        """Atomically delete a profile only when it is not default or assigned."""
+        return await self._run_db(
+            self._delete_profile_if_unassigned_sync,
+            profile_id,
+            effective_default_profile_id=effective_default_profile_id,
+        )
 
     async def get_assignment(self, assignment_id: str) -> ProfileAssignment | None:
         """Return a profile assignment by id."""
@@ -269,8 +291,72 @@ class SQLiteMCPStore:
         )
         return self._load_model(payload, MCPProfile)
 
+    def _create_profile_sync(
+        self,
+        profile: MCPProfile | Mapping[str, Any],
+    ) -> MCPProfile:
+        validated = self._validate_profile(profile)
+        payload = self._dump_model(validated)
+        profiles_table = self._table("mcp_profiles")
+        statement = sqlite_insert(profiles_table).values(
+            id=validated.id,
+            enabled=int(validated.enabled),
+            updated_at=validated.updated_at.isoformat(),
+            payload=payload,
+        )
+        try:
+            with self._engine.begin() as connection:
+                result = connection.execute(
+                    statement.on_conflict_do_nothing(
+                        index_elements=[profiles_table.c.id],
+                    )
+                )
+        except IntegrityError as exc:
+            raise ProfileAlreadyExistsError(validated.id) from exc
+        if not result.rowcount:
+            raise ProfileAlreadyExistsError(validated.id)
+        return self._load_model(payload, MCPProfile)
+
     def _delete_profile_sync(self, profile_id: str) -> bool:
         return self._delete_by_id("mcp_profiles", profile_id)
+
+    def _delete_profile_if_unassigned_sync(
+        self,
+        profile_id: str,
+        *,
+        effective_default_profile_id: str | None,
+    ) -> str:
+        if profile_id == effective_default_profile_id:
+            return "is_default"
+
+        profiles_table = self._table("mcp_profiles")
+        assignments_table = self._table("mcp_profile_assignments")
+        with self._engine.begin() as connection:
+            result = connection.execute(
+                delete(profiles_table).where(
+                    profiles_table.c.id == profile_id,
+                    ~select(assignments_table.c.id)
+                    .where(assignments_table.c.profile_id == profile_id)
+                    .exists(),
+                )
+            )
+            if result.rowcount and result.rowcount > 0:
+                return "deleted"
+
+            profile_row = connection.execute(
+                select(profiles_table.c.id).where(profiles_table.c.id == profile_id)
+            ).mappings().first()
+            if profile_row is None:
+                return "not_found"
+
+            assignment_row = connection.execute(
+                select(assignments_table.c.id)
+                .where(assignments_table.c.profile_id == profile_id)
+                .limit(1)
+            ).mappings().first()
+            if assignment_row is not None:
+                return "has_assignments"
+        return "not_found"
 
     def _get_assignment_sync(self, assignment_id: str) -> ProfileAssignment | None:
         return self._get_model(

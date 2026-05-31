@@ -322,6 +322,34 @@ class _ProfileManagementManagerDouble:
             "store": {"kind": "memory", "persistent": False},
         }
 
+    async def create_profile(self, profile_payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("create_profile", (profile_payload,), {}))
+        return {
+            "ok": True,
+            "profile": profile_payload,
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def patch_profile(
+        self,
+        profile_id: str,
+        patch_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append(("patch_profile", (profile_id, patch_payload), {}))
+        return {
+            "ok": True,
+            "profile": {"id": profile_id, "name": f"Profile {profile_id}", **patch_payload},
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def delete_profile(self, profile_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_profile", (profile_id,), {}))
+        return {
+            "ok": True,
+            "profile_id": profile_id,
+            "store": {"kind": "memory", "persistent": False},
+        }
+
 
 class _ProfileManagementBootstrapDouble:
     def __init__(self, manager: _ProfileManagementManagerDouble) -> None:
@@ -374,6 +402,22 @@ class _ProfileManagementErrorManagerDouble(_ProfileManagementManagerDouble):
     async def set_default_profile(self, profile_id: str) -> dict[str, Any]:
         await self._raise_if_targeted("set_default_profile")
         return await super().set_default_profile(profile_id)
+
+    async def create_profile(self, profile_payload: dict[str, Any]) -> dict[str, Any]:
+        await self._raise_if_targeted("create_profile")
+        return await super().create_profile(profile_payload)
+
+    async def patch_profile(
+        self,
+        profile_id: str,
+        patch_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        await self._raise_if_targeted("patch_profile")
+        return await super().patch_profile(profile_id, patch_payload)
+
+    async def delete_profile(self, profile_id: str) -> dict[str, Any]:
+        await self._raise_if_targeted("delete_profile")
+        return await super().delete_profile(profile_id)
 
 
 def test_gateway_package_does_not_import_tldw_server_api() -> None:
@@ -537,6 +581,22 @@ def test_gateway_profile_management_success_envelopes() -> None:
             "/mcp/profiles/default",
             json={"profile_id": "architect"},
         )
+        created = client.post(
+            "/mcp/profiles",
+            json={
+                "id": "custom-reviewer",
+                "name": "Custom Reviewer",
+                "policy_document": {"allowed_tools": ["echo.search"]},
+            },
+        )
+        patched = client.patch(
+            "/mcp/profiles/custom-reviewer",
+            json={
+                "name": "Custom Reviewer v2",
+                "description": "updated",
+            },
+        )
+        deleted = client.delete("/mcp/profiles/custom-reviewer")
 
     assert listed.json() == {
         "ok": True,
@@ -598,6 +658,29 @@ def test_gateway_profile_management_success_envelopes() -> None:
         },
         "store": {"kind": "memory", "persistent": False},
     }
+    assert created.json() == {
+        "ok": True,
+        "profile": {
+            "id": "custom-reviewer",
+            "name": "Custom Reviewer",
+            "policy_document": {"allowed_tools": ["echo.search"]},
+        },
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert patched.json() == {
+        "ok": True,
+        "profile": {
+            "id": "custom-reviewer",
+            "name": "Custom Reviewer v2",
+            "description": "updated",
+        },
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert deleted.json() == {
+        "ok": True,
+        "profile_id": "custom-reviewer",
+        "store": {"kind": "memory", "persistent": False},
+    }
     assert manager.calls == [
         ("list_profiles", (), {}),
         ("show_profile", ("reviewer",), {}),
@@ -613,6 +696,26 @@ def test_gateway_profile_management_success_envelopes() -> None:
         ),
         ("get_default_profile", (), {}),
         ("set_default_profile", ("architect",), {}),
+        (
+            "create_profile",
+            (
+                {
+                    "id": "custom-reviewer",
+                    "name": "Custom Reviewer",
+                    "policy_document": {"allowed_tools": ["echo.search"]},
+                },
+            ),
+            {},
+        ),
+        (
+            "patch_profile",
+            (
+                "custom-reviewer",
+                {"name": "Custom Reviewer v2", "description": "updated"},
+            ),
+            {},
+        ),
+        ("delete_profile", ("custom-reviewer",), {}),
     ]
 
 
@@ -626,7 +729,10 @@ def test_gateway_profile_management_routes_have_pydantic_response_models() -> No
     paths = app.openapi()["paths"]
     expected_refs = {
         ("/mcp/profiles", "get"): "#/components/schemas/ProfileListResponse",
+        ("/mcp/profiles", "post"): "#/components/schemas/ProfileResponse",
         ("/mcp/profiles/{profile_id}", "get"): "#/components/schemas/ProfileResponse",
+        ("/mcp/profiles/{profile_id}", "patch"): "#/components/schemas/ProfileResponse",
+        ("/mcp/profiles/{profile_id}", "delete"): "#/components/schemas/DeleteProfileResponse",
         ("/mcp/profiles/from-preset", "post"): "#/components/schemas/DuplicatePresetResponse",
         ("/mcp/profiles/default", "get"): "#/components/schemas/DefaultProfileResponse",
         ("/mcp/profiles/default", "put"): "#/components/schemas/DefaultProfileResponse",
@@ -671,6 +777,30 @@ def test_gateway_profile_management_routes_have_pydantic_response_models() -> No
             {"preset_id": "project-researcher"},
             "duplicate_preset",
             "profile_already_exists",
+            409,
+        ),
+        (
+            "PATCH",
+            "/mcp/profiles/reviewer",
+            {"name": "Reviewer"},
+            "patch_profile",
+            "invalid_profile_patch",
+            422,
+        ),
+        (
+            "DELETE",
+            "/mcp/profiles/reviewer",
+            None,
+            "delete_profile",
+            "profile_is_default",
+            409,
+        ),
+        (
+            "DELETE",
+            "/mcp/profiles/reviewer",
+            None,
+            "delete_profile",
+            "profile_has_assignments",
             409,
         ),
         ("GET", "/mcp/profiles", None, "list_profiles", "profile_store_unavailable", 503),
@@ -731,11 +861,19 @@ def test_gateway_profile_management_malformed_or_missing_bodies_return_422() -> 
             content="{",
             headers={"content-type": "application/json"},
         )
+        missing_create = client.post("/mcp/profiles", json={})
+        malformed_create = client.post(
+            "/mcp/profiles",
+            content="{",
+            headers={"content-type": "application/json"},
+        )
 
     assert missing_duplicate.status_code == 422
     assert malformed_duplicate.status_code == 422
     assert missing_default.status_code == 422
     assert malformed_default.status_code == 422
+    assert missing_create.status_code == 422
+    assert malformed_create.status_code == 422
 
 
 def test_gateway_profile_runtime_requires_profile_for_tool_execution() -> None:
