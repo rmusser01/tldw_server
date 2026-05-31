@@ -297,6 +297,17 @@ class SQLiteMCPStore:
         profiles_table = self._table("mcp_profiles")
         assignments_table = self._table("mcp_profile_assignments")
         with self._engine.begin() as connection:
+            result = connection.execute(
+                delete(profiles_table).where(
+                    profiles_table.c.id == profile_id,
+                    ~select(assignments_table.c.id)
+                    .where(assignments_table.c.profile_id == profile_id)
+                    .exists(),
+                )
+            )
+            if result.rowcount and result.rowcount > 0:
+                return "deleted"
+
             profile_row = connection.execute(
                 select(profiles_table.c.id).where(profiles_table.c.id == profile_id)
             ).mappings().first()
@@ -310,11 +321,7 @@ class SQLiteMCPStore:
             ).mappings().first()
             if assignment_row is not None:
                 return "has_assignments"
-
-            result = connection.execute(
-                delete(profiles_table).where(profiles_table.c.id == profile_id)
-            )
-        return "deleted" if result.rowcount and result.rowcount > 0 else "not_found"
+        return "not_found"
 
     def _get_assignment_sync(self, assignment_id: str) -> ProfileAssignment | None:
         return self._get_model(
