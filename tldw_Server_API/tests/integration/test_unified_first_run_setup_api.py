@@ -13,6 +13,11 @@ from tldw_Server_API.app.core.Setup.first_run_state import (
 )
 from tldw_Server_API.app.core.Setup.provider_catalog import REQUIRED_SETUP_PROVIDER_KEYS
 
+
+def _acknowledge_all_required_steps(store: FirstRunStateStore) -> None:
+    for step in REQUIRED_FIRST_RUN_STEPS:
+        store.update_step(step, {"acknowledged": True})
+
 app = app_main.app
 app_main._shared_is_explicit_pytest_runtime = lambda: True
 
@@ -349,6 +354,236 @@ def test_first_run_provider_save_requires_restart_when_cache_refresh_fails(
     assert body["requires_restart"] is True
     assert body["failure_category"] == "config_cache_refresh_failed"
     assert "raw refresh failure" not in str(body)
+
+
+def test_first_run_first_chat_endpoint_records_success_on_ready_response(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    async def _fake_verify_first_chat(*, provider, model, prompt):
+        assert provider == "openai"
+        assert model == "gpt-4.1-mini"
+        assert prompt == "Say hello."
+        return {
+            "status": "ready",
+            "provider": provider,
+            "model": model,
+            "response_id": "chatcmpl-first-run",
+            "response_text": "Hello from setup.",
+            "failure_category": None,
+            "message": None,
+        }
+
+    monkeypatch.setattr(setup_endpoint, "verify_first_chat", _fake_verify_first_chat, raising=False)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/first-chat",
+        json={"provider": "openai", "model": "gpt-4.1-mini", "prompt": "Say hello."},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["response_text"] == "Hello from setup."
+    state = FirstRunStateStore(state_path).load()
+    assert state.first_chat.completed is True
+    assert state.first_chat.provider == "openai"
+    assert state.first_chat.model == "gpt-4.1-mini"
+    assert state.first_chat.response_id == "chatcmpl-first-run"
+
+
+def test_first_run_first_chat_endpoint_failure_does_not_record_or_echo_raw_details(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+    from tldw_Server_API.app.core.Setup import first_chat_verifier
+
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    raw_detail = "bad sk-secret-token at /Users/local/private/config.txt"
+
+    async def _fake_call_chat_completion(**_kwargs):
+        raise ChatAuthenticationError(raw_detail, provider="openai")
+
+    monkeypatch.setattr(first_chat_verifier, "_call_chat_completion", _fake_call_chat_completion)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/first-chat",
+        json={"provider": "openai", "model": "gpt-4.1-mini"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["failure_category"] == "auth_failed"
+    assert body["response_id"] is None
+    assert body["response_text"] is None
+    rendered_body = str(body)
+    assert "sk-secret-token" not in rendered_body
+    assert "/Users/local/private" not in rendered_body
+    state = FirstRunStateStore(state_path).load()
+    assert state.first_chat.completed is False
+
+
+def test_first_run_complete_rejects_without_first_chat(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    completion_calls: list[bool] = []
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "mark_setup_completed",
+        lambda completed: completion_calls.append(completed),
+    )
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/complete",
+        json={"acknowledged_steps": list(REQUIRED_FIRST_RUN_STEPS)},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "first_chat_required"
+    assert completion_calls == []
+
+
+def test_first_run_complete_rejects_missing_required_acknowledgements(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    FirstRunStateStore(state_path).record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    completion_calls: list[bool] = []
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "mark_setup_completed",
+        lambda completed: completion_calls.append(completed),
+    )
+
+    acknowledged_steps = [step for step in REQUIRED_FIRST_RUN_STEPS if step != "audio_defaults"]
+    response = setup_client.post(
+        "/api/v1/setup/first-run/complete",
+        json={"acknowledged_steps": acknowledged_steps},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "required_steps_missing:audio_defaults"
+    assert completion_calls == []
+    assert FirstRunStateStore(state_path).load().status == FirstRunStatus.FIRST_CHAT_COMPLETE
+
+
+def test_first_run_complete_succeeds_after_first_chat_and_required_acknowledgements(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    FirstRunStateStore(state_path).record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    completion_calls: list[bool] = []
+
+    def _mark_legacy_complete(completed):
+        state = FirstRunStateStore(state_path).load()
+        assert state.status == FirstRunStatus.FIRST_CHAT_COMPLETE
+        assert set(state.acknowledged_steps) == set(REQUIRED_FIRST_RUN_STEPS)
+        completion_calls.append(completed)
+
+    monkeypatch.setattr(setup_endpoint.setup_manager, "mark_setup_completed", _mark_legacy_complete)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/complete",
+        json={"acknowledged_steps": list(REQUIRED_FIRST_RUN_STEPS)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert completion_calls == [True]
+    assert FirstRunStateStore(state_path).load().status == FirstRunStatus.COMPLETED
+
+
+def test_first_run_defaults_endpoints_persist_state_and_allow_skip_or_defer(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    ingest_response = setup_client.post(
+        "/api/v1/setup/first-run/ingest-defaults",
+        json={
+            "allow_local_file_ingest": True,
+            "chunking_profile": "balanced",
+            "metadata_mode": "basic",
+            "allowed_local_roots": [str(tmp_path / "ingest")],
+        },
+    )
+    audio_response = setup_client.post(
+        "/api/v1/setup/first-run/audio-defaults",
+        json={
+            "mode": "skip",
+            "stt_provider": None,
+            "tts_provider": None,
+            "tts_voice": None,
+        },
+    )
+    advanced_response = setup_client.post(
+        "/api/v1/setup/first-run/optional-advanced",
+        json={
+            "rag": "defer",
+            "storage_paths": "skip",
+            "values": {"notes": "state-only"},
+        },
+    )
+
+    assert ingest_response.json() == {
+        "status": "saved",
+        "step": "ingest_defaults",
+        "requires_restart": False,
+    }
+    assert audio_response.json() == {
+        "status": "saved",
+        "step": "audio_defaults",
+        "requires_restart": False,
+    }
+    assert advanced_response.json() == {
+        "status": "saved",
+        "step": "optional_advanced",
+        "requires_restart": False,
+    }
+    assert ingest_response.status_code == 200
+    assert audio_response.status_code == 200
+    assert advanced_response.status_code == 200
+    state = FirstRunStateStore(state_path).load()
+    assert state.step_data["ingest_defaults"]["acknowledged"] is True
+    assert state.step_data["ingest_defaults"]["chunking_profile"] == "balanced"
+    assert state.step_data["audio_defaults"]["mode"] == "skip"
+    assert state.step_data["optional_advanced"]["rag"] == "defer"
+    assert state.step_data["optional_advanced"]["storage_paths"] == "skip"
 
 
 def test_first_run_provider_validate_returns_typed_response_without_token_echo(

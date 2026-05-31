@@ -12,10 +12,8 @@ modified_files:
 - tldw_Server_API/app/core/Setup/first_chat_verifier.py
 - tldw_Server_API/app/api/v1/schemas/setup_schemas.py
 - tldw_Server_API/app/api/v1/endpoints/setup.py
-- tldw_Server_API/app/core/Setup/setup_manager.py
 - tldw_Server_API/tests/Setup/test_setup_first_chat_completion.py
 - tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
-- tldw_Server_API/tests/Setup/test_setup_manager_user_db_base_dir_validation.py
 ---
 
 ## Description

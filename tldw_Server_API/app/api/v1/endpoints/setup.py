@@ -35,17 +35,24 @@ from tldw_Server_API.app.api.v1.API_Deps.setup_deps import (
 )
 from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
     AudioBundleOperationResponse,
+    AudioDefaultsRequest,
     AudioPackExportResponse,
     AudioPackImportResponse,
     AudioReadinessResetResponse,
     AudioRecommendationsResponse,
+    FirstChatVerifyRequest,
+    FirstChatVerifyResponse,
+    FirstRunCompleteRequest,
     FirstRunConnectionDiagnostics,
     FirstRunMetadataResponse,
     FirstRunMultiUserExit,
     FirstRunSetupPath,
     FirstRunSkipRequest,
     FirstRunStateResponse,
+    FirstRunStepSaveResponse,
     FirstRunStepUpdateRequest,
+    IngestDefaultsRequest,
+    OptionalAdvancedRequest,
     SetupAssistantResponse,
     SetupCompleteResponse,
     SetupConfigUpdateResponse,
@@ -80,7 +87,9 @@ from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     DEFAULT_AUDIO_RESOURCE_PROFILE,
     get_audio_bundle_catalog,
 )
+from tldw_Server_API.app.core.Setup.first_chat_verifier import verify_first_chat
 from tldw_Server_API.app.core.Setup.first_run_state import (
+    REQUIRED_FIRST_RUN_STEPS,
     FirstRunStateStore,
     FirstRunStatus,
     InvalidFirstRunTransition,
@@ -139,9 +148,35 @@ _FIRST_RUN_STEP_DATA_ALLOWED_KEYS = {
         }
     ),
     "providers": frozenset({"acknowledged", "default_provider"}),
-    "ingest_defaults": frozenset({"acknowledged", "selected_options"}),
-    "audio_defaults": frozenset({"acknowledged", "selected_options"}),
-    "optional_advanced": frozenset({"acknowledged", "selected_options"}),
+    "ingest_defaults": frozenset(
+        {
+            "acknowledged",
+            "allow_local_file_ingest",
+            "allowed_local_roots",
+            "chunking_profile",
+            "metadata_mode",
+            "selected_options",
+        }
+    ),
+    "audio_defaults": frozenset(
+        {
+            "acknowledged",
+            "mode",
+            "selected_options",
+            "stt_provider",
+            "tts_provider",
+            "tts_voice",
+        }
+    ),
+    "optional_advanced": frozenset(
+        {
+            "acknowledged",
+            "rag",
+            "selected_options",
+            "storage_paths",
+            "values",
+        }
+    ),
 }
 _PUBLIC_FIRST_RUN_STEP_NAMES = frozenset(_FIRST_RUN_STEP_DATA_ALLOWED_KEYS) | {
     "first_chat",
@@ -579,6 +614,80 @@ def _sanitize_setup_payload(value: Any) -> Any:
     return value
 
 
+def _completion_conflict(detail: str) -> HTTPException:
+    return HTTPException(status.HTTP_409_CONFLICT, detail=detail)
+
+
+def _acknowledge_first_run_steps(
+    store: FirstRunStateStore,
+    acknowledged_steps: list[str],
+) -> None:
+    valid_steps = set(REQUIRED_FIRST_RUN_STEPS)
+    for step in acknowledged_steps:
+        if step not in valid_steps:
+            continue
+        existing_data = dict(store.load().step_data.get(step, {}))
+        existing_data["acknowledged"] = True
+        store.update_step(step, existing_data)
+
+
+def _first_run_step_saved(step: str) -> FirstRunStepSaveResponse:
+    return FirstRunStepSaveResponse(status="saved", step=step, requires_restart=False)
+
+
+def _step_payload(payload: BaseModel) -> dict[str, Any]:
+    data = model_dump_compat(payload, exclude_none=True)
+    data["acknowledged"] = True
+    return data
+
+
+async def _complete_setup_flow(
+    payload: SetupCompleteRequest,
+    background_tasks: BackgroundTasks,
+) -> SetupCompleteResponse:
+    first_run_store = _first_run_store()
+    try:
+        first_run_store.validate_completion_ready()
+    except InvalidFirstRunTransition as exc:
+        raise _completion_conflict(str(exc)) from exc
+
+    try:
+        setup_manager.mark_setup_completed(True)
+    except Exception as exc:  # noqa: BLE001 - public response must stay sanitized
+        logger.exception("Failed to persist legacy setup completion flag")
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to persist setup completion.",
+        ) from exc
+
+    try:
+        first_run_store.mark_completed()
+    except InvalidFirstRunTransition as exc:
+        raise _completion_conflict(str(exc)) from exc
+
+    _refresh_runtime_config_cache("setup completion")
+
+    plan_requested = False
+    if payload.install_plan and not payload.install_plan.is_empty():
+        plan_requested = True
+        plan_dict = model_dump_compat(payload.install_plan)
+        background_tasks.add_task(execute_install_plan, plan_dict)
+
+    if payload.disable_first_time_setup:
+        setup_manager.update_config(
+            {setup_manager.SETUP_SECTION: {"enable_first_time_setup": False}},
+            create_backup=False,
+        )
+        _refresh_runtime_config_cache("setup disable prompt update")
+
+    return SetupCompleteResponse(
+        success=True,
+        message="Setup marked as complete. Restart the server to load new configuration.",
+        requires_restart=True,
+        install_plan_submitted=plan_requested,
+    )
+
+
 class AudioBundleProvisionRequest(BaseModel):
     bundle_id: str = Field(..., min_length=1, description="Curated audio bundle identifier to provision.")
     resource_profile: str = Field(
@@ -838,6 +947,102 @@ async def validate_first_run_provider(
     if provider_key == "koboldcpp":
         return await validate_native_kobold_endpoint(normalized_payload)
     return await validate_local_openai_endpoint(normalized_payload)
+
+
+@router.post(
+    "/first-run/first-chat",
+    openapi_extra={"security": []},
+    response_model=FirstChatVerifyResponse,
+)
+async def verify_first_run_first_chat(
+    payload: FirstChatVerifyRequest,
+    _guard: None = Depends(_require_first_run_write_access),
+) -> FirstChatVerifyResponse:
+    result = await verify_first_chat(
+        provider=payload.provider,
+        model=payload.model,
+        prompt=payload.prompt,
+    )
+    response = FirstChatVerifyResponse.model_validate(model_dump_compat(result))
+    if response.status != "ready":
+        return response
+
+    try:
+        _first_run_store().record_first_chat_success(
+            provider=response.provider,
+            model=response.model,
+            response_id=response.response_id,
+        )
+    except InvalidFirstRunTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return response
+
+
+@router.post(
+    "/first-run/ingest-defaults",
+    openapi_extra={"security": []},
+    response_model=FirstRunStepSaveResponse,
+)
+async def save_first_run_ingest_defaults(
+    payload: IngestDefaultsRequest,
+    _guard: None = Depends(_require_first_run_write_access),
+) -> FirstRunStepSaveResponse:
+    try:
+        _first_run_store().update_step("ingest_defaults", _step_payload(payload))
+    except InvalidFirstRunTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _first_run_step_saved("ingest_defaults")
+
+
+@router.post(
+    "/first-run/audio-defaults",
+    openapi_extra={"security": []},
+    response_model=FirstRunStepSaveResponse,
+)
+async def save_first_run_audio_defaults(
+    payload: AudioDefaultsRequest,
+    _guard: None = Depends(_require_first_run_write_access),
+) -> FirstRunStepSaveResponse:
+    try:
+        _first_run_store().update_step("audio_defaults", _step_payload(payload))
+    except InvalidFirstRunTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _first_run_step_saved("audio_defaults")
+
+
+@router.post(
+    "/first-run/optional-advanced",
+    openapi_extra={"security": []},
+    response_model=FirstRunStepSaveResponse,
+)
+async def save_first_run_optional_advanced(
+    payload: OptionalAdvancedRequest,
+    _guard: None = Depends(_require_first_run_write_access),
+) -> FirstRunStepSaveResponse:
+    try:
+        _first_run_store().update_step("optional_advanced", _step_payload(payload))
+    except InvalidFirstRunTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _first_run_step_saved("optional_advanced")
+
+
+@router.post(
+    "/first-run/complete",
+    openapi_extra={"security": []},
+    response_model=SetupCompleteResponse,
+)
+async def complete_first_run(
+    payload: FirstRunCompleteRequest,
+    background_tasks: BackgroundTasks,
+    _guard: None = Depends(_require_first_run_write_access),
+) -> SetupCompleteResponse:
+    first_run_store = _first_run_store()
+    try:
+        _acknowledge_first_run_steps(first_run_store, payload.acknowledged_steps)
+    except InvalidFirstRunTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return await _complete_setup_flow(SetupCompleteRequest(), background_tasks)
 
 
 @router.post("/first-run/state", openapi_extra={"security": []}, response_model=FirstRunStateResponse)
@@ -1918,44 +2123,7 @@ async def mark_setup_complete(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> SetupCompleteResponse:
     """Mark the setup workflow as complete and optionally disable future prompts."""
-    first_run_store = _first_run_store()
-    try:
-        first_run_store.validate_completion_ready()
-    except InvalidFirstRunTransition as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-    try:
-        setup_manager.mark_setup_completed(True)
-    except Exception as exc:  # noqa: BLE001 - public response must stay sanitized
-        logger.exception("Failed to persist legacy setup completion flag")
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to persist setup completion.",
-        ) from exc
-
-    try:
-        first_run_store.mark_completed()
-    except InvalidFirstRunTransition as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-    _refresh_runtime_config_cache("setup completion")
-
-    plan_requested = False
-    if payload.install_plan and not payload.install_plan.is_empty():
-        plan_requested = True
-        plan_dict = model_dump_compat(payload.install_plan)
-        background_tasks.add_task(execute_install_plan, plan_dict)
-
-    if payload.disable_first_time_setup:
-        setup_manager.update_config({setup_manager.SETUP_SECTION: {"enable_first_time_setup": False}}, create_backup=False)
-        _refresh_runtime_config_cache("setup disable prompt update")
-
-    return {
-        "success": True,
-        "message": "Setup marked as complete. Restart the server to load new configuration.",
-        "requires_restart": True,
-        "install_plan_submitted": plan_requested,
-    }
+    return await _complete_setup_flow(payload, background_tasks)
 
 
 @router.post("/assistant", openapi_extra={"security": []}, response_model=SetupAssistantResponse)
