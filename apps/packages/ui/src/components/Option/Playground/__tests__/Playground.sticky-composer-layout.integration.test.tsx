@@ -193,6 +193,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => false,
+  useDesktop: () => true,
 }));
 
 vi.mock("@/services/chat-settings", () => ({
@@ -261,6 +262,7 @@ describe("Playground sticky composer layout integration", () => {
     const transcript = screen.getByTestId("playground-chat-transcript");
     const dock = screen.getByTestId("playground-chat-composer-dock");
 
+    expect(screen.getByTestId("playground-chat-shell")).toBeInTheDocument();
     expect(transcript).toBeInTheDocument();
     expect(dock).toBeInTheDocument();
     expect(dock.className).toContain("sticky");

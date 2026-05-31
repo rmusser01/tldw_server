@@ -60,7 +60,7 @@ import {
 } from "@/store/model";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
-import { ChevronDown, Keyboard, Search, X } from "lucide-react";
+import { ChevronDown, Keyboard, PanelRightOpen, Search, X } from "lucide-react";
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings";
 import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
@@ -71,7 +71,7 @@ import { useSetting } from "@/hooks/useSetting";
 import { useStorage } from "@plasmohq/storage/hook";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import { useMcpToolsStore } from "@/store/mcp-tools";
-import { useMobile } from "@/hooks/useMediaQuery";
+import { useDesktop, useMobile } from "@/hooks/useMediaQuery";
 import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { resolvePlaygroundShortcutAction } from "./playground-shortcuts";
@@ -221,6 +221,8 @@ const normalizeChatWorkflowMode = (
 export const Playground = () => {
   const drop = React.useRef<HTMLDivElement>(null);
   const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const artifactsEdgeExpandRef = React.useRef<HTMLButtonElement>(null);
+  const pendingArtifactsPanelFocusRef = React.useRef(false);
   const threadSearchInputRef = React.useRef<HTMLInputElement>(null);
   const shortcutsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const shortcutsCloseRef = React.useRef<HTMLButtonElement>(null);
@@ -262,6 +264,7 @@ export const Playground = () => {
     DEFAULT_CHAT_SETTINGS.stickyChatInput,
   );
   const isMobileViewport = useMobile();
+  const isDesktopViewport = useDesktop();
   const location = useLocation();
   const defaultChatLayoutMode: PlaygroundCockpitMode = isMobileViewport
     ? "focus"
@@ -1665,6 +1668,8 @@ export const Playground = () => {
   const setArtifactsOpen = useArtifactsStore((state) => state.setOpen);
   const closeArtifacts = useArtifactsStore((state) => state.closeArtifact);
   const markArtifactsRead = useArtifactsStore((state) => state.markRead);
+  const shouldShowArtifactsEdgeExpand =
+    isDesktopViewport && Boolean(activeArtifact) && !artifactsOpen;
 
   const parentMeta =
     historyId && compareParentByHistory
@@ -1725,6 +1730,35 @@ export const Playground = () => {
       artifactsTriggerRef.current?.focus();
     });
   }, [closeArtifacts]);
+  const openArtifactsFromEdge = React.useCallback(() => {
+    if (!activeArtifact) return;
+    pendingArtifactsPanelFocusRef.current = true;
+    setArtifactsOpen(true);
+    markArtifactsRead();
+  }, [activeArtifact, markArtifactsRead, setArtifactsOpen]);
+
+  React.useEffect(() => {
+    if (!artifactsOpen || !pendingArtifactsPanelFocusRef.current) return;
+    pendingArtifactsPanelFocusRef.current = false;
+    const focusPanelClose = () => {
+      const closeButton = document.querySelector<HTMLButtonElement>(
+        '[data-testid="artifacts-panel-close"]',
+      );
+      if (closeButton) {
+        closeButton.focus();
+        return true;
+      }
+      return false;
+    };
+    window.requestAnimationFrame(() => {
+      if (focusPanelClose()) return;
+      window.setTimeout(() => {
+        if (!focusPanelClose()) {
+          artifactsTriggerRef.current?.focus();
+        }
+      }, 0);
+    });
+  }, [artifactsOpen]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1819,6 +1853,10 @@ export const Playground = () => {
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     const handleFocusArtifactsTrigger = () => {
+      if (artifactsEdgeExpandRef.current) {
+        artifactsEdgeExpandRef.current.focus();
+        return;
+      }
       artifactsTriggerRef.current?.focus();
     };
     window.addEventListener(
@@ -3543,6 +3581,29 @@ export const Playground = () => {
             </div>
           </div>
         </PlaygroundCockpitShell>
+        {shouldShowArtifactsEdgeExpand && (
+          <button
+            ref={artifactsEdgeExpandRef}
+            type="button"
+            data-testid="playground-artifacts-edge-expand"
+            aria-label={
+              t(
+                "playground:regions.expandArtifactsRail",
+                "Expand artifacts rail",
+              ) as string
+            }
+            title={
+              t(
+                "playground:regions.expandArtifactsRail",
+                "Expand artifacts rail",
+              ) as string
+            }
+            onClick={openArtifactsFromEdge}
+            className="absolute right-2 top-20 z-30 inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-muted shadow-sm transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+          >
+            <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
         {artifactsOpen && (
           <>
             <div className="hidden h-full w-[36%] min-w-[280px] max-w-[520px] shrink-0 lg:flex">
