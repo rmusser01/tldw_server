@@ -122,6 +122,13 @@ export type AudioDefaultsRequest = {
   tts_voice?: string | null
 }
 
+export type AudioRecommendationsResponse = {
+  machine_profile: Record<string, unknown>
+  catalog: Array<Record<string, unknown>>
+  recommendations: Array<Record<string, unknown>>
+  excluded: Array<Record<string, unknown>>
+}
+
 export type OptionalAdvancedRequest = {
   rag?: "configure" | "skip" | "defer"
   storage_paths?: "configure" | "skip" | "defer"

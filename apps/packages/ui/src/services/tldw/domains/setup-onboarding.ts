@@ -1,6 +1,7 @@
 import { bgRequest } from "@/services/background-proxy"
 import type {
   AudioDefaultsRequest,
+  AudioRecommendationsResponse,
   FirstChatVerifyRequest,
   FirstChatVerifyResponse,
   FirstRunCompleteRequest,
@@ -112,6 +113,14 @@ export const setupOnboardingMethods = {
       headers: jsonHeaders,
       noAuth: true,
       body: payload
+    })
+  },
+
+  async getSetupAudioRecommendations(): Promise<AudioRecommendationsResponse> {
+    return await bgRequest<AudioRecommendationsResponse>({
+      path: "/api/v1/setup/audio/recommendations",
+      method: "GET",
+      noAuth: true
     })
   },
 

@@ -10,11 +10,23 @@ import type {
 import { SetupPathStep } from "./steps/SetupPathStep"
 import { PrivacySecurityStep } from "./steps/PrivacySecurityStep"
 import { MultiUserExitPanel } from "./steps/MultiUserExitPanel"
+import {
+  ProviderSetupStep,
+  type ProviderSelection
+} from "./steps/ProviderSetupStep"
+import { IngestDefaultsStep } from "./steps/IngestDefaultsStep"
+import { AudioSetupStep } from "./steps/AudioSetupStep"
+import { OptionalAdvancedStep } from "./steps/OptionalAdvancedStep"
+import { FirstChatStep } from "./steps/FirstChatStep"
 
 type WizardStep =
   | "setup_path"
   | "privacy_security"
   | "provider_setup"
+  | "ingest_defaults"
+  | "audio_defaults"
+  | "optional_advanced"
+  | "first_chat"
   | "multi_user_exit"
 
 type SoloSetupPath = "docker" | "local"
@@ -28,6 +40,34 @@ type UnifiedSetupWizardProps = {
 const setupPathToBackend = (path: SoloSetupPath) =>
   path === "docker" ? "docker_single_user" : "local_single_user"
 
+const stepFromState = (state: FirstRunState | null): WizardStep => {
+  const completed = new Set(state?.completed_steps ?? [])
+  if (!completed.has("setup_path")) return "setup_path"
+  if (!completed.has("privacy_security")) return "privacy_security"
+  if (!completed.has("providers")) return "provider_setup"
+  if (!completed.has("ingest_defaults")) return "ingest_defaults"
+  if (!completed.has("audio_defaults")) return "audio_defaults"
+  if (!completed.has("optional_advanced")) return "optional_advanced"
+  return "first_chat"
+}
+
+const providerSelectionFromState = (
+  state: FirstRunState | null
+): ProviderSelection | null => {
+  const data = state?.step_data?.providers
+  const provider = data?.default_provider
+  const model = data?.default_model
+  if (typeof provider === "string" && typeof model === "string") {
+    return { provider, model }
+  }
+  const firstChatProvider = state?.first_chat?.provider
+  const firstChatModel = state?.first_chat?.model
+  if (firstChatProvider && firstChatModel) {
+    return { provider: firstChatProvider, model: firstChatModel }
+  }
+  return null
+}
+
 export function UnifiedSetupWizard({
   initialState = null,
   initialMetadata = null,
@@ -36,21 +76,52 @@ export function UnifiedSetupWizard({
   const {
     state,
     metadata,
+    providerCatalog,
+    audioRecommendations,
     loading,
     error,
+    refresh,
+    loadProviderCatalog,
+    loadAudioRecommendations,
     saveStep,
-    skip
+    skip,
+    saveProvider,
+    saveIngestDefaults,
+    saveAudioDefaults,
+    saveOptionalAdvanced,
+    verifyFirstChat,
+    complete
   } = useSetupOnboarding({
     initialState,
     initialMetadata,
     autoLoad: !initialState || !initialMetadata
   })
-  const [step, setStep] = React.useState<WizardStep>("setup_path")
-  const [selectedPath, setSelectedPath] = React.useState<SoloSetupPath | null>(
-    null
+  const [step, setStep] = React.useState<WizardStep>(() =>
+    stepFromState(initialState)
   )
+  const [providerSelection, setProviderSelection] =
+    React.useState<ProviderSelection | null>(() =>
+      providerSelectionFromState(initialState)
+    )
   const [savingStep, setSavingStep] = React.useState(false)
   const [stepError, setStepError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    if (!state) return
+    setProviderSelection((current) => current ?? providerSelectionFromState(state))
+  }, [state])
+
+  React.useEffect(() => {
+    if (step !== "provider_setup" || providerCatalog.length > 0) return
+    void loadProviderCatalog().catch(() => {
+      setStepError("Provider catalog could not be loaded. Try again.")
+    })
+  }, [loadProviderCatalog, providerCatalog.length, step])
+
+  React.useEffect(() => {
+    if (step !== "audio_defaults" || audioRecommendations.length > 0) return
+    void loadAudioRecommendations().catch(() => undefined)
+  }, [audioRecommendations.length, loadAudioRecommendations, step])
 
   const persistStep = React.useCallback(
     async (payload: FirstRunStepUpdateRequest) => {
@@ -69,6 +140,12 @@ export function UnifiedSetupWizard({
     },
     [onStateChange, saveStep]
   )
+
+  const refreshParentState = React.useCallback(async () => {
+    const nextState = await refresh().catch(() => null)
+    if (nextState) onStateChange?.(nextState)
+    return nextState
+  }, [onStateChange, refresh])
 
   const handlePathSelect = React.useCallback(
     (path: "docker" | "local" | "multi_user") => {
@@ -90,7 +167,6 @@ export function UnifiedSetupWizard({
           }
         })
         if (!nextState) return
-        setSelectedPath(path)
         setStep("privacy_security")
       })()
     },
@@ -111,6 +187,61 @@ export function UnifiedSetupWizard({
       setStep("provider_setup")
     })()
   }, [metadata, persistStep])
+
+  const handleProviderContinue = React.useCallback(
+    (selection: ProviderSelection) => {
+      void (async () => {
+        const nextState = await persistStep({
+          step: "providers",
+          data: {
+            acknowledged: true,
+            default_provider: selection.provider,
+            default_model: selection.model
+          }
+        })
+        if (!nextState) return
+        setProviderSelection(selection)
+        setStep("ingest_defaults")
+      })()
+    },
+    [persistStep]
+  )
+
+  const saveIngestAndPublish = React.useCallback(
+    async (...args: Parameters<typeof saveIngestDefaults>) => {
+      const response = await saveIngestDefaults(...args)
+      await refreshParentState()
+      return response
+    },
+    [refreshParentState, saveIngestDefaults]
+  )
+
+  const saveAudioAndPublish = React.useCallback(
+    async (...args: Parameters<typeof saveAudioDefaults>) => {
+      const response = await saveAudioDefaults(...args)
+      await refreshParentState()
+      return response
+    },
+    [refreshParentState, saveAudioDefaults]
+  )
+
+  const saveAdvancedAndPublish = React.useCallback(
+    async (...args: Parameters<typeof saveOptionalAdvanced>) => {
+      const response = await saveOptionalAdvanced(...args)
+      await refreshParentState()
+      return response
+    },
+    [refreshParentState, saveOptionalAdvanced]
+  )
+
+  const completeAndPublish = React.useCallback(
+    async (...args: Parameters<typeof complete>) => {
+      const response = await complete(...args)
+      await refreshParentState()
+      return response
+    },
+    [complete, refreshParentState]
+  )
 
   const handleSkip = React.useCallback(() => {
     setStepError(null)
@@ -198,15 +329,46 @@ export function UnifiedSetupWizard({
           />
         ) : null}
         {step === "provider_setup" ? (
-          <section aria-labelledby="provider-setup-title" className="space-y-3">
-            <h2 id="provider-setup-title" className="text-lg font-semibold text-text">
-              Chat provider
-            </h2>
-            <p className="text-sm text-text-muted">
-              Next, connect a hosted API key or a local OpenAI-compatible
-              endpoint for {selectedPath === "local" ? "local install" : "Docker"}.
-            </p>
-          </section>
+          <ProviderSetupStep
+            providers={providerCatalog}
+            onSaveProvider={saveProvider}
+            onContinue={handleProviderContinue}
+            onBack={() => setStep("privacy_security")}
+          />
+        ) : null}
+        {step === "ingest_defaults" ? (
+          <IngestDefaultsStep
+            saveIngestDefaults={saveIngestAndPublish}
+            onContinue={() => setStep("audio_defaults")}
+            onBack={() => setStep("provider_setup")}
+          />
+        ) : null}
+        {step === "audio_defaults" ? (
+          <AudioSetupStep
+            recommendations={audioRecommendations}
+            saveAudioDefaults={saveAudioAndPublish}
+            onContinue={() => setStep("optional_advanced")}
+            onBack={() => setStep("ingest_defaults")}
+          />
+        ) : null}
+        {step === "optional_advanced" ? (
+          <OptionalAdvancedStep
+            saveOptionalAdvanced={saveAdvancedAndPublish}
+            onContinue={() => setStep("first_chat")}
+            onBack={() => setStep("audio_defaults")}
+          />
+        ) : null}
+        {step === "first_chat" && providerSelection ? (
+          <FirstChatStep
+            provider={providerSelection.provider}
+            model={providerSelection.model}
+            verifyFirstChat={verifyFirstChat}
+            complete={completeAndPublish}
+            onComplete={() => {
+              void refreshParentState()
+            }}
+            onBack={() => setStep("provider_setup")}
+          />
         ) : null}
       </div>
     </div>

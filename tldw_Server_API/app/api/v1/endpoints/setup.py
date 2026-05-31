@@ -147,7 +147,7 @@ _FIRST_RUN_STEP_DATA_ALLOWED_KEYS = {
             "selected_options",
         }
     ),
-    "providers": frozenset({"acknowledged", "default_provider"}),
+    "providers": frozenset({"acknowledged", "default_provider", "default_model"}),
     "ingest_defaults": frozenset(
         {
             "acknowledged",

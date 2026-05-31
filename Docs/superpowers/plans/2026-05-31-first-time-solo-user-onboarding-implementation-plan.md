@@ -2124,11 +2124,13 @@ git commit -m "feat: add focused first-run setup shell"
 - Create: `apps/packages/ui/src/components/Option/Onboarding/steps/FirstChatStep.tsx`
 - Create: `apps/packages/ui/src/components/Option/Onboarding/FirstSourceMilestonePrompt.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Onboarding/UnifiedSetupWizard.tsx`
+- Modify: `tldw_Server_API/app/api/v1/endpoints/setup.py`
 - Test: `apps/packages/ui/src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Onboarding/__tests__/FirstSourceMilestonePrompt.test.tsx`
+- Test: `tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py`
 
-- [ ] **Step 1: Write provider step tests**
+- [x] **Step 1: Write provider step tests**
 
 Create `ProviderSetupStep.test.tsx`:
 
@@ -2163,7 +2165,7 @@ describe("ProviderSetupStep", () => {
 })
 ```
 
-- [ ] **Step 2: Write first-chat step tests**
+- [x] **Step 2: Write first-chat step tests**
 
 Create `FirstChatStep.test.tsx`:
 
@@ -2201,7 +2203,7 @@ describe("FirstChatStep", () => {
 })
 ```
 
-- [ ] **Step 3: Run tests to verify failure**
+- [x] **Step 3: Run tests to verify failure**
 
 ```bash
 bunx vitest run src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx
@@ -2209,7 +2211,7 @@ bunx vitest run src/components/Option/Onboarding/__tests__/ProviderSetupStep.tes
 
 Expected: FAIL because step components do not exist.
 
-- [ ] **Step 4: Write first-source milestone prompt test**
+- [x] **Step 4: Write first-source milestone prompt test**
 
 Create `FirstSourceMilestonePrompt.test.tsx`:
 
@@ -2234,7 +2236,7 @@ describe("FirstSourceMilestonePrompt", () => {
 })
 ```
 
-- [ ] **Step 5: Run tests to verify failure**
+- [x] **Step 5: Run tests to verify failure**
 
 ```bash
 bunx vitest run src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx src/components/Option/Onboarding/__tests__/FirstSourceMilestonePrompt.test.tsx
@@ -2242,7 +2244,7 @@ bunx vitest run src/components/Option/Onboarding/__tests__/ProviderSetupStep.tes
 
 Expected: FAIL because step components and first-source prompt do not exist.
 
-- [ ] **Step 6: Implement `ProviderSetupStep`**
+- [x] **Step 6: Implement `ProviderSetupStep`**
 
 Requirements:
 
@@ -2256,7 +2258,7 @@ Requirements:
 
 Keep the component focused. Do not call `tldwClient` directly inside it; pass callbacks from `UnifiedSetupWizard` or hook.
 
-- [ ] **Step 7: Implement `IngestDefaultsStep`**
+- [x] **Step 7: Implement `IngestDefaultsStep`**
 
 Fields:
 
@@ -2267,7 +2269,7 @@ Fields:
 
 Primary action calls `saveIngestDefaults`.
 
-- [ ] **Step 8: Implement `AudioSetupStep`**
+- [x] **Step 8: Implement `AudioSetupStep`**
 
 Reuse existing audio setup logic where possible:
 
@@ -2278,7 +2280,7 @@ Reuse existing audio setup logic where possible:
 
 Avoid copying the full admin `AudioInstallerPanel` UI into first-run. The first-run step should be simpler and link to deeper setup.
 
-- [ ] **Step 9: Implement `OptionalAdvancedStep`**
+- [x] **Step 9: Implement `OptionalAdvancedStep`**
 
 Show RAG/embeddings and storage paths as optional:
 
@@ -2288,7 +2290,7 @@ Show RAG/embeddings and storage paths as optional:
 
 For V1, allow deferring without exposing every advanced field. If configure now is selected, deep-link to the relevant settings page after completion unless safe backend fields already exist.
 
-- [ ] **Step 10: Implement `FirstChatStep`**
+- [x] **Step 10: Implement `FirstChatStep`**
 
 Requirements:
 
@@ -2299,7 +2301,7 @@ Requirements:
 - calls completion only after `status === "ready"`;
 - shows provider failure categories with retry and back-to-provider actions.
 
-- [ ] **Step 11: Implement `FirstSourceMilestonePrompt`**
+- [x] **Step 11: Implement `FirstSourceMilestonePrompt`**
 
 Create `apps/packages/ui/src/components/Option/Onboarding/FirstSourceMilestonePrompt.tsx`.
 
@@ -2311,7 +2313,7 @@ Requirements:
 - do not block normal app navigation;
 - use copy that frames this as the next milestone after first chat, not as part of setup completion.
 
-- [ ] **Step 12: Wire steps into `UnifiedSetupWizard`**
+- [x] **Step 12: Wire steps into `UnifiedSetupWizard`**
 
 Wizard order:
 
@@ -2325,7 +2327,7 @@ Wizard order:
 
 Persist step completion to backend after every successful step.
 
-- [ ] **Step 13: Wire first-source prompt into the normal app handoff**
+- [x] **Step 13: Wire first-source prompt into the normal app handoff**
 
 Modify `option-index.tsx` or the existing post-onboarding shell entrypoint so that:
 
@@ -2333,7 +2335,7 @@ Modify `option-index.tsx` or the existing post-onboarding shell entrypoint so th
 - clicking `Add source` navigates to the existing source/ingest entrypoint;
 - dismissing the prompt writes only local UI state, not backend setup completion.
 
-- [ ] **Step 14: Run wizard step tests**
+- [x] **Step 14: Run wizard step tests**
 
 ```bash
 bunx vitest run src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx src/components/Option/Onboarding/__tests__/FirstSourceMilestonePrompt.test.tsx
@@ -2341,7 +2343,7 @@ bunx vitest run src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.te
 
 Expected: PASS.
 
-- [ ] **Step 15: Commit wizard steps**
+- [x] **Step 15: Commit wizard steps**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Onboarding/UnifiedSetupWizard.tsx apps/packages/ui/src/components/Option/Onboarding/steps apps/packages/ui/src/components/Option/Onboarding/FirstSourceMilestonePrompt.tsx apps/packages/ui/src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx apps/packages/ui/src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx apps/packages/ui/src/components/Option/Onboarding/__tests__/FirstSourceMilestonePrompt.test.tsx apps/packages/ui/src/routes/option-index.tsx

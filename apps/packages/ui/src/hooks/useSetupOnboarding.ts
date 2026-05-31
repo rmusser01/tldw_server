@@ -3,6 +3,7 @@ import * as React from "react"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type {
   AudioDefaultsRequest,
+  AudioRecommendationsResponse,
   FirstChatVerifyRequest,
   FirstChatVerifyResponse,
   FirstRunCompleteRequest,
@@ -40,6 +41,9 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
   )
   const [providerCatalog, setProviderCatalog] = React.useState<
     SetupProviderCatalogEntry[]
+  >([])
+  const [audioRecommendations, setAudioRecommendations] = React.useState<
+    AudioRecommendationsResponse["recommendations"]
   >([])
   const [loading, setLoading] = React.useState(
     autoLoad && (!initialState || !initialMetadata)
@@ -168,6 +172,12 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
     [refresh]
   )
 
+  const loadAudioRecommendations = React.useCallback(async () => {
+    const response = await tldwClient.getSetupAudioRecommendations()
+    setAudioRecommendations(response.recommendations)
+    return response.recommendations
+  }, [])
+
   const saveOptionalAdvanced = React.useCallback(
     async (payload: OptionalAdvancedRequest) => {
       const response = await tldwClient.saveOptionalAdvanced(payload)
@@ -201,6 +211,7 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
     state,
     metadata,
     providerCatalog,
+    audioRecommendations,
     loading,
     error,
     refresh,
@@ -212,6 +223,7 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
     validateProvider,
     saveIngestDefaults,
     saveAudioDefaults,
+    loadAudioRecommendations,
     saveOptionalAdvanced,
     verifyFirstChat,
     complete

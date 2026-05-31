@@ -98,4 +98,23 @@ describe("setup onboarding API domain", () => {
       }
     })
   })
+
+  it("fetches setup audio recommendations without requiring configured auth", async () => {
+    const { bgRequest } = await import("@/services/background-proxy")
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      machine_profile: {},
+      catalog: [],
+      recommendations: [],
+      excluded: []
+    })
+    const { setupOnboardingMethods } = await import("../domains/setup-onboarding")
+
+    await setupOnboardingMethods.getSetupAudioRecommendations.call({})
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/setup/audio/recommendations",
+      method: "GET",
+      noAuth: true
+    })
+  })
 })

@@ -5,7 +5,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const setupHookMocks = vi.hoisted(() => ({
   saveStep: vi.fn(),
-  skip: vi.fn()
+  skip: vi.fn(),
+  loadProviderCatalog: vi.fn(),
+  loadAudioRecommendations: vi.fn(),
+  saveProvider: vi.fn(),
+  saveIngestDefaults: vi.fn(),
+  saveAudioDefaults: vi.fn(),
+  saveOptionalAdvanced: vi.fn(),
+  verifyFirstChat: vi.fn(),
+  complete: vi.fn(),
+  refresh: vi.fn()
 }))
 
 vi.mock("@/hooks/useSetupOnboarding", () => ({
@@ -33,10 +42,29 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
       setup_paths: [],
       multi_user_exit: { guide_path: "/docs/multi-user" }
     },
+    providerCatalog: [
+      {
+        provider_key: "openai",
+        label: "OpenAI",
+        provider_type: "hosted_api_key",
+        supports_preflight: true,
+        recommended_for_first_chat: true
+      }
+    ],
+    audioRecommendations: [],
     loading: false,
     error: null,
+    refresh: setupHookMocks.refresh,
+    loadProviderCatalog: setupHookMocks.loadProviderCatalog,
+    loadAudioRecommendations: setupHookMocks.loadAudioRecommendations,
     saveStep: setupHookMocks.saveStep,
-    skip: setupHookMocks.skip
+    skip: setupHookMocks.skip,
+    saveProvider: setupHookMocks.saveProvider,
+    saveIngestDefaults: setupHookMocks.saveIngestDefaults,
+    saveAudioDefaults: setupHookMocks.saveAudioDefaults,
+    saveOptionalAdvanced: setupHookMocks.saveOptionalAdvanced,
+    verifyFirstChat: setupHookMocks.verifyFirstChat,
+    complete: setupHookMocks.complete
   })
 }))
 
@@ -44,6 +72,47 @@ describe("UnifiedSetupWizard", () => {
   beforeEach(() => {
     setupHookMocks.saveStep.mockReset()
     setupHookMocks.skip.mockReset()
+    setupHookMocks.loadProviderCatalog.mockReset().mockResolvedValue([])
+    setupHookMocks.loadAudioRecommendations.mockReset().mockResolvedValue([])
+    setupHookMocks.saveProvider.mockReset().mockResolvedValue({
+      provider_key: "openai",
+      status: "saved"
+    })
+    setupHookMocks.saveIngestDefaults.mockReset().mockResolvedValue({
+      status: "saved",
+      step: "ingest_defaults",
+      requires_restart: false
+    })
+    setupHookMocks.saveAudioDefaults.mockReset().mockResolvedValue({
+      status: "saved",
+      step: "audio_defaults",
+      requires_restart: false
+    })
+    setupHookMocks.saveOptionalAdvanced.mockReset().mockResolvedValue({
+      status: "saved",
+      step: "optional_advanced",
+      requires_restart: false
+    })
+    setupHookMocks.verifyFirstChat.mockReset().mockResolvedValue({
+      status: "ready",
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      response_text: "Hello."
+    })
+    setupHookMocks.complete.mockReset().mockResolvedValue({
+      success: true,
+      message: "completed",
+      requires_restart: false,
+      install_plan_submitted: false
+    })
+    setupHookMocks.refresh.mockReset().mockResolvedValue({
+      status: "in_progress",
+      completed_steps: [],
+      skipped_steps: [],
+      step_data: {},
+      acknowledged_steps: [],
+      first_chat: { completed: false }
+    })
     setupHookMocks.saveStep.mockResolvedValue({
       status: "in_progress",
       completed_steps: [],
@@ -161,5 +230,40 @@ describe("UnifiedSetupWizard", () => {
         expect.objectContaining({ status: "skipped" })
       )
     })
+  })
+
+  it("resumes at first chat when backend state includes the saved provider model", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard")
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: [
+            "setup_path",
+            "privacy_security",
+            "providers",
+            "ingest_defaults",
+            "audio_defaults",
+            "optional_advanced"
+          ],
+          skipped_steps: [],
+          step_data: {
+            providers: {
+              acknowledged: true,
+              default_provider: "openai",
+              default_model: "gpt-4.1-mini"
+            }
+          },
+          acknowledged_steps: [],
+          first_chat: { completed: false }
+        }}
+      />
+    )
+
+    expect(
+      screen.getByRole("heading", { name: /first chat/i })
+    ).toBeInTheDocument()
+    expect(screen.getByText(/openai \/ gpt-4.1-mini/i)).toBeInTheDocument()
   })
 })

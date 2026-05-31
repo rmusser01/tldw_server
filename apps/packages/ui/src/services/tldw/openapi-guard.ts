@@ -153,6 +153,7 @@ export type ClientPath =
   | "/api/v1/setup/first-run/providers/validate"
   | "/api/v1/setup/first-run/ingest-defaults"
   | "/api/v1/setup/first-run/audio-defaults"
+  | "/api/v1/setup/audio/recommendations"
   | "/api/v1/setup/first-run/optional-advanced"
   | "/api/v1/setup/first-run/first-chat"
   | "/api/v1/setup/first-run/complete"

@@ -22,7 +22,11 @@ def _persist_required_first_run_step_data(
     step_payloads = {
         "setup_path": {"acknowledged": True, "setup_path_key": "local"},
         "privacy_security": {"acknowledged": True, "local_only": True},
-        "providers": {"acknowledged": True, "default_provider": "openai"},
+        "providers": {
+            "acknowledged": True,
+            "default_provider": "openai",
+            "default_model": "gpt-4.1-mini",
+        },
         "ingest_defaults": {
             "acknowledged": True,
             "allow_local_file_ingest": False,
@@ -1706,6 +1710,7 @@ def test_first_run_state_persists_allowed_public_step_data(
             "data": {
                 "acknowledged": True,
                 "default_provider": "openai",
+                "default_model": "gpt-4.1-mini",
             },
         },
     )
@@ -1714,6 +1719,7 @@ def test_first_run_state_persists_allowed_public_step_data(
     providers_data = response.json()["step_data"]["providers"]
     assert providers_data["acknowledged"] is True
     assert providers_data["default_provider"] == "openai"
+    assert providers_data["default_model"] == "gpt-4.1-mini"
 
 
 def test_first_run_state_get_projects_only_public_step_data(
@@ -1728,6 +1734,7 @@ def test_first_run_state_get_projects_only_public_step_data(
         {
             "acknowledged": True,
             "default_provider": "openai",
+            "default_model": "gpt-4.1-mini",
         },
     )
     payload = setup_endpoint.json.loads(state.model_dump_json())
@@ -1747,6 +1754,7 @@ def test_first_run_state_get_projects_only_public_step_data(
     assert providers_data == {
         "acknowledged": True,
         "default_provider": "openai",
+        "default_model": "gpt-4.1-mini",
     }
     rendered_body = str(body)
     assert "sk-raw" not in rendered_body
