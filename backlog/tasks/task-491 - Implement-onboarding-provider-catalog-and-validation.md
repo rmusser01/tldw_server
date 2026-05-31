@@ -1,7 +1,7 @@
 ---
 id: TASK-491
 title: Implement onboarding provider catalog and validation
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: 2026-05-31 09:54
@@ -21,6 +21,7 @@ modified_files:
 - tldw_Server_API/app/api/v1/endpoints/setup.py
 - tldw_Server_API/tests/Setup/test_setup_provider_catalog.py
 - tldw_Server_API/tests/Setup/test_setup_provider_validation.py
+- tldw_Server_API/tests/Setup/test_setup_manager_provider_field_insertion.py
 - tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
 - tldw_Server_API/tests/Config/test_config_providers_endpoints.py
 ---
@@ -33,9 +34,9 @@ Task 3 slice from the unified onboarding plan. Add backend-generated setup provi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Provider catalog covers PRD provider keys and marks local endpoint providers correctly
-- [ ] #2 Provider save endpoint masks secrets and returns a typed saved/failed response
-- [ ] #3 Local OpenAI-compatible endpoint validation maps unreachable/auth/API-shape failures safely
+- [x] #1 Provider catalog covers PRD provider keys and marks local endpoint providers correctly
+- [x] #2 Provider save endpoint masks secrets and returns a typed saved/failed response
+- [x] #3 Local OpenAI-compatible endpoint validation maps unreachable/auth/API-shape failures safely
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -47,15 +48,15 @@ Started Task 3 subagent-driven slice after TASK-490 cleared spec and code-qualit
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 3 spec review fixes completed. Added hosted provider credential presence/syntax validation without external API calls, rejected blank hosted API keys on first-run provider save before config writes, mapped malformed local endpoint URLs to sanitized typed validation failures, and hardened secret masking so one- and two-character nonempty secrets are never fully exposed. Verification: provider/setup/config pytest group passed with 84 passed; setup guard/state/masking pytest group passed with 33 passed; Ruff passed; Bandit JSON reported zero findings; git diff --check passed.
+Task 3 complete. Added backend-generated first-run provider catalog and provider save/validate endpoints for hosted and local providers; provider saves mask secrets, reject blank hosted keys, refresh runtime config caches, and write new catalog fields into the correct config section. Added runtime config mappings for Moonshot, Z.AI, Kobold.cpp, and TabbyAPI; added local endpoint validation for OpenAI-compatible providers plus native Kobold.cpp validation; added SSRF-style target guarding for local provider validation. Hardened legacy /setup/config and /setup/complete behind first-run write/completion gates so they share backend-authoritative state and cannot bypass first-chat completion. Verification: provider/config pytest set passed with 110 passed; setup guard/state/masking set passed with 34 passed; focused provider-field regression passed with 4 passed; Ruff passed on changed files; Bandit passed on latest touched production files; full touched-scope Bandit only reported pre-existing config.py low B105 findings outside changed lines; git diff --check passed. Spec and code-quality reviews are approved.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

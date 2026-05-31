@@ -37,6 +37,8 @@ Parent implementation task for the approved unified first-time solo-user onboard
 
 <!-- SECTION:NOTES:BEGIN -->
 Created child implementation tasks: TASK-490 backend state/access foundation, TASK-491 provider catalog/validation, TASK-492 first-chat completion/settings endpoints, TASK-493 frontend setup client/shell, TASK-494 progressive wizard steps, TASK-495 docs/CLI cleanup, TASK-496 final E2E/security verification. Baseline checks before implementation: setup remote admin pytest 8 passed; config provider endpoint pytest 33 passed; OnboardingConnectForm design-system Vitest 4 passed. Bun install in apps initially hung in extension wxt postinstall and was stopped after dependencies were linked; targeted Vitest then passed.
+
+TASK-491 completed after spec and code-quality review. Provider setup now covers catalog/save/validation behavior, runtime config mapping, cache refresh, first-run write gating, local endpoint target guarding, and config-section insertion regressions.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
