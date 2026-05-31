@@ -57,7 +57,7 @@ Expected: no output.
 **Files:**
 - Add/modify: `Docs/superpowers/specs/2026-05-23-research-workspace-hard-replacement-roadmap-design.md`
 - Add/modify: `backlog/tasks/task-463 - Design-Research-Workspace-hard-replacement-roadmap.md`
-- Add: `backlog/tasks/task-472 - Stabilize-Research-Workspace-prerequisite-stack.md`
+- Add: `backlog/tasks/task-575 - Stabilize-Research-Workspace-prerequisite-stack.md`
 - Add: `Docs/superpowers/plans/2026-05-23-research-workspace-prerequisite-stack-packaging-plan.md`
 
 - [ ] **Step 1: Cherry-pick the roadmap commits**
@@ -75,7 +75,7 @@ Expected: roadmap design and task tracking apply cleanly.
 Copy only:
 
 ```text
-backlog/tasks/task-472 - Stabilize-Research-Workspace-prerequisite-stack.md
+backlog/tasks/task-575 - Stabilize-Research-Workspace-prerequisite-stack.md
 Docs/superpowers/plans/2026-05-23-research-workspace-prerequisite-stack-packaging-plan.md
 ```
 
@@ -289,7 +289,7 @@ Open `/research-workspace` via CDP. Verify:
 ### Task 9: Finalize Branch
 
 **Files:**
-- Modify: `backlog/tasks/task-472 - Stabilize-Research-Workspace-prerequisite-stack.md`
+- Modify: `backlog/tasks/task-575 - Stabilize-Research-Workspace-prerequisite-stack.md`
 
 - [ ] **Step 1: Run final diff checks**
 
