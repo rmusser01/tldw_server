@@ -715,12 +715,9 @@ def _sanitize_setup_payload(value: Any) -> Any:
     return value
 
 
-def _public_validation_error_detail(exc: ValueError, fallback: str) -> str:
-    """Return request validation text unless it looks like internal diagnostics."""
-    detail = str(exc).strip()
-    if not detail:
-        return fallback
-    return detail if _sanitize_setup_payload(detail) == detail else fallback
+def _public_validation_error_detail(_exc: ValueError, fallback: str) -> str:
+    """Return a stable public validation message for setup endpoint failures."""
+    return fallback
 
 
 def _completion_conflict(detail: str) -> HTTPException:
