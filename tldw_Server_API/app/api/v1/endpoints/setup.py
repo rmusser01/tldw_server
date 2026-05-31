@@ -27,6 +27,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_db_transaction,
 )
 from tldw_Server_API.app.api.v1.API_Deps.setup_deps import (
+    effective_setup_proxy_client_ip,
     has_setup_proxy_headers,
     require_local_setup_access,
     require_shared_audio_installer_access,
@@ -145,6 +146,9 @@ _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
     r"^xox[baprs]-[A-Za-z0-9-]{6,}$|"
     r"^gh[pousr]_[A-Za-z0-9_]{6,}$|"
     r"^github_pat_[A-Za-z0-9_]{6,}$|"
+    r"^hf_[A-Za-z0-9]{6,}$|"
+    r"^gsk_[A-Za-z0-9]{6,}$|"
+    r"^pplx-[A-Za-z0-9_-]{6,}$|"
     r"^AIza[0-9A-Za-z_-]{6,}$|"
     r"^eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}$|"
     r"^bearer\s+\S{6,}$|"
@@ -386,82 +390,8 @@ def _is_lan_host(host: str | None) -> bool:
     return address.is_private or address.is_link_local
 
 
-def _parse_forwarded_client_ip(value: str | None) -> str | None:
-    if not value:
-        return None
-    candidate = value.strip().strip('"')
-    if not candidate:
-        return None
-    if candidate.startswith("["):
-        end = candidate.find("]")
-        if end == -1:
-            return None
-        candidate = candidate[1:end]
-    elif candidate.count(":") == 1 and "." in candidate:
-        candidate = candidate.rsplit(":", 1)[0]
-    candidate = candidate.lower().strip("[]").split("%", 1)[0]
-    try:
-        return str(ipaddress.ip_address(candidate))
-    except ValueError:
-        return None
-
-
-def _first_forwarded_for_ip(request: Request) -> str | None:
-    raw = request.headers.get("x-forwarded-for")
-    if not raw:
-        return None
-    return _effective_forwarded_chain_ip(raw.split(","))
-
-
-def _effective_forwarded_chain_ip(candidates: list[str]) -> str | None:
-    parsed_candidates = []
-    for candidate in candidates:
-        if not candidate.strip():
-            return None
-        parsed_candidate = _parse_forwarded_client_ip(candidate)
-        if not parsed_candidate:
-            return None
-        parsed_candidates.append(parsed_candidate)
-    if not parsed_candidates:
-        return None
-
-    for parsed_candidate in parsed_candidates:
-        if not _is_local_host(parsed_candidate):
-            return parsed_candidate
-    return parsed_candidates[0]
-
-
-def _forwarded_header_for_ip(request: Request) -> str | None:
-    raw = request.headers.get("forwarded")
-    if not raw:
-        return None
-    candidates: list[str] = []
-    for forwarded_entry in raw.split(","):
-        if not forwarded_entry.strip():
-            return None
-        entry_candidates: list[str] = []
-        for parameter in forwarded_entry.split(";"):
-            if "=" not in parameter:
-                continue
-            key, value = parameter.split("=", 1)
-            if key.strip().lower() == "for":
-                entry_candidates.append(value)
-        if len(entry_candidates) != 1:
-            return None
-        candidates.append(entry_candidates[0])
-    return _effective_forwarded_chain_ip(candidates)
-
-
-def _real_ip_header_ip(request: Request) -> str | None:
-    return _parse_forwarded_client_ip(request.headers.get("x-real-ip"))
-
-
 def _effective_forwarded_client_ip(request: Request) -> str | None:
-    if request.headers.get("x-forwarded-for"):
-        return _first_forwarded_for_ip(request)
-    return (
-        _forwarded_header_for_ip(request) or _real_ip_header_ip(request)
-    )
+    return effective_setup_proxy_client_ip(request)
 
 
 def _classify_source_host(host: str | None) -> str:

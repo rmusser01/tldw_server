@@ -125,34 +125,109 @@ def _should_trust_proxy() -> bool:
     return raw.strip().lower() not in _FALSEY_ENV_VALUES
 
 
-def _first_forwarded_ip(request: Request) -> str | None:
-    """Return a loopback forwarded IP only when the complete XFF chain is local."""
+def _parse_proxy_client_ip(value: str | None) -> str | None:
+    """Parse one proxy-supplied client IP candidate."""
 
-    if not _should_trust_proxy():
+    if not value:
         return None
+    candidate = value.strip().strip('"')
+    if not candidate:
+        return None
+    if candidate.startswith("["):
+        end = candidate.find("]")
+        if end == -1:
+            return None
+        candidate = candidate[1:end]
+    elif candidate.count(":") == 1 and "." in candidate:
+        candidate = candidate.rsplit(":", 1)[0]
+    candidate = candidate.lower().strip("[]").split("%", 1)[0]
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return None
+
+
+def _effective_forwarded_chain_ip(candidates: list[str]) -> str | None:
+    parsed_candidates = []
+    for candidate in candidates:
+        if not candidate.strip():
+            return None
+        parsed_candidate = _parse_proxy_client_ip(candidate)
+        if not parsed_candidate:
+            return None
+        parsed_candidates.append(parsed_candidate)
+    if not parsed_candidates:
+        return None
+
+    for parsed_candidate in parsed_candidates:
+        if not ipaddress.ip_address(parsed_candidate).is_loopback:
+            return parsed_candidate
+    return parsed_candidates[0]
+
+
+def _forwarded_for_chain_ip(request: Request) -> str | None:
     raw = request.headers.get("x-forwarded-for")
     if not raw:
         return None
-    try:
-        candidates = [
-            candidate.strip().lower().strip("[]").split("%", 1)[0]
-            for candidate in raw.split(",")
-            if candidate.strip()
-        ]
-    except Exception:  # noqa: BLE001
+    return _effective_forwarded_chain_ip(raw.split(","))
+
+
+def _forwarded_header_chain_ip(request: Request) -> str | None:
+    raw = request.headers.get("forwarded")
+    if not raw:
         return None
+    candidates: list[str] = []
+    for forwarded_entry in raw.split(","):
+        if not forwarded_entry.strip():
+            return None
+        entry_candidates: list[str] = []
+        for parameter in forwarded_entry.split(";"):
+            if "=" not in parameter:
+                continue
+            key, value = parameter.split("=", 1)
+            if key.strip().lower() == "for":
+                entry_candidates.append(value)
+        if len(entry_candidates) != 1:
+            return None
+        candidates.append(entry_candidates[0])
+    return _effective_forwarded_chain_ip(candidates)
+
+
+def effective_setup_proxy_client_ip(request: Request) -> str | None:
+    """Return conservative effective client IP from trusted setup proxy headers."""
+
+    if not _should_trust_proxy():
+        return None
+
+    candidates: list[str] = []
+    if request.headers.get("x-forwarded-for"):
+        xff_ip = _forwarded_for_chain_ip(request)
+        if not xff_ip:
+            return None
+        candidates.append(xff_ip)
+    if request.headers.get("forwarded"):
+        forwarded_ip = _forwarded_header_chain_ip(request)
+        if not forwarded_ip:
+            return None
+        candidates.append(forwarded_ip)
+    if request.headers.get("x-real-ip"):
+        real_ip = _parse_proxy_client_ip(request.headers.get("x-real-ip"))
+        if not real_ip:
+            return None
+        candidates.append(real_ip)
     if not candidates:
         return None
 
-    parsed = []
     for candidate in candidates:
-        try:
-            parsed.append(ipaddress.ip_address(candidate))
-        except ValueError:
-            return None
-    if not all(candidate.is_loopback for candidate in parsed):
-        return None
-    return str(parsed[0])
+        if not ipaddress.ip_address(candidate).is_loopback:
+            return candidate
+    return candidates[0]
+
+
+def _first_forwarded_ip(request: Request) -> str | None:
+    """Return the effective trusted proxy client IP for setup locality checks."""
+
+    return effective_setup_proxy_client_ip(request)
 
 
 def should_trust_setup_proxy_headers(request: Request) -> bool:

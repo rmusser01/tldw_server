@@ -170,6 +170,22 @@ def test_first_run_metadata_rejects_mixed_forwarded_for_chain_from_trusted_local
     assert metadata.manual_auth_required is True
 
 
+def test_first_run_metadata_rejects_conflicting_forwarded_client_headers(monkeypatch):
+    _setup_needs_setup(monkeypatch)
+    request = _make_setup_metadata_request(
+        client_host="127.0.0.1",
+        host="localhost",
+        forwarded_for="127.0.0.1",
+        extra_headers={"forwarded": "for=203.0.113.10"},
+    )
+
+    metadata = setup_endpoint.build_first_run_metadata(request)
+
+    assert metadata.connection.browser_access == "remote"
+    assert metadata.bundled_single_user_auth_available is False
+    assert metadata.manual_auth_required is True
+
+
 def test_first_run_metadata_classifies_x_real_ip_from_trusted_local_proxy_as_remote(monkeypatch):
     _setup_needs_setup(monkeypatch)
     request = _make_setup_metadata_request(
@@ -469,6 +485,33 @@ def test_first_run_state_rejects_secret_like_allowed_public_step_value(
     assert "sk-raw" not in str(state_response.json())
 
 
+def test_first_run_state_rejects_huggingface_token_like_allowed_public_step_value(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={
+            "step": "providers",
+            "data": {
+                "acknowledged": True,
+                "default_provider": "hf_abcdef1234567890",
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unsupported_first_run_step_data"
+    state_response = setup_client.get("/api/v1/setup/first-run/state")
+    assert state_response.status_code == 200
+    assert "hf_abcdef1234567890" not in str(state_response.json())
+
+
 def test_first_run_state_persists_allowed_public_step_data(
     monkeypatch,
     tmp_path,
@@ -558,6 +601,31 @@ def test_first_run_state_get_filters_secret_like_allowed_public_step_values(
     body = response.json()
     assert body["step_data"]["setup_path"] == {"acknowledged": True}
     assert "sk-raw" not in str(body)
+
+
+def test_first_run_state_get_filters_huggingface_token_like_allowed_public_step_values(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    state = FirstRunStateStore(state_path).update_step(
+        "providers",
+        {
+            "acknowledged": True,
+            "default_provider": "hf_abcdef1234567890",
+        },
+    )
+    payload = setup_endpoint.json.loads(state.model_dump_json())
+    state_path.write_text(setup_endpoint.json.dumps(payload), encoding="utf-8")
+
+    response = setup_client.get("/api/v1/setup/first-run/state")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["step_data"]["providers"] == {"acknowledged": True}
+    assert "hf_abcdef1234567890" not in str(body)
 
 
 def test_skipped_first_run_state_rejected_by_shared_write_guard(

@@ -28,7 +28,11 @@ def _make_remote_post_request(path="/api/v1/setup/first-run/state") -> Request:
     return Request(scope)
 
 
-def _make_local_proxied_post_request(forwarded_for: str) -> Request:
+def _make_local_proxied_post_request(
+    forwarded_for: str,
+    *,
+    extra_headers: list[tuple[bytes, bytes]] | None = None,
+) -> Request:
     scope = {
         "type": "http",
         "method": "POST",
@@ -36,7 +40,8 @@ def _make_local_proxied_post_request(forwarded_for: str) -> Request:
         "headers": [
             (b"host", b"localhost"),
             (b"x-forwarded-for", forwarded_for.encode("ascii")),
-        ],
+        ]
+        + (extra_headers or []),
         "client": ("127.0.0.1", 4444),
     }
     return Request(scope)
@@ -184,6 +189,25 @@ async def test_local_setup_write_rejects_mixed_forwarded_for_chain(monkeypatch):
     with pytest.raises(HTTPException) as excinfo:
         await setup_deps.require_local_setup_access(
             _make_local_proxied_post_request("127.0.0.1, 203.0.113.10")
+        )
+
+    rendered_detail = str(excinfo.value.detail)
+    assert excinfo.value.status_code == 403
+    assert "203.0.113.10" not in rendered_detail
+    assert "127.0.0.1" not in rendered_detail
+
+
+@pytest.mark.asyncio
+async def test_local_setup_write_rejects_conflicting_forwarded_client_headers(monkeypatch):
+    monkeypatch.delenv("TLDW_SETUP_ALLOW_REMOTE", raising=False)
+    monkeypatch.setattr(setup_deps, "_config_allows_remote", lambda: False)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await setup_deps.require_local_setup_access(
+            _make_local_proxied_post_request(
+                "127.0.0.1",
+                extra_headers=[(b"forwarded", b"for=203.0.113.10")],
+            )
         )
 
     rendered_detail = str(excinfo.value.detail)
