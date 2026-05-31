@@ -3,14 +3,26 @@
 from __future__ import annotations
 
 import ast
-import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
+import mcp_unified.gateway.profiles as gateway_profiles_module
 import mcp_unified.profiles as profiles_pkg
+import mcp_unified.profiles.resolver as profile_resolver_module
 import pytest
+from loguru import logger as loguru_logger
 from mcp_unified.profiles.models import MCPProfile
-from mcp_unified.profiles.resolver import StoreBackedProfileResolver
-from mcp_unified.profiles.store import InMemoryProfileStore, ProfileStoreUnavailableError
+from mcp_unified.profiles.resolver import (
+    AssignmentBackedProfileResolver,
+    StoreBackedProfileResolver,
+)
+from mcp_unified.profiles.store import (
+    InMemoryProfileAssignmentStore,
+    InMemoryProfileStore,
+    ProfileAssignmentStoreUnavailableError,
+    ProfileStoreUnavailableError,
+)
+from mcp_unified.storage.models import ProfileAssignment
 
 
 def _tldw_imports_for(path: Path) -> list[str]:
@@ -22,8 +34,7 @@ def _tldw_imports_for(path: Path) -> list[str]:
             imports.extend(
                 alias.name
                 for alias in node.names
-                if alias.name == "tldw_Server_API"
-                or alias.name.startswith("tldw_Server_API.")
+                if alias.name == "tldw_Server_API" or alias.name.startswith("tldw_Server_API.")
             )
         elif isinstance(node, ast.ImportFrom) and node.module:
             if node.module == "tldw_Server_API" or node.module.startswith("tldw_Server_API."):
@@ -31,15 +42,20 @@ def _tldw_imports_for(path: Path) -> list[str]:
     return imports
 
 
-def test_profile_store_and_resolver_modules_have_no_tldw_server_imports() -> None:
-    package_root = Path(profiles_pkg.__file__).resolve().parent
+def test_profile_and_gateway_profile_modules_have_no_tldw_server_imports() -> None:
+    profiles_root = Path(profiles_pkg.__file__).resolve().parent
+    gateway_profile_path = Path(gateway_profiles_module.__file__).resolve()
 
     offenders: dict[str, list[str]] = {}
-    for path in package_root.rglob("*.py"):
+    for path in [*profiles_root.rglob("*.py"), gateway_profile_path]:
         imports = _tldw_imports_for(path)
         if imports:
             offenders[str(path)] = imports
     assert offenders == {}
+
+
+def test_profile_resolver_uses_loguru_logger() -> None:
+    assert profile_resolver_module.logger is loguru_logger
 
 
 @pytest.mark.asyncio
@@ -127,13 +143,23 @@ async def test_store_backed_resolver_returns_none_for_disabled_profiles() -> Non
 
 @pytest.mark.asyncio
 async def test_store_backed_resolver_fails_closed_when_store_unavailable(
-    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    class FakeLogger:
+        def __init__(self) -> None:
+            self.opt_calls: list[dict[str, object]] = []
+            self.warning_calls: list[tuple[str, dict[str, object]]] = []
+
+        def opt(self, **kwargs: object) -> FakeLogger:
+            self.opt_calls.append(kwargs)
+            return self
+
+        def warning(self, message: str, **kwargs: object) -> None:
+            self.warning_calls.append((message, kwargs))
+
     class UnavailableStore:
         async def get_profile(self, profile_id: str) -> MCPProfile | None:
-            raise ProfileStoreUnavailableError(
-                f"profile store unavailable: {profile_id}"
-            )
+            raise ProfileStoreUnavailableError(f"profile store unavailable: {profile_id}")
 
         async def list_profiles(self) -> list[MCPProfile]:
             raise ProfileStoreUnavailableError("profile store unavailable")
@@ -145,14 +171,201 @@ async def test_store_backed_resolver_fails_closed_when_store_unavailable(
             raise ProfileStoreUnavailableError("profile store unavailable")
 
         async def delete_profile(self, profile_id: str) -> bool:
-            raise ProfileStoreUnavailableError(
-                f"profile store unavailable: {profile_id}"
-            )
+            raise ProfileStoreUnavailableError(f"profile store unavailable: {profile_id}")
 
     resolver = StoreBackedProfileResolver(UnavailableStore(), default_profile_id="default")
-    caplog.set_level(logging.WARNING, logger="mcp_unified.profiles.resolver")
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(profile_resolver_module, "logger", fake_logger)
 
     assert await resolver.resolve_profile("explicit") is None
     assert await resolver.resolve_profile(None) is None
-    assert "MCP profile 'explicit'" in caplog.text
-    assert "MCP profile 'default'" in caplog.text
+    assert fake_logger.opt_calls == [{"exception": True}, {"exception": True}]
+    assert fake_logger.warning_calls == [
+        (
+            "Profile store unavailable while resolving MCP profile {profile_id}",
+            {"profile_id": "explicit"},
+        ),
+        (
+            "Profile store unavailable while resolving MCP profile {profile_id}",
+            {"profile_id": "default"},
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_assignment_backed_resolver_uses_stored_default_assignment() -> None:
+    profile_store = InMemoryProfileStore(
+        [
+            MCPProfile(id="default", name="Default"),
+            MCPProfile(id="explicit", name="Explicit"),
+        ]
+    )
+    assignment_store = InMemoryProfileAssignmentStore(
+        [
+            ProfileAssignment(
+                id="gateway-default",
+                profile_id="default",
+                is_default=True,
+            ),
+        ]
+    )
+    resolver = AssignmentBackedProfileResolver(
+        profile_store,
+        assignment_store=assignment_store,
+        fallback_default_profile_id=None,
+    )
+
+    result = await resolver.resolve_profile_result(None)
+
+    assert result.status == "resolved"
+    assert result.profile is not None
+    assert result.profile.id == "default"
+    assert result.provenance["used_default_assignment"] is True
+    assert result.provenance["default_assignment_id"] == "gateway-default"
+
+
+@pytest.mark.asyncio
+async def test_assignment_backed_resolver_explicit_profile_bypasses_default() -> None:
+    class RaisingAssignmentStore(InMemoryProfileAssignmentStore):
+        async def list_assignments(
+            self,
+            *,
+            profile_id: str | None = None,
+            principal_id: str | None = None,
+            workspace_id: str | None = None,
+        ) -> list[ProfileAssignment]:
+            raise AssertionError("explicit profile should bypass default assignment")
+
+    profile_store = InMemoryProfileStore(
+        [
+            MCPProfile(id="default", name="Default"),
+            MCPProfile(id="explicit", name="Explicit"),
+        ]
+    )
+    resolver = AssignmentBackedProfileResolver(
+        profile_store,
+        assignment_store=RaisingAssignmentStore(
+            [
+                ProfileAssignment(
+                    id="gateway-default",
+                    profile_id="default",
+                    is_default=True,
+                ),
+            ]
+        ),
+        fallback_default_profile_id=None,
+    )
+
+    result = await resolver.resolve_profile_result("explicit")
+
+    assert result.status == "resolved"
+    assert result.profile is not None
+    assert result.profile.id == "explicit"
+    assert result.provenance["used_default_assignment"] is False
+    assert result.provenance["default_assignment_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_assignment_backed_resolver_falls_back_when_no_assignment_exists() -> None:
+    profile_store = InMemoryProfileStore([MCPProfile(id="fallback", name="Fallback")])
+    resolver = AssignmentBackedProfileResolver(
+        profile_store,
+        assignment_store=InMemoryProfileAssignmentStore(),
+        fallback_default_profile_id="fallback",
+    )
+
+    result = await resolver.resolve_profile_result(None)
+
+    assert result.status == "resolved"
+    assert result.profile is not None
+    assert result.profile.id == "fallback"
+    assert result.provenance["used_default_assignment"] is False
+    assert result.provenance["used_default_profile"] is True
+
+
+@pytest.mark.asyncio
+async def test_assignment_backed_resolver_ignores_scoped_default_assignments() -> None:
+    profile_store = InMemoryProfileStore(
+        [
+            MCPProfile(id="global-default", name="Global Default"),
+            MCPProfile(id="principal-default", name="Principal Default"),
+            MCPProfile(id="workspace-default", name="Workspace Default"),
+        ]
+    )
+    assignment_store = InMemoryProfileAssignmentStore(
+        [
+            ProfileAssignment(
+                id="scoped-principal",
+                profile_id="principal-default",
+                principal_id="user-1",
+                is_default=True,
+                updated_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
+            ),
+            ProfileAssignment(
+                id="scoped-workspace",
+                profile_id="workspace-default",
+                workspace_id="workspace-1",
+                is_default=True,
+                updated_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
+            ),
+            ProfileAssignment(
+                id="gateway-default",
+                profile_id="global-default",
+                is_default=True,
+                updated_at=datetime(2026, 5, 31, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    resolver = AssignmentBackedProfileResolver(
+        profile_store,
+        assignment_store=assignment_store,
+        fallback_default_profile_id=None,
+    )
+
+    result = await resolver.resolve_profile_result(None)
+
+    assert result.status == "resolved"
+    assert result.profile is not None
+    assert result.profile.id == "global-default"
+    assert result.provenance["default_assignment_id"] == "gateway-default"
+
+
+@pytest.mark.asyncio
+async def test_assignment_backed_resolver_fails_closed_when_assignment_store_unavailable() -> None:
+    class UnavailableAssignmentStore:
+        async def get_assignment(
+            self,
+            assignment_id: str,
+        ) -> ProfileAssignment | None:
+            raise ProfileAssignmentStoreUnavailableError(assignment_id)
+
+        async def list_assignments(
+            self,
+            *,
+            profile_id: str | None = None,
+            principal_id: str | None = None,
+            workspace_id: str | None = None,
+        ) -> list[ProfileAssignment]:
+            raise ProfileAssignmentStoreUnavailableError("assignment store unavailable")
+
+        async def upsert_assignment(
+            self,
+            assignment: ProfileAssignment,
+        ) -> ProfileAssignment:
+            raise ProfileAssignmentStoreUnavailableError(assignment.id)
+
+        async def delete_assignment(self, assignment_id: str) -> bool:
+            raise ProfileAssignmentStoreUnavailableError(assignment_id)
+
+    resolver = AssignmentBackedProfileResolver(
+        InMemoryProfileStore([MCPProfile(id="fallback", name="Fallback")]),
+        assignment_store=UnavailableAssignmentStore(),
+        fallback_default_profile_id="fallback",
+    )
+
+    result = await resolver.resolve_profile_result(None)
+
+    assert result.status == "store_unavailable"
+    assert result.reason_code == "assignment_store_unavailable"
+    assert result.provenance["used_default_assignment"] is False
+    assert result.provenance["resolved_profile_id"] is None

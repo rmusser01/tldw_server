@@ -16,6 +16,11 @@ from .config import (
     load_gateway_profile_bootstrap_config,
 )
 from .profile_runtime import ProfileAwareGatewayRuntime
+from .profiles import (
+    GatewayProfileManagementError,
+    GatewayProfileManager,
+    GatewayProfileStoreMetadata,
+)
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 from .stdio import GatewayStdioServer, handle_stdio_line
 
@@ -27,6 +32,9 @@ __all__ = [
     "GatewayConfigFormat",
     "GatewayProfileBootstrap",
     "GatewayProfileBootstrapConfig",
+    "GatewayProfileManagementError",
+    "GatewayProfileManager",
+    "GatewayProfileStoreMetadata",
     "GatewayRequestContext",
     "GatewayRuntime",
     "GatewayStdioServer",

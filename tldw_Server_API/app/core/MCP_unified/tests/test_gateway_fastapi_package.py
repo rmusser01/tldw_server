@@ -241,6 +241,141 @@ def _profile_with_capabilities(profile_id: str, capabilities: list[str]) -> Any:
     )
 
 
+class _ProfileManagementManagerDouble:
+    """Small manager double that returns deterministic profile-management payloads."""
+
+    def __init__(self, marker: str = "manager") -> None:
+        self.marker = marker
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    async def list_profiles(self) -> dict[str, Any]:
+        self.calls.append(("list_profiles", (), {}))
+        return {
+            "ok": True,
+            "profiles": [{"id": self.marker, "name": f"Profile {self.marker}"}],
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def show_profile(self, profile_id: str) -> dict[str, Any]:
+        self.calls.append(("show_profile", (profile_id,), {}))
+        return {
+            "ok": True,
+            "profile": {"id": profile_id, "name": f"Profile {profile_id}"},
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def duplicate_preset(
+        self,
+        preset_id: str,
+        *,
+        profile_id: str | None = None,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "duplicate_preset",
+                (preset_id,),
+                {"profile_id": profile_id, "name": name},
+            )
+        )
+        resolved_profile_id = profile_id or preset_id
+        return {
+            "ok": True,
+            "profile": {
+                "id": resolved_profile_id,
+                "name": name or f"Profile {resolved_profile_id}",
+                "preset_id": preset_id,
+                "preset_version": "2026.05.27",
+            },
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def get_default_profile(self) -> dict[str, Any]:
+        self.calls.append(("get_default_profile", (), {}))
+        return {
+            "ok": True,
+            "profile": {"id": self.marker, "name": f"Profile {self.marker}"},
+            "assignment": None,
+            "default": {
+                "source": "fallback_default_profile_id",
+                "profile_id": self.marker,
+                "assignment_id": None,
+            },
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def set_default_profile(self, profile_id: str) -> dict[str, Any]:
+        self.calls.append(("set_default_profile", (profile_id,), {}))
+        return {
+            "ok": True,
+            "profile": {"id": profile_id, "name": f"Profile {profile_id}"},
+            "assignment": {
+                "id": "gateway-default",
+                "profile_id": profile_id,
+                "is_default": True,
+            },
+            "default": {
+                "source": "assignment",
+                "profile_id": profile_id,
+                "assignment_id": "gateway-default",
+            },
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+
+class _ProfileManagementBootstrapDouble:
+    def __init__(self, manager: _ProfileManagementManagerDouble) -> None:
+        self.profile_manager = manager
+
+
+class _ProfileManagementErrorManagerDouble(_ProfileManagementManagerDouble):
+    def __init__(self, method: str, reason_code: str) -> None:
+        super().__init__()
+        self.method = method
+        self.reason_code = reason_code
+
+    async def _raise_if_targeted(self, method: str) -> None:
+        if method == self.method:
+            from mcp_unified.gateway.profiles import GatewayProfileManagementError
+
+            raise GatewayProfileManagementError(
+                f"domain failure: {self.reason_code}",
+                reason_code=self.reason_code,
+                profile_id="missing-profile" if "profile" in self.reason_code else None,
+                preset_id="missing-preset" if "preset" in self.reason_code else None,
+            )
+
+    async def list_profiles(self) -> dict[str, Any]:
+        await self._raise_if_targeted("list_profiles")
+        return await super().list_profiles()
+
+    async def show_profile(self, profile_id: str) -> dict[str, Any]:
+        await self._raise_if_targeted("show_profile")
+        return await super().show_profile(profile_id)
+
+    async def duplicate_preset(
+        self,
+        preset_id: str,
+        *,
+        profile_id: str | None = None,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        await self._raise_if_targeted("duplicate_preset")
+        return await super().duplicate_preset(
+            preset_id,
+            profile_id=profile_id,
+            name=name,
+        )
+
+    async def get_default_profile(self) -> dict[str, Any]:
+        await self._raise_if_targeted("get_default_profile")
+        return await super().get_default_profile()
+
+    async def set_default_profile(self, profile_id: str) -> dict[str, Any]:
+        await self._raise_if_targeted("set_default_profile")
+        return await super().set_default_profile(profile_id)
+
+
 def test_gateway_package_does_not_import_tldw_server_api() -> None:
     assert GATEWAY_ROOT.exists()
     offenders: dict[str, list[str]] = {}
@@ -270,6 +405,337 @@ def test_gateway_stdio_submodule_import_does_not_eagerly_import_fastapi_transpor
     )
 
     assert result.stdout.strip() == "False"
+
+
+def test_gateway_profile_management_routes_are_not_mounted_by_default() -> None:
+    app = create_gateway_app(_FakeGatewayRuntime(), prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/profiles")
+
+    assert response.status_code == 404
+
+
+def test_gateway_profile_management_routes_mount_with_manager() -> None:
+    manager = _ProfileManagementManagerDouble("direct")
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        profile_manager=manager,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/profiles")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "profiles": [{"id": "direct", "name": "Profile direct"}],
+        "store": {"kind": "memory", "persistent": False},
+    }
+
+
+def test_gateway_profile_management_routes_mount_with_bootstrap() -> None:
+    manager = _ProfileManagementManagerDouble("bootstrap")
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        profile_bootstrap=_ProfileManagementBootstrapDouble(manager),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/profiles")
+
+    assert response.status_code == 200
+    assert response.json()["profiles"] == [
+        {"id": "bootstrap", "name": "Profile bootstrap"}
+    ]
+
+
+def test_gateway_profile_management_routes_mount_when_enabled_with_manager() -> None:
+    manager = _ProfileManagementManagerDouble("enabled")
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    app.include_router(
+        gateway_fastapi.create_gateway_router(
+            _FakeGatewayRuntime(),
+            profile_manager=manager,
+            enable_profile_management=True,
+        ),
+        prefix="/mcp",
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/profiles")
+
+    assert response.status_code == 200
+    assert response.json()["profiles"] == [{"id": "enabled", "name": "Profile enabled"}]
+
+
+def test_gateway_profile_management_enabled_without_manager_raises() -> None:
+    with pytest.raises(ValueError, match="profile management requires"):
+        gateway_fastapi.create_gateway_router(
+            _FakeGatewayRuntime(),
+            enable_profile_management=True,
+        )
+
+    with pytest.raises(ValueError, match="profile management requires"):
+        create_gateway_app(
+            _FakeGatewayRuntime(),
+            prefix="/mcp",
+            enable_profile_management=True,
+        )
+
+
+def test_gateway_profile_management_explicit_manager_precedes_bootstrap_manager() -> None:
+    direct = _ProfileManagementManagerDouble("direct")
+    bootstrap = _ProfileManagementBootstrapDouble(
+        _ProfileManagementManagerDouble("bootstrap")
+    )
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        profile_manager=direct,
+        profile_bootstrap=bootstrap,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/profiles")
+
+    assert response.status_code == 200
+    assert response.json()["profiles"] == [{"id": "direct", "name": "Profile direct"}]
+    assert direct.calls == [("list_profiles", (), {})]
+    assert bootstrap.profile_manager.calls == []
+
+
+def test_gateway_profile_management_success_envelopes() -> None:
+    manager = _ProfileManagementManagerDouble("default")
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        profile_manager=manager,
+    )
+
+    with TestClient(app) as client:
+        listed = client.get("/mcp/profiles")
+        shown = client.get("/mcp/profiles/reviewer")
+        duplicated_default = client.post(
+            "/mcp/profiles/from-preset",
+            json={"preset_id": "project-researcher"},
+        )
+        duplicated_custom = client.post(
+            "/mcp/profiles/from-preset",
+            json={
+                "preset_id": "project-researcher",
+                "profile_id": "custom-researcher",
+                "name": "Custom Researcher",
+            },
+        )
+        default_before = client.get("/mcp/profiles/default")
+        default_after = client.put(
+            "/mcp/profiles/default",
+            json={"profile_id": "architect"},
+        )
+
+    assert listed.json() == {
+        "ok": True,
+        "profiles": [{"id": "default", "name": "Profile default"}],
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert shown.json() == {
+        "ok": True,
+        "profile": {"id": "reviewer", "name": "Profile reviewer"},
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert duplicated_default.json() == {
+        "ok": True,
+        "profile": {
+            "id": "project-researcher",
+            "name": "Profile project-researcher",
+            "preset_id": "project-researcher",
+            "preset_version": "2026.05.27",
+        },
+        "preset_id": "project-researcher",
+        "preset_version": "2026.05.27",
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert duplicated_custom.json() == {
+        "ok": True,
+        "profile": {
+            "id": "custom-researcher",
+            "name": "Custom Researcher",
+            "preset_id": "project-researcher",
+            "preset_version": "2026.05.27",
+        },
+        "preset_id": "project-researcher",
+        "preset_version": "2026.05.27",
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert default_before.json() == {
+        "ok": True,
+        "profile": {"id": "default", "name": "Profile default"},
+        "assignment": None,
+        "default": {
+            "source": "fallback_default_profile_id",
+            "profile_id": "default",
+            "assignment_id": None,
+        },
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert default_after.json() == {
+        "ok": True,
+        "profile": {"id": "architect", "name": "Profile architect"},
+        "assignment": {
+            "id": "gateway-default",
+            "profile_id": "architect",
+            "is_default": True,
+        },
+        "default": {
+            "source": "assignment",
+            "profile_id": "architect",
+            "assignment_id": "gateway-default",
+        },
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert manager.calls == [
+        ("list_profiles", (), {}),
+        ("show_profile", ("reviewer",), {}),
+        (
+            "duplicate_preset",
+            ("project-researcher",),
+            {"profile_id": None, "name": None},
+        ),
+        (
+            "duplicate_preset",
+            ("project-researcher",),
+            {"profile_id": "custom-researcher", "name": "Custom Researcher"},
+        ),
+        ("get_default_profile", (), {}),
+        ("set_default_profile", ("architect",), {}),
+    ]
+
+
+def test_gateway_profile_management_routes_have_pydantic_response_models() -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        profile_manager=_ProfileManagementManagerDouble(),
+    )
+
+    paths = app.openapi()["paths"]
+    expected_refs = {
+        ("/mcp/profiles", "get"): "#/components/schemas/ProfileListResponse",
+        ("/mcp/profiles/{profile_id}", "get"): "#/components/schemas/ProfileResponse",
+        ("/mcp/profiles/from-preset", "post"): "#/components/schemas/DuplicatePresetResponse",
+        ("/mcp/profiles/default", "get"): "#/components/schemas/DefaultProfileResponse",
+        ("/mcp/profiles/default", "put"): "#/components/schemas/DefaultProfileResponse",
+    }
+
+    for (path, method), expected_ref in expected_refs.items():
+        schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
+        assert schema == {"$ref": expected_ref}
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "json_body", "manager_method", "reason_code", "status_code"),
+    [
+        ("GET", "/mcp/profiles/missing", None, "show_profile", "profile_not_found", 404),
+        (
+            "POST",
+            "/mcp/profiles/from-preset",
+            {"preset_id": "missing-preset"},
+            "duplicate_preset",
+            "preset_not_found",
+            404,
+        ),
+        (
+            "GET",
+            "/mcp/profiles/default",
+            None,
+            "get_default_profile",
+            "default_profile_not_configured",
+            404,
+        ),
+        (
+            "PUT",
+            "/mcp/profiles/default",
+            {"profile_id": "disabled"},
+            "set_default_profile",
+            "profile_disabled",
+            409,
+        ),
+        (
+            "POST",
+            "/mcp/profiles/from-preset",
+            {"preset_id": "project-researcher"},
+            "duplicate_preset",
+            "profile_already_exists",
+            409,
+        ),
+        ("GET", "/mcp/profiles", None, "list_profiles", "profile_store_unavailable", 503),
+        (
+            "PUT",
+            "/mcp/profiles/default",
+            {"profile_id": "reviewer"},
+            "set_default_profile",
+            "assignment_store_unavailable",
+            503,
+        ),
+    ],
+)
+def test_gateway_profile_management_error_status_mapping(
+    method: str,
+    path: str,
+    json_body: dict[str, Any] | None,
+    manager_method: str,
+    reason_code: str,
+    status_code: int,
+) -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        profile_manager=_ProfileManagementErrorManagerDouble(
+            manager_method,
+            reason_code,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.request(method, path, json=json_body)
+
+    assert response.status_code == status_code
+    body = response.json()
+    assert body["ok"] is False
+    assert body["reason_code"] == reason_code
+    assert body["error"] == f"domain failure: {reason_code}"
+
+
+def test_gateway_profile_management_malformed_or_missing_bodies_return_422() -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        profile_manager=_ProfileManagementManagerDouble(),
+    )
+
+    with TestClient(app) as client:
+        missing_duplicate = client.post("/mcp/profiles/from-preset", json={})
+        malformed_duplicate = client.post(
+            "/mcp/profiles/from-preset",
+            content="{",
+            headers={"content-type": "application/json"},
+        )
+        missing_default = client.put("/mcp/profiles/default", json={})
+        malformed_default = client.put(
+            "/mcp/profiles/default",
+            content="{",
+            headers={"content-type": "application/json"},
+        )
+
+    assert missing_duplicate.status_code == 422
+    assert malformed_duplicate.status_code == 422
+    assert missing_default.status_code == 422
+    assert malformed_default.status_code == 422
 
 
 def test_gateway_profile_runtime_requires_profile_for_tool_execution() -> None:
@@ -461,6 +927,8 @@ def test_gateway_profile_runtime_treats_non_list_backend_tools_as_empty() -> Non
 
 def test_gateway_profile_bootstrap_seeds_default_builtin_preset_profile() -> None:
     from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
+    from mcp_unified.gateway.profiles import GatewayProfileManager
+    from mcp_unified.profiles.store import InMemoryProfileAssignmentStore
 
     backend = _MultiToolGatewayRuntime()
     bootstrap = asyncio.run(
@@ -488,6 +956,14 @@ def test_gateway_profile_bootstrap_seeds_default_builtin_preset_profile() -> Non
 
     assert bootstrap.default_profile_id == "project-researcher"
     assert bootstrap.seeded_profile_ids == ("project-researcher",)
+    assert isinstance(bootstrap.assignment_store, InMemoryProfileAssignmentStore)
+    assert bootstrap.audit_store is None
+    assert isinstance(bootstrap.profile_manager, GatewayProfileManager)
+    assert bootstrap.profile_manager.assignment_store is bootstrap.assignment_store
+    assert bootstrap.store_metadata.to_payload() == {
+        "kind": "memory",
+        "persistent": False,
+    }
     assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
     assert allowed.json()["result"]["content"][0]["text"] == "echo.search:bootstrap"
 
@@ -547,6 +1023,92 @@ def test_gateway_profile_bootstrap_keeps_explicit_default_when_seeding_preset() 
     assert bootstrap.seeded_profile_ids == ("project-researcher",)
     assert {profile.id for profile in stored_profiles} == {"reviewer", "project-researcher"}
     assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["admin.delete"]
+
+
+def test_gateway_profile_bootstrap_manager_default_changes_runtime_without_restart() -> None:
+    """Share default assignment state between bootstrap manager and runtime."""
+
+    from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
+
+    backend = _MultiToolGatewayRuntime()
+    reviewer = _profile_with_allowed_tools("reviewer", ["echo.search"])
+    architect = _profile_with_allowed_tools("architect", ["admin.delete"])
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway(
+            backend,
+            profiles=[reviewer, architect],
+        )
+    )
+    app = create_gateway_app(bootstrap.runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        asyncio.run(bootstrap.profile_manager.set_default_profile("reviewer"))
+        first = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-default-1"},
+        )
+
+        asyncio.run(bootstrap.profile_manager.set_default_profile("architect"))
+        second = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-default-2"},
+        )
+
+        explicit = client.post(
+            "/mcp/request",
+            headers={"X-MCP-Profile": "reviewer"},
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-explicit"},
+        )
+
+    assert [tool["name"] for tool in first.json()["result"]["tools"]] == ["echo.search"]
+    assert [tool["name"] for tool in second.json()["result"]["tools"]] == ["admin.delete"]
+    assert [tool["name"] for tool in explicit.json()["result"]["tools"]] == ["echo.search"]
+
+
+def test_gateway_profile_management_http_default_changes_runtime_without_restart() -> None:
+    """Change the runtime default through HTTP management routes."""
+
+    from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
+
+    backend = _MultiToolGatewayRuntime()
+    reviewer = _profile_with_allowed_tools("reviewer", ["echo.search"])
+    architect = _profile_with_allowed_tools("architect", ["admin.delete"])
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway(
+            backend,
+            profiles=[reviewer, architect],
+        )
+    )
+    app = create_gateway_app(
+        bootstrap.runtime,
+        prefix="/mcp",
+        profile_bootstrap=bootstrap,
+    )
+
+    with TestClient(app) as client:
+        first_default = client.put(
+            "/mcp/profiles/default",
+            json={"profile_id": "reviewer"},
+        )
+        first_tools = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-http-default-1"},
+        )
+        second_default = client.put(
+            "/mcp/profiles/default",
+            json={"profile_id": "architect"},
+        )
+        second_tools = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-http-default-2"},
+        )
+
+    assert first_default.status_code == 200
+    assert first_default.json()["default"]["profile_id"] == "reviewer"
+    assert [tool["name"] for tool in first_tools.json()["result"]["tools"]] == ["echo.search"]
+    assert second_default.status_code == 200
+    assert second_default.json()["default"]["profile_id"] == "architect"
+    assert [tool["name"] for tool in second_tools.json()["result"]["tools"]] == ["admin.delete"]
 
 
 def test_gateway_profile_bootstrap_rejects_existing_preset_profile_collision() -> None:
@@ -627,6 +1189,15 @@ def test_gateway_config_bootstrap_uses_sqlite_profile_store(tmp_path: Path) -> N
     stored_profiles = asyncio.run(bootstrap.profile_store.list_profiles())
 
     assert isinstance(bootstrap.profile_store, SQLiteMCPStore)
+    assert bootstrap.assignment_store is bootstrap.profile_store
+    assert bootstrap.audit_store is bootstrap.profile_store
+    assert bootstrap.profile_manager.profile_store is bootstrap.profile_store
+    assert bootstrap.profile_manager.assignment_store is bootstrap.assignment_store
+    assert bootstrap.profile_manager.audit_store is bootstrap.audit_store
+    assert bootstrap.store_metadata.to_payload() == {
+        "kind": "sqlite",
+        "persistent": True,
+    }
     assert sqlite_path.exists()
     assert [profile.id for profile in stored_profiles] == ["project-researcher"]
     asyncio.run(bootstrap.profile_store.aclose())
@@ -637,12 +1208,10 @@ def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Pat
 
     from mcp_unified.gateway.config import (
         GatewayProfileBootstrapConfig,
-        GatewayProfileStoreConfig,
         bootstrap_profile_gateway_from_config,
     )
     from mcp_unified.profiles.store import InMemoryProfileStore
 
-    sqlite_path = tmp_path / "unused.db"
     profile = _profile_with_allowed_tools("reviewer", ["admin.delete"])
     injected_store = InMemoryProfileStore([profile])
 
@@ -650,7 +1219,6 @@ def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Pat
         bootstrap_profile_gateway_from_config(
             _MultiToolGatewayRuntime(),
             GatewayProfileBootstrapConfig(
-                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
                 default_profile_id="reviewer",
             ),
             profile_store=injected_store,
@@ -665,8 +1233,91 @@ def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Pat
         )
 
     assert bootstrap.profile_store is injected_store
-    assert not sqlite_path.exists()
     assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["admin.delete"]
+
+
+def test_gateway_config_storage_reuses_injected_sqlite_store_capabilities(tmp_path: Path) -> None:
+    """Reuse assignment and audit capabilities from injected persistent stores."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_profile_storage,
+    )
+    from mcp_unified.storage.sqlite import SQLiteMCPStore
+
+    sqlite_path = tmp_path / "gateway.db"
+    store = SQLiteMCPStore(sqlite_path)
+
+    try:
+        bundle = build_gateway_profile_storage(
+            GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+            profile_store=store,
+        )
+
+        assert bundle.profile_store is store
+        assert bundle.assignment_store is store
+        assert bundle.audit_store is store
+        assert bundle.metadata.to_payload() == {
+            "kind": "sqlite",
+            "persistent": True,
+        }
+    finally:
+        asyncio.run(store.aclose())
+
+
+def test_gateway_config_rejects_sqlite_injected_store_without_assignment_store(
+    tmp_path: Path,
+) -> None:
+    """Reject divergent injected SQLite profile stores without assignment support."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_profile_storage,
+    )
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    with pytest.raises(ValueError, match="assignment_store"):
+        build_gateway_profile_storage(
+            GatewayProfileStoreConfig(
+                kind="sqlite",
+                sqlite_path=tmp_path / "gateway.db",
+            ),
+            profile_store=InMemoryProfileStore(),
+        )
+
+
+def test_gateway_config_rejects_sqlite_injected_store_without_audit_store(
+    tmp_path: Path,
+) -> None:
+    """Reject divergent injected SQLite profile stores without audit support."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_profile_storage,
+    )
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    class AssignmentOnlyProfileStore(InMemoryProfileStore):
+        async def get_assignment(self, *_: object, **__: object) -> None:
+            return None
+
+        async def list_assignments(self, *_: object, **__: object) -> list[object]:
+            return []
+
+        async def upsert_assignment(self, assignment: object) -> object:
+            return assignment
+
+        async def delete_assignment(self, *_: object, **__: object) -> bool:
+            return False
+
+    with pytest.raises(ValueError, match="audit_store"):
+        build_gateway_profile_storage(
+            GatewayProfileStoreConfig(
+                kind="sqlite",
+                sqlite_path=tmp_path / "gateway.db",
+            ),
+            profile_store=AssignmentOnlyProfileStore(),
+        )
 
 
 def test_gateway_config_rejects_invalid_store_kind() -> None:

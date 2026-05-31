@@ -9,11 +9,15 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from mcp_unified.interfaces.storage import ProfileStore
+from mcp_unified.interfaces.storage import AuditStore, ProfileAssignmentStore, ProfileStore
 from mcp_unified.profiles.models import MCPProfile
-from mcp_unified.profiles.store import InMemoryProfileStore
+from mcp_unified.profiles.store import (
+    InMemoryProfileAssignmentStore,
+    InMemoryProfileStore,
+)
 
 from .bootstrap import GatewayProfileBootstrap, bootstrap_profile_gateway
+from .profiles import GatewayProfileStoreMetadata
 from .runtime import GatewayRuntime
 
 try:  # pragma: no cover - Python <3.11 fallback is exercised only on older runtimes.
@@ -76,28 +80,171 @@ class GatewayProfileBootstrapConfig:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class GatewayProfileStorageBundle:
+    """Resolved profile, assignment, audit stores and persistence metadata."""
+
+    profile_store: ProfileStore
+    assignment_store: ProfileAssignmentStore
+    audit_store: AuditStore | None
+    metadata: GatewayProfileStoreMetadata
+
+
 async def bootstrap_profile_gateway_from_config(
     backend: GatewayRuntime,
     config: GatewayProfileBootstrapConfig | Mapping[str, Any] | None = None,
     *,
     profile_store: ProfileStore | None = None,
+    assignment_store: ProfileAssignmentStore | None = None,
+    audit_store: AuditStore | None = None,
 ) -> GatewayProfileBootstrap:
     """Build a profile-aware gateway runtime from explicit gateway config."""
 
     resolved_config = _validate_bootstrap_config(config)
-    store = profile_store
-    if store is None:
-        store_config = resolved_config.store
-        if isinstance(store_config, Mapping):
-            store_config = GatewayProfileStoreConfig(**store_config)
-        store = _build_profile_store(store_config)
+    storage = build_gateway_profile_storage(
+        resolved_config.store,
+        profile_store=profile_store,
+        assignment_store=assignment_store,
+        audit_store=audit_store,
+    )
 
     return await bootstrap_profile_gateway(
         backend,
-        profile_store=store,
+        profile_store=storage.profile_store,
+        assignment_store=storage.assignment_store,
+        audit_store=storage.audit_store,
+        store_metadata=storage.metadata,
         profiles=resolved_config.profiles,
         default_profile_id=resolved_config.default_profile_id,
         default_preset_id=resolved_config.default_preset_id,
+    )
+
+
+def build_gateway_profile_storage(
+    store_config: GatewayProfileStoreConfig | Mapping[str, Any],
+    *,
+    profile_store: ProfileStore | None = None,
+    assignment_store: ProfileAssignmentStore | None = None,
+    audit_store: AuditStore | None = None,
+) -> GatewayProfileStorageBundle:
+    """Resolve configured gateway profile storage dependencies."""
+
+    if isinstance(store_config, Mapping):
+        store_config = GatewayProfileStoreConfig(**store_config)
+
+    if profile_store is not None:
+        return GatewayProfileStorageBundle(
+            profile_store=profile_store,
+            assignment_store=_resolve_injected_assignment_store(
+                store_config,
+                profile_store,
+                assignment_store,
+            ),
+            audit_store=_resolve_injected_audit_store(
+                store_config,
+                profile_store,
+                audit_store,
+            ),
+            metadata=_metadata_for_store_config(store_config),
+        )
+
+    if store_config.kind == "memory":
+        return GatewayProfileStorageBundle(
+            profile_store=InMemoryProfileStore(),
+            assignment_store=assignment_store
+            if assignment_store is not None
+            else InMemoryProfileAssignmentStore(),
+            audit_store=audit_store,
+            metadata=GatewayProfileStoreMetadata(kind="memory", persistent=False),
+        )
+
+    if store_config.kind == "sqlite":
+        store = _build_profile_store(store_config)
+        return GatewayProfileStorageBundle(
+            profile_store=store,
+            assignment_store=assignment_store
+            if assignment_store is not None
+            else cast(ProfileAssignmentStore, store),
+            audit_store=audit_store if audit_store is not None else cast(AuditStore, store),
+            metadata=GatewayProfileStoreMetadata(kind="sqlite", persistent=True),
+        )
+
+    raise ValueError(
+        f"Unsupported gateway profile store kind: {store_config.kind!r}"
+    )
+
+
+def _metadata_for_store_config(
+    store_config: GatewayProfileStoreConfig,
+) -> GatewayProfileStoreMetadata:
+    """Return user-facing persistence metadata for a validated store config."""
+
+    return GatewayProfileStoreMetadata(
+        kind=store_config.kind,
+        persistent=store_config.kind == "sqlite",
+    )
+
+
+def _resolve_injected_assignment_store(
+    store_config: GatewayProfileStoreConfig,
+    profile_store: ProfileStore,
+    assignment_store: ProfileAssignmentStore | None,
+) -> ProfileAssignmentStore:
+    """Resolve assignment storage for caller-injected profile stores."""
+
+    if assignment_store is not None:
+        return assignment_store
+    if _supports_assignment_store(profile_store):
+        return cast(ProfileAssignmentStore, profile_store)
+    if store_config.kind == "memory":
+        return InMemoryProfileAssignmentStore()
+    raise ValueError(
+        "assignment_store is required when injecting a profile_store for "
+        "sqlite gateway profile storage unless profile_store implements "
+        "profile assignment methods"
+    )
+
+
+def _resolve_injected_audit_store(
+    store_config: GatewayProfileStoreConfig,
+    profile_store: ProfileStore,
+    audit_store: AuditStore | None,
+) -> AuditStore | None:
+    """Reuse audit-capable injected stores when no audit store is supplied."""
+
+    if audit_store is not None:
+        return audit_store
+    if _supports_audit_store(profile_store):
+        return cast(AuditStore, profile_store)
+    if store_config.kind == "sqlite":
+        raise ValueError(
+            "audit_store is required when injecting a profile_store for "
+            "sqlite gateway profile storage unless profile_store implements "
+            "audit methods"
+        )
+    return None
+
+
+def _supports_assignment_store(candidate: object) -> bool:
+    """Return whether an object provides the profile-assignment store API."""
+
+    return all(
+        callable(getattr(candidate, method_name, None))
+        for method_name in (
+            "get_assignment",
+            "list_assignments",
+            "upsert_assignment",
+            "delete_assignment",
+        )
+    )
+
+
+def _supports_audit_store(candidate: object) -> bool:
+    """Return whether an object provides the audit store API."""
+
+    return all(
+        callable(getattr(candidate, method_name, None))
+        for method_name in ("append_event", "query_events")
     )
 
 
@@ -217,6 +364,8 @@ __all__ = [
     "GatewayProfileBootstrapConfig",
     "GatewayProfileStoreConfig",
     "GatewayProfileStoreKind",
+    "GatewayProfileStorageBundle",
     "bootstrap_profile_gateway_from_config",
+    "build_gateway_profile_storage",
     "load_gateway_profile_bootstrap_config",
 ]

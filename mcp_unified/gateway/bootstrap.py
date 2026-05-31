@@ -6,10 +6,12 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from mcp_unified.interfaces.storage import ProfileStore
+from mcp_unified.gateway.profiles import GatewayProfileManager, GatewayProfileStoreMetadata
+from mcp_unified.interfaces.storage import AuditStore, ProfileAssignmentStore, ProfileStore
 from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.profiles.presets import duplicate_builtin_preset
-from mcp_unified.profiles.store import InMemoryProfileStore
+from mcp_unified.profiles.resolver import AssignmentBackedProfileResolver
+from mcp_unified.profiles.store import InMemoryProfileAssignmentStore, InMemoryProfileStore
 
 from .profile_runtime import ProfileAwareGatewayRuntime
 from .runtime import GatewayRuntime
@@ -21,6 +23,10 @@ class GatewayProfileBootstrap:
 
     runtime: ProfileAwareGatewayRuntime
     profile_store: ProfileStore
+    assignment_store: ProfileAssignmentStore
+    audit_store: AuditStore | None
+    profile_manager: GatewayProfileManager
+    store_metadata: GatewayProfileStoreMetadata
     default_profile_id: str | None
     seeded_profile_ids: tuple[str, ...]
 
@@ -29,6 +35,9 @@ async def bootstrap_profile_gateway(
     backend: GatewayRuntime,
     *,
     profile_store: ProfileStore | None = None,
+    assignment_store: ProfileAssignmentStore | None = None,
+    audit_store: AuditStore | None = None,
+    store_metadata: GatewayProfileStoreMetadata | None = None,
     profiles: Iterable[MCPProfile | Mapping[str, Any]] | None = None,
     default_profile_id: str | None = None,
     default_preset_id: str | None = None,
@@ -36,6 +45,16 @@ async def bootstrap_profile_gateway(
     """Seed profile data and return a profile-aware gateway runtime."""
 
     store = profile_store if profile_store is not None else InMemoryProfileStore()
+    assignments = (
+        assignment_store
+        if assignment_store is not None
+        else InMemoryProfileAssignmentStore()
+    )
+    metadata = (
+        store_metadata
+        if store_metadata is not None
+        else GatewayProfileStoreMetadata(kind="memory", persistent=False)
+    )
     for profile in profiles or ():
         await store.upsert_profile(_validate_profile(profile))
 
@@ -55,14 +74,29 @@ async def bootstrap_profile_gateway(
         await store.upsert_profile(preset_profile)
         seeded_profile_ids = (preset_profile.id,)
 
+    resolver = AssignmentBackedProfileResolver(
+        store,
+        assignment_store=assignments,
+        fallback_default_profile_id=resolved_default_profile_id,
+    )
     runtime = ProfileAwareGatewayRuntime(
         backend,
+        profile_resolver=resolver,
+    )
+    profile_manager = GatewayProfileManager(
         profile_store=store,
-        default_profile_id=resolved_default_profile_id,
+        assignment_store=assignments,
+        audit_store=audit_store,
+        fallback_default_profile_id=resolved_default_profile_id,
+        store_metadata=metadata,
     )
     return GatewayProfileBootstrap(
         runtime=runtime,
         profile_store=store,
+        assignment_store=assignments,
+        audit_store=audit_store,
+        profile_manager=profile_manager,
+        store_metadata=metadata,
         default_profile_id=resolved_default_profile_id,
         seeded_profile_ids=seeded_profile_ids,
     )
