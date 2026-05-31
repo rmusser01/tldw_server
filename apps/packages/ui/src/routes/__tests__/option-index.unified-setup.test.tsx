@@ -193,7 +193,11 @@ describe("OptionIndex unified setup resolver", () => {
     fireEvent.click(screen.getByRole("button", { name: /add source/i }))
 
     expect(routeMocks.requestQuickIngestOpen).toHaveBeenCalledWith(
-      { source: "first_source_milestone" },
+      {
+        source: "first_source_milestone",
+        preferredPreset: "quick",
+        firstSource: true
+      },
       { focusTrigger: true }
     )
   })

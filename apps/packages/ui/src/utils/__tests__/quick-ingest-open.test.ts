@@ -69,4 +69,35 @@ describe("quick ingest open handoff", () => {
       openDetail: detail,
     })
   })
+
+  it("creates a quick first-source wizard seed from first-source milestone metadata", () => {
+    const detail = {
+      source: "first_source_milestone" as const,
+      preferredPreset: "quick" as const,
+      firstSource: true,
+    }
+
+    expect(createQuickIngestSessionSeedFromOpenDetail(detail)).toMatchObject({
+      openDetail: detail,
+      selectedPreset: "quick",
+      customBasePreset: "quick",
+      presetConfig: {
+        storeRemote: true,
+        reviewBeforeStorage: false,
+        common: {
+          perform_analysis: false,
+          perform_chunking: true,
+        },
+        typeDefaults: {
+          document: { ocr: false },
+        },
+      },
+    })
+  })
+
+  it("does not change regular quick-ingest opens without first-source metadata", () => {
+    expect(
+      createQuickIngestSessionSeedFromOpenDetail({ source: "global" })
+    ).toBeNull()
+  })
 })

@@ -103,6 +103,27 @@ export const resolvePresetMap = (
   deep: mergePresetConfig(DEFAULT_PRESETS.deep, overrides?.deep)
 })
 
+export const FIRST_SOURCE_PREFERRED_PRESET: Exclude<
+  IngestPreset,
+  "custom"
+> = "quick"
+
+export const FIRST_SOURCE_QUICK_PRESET_CONFIG: PresetConfig =
+  mergePresetConfig(DEFAULT_PRESETS.quick, {
+    common: {
+      ...DEFAULT_PRESETS.quick.common,
+      perform_analysis: false,
+      perform_chunking: true
+    },
+    storeRemote: true,
+    reviewBeforeStorage: false,
+    typeDefaults: {
+      audio: { diarize: false },
+      document: { ocr: false },
+      video: { captions: false }
+    }
+  })
+
 /**
  * Metadata for each preset (labels, descriptions, icons).
  * Keys reference i18n translation keys.

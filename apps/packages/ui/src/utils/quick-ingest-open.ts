@@ -1,3 +1,13 @@
+import {
+  DEFAULT_PRESETS,
+  FIRST_SOURCE_PREFERRED_PRESET,
+  FIRST_SOURCE_QUICK_PRESET_CONFIG
+} from "@/components/Common/QuickIngest/presets"
+import type {
+  IngestPreset,
+  PresetConfig
+} from "@/components/Common/QuickIngest/types"
+
 export type QuickIngestPendingOpenMode = "normal" | "intro"
 
 export type QuickIngestPlaylistSourceKind =
@@ -11,6 +21,12 @@ export type QuickIngestOpenDetail =
       action?: "normal"
     }
   | {
+      source: "first_source_milestone"
+      preferredPreset?: Exclude<IngestPreset, "custom">
+      firstSource?: boolean
+      action?: string
+    }
+  | {
       source: "extension_active_tab"
       url: string
       sourceKind?: QuickIngestPlaylistSourceKind
@@ -20,6 +36,8 @@ export type QuickIngestOpenDetail =
       source?: string
       action?: string
       url?: string
+      preferredPreset?: Exclude<IngestPreset, "custom">
+      firstSource?: boolean
       [key: string]: unknown
     }
 
@@ -33,6 +51,13 @@ export type QuickIngestPendingOpenRequest = {
   at: number
   detail?: QuickIngestOpenDetail
   options?: QuickIngestPendingOpenOptions
+}
+
+export type QuickIngestSessionSeed = {
+  openDetail: QuickIngestOpenDetail
+  selectedPreset?: Exclude<IngestPreset, "custom">
+  customBasePreset?: Exclude<IngestPreset, "custom">
+  presetConfig?: PresetConfig
 }
 
 type QuickIngestWindow = Window & {
@@ -175,9 +200,44 @@ export const isQuickIngestPlaylistPreflightDetail = (
       detail.url.trim().length > 0
   )
 
+const isPreferredPreset = (
+  value: unknown
+): value is Exclude<IngestPreset, "custom"> =>
+  typeof value === "string" && value in DEFAULT_PRESETS
+
+const isFirstSourceOpenDetail = (
+  detail: QuickIngestOpenDetail | null | undefined
+): detail is Extract<
+  QuickIngestOpenDetail,
+  { source: "first_source_milestone" }
+> =>
+  Boolean(
+    detail &&
+      (detail.source === "first_source_milestone" ||
+        detail.firstSource === true)
+  )
+
 export const createQuickIngestSessionSeedFromOpenDetail = (
   detail: QuickIngestOpenDetail | null | undefined
-): { openDetail: QuickIngestOpenDetail } | null =>
-  isQuickIngestPlaylistPreflightDetail(detail)
-    ? { openDetail: detail }
-    : null
+): QuickIngestSessionSeed | null => {
+  if (isFirstSourceOpenDetail(detail)) {
+    const preferredPreset = isPreferredPreset(detail.preferredPreset)
+      ? detail.preferredPreset
+      : FIRST_SOURCE_PREFERRED_PRESET
+    return {
+      openDetail: detail,
+      selectedPreset: preferredPreset,
+      customBasePreset: preferredPreset,
+      presetConfig:
+        preferredPreset === "quick"
+          ? FIRST_SOURCE_QUICK_PRESET_CONFIG
+          : DEFAULT_PRESETS[preferredPreset]
+    }
+  }
+
+  if (isQuickIngestPlaylistPreflightDetail(detail)) {
+    return { openDetail: detail }
+  }
+
+  return null
+}

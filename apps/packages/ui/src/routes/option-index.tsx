@@ -163,7 +163,11 @@ const OptionIndex = () => {
         <FirstSourceMilestonePrompt
           onAddSource={() => {
             requestQuickIngestOpen(
-              { source: "first_source_milestone" },
+              {
+                source: "first_source_milestone",
+                preferredPreset: "quick",
+                firstSource: true
+              },
               { focusTrigger: true }
             )
           }}

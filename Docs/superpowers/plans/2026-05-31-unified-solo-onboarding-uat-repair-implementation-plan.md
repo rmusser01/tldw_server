@@ -212,7 +212,7 @@ docker compose --env-file "$(TLDW_ENV_FILE)" ...
 - `apps/packages/ui/src/routes/__tests__/option-index.unified-setup.test.tsx`
 - Quick Ingest modal/session tests if existing coverage is present
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -225,14 +225,14 @@ docker compose --env-file "$(TLDW_ENV_FILE)" ...
 
 ### Red Tests
 
-- [ ] Add a route test showing `FirstSourceMilestonePrompt` dispatches Quick Ingest with `source: "first_source_milestone"` and first-source preset metadata.
-- [ ] Add a Quick Ingest session/modal test showing first-source metadata selects the quick first-source profile.
-- [ ] Add a control test showing regular Quick Ingest opens with existing default preset behavior.
-- [ ] Run the focused tests and confirm first-source preset assertions fail before implementation.
+- [x] Add a route test showing `FirstSourceMilestonePrompt` dispatches Quick Ingest with `source: "first_source_milestone"` and first-source preset metadata.
+- [x] Add a Quick Ingest session/modal test showing first-source metadata selects the quick first-source profile.
+- [x] Add a control test showing regular Quick Ingest opens with existing default preset behavior.
+- [x] Run the focused tests and confirm first-source preset assertions fail before implementation.
 
 ### Implementation
 
-- [ ] Extend the Quick Ingest open detail type to allow:
+- [x] Extend the Quick Ingest open detail type to allow:
 
 ```ts
 type QuickIngestOpenDetail = {
@@ -242,7 +242,7 @@ type QuickIngestOpenDetail = {
 };
 ```
 
-- [ ] Dispatch first-source open details from `option-index.tsx`:
+- [x] Dispatch first-source open details from `option-index.tsx`:
 
 ```ts
 requestQuickIngestOpen(
@@ -255,16 +255,16 @@ requestQuickIngestOpen(
 );
 ```
 
-- [ ] Add a first-source quick ingest preset or preset override that keeps:
-  - [ ] `storeRemote: true`,
-  - [ ] chunking enabled,
-  - [ ] analysis disabled,
-  - [ ] OCR disabled,
-  - [ ] upload/paste/manual content paths available.
-- [ ] Apply the first-source preset only when the modal opens from `first_source_milestone`.
-- [ ] Preserve existing default preset selection for every other Quick Ingest entry point.
-- [ ] Run the focused tests and confirm they pass.
-- [ ] Commit with message `fix: default first source ingest for fast value`.
+- [x] Add a first-source quick ingest preset or preset override that keeps:
+  - [x] `storeRemote: true`,
+  - [x] chunking enabled,
+  - [x] analysis disabled,
+  - [x] OCR disabled,
+  - [x] upload/paste/manual content paths available.
+- [x] Apply the first-source preset only when the modal opens from `first_source_milestone`.
+- [x] Preserve existing default preset selection for every other Quick Ingest entry point.
+- [x] Run the focused tests and confirm they pass.
+- [x] Commit with message `fix: default first source ingest for fast value`.
 
 ---
 
