@@ -1114,7 +1114,7 @@ def test_gateway_cli_external_registry_memory_config_reports_json_error(
     assert exit_code == 1
     assert captured.out == ""
     assert payload["ok"] is False
-    assert payload["path"] == str(config_path)
+    assert payload["reason_code"] == "external_registry_store_unavailable"
     assert "external registry management requires" in payload["error"]
     assert "Traceback" not in captured.err
 

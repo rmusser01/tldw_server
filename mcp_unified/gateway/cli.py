@@ -578,6 +578,10 @@ def _handle_external_registry_command(
             _emit_json(exc.to_payload(), sys.stderr)
             return 1
         except Exception as exc:  # noqa: BLE001
+            unavailable_error = _external_registry_storage_unavailable_error(exc)
+            if unavailable_error is not None:
+                _emit_json(unavailable_error.to_payload(), sys.stderr)
+                return 1
             # CLI boundary: config loading and storage construction failures
             # should be machine-readable.
             _emit_json(
@@ -603,6 +607,25 @@ def _handle_external_registry_command(
     finally:
         if bundle is not None:
             _run_async(_close_external_registry_bundle(bundle))
+
+
+def _external_registry_storage_unavailable_error(
+    exc: Exception,
+) -> GatewayExternalRegistryManagementError | None:
+    """Map expected unavailable external-registry storage build failures."""
+
+    if not isinstance(exc, ValueError):
+        return None
+    if (
+        str(exc)
+        != "external registry management requires sqlite or an injected "
+        "equivalent external registry store"
+    ):
+        return None
+    return GatewayExternalRegistryManagementError(
+        str(exc),
+        reason_code="external_registry_store_unavailable",
+    )
 
 
 def _config_path_from_args(args: argparse.Namespace) -> Path:
