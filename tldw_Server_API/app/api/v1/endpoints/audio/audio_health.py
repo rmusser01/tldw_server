@@ -698,7 +698,7 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
 
         return health
     except Exception as e:
-        logger.error("Error getting TTS health")
+        logger.error("Error getting TTS health", exc_info=True)
         request_id = ensure_request_id(request)
         payload = _http_error_detail("TTS health check failed", request_id, exc=e)
         return {"status": "error", **payload, "timestamp": datetime.utcnow().isoformat()}

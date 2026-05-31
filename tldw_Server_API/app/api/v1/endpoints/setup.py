@@ -715,6 +715,14 @@ def _sanitize_setup_payload(value: Any) -> Any:
     return value
 
 
+def _public_validation_error_detail(exc: ValueError, fallback: str) -> str:
+    """Return request validation text unless it looks like internal diagnostics."""
+    detail = str(exc).strip()
+    if not detail:
+        return fallback
+    return detail if _sanitize_setup_payload(detail) == detail else fallback
+
+
 def _completion_conflict(detail: str) -> HTTPException:
     return HTTPException(status.HTTP_409_CONFLICT, detail=detail)
 
@@ -903,11 +911,12 @@ async def require_admin_and_system_configure(
     return principal
 
 
-def _audio_pack_compatibility(machine_profile: audio_profile_service.MachineProfile) -> dict[str, str]:
+def _audio_pack_compatibility(machine_profile: audio_profile_service.MachineProfile | dict[str, Any]) -> dict[str, str]:
     """Project machine-profile data into the portable manifest compatibility shape."""
+    payload = model_dump_compat(machine_profile)
     return {
-        "platform": machine_profile.platform,
-        "arch": machine_profile.arch,
+        "platform": str(payload.get("platform") or ""),
+        "arch": str(payload.get("arch") or ""),
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
     }
 
@@ -2030,10 +2039,10 @@ async def _execute_audio_bundle_provision(
             tts_choice=payload.tts_choice,
             safe_rerun=payload.safe_rerun,
         )
-    except ValueError:
+    except ValueError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail=INVALID_AUDIO_BUNDLE_REQUEST_DETAIL,
+            detail=_public_validation_error_detail(exc, INVALID_AUDIO_BUNDLE_REQUEST_DETAIL),
         ) from None
     except KeyError:
         raise HTTPException(
@@ -2067,10 +2076,10 @@ async def _execute_audio_bundle_verification(
             resource_profile=payload.resource_profile,
             tts_choice=payload.tts_choice,
         )
-    except ValueError:
+    except ValueError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail=INVALID_AUDIO_BUNDLE_REQUEST_DETAIL,
+            detail=_public_validation_error_detail(exc, INVALID_AUDIO_BUNDLE_REQUEST_DETAIL),
         ) from None
     except KeyError:
         raise HTTPException(
@@ -2149,7 +2158,7 @@ async def export_audio_pack(
                 pack_name=pack_name,
                 bundle_id=payload.bundle_id,
                 resource_profile=payload.resource_profile,
-                tts_choice=payload.tts_choice,
+                tts_choice=getattr(payload, "tts_choice", None),
                 installed_assets=readiness.get("installed_asset_manifests"),
                 compatibility=compatibility,
             )
@@ -2157,14 +2166,14 @@ async def export_audio_pack(
             manifest = audio_pack_service.build_audio_pack_manifest(
                 bundle_id=payload.bundle_id,
                 resource_profile=payload.resource_profile,
-                tts_choice=payload.tts_choice,
+                tts_choice=getattr(payload, "tts_choice", None),
                 installed_assets=readiness.get("installed_asset_manifests"),
                 compatibility=compatibility,
             )
-    except ValueError:
+    except ValueError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail=INVALID_AUDIO_PACK_EXPORT_REQUEST_DETAIL,
+            detail=_public_validation_error_detail(exc, INVALID_AUDIO_PACK_EXPORT_REQUEST_DETAIL),
         ) from None
     except KeyError:
         raise HTTPException(
@@ -2190,17 +2199,22 @@ async def import_audio_pack(
     if not status_snapshot["enabled"]:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Setup flow not enabled in config.txt")
 
-    pack_name = _normalize_audio_pack_name(payload.pack_name)
+    pack_name = getattr(payload, "pack_name", None)
+    raw_pack_path = getattr(payload, "pack_path", None)
+    if raw_pack_path:
+        pack_reference = Path(raw_pack_path).expanduser()
+    elif pack_name:
+        pack_reference = _normalize_audio_pack_name(pack_name)
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Audio pack path is required.")
     machine_profile = audio_profile_service.detect_machine_profile()
     compatibility = _audio_pack_compatibility(machine_profile)
-    machine_profile_payload = (
-        machine_profile.model_dump() if hasattr(machine_profile, "model_dump") else dict(machine_profile)
-    )
+    machine_profile_payload = model_dump_compat(machine_profile)
     readiness_store = audio_readiness_store.get_audio_readiness_store()
 
     try:
         result = audio_pack_service.register_imported_audio_pack(
-            pack_name,
+            pack_reference,
             readiness_store=readiness_store,
             machine_profile=machine_profile_payload,
             python_version=compatibility["python_version"],

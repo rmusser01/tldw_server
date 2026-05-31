@@ -2517,10 +2517,9 @@ python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/t
 Expected: PASS.
 
 Result: `test_first_run_state.py`, `test_unified_first_run_setup_api.py`, and
-`test_config_providers_endpoints.py` passed: 135 passed, 2 warnings. The broader
-`tldw_Server_API/tests/Setup` suite was also attempted and exposed unrelated
-pre-existing audio health/audio pack/installer failures outside this onboarding
-slice before the run was stopped.
+`test_config_providers_endpoints.py` passed: 135 passed, 2 warnings. A later
+release-gate cleanup resolved the broader setup audio failures and the full
+setup/config command passed: 324 passed, 4 warnings.
 
 - [x] **Step 5: Run focused frontend tests**
 
@@ -2590,8 +2589,8 @@ git commit -m "test: verify unified first-run onboarding"
 
 Before opening a PR or declaring implementation complete:
 
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py -v` - attempted; unrelated audio setup failures observed in `test_audio_health_helpers.py`, `test_audio_pack_service.py`, and installer tests.
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Docs tldw_Server_API/tests/Utils/test_makefile_onboarding_profiles.py tldw_Server_API/tests/Utils/test_makefile_quickstart_default.py -v`
+- [x] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py tldw_Server_API/tests/Config/test_config_providers_endpoints.py -v` - passed: 324 passed, 4 warnings.
+- [x] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Docs tldw_Server_API/tests/Utils/test_makefile_onboarding_profiles.py tldw_Server_API/tests/Utils/test_makefile_quickstart_default.py -v`
 - [x] `cd apps/packages/ui && bunx vitest run src/services/tldw/__tests__/setup-onboarding.test.ts src/hooks/__tests__/useSetupOnboarding.test.tsx src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx src/components/Option/Onboarding/__tests__/FirstSourceMilestonePrompt.test.tsx src/routes/__tests__/option-index.unified-setup.test.tsx`
 - [x] `cd apps/tldw-frontend && bunx playwright test e2e/workflows/unified-first-run-onboarding.spec.ts --reporter=line`
 - [x] `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Setup tldw_Server_API/app/api/v1/endpoints/setup.py tldw_Server_API/app/api/v1/API_Deps/setup_deps.py -f json -o /tmp/bandit_unified_first_run_onboarding.json`

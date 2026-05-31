@@ -4,7 +4,7 @@ title: Verify unified first-run onboarding end to end
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-31 16:40'
+updated_date: '2026-05-31 16:56'
 labels: []
 dependencies: []
 references:
@@ -46,7 +46,11 @@ Attempted the broader tldw_Server_API/tests/Setup release command; unrelated aud
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Verified the unified first-run onboarding flow end to end with a new Playwright workflow, fixed shell override timing needed by the focused setup shell, and hardened the setup onboarding hook against remount-driven duplicate initial loads. Focused backend setup/config tests passed, focused frontend tests passed, the Playwright workflow passed, Bandit reported no findings for the setup backend scope, and git diff whitespace validation passed. The broader Setup suite still has unrelated audio setup failures that are documented for follow-up.
+Verified the unified first-run onboarding flow end to end with a new Playwright workflow, fixed shell override timing needed by the focused setup shell, and hardened the setup onboarding hook against remount-driven duplicate initial loads. Focused backend setup/config tests passed, focused frontend tests passed, the Playwright workflow passed, Bandit reported no findings for the setup backend scope, and git diff whitespace validation passed.
+
+Follow-up verification on 2026-05-31: docs and Makefile onboarding gate passed with 90 tests, 5 warnings: source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Docs tldw_Server_API/tests/Utils/test_makefile_onboarding_profiles.py tldw_Server_API/tests/Utils/test_makefile_quickstart_default.py -v.
+
+Follow-up verification on 2026-05-31: setup audio release-gate failures were resolved under TASK-500. Full setup/config gate passed with 324 tests, 4 warnings: source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py tldw_Server_API/tests/Config/test_config_providers_endpoints.py -v. Bandit for touched setup/audio cleanup code reported 0 findings at /tmp/bandit_setup_audio_release_gate.json, and git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
