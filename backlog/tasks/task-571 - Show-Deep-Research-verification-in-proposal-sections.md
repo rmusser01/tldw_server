@@ -6,6 +6,8 @@ documentation:
 - Docs/Product/Research_Workspace_Literature_Workproducts_PRD.md
 - Docs/superpowers/plans/2026-05-30-research-workspace-literature-workproducts-plan.md
 - Docs/superpowers/plans/2026-05-30-research-workspace-deep-research-proposal-verification-plan.md
+pr_links:
+- https://github.com/rmusser01/tldw_server/pull/2186
 modified_files:
 - Docs/superpowers/plans/2026-05-30-research-workspace-deep-research-proposal-verification-plan.md
 - apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/proposal-deep-research-verification.ts
