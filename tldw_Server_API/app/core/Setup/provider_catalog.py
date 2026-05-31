@@ -36,8 +36,10 @@ def mask_secret(value: str) -> str:
     """Return a non-reversible display hint for a secret value."""
     if not value:
         return ""
+    if len(value) <= 2:
+        return "****"
     if len(value) <= 8:
-        return f"****{value[-2:]}" if len(value) >= 2 else "****"
+        return f"****{value[-2:]}"
     return f"{value[:3]}...{value[-4:]}"
 
 

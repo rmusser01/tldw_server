@@ -45,7 +45,7 @@ Started Task 3 subagent-driven slice after TASK-490 cleared spec and code-qualit
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented backend setup provider catalog and local endpoint validation for Task 3. Added typed setup provider catalog/save/validation schemas, first-run provider catalog/save/validate endpoints guarded as required, deterministic PRD provider coverage, secret masking, real config writes for catalog fields, and local OpenAI-compatible /models validation that safely maps unreachable/auth/API-shape failures. Verification: provider/setup/config pytest command passed with 75 passed; setup guard/state/masking pytest command passed with 33 passed; Ruff passed on touched scope; Bandit JSON reported zero findings; git diff --check passed.
+Task 3 spec review fixes completed. Added hosted provider credential presence/syntax validation without external API calls, rejected blank hosted API keys on first-run provider save before config writes, mapped malformed local endpoint URLs to sanitized typed validation failures, and hardened secret masking so one- and two-character nonempty secrets are never fully exposed. Verification: provider/setup/config pytest group passed with 84 passed; setup guard/state/masking pytest group passed with 33 passed; Ruff passed; Bandit JSON reported zero findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

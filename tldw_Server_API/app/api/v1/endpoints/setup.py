@@ -92,7 +92,10 @@ from tldw_Server_API.app.core.Setup.provider_catalog import (
     mask_secret,
 )
 from tldw_Server_API.app.core.Setup.provider_validation import (
+    FAILURE_LOCAL_PROVIDER_UNREACHABLE,
+    HostedProviderValidationRequest,
     LocalEndpointValidationRequest,
+    validate_hosted_provider_credentials,
     validate_local_openai_endpoint,
 )
 from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
@@ -723,6 +726,14 @@ async def save_first_run_provider(
     entry = get_setup_provider_entry(provider_key)
     if entry is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unknown_setup_provider")
+    if (
+        entry.provider_type is SetupProviderType.HOSTED_API_KEY
+        and entry.api_key_field
+        and (payload.api_key is None or not payload.api_key.strip())
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="provider_api_key_required")
+    if entry.provider_type is SetupProviderType.HOSTED_API_KEY and payload.api_key is not None:
+        payload = payload.model_copy(update={"api_key": payload.api_key.strip()})
 
     updates = _provider_config_updates(payload)
     if not updates:
@@ -768,19 +779,31 @@ async def save_first_run_provider(
     response_model=SetupProviderValidationResponse,
 )
 async def validate_first_run_provider(
-    payload: LocalEndpointValidationRequest,
+    payload: SetupProviderSaveRequest,
     _guard: None = Depends(_require_first_run_write_access),
 ) -> SetupProviderValidationResponse:
     provider_key = payload.provider_key.strip().lower()
     entry = get_setup_provider_entry(provider_key)
     if entry is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unknown_setup_provider")
-    if entry.provider_type is not SetupProviderType.LOCAL_ENDPOINT:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="provider_validation_not_supported")
+    if entry.provider_type is SetupProviderType.HOSTED_API_KEY:
+        return validate_hosted_provider_credentials(
+            HostedProviderValidationRequest(
+                provider_key=provider_key,
+                api_key=payload.api_key,
+            )
+        )
+    if payload.base_url is None or not payload.base_url.strip():
+        return SetupProviderValidationResponse(
+            provider_key=provider_key,
+            status="failed",
+            failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
+            message="Local provider endpoint is required.",
+        )
 
     normalized_payload = LocalEndpointValidationRequest(
         provider_key=provider_key,
-        base_url=payload.base_url,
+        base_url=payload.base_url.strip(),
         model=payload.model,
         api_key=payload.api_key,
     )

@@ -32,6 +32,13 @@ def test_mask_secret_never_returns_raw_value():
     assert mask_secret("") == ""
 
 
+def test_mask_secret_never_returns_full_short_value():
+    assert mask_secret("a") == "****"
+    assert mask_secret("ab") != "****ab"
+    assert "ab" not in mask_secret("ab")
+    assert mask_secret("tiny") == "****ny"
+
+
 def test_provider_save_response_contract_masks_secret_and_uses_saved_status():
     raw_key = "sk-abcdefghijklmnopqrstuvwxyz"
 

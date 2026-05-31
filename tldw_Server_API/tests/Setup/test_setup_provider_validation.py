@@ -1,8 +1,11 @@
+import httpx
 import pytest
 
 from tldw_Server_API.app.core.Setup import provider_validation
 from tldw_Server_API.app.core.Setup.provider_validation import (
+    HostedProviderValidationRequest,
     LocalEndpointValidationRequest,
+    validate_hosted_provider_credentials,
     validate_local_openai_endpoint,
 )
 
@@ -128,3 +131,68 @@ async def test_invalid_json_maps_to_unsupported_api_shape(monkeypatch):
 
     assert response.status == "failed"
     assert response.failure_category == "unsupported_api_shape"
+
+
+@pytest.mark.asyncio
+async def test_malformed_local_endpoint_url_maps_to_typed_failure(monkeypatch):
+    raw_url = "http://[::1"
+    fake_client = _FakeAsyncClient(error=httpx.InvalidURL(f"Invalid URL: {raw_url}"))
+    monkeypatch.setattr(provider_validation, "_create_validation_client", lambda: fake_client)
+
+    response = await validate_local_openai_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="custom_openai",
+            base_url=raw_url,
+            api_key="secret-local-token",
+        )
+    )
+
+    body = response.model_dump_json()
+    assert response.status == "failed"
+    assert response.failure_category == "local_provider_unreachable"
+    assert raw_url not in body
+    assert "Invalid URL" not in body
+    assert "secret-local-token" not in body
+
+
+def test_hosted_provider_validation_requires_api_key():
+    response = validate_hosted_provider_credentials(
+        HostedProviderValidationRequest(provider_key="openai", api_key="   ")
+    )
+
+    assert response.status == "failed"
+    assert response.failure_category == "provider_api_key_required"
+    assert "api key" in (response.message or "").lower()
+
+
+def test_hosted_provider_validation_accepts_plausible_openai_key_without_echo():
+    raw_key = "sk-abcdefghijklmnopqrstuvwxyz"
+
+    response = validate_hosted_provider_credentials(
+        HostedProviderValidationRequest(provider_key="openai", api_key=raw_key)
+    )
+
+    assert response.status == "accepted"
+    assert response.failure_category is None
+    assert raw_key not in response.model_dump_json()
+
+
+def test_hosted_provider_validation_rejects_malformed_openai_key_without_echo():
+    raw_key = "not-an-openai-key"
+
+    response = validate_hosted_provider_credentials(
+        HostedProviderValidationRequest(provider_key="openai", api_key=raw_key)
+    )
+
+    assert response.status == "failed"
+    assert response.failure_category == "provider_api_key_invalid"
+    assert raw_key not in response.model_dump_json()
+
+
+def test_hosted_provider_validation_accepts_other_hosted_nonblank_key():
+    response = validate_hosted_provider_credentials(
+        HostedProviderValidationRequest(provider_key="anthropic", api_key="anthropic-secret")
+    )
+
+    assert response.status == "accepted"
+    assert response.failure_category is None

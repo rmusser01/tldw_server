@@ -170,6 +170,29 @@ def test_first_run_provider_save_masks_key_and_writes_config(monkeypatch, tmp_pa
     assert "default_api = openai" in config_text
 
 
+def test_first_run_provider_save_rejects_blank_hosted_api_key_without_config_write(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    config_path = tmp_path / "config.txt"
+    config_path.write_text("[API]\ndefault_api = openai\n", encoding="utf-8")
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    monkeypatch.setattr(setup_endpoint.setup_manager, "get_config_file_path", lambda: config_path)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers",
+        json={"provider_key": "openai", "api_key": "   "},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "provider_api_key_required"
+    config_text = config_path.read_text(encoding="utf-8")
+    assert "openai_api_key" not in config_text
+
+
 def test_completed_setup_rejects_provider_save_through_first_run_write_guard(
     monkeypatch,
     tmp_path,
@@ -237,6 +260,50 @@ def test_first_run_provider_validate_returns_typed_response_without_token_echo(
         "models": ["local-model"],
     }
     assert raw_token not in str(body)
+
+
+def test_first_run_hosted_provider_validate_rejects_blank_key_with_typed_response(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers/validate",
+        json={"provider_key": "openai", "api_key": "   "},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider_key"] == "openai"
+    assert body["status"] == "failed"
+    assert body["failure_category"] == "provider_api_key_required"
+
+
+def test_first_run_hosted_provider_validate_accepts_plausible_key_without_echo(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    raw_key = "sk-abcdefghijklmnopqrstuvwxyz"
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers/validate",
+        json={"provider_key": "openai", "api_key": raw_key},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider_key"] == "openai"
+    assert body["status"] == "accepted"
+    assert body["failure_category"] is None
+    assert raw_key not in str(body)
 
 
 def test_first_run_metadata_classifies_forwarded_remote_browser_as_remote(

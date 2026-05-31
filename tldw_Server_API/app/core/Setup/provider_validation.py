@@ -10,16 +10,24 @@ from pydantic import BaseModel, Field
 from tldw_Server_API.app.api.v1.schemas.setup_schemas import SetupProviderValidationResponse
 
 VALIDATION_STATUS_READY = "ready"
+VALIDATION_STATUS_ACCEPTED = "accepted"
 VALIDATION_STATUS_FAILED = "failed"
 FAILURE_LOCAL_PROVIDER_UNREACHABLE = "local_provider_unreachable"
 FAILURE_AUTH_FAILED = "auth_failed"
 FAILURE_UNSUPPORTED_API_SHAPE = "unsupported_api_shape"
+FAILURE_PROVIDER_API_KEY_REQUIRED = "provider_api_key_required"
+FAILURE_PROVIDER_API_KEY_INVALID = "provider_api_key_invalid"
 
 
 class LocalEndpointValidationRequest(BaseModel):
     provider_key: str = Field(..., min_length=1)
     base_url: str = Field(..., min_length=1)
     model: str | None = None
+    api_key: str | None = None
+
+
+class HostedProviderValidationRequest(BaseModel):
+    provider_key: str = Field(..., min_length=1)
     api_key: str | None = None
 
 
@@ -55,6 +63,36 @@ def _extract_model_ids(body: Any) -> list[str] | None:
     return model_ids
 
 
+def validate_hosted_provider_credentials(
+    payload: HostedProviderValidationRequest,
+) -> SetupProviderValidationResponse:
+    """Validate hosted credentials with local-only syntax and presence checks."""
+    provider_key = payload.provider_key.strip().lower()
+    api_key = payload.api_key.strip() if payload.api_key is not None else ""
+
+    if not api_key:
+        return SetupProviderValidationResponse(
+            provider_key=provider_key,
+            status=VALIDATION_STATUS_FAILED,
+            failure_category=FAILURE_PROVIDER_API_KEY_REQUIRED,
+            message="Provider API key is required.",
+        )
+
+    if provider_key == "openai" and not api_key.startswith("sk-"):
+        return SetupProviderValidationResponse(
+            provider_key=provider_key,
+            status=VALIDATION_STATUS_FAILED,
+            failure_category=FAILURE_PROVIDER_API_KEY_INVALID,
+            message="OpenAI API key format is not recognized.",
+        )
+
+    return SetupProviderValidationResponse(
+        provider_key=provider_key,
+        status=VALIDATION_STATUS_ACCEPTED,
+        message="Provider credentials passed local syntax checks.",
+    )
+
+
 def _create_validation_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=5.0)
 
@@ -71,7 +109,7 @@ async def validate_local_openai_endpoint(
     try:
         async with _create_validation_client() as client:
             response = await client.get(models_url, headers=headers)
-    except (httpx.HTTPError, TimeoutError, OSError):
+    except (httpx.InvalidURL, httpx.HTTPError, TimeoutError, OSError):
         return _failed_response(
             payload,
             failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
