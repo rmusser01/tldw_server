@@ -267,6 +267,36 @@ def _provider_check(base_url: str, headers: dict[str, str], timeout: float) -> d
     return result
 
 
+def _first_run_state_check(base_url: str, timeout: float) -> dict[str, Any]:
+    response = _request("GET", base_url, "/api/v1/setup/first-run/state", timeout=timeout)
+    result: dict[str, Any] = {
+        "url": _sanitize_url_userinfo(response.get("url")),
+        "status_code": response.get("status_code"),
+        "ok": True,
+    }
+    if not response.get("ok"):
+        result.update({"status": "unavailable", "error": "request_failed"})
+        return result
+
+    body = response.get("body")
+    if not isinstance(body, dict):
+        result.update({"status": "unavailable", "error": "unexpected_response"})
+        return result
+
+    setup_status = str(body.get("status") or "unknown")
+    first_chat = body.get("first_chat")
+    first_chat_completed = (
+        isinstance(first_chat, dict) and first_chat.get("completed") is True
+    )
+    result["setup_status"] = setup_status
+    result["first_chat_completed"] = first_chat_completed
+    if setup_status == "completed" or first_chat_completed:
+        result["status"] = "first_chat_complete"
+    else:
+        result["status"] = "first_chat_not_complete"
+    return result
+
+
 def _first_value_check(base_url: str, headers: dict[str, str], timeout: float) -> dict[str, Any]:
     sample = _FIRST_VALUE_SAMPLE.encode("utf-8")
     ingest = _request(
@@ -365,6 +395,13 @@ def run_profile_checks(
         webui_result = _request("GET", webui_url, "/", timeout=timeout)
         webui_ok = bool(webui_result.get("ok"))
         actions.append({"webui": _response_summary(webui_result)})
+
+    first_run = _first_run_state_check(base_url, timeout)
+    actions.append({"first_run": first_run})
+    if first_run.get("status") == "first_chat_not_complete":
+        notes.append("First chat is not complete yet; open the WebUI to complete first-time setup.")
+    elif first_run.get("status") == "unavailable":
+        notes.append("First-run setup state was not available; open the WebUI if setup is still pending.")
 
     endpoints_ok = all(result.get("ok") for result in endpoint_results.values())
     auth_ok = all(result.get("ok") for result in auth_checks.values())

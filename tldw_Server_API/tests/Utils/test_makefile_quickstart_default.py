@@ -28,6 +28,10 @@ def test_quickstart_target_runs_docker_single_webui_path() -> None:
         "setup-docker-single start-docker-single verify-docker-single" in quickstart,
         "quickstart should depend on setup/start/verify Docker single-user targets",
     )
+    _require(
+        "open $(TLDW_WEBUI_URL) and complete first-time setup in the WebUI" in quickstart,
+        "quickstart should end by pointing users to WebUI first-time setup",
+    )
     quickstart_docker_webui = _target_block(text, "quickstart-docker-webui")
     _require(": quickstart" in quickstart_docker_webui, "quickstart-docker-webui should alias quickstart")
 

@@ -280,3 +280,23 @@ def test_default_output_targets_do_not_print_full_api_keys() -> None:
         _require("grep '^SINGLE_USER_API_KEY='" not in block, f"{target} should not read the API key")
         _require("cut -d= -f2-" not in block, f"{target} should not print the API key value")
         _require("Your API Key:" not in block, f"{target} should not label full API key output")
+
+
+def test_single_user_start_and_verify_output_points_to_webui_first_chat() -> None:
+    """Solo startup/verify output should hand users to the WebUI first-chat gate."""
+    text = _read_makefile()
+    expected_next = "open $(TLDW_WEBUI_URL) and complete first-time setup in the WebUI"
+
+    for target in ("quickstart", "start-docker-single", "verify-docker-single"):
+        block = _target_block(text, target)
+        _require(expected_next in block, f"{target} should print the WebUI first-chat next action")
+
+    start_local_single = _target_block(text, "start-local-single")
+    _require(
+        "Start the WebUI separately" in start_local_single,
+        "start-local-single should tell local users how to reach the WebUI path",
+    )
+    _require(
+        expected_next in start_local_single,
+        "start-local-single should name the WebUI first-chat next action",
+    )

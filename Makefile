@@ -122,10 +122,11 @@ start-docker-single:
 	docker compose --env-file "$(TLDW_ENV_FILE)" -f "$(DOCKER_SINGLE_COMPOSE)" -f "$(DOCKER_WEBUI_COMPOSE)" up -d $(DOCKER_BUILD_FLAG) $(DOCKER_WAIT_FLAG)
 	@echo "[start-docker-single] API:   $(TLDW_BASE_URL)"
 	@echo "[start-docker-single] WebUI: $(TLDW_WEBUI_URL)"
-	@echo "[start-docker-single] Next:  make verify-docker-single"
+	@echo "[start-docker-single] Next:  make verify-docker-single, then open $(TLDW_WEBUI_URL) and complete first-time setup in the WebUI."
 
 verify-docker-single: setup-wizard-tools
 	@$(TLDW_SETUP) verify --profile docker-single-webui --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)" --webui-url "$(TLDW_WEBUI_URL)" --first-value
+	@echo "[verify-docker-single] Next: open $(TLDW_WEBUI_URL) and complete first-time setup in the WebUI."
 
 setup-docker-multi: setup-wizard-tools
 	@command -v docker >/dev/null 2>&1 || (echo "[setup-docker-multi] docker not found. Install Docker and retry." && exit 1)
@@ -164,12 +165,16 @@ setup-local-single: setup-wizard-tools
 
 start-local-single:
 	@echo "[start-local-single] Starting API at $(TLDW_BASE_URL)"
+	@echo "[start-local-single] Start the WebUI separately: cd apps/tldw-frontend && bun run dev -- -p 8080"
+	@echo "[start-local-single] Next: open $(TLDW_WEBUI_URL) and complete first-time setup in the WebUI."
 	TLDW_ENV_FILE="$(TLDW_ENV_FILE)" $(VENV_PYTHON) -m uvicorn tldw_Server_API.app.main:app --host 127.0.0.1 --port 8000
 
 verify-local-single: setup-wizard-tools
 	@$(TLDW_SETUP) verify --profile local-single --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)" --first-value
+	@echo "[verify-local-single] Next: start the WebUI if needed, then open $(TLDW_WEBUI_URL) and complete first-time setup in the WebUI."
 
 quickstart: setup-docker-single start-docker-single verify-docker-single
+	@echo "[quickstart] Next: open $(TLDW_WEBUI_URL) and complete first-time setup in the WebUI."
 
 quickstart-docker-webui: quickstart
 

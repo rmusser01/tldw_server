@@ -2354,7 +2354,6 @@ git commit -m "feat: add progressive first-run wizard steps"
 
 **Files:**
 - Modify: `Makefile`
-- Modify: `tldw_Server_API/cli/wizard/cli.py`
 - Modify: `tldw_Server_API/cli/wizard/profile_verify.py`
 - Modify: `Docs/Getting_Started/README.md`
 - Modify: `Docs/Getting_Started/Profile_Docker_Single_User.md`
@@ -2362,13 +2361,17 @@ git commit -m "feat: add progressive first-run wizard steps"
 - Modify: `Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md`
 - Modify: `Docs/Getting_Started/onboarding_manifest.yaml`
 - Modify: `Docs/Published/Getting_Started/README.md`
+- Modify: `Docs/Published/Getting_Started/Profile_Docker_Single_User.md`
+- Modify: `Docs/Published/Getting_Started/Profile_Local_Single_User.md`
+- Modify: `Docs/Published/Getting_Started/Profile_Docker_Multi_User_Postgres.md`
 - Modify: `Docs/Published/Getting_Started/onboarding_manifest.yaml`
 - Test: `tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py`
 - Test: `tldw_Server_API/tests/Docs/test_onboarding_command_boundaries.py`
 - Test: `tldw_Server_API/tests/Utils/test_makefile_onboarding_profiles.py`
 - Test: `tldw_Server_API/tests/Utils/test_makefile_quickstart_default.py`
+- Test: `tldw_Server_API/tests/wizard/test_cli_verify_profiles.py`
 
-- [ ] **Step 1: Add failing docs/Makefile tests**
+- [x] **Step 1: Add failing docs/Makefile tests**
 
 Update docs tests so they assert:
 
@@ -2391,7 +2394,7 @@ def test_getting_started_presents_docker_and_local_as_peer_solo_paths():
     assert "first successful chat" in text
 ```
 
-- [ ] **Step 2: Run docs/Makefile tests to verify failure**
+- [x] **Step 2: Run docs/Makefile tests to verify failure**
 
 ```bash
 source .venv/bin/activate
@@ -2400,7 +2403,7 @@ python -m pytest tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py 
 
 Expected: FAIL until docs are updated.
 
-- [ ] **Step 3: Update Getting Started index**
+- [x] **Step 3: Update Getting Started index**
 
 `Docs/Getting_Started/README.md` should start with:
 
@@ -2410,7 +2413,7 @@ Expected: FAIL until docs are updated.
 - lifecycle: prepare, start, verify, open WebUI, complete first chat;
 - adding first source as next milestone.
 
-- [ ] **Step 4: Update profile docs**
+- [x] **Step 4: Update profile docs**
 
 Update Docker and local single-user docs:
 
@@ -2425,7 +2428,7 @@ Update multi-user doc:
 - clearly says solo wizard is not the multi-user path;
 - points to admin bootstrap/operator checklist.
 
-- [ ] **Step 5: Update CLI/Makefile messaging**
+- [x] **Step 5: Update CLI/Makefile messaging**
 
 Make output should print WebUI URL and next action:
 
@@ -2442,11 +2445,11 @@ CLI verification can report:
 
 Do not make CLI claim first-run complete without backend first-chat state.
 
-- [ ] **Step 6: Update onboarding manifest and published parity**
+- [x] **Step 6: Update onboarding manifest and published parity**
 
 Update source and published onboarding manifests as existing tests require. Do not manually move generated published files unless existing repo workflow expects committed parity.
 
-- [ ] **Step 7: Run docs/Makefile tests**
+- [x] **Step 7: Run docs/Makefile tests**
 
 ```bash
 source .venv/bin/activate
@@ -2455,7 +2458,7 @@ python -m pytest tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py 
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit docs/CLI cleanup**
+- [x] **Step 8: Commit docs/CLI cleanup**
 
 ```bash
 git add Makefile tldw_Server_API/cli/wizard/cli.py tldw_Server_API/cli/wizard/profile_verify.py Docs/Getting_Started Docs/Published/Getting_Started tldw_Server_API/tests/Docs tldw_Server_API/tests/Utils
