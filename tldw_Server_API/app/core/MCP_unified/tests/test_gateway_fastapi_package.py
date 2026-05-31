@@ -1403,6 +1403,142 @@ def test_gateway_config_storage_reuses_injected_sqlite_store_capabilities(tmp_pa
         asyncio.run(store.aclose())
 
 
+def test_gateway_config_builds_sqlite_external_registry_storage(tmp_path: Path) -> None:
+    """Build external registry storage from the configured SQLite store."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_external_registry_storage,
+    )
+    from mcp_unified.storage.sqlite import SQLiteMCPStore
+
+    bundle = build_gateway_external_registry_storage(
+        GatewayProfileStoreConfig(kind="sqlite", sqlite_path=tmp_path / "gateway.db"),
+    )
+
+    try:
+        assert isinstance(bundle.external_registry_store, SQLiteMCPStore)
+        assert bundle.credential_grant_store is bundle.external_registry_store
+        assert bundle.audit_store is bundle.external_registry_store
+        assert bundle.metadata.to_payload() == {
+            "kind": "sqlite",
+            "persistent": True,
+        }
+    finally:
+        asyncio.run(bundle.external_registry_store.aclose())
+
+
+def test_gateway_config_external_registry_storage_manager_from_storage_uses_bundle(
+    tmp_path: Path,
+) -> None:
+    """Build an external registry manager from a resolved storage bundle."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_external_registry_storage,
+        external_registry_manager_from_storage,
+    )
+
+    bundle = build_gateway_external_registry_storage(
+        GatewayProfileStoreConfig(kind="sqlite", sqlite_path=tmp_path / "gateway.db"),
+    )
+
+    try:
+        manager = external_registry_manager_from_storage(bundle)
+
+        assert manager.external_registry_store is bundle.external_registry_store
+        assert manager.credential_grant_store is bundle.credential_grant_store
+        assert manager.audit_store is bundle.audit_store
+        assert manager.store_metadata is bundle.metadata
+    finally:
+        asyncio.run(bundle.external_registry_store.aclose())
+
+
+def test_gateway_config_external_registry_memory_requires_injected_store() -> None:
+    """Reject production memory config without an injected external registry."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_external_registry_storage,
+    )
+
+    with pytest.raises(ValueError, match="external registry.*sqlite"):
+        build_gateway_external_registry_storage(
+            GatewayProfileStoreConfig(kind="memory"),
+        )
+
+
+def test_gateway_config_external_registry_injected_store_can_omit_grant_store() -> None:
+    """Allow injected external registry stores without credential grant storage."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_external_registry_storage,
+        external_registry_manager_from_storage,
+    )
+    from mcp_unified.gateway.external_registry import GatewayExternalRegistryManagementError
+    from mcp_unified.storage.models import ExternalServerDefinition
+
+    class ExternalRegistryOnlyStore:
+        def __init__(self, server: ExternalServerDefinition) -> None:
+            self.server = server
+
+        async def get_server(self, server_id: str) -> ExternalServerDefinition | None:
+            if server_id == self.server.id:
+                return self.server
+            return None
+
+        async def list_servers(self) -> list[ExternalServerDefinition]:
+            return [self.server]
+
+        async def list_server_definitions(
+            self,
+            *,
+            enabled: bool | None = None,
+        ) -> list[ExternalServerDefinition]:
+            if enabled is None or enabled is self.server.enabled:
+                return [self.server]
+            return []
+
+        async def create_server(
+            self,
+            server: ExternalServerDefinition,
+        ) -> ExternalServerDefinition:
+            self.server = server
+            return server
+
+        async def upsert_server(
+            self,
+            server: ExternalServerDefinition,
+        ) -> ExternalServerDefinition:
+            self.server = server
+            return server
+
+        async def delete_server(self, server_id: str) -> bool:
+            return server_id == self.server.id
+
+    store = ExternalRegistryOnlyStore(
+        ExternalServerDefinition(
+            id="local-research",
+            name="Local Research",
+            transport="stdio",
+            command=["mcp-local-research"],
+        )
+    )
+    bundle = build_gateway_external_registry_storage(
+        GatewayProfileStoreConfig(kind="memory"),
+        external_registry_store=store,
+    )
+    manager = external_registry_manager_from_storage(bundle)
+
+    assert bundle.external_registry_store is store
+    assert bundle.credential_grant_store is None
+    assert manager.credential_grant_store is None
+    with pytest.raises(GatewayExternalRegistryManagementError) as exc_info:
+        asyncio.run(manager.delete_server("local-research"))
+    assert exc_info.value.reason_code == "credential_grant_store_unavailable"
+
+
 def test_gateway_config_rejects_sqlite_injected_store_without_assignment_store(
     tmp_path: Path,
 ) -> None:
