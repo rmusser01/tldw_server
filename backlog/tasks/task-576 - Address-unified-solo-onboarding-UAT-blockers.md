@@ -28,7 +28,7 @@ Plan and implement repairs required for a clean first-time solo-user walkthrough
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design spec created and reviewed: Docs/superpowers/specs/2026-05-31-unified-solo-onboarding-uat-repair-design.md. Implementation plan created: Docs/superpowers/plans/2026-05-31-unified-solo-onboarding-uat-repair-implementation-plan.md. Current preflight result: focused implementation can start after the current ~2.1GiB free-space check, but Docker rebuild/fresh-install UAT remains blocked until at least 10GiB is available. Next step after user approval is targeted cleanup if heavy UAT/build work is needed, otherwise Stage 1 red-green implementation can begin.
+Design spec created and reviewed: Docs/superpowers/specs/2026-05-31-unified-solo-onboarding-uat-repair-design.md. Implementation plan created: Docs/superpowers/plans/2026-05-31-unified-solo-onboarding-uat-repair-implementation-plan.md. Cleanup preflight completed on 2026-05-31: pruned stale Git worktree metadata, removed 123 clean merged non-current worktrees without force, skipped 13 dirty/untracked worktrees, and verified free space at 134GiB. Next step is Stage 1 red-green implementation.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
