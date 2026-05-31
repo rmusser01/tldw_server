@@ -10,6 +10,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from .bootstrap import GatewayProfileBootstrap
+from .external_registry import (
+    GatewayExternalRegistryManagementError,
+    GatewayExternalRegistryManager,
+)
 from .jsonrpc import (
     GATEWAY_RESPONSE_TYPES as _GATEWAY_RESPONSE_TYPES,
 )
@@ -56,6 +60,17 @@ _PROFILE_MANAGEMENT_STATUS_CODES = {
     "assignment_store_unavailable": 503,
     "unexpected_delete_result": 500,
 }
+_EXTERNAL_REGISTRY_STATUS_CODES = {
+    "external_registry_store_unavailable": 503,
+    "credential_grant_store_unavailable": 503,
+    "external_server_not_found": 404,
+    "external_server_already_exists": 409,
+    "external_server_has_credential_grants": 409,
+    "credential_slot_change_requires_disabled_server": 409,
+    "invalid_external_server_request": 422,
+    "invalid_external_server_patch": 422,
+    "unexpected_external_server_delete_result": 500,
+}
 
 
 class DuplicatePresetRequest(BaseModel):
@@ -83,6 +98,21 @@ class CreateProfileRequest(BaseModel):
 
 class PatchProfileRequest(BaseModel):
     """Request body for patching a user-editable gateway profile."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class CreateExternalServerRequest(BaseModel):
+    """Request body for creating a stored external MCP server definition."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+
+
+class PatchExternalServerRequest(BaseModel):
+    """Request body for patching a stored external MCP server definition."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -135,6 +165,30 @@ class DeleteProfileResponse(BaseModel):
 
     ok: bool
     profile_id: str
+    store: StoreMetadataResponse
+
+
+class ExternalServerListResponse(BaseModel):
+    """Response body for listing stored external MCP servers."""
+
+    ok: bool
+    servers: list[dict[str, Any]]
+    store: StoreMetadataResponse
+
+
+class ExternalServerResponse(BaseModel):
+    """Response body for returning one stored external MCP server."""
+
+    ok: bool
+    server: dict[str, Any]
+    store: StoreMetadataResponse
+
+
+class DeleteExternalServerResponse(BaseModel):
+    """Response body for deleting one stored external MCP server."""
+
+    ok: bool
+    server_id: str
     store: StoreMetadataResponse
 
 
@@ -229,6 +283,17 @@ def _profile_management_error_response(exc: GatewayProfileManagementError) -> JS
     )
 
 
+def _external_registry_error_response(
+    exc: GatewayExternalRegistryManagementError,
+) -> JSONResponse:
+    """Translate expected external-registry errors into HTTP JSON responses."""
+
+    return JSONResponse(
+        status_code=_EXTERNAL_REGISTRY_STATUS_CODES.get(exc.reason_code, 500),
+        content=exc.to_payload(),
+    )
+
+
 def _normalize_duplicate_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Expose duplicated preset metadata at the top level for HTTP clients."""
 
@@ -256,12 +321,30 @@ def _resolve_profile_manager(
 
     resolved_manager = profile_manager
     if resolved_manager is None and profile_bootstrap is not None:
-        resolved_manager = profile_bootstrap.profile_manager
+        resolved_manager = getattr(profile_bootstrap, "profile_manager", None)
     if enable_profile_management and resolved_manager is None:
         raise ValueError(
             "profile management requires profile_manager or profile_bootstrap"
         )
     return resolved_manager
+
+
+def _resolve_external_registry_manager(
+    *,
+    external_registry_manager: GatewayExternalRegistryManager | None,
+    profile_bootstrap: GatewayProfileBootstrap | None,
+    enable_external_registry_management: bool,
+) -> GatewayExternalRegistryManager | None:
+    """Return the configured external registry manager or reject invalid gating."""
+
+    resolved = external_registry_manager
+    if resolved is None and profile_bootstrap is not None:
+        resolved = getattr(profile_bootstrap, "external_registry_manager", None)
+    if enable_external_registry_management and resolved is None:
+        raise ValueError(
+            "external registry management requires external_registry_manager or profile_bootstrap"
+        )
+    return resolved
 
 
 def _mount_profile_management_routes(
@@ -352,12 +435,78 @@ def _mount_profile_management_routes(
             return _profile_management_error_response(exc)
 
 
+def _mount_external_registry_routes(
+    router: APIRouter,
+    manager: GatewayExternalRegistryManager,
+) -> None:
+    """Mount external-registry management endpoints on the package gateway router."""
+
+    @router.get("/external-servers", response_model=ExternalServerListResponse)
+    async def list_external_servers(
+        enabled: bool | None = None,
+    ) -> ExternalServerListResponse | JSONResponse:
+        """Return stored external MCP servers from the configured registry manager."""
+        try:
+            return await manager.list_servers(enabled=enabled)
+        except GatewayExternalRegistryManagementError as exc:
+            return _external_registry_error_response(exc)
+
+    @router.get("/external-servers/{server_id}", response_model=ExternalServerResponse)
+    async def show_external_server(
+        server_id: str,
+    ) -> ExternalServerResponse | JSONResponse:
+        """Return a single stored external MCP server by id."""
+        try:
+            return await manager.show_server(server_id)
+        except GatewayExternalRegistryManagementError as exc:
+            return _external_registry_error_response(exc)
+
+    @router.post("/external-servers", response_model=ExternalServerResponse)
+    async def create_external_server(
+        request: CreateExternalServerRequest,
+    ) -> ExternalServerResponse | JSONResponse:
+        """Create a stored external MCP server definition."""
+        try:
+            return await manager.create_server(request.model_dump(mode="json"))
+        except GatewayExternalRegistryManagementError as exc:
+            return _external_registry_error_response(exc)
+
+    @router.patch("/external-servers/{server_id}", response_model=ExternalServerResponse)
+    async def patch_external_server(
+        server_id: str,
+        request: PatchExternalServerRequest,
+    ) -> ExternalServerResponse | JSONResponse:
+        """Apply an allowed patch to a stored external MCP server definition."""
+        try:
+            return await manager.patch_server(
+                server_id,
+                request.model_dump(mode="json", exclude_unset=True),
+            )
+        except GatewayExternalRegistryManagementError as exc:
+            return _external_registry_error_response(exc)
+
+    @router.delete(
+        "/external-servers/{server_id}",
+        response_model=DeleteExternalServerResponse,
+    )
+    async def delete_external_server(
+        server_id: str,
+    ) -> DeleteExternalServerResponse | JSONResponse:
+        """Delete a stored external MCP server definition."""
+        try:
+            return await manager.delete_server(server_id)
+        except GatewayExternalRegistryManagementError as exc:
+            return _external_registry_error_response(exc)
+
+
 def create_gateway_router(
     runtime: GatewayRuntime,
     *,
     profile_manager: GatewayProfileManager | None = None,
     profile_bootstrap: GatewayProfileBootstrap | None = None,
     enable_profile_management: bool = False,
+    external_registry_manager: GatewayExternalRegistryManager | None = None,
+    enable_external_registry_management: bool = False,
 ) -> APIRouter:
     """Create a package-owned FastAPI router for a standalone MCP runtime."""
 
@@ -369,6 +518,13 @@ def create_gateway_router(
     )
     if resolved_profile_manager is not None:
         _mount_profile_management_routes(router, resolved_profile_manager)
+    resolved_external_registry_manager = _resolve_external_registry_manager(
+        external_registry_manager=external_registry_manager,
+        profile_bootstrap=profile_bootstrap,
+        enable_external_registry_management=enable_external_registry_management,
+    )
+    if resolved_external_registry_manager is not None:
+        _mount_external_registry_routes(router, resolved_external_registry_manager)
 
     @router.get("/status")
     async def gateway_status() -> dict[str, str]:
@@ -438,6 +594,8 @@ def create_gateway_app(
     profile_manager: GatewayProfileManager | None = None,
     profile_bootstrap: GatewayProfileBootstrap | None = None,
     enable_profile_management: bool = False,
+    external_registry_manager: GatewayExternalRegistryManager | None = None,
+    enable_external_registry_management: bool = False,
 ) -> FastAPI:
     """Create a minimal FastAPI app exposing the standalone MCP gateway router."""
 
@@ -448,6 +606,8 @@ def create_gateway_app(
             profile_manager=profile_manager,
             profile_bootstrap=profile_bootstrap,
             enable_profile_management=enable_profile_management,
+            external_registry_manager=external_registry_manager,
+            enable_external_registry_management=enable_external_registry_management,
         ),
         prefix=prefix,
     )
