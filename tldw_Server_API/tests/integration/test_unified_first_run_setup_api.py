@@ -601,7 +601,7 @@ def test_first_run_complete_succeeds_after_first_chat_and_required_acknowledgeme
 
     def _mark_legacy_complete(completed):
         state = FirstRunStateStore(state_path).load()
-        assert state.status == FirstRunStatus.FIRST_CHAT_COMPLETE
+        assert state.status == FirstRunStatus.COMPLETED
         assert set(state.acknowledged_steps) == set(REQUIRED_FIRST_RUN_STEPS)
         completion_calls.append(completed)
 
@@ -675,6 +675,8 @@ def test_first_run_defaults_endpoints_persist_state_and_allow_skip_or_defer(
     state = FirstRunStateStore(state_path).load()
     assert state.step_data["ingest_defaults"]["acknowledged"] is True
     assert state.step_data["ingest_defaults"]["chunking_profile"] == "balanced"
+    assert "allowed_local_roots" not in state.step_data["ingest_defaults"]
+    assert str(tmp_path / "ingest") not in state_path.read_text(encoding="utf-8")
     assert state.step_data["audio_defaults"]["mode"] == "skip"
     assert state.step_data["optional_advanced"]["rag"] == "defer"
     assert state.step_data["optional_advanced"]["storage_paths"] == "skip"
@@ -893,6 +895,38 @@ def test_generic_first_run_state_rejects_invalid_ingest_roots(
     assert response.status_code == 400
     assert response.json()["detail"] == "invalid_allowed_local_roots"
     assert not state_path.exists()
+
+
+def test_generic_first_run_state_validates_but_does_not_persist_ingest_roots(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    raw_root = str(tmp_path / "ingest")
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={
+            "step": "ingest_defaults",
+            "data": {
+                "acknowledged": True,
+                "allow_local_file_ingest": True,
+                "chunking_profile": "balanced",
+                "metadata_mode": "automatic",
+                "allowed_local_roots": [raw_root],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "allowed_local_roots" not in body["step_data"]["ingest_defaults"]
+    state = FirstRunStateStore(state_path).load()
+    assert "allowed_local_roots" not in state.step_data["ingest_defaults"]
+    assert raw_root not in state_path.read_text(encoding="utf-8")
 
 
 def test_first_run_provider_validate_returns_typed_response_without_token_echo(
@@ -1273,6 +1307,36 @@ def test_setup_config_refreshes_runtime_config_cache_after_write(
     assert refresh_calls == [True]
 
 
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"Setup": {"setup_completed": True}},
+        {"Setup": {"enable_first_time_setup": False}},
+        {"setup": {"SETUP_COMPLETED": "true"}},
+    ],
+)
+def test_setup_config_rejects_lifecycle_flag_updates(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+    updates,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "update_config",
+        lambda *_args, **_kwargs: pytest.fail("lifecycle flags must not hit update_config"),
+    )
+
+    response = setup_client.post("/api/v1/setup/config", json={"updates": updates})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "setup_lifecycle_flags_not_allowed"
+    assert FirstRunStateStore(state_path).load().status == FirstRunStatus.NOT_STARTED
+
+
 def test_setup_complete_rejects_without_first_chat_and_does_not_mark_legacy_complete(
     monkeypatch,
     tmp_path,
@@ -1358,7 +1422,7 @@ def test_setup_complete_does_not_persist_first_run_completion_when_legacy_write_
     assert state.completed_at is None
 
 
-def test_setup_complete_rolls_back_legacy_flag_when_first_run_completion_write_fails(
+def test_setup_complete_does_not_mark_legacy_when_first_run_completion_write_fails(
     monkeypatch,
     tmp_path,
     setup_client,
@@ -1392,7 +1456,7 @@ def test_setup_complete_rolls_back_legacy_flag_when_first_run_completion_write_f
 
     assert response.status_code == 500
     assert response.json() == {"detail": "Failed to persist setup completion."}
-    assert completion_calls == [True, False]
+    assert completion_calls == []
     state = FirstRunStateStore(state_path).load()
     assert state.status == FirstRunStatus.FIRST_CHAT_COMPLETE
     assert state.completed_at is None

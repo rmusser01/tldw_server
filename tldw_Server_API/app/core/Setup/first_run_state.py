@@ -398,25 +398,25 @@ class FirstRunStateStore:
         self,
         *,
         mark_legacy_complete: Callable[[], None],
-        rollback_legacy_complete: Callable[[], None],
+        rollback_first_run_complete: bool = True,
     ) -> FirstRunState:
-        """Mark both first-run and legacy setup complete with best-effort rollback."""
-        legacy_marked = False
+        """Durably mark first-run complete, then mark the legacy setup flag."""
         with self._state_lock():
             state = self.load()
             _ensure_completion_ready(state)
+            previous_state = state.model_copy(deep=True)
+            state.status = FirstRunStatus.COMPLETED
+            state.completed_at = _now()
+            completed_state = self._save_unlocked(state)
             try:
                 mark_legacy_complete()
-                legacy_marked = True
-                state.status = FirstRunStatus.COMPLETED
-                state.completed_at = _now()
-                return self._save_unlocked(state)
+                return completed_state
             except Exception:
-                if legacy_marked:
+                if rollback_first_run_complete:
                     try:
-                        rollback_legacy_complete()
-                    except Exception:  # noqa: BLE001 - keep original completion failure
-                        logger.exception("Failed to roll back legacy setup completion flag")
+                        self._save_unlocked(previous_state)
+                    except Exception:  # noqa: BLE001 - keep original legacy failure
+                        logger.exception("Failed to roll back first-run completion state")
                 raise
 
     def mark_skipped(self, *, reason: str | None = None) -> FirstRunState:

@@ -182,6 +182,7 @@ _PUBLIC_FIRST_RUN_STEP_NAMES = frozenset(_FIRST_RUN_STEP_DATA_ALLOWED_KEYS) | {
     "first_chat",
     "state_recovery",
 }
+_SETUP_LIFECYCLE_CONFIG_KEYS = frozenset({"setup_completed", "enable_first_time_setup"})
 _UNSAFE_FIRST_RUN_STEP_DATA_KEY_MARKERS = (
     "api_key",
     "apikey",
@@ -331,6 +332,13 @@ def _validate_ingest_allowed_local_roots(data: dict[str, Any]) -> None:
         ) from exc
 
 
+def _strip_non_persisted_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, Any]:
+    persisted_data = dict(data)
+    if step == "ingest_defaults":
+        persisted_data.pop("allowed_local_roots", None)
+    return persisted_data
+
+
 def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, Any]:
     allowed_keys = _FIRST_RUN_STEP_DATA_ALLOWED_KEYS.get(step)
     if allowed_keys is None:
@@ -369,7 +377,7 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
         )
-    return dict(data)
+    return _strip_non_persisted_first_run_step_data(step, data)
 
 
 def _public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -382,6 +390,8 @@ def _public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, An
     public_data: dict[str, Any] = {}
     for key, value in data.items():
         if key not in allowed_keys:
+            continue
+        if step == "ingest_defaults" and key == "allowed_local_roots":
             continue
         if _is_unsafe_public_step_data_key(key) and not _is_explicitly_allowed_unsafe_named_step_key(
             step, key
@@ -742,6 +752,18 @@ def _safe_ingest_defaults_payload(payload: IngestDefaultsRequest) -> dict[str, A
     return _validated_public_first_run_step_data("ingest_defaults", _step_payload(payload))
 
 
+def _reject_setup_lifecycle_config_updates(updates: dict[str, dict[str, Any]]) -> None:
+    for section, section_updates in updates.items():
+        if section.lower() != setup_manager.SETUP_SECTION.lower():
+            continue
+        for key in section_updates:
+            if key.lower() in _SETUP_LIFECYCLE_CONFIG_KEYS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="setup_lifecycle_flags_not_allowed",
+                )
+
+
 async def _complete_setup_flow(
     payload: SetupCompleteRequest,
     background_tasks: BackgroundTasks,
@@ -750,7 +772,6 @@ async def _complete_setup_flow(
     try:
         first_run_store.mark_completed_with_legacy_flag(
             mark_legacy_complete=lambda: setup_manager.mark_setup_completed(True),
-            rollback_legacy_complete=lambda: setup_manager.mark_setup_completed(False),
         )
     except InvalidFirstRunTransition as exc:
         raise _completion_conflict(str(exc)) from exc
@@ -2200,6 +2221,7 @@ async def update_setup_config(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> SetupConfigUpdateResponse:
     """Persist configuration updates coming from the setup UI."""
+    _reject_setup_lifecycle_config_updates(payload.updates)
     try:
         backup_path = setup_manager.update_config(payload.updates)
         _refresh_runtime_config_cache("setup config update")
