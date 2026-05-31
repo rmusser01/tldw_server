@@ -325,3 +325,20 @@ def test_first_chat_success_allows_completion(tmp_path: Path):
     assert state.status == FirstRunStatus.COMPLETED
     assert state.completed_at is not None
     assert state.first_chat.completed is True
+
+
+def test_validate_completion_ready_does_not_mark_completed(tmp_path: Path):
+    store = FirstRunStateStore(tmp_path / "first_run_state.json")
+
+    for step in REQUIRED_FIRST_RUN_STEPS:
+        store.update_step(step, {"acknowledged": True})
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    state = store.validate_completion_ready()
+
+    assert state.status == FirstRunStatus.FIRST_CHAT_COMPLETE
+    assert state.completed_at is None
+    assert state.first_chat.completed is True

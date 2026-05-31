@@ -110,6 +110,19 @@ def _sync_step_completion(state: FirstRunState, step: str) -> None:
         state.completed_steps.append(step)
 
 
+def _ensure_completion_ready(state: FirstRunState) -> None:
+    _ensure_mutable_state(state)
+    if not state.first_chat.completed:
+        raise InvalidFirstRunTransition("first_chat_required")
+    missing_steps = [
+        step
+        for step in REQUIRED_FIRST_RUN_STEPS
+        if state.step_data.get(step, {}).get("acknowledged") is not True
+    ]
+    if missing_steps:
+        raise InvalidFirstRunTransition("required_steps_missing:" + ",".join(missing_steps))
+
+
 def _normalized_key(value: object) -> str:
     return "".join(character for character in str(value).lower() if character.isalnum())
 
@@ -359,20 +372,15 @@ class FirstRunStateStore:
 
         return self._mutate_state(_record)
 
+    def validate_completion_ready(self) -> FirstRunState:
+        with self._state_lock():
+            state = self.load()
+            _ensure_completion_ready(state)
+            return state
+
     def mark_completed(self) -> FirstRunState:
         def _complete(state: FirstRunState) -> None:
-            _ensure_mutable_state(state)
-            if not state.first_chat.completed:
-                raise InvalidFirstRunTransition("first_chat_required")
-            missing_steps = [
-                step
-                for step in REQUIRED_FIRST_RUN_STEPS
-                if state.step_data.get(step, {}).get("acknowledged") is not True
-            ]
-            if missing_steps:
-                raise InvalidFirstRunTransition(
-                    "required_steps_missing:" + ",".join(missing_steps)
-                )
+            _ensure_completion_ready(state)
             state.status = FirstRunStatus.COMPLETED
             state.completed_at = _now()
 

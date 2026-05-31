@@ -1918,12 +1918,26 @@ async def mark_setup_complete(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> SetupCompleteResponse:
     """Mark the setup workflow as complete and optionally disable future prompts."""
+    first_run_store = _first_run_store()
     try:
-        _first_run_store().mark_completed()
+        first_run_store.validate_completion_ready()
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
-    setup_manager.mark_setup_completed(True)
+    try:
+        setup_manager.mark_setup_completed(True)
+    except Exception as exc:  # noqa: BLE001 - public response must stay sanitized
+        logger.exception("Failed to persist legacy setup completion flag")
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to persist setup completion.",
+        ) from exc
+
+    try:
+        first_run_store.mark_completed()
+    except InvalidFirstRunTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
     _refresh_runtime_config_cache("setup completion")
 
     plan_requested = False

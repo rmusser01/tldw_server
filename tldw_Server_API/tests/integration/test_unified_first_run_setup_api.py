@@ -748,6 +748,41 @@ def test_setup_complete_marks_legacy_complete_only_after_first_run_completion(
     assert completion_calls == [True]
 
 
+def test_setup_complete_does_not_persist_first_run_completion_when_legacy_write_fails(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    for step in REQUIRED_FIRST_RUN_STEPS:
+        store.update_step(step, {"acknowledged": True})
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+
+    def _raise_legacy_completion_failure(completed):  # noqa: ARG001
+        raise RuntimeError("raw legacy config path /tmp/secret-config")
+
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "mark_setup_completed",
+        _raise_legacy_completion_failure,
+    )
+
+    response = setup_client.post("/api/v1/setup/complete", json={})
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Failed to persist setup completion."}
+    state = FirstRunStateStore(state_path).load()
+    assert state.status == FirstRunStatus.FIRST_CHAT_COMPLETE
+    assert state.completed_at is None
+
+
 def test_legacy_completed_setup_rejects_first_run_writes_without_state_file(
     monkeypatch,
     tmp_path,

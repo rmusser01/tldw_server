@@ -48,6 +48,10 @@ class _FakeAsyncClient:
         return self._response
 
 
+def _fail_client_creation():
+    pytest.fail("disallowed local provider endpoint should be rejected before httpx client creation")
+
+
 @pytest.mark.asyncio
 async def test_unreachable_local_endpoint_maps_to_unreachable(monkeypatch):
     fake_client = _FakeAsyncClient(error=TimeoutError("raw timeout details"))
@@ -87,6 +91,59 @@ async def test_openai_models_shape_maps_to_ready(monkeypatch):
     assert response.status == "ready"
     assert response.models == ["local-model"]
     assert fake_client.requests == [("http://127.0.0.1:11434/v1/models", {})]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://203.0.113.10:8000/v1",
+        "http://169.254.169.254/latest/meta-data",
+        "ftp://127.0.0.1:11434/v1",
+        "http://example.com:11434/v1",
+    ],
+)
+async def test_openai_local_validation_rejects_disallowed_targets_before_request(
+    monkeypatch,
+    base_url,
+):
+    monkeypatch.setattr(provider_validation, "_create_validation_client", _fail_client_creation)
+
+    response = await validate_local_openai_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="custom_openai",
+            base_url=base_url,
+            api_key="secret-local-token",
+        )
+    )
+
+    body = response.model_dump_json()
+    assert response.status == "failed"
+    assert response.failure_category == "local_provider_endpoint_not_allowed"
+    assert base_url not in body
+    assert "secret-local-token" not in body
+
+
+@pytest.mark.asyncio
+async def test_openai_local_validation_allows_private_ip_targets(monkeypatch):
+    fake_client = _FakeAsyncClient(
+        response=_FakeResponse(
+            200,
+            {"object": "list", "data": [{"id": "private-model", "object": "model"}]},
+        )
+    )
+    monkeypatch.setattr(provider_validation, "_create_validation_client", lambda: fake_client)
+
+    response = await validate_local_openai_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="custom_openai",
+            base_url="http://10.0.0.5:8000/v1",
+        )
+    )
+
+    assert response.status == "ready"
+    assert response.models == ["private-model"]
+    assert fake_client.requests == [("http://10.0.0.5:8000/v1/models", {})]
 
 
 @pytest.mark.asyncio
@@ -174,6 +231,26 @@ async def test_kobold_native_shape_maps_to_ready_and_posts_supplied_url(monkeypa
         )
     ]
     assert raw_token not in response.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_kobold_native_rejects_disallowed_target_before_request(monkeypatch):
+    base_url = "http://169.254.169.254/api/v1/generate"
+    monkeypatch.setattr(provider_validation, "_create_validation_client", _fail_client_creation)
+
+    response = await validate_native_kobold_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="koboldcpp",
+            base_url=base_url,
+            api_key="secret-local-token",
+        )
+    )
+
+    body = response.model_dump_json()
+    assert response.status == "failed"
+    assert response.failure_category == "local_provider_endpoint_not_allowed"
+    assert base_url not in body
+    assert "secret-local-token" not in body
 
 
 @pytest.mark.asyncio

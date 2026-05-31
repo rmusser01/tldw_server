@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel, Field
@@ -17,6 +19,12 @@ FAILURE_AUTH_FAILED = "auth_failed"
 FAILURE_UNSUPPORTED_API_SHAPE = "unsupported_api_shape"
 FAILURE_PROVIDER_API_KEY_REQUIRED = "provider_api_key_required"
 FAILURE_PROVIDER_API_KEY_INVALID = "provider_api_key_invalid"
+FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED = "local_provider_endpoint_not_allowed"
+_ALLOWED_PRIVATE_IPV4_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
+_ALLOWED_PRIVATE_IPV6_NETWORKS = (ipaddress.ip_network("fc00::/7"),)
 
 
 class LocalEndpointValidationRequest(BaseModel):
@@ -75,6 +83,59 @@ def _has_kobold_native_result(body: Any) -> bool:
     return isinstance(first_result.get("text"), str)
 
 
+def _is_allowed_local_provider_host(hostname: str) -> bool:
+    normalized_host = hostname.strip().lower()
+    if normalized_host == "localhost":
+        return True
+
+    if "%" in normalized_host:
+        normalized_host = normalized_host.split("%", 1)[0]
+
+    try:
+        address = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        return False
+
+    if address.is_multicast or address.is_unspecified or address.is_link_local:
+        return False
+
+    if address.version == 4:
+        return address.is_loopback or any(
+            address in network for network in _ALLOWED_PRIVATE_IPV4_NETWORKS
+        )
+
+    if address.is_loopback:
+        return True
+    return any(address in network for network in _ALLOWED_PRIVATE_IPV6_NETWORKS)
+
+
+def _validate_local_provider_target(
+    payload: LocalEndpointValidationRequest,
+) -> SetupProviderValidationResponse | None:
+    try:
+        parsed = urlsplit(payload.base_url)
+    except ValueError:
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
+            message="Local provider endpoint is unreachable.",
+        )
+
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED,
+            message="Local provider endpoint target is not allowed.",
+        )
+    if not parsed.hostname or not _is_allowed_local_provider_host(parsed.hostname):
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_LOCAL_PROVIDER_ENDPOINT_NOT_ALLOWED,
+            message="Local provider endpoint target is not allowed.",
+        )
+    return None
+
+
 def validate_hosted_provider_credentials(
     payload: HostedProviderValidationRequest,
 ) -> SetupProviderValidationResponse:
@@ -113,6 +174,9 @@ async def validate_local_openai_endpoint(
     payload: LocalEndpointValidationRequest,
 ) -> SetupProviderValidationResponse:
     """Validate a local OpenAI-compatible endpoint using its ``/models`` shape."""
+    if rejected_response := _validate_local_provider_target(payload):
+        return rejected_response
+
     models_url = f"{payload.base_url.rstrip('/')}/models"
     headers: dict[str, str] = {}
     if payload.api_key:
@@ -169,6 +233,9 @@ async def validate_native_kobold_endpoint(
     payload: LocalEndpointValidationRequest,
 ) -> SetupProviderValidationResponse:
     """Validate a Kobold.cpp native ``/api/v1/generate`` endpoint shape."""
+    if rejected_response := _validate_local_provider_target(payload):
+        return rejected_response
+
     headers = {"Content-Type": "application/json"}
     if payload.api_key:
         headers["X-Api-Key"] = payload.api_key
