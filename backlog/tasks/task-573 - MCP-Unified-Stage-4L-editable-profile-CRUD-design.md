@@ -1,15 +1,18 @@
 ---
 id: TASK-573
 title: MCP Unified Stage 4L editable profile CRUD design
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-31 15:36'
+updated_date: 2026-05-31 15:36
 labels:
-  - mcp-unified
-  - design
-  - stage-4l
+- mcp-unified
+- design
+- stage-4l
 dependencies: []
+modified_files:
+- Docs/superpowers/specs/2026-05-31-mcp-unified-stage4l-editable-profile-crud-design.md
+- backlog/tasks/task-573 - MCP-Unified-Stage-4L-editable-profile-CRUD-design.md
 ---
 
 ## Description
@@ -20,11 +23,11 @@ Write and review the Stage 4L design spec for manager-first editable profile CRU
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Stage 4L design spec captures manager-first editable profile CRUD scope.
-- [ ] #2 Spec covers FastAPI and CLI contracts for create, limited patch, and guarded delete.
-- [ ] #3 Spec documents safety rules for duplicate create, unsupported patch fields, default disable, default delete, and assigned-profile delete.
-- [ ] #4 Spec documents non-goals for assignment CRUD, approval policy editing, path scopes, grants, and UI changes.
-- [ ] #5 Spec review loop is completed and results are recorded.
+- [x] #1 Stage 4L design spec captures manager-first editable profile CRUD scope.
+- [x] #2 Spec covers FastAPI and CLI contracts for create, limited patch, and guarded delete.
+- [x] #3 Spec documents safety rules for duplicate create, unsupported patch fields, default disable, default delete, and assigned-profile delete.
+- [x] #4 Spec documents non-goals for assignment CRUD, approval policy editing, path scopes, grants, and UI changes.
+- [x] #5 Spec review loop is completed and results are recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -42,14 +45,15 @@ Spec drafted at Docs/superpowers/specs/2026-05-31-mcp-unified-stage4l-editable-p
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Stage 4L design spec was written and reviewed. It captures manager-first editable profile CRUD scope, FastAPI and CLI contracts, safety rules for duplicate create, unsupported/no-op patch, default protections, assigned-profile delete protection, compact audit posture, persistent-store guarded delete requirements, and explicit non-goals. Follow-up implementation planning and execution are tracked in TASK-574 and TASK-575. Known skips/blockers: Bandit not applicable for design-only task; no blockers.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
