@@ -11,10 +11,13 @@ from tldw_Server_API.app.core.Sandbox.runners.docker_runner import DockerRunner
 
 
 class _StopAfterCreate(Exception):
+    """Sentinel used to stop DockerRunner after docker create is assembled."""
+
     pass
 
 
 def _capture_docker_create_command(monkeypatch, spec: RunSpec) -> list[str]:
+    """Return the docker create command without starting a real container."""
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
     monkeypatch.delenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", raising=False)
     recorded_cmds: list[list[str]] = []
@@ -39,6 +42,7 @@ def _capture_docker_create_command(monkeypatch, spec: RunSpec) -> list[str]:
 
 
 def _staged_mount_source(create_cmd: list[str]) -> str:
+    """Extract the host source path for the read-only staged input mount."""
     staged_mount = next(
         (
             create_cmd[idx + 1]
@@ -56,6 +60,7 @@ def _staged_mount_source(create_cmd: list[str]) -> str:
 
 
 def _capture_staged_input_dir(monkeypatch, spec: RunSpec, session_workspace: str | None = None) -> str:
+    """Return the staged input directory while DockerRunner is still preparing create."""
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
     monkeypatch.delenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", raising=False)
 
@@ -77,6 +82,7 @@ def _capture_staged_input_dir(monkeypatch, spec: RunSpec, session_workspace: str
 
 @pytest.mark.unit
 def test_docker_runner_defaults_to_non_root_uid_gid_and_read_only_rootfs(monkeypatch) -> None:
+    """Default hardened Docker runs should use non-root uid/gid and read-only rootfs."""
     monkeypatch.delenv("SANDBOX_DOCKER_DEFAULT_UID", raising=False)
     monkeypatch.delenv("SANDBOX_DOCKER_DEFAULT_GID", raising=False)
     spec = RunSpec(
@@ -101,6 +107,7 @@ def test_docker_runner_defaults_to_non_root_uid_gid_and_read_only_rootfs(monkeyp
 
 @pytest.mark.unit
 def test_docker_runner_bind_mounts_staged_workspace_for_inline_files(monkeypatch) -> None:
+    """Inline files should be staged via read-only mount while /workspace stays tmpfs."""
     monkeypatch.delenv("SANDBOX_DOCKER_BIND_WORKSPACE", raising=False)
     spec = RunSpec(
         session_id=None,
@@ -141,6 +148,7 @@ def test_docker_runner_bind_mounts_staged_workspace_for_inline_files(monkeypatch
 
 @pytest.mark.unit
 def test_docker_runner_skips_symlinked_session_workspace_inputs(monkeypatch, tmp_path: Path) -> None:
+    """Session workspace staging should not copy symlinked files outside the workspace."""
     outside_file = tmp_path.parent / "outside-workspace.txt"
     outside_file.write_text("outside\n", encoding="utf-8")
     workspace_dir = tmp_path / "workspace"
@@ -171,6 +179,7 @@ def test_docker_runner_skips_symlinked_session_workspace_inputs(monkeypatch, tmp
 
 @pytest.mark.unit
 def test_docker_runner_normalizes_staged_input_modes(monkeypatch) -> None:
+    """Inline staged files and parent directories should stay readable under restrictive umask."""
     spec = RunSpec(
         session_id=None,
         runtime=RuntimeType.docker,
@@ -202,6 +211,7 @@ def test_docker_runner_normalizes_staged_input_modes(monkeypatch) -> None:
 
 @pytest.mark.unit
 def test_docker_runner_uses_configured_non_root_uid_gid(monkeypatch) -> None:
+    """Configured Docker uid/gid should override hardened non-root defaults."""
     monkeypatch.setenv("SANDBOX_DOCKER_DEFAULT_UID", "2001")
     monkeypatch.setenv("SANDBOX_DOCKER_DEFAULT_GID", "3002")
     spec = RunSpec(
@@ -224,6 +234,7 @@ def test_docker_runner_uses_configured_non_root_uid_gid(monkeypatch) -> None:
 
 @pytest.mark.unit
 def test_docker_runner_adds_ssh_caps_for_acp_internal_ssh_port(monkeypatch) -> None:
+    """ACP internal SSH mappings should receive the minimal OpenSSH capability set."""
     spec = RunSpec(
         session_id=None,
         runtime=RuntimeType.docker,

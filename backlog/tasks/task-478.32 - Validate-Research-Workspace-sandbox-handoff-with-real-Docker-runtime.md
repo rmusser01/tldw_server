@@ -50,6 +50,8 @@ Evidence:
 - UAT matrix RW-UAT-020 and RW-UAT-023 now record the real-Docker evidence while preserving no `/workspace-playground` aliases or redirects.
 
 PR review follow-up: hardened staged Docker inputs to skip symlinked or escaped session-workspace files, copy staged inputs with `cp -R` instead of preserving host ownership, normalize staged file and parent-directory modes for non-root container users, and replace new silent staging suppressions with debug logging. Added regression coverage for symlink skipping, restrictive `umask 077` inline-file staging, and non-archive startup copy behavior. Focused unit tests passed; real-Docker integration was re-run but skipped because the local Docker daemon was not reachable in this follow-up environment.
+
+Second PR review cleanup: added docstrings to the changed Docker hardening test helpers/tests to address CodeRabbit's docstring-coverage warning without broad production refactoring. The focused hardening test file was rerun and passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
