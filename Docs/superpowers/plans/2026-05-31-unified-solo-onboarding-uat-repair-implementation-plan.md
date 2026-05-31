@@ -315,7 +315,7 @@ const mediaId = Array.isArray(response.media_ids) ? response.media_ids[0] : resp
 
 - [x] Ensure direct supported file URLs continue through the existing media/document job path.
 - [x] Run the focused tests and confirm they pass.
-- [ ] Commit with message `fix: route quick ingest web sources correctly`.
+- [x] Commit with message `fix: route quick ingest web sources correctly`.
 
 ---
 
@@ -331,11 +331,11 @@ const mediaId = Array.isArray(response.media_ids) ? response.media_ids[0] : resp
 
 **Tests:** Focused command list below.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Commands
 
-- [ ] From `apps/tldw-frontend`, run:
+- [x] From `apps/tldw-frontend`, run:
 
 ```bash
 bunx vitest run \
@@ -345,7 +345,7 @@ bunx vitest run \
   --reporter=default
 ```
 
-- [ ] From `apps/packages/ui`, run:
+- [x] From `apps/packages/ui`, run:
 
 ```bash
 bunx vitest run \
@@ -355,16 +355,27 @@ bunx vitest run \
   --reporter=default
 ```
 
-- [ ] If any backend Python code is touched, activate `.venv` and run Bandit on the touched Python paths:
+- [x] Additional touched UI regression tests passed:
+
+```bash
+bunx vitest run \
+  src/services/__tests__/tldw-api-client.quickstart-auth.test.ts \
+  src/utils/__tests__/quick-ingest-open.test.ts \
+  src/components/Layouts/__tests__/QuickIngestButton.resume.test.tsx \
+  src/components/Common/QuickIngest/__tests__/AddContentStep.url-detection.test.ts \
+  --reporter=default
+```
+
+- [x] If any backend Python code is touched, activate `.venv` and run Bandit on the touched Python paths:
 
 ```bash
 source .venv/bin/activate
 python -m bandit -r <touched-python-paths> -f json -o /tmp/bandit_unified_onboarding_uat_repair.json
 ```
 
-- [ ] If no backend Python code is touched, document “Bandit not applicable: touched scope is TS/React/Makefile only” in `TASK-576`.
-- [ ] Run `git diff --check`.
-- [ ] Commit any remaining test-only or documentation updates with a message tied to the changed behavior.
+- [x] If no backend Python code is touched, document “Bandit not applicable: touched scope is TS/React/Makefile only” in `TASK-576`.
+- [x] Run `git diff --check`.
+- [x] Commit any remaining test-only or documentation updates with a message tied to the changed behavior.
 
 ---
 

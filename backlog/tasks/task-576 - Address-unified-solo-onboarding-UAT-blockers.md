@@ -48,13 +48,13 @@ Plan and implement repairs required for a clean first-time solo-user walkthrough
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-['Stage 0 cleanup/preflight: completed', 'Stage 1 first-run route repair: completed', 'Stage 2 quickstart WebUI auth handoff: completed', 'Stage 3 post-onboarding readiness gate: completed', 'Stage 4 first-source Quick Ingest defaults: completed', 'Stage 5 web/text ingest routing repair: completed', 'Stage 6 focused regression verification: pending', 'Stage 7 real UAT walkthrough: pending']
+['Stage 0 cleanup/preflight: completed', 'Stage 1 first-run route repair: completed', 'Stage 2 quickstart WebUI auth handoff: completed', 'Stage 3 post-onboarding readiness gate: completed', 'Stage 4 first-source Quick Ingest defaults: completed', 'Stage 5 web/text ingest routing repair: completed', 'Stage 6 focused regression verification: completed', 'Stage 7 real UAT walkthrough: pending']
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+['Stage 6 verification passed: apps/tldw-frontend vitest suite for frontend-quickstart-networking, app-layout, runtime-bootstrap: 35 tests passed.', 'Stage 6 verification passed: apps/packages/ui vitest suite for option-index unified setup, UnifiedSetupWizard, quick-ingest-batch: 43 tests passed.', 'Additional touched UI regressions passed: tldw-api-client.quickstart-auth, quick-ingest-open, QuickIngestButton.resume, AddContentStep.url-detection: 19 tests passed.', 'git diff --check passed.', 'Bandit not applicable: touched scope is TS/React/Makefile/docs only; no backend Python files touched.']
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
