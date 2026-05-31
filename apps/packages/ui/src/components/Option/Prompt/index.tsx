@@ -10,7 +10,6 @@ import {
   Segmented,
   Tag,
   Select,
-  Alert,
   Pagination,
   type InputRef
 } from "antd"
@@ -43,6 +42,7 @@ import { tagColors } from "@/utils/color"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import ConnectFeatureBanner from "@/components/Common/ConnectFeatureBanner"
+import { Alert } from "@/components/ui/primitives"
 // useMessageOption moved to usePromptInteractions hook
 import { useDebounce } from "@/hooks/useDebounce"
 import {
@@ -1226,17 +1226,19 @@ export const PromptBody = () => {
         {/* Project filter banner - shown when filtering by project */}
         {projectFilter && (
           <Alert
-            type="info"
-            showIcon
+            variant="info"
             className="mb-4"
             title={t("managePrompts.projectFilter.active", {
               defaultValue: "Filtering by project"
             })}
-            description={t("managePrompts.projectFilter.description", {
-              defaultValue: "Showing prompts linked to Project #{{projectId}}. Clear the filter to see all prompts.",
-              projectId: projectFilter
-            })}
-            action={
+          >
+            <p>
+              {t("managePrompts.projectFilter.description", {
+                defaultValue: "Showing prompts linked to Project #{{projectId}}. Clear the filter to see all prompts.",
+                projectId: projectFilter
+              })}
+            </p>
+            <div className="mt-2">
               <button
                 onClick={clearProjectFilter}
                 className="text-sm text-primary hover:underline"
@@ -1244,8 +1246,8 @@ export const PromptBody = () => {
               >
                 {t("managePrompts.projectFilter.clear", { defaultValue: "Show all prompts" })}
               </button>
-            }
-          />
+            </div>
+          </Alert>
         )}
         <div className="mb-6 space-y-3">
           {/* Bulk action bar - shown when rows are selected (table view only) */}
@@ -1835,18 +1837,18 @@ export const PromptBody = () => {
 
         {useServerSearchResults && hiddenServerResultsOnPage > 0 && (
           <Alert
-            type="info"
-            showIcon
+            variant="info"
             className="mb-3"
             title={t("managePrompts.search.localSubset", {
               defaultValue: "Showing synced local matches only"
             })}
-            description={t("managePrompts.search.localSubsetDesc", {
+          >
+            {t("managePrompts.search.localSubsetDesc", {
               defaultValue:
                 "{{count}} result(s) from this page are not saved locally yet.",
               count: hiddenServerResultsOnPage
             })}
-          />
+          </Alert>
         )}
 
         {status === "success" && Array.isArray(data) && data.length === 0 && (
@@ -2626,33 +2628,33 @@ export const PromptBody = () => {
       {/* Firefox Private Mode Warning */}
       {isFireFoxPrivateMode && (
         <Alert
-          type="warning"
-          showIcon
+          variant="warning"
           icon={<AlertTriangle className="size-4" />}
           className="mb-4"
           title={t("managePrompts.privateMode.title", { defaultValue: "Limited functionality in Private Mode" })}
-          description={t("managePrompts.privateMode.description", {
+        >
+          {t("managePrompts.privateMode.description", {
             defaultValue: "Firefox Private Mode doesn't support IndexedDB. You can view existing prompts, but creating, editing, or importing prompts is disabled. Use a normal window for full functionality."
           })}
-        />
+        </Alert>
       )}
       {(promptLoadFailed || copilotLoadFailed) && (
         <Alert
-          type="error"
-          showIcon
+          variant="error"
           className="mb-4"
           title={t(
             "managePrompts.partialLoad",
             "Some prompt data isn't available"
           )}
-          description={
+        >
+          {
             loadErrorDescription ||
             t(
               "managePrompts.loadErrorHelp",
               "Check your server connection and refresh to try again."
             )
           }
-        />
+        </Alert>
       )}
       <div className="flex min-w-0 max-w-full gap-0">
         {/* Sidebar - desktop only */}
@@ -2914,17 +2916,17 @@ export const PromptBody = () => {
       >
         <div className="space-y-3" data-testid="prompts-empty-trash-confirm">
           <Alert
-            type="error"
-            showIcon
+            variant="error"
             title={t("managePrompts.trash.emptyConfirmWarningTitle", {
               defaultValue: "This permanently deletes every prompt in trash"
             })}
-            description={t("managePrompts.trash.emptyConfirmContent", {
+          >
+            {t("managePrompts.trash.emptyConfirmContent", {
               defaultValue:
                 "This will permanently delete {{count}} prompts. This action cannot be undone.",
               count: Array.isArray(trashData) ? trashData.length : 0
             })}
-          />
+          </Alert>
           <label
             className="block text-sm font-medium text-text"
             htmlFor="prompts-empty-trash-confirm-input"

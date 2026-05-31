@@ -214,6 +214,19 @@ describe("PromptEditorDrawer structured prompt mode", () => {
     expect(previewMatches.length).toBeGreaterThan(0)
   })
 
+  it("renders advanced JSON guidance through the design-system Alert", async () => {
+    renderDrawer()
+
+    const advancedLabel = await screen.findByText("Advanced Options")
+    fireEvent.click(advancedLabel)
+
+    const guidance = await screen.findByText(
+      "These fields accept JSON. Few-shot examples help the model learn from examples."
+    )
+    const alert = guidance.closest('[data-ds-component="Alert"]')
+    expect(alert).not.toBeNull()
+  })
+
   it("projects structured edits into legacy fields and preserves them across mode switches", async () => {
     renderDrawer()
 

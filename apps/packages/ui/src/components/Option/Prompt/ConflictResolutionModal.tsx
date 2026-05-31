@@ -1,6 +1,7 @@
 import React from "react"
-import { Alert, Modal, Tag } from "antd"
+import { Modal, Tag } from "antd"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import type { ConflictInfo, ConflictResolution } from "@/services/prompt-sync"
 
 interface ConflictResolutionModalProps {
@@ -144,24 +145,23 @@ export const ConflictResolutionModal: React.FC<ConflictResolutionModalProps> = (
 
       {!loading && !conflictInfo ? (
         <Alert
-          type="warning"
-          showIcon
-          message={t("managePrompts.sync.conflictUnavailable", {
+          variant="warning"
+          title={t("managePrompts.sync.conflictUnavailable", {
             defaultValue: "Conflict details unavailable"
           })}
-          description={t("managePrompts.sync.conflictUnavailableDesc", {
+        >
+          {t("managePrompts.sync.conflictUnavailableDesc", {
             defaultValue:
               "We couldn't retrieve local and server versions for comparison."
           })}
-        />
+        </Alert>
       ) : null}
 
       {conflictInfo ? (
         <div className="space-y-3">
           <Alert
-            type={hasNamedDifferences ? "warning" : "info"}
-            showIcon
-            message={
+            variant={hasNamedDifferences ? "warning" : "info"}
+            title={
               hasNamedDifferences
                 ? t("managePrompts.sync.conflictDiffDetected", {
                     defaultValue: "Differences detected between local and server versions."
