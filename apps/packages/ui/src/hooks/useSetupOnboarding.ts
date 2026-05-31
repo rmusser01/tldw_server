@@ -21,7 +21,131 @@ import type {
 } from "@/types/setup-onboarding"
 
 const toError = (value: unknown): Error =>
-  value instanceof Error ? value : new Error(String(value || "Setup request failed"))
+  value instanceof Error
+    ? value
+    : new Error(String(value || "Setup request failed"))
+
+type InitialSetupLoadResult = {
+  nextState: FirstRunState | null
+  nextMetadata: FirstRunMetadata | null
+  firstError: Error | null
+}
+
+type InitialSetupCache = InitialSetupLoadResult & {
+  stateLoaded: boolean
+  metadataLoaded: boolean
+}
+
+type LoadOutcome<T> = {
+  value: T | null
+  error: Error | null
+}
+
+let initialSetupStatePromise: Promise<LoadOutcome<FirstRunState>> | null = null
+let initialSetupMetadataPromise: Promise<LoadOutcome<FirstRunMetadata>> | null =
+  null
+let initialSetupSnapshot: InitialSetupCache | null = null
+
+const rememberInitialSetupSnapshot = (
+  patch: Partial<InitialSetupLoadResult> &
+    Partial<Pick<InitialSetupCache, "stateLoaded" | "metadataLoaded">>
+) => {
+  const current = initialSetupSnapshot ?? {
+    nextState: null,
+    nextMetadata: null,
+    firstError: null,
+    stateLoaded: false,
+    metadataLoaded: false
+  }
+  const hasNextState = Object.prototype.hasOwnProperty.call(patch, "nextState")
+  const hasNextMetadata = Object.prototype.hasOwnProperty.call(
+    patch,
+    "nextMetadata"
+  )
+  const hasFirstError = Object.prototype.hasOwnProperty.call(
+    patch,
+    "firstError"
+  )
+  initialSetupSnapshot = {
+    nextState: hasNextState ? (patch.nextState ?? null) : current.nextState,
+    nextMetadata: hasNextMetadata
+      ? (patch.nextMetadata ?? null)
+      : current.nextMetadata,
+    firstError: hasFirstError ? (patch.firstError ?? null) : current.firstError,
+    stateLoaded: patch.stateLoaded ?? current.stateLoaded,
+    metadataLoaded: patch.metadataLoaded ?? current.metadataLoaded
+  }
+}
+
+const loadInitialSetupState = (): Promise<LoadOutcome<FirstRunState>> => {
+  if (initialSetupSnapshot?.stateLoaded) {
+    return Promise.resolve({
+      value: initialSetupSnapshot.nextState,
+      error: initialSetupSnapshot.nextState
+        ? null
+        : initialSetupSnapshot.firstError
+    })
+  }
+  if (!initialSetupStatePromise) {
+    initialSetupStatePromise = tldwClient
+      .getFirstRunState()
+      .then((nextState) => {
+        rememberInitialSetupSnapshot({
+          nextState,
+          firstError: null,
+          stateLoaded: true
+        })
+        return { value: nextState, error: null }
+      })
+      .catch((err) => {
+        const error = toError(err)
+        rememberInitialSetupSnapshot({
+          firstError: error,
+          stateLoaded: true
+        })
+        return { value: null, error }
+      })
+      .finally(() => {
+        initialSetupStatePromise = null
+      })
+  }
+  return initialSetupStatePromise
+}
+
+const loadInitialSetupMetadata = (): Promise<LoadOutcome<FirstRunMetadata>> => {
+  if (initialSetupSnapshot?.metadataLoaded) {
+    return Promise.resolve({
+      value: initialSetupSnapshot.nextMetadata,
+      error: initialSetupSnapshot.nextMetadata
+        ? null
+        : initialSetupSnapshot.firstError
+    })
+  }
+  if (!initialSetupMetadataPromise) {
+    initialSetupMetadataPromise = tldwClient
+      .getFirstRunMetadata()
+      .then((nextMetadata) => {
+        rememberInitialSetupSnapshot({
+          nextMetadata,
+          firstError: null,
+          metadataLoaded: true
+        })
+        return { value: nextMetadata, error: null }
+      })
+      .catch((err) => {
+        const error = toError(err)
+        rememberInitialSetupSnapshot({
+          firstError: error,
+          metadataLoaded: true
+        })
+        return { value: null, error }
+      })
+      .finally(() => {
+        initialSetupMetadataPromise = null
+      })
+  }
+  return initialSetupMetadataPromise
+}
 
 type UseSetupOnboardingOptions = {
   initialState?: FirstRunState | null
@@ -35,9 +159,17 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
     initialMetadata = null,
     autoLoad = true
   } = options
-  const [state, setState] = React.useState<FirstRunState | null>(initialState)
+  const cachedInitialState = autoLoad
+    ? (initialSetupSnapshot?.nextState ?? null)
+    : null
+  const cachedInitialMetadata = autoLoad
+    ? (initialSetupSnapshot?.nextMetadata ?? null)
+    : null
+  const [state, setState] = React.useState<FirstRunState | null>(
+    initialState ?? cachedInitialState
+  )
   const [metadata, setMetadata] = React.useState<FirstRunMetadata | null>(
-    initialMetadata
+    initialMetadata ?? cachedInitialMetadata
   )
   const [providerCatalog, setProviderCatalog] = React.useState<
     SetupProviderCatalogEntry[]
@@ -46,9 +178,14 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
     AudioRecommendationsResponse["recommendations"]
   >([])
   const [loading, setLoading] = React.useState(
-    autoLoad && (!initialState || !initialMetadata)
+    autoLoad &&
+      (!(initialState ?? cachedInitialState) ||
+        !(initialMetadata ?? cachedInitialMetadata))
   )
-  const [error, setError] = React.useState<Error | null>(null)
+  const [error, setError] = React.useState<Error | null>(
+    autoLoad ? (initialSetupSnapshot?.firstError ?? null) : null
+  )
+  const autoLoadInFlightRef = React.useRef(false)
 
   const refresh = React.useCallback(async () => {
     setLoading(true)
@@ -58,16 +195,28 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
       let firstError: Error | null = null
       try {
         nextState = await tldwClient.getFirstRunState()
+        rememberInitialSetupSnapshot({
+          nextState,
+          firstError: null,
+          stateLoaded: true
+        })
         setState(nextState)
       } catch (err) {
         firstError = toError(err)
       }
       try {
-        setMetadata(await tldwClient.getFirstRunMetadata())
+        const nextMetadata = await tldwClient.getFirstRunMetadata()
+        rememberInitialSetupSnapshot({
+          nextMetadata,
+          firstError: null,
+          metadataLoaded: true
+        })
+        setMetadata(nextMetadata)
       } catch (err) {
         firstError = firstError ?? toError(err)
       }
       if (firstError) {
+        rememberInitialSetupSnapshot({ firstError })
         setError(firstError)
         if (!nextState) {
           throw firstError
@@ -81,37 +230,39 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
 
   React.useEffect(() => {
     if (!autoLoad || (state && metadata)) return
+    if (autoLoadInFlightRef.current) return
     let mounted = true
-    let nextState: FirstRunState | null = null
-    let firstError: Error | null = null
+    autoLoadInFlightRef.current = true
     setLoading(true)
     setError(null)
-    tldwClient
-      .getFirstRunState()
-      .then((loadedState) => {
-        nextState = loadedState
-        if (mounted) setState(loadedState)
+    loadInitialSetupState()
+      .then((stateOutcome) => {
+        if (!mounted) return
+        if (stateOutcome.value) setState(stateOutcome.value)
+        if (stateOutcome.error) setError(stateOutcome.error)
+        return loadInitialSetupMetadata()
       })
-      .catch((err) => {
-        firstError = toError(err)
-      })
-      .then(() => tldwClient.getFirstRunMetadata())
-      .then((nextMetadata) => {
-        if (mounted) setMetadata(nextMetadata)
-      })
-      .catch((err) => {
-        firstError = firstError ?? toError(err)
+      .then((metadataOutcome) => {
+        if (!mounted || !metadataOutcome) return
+        if (metadataOutcome.value) setMetadata(metadataOutcome.value)
+        if (metadataOutcome.error) setError(metadataOutcome.error)
       })
       .finally(() => {
-        if (mounted && firstError) setError(firstError)
+        autoLoadInFlightRef.current = false
         if (mounted) setLoading(false)
       })
     return () => {
       mounted = false
+      autoLoadInFlightRef.current = false
     }
-  }, [autoLoad, metadata, state])
+  }, [autoLoad])
 
   const adoptState = React.useCallback((nextState: FirstRunState) => {
+    rememberInitialSetupSnapshot({
+      nextState,
+      firstError: null,
+      stateLoaded: true
+    })
     setState(nextState)
   }, [])
 
@@ -124,6 +275,11 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
   const saveStep = React.useCallback(
     async (payload: FirstRunStepUpdateRequest) => {
       const nextState = await tldwClient.updateFirstRunState(payload)
+      rememberInitialSetupSnapshot({
+        nextState,
+        firstError: null,
+        stateLoaded: true
+      })
       setState(nextState)
       return nextState
     },
@@ -132,12 +288,19 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
 
   const skip = React.useCallback(async (payload: FirstRunSkipRequest = {}) => {
     const nextState = await tldwClient.skipFirstRun(payload)
+    rememberInitialSetupSnapshot({
+      nextState,
+      firstError: null,
+      stateLoaded: true
+    })
     setState(nextState)
     return nextState
   }, [])
 
   const saveProvider = React.useCallback(
-    async (payload: SetupProviderSaveRequest): Promise<SetupProviderSaveResponse> => {
+    async (
+      payload: SetupProviderSaveRequest
+    ): Promise<SetupProviderSaveResponse> => {
       const response = await tldwClient.saveSetupProvider(payload)
       await refresh().catch(() => undefined)
       return response
@@ -188,7 +351,9 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
   )
 
   const verifyFirstChat = React.useCallback(
-    async (payload: FirstChatVerifyRequest): Promise<FirstChatVerifyResponse> => {
+    async (
+      payload: FirstChatVerifyRequest
+    ): Promise<FirstChatVerifyResponse> => {
       const response = await tldwClient.verifyFirstRunChat(payload)
       await refresh().catch(() => undefined)
       return response

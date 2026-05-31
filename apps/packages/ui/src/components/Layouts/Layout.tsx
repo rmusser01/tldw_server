@@ -642,10 +642,27 @@ function NestedLayoutContent({
   }, [location.pathname, props.hideHeader, props.hideSidebar])
 
   React.useEffect(() => {
-    const setOverrides = shell.setOverrides || globalShell?.setOverrides
-    if (!setOverrides || !requestedOverrides) return
-    setOverrides(requestedOverrides)
-    return () => setOverrides?.(null)
+    if (!requestedOverrides) return
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    const applyOverrides = () => {
+      const setOverrides = shell.setOverrides || globalShell?.setOverrides
+      if (!setOverrides) return false
+      setOverrides(requestedOverrides)
+      return true
+    }
+
+    if (!applyOverrides()) {
+      timeoutId = setTimeout(() => {
+        applyOverrides()
+      }, 0)
+    }
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId)
+      const setOverrides = shell.setOverrides || globalShell?.setOverrides
+      setOverrides?.(null)
+    }
   }, [globalShell?.setOverrides, requestedOverrides, shell.setOverrides])
 
   return (

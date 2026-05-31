@@ -2473,7 +2473,7 @@ git commit -m "docs: align onboarding around first chat"
 - Modify: `tldw_Server_API/tests/frontend_e2e/test_onboarding_workflow.py` if backend-driven E2E hooks need updating.
 - Backlog: update all child tasks with verification.
 
-- [ ] **Step 1: Add Playwright E2E for setup shell**
+- [x] **Step 1: Add Playwright E2E for setup shell**
 
 Create `apps/tldw-frontend/e2e/workflows/unified-first-run-onboarding.spec.ts`:
 
@@ -2497,17 +2497,17 @@ test("first-run setup hides global navigation until skipped", async ({ page }) =
 
 Adjust selectors to match actual app shell once implemented.
 
-- [ ] **Step 2: Add E2E for completed setup first-source milestone**
+- [x] **Step 2: Add E2E for completed setup first-source milestone**
 
 Add a Playwright test that starts with backend setup state mocked or pre-seeded as `completed` and verifies the normal app shell shows the first-source milestone prompt with an `Add source` action.
 
 Expected: the prompt is visible after completion, does not hide normal navigation, and can be dismissed without changing backend setup state.
 
-- [ ] **Step 3: Add E2E for hosted-key happy path with mock backend**
+- [x] **Step 3: Add E2E for hosted-key happy path with mock backend**
 
 If live provider calls are not available in CI, use a mocked backend route or test mode endpoint so first chat returns a deterministic response. The E2E should still verify the UI waits for a real backend success response shape, not just local validation.
 
-- [ ] **Step 4: Run focused backend tests**
+- [x] **Step 4: Run focused backend tests**
 
 ```bash
 source .venv/bin/activate
@@ -2516,7 +2516,13 @@ python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/t
 
 Expected: PASS.
 
-- [ ] **Step 5: Run focused frontend tests**
+Result: `test_first_run_state.py`, `test_unified_first_run_setup_api.py`, and
+`test_config_providers_endpoints.py` passed: 135 passed, 2 warnings. The broader
+`tldw_Server_API/tests/Setup` suite was also attempted and exposed unrelated
+pre-existing audio health/audio pack/installer failures outside this onboarding
+slice before the run was stopped.
+
+- [x] **Step 5: Run focused frontend tests**
 
 From `apps/packages/ui`:
 
@@ -2526,7 +2532,10 @@ bunx vitest run src/services/tldw/__tests__/setup-onboarding.test.ts src/hooks/_
 
 Expected: PASS.
 
-- [ ] **Step 6: Run Playwright E2E**
+Result: passed: 7 files, 23 tests. Existing warnings observed for Vitest
+localStorage and a missing test i18next instance in the option index test.
+
+- [x] **Step 6: Run Playwright E2E**
 
 From `apps/tldw-frontend`:
 
@@ -2536,7 +2545,9 @@ bunx playwright test e2e/workflows/unified-first-run-onboarding.spec.ts --report
 
 Expected: PASS. If the app requires a running server, document exact server command and URL in Backlog.
 
-- [ ] **Step 7: Run Bandit on touched backend scope**
+Result: passed: 3 Chromium tests.
+
+- [x] **Step 7: Run Bandit on touched backend scope**
 
 ```bash
 source .venv/bin/activate
@@ -2545,7 +2556,10 @@ python -m bandit -r tldw_Server_API/app/core/Setup tldw_Server_API/app/api/v1/en
 
 Expected: no new high/medium findings in touched code. Fix new findings before completion.
 
-- [ ] **Step 8: Run diff whitespace check**
+Result: no findings; report written to
+`/tmp/bandit_unified_first_run_onboarding.json`.
+
+- [x] **Step 8: Run diff whitespace check**
 
 ```bash
 git diff --check
@@ -2553,7 +2567,9 @@ git diff --check
 
 Expected: no whitespace errors.
 
-- [ ] **Step 9: Update Backlog final summaries**
+Result: passed.
+
+- [x] **Step 9: Update Backlog final summaries**
 
 For each child task and parent task, record:
 
@@ -2563,7 +2579,7 @@ For each child task and parent task, record:
 - known skips/blockers;
 - follow-up items.
 
-- [ ] **Step 10: Final commit if verification-only files changed**
+- [x] **Step 10: Final commit if verification-only files changed**
 
 ```bash
 git add apps/tldw-frontend/e2e/workflows/unified-first-run-onboarding.spec.ts apps/tldw-frontend/e2e/smoke/page-inventory.ts tldw_Server_API/tests/frontend_e2e/test_onboarding_workflow.py backlog/tasks
@@ -2574,12 +2590,12 @@ git commit -m "test: verify unified first-run onboarding"
 
 Before opening a PR or declaring implementation complete:
 
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py -v`
+- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py -v` - attempted; unrelated audio setup failures observed in `test_audio_health_helpers.py`, `test_audio_pack_service.py`, and installer tests.
 - [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Docs tldw_Server_API/tests/Utils/test_makefile_onboarding_profiles.py tldw_Server_API/tests/Utils/test_makefile_quickstart_default.py -v`
-- [ ] `cd apps/packages/ui && bunx vitest run src/services/tldw/__tests__/setup-onboarding.test.ts src/hooks/__tests__/useSetupOnboarding.test.tsx src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx src/components/Option/Onboarding/__tests__/FirstSourceMilestonePrompt.test.tsx src/routes/__tests__/option-index.unified-setup.test.tsx`
-- [ ] `cd apps/tldw-frontend && bunx playwright test e2e/workflows/unified-first-run-onboarding.spec.ts --reporter=line`
-- [ ] `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Setup tldw_Server_API/app/api/v1/endpoints/setup.py tldw_Server_API/app/api/v1/API_Deps/setup_deps.py -f json -o /tmp/bandit_unified_first_run_onboarding.json`
-- [ ] `git diff --check`
+- [x] `cd apps/packages/ui && bunx vitest run src/services/tldw/__tests__/setup-onboarding.test.ts src/hooks/__tests__/useSetupOnboarding.test.tsx src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx src/components/Option/Onboarding/__tests__/FirstSourceMilestonePrompt.test.tsx src/routes/__tests__/option-index.unified-setup.test.tsx`
+- [x] `cd apps/tldw-frontend && bunx playwright test e2e/workflows/unified-first-run-onboarding.spec.ts --reporter=line`
+- [x] `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Setup tldw_Server_API/app/api/v1/endpoints/setup.py tldw_Server_API/app/api/v1/API_Deps/setup_deps.py -f json -o /tmp/bandit_unified_first_run_onboarding.json`
+- [x] `git diff --check`
 
 ## Implementation Notes
 
