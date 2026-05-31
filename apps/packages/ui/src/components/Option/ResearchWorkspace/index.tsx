@@ -46,6 +46,7 @@ import type {
   WorkspaceSourceStatusListResponse
 } from "@/services/tldw/domains/workspace-api"
 import type {
+  GeneratedArtifact,
   WorkspaceSourceStatus,
   WorkspaceSourceStatusDetails
 } from "@/types/workspace"
@@ -96,6 +97,7 @@ import {
   RESEARCH_WORKSPACE_DEFAULT_TAB,
   readResearchWorkspaceLastMobileTab,
   writeResearchWorkspaceLastMobileTab,
+  type ResearchWorkspaceDeepResearchReturnContext,
   type ResearchWorkspaceTab
 } from "./research-workspace-route-state"
 import {
@@ -112,6 +114,10 @@ import {
   buildResearchWorkspaceServerSourceSignature,
   reconcileResearchWorkspaceServerState
 } from "./workspace-server-reconcile"
+import {
+  DeepResearchBundleImportError,
+  buildDeepResearchBundleArtifactPayload
+} from "./deep-research-bundle-import"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -162,6 +168,21 @@ const WORKSPACE_CONFLICT_FIELD_LABELS: Record<string, string> = {
 }
 const WORKSPACE_CHAT_OFFLOAD_POINTER_KIND = "workspace_chat_session_v1"
 const WORKSPACE_ARTIFACT_OFFLOAD_POINTER_KIND = "workspace_artifact_payload_v1"
+
+type DeepResearchBundleImportState = {
+  contextKey: string
+  status: "importing" | "imported" | "failed"
+  message?: string
+}
+
+const buildDeepResearchBundleImportContextKey = (
+  context: ResearchWorkspaceDeepResearchReturnContext
+): string =>
+  [
+    context.sourceWorkspaceId,
+    context.sourceArtifactId ?? "",
+    context.researchRunId
+  ].join(":")
 
 const collectResearchWorkspaceLegacyLocalStorageKeys = (): string[] => {
   if (typeof window === "undefined") return []
@@ -1239,6 +1260,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     (s) => s.selectedSourceFolderIds
   )
   const generatedArtifacts = useWorkspaceStore((s) => s.generatedArtifacts)
+  const addArtifact = useWorkspaceStore((s) => s.addArtifact)
   const leftPaneCollapsed = useWorkspaceStore((s) => s.leftPaneCollapsed)
   const rightPaneCollapsed = useWorkspaceStore((s) => s.rightPaneCollapsed)
   const setLeftPaneCollapsed = useWorkspaceStore((s) => s.setLeftPaneCollapsed)
@@ -1266,6 +1288,15 @@ const ResearchWorkspaceBody: React.FC = () => {
   const workspaceStatusRequestSeqRef = React.useRef(0)
   const workspaceStatusInFlightRef = React.useRef(false)
   const workspaceServerReconcileSignatureRef = React.useRef<string | null>(null)
+  const [deepResearchBundleImportState, setDeepResearchBundleImportState] =
+    React.useState<DeepResearchBundleImportState | null>(null)
+  const activeDeepResearchReturnKey = activeDeepResearchReturnContext
+    ? buildDeepResearchBundleImportContextKey(activeDeepResearchReturnContext)
+    : null
+  const activeDeepResearchBundleImportState =
+    deepResearchBundleImportState?.contextKey === activeDeepResearchReturnKey
+      ? deepResearchBundleImportState
+      : null
   const workspaceProjectedSourceStatusByMediaIdRef = React.useRef<{
     workspaceId: string | null
     fallbackReady: boolean
@@ -2227,6 +2258,63 @@ const ResearchWorkspaceBody: React.FC = () => {
     focusWorkspacePane("studio")
   }, [activeDeepResearchReturnContext, focusWorkspacePane])
 
+  const handleImportDeepResearchBundle = React.useCallback(async () => {
+    if (!activeDeepResearchReturnContext || !activeDeepResearchReturnKey) return
+
+    setDeepResearchBundleImportState({
+      contextKey: activeDeepResearchReturnKey,
+      status: "importing"
+    })
+
+    try {
+      const bundle = await tldwClient.getResearchBundle(
+        activeDeepResearchReturnContext.researchRunId
+      )
+      const sourceArtifact = activeDeepResearchReturnContext.sourceArtifactId
+        ? (generatedArtifacts.find(
+            (artifact: GeneratedArtifact) =>
+              artifact.id === activeDeepResearchReturnContext.sourceArtifactId
+          ) ?? null)
+        : null
+      const artifactPayload = buildDeepResearchBundleArtifactPayload({
+        bundle,
+        returnContext: activeDeepResearchReturnContext,
+        sourceArtifact
+      })
+
+      addArtifact(artifactPayload)
+      setDeepResearchBundleImportState({
+        contextKey: activeDeepResearchReturnKey,
+        status: "imported",
+        message: t(
+          "playground:studio.deepResearchBundleImported",
+          "Bundle imported"
+        )
+      })
+      focusWorkspacePane("studio")
+    } catch (error) {
+      const message =
+        error instanceof DeepResearchBundleImportError || error instanceof Error
+          ? error.message
+          : t(
+              "playground:studio.deepResearchBundleImportFailed",
+              "Deep Research bundle could not be imported."
+            )
+      setDeepResearchBundleImportState({
+        contextKey: activeDeepResearchReturnKey,
+        status: "failed",
+        message
+      })
+    }
+  }, [
+    activeDeepResearchReturnContext,
+    activeDeepResearchReturnKey,
+    addArtifact,
+    focusWorkspacePane,
+    generatedArtifacts,
+    t
+  ])
+
   const handleOpenSplitWorkspace = React.useCallback(() => {
     if (readyEffectiveSelectedSourceEntries.length === 0) {
       focusWorkspacePane("sources")
@@ -3163,14 +3251,58 @@ const ResearchWorkspaceBody: React.FC = () => {
         <span className="font-mono text-xs">
           {activeDeepResearchReturnContext.researchRunId}
         </span>
+        {activeDeepResearchBundleImportState ? (
+          <>
+            <span className="mx-1 text-text-subtle">|</span>
+            <span
+              className={
+                activeDeepResearchBundleImportState.status === "failed"
+                  ? "text-danger"
+                  : "text-text-muted"
+              }
+            >
+              {activeDeepResearchBundleImportState.status === "failed"
+                ? t(
+                    "playground:studio.deepResearchBundleImportFailedInline",
+                    "Bundle could not be imported"
+                  )
+                : activeDeepResearchBundleImportState.message ||
+                  t(
+                    "playground:studio.deepResearchBundleImporting",
+                    "Importing bundle"
+                  )}
+              {activeDeepResearchBundleImportState.status === "failed" &&
+              activeDeepResearchBundleImportState.message
+                ? `: ${activeDeepResearchBundleImportState.message}`
+                : ""}
+            </span>
+          </>
+        ) : null}
       </span>
-      <button
-        type="button"
-        className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-surface2"
-        onClick={() => focusWorkspacePane("studio")}
-      >
-        {t("playground:studio.openStudio", "Open Studio")}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={
+            activeDeepResearchBundleImportState?.status === "importing" ||
+            activeDeepResearchBundleImportState?.status === "imported"
+          }
+          onClick={handleImportDeepResearchBundle}
+        >
+          {activeDeepResearchBundleImportState?.status === "importing"
+            ? t("playground:studio.importingBundle", "Importing")
+            : activeDeepResearchBundleImportState?.status === "imported"
+              ? t("playground:studio.bundleImported", "Imported")
+              : t("playground:studio.importBundle", "Import bundle")}
+        </button>
+        <button
+          type="button"
+          className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-surface2"
+          onClick={() => focusWorkspacePane("studio")}
+        >
+          {t("playground:studio.openStudio", "Open Studio")}
+        </button>
+      </div>
     </div>
   ) : null
 

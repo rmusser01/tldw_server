@@ -9,6 +9,7 @@ const {
   mockWorkspaceStorageGetItem,
   mockWorkspaceStorageSetItem,
   mockGetResearchWorkspaceCapabilities,
+  mockGetResearchBundle,
   mockChatPaneProps,
   mockStudioPaneProps
 } = vi.hoisted(() => ({
@@ -30,6 +31,7 @@ const {
       }
     }
   })),
+  mockGetResearchBundle: vi.fn(),
   mockChatPaneProps: [] as any[],
   mockStudioPaneProps: [] as any[]
 }))
@@ -55,6 +57,7 @@ const testState = {
   captureToCurrentNote: vi.fn(),
   clearCurrentNote: vi.fn(),
   loadNote: vi.fn(),
+  addArtifact: vi.fn(),
   selectedSourceIds: [] as string[],
   generatedArtifacts: [] as Array<{ id: string }>,
   setLeftPaneCollapsed: vi.fn(),
@@ -124,6 +127,7 @@ vi.mock("@/store/workspace", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getMediaDetails: vi.fn().mockResolvedValue({}),
+    getResearchBundle: mockGetResearchBundle,
     getResearchWorkspaceCapabilities: mockGetResearchWorkspaceCapabilities
   }
 }))
@@ -233,7 +237,9 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     testState.createNewWorkspace = vi.fn()
     testState.clearCurrentNote = vi.fn()
     testState.loadNote = vi.fn()
+    testState.addArtifact = vi.fn()
     mockGetResearchWorkspaceCapabilities.mockClear()
+    mockGetResearchBundle.mockReset()
     mockChatPaneProps.length = 0
     mockStudioPaneProps.length = 0
     window.localStorage.removeItem(RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY)
@@ -470,6 +476,105 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     expect(
       screen.getByRole("complementary", { name: "Studio panel" })
     ).toBeInTheDocument()
+  })
+
+  it("imports a completed Deep Research bundle from the return handoff", async () => {
+    testState.generatedArtifacts = [
+      {
+        id: "gap-artifact",
+        type: "data_table",
+        title: "Corpus Gap Finder",
+        status: "completed",
+        templateId: "corpus_gap_finder",
+        sourceCoverage: {
+          selectedSourceIds: ["source-a", "source-b"],
+          usableSources: [
+            { sourceId: "source-a", mediaId: 101, title: "Paper A" },
+            { sourceId: "source-b", mediaId: 102, title: "Paper B" }
+          ],
+          skippedSources: [],
+          truncatedSources: [],
+          minimumUsableSourcesMet: true
+        },
+        sourceLineage: [
+          { sourceId: "source-a", mediaId: 101, title: "Paper A" },
+          { sourceId: "source-b", mediaId: 102, title: "Paper B" }
+        ],
+        createdAt: new Date()
+      }
+    ] as any[]
+    mockGetResearchBundle.mockResolvedValueOnce({
+      question: "Which intervention gaps remain?",
+      report_markdown: "# Deep Report\n\nThe evidence supports follow-up work.",
+      claims: [
+        {
+          text: "Claim one",
+          citations: [{ source_id: "src_1", title: "Paper A" }]
+        }
+      ],
+      source_inventory: [{ source_id: "src_1", title: "Paper A" }],
+      verification_summary: {
+        supported_claim_count: 1,
+        unsupported_claim_count: 0
+      },
+      source_trust: [{ source_id: "src_1", snapshot_policy: "full_artifact" }]
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?source_workspace_id=workspace-1&source_artifact_id=gap-artifact&source_artifact_template=corpus_gap_finder&source_artifact_title=Corpus%20Gap%20Finder&research_run_id=research-run-7"
+    )
+
+    render(<ResearchWorkspace />)
+
+    fireEvent.click(screen.getByRole("button", { name: /import bundle/i }))
+
+    await waitFor(() => {
+      expect(mockGetResearchBundle).toHaveBeenCalledWith("research-run-7")
+    })
+    expect(testState.addArtifact).toHaveBeenCalledTimes(1)
+    const artifactPayload = testState.addArtifact.mock.calls[0]?.[0]
+    expect(artifactPayload).toMatchObject({
+      type: "report",
+      status: "completed",
+      title: "Deep Research: Corpus Gap Finder",
+      producerMetadata: {
+        producerType: "deep_research_bundle_import",
+        runId: "research-run-7",
+        templateId: "corpus_gap_finder"
+      }
+    })
+    expect(artifactPayload.data.deepResearch.runId).toBe("research-run-7")
+    expect(artifactPayload.sourceCoverage.selectedSourceIds).toEqual([
+      "source-a",
+      "source-b"
+    ])
+    expect(
+      screen.getByTestId("workspace-deep-research-return-handoff")
+    ).toHaveTextContent("Bundle imported")
+  })
+
+  it("shows a bundle import error without adding an artifact", async () => {
+    mockGetResearchBundle.mockResolvedValueOnce({
+      question: "Which intervention gaps remain?"
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?source_workspace_id=workspace-1&source_artifact_id=gap-artifact&source_artifact_template=corpus_gap_finder&source_artifact_title=Corpus%20Gap%20Finder&research_run_id=research-run-7"
+    )
+
+    render(<ResearchWorkspace />)
+
+    fireEvent.click(screen.getByRole("button", { name: /import bundle/i }))
+
+    await waitFor(() => {
+      expect(mockGetResearchBundle).toHaveBeenCalledWith("research-run-7")
+    })
+    expect(testState.addArtifact).not.toHaveBeenCalled()
+    expect(
+      screen.getByTestId("workspace-deep-research-return-handoff")
+    ).toHaveTextContent("could not be imported")
   })
 
   it("surfaces matching Deep Research return context from HashRouter search params", async () => {
