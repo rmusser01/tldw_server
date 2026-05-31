@@ -6,6 +6,10 @@ labels:
 - mcp-unified
 - implementation
 - stage-4l
+modified_files:
+- mcp_unified/interfaces/storage.py
+- mcp_unified/gateway/profiles.py
+- mcp_unified/storage/sqlite.py
 ---
 
 ## Description

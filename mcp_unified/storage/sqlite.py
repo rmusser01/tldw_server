@@ -107,6 +107,19 @@ class SQLiteMCPStore:
         """Delete a profile by id and return whether it existed."""
         return await self._run_db(self._delete_profile_sync, profile_id)
 
+    async def delete_profile_if_unassigned(
+        self,
+        profile_id: str,
+        *,
+        effective_default_profile_id: str | None,
+    ) -> str:
+        """Atomically delete a profile only when it is not default or assigned."""
+        return await self._run_db(
+            self._delete_profile_if_unassigned_sync,
+            profile_id,
+            effective_default_profile_id=effective_default_profile_id,
+        )
+
     async def get_assignment(self, assignment_id: str) -> ProfileAssignment | None:
         """Return a profile assignment by id."""
         return await self._run_db(self._get_assignment_sync, assignment_id)
@@ -271,6 +284,37 @@ class SQLiteMCPStore:
 
     def _delete_profile_sync(self, profile_id: str) -> bool:
         return self._delete_by_id("mcp_profiles", profile_id)
+
+    def _delete_profile_if_unassigned_sync(
+        self,
+        profile_id: str,
+        *,
+        effective_default_profile_id: str | None,
+    ) -> str:
+        if profile_id == effective_default_profile_id:
+            return "is_default"
+
+        profiles_table = self._table("mcp_profiles")
+        assignments_table = self._table("mcp_profile_assignments")
+        with self._engine.begin() as connection:
+            profile_row = connection.execute(
+                select(profiles_table.c.id).where(profiles_table.c.id == profile_id)
+            ).mappings().first()
+            if profile_row is None:
+                return "not_found"
+
+            assignment_row = connection.execute(
+                select(assignments_table.c.id)
+                .where(assignments_table.c.profile_id == profile_id)
+                .limit(1)
+            ).mappings().first()
+            if assignment_row is not None:
+                return "has_assignments"
+
+            result = connection.execute(
+                delete(profiles_table).where(profiles_table.c.id == profile_id)
+            )
+        return "deleted" if result.rowcount and result.rowcount > 0 else "not_found"
 
     def _get_assignment_sync(self, assignment_id: str) -> ProfileAssignment | None:
         return self._get_model(

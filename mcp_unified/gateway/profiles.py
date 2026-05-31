@@ -27,6 +27,22 @@ from mcp_unified.profiles.store import (
 )
 from mcp_unified.storage.models import AuditEvent, ProfileAssignment
 
+_PROFILE_PATCH_FIELDS = frozenset(
+    {"name", "description", "enabled", "metadata", "policy_document"}
+)
+_POLICY_PATCH_FIELDS = frozenset(
+    {
+        "allowed_tools",
+        "denied_tools",
+        "capabilities",
+        "denied_capabilities",
+        "tool_patterns",
+        "module_patterns",
+        "risk_classes",
+        "resource_constraints",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class GatewayProfileStoreMetadata:
@@ -202,6 +218,260 @@ class GatewayProfileManager:
             "profile": self._dump_profile(stored),
             "store": self.store_metadata.to_payload(),
         }
+
+    async def create_profile(
+        self,
+        profile_document: MCPProfile | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Create a user-editable gateway profile."""
+        try:
+            profile = (
+                profile_document.model_copy(deep=True)
+                if isinstance(profile_document, MCPProfile)
+                else MCPProfile.model_validate(profile_document)
+            )
+        except Exception as exc:
+            raise self._error(
+                "Invalid profile request",
+                reason_code="invalid_profile_request",
+            ) from exc
+
+        if await self._get_profile(profile.id) is not None:
+            await self._audit_expected_failure(
+                "profile.create_failed",
+                reason_code="profile_already_exists",
+                profile_id=profile.id,
+                target_type="profile",
+                target_id=profile.id,
+            )
+            raise self._error(
+                f"Profile already exists: {profile.id}",
+                reason_code="profile_already_exists",
+                profile_id=profile.id,
+            )
+
+        effective_default_id = await self._effective_default_profile_id()
+        if not profile.enabled and profile.id == effective_default_id:
+            await self._audit_expected_failure(
+                "profile.create_failed",
+                reason_code="profile_is_default",
+                profile_id=profile.id,
+                target_type="profile",
+                target_id=profile.id,
+            )
+            raise self._error(
+                f"Profile is the effective default: {profile.id}",
+                reason_code="profile_is_default",
+                profile_id=profile.id,
+            )
+
+        now = datetime.now(timezone.utc)
+        profile = profile.model_copy(update={"updated_at": now}, deep=True)
+        try:
+            stored = await self.profile_store.upsert_profile(profile)
+        except ProfileStoreUnavailableError as exc:
+            raise self._error(
+                "Profile store unavailable",
+                reason_code="profile_store_unavailable",
+                profile_id=profile.id,
+            ) from exc
+
+        await self._append_audit_event(
+            "profile.created",
+            profile_id=stored.id,
+            target_type="profile",
+            target_id=stored.id,
+            payload={"profile_id": stored.id},
+        )
+        profile_payload = self._dump_profile(stored)
+        profile_payload["created_at"] = stored.created_at.isoformat()
+        profile_payload["updated_at"] = stored.updated_at.isoformat()
+        return {
+            "ok": True,
+            "profile": profile_payload,
+            "store": self.store_metadata.to_payload(),
+        }
+
+    async def patch_profile(
+        self,
+        profile_id: str,
+        patch_document: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Apply a limited semantic patch to a stored gateway profile."""
+        normalized_profile_id = self._require_text(profile_id, field="profile_id")
+        try:
+            patch = self._validate_patch_document(patch_document)
+        except GatewayProfileManagementError:
+            await self._audit_expected_failure(
+                "profile.patch_failed",
+                reason_code="invalid_profile_patch",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
+            raise
+
+        profile = await self._get_profile(normalized_profile_id)
+        if profile is None:
+            await self._audit_expected_failure(
+                "profile.patch_failed",
+                reason_code="profile_not_found",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
+            raise self._error(
+                f"Profile not found: {normalized_profile_id}",
+                reason_code="profile_not_found",
+                profile_id=normalized_profile_id,
+            )
+
+        if (
+            patch.get("enabled") is False
+            and normalized_profile_id == await self._effective_default_profile_id()
+        ):
+            await self._audit_expected_failure(
+                "profile.patch_failed",
+                reason_code="profile_is_default",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
+            raise self._error(
+                f"Profile is the effective default: {normalized_profile_id}",
+                reason_code="profile_is_default",
+                profile_id=normalized_profile_id,
+            )
+
+        try:
+            updated, changed_fields = self._apply_profile_patch(profile, patch)
+        except GatewayProfileManagementError:
+            await self._audit_expected_failure(
+                "profile.patch_failed",
+                reason_code="invalid_profile_patch",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
+            raise
+
+        updated = updated.model_copy(
+            update={"updated_at": datetime.now(timezone.utc)},
+            deep=True,
+        )
+        try:
+            stored = await self.profile_store.upsert_profile(updated)
+        except ProfileStoreUnavailableError as exc:
+            raise self._error(
+                "Profile store unavailable",
+                reason_code="profile_store_unavailable",
+                profile_id=normalized_profile_id,
+            ) from exc
+
+        await self._append_audit_event(
+            "profile.patched",
+            profile_id=stored.id,
+            target_type="profile",
+            target_id=stored.id,
+            payload={"profile_id": stored.id, "changed_fields": list(changed_fields)},
+        )
+        profile_payload = self._dump_profile(stored)
+        profile_payload["created_at"] = stored.created_at.isoformat()
+        profile_payload["updated_at"] = stored.updated_at.isoformat()
+        return {
+            "ok": True,
+            "profile": profile_payload,
+            "store": self.store_metadata.to_payload(),
+        }
+
+    async def delete_profile(self, profile_id: str) -> dict[str, Any]:
+        """Delete an unassigned non-default profile."""
+        normalized_profile_id = self._require_text(profile_id, field="profile_id")
+        effective_default_id = await self._effective_default_profile_id()
+        if normalized_profile_id == effective_default_id:
+            await self._audit_expected_failure(
+                "profile.delete_failed",
+                reason_code="profile_is_default",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
+            raise self._error(
+                f"Profile is the effective default: {normalized_profile_id}",
+                reason_code="profile_is_default",
+                profile_id=normalized_profile_id,
+            )
+
+        guarded_delete = getattr(
+            self.profile_store,
+            "delete_profile_if_unassigned",
+            None,
+        )
+        if callable(guarded_delete):
+            result = await guarded_delete(
+                normalized_profile_id,
+                effective_default_profile_id=effective_default_id,
+            )
+        elif not self.store_metadata.persistent:
+            result = await self._manager_guarded_delete(normalized_profile_id)
+        else:
+            raise self._error(
+                "Profile store unavailable",
+                reason_code="profile_store_unavailable",
+            )
+
+        if result == "deleted":
+            await self._append_audit_event(
+                "profile.deleted",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+                payload={"profile_id": normalized_profile_id},
+            )
+            return {
+                "ok": True,
+                "profile_id": normalized_profile_id,
+                "store": self.store_metadata.to_payload(),
+            }
+        if result == "not_found":
+            await self._audit_expected_failure(
+                "profile.delete_failed",
+                reason_code="profile_not_found",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
+            raise self._error(
+                f"Profile not found: {normalized_profile_id}",
+                reason_code="profile_not_found",
+                profile_id=normalized_profile_id,
+            )
+        if result == "has_assignments":
+            await self._audit_expected_failure(
+                "profile.delete_failed",
+                reason_code="profile_has_assignments",
+                profile_id=normalized_profile_id,
+                target_type="profile",
+                target_id=normalized_profile_id,
+            )
+            raise self._error(
+                f"Profile has assignments: {normalized_profile_id}",
+                reason_code="profile_has_assignments",
+                profile_id=normalized_profile_id,
+            )
+
+        await self._audit_expected_failure(
+            "profile.delete_failed",
+            reason_code="profile_is_default",
+            profile_id=normalized_profile_id,
+            target_type="profile",
+            target_id=normalized_profile_id,
+        )
+        raise self._error(
+            f"Profile is the effective default: {normalized_profile_id}",
+            reason_code="profile_is_default",
+            profile_id=normalized_profile_id,
+        )
 
     async def get_default_profile(self) -> dict[str, Any]:
         """Return the active gateway default profile."""
@@ -430,6 +700,107 @@ class GatewayProfileManager:
                 "Profile assignment store unavailable",
                 reason_code="assignment_store_unavailable",
             ) from exc
+
+    async def _effective_default_profile_id(self) -> str | None:
+        assignment = await self._load_default_assignment()
+        if assignment is not None:
+            return assignment.profile_id
+        return self.fallback_default_profile_id
+
+    async def _manager_guarded_delete(self, profile_id: str) -> str:
+        profile = await self._get_profile(profile_id)
+        if profile is None:
+            return "not_found"
+        try:
+            assignments = await self.assignment_store.list_assignments(
+                profile_id=profile_id,
+            )
+        except ProfileAssignmentStoreUnavailableError as exc:
+            raise self._error(
+                "Profile assignment store unavailable",
+                reason_code="assignment_store_unavailable",
+            ) from exc
+        if assignments:
+            return "has_assignments"
+        try:
+            deleted = await self.profile_store.delete_profile(profile_id)
+        except ProfileStoreUnavailableError as exc:
+            raise self._error(
+                "Profile store unavailable",
+                reason_code="profile_store_unavailable",
+                profile_id=profile_id,
+            ) from exc
+        return "deleted" if deleted else "not_found"
+
+    def _validate_patch_document(self, patch: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(patch, Mapping):
+            raise self._error(
+                "Invalid profile patch",
+                reason_code="invalid_profile_patch",
+            )
+        normalized = dict(patch)
+        if not normalized:
+            raise self._error(
+                "Invalid profile patch",
+                reason_code="invalid_profile_patch",
+            )
+        unsupported_fields = set(normalized) - _PROFILE_PATCH_FIELDS
+        if unsupported_fields:
+            raise self._error(
+                "Invalid profile patch",
+                reason_code="invalid_profile_patch",
+            )
+        policy_patch = normalized.get("policy_document")
+        if "policy_document" in normalized:
+            if not isinstance(policy_patch, Mapping):
+                raise self._error(
+                    "Invalid profile patch",
+                    reason_code="invalid_profile_patch",
+                )
+            policy_patch = dict(policy_patch)
+            unsupported_policy_fields = set(policy_patch) - _POLICY_PATCH_FIELDS
+            if unsupported_policy_fields:
+                raise self._error(
+                    "Invalid profile patch",
+                    reason_code="invalid_profile_patch",
+                )
+            if not policy_patch and set(normalized) == {"policy_document"}:
+                raise self._error(
+                    "Invalid profile patch",
+                    reason_code="invalid_profile_patch",
+                )
+            normalized["policy_document"] = policy_patch
+        return normalized
+
+    def _apply_profile_patch(
+        self,
+        profile: MCPProfile,
+        patch: Mapping[str, Any],
+    ) -> tuple[MCPProfile, tuple[str, ...]]:
+        before = profile.model_dump(mode="json", exclude={"updated_at"})
+        profile_payload = profile.model_dump(mode="python")
+        for field, value in patch.items():
+            if field == "policy_document":
+                policy_payload = profile.policy_document.model_dump(mode="python")
+                policy_payload.update(dict(value))
+                profile_payload["policy_document"] = policy_payload
+            else:
+                profile_payload[field] = value
+        try:
+            updated = MCPProfile.model_validate(profile_payload)
+        except Exception as exc:
+            raise self._error(
+                "Invalid profile patch",
+                reason_code="invalid_profile_patch",
+            ) from exc
+
+        after = updated.model_dump(mode="json", exclude={"updated_at"})
+        if after == before:
+            raise self._error(
+                "Invalid profile patch",
+                reason_code="invalid_profile_patch",
+            )
+        return updated, tuple(sorted(patch))
 
     @staticmethod
     def _dump_profile(profile: MCPProfile) -> dict[str, Any]:

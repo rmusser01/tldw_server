@@ -34,6 +34,19 @@ class ProfileStore(Protocol):
     async def delete_profile(self, profile_id: str) -> bool: ...
 
 
+class GuardedProfileDeleteStore(Protocol):
+    """Store capability for atomically deleting unassigned non-default profiles."""
+
+    async def delete_profile_if_unassigned(
+        self,
+        profile_id: str,
+        *,
+        effective_default_profile_id: str | None,
+    ) -> str:
+        """Return deleted, not_found, is_default, or has_assignments."""
+        raise NotImplementedError
+
+
 class ProfileAssignmentStore(Protocol):
     """Store for principal, workspace, and default-profile assignments."""
 
