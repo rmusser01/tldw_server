@@ -251,6 +251,71 @@ def test_completed_setup_rejects_provider_save_through_first_run_write_guard(
     assert response.json()["detail"] == "setup_already_completed"
 
 
+def test_first_run_provider_save_refreshes_runtime_config_cache(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    writes: list[dict[str, dict[str, str]]] = []
+    refresh_calls: list[bool] = []
+
+    def _capture_update_config(updates, *, create_backup=True):  # noqa: ARG001
+        writes.append(updates)
+        return None
+
+    monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", _capture_update_config)
+    monkeypatch.setattr(
+        setup_endpoint,
+        "clear_config_cache",
+        lambda: refresh_calls.append(True),
+        raising=False,
+    )
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers",
+        json={"provider_key": "openai", "api_key": "sk-abcdefghijklmnopqrstuvwxyz"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "saved"
+    assert body["requires_restart"] is False
+    assert writes == [{"API": {"openai_api_key": "sk-abcdefghijklmnopqrstuvwxyz"}}]
+    assert refresh_calls == [True]
+
+
+def test_first_run_provider_save_requires_restart_when_cache_refresh_fails(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", lambda updates: None)
+
+    def _raise_refresh_failure():
+        raise RuntimeError("raw refresh failure")
+
+    monkeypatch.setattr(setup_endpoint, "clear_config_cache", _raise_refresh_failure, raising=False)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers",
+        json={"provider_key": "openai", "api_key": "sk-abcdefghijklmnopqrstuvwxyz"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "saved"
+    assert body["requires_restart"] is True
+    assert body["failure_category"] == "config_cache_refresh_failed"
+    assert "raw refresh failure" not in str(body)
+
+
 def test_first_run_provider_validate_returns_typed_response_without_token_echo(
     monkeypatch,
     tmp_path,
@@ -553,6 +618,134 @@ def test_completed_setup_rejects_first_run_writes(monkeypatch, tmp_path, setup_c
 
     assert response.status_code == 409
     assert response.json()["detail"] == "setup_already_completed"
+
+
+@pytest.mark.parametrize(
+    ("state_factory", "expected_detail"),
+    [
+        ("completed", "setup_already_completed"),
+        ("skipped", "state_skipped"),
+        ("blocked", "state_blocked"),
+    ],
+)
+def test_setup_config_rejects_terminal_first_run_state_through_write_guard(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+    state_factory,
+    expected_detail,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    if state_factory == "completed":
+        for step in REQUIRED_FIRST_RUN_STEPS:
+            store.update_step(step, {"acknowledged": True})
+        store.record_first_chat_success(
+            provider="openai",
+            model="gpt-4.1-mini",
+            response_id="chatcmpl-test",
+        )
+        store.mark_completed()
+    elif state_factory == "skipped":
+        store.mark_skipped(reason="user_skip")
+    else:
+        state_path.write_text("{", encoding="utf-8")
+        assert store.load().status == FirstRunStatus.BLOCKED
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "update_config",
+        lambda *_args, **_kwargs: pytest.fail("/setup/config bypassed first-run write guard"),
+    )
+
+    response = setup_client.post(
+        "/api/v1/setup/config",
+        json={"updates": {"API": {"default_api": "openai"}}},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == expected_detail
+
+
+def test_setup_config_refreshes_runtime_config_cache_after_write(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    refresh_calls: list[bool] = []
+
+    monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", lambda updates: tmp_path / "config.bak")
+    monkeypatch.setattr(
+        setup_endpoint,
+        "clear_config_cache",
+        lambda: refresh_calls.append(True),
+        raising=False,
+    )
+
+    response = setup_client.post(
+        "/api/v1/setup/config",
+        json={"updates": {"API": {"default_api": "openai"}}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["requires_restart"] is True
+    assert refresh_calls == [True]
+
+
+def test_setup_complete_rejects_without_first_chat_and_does_not_mark_legacy_complete(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    completion_calls: list[bool] = []
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "mark_setup_completed",
+        lambda completed: completion_calls.append(completed),
+    )
+
+    response = setup_client.post("/api/v1/setup/complete", json={})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "first_chat_required"
+    assert completion_calls == []
+
+
+def test_setup_complete_marks_legacy_complete_only_after_first_run_completion(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    for step in REQUIRED_FIRST_RUN_STEPS:
+        store.update_step(step, {"acknowledged": True})
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    completion_calls: list[bool] = []
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "mark_setup_completed",
+        lambda completed: completion_calls.append(completed),
+    )
+
+    response = setup_client.post("/api/v1/setup/complete", json={})
+
+    assert response.status_code == 200
+    assert FirstRunStateStore(state_path).load().status == FirstRunStatus.COMPLETED
+    assert completion_calls == [True]
 
 
 def test_legacy_completed_setup_rejects_first_run_writes_without_state_file(

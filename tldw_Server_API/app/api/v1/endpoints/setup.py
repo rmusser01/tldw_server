@@ -67,6 +67,7 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.config import clear_config_cache
 from tldw_Server_API.app.core.Setup import (
     audio_pack_service,
     audio_profile_service,
@@ -546,6 +547,19 @@ def _provider_config_updates(payload: SetupProviderSaveRequest) -> dict[str, dic
     return updates
 
 
+def _refresh_runtime_config_cache(context: str) -> bool:
+    try:
+        clear_config_cache()
+    except Exception as exc:  # noqa: BLE001 - public response must stay sanitized
+        logger.warning(
+            "Runtime config cache refresh failed after {}: {}",
+            context,
+            type(exc).__name__,
+        )
+        return False
+    return True
+
+
 def _sanitize_setup_payload(value: Any) -> Any:
     if isinstance(value, str):
         return (
@@ -762,6 +776,19 @@ async def save_first_run_provider(
             make_default=payload.make_default,
             failure_category="config_write_failed",
             message="Provider settings could not be saved.",
+        )
+
+    if not _refresh_runtime_config_cache(f"provider setup save for {provider_key}"):
+        return SetupProviderSaveResponse(
+            provider_key=provider_key,
+            status=SetupProviderSaveStatus.SAVED,
+            masked_api_key=mask_secret(payload.api_key) if payload.api_key is not None else None,
+            base_url=payload.base_url,
+            model=payload.model,
+            make_default=payload.make_default,
+            requires_restart=True,
+            failure_category="config_cache_refresh_failed",
+            message="Provider settings were saved, but a restart is required before they are active.",
         )
 
     return SetupProviderSaveResponse(
@@ -1862,21 +1889,12 @@ async def import_audio_pack(
 @router.post("/config", openapi_extra={"security": []}, response_model=SetupConfigUpdateResponse)
 async def update_setup_config(
     payload: ConfigUpdates,
-    _guard: None = Depends(require_local_setup_access),
+    _guard: None = Depends(_require_first_run_write_access),
 ) -> SetupConfigUpdateResponse:
     """Persist configuration updates coming from the setup UI."""
-    status_snapshot = setup_manager.get_status_snapshot()
-    if not status_snapshot["enabled"]:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Setup flow not enabled in config.txt")
-
-    if not status_snapshot["needs_setup"]:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            detail="Setup already completed. Toggle enable_first_time_setup to make changes here.",
-        )
-
     try:
         backup_path = setup_manager.update_config(payload.updates)
+        _refresh_runtime_config_cache("setup config update")
         return {
             "success": True,
             "backup_path": str(backup_path) if backup_path else None,
@@ -1897,17 +1915,16 @@ async def update_setup_config(
 async def mark_setup_complete(
     payload: SetupCompleteRequest,
     background_tasks: BackgroundTasks,
-    _guard: None = Depends(require_local_setup_access),
+    _guard: None = Depends(_require_first_run_write_access),
 ) -> SetupCompleteResponse:
     """Mark the setup workflow as complete and optionally disable future prompts."""
-    status_snapshot = setup_manager.get_status_snapshot()
-    if not status_snapshot["enabled"]:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Setup flow not enabled in config.txt")
-
-    if not status_snapshot["needs_setup"]:
-        raise HTTPException(status.HTTP_409_CONFLICT, detail="Setup already marked as complete")
+    try:
+        _first_run_store().mark_completed()
+    except InvalidFirstRunTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     setup_manager.mark_setup_completed(True)
+    _refresh_runtime_config_cache("setup completion")
 
     plan_requested = False
     if payload.install_plan and not payload.install_plan.is_empty():
@@ -1917,6 +1934,7 @@ async def mark_setup_complete(
 
     if payload.disable_first_time_setup:
         setup_manager.update_config({setup_manager.SETUP_SECTION: {"enable_first_time_setup": False}}, create_backup=False)
+        _refresh_runtime_config_cache("setup disable prompt update")
 
     return {
         "success": True,
