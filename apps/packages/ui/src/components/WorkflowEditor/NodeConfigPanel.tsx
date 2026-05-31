@@ -15,8 +15,7 @@ import {
   Button,
   Tooltip,
   Empty,
-  Divider,
-  Alert
+  Divider
 } from "antd"
 import {
   Settings,
@@ -30,6 +29,7 @@ import type {
 } from "@/types/workflow-editor"
 import type { ConfigFieldSchema } from "./step-registry"
 import { useWorkflowEditorStore } from "@/store/workflow-editor"
+import { Alert } from "@/components/ui/primitives"
 import { getStepMetadata } from "./step-registry"
 import { schemaHasProperties, schemaToConfigFields } from "./schema-utils"
 import { useWorkflowDynamicOptions } from "./dynamic-options"
@@ -476,9 +476,8 @@ export const NodeConfigPanel = ({ className = "" }: NodeConfigPanelProps) => {
               />
               {rawConfigError && (
                 <Alert
-                  type="error"
+                  variant="error"
                   title={rawConfigError}
-                  showIcon
                   className="mt-2"
                 />
               )}
