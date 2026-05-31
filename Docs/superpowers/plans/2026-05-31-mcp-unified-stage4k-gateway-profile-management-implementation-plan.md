@@ -897,9 +897,9 @@ git commit -m "feat: expose gateway profile management API"
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py` only if a gap is found in existing SQLite assignment/audit coverage.
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py` only if boundary tests need new explicit file coverage.
 - Modify: `Docs/superpowers/plans/2026-05-31-mcp-unified-stage4k-gateway-profile-management-implementation-plan.md`
-- Modify: `backlog/tasks/task-570 - Plan-MCP-Unified-Stage-4K-gateway-profile-management-implementation.md`
+- Modify: `backlog/tasks/task-571 - Implement-MCP-Unified-Stage-4K-gateway-profile-management.md`
 
-- [ ] **Step 1: Run focused SQLite/storage tests**
+- [x] **Step 1: Run focused SQLite/storage tests**
 
 Run:
 
@@ -908,9 +908,9 @@ source .venv/bin/activate
 python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_storage_contracts.py -q
 ```
 
-Expected: pass. If assignment/audit persistence behavior needed by this slice is untested, add the smallest missing assertions to the existing SQLite/storage test file.
+Result: `26 passed, 3 warnings`. No SQLite/storage coverage gap was found.
 
-- [ ] **Step 2: Run package boundary tests**
+- [x] **Step 2: Run package boundary tests**
 
 Run:
 
@@ -919,9 +919,9 @@ source .venv/bin/activate
 python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -q
 ```
 
-Expected: pass. If new `mcp_unified.gateway.profiles` or `mcp_unified.profiles.defaults` files are not covered by an existing no-host-import scan, extend the scan.
+Result: `43 passed, 3 warnings`. Existing package boundary scans cover the new files.
 
-- [ ] **Step 3: Run focused Stage 4K suite**
+- [x] **Step 3: Run focused Stage 4K suite**
 
 Run:
 
@@ -930,9 +930,9 @@ source .venv/bin/activate
 python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_registry_resolver.py -q
 ```
 
-Expected: pass.
+Result: `135 passed, 4 warnings`.
 
-- [ ] **Step 4: Run lint**
+- [x] **Step 4: Run lint**
 
 Run:
 
@@ -941,9 +941,9 @@ source .venv/bin/activate
 python -m ruff check mcp_unified/gateway mcp_unified/profiles tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_registry_resolver.py
 ```
 
-Expected: `All checks passed!`
+Result: `All checks passed!`
 
-- [ ] **Step 5: Run Bandit on touched production package scope**
+- [x] **Step 5: Run Bandit on touched production package scope**
 
 Run:
 
@@ -952,9 +952,9 @@ source .venv/bin/activate
 python -m bandit -r mcp_unified/gateway mcp_unified/profiles -f json -o /tmp/bandit_mcp_stage4k_profile_management.json
 ```
 
-Expected: no new findings in touched code. If existing baseline findings appear, record exact IDs and why they are unrelated.
+Result: `/tmp/bandit_mcp_stage4k_profile_management.json` reported `results: []` and `errors: []`.
 
-- [ ] **Step 6: Run whitespace check**
+- [x] **Step 6: Run whitespace check**
 
 Run:
 
@@ -962,22 +962,22 @@ Run:
 git diff --check
 ```
 
-Expected: no output and exit code `0`.
+Result: no output and exit code `0`.
 
-- [ ] **Step 7: Update plan and Backlog task**
+- [x] **Step 7: Update plan and Backlog task**
 
 Record RED/GREEN results, focused verification outputs, any skips, and final summary in:
 
 - `Docs/superpowers/plans/2026-05-31-mcp-unified-stage4k-gateway-profile-management-implementation-plan.md`
-- `backlog/tasks/task-570 - Plan-MCP-Unified-Stage-4K-gateway-profile-management-implementation.md`
+- `backlog/tasks/task-571 - Implement-MCP-Unified-Stage-4K-gateway-profile-management.md`
 
 Check off acceptance criteria and Definition of Done when complete.
 
-- [ ] **Step 8: Commit final validation updates**
+- [x] **Step 8: Commit final validation updates**
 
 ```bash
-git add Docs/superpowers/plans/2026-05-31-mcp-unified-stage4k-gateway-profile-management-implementation-plan.md backlog/tasks/task-570\ -\ Plan-MCP-Unified-Stage-4K-gateway-profile-management-implementation.md
-git commit -m "docs: plan gateway profile management implementation"
+git add Docs/superpowers/plans/2026-05-31-mcp-unified-stage4k-gateway-profile-management-implementation-plan.md backlog/tasks/task-571\ -\ Implement-MCP-Unified-Stage-4K-gateway-profile-management.md
+git commit -m "chore: validate gateway profile management implementation"
 ```
 
 ## Final Verification Command Set
@@ -992,15 +992,19 @@ python -m bandit -r mcp_unified/gateway mcp_unified/profiles -f json -o /tmp/ban
 git diff --check
 ```
 
+Result: final combined pytest command reported `204 passed, 4 warnings`; ruff
+reported `All checks passed!`; Bandit reported `results: []`; `git diff
+--check` passed.
+
 ## Implementation Review Checklist
 
-- [ ] No new `tldw_Server_API` imports under `mcp_unified/gateway` or `mcp_unified/profiles`.
-- [ ] Default profile selection uses `ProfileAssignmentStore`; no process-local mutable default holder is added.
-- [ ] Runtime and manager share the same assignment store in bootstrap/config paths.
-- [ ] `PUT /profiles/default` affects later no-profile JSON-RPC requests without app/runtime restart.
-- [ ] Explicit header/query profile id still overrides stored default.
-- [ ] Management endpoints are absent from the default app/router.
-- [ ] CLI mutating commands reject memory-store configs.
-- [ ] Read-only memory CLI payload includes exactly `{"store": {"kind": "memory", "persistent": false}}`.
-- [ ] Domain failures emit JSON without tracebacks.
-- [ ] Audit payloads contain ids/reasons/provenance only, not full profile documents.
+- [x] No new `tldw_Server_API` imports under `mcp_unified/gateway` or `mcp_unified/profiles`.
+- [x] Default profile selection uses `ProfileAssignmentStore`; no process-local mutable default holder is added.
+- [x] Runtime and manager share the same assignment store in bootstrap/config paths.
+- [x] `PUT /profiles/default` affects later no-profile JSON-RPC requests without app/runtime restart.
+- [x] Explicit header/query profile id still overrides stored default.
+- [x] Management endpoints are absent from the default app/router.
+- [x] CLI mutating commands reject memory-store configs.
+- [x] Read-only memory CLI payload includes exactly `{"store": {"kind": "memory", "persistent": false}}`.
+- [x] Domain failures emit JSON without tracebacks.
+- [x] Audit payloads contain ids/reasons/provenance only, not full profile documents.

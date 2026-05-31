@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 import pytest
 from mcp_unified.gateway.profiles import (
@@ -18,7 +17,6 @@ from mcp_unified.profiles.store import (
     InMemoryProfileStore,
 )
 from mcp_unified.storage.models import AuditEvent, ProfileAssignment
-
 
 UTC = timezone.utc
 
