@@ -1462,7 +1462,7 @@ def test_gateway_config_external_registry_memory_requires_injected_store() -> No
         build_gateway_external_registry_storage,
     )
 
-    with pytest.raises(ValueError, match="external registry.*sqlite"):
+    with pytest.raises(ValueError, match="sqlite.*injected equivalent"):
         build_gateway_external_registry_storage(
             GatewayProfileStoreConfig(kind="memory"),
         )

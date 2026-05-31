@@ -221,7 +221,10 @@ def build_gateway_external_registry_storage(
         )
 
     if store_config.kind == "memory":
-        raise ValueError("external registry management requires sqlite store")
+        raise ValueError(
+            "external registry management requires sqlite or an injected "
+            "equivalent external registry store"
+        )
 
     if store_config.kind == "sqlite":
         store = _build_external_registry_store(store_config)
@@ -441,7 +444,10 @@ def _build_external_registry_store(
         if sqlite_path is None:
             raise ValueError("sqlite_path is required for sqlite profile store")
         return SQLiteMCPStore(sqlite_path)
-    raise ValueError("external registry management requires sqlite store")
+    raise ValueError(
+        "external registry management requires sqlite or an injected equivalent "
+        "external registry store"
+    )
 
 
 def _copy_profile(profile: MCPProfile | Mapping[str, Any]) -> MCPProfile:
