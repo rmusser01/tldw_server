@@ -14,6 +14,7 @@ import mcp_unified.gateway.jsonrpc as gateway_jsonrpc
 import pytest
 from fastapi.testclient import TestClient
 from mcp_unified.gateway import create_gateway_app
+from mcp_unified.gateway.external_runtime import GatewayExternalRuntimeError
 from mcp_unified.storage.models import ExternalServerDefinition
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
@@ -559,6 +560,114 @@ class _ExternalRegistryErrorManagerDouble(_ExternalRegistryManagerDouble):
     async def delete_server(self, server_id: str) -> dict[str, Any]:
         await self._raise_if_targeted("delete_server")
         return await super().delete_server(server_id)
+
+
+class _ExternalRuntimeManagerDouble:
+    """Small manager double for external runtime route tests."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    async def list_runtime_servers(self) -> dict[str, Any]:
+        self.calls.append(("list_runtime_servers", (), {}))
+        return {
+            "ok": True,
+            "servers": [{"id": "research", "status": "healthy"}],
+        }
+
+    async def start_server(self, server_id: str) -> dict[str, Any]:
+        self.calls.append(("start_server", (server_id,), {}))
+        return {
+            "ok": True,
+            "reason_code": "external_server_started",
+            "server_id": server_id,
+        }
+
+    async def stop_server(self, server_id: str) -> dict[str, Any]:
+        self.calls.append(("stop_server", (server_id,), {}))
+        return {
+            "ok": True,
+            "reason_code": "external_server_stopped",
+            "server_id": server_id,
+        }
+
+    async def restart_server(self, server_id: str) -> dict[str, Any]:
+        self.calls.append(("restart_server", (server_id,), {}))
+        return {
+            "ok": True,
+            "reason_code": "external_server_restarted",
+            "server_id": server_id,
+        }
+
+    async def refresh_server(self, server_id: str | None = None) -> dict[str, Any]:
+        self.calls.append(("refresh_server", (server_id,), {}))
+        return {
+            "ok": True,
+            "reason_code": "external_server_refreshed",
+            "server_id": server_id,
+        }
+
+    async def reconcile(self, server_id: str | None = None) -> dict[str, Any]:
+        self.calls.append(("reconcile", (server_id,), {}))
+        return {
+            "ok": True,
+            "reason_code": "external_server_reconciled",
+            "server_id": server_id,
+        }
+
+    async def install_server(
+        self,
+        server_id: str,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        self.calls.append(("install_server", (server_id,), {"context": context}))
+        return {
+            "ok": False,
+            "reason_code": "external_server_install_not_configured",
+            "server_id": server_id,
+        }
+
+    async def update_server(
+        self,
+        server_id: str,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        self.calls.append(("update_server", (server_id,), {"context": context}))
+        return {
+            "ok": False,
+            "reason_code": "external_server_update_not_configured",
+            "server_id": server_id,
+        }
+
+
+class _ExternalRuntimeBootstrapDouble:
+    def __init__(self, manager: _ExternalRuntimeManagerDouble) -> None:
+        self.external_runtime_manager = manager
+
+
+class _ExternalRuntimeErrorManagerDouble(_ExternalRuntimeManagerDouble):
+    def __init__(self, method: str, reason_code: str) -> None:
+        super().__init__()
+        self.method = method
+        self.reason_code = reason_code
+
+    async def _raise_if_targeted(self, method: str) -> None:
+        if method == self.method:
+            raise GatewayExternalRuntimeError(
+                f"runtime failure: {self.reason_code}",
+                reason_code=self.reason_code,
+                server_id="research",
+            )
+
+    async def start_server(self, server_id: str) -> dict[str, Any]:
+        await self._raise_if_targeted("start_server")
+        return await super().start_server(server_id)
+
+    async def refresh_server(self, server_id: str | None = None) -> dict[str, Any]:
+        await self._raise_if_targeted("refresh_server")
+        return await super().refresh_server(server_id)
 
 
 def test_gateway_package_does_not_import_tldw_server_api() -> None:
@@ -1427,6 +1536,122 @@ def test_gateway_external_registry_management_malformed_or_missing_bodies_return
     assert malformed_patch.status_code == 422
     assert extra_create.status_code == 422
     assert extra_patch.status_code == 422
+
+
+def test_gateway_external_runtime_routes_are_not_mounted_by_default() -> None:
+    app = create_gateway_app(_FakeGatewayRuntime(), prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/external-servers/runtime")
+
+    assert response.status_code == 404
+
+
+def test_gateway_external_runtime_management_routes_mount_with_manager() -> None:
+    manager = _ExternalRuntimeManagerDouble()
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_runtime_manager=manager,
+    )
+
+    with TestClient(app) as client:
+        listed = client.get("/mcp/external-servers/runtime")
+        started = client.post("/mcp/external-servers/research/start")
+        stopped = client.post("/mcp/external-servers/research/stop")
+        refreshed_all = client.post("/mcp/external-servers/refresh")
+        refreshed_one = client.post("/mcp/external-servers/research/refresh")
+        reconciled_all = client.post("/mcp/external-servers/reconcile")
+        reconciled_one = client.post("/mcp/external-servers/research/reconcile")
+        installed = client.post("/mcp/external-servers/research/install")
+        updated = client.post("/mcp/external-servers/research/update")
+
+    assert listed.status_code == 200
+    assert listed.json()["servers"] == [{"id": "research", "status": "healthy"}]
+    assert started.json()["reason_code"] == "external_server_started"
+    assert stopped.json()["reason_code"] == "external_server_stopped"
+    assert refreshed_all.json()["server_id"] is None
+    assert refreshed_one.json()["server_id"] == "research"
+    assert reconciled_all.json()["server_id"] is None
+    assert reconciled_one.json()["server_id"] == "research"
+    assert installed.json()["reason_code"] == "external_server_install_not_configured"
+    assert updated.json()["reason_code"] == "external_server_update_not_configured"
+    assert manager.calls == [
+        ("list_runtime_servers", (), {}),
+        ("start_server", ("research",), {}),
+        ("stop_server", ("research",), {}),
+        ("refresh_server", (None,), {}),
+        ("refresh_server", ("research",), {}),
+        ("reconcile", (None,), {}),
+        ("reconcile", ("research",), {}),
+        ("install_server", ("research",), {"context": None}),
+        ("update_server", ("research",), {"context": None}),
+    ]
+
+
+def test_gateway_external_runtime_management_routes_mount_with_bootstrap() -> None:
+    manager = _ExternalRuntimeManagerDouble()
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        profile_bootstrap=_ExternalRuntimeBootstrapDouble(manager),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/external-servers/runtime")
+
+    assert response.status_code == 200
+    assert manager.calls == [("list_runtime_servers", (), {})]
+
+
+def test_gateway_external_runtime_management_enabled_without_manager_raises() -> None:
+    with pytest.raises(ValueError, match="external runtime management requires"):
+        gateway_fastapi.create_gateway_router(
+            _FakeGatewayRuntime(),
+            enable_external_runtime_management=True,
+        )
+
+    with pytest.raises(ValueError, match="external runtime management requires"):
+        create_gateway_app(
+            _FakeGatewayRuntime(),
+            prefix="/mcp",
+            enable_external_runtime_management=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("reason_code", "status_code"),
+    [
+        ("external_server_not_found", 404),
+        ("external_server_disabled", 409),
+        ("credential_broker_unavailable", 503),
+        ("external_server_transport_unavailable", 503),
+        ("invalid_external_runtime_request", 422),
+        ("unexpected_external_runtime_reason", 500),
+    ],
+)
+def test_gateway_external_runtime_management_error_status_mapping(
+    reason_code: str,
+    status_code: int,
+) -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_runtime_manager=_ExternalRuntimeErrorManagerDouble(
+            "start_server",
+            reason_code,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/mcp/external-servers/research/start")
+
+    assert response.status_code == status_code
+    body = response.json()
+    assert body["ok"] is False
+    assert body["reason_code"] == reason_code
+    assert body["server_id"] == "research"
+    assert body["error"] == f"runtime failure: {reason_code}"
 
 
 def test_gateway_profile_runtime_requires_profile_for_tool_execution() -> None:

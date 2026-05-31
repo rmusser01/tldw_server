@@ -412,7 +412,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_externa
 
 Expected: all runtime, credential, and install/update tests pass.
 
-- [ ] **Step 6: Commit install/update contracts**
+- [x] **Step 6: Commit install/update contracts**
 
 ```bash
 git add mcp_unified/federation/installers.py mcp_unified/federation/__init__.py mcp_unified/gateway/external_runtime.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime.py
@@ -426,7 +426,7 @@ git commit -m "feat: add external runtime install contracts"
 - Modify: `mcp_unified/gateway/fastapi.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py`
 
-- [ ] **Step 1: Add red FastAPI tests**
+- [x] **Step 1: Add red FastAPI tests**
 
 In `test_gateway_fastapi_package.py`, add tests that create a fake runtime
 manager and mount:
@@ -448,7 +448,7 @@ Assert:
 - `POST /mcp/external-servers/research/refresh` calls manager with server id
 - expected manager errors map to HTTP status codes
 
-- [ ] **Step 2: Extend bootstrap dataclass**
+- [x] **Step 2: Extend bootstrap dataclass**
 
 Add:
 
@@ -458,14 +458,14 @@ external_runtime_manager: GatewayExternalRuntimeManager | None = None
 
 Keep existing bootstrap call sites compatible by defaulting to `None`.
 
-- [ ] **Step 3: Add FastAPI resolver and route mount**
+- [x] **Step 3: Add FastAPI resolver and route mount**
 
 Add `external_runtime_manager` and `enable_external_runtime_management` params
 to `create_gateway_router()` and `create_gateway_app()`.
 
 Fail fast when explicit enable is true without a manager.
 
-- [ ] **Step 4: Add route handlers**
+- [x] **Step 4: Add route handlers**
 
 Implement the routes from the spec except durable CLI control. Use manager
 methods directly and map `GatewayExternalRuntimeError.to_payload()` to status
@@ -477,7 +477,7 @@ codes:
 - invalid request: 422
 - otherwise: 500
 
-- [ ] **Step 5: Run FastAPI tests**
+- [x] **Step 5: Run FastAPI tests**
 
 Run:
 
