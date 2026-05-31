@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
+from loguru import logger
+
 from mcp_unified.interfaces.storage import (
     AuditStore,
     ProfileAssignmentStore,
@@ -361,7 +363,16 @@ class GatewayProfileManager:
             payload=dict(payload or {}),
             provenance={"source": "gateway_profile_manager"},
         )
-        await self.audit_store.append_event(event)
+        try:
+            await self.audit_store.append_event(event)
+        except Exception:  # noqa: BLE001
+            # Audit logging is best-effort and must not fail profile mutations.
+            logger.opt(exception=True).warning(
+                "Gateway profile audit append failed for {event_type}",
+                event_type=event_type,
+                target_type=target_type,
+                target_id=target_id,
+            )
 
     async def _audit_expected_failure(
         self,

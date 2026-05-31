@@ -616,6 +616,27 @@ def test_gateway_profile_management_success_envelopes() -> None:
     ]
 
 
+def test_gateway_profile_management_routes_have_pydantic_response_models() -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        profile_manager=_ProfileManagementManagerDouble(),
+    )
+
+    paths = app.openapi()["paths"]
+    expected_refs = {
+        ("/mcp/profiles", "get"): "#/components/schemas/ProfileListResponse",
+        ("/mcp/profiles/{profile_id}", "get"): "#/components/schemas/ProfileResponse",
+        ("/mcp/profiles/from-preset", "post"): "#/components/schemas/DuplicatePresetResponse",
+        ("/mcp/profiles/default", "get"): "#/components/schemas/DefaultProfileResponse",
+        ("/mcp/profiles/default", "put"): "#/components/schemas/DefaultProfileResponse",
+    }
+
+    for (path, method), expected_ref in expected_refs.items():
+        schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
+        assert schema == {"$ref": expected_ref}
+
+
 @pytest.mark.parametrize(
     ("method", "path", "json_body", "manager_method", "reason_code", "status_code"),
     [
@@ -1187,12 +1208,10 @@ def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Pat
 
     from mcp_unified.gateway.config import (
         GatewayProfileBootstrapConfig,
-        GatewayProfileStoreConfig,
         bootstrap_profile_gateway_from_config,
     )
     from mcp_unified.profiles.store import InMemoryProfileStore
 
-    sqlite_path = tmp_path / "unused.db"
     profile = _profile_with_allowed_tools("reviewer", ["admin.delete"])
     injected_store = InMemoryProfileStore([profile])
 
@@ -1200,7 +1219,6 @@ def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Pat
         bootstrap_profile_gateway_from_config(
             _MultiToolGatewayRuntime(),
             GatewayProfileBootstrapConfig(
-                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
                 default_profile_id="reviewer",
             ),
             profile_store=injected_store,
@@ -1215,8 +1233,57 @@ def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Pat
         )
 
     assert bootstrap.profile_store is injected_store
-    assert not sqlite_path.exists()
     assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["admin.delete"]
+
+
+def test_gateway_config_storage_reuses_injected_sqlite_store_capabilities(tmp_path: Path) -> None:
+    """Reuse assignment and audit capabilities from injected persistent stores."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_profile_storage,
+    )
+    from mcp_unified.storage.sqlite import SQLiteMCPStore
+
+    sqlite_path = tmp_path / "gateway.db"
+    store = SQLiteMCPStore(sqlite_path)
+
+    try:
+        bundle = build_gateway_profile_storage(
+            GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+            profile_store=store,
+        )
+
+        assert bundle.profile_store is store
+        assert bundle.assignment_store is store
+        assert bundle.audit_store is store
+        assert bundle.metadata.to_payload() == {
+            "kind": "sqlite",
+            "persistent": True,
+        }
+    finally:
+        asyncio.run(store.aclose())
+
+
+def test_gateway_config_rejects_sqlite_injected_store_without_assignment_store(
+    tmp_path: Path,
+) -> None:
+    """Reject divergent injected SQLite profile stores without assignment support."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_profile_storage,
+    )
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    with pytest.raises(ValueError, match="assignment_store"):
+        build_gateway_profile_storage(
+            GatewayProfileStoreConfig(
+                kind="sqlite",
+                sqlite_path=tmp_path / "gateway.db",
+            ),
+            profile_store=InMemoryProfileStore(),
+        )
 
 
 def test_gateway_config_rejects_invalid_store_kind() -> None:

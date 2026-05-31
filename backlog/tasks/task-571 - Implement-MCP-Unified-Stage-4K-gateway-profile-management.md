@@ -4,17 +4,23 @@ title: Implement MCP Unified Stage 4K gateway profile management
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-31 02:34'
+updated_date: 2026-05-31 02:34
 labels:
-  - mcp-unified
-  - stage-4k
-  - implementation
+- mcp-unified
+- stage-4k
+- implementation
 dependencies: []
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-05-30-mcp-unified-stage4k-gateway-profile-management-design.md
-  - >-
-    Docs/superpowers/plans/2026-05-31-mcp-unified-stage4k-gateway-profile-management-implementation-plan.md
+- Docs/superpowers/specs/2026-05-30-mcp-unified-stage4k-gateway-profile-management-design.md
+- Docs/superpowers/plans/2026-05-31-mcp-unified-stage4k-gateway-profile-management-implementation-plan.md
+modified_files:
+- mcp_unified/gateway/config.py
+- mcp_unified/gateway/fastapi.py
+- mcp_unified/gateway/profiles.py
+- mcp_unified/profiles/resolver.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_profile_registry_resolver.py
 ---
 
 ## Description
@@ -47,7 +53,7 @@ Docs/superpowers/plans/2026-05-31-mcp-unified-stage4k-gateway-profile-management
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented MCP Unified Stage 4K gateway profile management. Added GatewayProfileManager, assignment-aware default resolution, in-memory assignment storage, shared bootstrap/config wiring, CLI profile-management commands, and explicitly gated FastAPI management routes. Validation recorded: storage contracts 26 passed, boundary tests 43 passed, focused Stage 4K suite 135 passed, final combined pytest 204 passed, ruff passed, Bandit /tmp/bandit_mcp_stage4k_profile_management.json reported no findings, and git diff --check passed. Known non-code issue: git commit continues to report the pre-existing worktree gc.log/unreachable-loose-objects warning.
+Implemented MCP Unified Stage 4K gateway profile management and addressed PR #2184 review feedback after rebasing onto latest dev. Added Pydantic response models for FastAPI profile-management success responses, switched profile resolver logging to Loguru, reused assignment/audit capabilities from injected persistent stores, rejected divergent sqlite injected-store wiring without assignment support, and made gateway profile audit appends best-effort. Validation recorded: focused profile-management pytest 114 passed, final MCP Unified slice 209 passed, Ruff touched-scope check passed, Bandit /tmp/bandit_mcp_stage4k_pr2184_qodo.json reported no findings, and git diff --check passed. Known non-code issue: git commands continue to report the pre-existing worktree gc.log/unreachable-loose-objects warning.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

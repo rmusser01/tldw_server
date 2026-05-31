@@ -52,6 +52,13 @@ class InMemoryAuditStore:
         return [event.model_copy(deep=True) for event in events]
 
 
+class FailingAuditStore(InMemoryAuditStore):
+    """Audit store double that simulates a transient append failure."""
+
+    async def append_event(self, event: AuditEvent) -> AuditEvent:
+        raise RuntimeError(f"audit unavailable for {event.event_type}")
+
+
 def _manager(
     profile_store: InMemoryProfileStore,
     assignment_store: InMemoryProfileAssignmentStore | None = None,
@@ -209,6 +216,18 @@ async def test_duplicate_preset_payload_mutation_does_not_mutate_store() -> None
     assert stored is not None
     assert stored.name == "Project Researcher"
     assert stored.metadata["agent_metadata"]["ui_label"] == "Project Researcher"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_preset_succeeds_when_audit_append_fails() -> None:
+    store = InMemoryProfileStore()
+    manager = _manager(store, audit_store=FailingAuditStore())
+
+    payload = await manager.duplicate_preset("project-researcher")
+
+    assert payload["ok"] is True
+    assert payload["profile"]["id"] == "project-researcher"
+    assert await store.get_profile("project-researcher") is not None
 
 
 @pytest.mark.asyncio

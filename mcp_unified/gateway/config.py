@@ -135,11 +135,13 @@ def build_gateway_profile_storage(
     if profile_store is not None:
         return GatewayProfileStorageBundle(
             profile_store=profile_store,
-            assignment_store=assignment_store
-            if assignment_store is not None
-            else InMemoryProfileAssignmentStore(),
-            audit_store=audit_store,
-            metadata=GatewayProfileStoreMetadata(kind="memory", persistent=False),
+            assignment_store=_resolve_injected_assignment_store(
+                store_config,
+                profile_store,
+                assignment_store,
+            ),
+            audit_store=_resolve_injected_audit_store(profile_store, audit_store),
+            metadata=_metadata_for_store_config(store_config),
         )
 
     if store_config.kind == "memory":
@@ -165,6 +167,73 @@ def build_gateway_profile_storage(
 
     raise ValueError(
         f"Unsupported gateway profile store kind: {store_config.kind!r}"
+    )
+
+
+def _metadata_for_store_config(
+    store_config: GatewayProfileStoreConfig,
+) -> GatewayProfileStoreMetadata:
+    """Return user-facing persistence metadata for a validated store config."""
+
+    return GatewayProfileStoreMetadata(
+        kind=store_config.kind,
+        persistent=store_config.kind == "sqlite",
+    )
+
+
+def _resolve_injected_assignment_store(
+    store_config: GatewayProfileStoreConfig,
+    profile_store: ProfileStore,
+    assignment_store: ProfileAssignmentStore | None,
+) -> ProfileAssignmentStore:
+    """Resolve assignment storage for caller-injected profile stores."""
+
+    if assignment_store is not None:
+        return assignment_store
+    if _supports_assignment_store(profile_store):
+        return cast(ProfileAssignmentStore, profile_store)
+    if store_config.kind == "memory":
+        return InMemoryProfileAssignmentStore()
+    raise ValueError(
+        "assignment_store is required when injecting a profile_store for "
+        "sqlite gateway profile storage unless profile_store implements "
+        "profile assignment methods"
+    )
+
+
+def _resolve_injected_audit_store(
+    profile_store: ProfileStore,
+    audit_store: AuditStore | None,
+) -> AuditStore | None:
+    """Reuse audit-capable injected stores when no audit store is supplied."""
+
+    if audit_store is not None:
+        return audit_store
+    if _supports_audit_store(profile_store):
+        return cast(AuditStore, profile_store)
+    return None
+
+
+def _supports_assignment_store(candidate: object) -> bool:
+    """Return whether an object provides the profile-assignment store API."""
+
+    return all(
+        callable(getattr(candidate, method_name, None))
+        for method_name in (
+            "get_assignment",
+            "list_assignments",
+            "upsert_assignment",
+            "delete_assignment",
+        )
+    )
+
+
+def _supports_audit_store(candidate: object) -> bool:
+    """Return whether an object provides the audit store API."""
+
+    return all(
+        callable(getattr(candidate, method_name, None))
+        for method_name in ("append_event", "query_events")
     )
 
 

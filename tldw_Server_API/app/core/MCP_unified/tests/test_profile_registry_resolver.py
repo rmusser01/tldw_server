@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import ast
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 import mcp_unified.gateway.profiles as gateway_profiles_module
 import mcp_unified.profiles as profiles_pkg
+import mcp_unified.profiles.resolver as profile_resolver_module
 import pytest
+from loguru import logger as loguru_logger
 from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.profiles.resolver import (
     AssignmentBackedProfileResolver,
@@ -51,6 +52,10 @@ def test_profile_and_gateway_profile_modules_have_no_tldw_server_imports() -> No
         if imports:
             offenders[str(path)] = imports
     assert offenders == {}
+
+
+def test_profile_resolver_uses_loguru_logger() -> None:
+    assert profile_resolver_module.logger is loguru_logger
 
 
 @pytest.mark.asyncio
@@ -138,8 +143,20 @@ async def test_store_backed_resolver_returns_none_for_disabled_profiles() -> Non
 
 @pytest.mark.asyncio
 async def test_store_backed_resolver_fails_closed_when_store_unavailable(
-    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    class FakeLogger:
+        def __init__(self) -> None:
+            self.opt_calls: list[dict[str, object]] = []
+            self.warning_calls: list[tuple[str, dict[str, object]]] = []
+
+        def opt(self, **kwargs: object) -> FakeLogger:
+            self.opt_calls.append(kwargs)
+            return self
+
+        def warning(self, message: str, **kwargs: object) -> None:
+            self.warning_calls.append((message, kwargs))
+
     class UnavailableStore:
         async def get_profile(self, profile_id: str) -> MCPProfile | None:
             raise ProfileStoreUnavailableError(f"profile store unavailable: {profile_id}")
@@ -157,12 +174,22 @@ async def test_store_backed_resolver_fails_closed_when_store_unavailable(
             raise ProfileStoreUnavailableError(f"profile store unavailable: {profile_id}")
 
     resolver = StoreBackedProfileResolver(UnavailableStore(), default_profile_id="default")
-    caplog.set_level(logging.WARNING, logger="mcp_unified.profiles.resolver")
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(profile_resolver_module, "logger", fake_logger)
 
     assert await resolver.resolve_profile("explicit") is None
     assert await resolver.resolve_profile(None) is None
-    assert "MCP profile 'explicit'" in caplog.text
-    assert "MCP profile 'default'" in caplog.text
+    assert fake_logger.opt_calls == [{"exception": True}, {"exception": True}]
+    assert fake_logger.warning_calls == [
+        (
+            "Profile store unavailable while resolving MCP profile {profile_id}",
+            {"profile_id": "explicit"},
+        ),
+        (
+            "Profile store unavailable while resolving MCP profile {profile_id}",
+            {"profile_id": "default"},
+        ),
+    ]
 
 
 @pytest.mark.asyncio

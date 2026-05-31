@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -66,6 +66,49 @@ class SetDefaultProfileRequest(BaseModel):
     """Request body for changing the gateway default profile."""
 
     profile_id: str
+
+
+class StoreMetadataResponse(BaseModel):
+    """Response metadata describing the active gateway profile store."""
+
+    kind: Literal["memory", "sqlite"]
+    persistent: bool
+
+
+class ProfileListResponse(BaseModel):
+    """Response body for listing stored gateway profiles."""
+
+    ok: bool
+    profiles: list[dict[str, Any]]
+    store: StoreMetadataResponse
+
+
+class ProfileResponse(BaseModel):
+    """Response body for returning one stored gateway profile."""
+
+    ok: bool
+    profile: dict[str, Any]
+    store: StoreMetadataResponse
+
+
+class DuplicatePresetResponse(BaseModel):
+    """Response body for duplicating a built-in profile preset."""
+
+    ok: bool
+    preset_id: str | None = None
+    preset_version: str | None = None
+    profile: dict[str, Any]
+    store: StoreMetadataResponse
+
+
+class DefaultProfileResponse(BaseModel):
+    """Response body for reading or updating the gateway default profile."""
+
+    ok: bool
+    profile: dict[str, Any]
+    assignment: dict[str, Any] | None
+    default: dict[str, Any]
+    store: StoreMetadataResponse
 
 
 async def _parse_json_body(request: Request) -> Any:
@@ -200,17 +243,17 @@ def _mount_profile_management_routes(
 ) -> None:
     """Mount profile-management endpoints on the package gateway router."""
 
-    @router.get("/profiles", response_model=None)
-    async def list_profiles() -> dict[str, Any] | JSONResponse:
+    @router.get("/profiles", response_model=ProfileListResponse)
+    async def list_profiles() -> ProfileListResponse | JSONResponse:
         try:
             return await manager.list_profiles()
         except GatewayProfileManagementError as exc:
             return _profile_management_error_response(exc)
 
-    @router.post("/profiles/from-preset", response_model=None)
+    @router.post("/profiles/from-preset", response_model=DuplicatePresetResponse)
     async def duplicate_preset(
         request: DuplicatePresetRequest,
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> DuplicatePresetResponse | JSONResponse:
         try:
             payload = await manager.duplicate_preset(
                 request.preset_id,
@@ -221,24 +264,24 @@ def _mount_profile_management_routes(
             return _profile_management_error_response(exc)
         return _normalize_duplicate_preset_payload(payload)
 
-    @router.get("/profiles/default", response_model=None)
-    async def get_default_profile() -> dict[str, Any] | JSONResponse:
+    @router.get("/profiles/default", response_model=DefaultProfileResponse)
+    async def get_default_profile() -> DefaultProfileResponse | JSONResponse:
         try:
             return await manager.get_default_profile()
         except GatewayProfileManagementError as exc:
             return _profile_management_error_response(exc)
 
-    @router.put("/profiles/default", response_model=None)
+    @router.put("/profiles/default", response_model=DefaultProfileResponse)
     async def set_default_profile(
         request: SetDefaultProfileRequest,
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> DefaultProfileResponse | JSONResponse:
         try:
             return await manager.set_default_profile(request.profile_id)
         except GatewayProfileManagementError as exc:
             return _profile_management_error_response(exc)
 
-    @router.get("/profiles/{profile_id}", response_model=None)
-    async def show_profile(profile_id: str) -> dict[str, Any] | JSONResponse:
+    @router.get("/profiles/{profile_id}", response_model=ProfileResponse)
+    async def show_profile(profile_id: str) -> ProfileResponse | JSONResponse:
         try:
             return await manager.show_profile(profile_id)
         except GatewayProfileManagementError as exc:

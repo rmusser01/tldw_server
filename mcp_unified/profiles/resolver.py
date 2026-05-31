@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Protocol
+
+from loguru import logger
 
 from mcp_unified.interfaces.storage import ProfileAssignmentStore, ProfileStore
 
@@ -11,8 +12,6 @@ from .defaults import load_gateway_default_assignment
 from .models import MCPProfile
 from .resolution import ProfileResolutionResult
 from .store import ProfileAssignmentStoreUnavailableError, ProfileStoreUnavailableError
-
-logger = logging.getLogger(__name__)
 
 
 class ProfileResolver(Protocol):
@@ -74,10 +73,9 @@ class StoreBackedProfileResolver:
         try:
             profile = await self.profile_store.get_profile(resolved_id)
         except ProfileStoreUnavailableError:
-            logger.warning(
-                "Profile store unavailable while resolving MCP profile %r",
-                resolved_id,
-                exc_info=True,
+            logger.opt(exception=True).warning(
+                "Profile store unavailable while resolving MCP profile {profile_id}",
+                profile_id=resolved_id,
             )
             return ProfileResolutionResult(
                 status="store_unavailable",
@@ -156,9 +154,8 @@ class AssignmentBackedProfileResolver(StoreBackedProfileResolver):
         try:
             assignment = await load_gateway_default_assignment(self.assignment_store)
         except ProfileAssignmentStoreUnavailableError:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "Profile assignment store unavailable while resolving MCP default profile",
-                exc_info=True,
             )
             return ProfileResolutionResult(
                 status="store_unavailable",
@@ -193,10 +190,9 @@ class AssignmentBackedProfileResolver(StoreBackedProfileResolver):
         try:
             profile = await self.profile_store.get_profile(resolved_id)
         except ProfileStoreUnavailableError:
-            logger.warning(
-                "Profile store unavailable while resolving MCP profile %r",
-                resolved_id,
-                exc_info=True,
+            logger.opt(exception=True).warning(
+                "Profile store unavailable while resolving MCP profile {profile_id}",
+                profile_id=resolved_id,
             )
             return ProfileResolutionResult(
                 status="store_unavailable",
