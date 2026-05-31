@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { PlaygroundEmpty } from "../PlaygroundEmpty";
 
@@ -38,25 +38,22 @@ describe("PlaygroundEmpty – disconnected state", () => {
     vi.clearAllMocks();
   });
 
-  it("renders an Open Settings button inside the unified onboarding shell when disconnected", () => {
+  it("keeps the blank chat shell neutral when disconnected", () => {
     render(<PlaygroundEmpty />);
 
     const shell = screen.getByTestId("playground-empty-shell");
-    const settingsButton = within(shell).getByRole("button", {
-      name: /open settings/i,
-    });
-    expect(settingsButton).toBeInTheDocument();
-  });
 
-  it("navigates to /settings/tldw when Open Settings is clicked", () => {
-    render(<PlaygroundEmpty />);
-
-    const shell = screen.getByTestId("playground-empty-shell");
-    const settingsButton = within(shell).getByRole("button", {
-      name: /open settings/i,
-    });
-    fireEvent.click(settingsButton);
-
-    expect(navigate).toHaveBeenCalledWith("/settings/tldw");
+    expect(
+      within(shell).getByText(
+        "Experiment with different models, prompts, and knowledge sources here.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(shell).queryByText("Connect to a tldw server to start chatting."),
+    ).not.toBeInTheDocument();
+    expect(
+      within(shell).queryByRole("button", { name: /open settings/i }),
+    ).not.toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
   });
 });

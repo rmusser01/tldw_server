@@ -8,6 +8,7 @@ import type { RolePlayCompatibility } from "../role-play-compatibility";
 export type UsePlaygroundContextItemsDeps = {
   selectedModel: string | null | undefined;
   modelSummaryLabel: string;
+  isConnectionReady: boolean;
   isSessionDegraded: boolean;
   connectionStatusLabel: string;
   compareModeActive: boolean;
@@ -58,6 +59,7 @@ export function usePlaygroundContextItems(
   const {
     selectedModel,
     modelSummaryLabel,
+    isConnectionReady,
     isSessionDegraded,
     connectionStatusLabel,
     compareModeActive,
@@ -112,7 +114,7 @@ export function usePlaygroundContextItems(
       tone: selectedModel ? "active" : "warning",
       onClick: openModelApiSelector,
     });
-    if (isSessionDegraded) {
+    if (isConnectionReady && isSessionDegraded) {
       items.push({
         id: "sessionStatus",
         label: t("playground:composer.context.sessionStatus", "Session status"),
@@ -508,6 +510,7 @@ export function usePlaygroundContextItems(
     jsonMode,
     focusConnectionCard,
     handleToggleWebSearch,
+    isConnectionReady,
     isSessionDegraded,
     modelSummaryLabel,
     openModelApiSelector,

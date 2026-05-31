@@ -265,6 +265,7 @@ type Props = {
   onPrepareResearchFollowUp?: (target: ResearchFollowUpTarget) => void;
   stickyDockEnabled?: boolean;
   mobileCockpitModeActive?: boolean;
+  forceWideMode?: boolean;
   onComposerLayoutChange?: (metrics: ComposerDockLayoutMetrics) => void;
   onDraftPresenceChange?: (hasDraft: boolean) => void;
   characterChatSendBlocker?: PlaygroundSendBlocker | null;
@@ -460,6 +461,7 @@ export const PlaygroundForm = ({
   onPrepareResearchFollowUp,
   stickyDockEnabled = false,
   mobileCockpitModeActive = false,
+  forceWideMode = false,
   onComposerLayoutChange,
   onDraftPresenceChange,
   characterChatSendBlocker = null,
@@ -495,6 +497,7 @@ export const PlaygroundForm = ({
   const voiceChatSubmitFormRef = React.useRef<() => void>(() => undefined);
 
   const [checkWideMode] = useStorage("checkWideMode", false);
+  const effectiveWideMode = checkWideMode || forceWideMode;
   const [allowExternalImages, setAllowExternalImages] = useStorage(
     "allowExternalImages",
     DEFAULT_CHAT_SETTINGS.allowExternalImages,
@@ -934,9 +937,6 @@ export const PlaygroundForm = ({
       });
     },
   });
-  const [hasShownConnectBanner, setHasShownConnectBanner] =
-    React.useState(false);
-  const [showConnectBanner, setShowConnectBanner] = React.useState(false);
   const [documentGeneratorOpen, setDocumentGeneratorOpen] =
     React.useState(false);
   const [voiceModeSelectorOpen, setVoiceModeSelectorOpen] =
@@ -2467,12 +2467,6 @@ export const PlaygroundForm = ({
     }
   }, [defaultInternetSearchOn, setWebSearch]);
 
-  React.useEffect(() => {
-    if (isConnectionReady) {
-      setShowConnectBanner(false);
-    }
-  }, [isConnectionReady]);
-
   const notifyImageAttachmentDisabled = React.useCallback(() => {
     notificationApi.warning({
       message: t(
@@ -2644,13 +2638,6 @@ export const PlaygroundForm = ({
       textareaRef,
     ],
   );
-  const handleDisconnectedFocus = React.useCallback(() => {
-    if (!isConnectionReady && !hasShownConnectBanner) {
-      setShowConnectBanner(true);
-      setHasShownConnectBanner(true);
-    }
-  }, [hasShownConnectBanner, isConnectionReady]);
-
   const handleTextareaKeyDown = (
     e: React.KeyboardEvent<HTMLTextAreaElement>,
   ) => {
@@ -2659,7 +2646,6 @@ export const PlaygroundForm = ({
   };
 
   const handleTextareaFocus = React.useCallback(() => {
-    handleDisconnectedFocus();
     if (!isMessageCollapsed) return;
     const wasPointer = pointerDownRef.current;
     pointerDownRef.current = false;
@@ -2673,7 +2659,6 @@ export const PlaygroundForm = ({
     }
     syncCollapsedCaret();
   }, [
-    handleDisconnectedFocus,
     isMessageCollapsed,
     syncCollapsedCaret,
     textareaRef,
@@ -4128,6 +4113,7 @@ export const PlaygroundForm = ({
   const contextItems = usePlaygroundContextItems({
     selectedModel,
     modelSummaryLabel,
+    isConnectionReady,
     isSessionDegraded,
     connectionStatusLabel,
     compareModeActive,
@@ -4805,9 +4791,11 @@ export const PlaygroundForm = ({
     >
       <div className="flex w-full flex-col items-center px-4 pb-6">
         <div
-          data-checkwidemode={checkWideMode}
+          data-checkwidemode={effectiveWideMode}
           data-ui-mode={uiMode}
-          className="relative z-10 flex w-full max-w-[64rem] flex-col items-center justify-center gap-2 text-base data-[checkwidemode='true']:max-w-none"
+          className={`relative z-10 flex w-full ${
+            effectiveWideMode ? "max-w-none" : "max-w-[64rem]"
+          } flex-col items-center justify-center gap-2 text-base`}
         >
           <div className="relative flex w-full flex-row justify-center">
             <div
@@ -5449,17 +5437,10 @@ export const PlaygroundForm = ({
                                     onCompositionEnd={handleCompositionEnd}
                                     onMouseDown={handleTextareaMouseDown}
                                     onMouseUp={handleTextareaMouseUp}
-                                    placeholder={
-                                      isConnectionReady
-                                        ? t(
-                                            "playground:composer.placeholderWithMentions",
-                                            "Type a message... (/ commands, @ mentions)",
-                                          )
-                                        : t(
-                                            "playground:composer.connectionPlaceholder",
-                                            "Connect to tldw to start chatting.",
-                                          )
-                                    }
+                                    placeholder={t(
+                                      "playground:composer.placeholderWithMentions",
+                                      "Type a message... (/ commands, @ mentions)",
+                                    )}
                                     isProMode={isProMode}
                                     isMobile={isMobileViewport}
                                     isConnectionReady={isConnectionReady}
@@ -5954,42 +5935,6 @@ export const PlaygroundForm = ({
                           </>
                         );
                       })()}
-                      {showConnectBanner && !isConnectionReady && (
-                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
-                          <p className="max-w-xs text-left">
-                            {t(
-                              "playground:composer.connectNotice",
-                              "Connect to your tldw server in Settings to send messages.",
-                            )}
-                          </p>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Link
-                              to="/settings/tldw"
-                              className="text-xs font-medium text-warn underline hover:text-warn"
-                            >
-                              {t("settings:tldw.setupLink", "Set up server")}
-                            </Link>
-                            <Link
-                              to="/settings/health"
-                              className="text-xs font-medium text-warn underline hover:text-warn"
-                            >
-                              {t(
-                                "settings:healthSummary.diagnostics",
-                                "Health & diagnostics",
-                              )}
-                            </Link>
-                            <button
-                              type="button"
-                              onClick={() => setShowConnectBanner(false)}
-                              className="inline-flex items-center rounded-full p-1 text-warn hover:bg-warn/10"
-                              aria-label={t("common:close", "Dismiss")}
-                              title={t("common:close", "Dismiss") as string}
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
                       <ChatQueuePanel
                         queue={queuedMessages}
                         isConnectionReady={isConnectionReady}

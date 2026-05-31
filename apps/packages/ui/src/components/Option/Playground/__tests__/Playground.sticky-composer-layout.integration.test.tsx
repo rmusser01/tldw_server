@@ -74,6 +74,9 @@ const storeOptionState = vi.hoisted(() => ({
 const storageState = vi.hoisted(() => ({
   value: {
     stickyChatInput: true,
+    chatLayoutMode: "cockpit",
+    cockpitContextRailVisible: true,
+    cockpitRuntimeRailVisible: true,
   },
 }));
 
@@ -96,7 +99,14 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
-  PlaygroundForm: () => <div data-testid="playground-form">Mock composer</div>,
+  PlaygroundForm: ({ forceWideMode = false }: { forceWideMode?: boolean }) => (
+    <div
+      data-testid="playground-form"
+      data-force-wide-mode={String(forceWideMode)}
+    >
+      Mock composer
+    </div>
+  ),
 }));
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
@@ -168,6 +178,15 @@ vi.mock("@plasmohq/storage/hook", () => ({
     if (key === "stickyChatInput") {
       return [storageState.value.stickyChatInput];
     }
+    if (key === "playgroundChatLayoutMode") {
+      return [storageState.value.chatLayoutMode];
+    }
+    if (key === "playgroundChatContextRailVisible") {
+      return [storageState.value.cockpitContextRailVisible];
+    }
+    if (key === "playgroundChatRuntimeRailVisible") {
+      return [storageState.value.cockpitRuntimeRailVisible];
+    }
     return [defaultValue];
   },
 }));
@@ -230,6 +249,9 @@ describe("Playground sticky composer layout integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     storageState.value.stickyChatInput = true;
+    storageState.value.chatLayoutMode = "cockpit";
+    storageState.value.cockpitContextRailVisible = true;
+    storageState.value.cockpitRuntimeRailVisible = true;
     storeOptionState.value.setSelectedQuickPrompt = vi.fn();
   });
 
@@ -248,6 +270,23 @@ describe("Playground sticky composer layout integration", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(findCenteredWidthContract(dock)).toBeDefined();
+  });
+
+  it("removes centered chat width constraints when cockpit rails are collapsed", () => {
+    storageState.value.cockpitContextRailVisible = false;
+    storageState.value.cockpitRuntimeRailVisible = false;
+
+    render(<Playground />);
+
+    const transcript = screen.getByTestId("playground-chat-transcript");
+    const dock = screen.getByTestId("playground-chat-composer-dock");
+
+    expect(findCenteredWidthContract(transcript)).toBeUndefined();
+    expect(findCenteredWidthContract(dock)).toBeUndefined();
+    expect(screen.getByTestId("playground-form")).toHaveAttribute(
+      "data-force-wide-mode",
+      "true",
+    );
   });
 
   it("keeps the legacy non-docked composer branch when sticky chat input is disabled", () => {

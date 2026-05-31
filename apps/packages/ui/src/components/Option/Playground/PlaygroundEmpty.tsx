@@ -11,7 +11,6 @@ import {
   Microscope,
 } from "lucide-react";
 import { useDemoMode } from "@/context/demo-mode";
-import { useIsConnected } from "@/hooks/useConnectionState";
 import { useHelpModal } from "@/store/tutorials";
 import { buildResearchLaunchPath } from "@/routes/route-paths";
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open";
@@ -23,7 +22,6 @@ const actionButtonFocusClassName =
 export const PlaygroundEmpty = () => {
   const { t } = useTranslation(["playground", "common", "option"]);
   const { demoEnabled } = useDemoMode();
-  const isConnected = useIsConnected();
   const { open: openHelpModal } = useHelpModal();
   const navigate = useNavigate();
   const [modesExpanded, setModesExpanded] = React.useState(false);
@@ -133,29 +131,11 @@ export const PlaygroundEmpty = () => {
     [dispatchStarter, handleOpenDeepResearch, t],
   );
 
-  const isDisconnected = !demoEnabled && !isConnected;
   const description = demoEnabled ? (
     t("playground:empty.demoDescription", {
       defaultValue:
         "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later.",
     })
-  ) : isDisconnected ? (
-    <div className="mx-auto flex max-w-2xl flex-col items-center gap-2 sm:text-base">
-      <span>
-        {t("playground:empty.disconnectedDescription", {
-          defaultValue: "Connect to a tldw server to start chatting.",
-        })}
-      </span>
-      <button
-        type="button"
-        onClick={() => navigate("/settings/tldw")}
-        className={`inline-flex items-center text-sm font-medium text-primary transition hover:underline ${actionButtonFocusClassName}`}
-      >
-        {t("playground:empty.openSettings", {
-          defaultValue: "Open Settings",
-        })}
-      </button>
-    </div>
   ) : (
     t("playground:empty.description", {
       defaultValue:
