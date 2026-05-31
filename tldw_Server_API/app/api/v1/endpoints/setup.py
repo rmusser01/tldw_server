@@ -129,11 +129,7 @@ def _first_run_store() -> FirstRunStateStore:
 async def _require_first_run_write_access(request: Request) -> None:
     await require_local_setup_access(request)
     status_snapshot = setup_manager.get_status_snapshot()
-    if (
-        status_snapshot.get("setup_completed")
-        or status_snapshot.get("completed")
-        or not status_snapshot.get("needs_setup")
-    ):
+    if status_snapshot.get("setup_completed") or status_snapshot.get("completed"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="setup_already_completed",
@@ -142,6 +138,11 @@ async def _require_first_run_write_access(request: Request) -> None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="setup_disabled",
+        )
+    if not status_snapshot.get("needs_setup"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="setup_already_completed",
         )
     state = _first_run_store().load()
     terminal_details = {

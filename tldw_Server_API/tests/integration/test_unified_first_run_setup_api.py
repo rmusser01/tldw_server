@@ -199,6 +199,37 @@ def test_disabled_legacy_completed_setup_rejects_first_run_writes_without_state_
     assert response.json()["detail"] == "setup_already_completed"
 
 
+def test_disabled_incomplete_setup_rejects_first_run_writes_without_state_file(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "get_status_snapshot",
+        lambda: {
+            "enabled": False,
+            "setup_completed": False,
+            "completed": False,
+            "needs_setup": False,
+            "auth_mode": "single_user",
+            "allow_remote_setup_access": False,
+            "remote_access_env_override": False,
+            "remote_access_active": False,
+        },
+    )
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={"step": "providers", "data": {}},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "setup_disabled"
+
+
 def test_skipped_first_run_state_rejected_by_shared_write_guard(
     monkeypatch,
     tmp_path,
