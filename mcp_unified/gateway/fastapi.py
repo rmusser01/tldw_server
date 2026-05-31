@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from .bootstrap import GatewayProfileBootstrap
 from .jsonrpc import (
@@ -47,8 +47,11 @@ _PROFILE_MANAGEMENT_STATUS_CODES = {
     "preset_not_found": 404,
     "default_profile_not_configured": 404,
     "profile_disabled": 409,
+    "profile_is_default": 409,
+    "profile_has_assignments": 409,
     "profile_already_exists": 409,
     "invalid_profile_request": 422,
+    "invalid_profile_patch": 422,
     "profile_store_unavailable": 503,
     "assignment_store_unavailable": 503,
 }
@@ -66,6 +69,21 @@ class SetDefaultProfileRequest(BaseModel):
     """Request body for changing the gateway default profile."""
 
     profile_id: str
+
+
+class CreateProfileRequest(BaseModel):
+    """Request body for creating a user-editable gateway profile."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+
+
+class PatchProfileRequest(BaseModel):
+    """Request body for patching a user-editable gateway profile."""
+
+    model_config = ConfigDict(extra="allow")
 
 
 class StoreMetadataResponse(BaseModel):
@@ -108,6 +126,14 @@ class DefaultProfileResponse(BaseModel):
     profile: dict[str, Any]
     assignment: dict[str, Any] | None
     default: dict[str, Any]
+    store: StoreMetadataResponse
+
+
+class DeleteProfileResponse(BaseModel):
+    """Response body for deleting one stored gateway profile."""
+
+    ok: bool
+    profile_id: str
     store: StoreMetadataResponse
 
 
@@ -247,6 +273,35 @@ def _mount_profile_management_routes(
     async def list_profiles() -> ProfileListResponse | JSONResponse:
         try:
             return await manager.list_profiles()
+        except GatewayProfileManagementError as exc:
+            return _profile_management_error_response(exc)
+
+    @router.post("/profiles", response_model=ProfileResponse)
+    async def create_profile(
+        request: CreateProfileRequest,
+    ) -> ProfileResponse | JSONResponse:
+        try:
+            return await manager.create_profile(request.model_dump(mode="json"))
+        except GatewayProfileManagementError as exc:
+            return _profile_management_error_response(exc)
+
+    @router.patch("/profiles/{profile_id}", response_model=ProfileResponse)
+    async def patch_profile(
+        profile_id: str,
+        request: PatchProfileRequest,
+    ) -> ProfileResponse | JSONResponse:
+        try:
+            return await manager.patch_profile(
+                profile_id,
+                request.model_dump(mode="json", exclude_unset=True),
+            )
+        except GatewayProfileManagementError as exc:
+            return _profile_management_error_response(exc)
+
+    @router.delete("/profiles/{profile_id}", response_model=DeleteProfileResponse)
+    async def delete_profile(profile_id: str) -> DeleteProfileResponse | JSONResponse:
+        try:
+            return await manager.delete_profile(profile_id)
         except GatewayProfileManagementError as exc:
             return _profile_management_error_response(exc)
 

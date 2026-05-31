@@ -10,6 +10,8 @@ modified_files:
 - mcp_unified/interfaces/storage.py
 - mcp_unified/gateway/profiles.py
 - mcp_unified/storage/sqlite.py
+- mcp_unified/gateway/fastapi.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
 ---
 
 ## Description
