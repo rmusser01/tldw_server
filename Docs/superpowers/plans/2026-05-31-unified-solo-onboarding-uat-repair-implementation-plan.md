@@ -22,7 +22,7 @@
 
 **Tests:** Read-only shell checks.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Tasks
 
@@ -48,7 +48,7 @@
 
 **Tests:** `apps/tldw-frontend/__tests__/app/app-layout.test.tsx`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 

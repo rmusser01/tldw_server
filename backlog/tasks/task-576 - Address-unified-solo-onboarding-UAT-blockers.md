@@ -13,6 +13,8 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-05-31-unified-solo-onboarding-uat-repair-design.md
 - Docs/superpowers/plans/2026-05-31-unified-solo-onboarding-uat-repair-implementation-plan.md
+- apps/tldw-frontend/pages/_app.tsx
+- apps/tldw-frontend/__tests__/app/app-layout.test.tsx
 ---
 
 ## Description
@@ -28,7 +30,7 @@ Plan and implement repairs required for a clean first-time solo-user walkthrough
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design spec created and reviewed: Docs/superpowers/specs/2026-05-31-unified-solo-onboarding-uat-repair-design.md. Implementation plan created: Docs/superpowers/plans/2026-05-31-unified-solo-onboarding-uat-repair-implementation-plan.md. Cleanup preflight completed on 2026-05-31: pruned stale Git worktree metadata, removed 123 clean merged non-current worktrees without force, skipped 13 dirty/untracked worktrees, and verified free space at 134GiB. Next step is Stage 1 red-green implementation.
+Design spec created and reviewed: Docs/superpowers/specs/2026-05-31-unified-solo-onboarding-uat-repair-design.md. Implementation plan created: Docs/superpowers/plans/2026-05-31-unified-solo-onboarding-uat-repair-implementation-plan.md. Cleanup preflight completed on 2026-05-31: pruned stale Git worktree metadata, removed 123 clean merged non-current worktrees without force, skipped 13 dirty/untracked worktrees, and verified free space at 134GiB. Stage 1 complete: generic first-run routes now target `/`, `/` is the unified setup host bypass, and explicit character-chat onboarding remains character-specific. Verification: `bunx vitest run __tests__/app/app-layout.test.tsx --reporter=default` passed. Next step is Stage 2 quickstart WebUI auth handoff.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
