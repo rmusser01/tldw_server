@@ -409,6 +409,10 @@ def _public_first_run_step_list(value: object) -> list[str]:
     return [step for step in value if _is_public_first_run_step_name(step)]
 
 
+def _safe_first_run_skip_reason(value: object) -> str | None:
+    return value if isinstance(value, str) and _is_public_first_run_step_value(value) else None
+
+
 def _safe_public_first_chat_metadata_value(value: object) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
@@ -444,12 +448,7 @@ def _public_first_run_state(state: FirstRunStateResponse) -> FirstRunStateRespon
     payload["completed_steps"] = _public_first_run_step_list(payload.get("completed_steps"))
     payload["acknowledged_steps"] = _public_first_run_step_list(payload.get("acknowledged_steps"))
     payload["skipped_steps"] = _public_first_run_step_list(payload.get("skipped_steps"))
-    skip_reason = payload.get("skip_reason")
-    payload["skip_reason"] = (
-        skip_reason
-        if isinstance(skip_reason, str) and _is_public_first_run_step_value(skip_reason)
-        else None
-    )
+    payload["skip_reason"] = _safe_first_run_skip_reason(payload.get("skip_reason"))
     step_data = payload.get("step_data")
     if isinstance(step_data, dict):
         payload["step_data"] = {
@@ -1171,7 +1170,8 @@ async def skip_first_run(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> FirstRunStateResponse:
     try:
-        return _public_first_run_state(_first_run_store().mark_skipped(reason=payload.reason))
+        safe_reason = _safe_first_run_skip_reason(payload.reason)
+        return _public_first_run_state(_first_run_store().mark_skipped(reason=safe_reason))
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 

@@ -126,21 +126,29 @@ def test_first_run_skip_endpoint_records_skipped(monkeypatch, tmp_path, setup_cl
     assert body["skip_reason"] == "user_skip"
 
 
-def test_first_run_skip_endpoint_filters_secret_like_reason(monkeypatch, tmp_path, setup_client):
+@pytest.mark.parametrize("reason", ["hf_abcdef1234567890", "/Users/me/.env"])
+def test_first_run_skip_endpoint_filters_unsafe_reason_before_persistence(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+    reason,
+):
     state_path = tmp_path / "first_run_state.json"
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     _setup_needs_setup(monkeypatch)
 
     response = setup_client.post(
         "/api/v1/setup/first-run/skip",
-        json={"reason": "hf_abcdef1234567890"},
+        json={"reason": reason},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "skipped"
     assert body["skip_reason"] is None
-    assert "hf_abcdef1234567890" not in str(body)
+    assert reason not in str(body)
+    assert FirstRunStateStore(state_path).load().skip_reason is None
+    assert reason not in state_path.read_text(encoding="utf-8")
 
 
 def test_first_run_metadata_returns_auth_and_setup_path_guidance(monkeypatch, tmp_path, setup_client):
