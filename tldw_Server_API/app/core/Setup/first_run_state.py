@@ -209,8 +209,10 @@ class FirstRunStateStore:
                     state.acknowledged_steps.append(step)
                 elif data.get("acknowledged") is not True and step in state.acknowledged_steps:
                     state.acknowledged_steps.remove(step)
-            elif step in REQUIRED_FIRST_RUN_STEPS and step in state.acknowledged_steps:
-                state.acknowledged_steps.remove(step)
+            elif step in REQUIRED_FIRST_RUN_STEPS:
+                state.step_data.setdefault(step, {})["acknowledged"] = False
+                if step in state.acknowledged_steps:
+                    state.acknowledged_steps.remove(step)
             _sync_step_completion(state, step)
 
         return self._mutate_state(_update)

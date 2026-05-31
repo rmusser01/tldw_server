@@ -85,6 +85,26 @@ def test_required_step_completion_is_revoked_when_acknowledgement_is_removed(tmp
     assert "providers" not in state.completed_steps
 
 
+def test_required_step_without_data_revokes_acknowledgement_for_completion(tmp_path: Path):
+    store = FirstRunStateStore(tmp_path / "first_run_state.json")
+
+    for step in REQUIRED_FIRST_RUN_STEPS:
+        store.update_step(step, {"acknowledged": True})
+    state = store.update_step("providers")
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+
+    assert "providers" not in state.acknowledged_steps
+    assert "providers" not in state.completed_steps
+    with pytest.raises(InvalidFirstRunTransition) as excinfo:
+        store.mark_completed()
+
+    assert "required_steps_missing:providers" in str(excinfo.value)
+
+
 def test_blocked_state_rejects_normal_mutations(tmp_path: Path):
     path = tmp_path / "first_run_state.json"
     path.write_text("{invalid-json", encoding="utf-8")
