@@ -17,6 +17,12 @@ describe("detectTypeFromUrl", () => {
     expect(detectTypeFromUrl("https://soundcloud.com.evil.test/track")).toBe("web")
   })
 
+  it("detects direct text and Markdown URLs as documents", () => {
+    expect(detectTypeFromUrl("https://example.com/source.md")).toBe("document")
+    expect(detectTypeFromUrl("https://example.com/source.markdown")).toBe("document")
+    expect(detectTypeFromUrl("https://example.com/source.txt")).toBe("document")
+  })
+
   it("identifies YouTube playlist URLs as preflight candidates", () => {
     expect(
       detectPlaylistPreflightCandidate(

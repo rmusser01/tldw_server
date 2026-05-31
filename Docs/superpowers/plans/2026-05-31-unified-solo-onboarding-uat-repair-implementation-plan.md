@@ -279,9 +279,11 @@ requestQuickIngestOpen(
 - Web-scrape persist responses are normalized so success surfaces a persisted media id when the backend returns `media_ids`.
 - This repair does not introduce a new durable web-ingest jobs backend in this PR.
 
-**Tests:** `apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts`
+**Tests:**
+- `apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts`
+- `apps/packages/ui/src/components/Common/QuickIngest/__tests__/AddContentStep.url-detection.test.ts`
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -293,26 +295,26 @@ requestQuickIngestOpen(
 
 ### Red Tests
 
-- [ ] Add a test showing an ordinary URL like `https://example.com/article` calls `processWebScrape` and does not enqueue `/media/ingest/jobs`.
-- [ ] Add a test showing a direct Markdown URL like `https://example.com/source.md` still follows the document/media route.
-- [ ] Add a test showing a web-scrape persist response with `{ status: "persist-ok", media_ids: [123] }` is normalized as a successful result with media id `123`.
-- [ ] Add a type-detection test for `.md`/`.markdown`/`.txt` if the UI detection logic has test coverage.
-- [ ] Run the focused tests and confirm the new URL-routing assertions fail before implementation.
+- [x] Add a test showing an ordinary URL like `https://example.com/article` calls `processWebScrape` and does not enqueue `/media/ingest/jobs`.
+- [x] Add a test showing a direct Markdown URL like `https://example.com/source.md` still follows the document/media route.
+- [x] Add a test showing a web-scrape persist response with `{ status: "persist-ok", media_ids: [123] }` is normalized as a successful result with media id `123`.
+- [x] Add a type-detection test for `.md`/`.markdown`/`.txt` if the UI detection logic has test coverage.
+- [x] Run the focused tests and confirm the new URL-routing assertions fail before implementation.
 
 ### Implementation
 
-- [ ] Update `AddContentStep.tsx` URL detection so `.md`, `.markdown`, and `.txt` are detected as document/text sources instead of generic web sources.
-- [ ] Keep ordinary URLs as web/html sources.
-- [ ] In `quick-ingest-batch.ts`, route `resolvedType === "html"` or equivalent ordinary web source entries through `client.processWebScrape()` before the generic ingest job path, including when `storeRemote` is true.
-- [ ] Use the backend’s existing persist mode for ordinary web URLs. Do not add a new durable web-job backend in this PR.
-- [ ] Normalize the backend web-scrape persist response:
+- [x] Update `AddContentStep.tsx` URL detection so `.md`, `.markdown`, and `.txt` are detected as document/text sources instead of generic web sources.
+- [x] Keep ordinary URLs as web/html sources.
+- [x] In `quick-ingest-batch.ts`, route `resolvedType === "html"` or equivalent ordinary web source entries through `processWebScrape()` before the generic ingest job path, including when `storeRemote` is true.
+- [x] Use the backend’s existing persist mode for ordinary web URLs. Do not add a new durable web-job backend in this PR.
+- [x] Normalize the backend web-scrape persist response:
 
 ```ts
 const mediaId = Array.isArray(response.media_ids) ? response.media_ids[0] : response.media_id;
 ```
 
-- [ ] Ensure direct supported file URLs continue through the existing media/document job path.
-- [ ] Run the focused tests and confirm they pass.
+- [x] Ensure direct supported file URLs continue through the existing media/document job path.
+- [x] Run the focused tests and confirm they pass.
 - [ ] Commit with message `fix: route quick ingest web sources correctly`.
 
 ---
