@@ -461,6 +461,8 @@ def test_gateway_profile_runtime_treats_non_list_backend_tools_as_empty() -> Non
 
 def test_gateway_profile_bootstrap_seeds_default_builtin_preset_profile() -> None:
     from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
+    from mcp_unified.gateway.profiles import GatewayProfileManager
+    from mcp_unified.profiles.store import InMemoryProfileAssignmentStore
 
     backend = _MultiToolGatewayRuntime()
     bootstrap = asyncio.run(
@@ -488,6 +490,14 @@ def test_gateway_profile_bootstrap_seeds_default_builtin_preset_profile() -> Non
 
     assert bootstrap.default_profile_id == "project-researcher"
     assert bootstrap.seeded_profile_ids == ("project-researcher",)
+    assert isinstance(bootstrap.assignment_store, InMemoryProfileAssignmentStore)
+    assert bootstrap.audit_store is None
+    assert isinstance(bootstrap.profile_manager, GatewayProfileManager)
+    assert bootstrap.profile_manager.assignment_store is bootstrap.assignment_store
+    assert bootstrap.store_metadata.to_payload() == {
+        "kind": "memory",
+        "persistent": False,
+    }
     assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["echo.search"]
     assert allowed.json()["result"]["content"][0]["text"] == "echo.search:bootstrap"
 
@@ -547,6 +557,46 @@ def test_gateway_profile_bootstrap_keeps_explicit_default_when_seeding_preset() 
     assert bootstrap.seeded_profile_ids == ("project-researcher",)
     assert {profile.id for profile in stored_profiles} == {"reviewer", "project-researcher"}
     assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["admin.delete"]
+
+
+def test_gateway_profile_bootstrap_manager_default_changes_runtime_without_restart() -> None:
+    """Share default assignment state between bootstrap manager and runtime."""
+
+    from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
+
+    backend = _MultiToolGatewayRuntime()
+    reviewer = _profile_with_allowed_tools("reviewer", ["echo.search"])
+    architect = _profile_with_allowed_tools("architect", ["admin.delete"])
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway(
+            backend,
+            profiles=[reviewer, architect],
+        )
+    )
+    app = create_gateway_app(bootstrap.runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        asyncio.run(bootstrap.profile_manager.set_default_profile("reviewer"))
+        first = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-default-1"},
+        )
+
+        asyncio.run(bootstrap.profile_manager.set_default_profile("architect"))
+        second = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-default-2"},
+        )
+
+        explicit = client.post(
+            "/mcp/request",
+            headers={"X-MCP-Profile": "reviewer"},
+            json={"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": "tools-explicit"},
+        )
+
+    assert [tool["name"] for tool in first.json()["result"]["tools"]] == ["echo.search"]
+    assert [tool["name"] for tool in second.json()["result"]["tools"]] == ["admin.delete"]
+    assert [tool["name"] for tool in explicit.json()["result"]["tools"]] == ["echo.search"]
 
 
 def test_gateway_profile_bootstrap_rejects_existing_preset_profile_collision() -> None:
@@ -627,6 +677,15 @@ def test_gateway_config_bootstrap_uses_sqlite_profile_store(tmp_path: Path) -> N
     stored_profiles = asyncio.run(bootstrap.profile_store.list_profiles())
 
     assert isinstance(bootstrap.profile_store, SQLiteMCPStore)
+    assert bootstrap.assignment_store is bootstrap.profile_store
+    assert bootstrap.audit_store is bootstrap.profile_store
+    assert bootstrap.profile_manager.profile_store is bootstrap.profile_store
+    assert bootstrap.profile_manager.assignment_store is bootstrap.assignment_store
+    assert bootstrap.profile_manager.audit_store is bootstrap.audit_store
+    assert bootstrap.store_metadata.to_payload() == {
+        "kind": "sqlite",
+        "persistent": True,
+    }
     assert sqlite_path.exists()
     assert [profile.id for profile in stored_profiles] == ["project-researcher"]
     asyncio.run(bootstrap.profile_store.aclose())
