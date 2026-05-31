@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -72,6 +73,98 @@ def test_later_unacknowledged_step_blocks_completion(tmp_path: Path):
         store.mark_completed()
 
     assert "required_steps_missing:providers" in str(excinfo.value)
+
+
+def test_required_step_completion_is_revoked_when_acknowledgement_is_removed(tmp_path: Path):
+    store = FirstRunStateStore(tmp_path / "first_run_state.json")
+
+    store.update_step("providers", {"acknowledged": True})
+    state = store.update_step("providers", {"acknowledged": False})
+
+    assert "providers" not in state.acknowledged_steps
+    assert "providers" not in state.completed_steps
+
+
+def test_blocked_state_rejects_normal_mutations(tmp_path: Path):
+    path = tmp_path / "first_run_state.json"
+    path.write_text("{invalid-json", encoding="utf-8")
+    store = FirstRunStateStore(path)
+    assert store.load().status == FirstRunStatus.BLOCKED
+
+    with pytest.raises(InvalidFirstRunTransition, match="state_blocked"):
+        store.update_step("providers", {"acknowledged": True})
+    with pytest.raises(InvalidFirstRunTransition, match="state_blocked"):
+        store.record_first_chat_success(
+            provider="openai",
+            model="gpt-4.1-mini",
+            response_id="chatcmpl-test",
+        )
+    with pytest.raises(InvalidFirstRunTransition, match="state_blocked"):
+        store.mark_completed()
+    with pytest.raises(InvalidFirstRunTransition, match="state_blocked"):
+        store.mark_skipped(reason="user_skip")
+
+
+def test_skipped_state_rejects_normal_mutations_but_skip_is_idempotent(tmp_path: Path):
+    store = FirstRunStateStore(tmp_path / "first_run_state.json")
+    store.mark_skipped(reason="user_skip")
+
+    with pytest.raises(InvalidFirstRunTransition, match="state_skipped"):
+        store.update_step("providers", {"acknowledged": True})
+    with pytest.raises(InvalidFirstRunTransition, match="state_skipped"):
+        store.record_first_chat_success(
+            provider="openai",
+            model="gpt-4.1-mini",
+            response_id="chatcmpl-test",
+        )
+    with pytest.raises(InvalidFirstRunTransition, match="state_skipped"):
+        store.mark_completed()
+
+    state = store.mark_skipped(reason="ignored_later_reason")
+    assert state.status == FirstRunStatus.SKIPPED
+    assert state.skip_reason == "user_skip"
+
+
+def test_completed_state_rejects_normal_mutations(tmp_path: Path):
+    store = FirstRunStateStore(tmp_path / "first_run_state.json")
+
+    for step in REQUIRED_FIRST_RUN_STEPS:
+        store.update_step(step, {"acknowledged": True})
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    store.mark_completed()
+
+    with pytest.raises(InvalidFirstRunTransition, match="setup_already_completed"):
+        store.update_step("providers", {"acknowledged": False})
+    with pytest.raises(InvalidFirstRunTransition, match="setup_already_completed"):
+        store.record_first_chat_success(
+            provider="openai",
+            model="gpt-4.1-mini",
+            response_id="chatcmpl-test-2",
+        )
+    with pytest.raises(InvalidFirstRunTransition, match="setup_already_completed"):
+        store.mark_completed()
+    with pytest.raises(InvalidFirstRunTransition, match="setup_already_completed"):
+        store.mark_skipped(reason="user_skip")
+
+
+def test_mutating_methods_use_state_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    calls: list[str] = []
+
+    @contextmanager
+    def capture_lock(self):
+        calls.append(str(self.path))
+        yield
+
+    monkeypatch.setattr(FirstRunStateStore, "_state_lock", capture_lock, raising=False)
+    store = FirstRunStateStore(tmp_path / "first_run_state.json")
+
+    store.update_step("providers", {"default_provider": "openai"})
+
+    assert calls == [str(tmp_path / "first_run_state.json")]
 
 
 def test_corrupt_state_file_is_quarantined_and_loads_blocked_recovery_state(tmp_path: Path):

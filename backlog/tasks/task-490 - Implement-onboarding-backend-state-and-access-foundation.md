@@ -42,7 +42,7 @@ Started Task 1 subagent-driven slice: backend first-run state store and setup sc
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 1 review fix slice: hardened first-run state persistence with atomic writes, corrupt/schema-invalid state quarantine, persisted BLOCKED recovery state context, current-state acknowledgement revocation, and core-owned first-run domain models re-exported by setup_schemas. TASK-490 remains In Progress because Task 2 endpoint/access-boundary work is intentionally not implemented. Red phase captured 3 expected failures in tldw_Server_API/tests/Setup/test_first_run_state.py before production changes. Verification after fix: test_first_run_state.py - 9 passed; test_setup_manager_masking.py - 1 passed; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings; git diff --check passed.
+Task 1 re-review fix slice: added terminal-state transition guards for BLOCKED/SKIPPED/COMPLETED states, idempotent skipped handling without reason overwrite, lock-file backed read-modify-write mutation path, required-step completed_steps revocation when acknowledgement is false/missing, and read recovery for JSON, schema, Unicode, and OSError failures where possible. TASK-490 remains In Progress because Task 2 endpoint/access-boundary work is intentionally not implemented. Red phase captured 5 expected failures in test_first_run_state.py before production changes. Verification after fix: test_first_run_state.py - 14 passed; test_setup_manager_masking.py - 1 passed; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 <!-- SECTION:FINAL_SUMMARY:END -->
 
