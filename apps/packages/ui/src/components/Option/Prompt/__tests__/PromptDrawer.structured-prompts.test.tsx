@@ -77,7 +77,10 @@ describe("PromptDrawer structured prompts", () => {
       screen.getByRole("button", { name: /convert to structured/i })
     )
 
-    expect(await screen.findByText("Multi-section prompt mode")).toBeInTheDocument()
+    const structuredModeTitle = await screen.findByText("Multi-section prompt mode")
+    expect(structuredModeTitle).toBeInTheDocument()
+    const alert = structuredModeTitle.closest('[data-ds-component="Alert"]')
+    expect(alert).not.toBeNull()
     expect(screen.getByTestId("prompt-drawer-system")).toBeDisabled()
     expect(screen.getByTestId("prompt-drawer-user")).toBeDisabled()
     expect(screen.getByTestId("structured-block-list")).toBeInTheDocument()

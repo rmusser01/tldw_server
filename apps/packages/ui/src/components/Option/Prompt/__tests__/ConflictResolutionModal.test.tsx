@@ -70,6 +70,10 @@ describe("ConflictResolutionModal", () => {
     expect(screen.getByText("Local version")).toBeInTheDocument()
     expect(screen.getByText("Server version")).toBeInTheDocument()
     expect(screen.getAllByText("Changed").length).toBeGreaterThan(0)
+    const diffAlert = screen
+      .getByText("Differences detected between local and server versions.")
+      .closest('[data-ds-component="Alert"]')
+    expect(diffAlert).not.toBeNull()
 
     await user.click(screen.getByRole("button", { name: "Keep mine" }))
     expect(onResolve).toHaveBeenCalledWith("keep_local")
@@ -87,6 +91,10 @@ describe("ConflictResolutionModal", () => {
     )
 
     expect(screen.getByText("Conflict details unavailable")).toBeInTheDocument()
+    const unavailableAlert = screen
+      .getByText("Conflict details unavailable")
+      .closest('[data-ds-component="Alert"]')
+    expect(unavailableAlert).not.toBeNull()
     expect(screen.getByRole("button", { name: "Keep mine" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Keep server" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Keep both" })).toBeDisabled()
