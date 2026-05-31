@@ -550,61 +550,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Prompt/Studio/TestCases/TestCaseBulkPanel.tsx:Alert#antd-alert-testcasebulkpanel-type-info-line-172-50bcsa",
-    "path": "src/components/Option/Prompt/Studio/TestCases/TestCaseBulkPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Prompt/Studio/TestCases/TestCaseBulkPanel.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Prompt/Studio/TestCases/TestCaseBulkPanel.tsx:Alert#antd-alert-testcasebulkpanel-type-info-line-239-xqvozm",
-    "path": "src/components/Option/Prompt/Studio/TestCases/TestCaseBulkPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Prompt/Studio/TestCases/TestCaseBulkPanel.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Prompt/Studio/TestCases/TestCaseGenerateModal.tsx:Alert",
-    "path": "src/components/Option/Prompt/Studio/TestCases/TestCaseGenerateModal.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Prompt/Studio/TestCases/TestCaseGenerateModal.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Prompt/Studio/TestCases/TestCaseRunModal.tsx:Alert",
-    "path": "src/components/Option/Prompt/Studio/TestCases/TestCaseRunModal.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Prompt/Studio/TestCases/TestCaseRunModal.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Prompt/Studio/TestCases/TestCaseRunModal.tsx:Tag",
-    "path": "src/components/Option/Prompt/Studio/TestCases/TestCaseRunModal.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Tag",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Tag product-state UI in src/components/Option/Prompt/Studio/TestCases/TestCaseRunModal.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Settings/chatbooks.tsx:Alert",
     "path": "src/components/Option/Settings/chatbooks.tsx",
     "rule": "antd-product-state-import",

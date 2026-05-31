@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Modal, Select, notification, Alert, Spin, Table, Tag } from "antd"
+import { Modal, Select, notification, Spin, Table } from "antd"
 import { Play, CheckCircle2, XCircle, Clock } from "lucide-react"
 import React, { useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -10,6 +10,7 @@ import {
   type TestRunResult
 } from "@/services/prompt-studio"
 import { Button } from "@/components/Common/Button"
+import { Alert as DsAlert, Badge } from "@/components/ui/primitives"
 
 type TestCaseRunModalProps = {
   open: boolean
@@ -102,9 +103,8 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
       <div className="mt-4 space-y-4">
         {!results && (
           <>
-            <Alert
-              type="info"
-              showIcon
+            <DsAlert
+              variant="info"
               title={t("managePrompts.studio.testCases.runInfo", {
                 defaultValue:
                   "Run {{count}} test cases against a prompt to see the outputs.",
@@ -157,13 +157,15 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
                   defaultValue: "Results"
                 })}
               </span>
-              <Tag color="green" icon={<CheckCircle2 className="size-3" />}>
+              <Badge variant="success" size="sm">
+                <CheckCircle2 className="size-3" aria-hidden="true" />
                 {passCount} passed
-              </Tag>
+              </Badge>
               {failCount > 0 && (
-                <Tag color="red" icon={<XCircle className="size-3" />}>
+                <Badge variant="danger" size="sm">
+                  <XCircle className="size-3" aria-hidden="true" />
                   {failCount} failed
-                </Tag>
+                </Badge>
               )}
             </div>
 
@@ -191,19 +193,24 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
                   width: 80,
                   render: (_, record) =>
                     record.error ? (
-                      <Tag color="red" icon={<XCircle className="size-3" />}>
+                      <Badge variant="danger" size="sm">
+                        <XCircle className="size-3" aria-hidden="true" />
                         Error
-                      </Tag>
+                      </Badge>
                     ) : record.passed ? (
-                      <Tag color="green" icon={<CheckCircle2 className="size-3" />}>
+                      <Badge variant="success" size="sm">
+                        <CheckCircle2 className="size-3" aria-hidden="true" />
                         Pass
-                      </Tag>
+                      </Badge>
                     ) : record.passed === false ? (
-                      <Tag color="orange" icon={<XCircle className="size-3" />}>
+                      <Badge variant="warning" size="sm">
+                        <XCircle className="size-3" aria-hidden="true" />
                         Fail
-                      </Tag>
+                      </Badge>
                     ) : (
-                      <Tag>Run</Tag>
+                      <Badge variant="secondary" size="sm">
+                        Run
+                      </Badge>
                     )
                 },
                 {

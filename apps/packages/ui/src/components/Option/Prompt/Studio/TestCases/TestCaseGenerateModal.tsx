@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Modal, Form, InputNumber, Select, notification, Alert, Spin } from "antd"
+import { Modal, Form, InputNumber, Select, notification, Spin } from "antd"
 import { Sparkles } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -10,6 +10,7 @@ import {
   type Prompt
 } from "@/services/prompt-studio"
 import { Button } from "@/components/Common/Button"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 
 type TestCaseGenerateModalProps = {
   open: boolean
@@ -94,9 +95,8 @@ export const TestCaseGenerateModal: React.FC<TestCaseGenerateModalProps> = ({
       destroyOnHidden
     >
       <div className="mt-4 space-y-4">
-        <Alert
-          type="info"
-          showIcon
+        <DsAlert
+          variant="info"
           title={t("managePrompts.studio.testCases.generateInfo", {
             defaultValue:
               "Use AI to automatically generate test cases based on your prompt structure."
