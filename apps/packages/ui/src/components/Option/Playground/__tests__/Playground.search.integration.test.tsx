@@ -56,6 +56,17 @@ const mobileViewportState = vi.hoisted(() => ({
   value: false
 }))
 
+const desktopViewportState = vi.hoisted(() => ({
+  value: true
+}))
+
+const artifactFixture = vi.hoisted(() => ({
+  id: "artifact-1",
+  title: "Generated table",
+  content: "a,b\n1,2",
+  kind: "table" as const
+}))
+
 const storeOptionState = vi.hoisted(() => ({
   value: {
     compareParentByHistory: {} as Record<
@@ -67,6 +78,11 @@ const storeOptionState = vi.hoisted(() => ({
 
 const routerState = vi.hoisted(() => ({
   navigate: vi.fn()
+}))
+
+const chatSettingsState = vi.hoisted(() => ({
+  syncChatSettingsForServerChat: vi.fn(async () => null),
+  applyChatSettingsPatch: vi.fn(async () => null)
 }))
 
 vi.mock("react-i18next", () => ({
@@ -177,7 +193,15 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => mobileViewportState.value
+  useMobile: () => mobileViewportState.value,
+  useDesktop: () => desktopViewportState.value
+}))
+
+vi.mock("@/services/chat-settings", () => ({
+  syncChatSettingsForServerChat: (...args: unknown[]) =>
+    chatSettingsState.syncChatSettingsForServerChat(...args),
+  applyChatSettingsPatch: (...args: unknown[]) =>
+    chatSettingsState.applyChatSettingsPatch(...args)
 }))
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
@@ -206,7 +230,11 @@ describe("Playground thread search integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mobileViewportState.value = false
+    desktopViewportState.value = true
     artifactsState.value.isOpen = false
+    artifactsState.value.active = null
+    artifactsState.value.history = []
+    artifactsState.value.unreadCount = 0
     storeOptionState.value.compareParentByHistory = {}
   })
 
@@ -266,6 +294,56 @@ describe("Playground thread search integration", () => {
       screen.queryByTestId("playground-chat-workflows-trigger")
     ).not.toBeInTheDocument()
     expect(routerState.navigate).not.toHaveBeenCalled()
+  })
+
+  it("shows a desktop right-edge artifacts expand button only when an artifact is active and the rail is closed", () => {
+    artifactsState.value.active = artifactFixture
+    artifactsState.value.isOpen = false
+
+    render(<Playground />)
+
+    expect(
+      screen.getByRole("button", { name: "Expand artifacts rail" })
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("artifacts-panel")).not.toBeInTheDocument()
+  })
+
+  it("does not show the right-edge artifacts expand button without an active artifact", () => {
+    artifactsState.value.active = null
+    artifactsState.value.isOpen = false
+
+    render(<Playground />)
+
+    expect(
+      screen.queryByRole("button", { name: "Expand artifacts rail" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("opens artifacts from the right edge and marks them read", () => {
+    artifactsState.value.active = artifactFixture
+    artifactsState.value.isOpen = false
+
+    render(<Playground />)
+    fireEvent.click(screen.getByRole("button", { name: "Expand artifacts rail" }))
+
+    expect(artifactsState.value.setOpen).toHaveBeenCalledWith(true)
+    expect(artifactsState.value.markRead).toHaveBeenCalledTimes(1)
+  })
+
+  it("routes artifact focus events to the edge button when the rail is closed", async () => {
+    artifactsState.value.active = artifactFixture
+    artifactsState.value.isOpen = false
+
+    render(<Playground />)
+    const edgeButton = screen.getByRole("button", {
+      name: "Expand artifacts rail"
+    })
+
+    window.dispatchEvent(new CustomEvent("tldw:focus-artifacts-trigger"))
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(edgeButton)
+    })
   })
 
   it("shows mobile artifacts sheet context and returns focus to trigger when closing", async () => {
