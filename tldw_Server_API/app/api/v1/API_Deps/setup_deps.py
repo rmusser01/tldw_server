@@ -39,6 +39,7 @@ _SETUP_PROXY_HEADERS = (
     "x-forwarded-host",
     "x-forwarded-proto",
 )
+_SETUP_PROXY_CLIENT_IP_HEADERS = ("x-forwarded-for", "x-real-ip")
 _REMOTE_SETUP_WRITE_DENIED_DETAIL = (
     "Setup writes are only available from localhost unless remote setup access is explicitly enabled."
 )
@@ -244,6 +245,28 @@ def has_setup_proxy_headers(request: Request) -> bool:
     return any(key in headers for key in _SETUP_PROXY_HEADERS)
 
 
+def has_setup_proxy_client_ip_headers(request: Request) -> bool:
+    """Return True when proxy headers claim to identify the original client."""
+
+    headers = request.headers
+    if any(key in headers for key in _SETUP_PROXY_CLIENT_IP_HEADERS):
+        return True
+
+    forwarded = headers.get("forwarded")
+    if not forwarded:
+        return False
+
+    for forwarded_entry in forwarded.split(","):
+        for parameter in forwarded_entry.split(";"):
+            if "=" not in parameter:
+                continue
+            key, _value = parameter.split("=", 1)
+            if key.strip().lower() == "for":
+                return True
+
+    return False
+
+
 def _is_loopback_host(host: str | None) -> bool:
     """Return True if the provided hostname/IP represents a local loopback address."""
     if not host:
@@ -298,6 +321,7 @@ def _is_local_setup_request(
     method: str,
     path: str,
     has_proxy_headers: bool,
+    has_proxy_client_ip_headers: bool,
     client_is_local: bool,
     forwarded_is_local: bool,
     host_header_is_local: bool,
@@ -308,9 +332,13 @@ def _is_local_setup_request(
             return False
         if not has_proxy_headers and client_is_local:
             return True
+        if has_proxy_headers and not has_proxy_client_ip_headers:
+            return client_is_local
         return bool(has_proxy_headers and client_is_local and forwarded_is_local)
 
     if has_proxy_headers:
+        if not has_proxy_client_ip_headers:
+            return client_is_local and host_header_is_local
         return client_is_local and forwarded_is_local and host_header_is_local
 
     return client_is_local and host_header_is_local
@@ -334,6 +362,7 @@ async def require_local_setup_access(request: Request) -> None:
     method = (request.method or "").upper()
 
     has_proxy_headers = _has_proxy_headers(request)
+    has_proxy_client_ip_headers = has_setup_proxy_client_ip_headers(request)
     client_host = request.client.host if request.client else None
     forwarded_ip = _first_forwarded_ip(request)
     client_is_local = _is_loopback_host(client_host)
@@ -343,6 +372,7 @@ async def require_local_setup_access(request: Request) -> None:
         method=method,
         path=path,
         has_proxy_headers=has_proxy_headers,
+        has_proxy_client_ip_headers=has_proxy_client_ip_headers,
         client_is_local=client_is_local,
         forwarded_is_local=forwarded_is_local,
         host_header_is_local=host_header_is_local,
@@ -370,6 +400,8 @@ async def require_local_setup_access(request: Request) -> None:
             )
         if not has_proxy_headers and client_is_local:
             return
+        if has_proxy_headers and not has_proxy_client_ip_headers and client_is_local:
+            return
         if has_proxy_headers and client_is_local and forwarded_is_local:
             logger.debug("Allowing proxied localhost GET to /api/v1/setup/config with loopback client and forwarded IP")
             return
@@ -389,6 +421,8 @@ async def require_local_setup_access(request: Request) -> None:
         )
 
     if has_proxy_headers:
+        if not has_proxy_client_ip_headers and client_is_local and host_header_is_local:
+            return
         if not (client_is_local and forwarded_is_local and host_header_is_local):
             logger.warning(
                 "Blocked setup access via proxy (client={}, forwarded={}, host_local={})",

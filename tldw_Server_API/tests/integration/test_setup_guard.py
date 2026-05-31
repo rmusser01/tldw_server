@@ -77,6 +77,50 @@ async def test_setup_guard_allows_local_proxy(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_setup_guard_allows_local_rewrite_metadata_without_forwarded_ip(monkeypatch):
+    """Local Next rewrites may send proxy metadata without a client IP chain."""
+    monkeypatch.delenv("TLDW_SETUP_ALLOW_REMOTE", raising=False)
+    monkeypatch.delenv("TLDW_SETUP_TRUST_PROXY", raising=False)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/v1/setup/first-run/state",
+        "client": ("127.0.0.1", 12345),
+        "headers": [
+            (b"host", b"127.0.0.1:18102"),
+            (b"x-forwarded-host", b"127.0.0.1:18102"),
+            (b"x-forwarded-proto", b"http"),
+        ],
+    }
+    request = Request(scope)
+    await require_local_setup_access(request)
+
+
+@pytest.mark.asyncio
+async def test_setup_guard_blocks_remote_rewrite_metadata_without_forwarded_ip(monkeypatch):
+    """Remote clients cannot become local by sending rewrite-only proxy metadata."""
+    monkeypatch.delenv("TLDW_SETUP_ALLOW_REMOTE", raising=False)
+    monkeypatch.delenv("TLDW_SETUP_TRUST_PROXY", raising=False)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/v1/setup/first-run/state",
+        "client": ("203.0.113.50", 12345),
+        "headers": [
+            (b"host", b"127.0.0.1:18102"),
+            (b"x-forwarded-host", b"127.0.0.1:18102"),
+            (b"x-forwarded-proto", b"http"),
+        ],
+    }
+    request = Request(scope)
+    with pytest.raises(HTTPException) as exc:
+        await require_local_setup_access(request)
+    assert exc.value.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
 async def test_setup_guard_config_allows_remote(monkeypatch):
     """Config flag can relax locality restriction for authenticated admin callers."""
     monkeypatch.delenv("TLDW_SETUP_ALLOW_REMOTE", raising=False)
