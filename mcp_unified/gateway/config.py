@@ -9,7 +9,13 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from mcp_unified.interfaces.storage import AuditStore, ProfileAssignmentStore, ProfileStore
+from mcp_unified.interfaces.storage import (
+    AuditStore,
+    CredentialGrantStore,
+    ExternalRegistryStore,
+    ProfileAssignmentStore,
+    ProfileStore,
+)
 from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.profiles.store import (
     InMemoryProfileAssignmentStore,
@@ -17,6 +23,7 @@ from mcp_unified.profiles.store import (
 )
 
 from .bootstrap import GatewayProfileBootstrap, bootstrap_profile_gateway
+from .external_registry import GatewayExternalRegistryManager, GatewayStoreMetadata
 from .profiles import GatewayProfileStoreMetadata
 from .runtime import GatewayRuntime
 
@@ -90,6 +97,22 @@ class GatewayProfileStorageBundle:
     metadata: GatewayProfileStoreMetadata
 
 
+@dataclass(frozen=True, slots=True)
+class GatewayExternalRegistryStorageBundle:
+    """Resolved external registry, credential grant, audit stores and metadata."""
+
+    external_registry_store: ExternalRegistryStore
+    credential_grant_store: CredentialGrantStore | None
+    audit_store: AuditStore | None
+    metadata: GatewayStoreMetadata
+
+
+class ExternalRegistryStorageConfigurationError(ValueError):
+    """Raised when configured storage cannot support external registry management."""
+
+    reason_code = "external_registry_store_unavailable"
+
+
 async def bootstrap_profile_gateway_from_config(
     backend: GatewayRuntime,
     config: GatewayProfileBootstrapConfig | Mapping[str, Any] | None = None,
@@ -107,6 +130,16 @@ async def bootstrap_profile_gateway_from_config(
         assignment_store=assignment_store,
         audit_store=audit_store,
     )
+    external_registry_manager: GatewayExternalRegistryManager | None = None
+    if _supports_external_registry_store(storage.profile_store):
+        external_storage = build_gateway_external_registry_storage(
+            resolved_config.store,
+            external_registry_store=cast(ExternalRegistryStore, storage.profile_store),
+            audit_store=storage.audit_store,
+        )
+        external_registry_manager = external_registry_manager_from_storage(
+            external_storage,
+        )
 
     return await bootstrap_profile_gateway(
         backend,
@@ -117,6 +150,7 @@ async def bootstrap_profile_gateway_from_config(
         profiles=resolved_config.profiles,
         default_profile_id=resolved_config.default_profile_id,
         default_preset_id=resolved_config.default_preset_id,
+        external_registry_manager=external_registry_manager,
     )
 
 
@@ -171,6 +205,76 @@ def build_gateway_profile_storage(
 
     raise ValueError(
         f"Unsupported gateway profile store kind: {store_config.kind!r}"
+    )
+
+
+def build_gateway_external_registry_storage(
+    store_config: GatewayProfileStoreConfig | Mapping[str, Any],
+    *,
+    external_registry_store: ExternalRegistryStore | None = None,
+    credential_grant_store: CredentialGrantStore | None = None,
+    audit_store: AuditStore | None = None,
+) -> GatewayExternalRegistryStorageBundle:
+    """Resolve configured gateway external registry storage dependencies."""
+
+    if isinstance(store_config, Mapping):
+        store_config = GatewayProfileStoreConfig(**store_config)
+
+    if external_registry_store is not None:
+        return GatewayExternalRegistryStorageBundle(
+            external_registry_store=external_registry_store,
+            credential_grant_store=credential_grant_store
+            if credential_grant_store is not None
+            else (
+                cast(CredentialGrantStore, external_registry_store)
+                if _supports_credential_grant_store(external_registry_store)
+                else None
+            ),
+            audit_store=audit_store
+            if audit_store is not None
+            else (
+                cast(AuditStore, external_registry_store)
+                if _supports_audit_store(external_registry_store)
+                else None
+            ),
+            metadata=GatewayStoreMetadata(
+                kind=store_config.kind,
+                persistent=store_config.kind == "sqlite",
+            ),
+        )
+
+    if store_config.kind == "memory":
+        raise ExternalRegistryStorageConfigurationError(
+            "external registry management requires sqlite or an injected "
+            "equivalent external registry store"
+        )
+
+    if store_config.kind == "sqlite":
+        store = _build_external_registry_store(store_config)
+        return GatewayExternalRegistryStorageBundle(
+            external_registry_store=store,
+            credential_grant_store=credential_grant_store
+            if credential_grant_store is not None
+            else cast(CredentialGrantStore, store),
+            audit_store=audit_store if audit_store is not None else cast(AuditStore, store),
+            metadata=GatewayStoreMetadata(kind="sqlite", persistent=True),
+        )
+
+    raise ValueError(
+        f"Unsupported gateway external registry store kind: {store_config.kind!r}"
+    )
+
+
+def external_registry_manager_from_storage(
+    bundle: GatewayExternalRegistryStorageBundle,
+) -> GatewayExternalRegistryManager:
+    """Build an external registry manager from resolved storage dependencies."""
+
+    return GatewayExternalRegistryManager(
+        external_registry_store=bundle.external_registry_store,
+        credential_grant_store=bundle.credential_grant_store,
+        audit_store=bundle.audit_store,
+        store_metadata=bundle.metadata,
     )
 
 
@@ -245,6 +349,37 @@ def _supports_audit_store(candidate: object) -> bool:
     return all(
         callable(getattr(candidate, method_name, None))
         for method_name in ("append_event", "query_events")
+    )
+
+
+def _supports_credential_grant_store(candidate: object) -> bool:
+    """Return whether an object provides the credential-grant store API."""
+
+    return all(
+        callable(getattr(candidate, method_name, None))
+        for method_name in (
+            "get_grant",
+            "list_grants",
+            "upsert_grant",
+            "delete_grant",
+        )
+    )
+
+
+def _supports_external_registry_store(candidate: object) -> bool:
+    """Return whether an object provides the external-registry store API."""
+
+    return all(
+        callable(getattr(candidate, method_name, None))
+        for method_name in (
+            "get_server",
+            "list_servers",
+            "list_server_definitions",
+            "create_server",
+            "upsert_server",
+            "update_server",
+            "delete_server",
+        )
     )
 
 
@@ -351,6 +486,26 @@ def _build_profile_store(store_config: GatewayProfileStoreConfig) -> ProfileStor
     )
 
 
+def _build_external_registry_store(
+    store_config: GatewayProfileStoreConfig,
+) -> ExternalRegistryStore:
+    """Create the configured external registry store without early imports."""
+
+    if store_config.kind == "sqlite":
+        from mcp_unified.storage.sqlite import SQLiteMCPStore
+
+        sqlite_path = store_config.sqlite_path
+        if sqlite_path is None:
+            raise ValueError(
+                "sqlite_path is required for sqlite external registry store"
+            )
+        return SQLiteMCPStore(sqlite_path)
+    raise ValueError(
+        "external registry management requires sqlite or an injected equivalent "
+        "external registry store"
+    )
+
+
 def _copy_profile(profile: MCPProfile | Mapping[str, Any]) -> MCPProfile:
     """Return a validated, copy-isolated profile config value."""
 
@@ -361,11 +516,14 @@ def _copy_profile(profile: MCPProfile | Mapping[str, Any]) -> MCPProfile:
 
 __all__ = [
     "GatewayConfigFormat",
+    "GatewayExternalRegistryStorageBundle",
     "GatewayProfileBootstrapConfig",
     "GatewayProfileStoreConfig",
     "GatewayProfileStoreKind",
     "GatewayProfileStorageBundle",
     "bootstrap_profile_gateway_from_config",
+    "build_gateway_external_registry_storage",
     "build_gateway_profile_storage",
+    "external_registry_manager_from_storage",
     "load_gateway_profile_bootstrap_config",
 ]

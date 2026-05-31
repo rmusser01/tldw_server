@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mcp_unified.gateway.profiles import GatewayProfileManager, GatewayProfileStoreMetadata
 from mcp_unified.interfaces.storage import AuditStore, ProfileAssignmentStore, ProfileStore
@@ -15,6 +15,9 @@ from mcp_unified.profiles.store import InMemoryProfileAssignmentStore, InMemoryP
 
 from .profile_runtime import ProfileAwareGatewayRuntime
 from .runtime import GatewayRuntime
+
+if TYPE_CHECKING:
+    from mcp_unified.gateway.external_registry import GatewayExternalRegistryManager
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +32,7 @@ class GatewayProfileBootstrap:
     store_metadata: GatewayProfileStoreMetadata
     default_profile_id: str | None
     seeded_profile_ids: tuple[str, ...]
+    external_registry_manager: GatewayExternalRegistryManager | None = None
 
 
 async def bootstrap_profile_gateway(
@@ -41,6 +45,7 @@ async def bootstrap_profile_gateway(
     profiles: Iterable[MCPProfile | Mapping[str, Any]] | None = None,
     default_profile_id: str | None = None,
     default_preset_id: str | None = None,
+    external_registry_manager: GatewayExternalRegistryManager | None = None,
 ) -> GatewayProfileBootstrap:
     """Seed profile data and return a profile-aware gateway runtime."""
 
@@ -99,6 +104,7 @@ async def bootstrap_profile_gateway(
         store_metadata=metadata,
         default_profile_id=resolved_default_profile_id,
         seeded_profile_ids=seeded_profile_ids,
+        external_registry_manager=external_registry_manager,
     )
 
 

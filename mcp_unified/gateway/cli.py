@@ -18,16 +18,28 @@ from mcp_unified.profiles.presets import (
 )
 
 from .config import (
+    ExternalRegistryStorageConfigurationError,
     GatewayConfigFormat,
+    GatewayExternalRegistryStorageBundle,
     GatewayProfileBootstrapConfig,
     GatewayProfileStorageBundle,
+    build_gateway_external_registry_storage,
     build_gateway_profile_storage,
+    external_registry_manager_from_storage,
     load_gateway_profile_bootstrap_config,
+)
+from .external_registry import (
+    GatewayExternalRegistryManagementError,
+    GatewayExternalRegistryManager,
 )
 from .profiles import GatewayProfileManagementError, GatewayProfileManager
 
 _ProfileOperation = Callable[
     [GatewayProfileManager],
+    Coroutine[Any, Any, dict[str, Any]],
+]
+_ExternalRegistryOperation = Callable[
+    [GatewayExternalRegistryManager],
     Coroutine[Any, Any, dict[str, Any]],
 ]
 
@@ -210,6 +222,70 @@ def _build_parser() -> _JsonArgumentParser:
     _add_profile_config_argument(delete_profile)
     delete_profile.set_defaults(handler=_handle_delete_profile)
 
+    list_external_servers = subparsers.add_parser(
+        "list-external-servers",
+        help="List external MCP servers from a configured gateway registry store.",
+    )
+    list_external_servers.add_argument(
+        "--enabled",
+        choices=("true", "false"),
+        help="Optional enabled-state filter.",
+    )
+    _add_profile_config_argument(list_external_servers)
+    list_external_servers.set_defaults(handler=_handle_list_external_servers)
+
+    show_external_server = subparsers.add_parser(
+        "show-external-server",
+        help="Show one external MCP server from a configured registry store.",
+    )
+    show_external_server.add_argument(
+        "server_id",
+        help="External server id to inspect.",
+    )
+    _add_profile_config_argument(show_external_server)
+    show_external_server.set_defaults(handler=_handle_show_external_server)
+
+    create_external_server = subparsers.add_parser(
+        "create-external-server",
+        help="Create an external MCP server in a persistent gateway registry store.",
+    )
+    create_external_server.add_argument(
+        "--server-file",
+        type=Path,
+        required=True,
+        help="Path to a JSON external server object, or '-' to read from stdin.",
+    )
+    _add_profile_config_argument(create_external_server)
+    create_external_server.set_defaults(handler=_handle_create_external_server)
+
+    patch_external_server = subparsers.add_parser(
+        "patch-external-server",
+        help="Patch an external MCP server in a persistent gateway registry store.",
+    )
+    patch_external_server.add_argument(
+        "server_id",
+        help="External server id to patch.",
+    )
+    patch_external_server.add_argument(
+        "--patch-file",
+        type=Path,
+        required=True,
+        help="Path to a JSON patch object, or '-' to read from stdin.",
+    )
+    _add_profile_config_argument(patch_external_server)
+    patch_external_server.set_defaults(handler=_handle_patch_external_server)
+
+    delete_external_server = subparsers.add_parser(
+        "delete-external-server",
+        help="Delete an ungranted external MCP server from a persistent registry store.",
+    )
+    delete_external_server.add_argument(
+        "server_id",
+        help="External server id to delete.",
+    )
+    _add_profile_config_argument(delete_external_server)
+    delete_external_server.set_defaults(handler=_handle_delete_external_server)
+
     get_default_profile = subparsers.add_parser(
         "get-default-profile",
         help="Show the active gateway default profile.",
@@ -346,6 +422,60 @@ def _handle_delete_profile(args: argparse.Namespace) -> int:
     )
 
 
+def _handle_list_external_servers(args: argparse.Namespace) -> int:
+    """List external servers from a configured gateway registry store."""
+
+    enabled = _optional_bool_choice(args.enabled)
+    return _handle_external_registry_command(
+        args,
+        lambda manager: manager.list_servers(enabled=enabled),
+    )
+
+
+def _handle_show_external_server(args: argparse.Namespace) -> int:
+    """Show one external server from a configured gateway registry store."""
+
+    server_id = _require_cli_text(args.server_id, field="server_id")
+    return _handle_external_registry_command(
+        args,
+        lambda manager: manager.show_server(server_id),
+    )
+
+
+def _handle_create_external_server(args: argparse.Namespace) -> int:
+    """Create one external server from a JSON file or stdin payload."""
+
+    return _handle_external_registry_command(
+        args,
+        lambda manager: manager.create_server(
+            _load_json_argument_file(args.server_file, label="server"),
+        ),
+    )
+
+
+def _handle_patch_external_server(args: argparse.Namespace) -> int:
+    """Patch one external server using a JSON file or stdin payload."""
+
+    server_id = _require_cli_text(args.server_id, field="server_id")
+    return _handle_external_registry_command(
+        args,
+        lambda manager: manager.patch_server(
+            server_id,
+            _load_json_argument_file(args.patch_file, label="patch"),
+        ),
+    )
+
+
+def _handle_delete_external_server(args: argparse.Namespace) -> int:
+    """Delete one external server from a persistent gateway registry store."""
+
+    server_id = _require_cli_text(args.server_id, field="server_id")
+    return _handle_external_registry_command(
+        args,
+        lambda manager: manager.delete_server(server_id),
+    )
+
+
 def _handle_get_default_profile(args: argparse.Namespace) -> int:
     """Show the active gateway default profile."""
 
@@ -421,6 +551,83 @@ def _handle_profile_management_command(
 
     _emit_json(_cli_payload(payload), sys.stdout)
     return 0
+
+
+def _handle_external_registry_command(
+    args: argparse.Namespace,
+    operation: _ExternalRegistryOperation,
+    *,
+    require_persistent: bool = True,
+) -> int:
+    """Run an external-registry command against the configured gateway store."""
+
+    config_path = _config_path_from_args(args)
+    bundle: GatewayExternalRegistryStorageBundle | None = None
+    try:
+        try:
+            config = load_gateway_profile_bootstrap_config(config_path)
+            bundle = build_gateway_external_registry_storage(config.store)
+            if require_persistent and not bundle.metadata.persistent:
+                raise GatewayExternalRegistryManagementError(
+                    "External registry management requires a persistent gateway store",
+                    reason_code="external_registry_store_unavailable",
+                )
+            manager = external_registry_manager_from_storage(bundle)
+        except _CliArgumentError:
+            raise
+        except GatewayExternalRegistryManagementError as exc:
+            _emit_json(exc.to_payload(), sys.stderr)
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            unavailable_error = _external_registry_storage_unavailable_error(exc)
+            if unavailable_error is not None:
+                _emit_json(unavailable_error.to_payload(), sys.stderr)
+                return 1
+            # CLI boundary: config loading and storage construction failures
+            # should be machine-readable.
+            _emit_json(
+                {
+                    "error": str(exc),
+                    "ok": False,
+                    "path": str(config_path),
+                },
+                sys.stderr,
+            )
+            return 1
+
+        try:
+            payload = _run_async(operation(manager))
+        except _CliArgumentError:
+            raise
+        except GatewayExternalRegistryManagementError as exc:
+            _emit_json(exc.to_payload(), sys.stderr)
+            return 1
+        except Exception:  # noqa: BLE001
+            unavailable_error = GatewayExternalRegistryManagementError(
+                "External registry store unavailable",
+                reason_code="external_registry_store_unavailable",
+            )
+            _emit_json(unavailable_error.to_payload(), sys.stderr)
+            return 1
+
+        _emit_json(_cli_payload(payload), sys.stdout)
+        return 0
+    finally:
+        if bundle is not None:
+            _run_async(_close_external_registry_bundle(bundle))
+
+
+def _external_registry_storage_unavailable_error(
+    exc: Exception,
+) -> GatewayExternalRegistryManagementError | None:
+    """Map expected unavailable external-registry storage build failures."""
+
+    if not isinstance(exc, ExternalRegistryStorageConfigurationError):
+        return None
+    return GatewayExternalRegistryManagementError(
+        str(exc),
+        reason_code="external_registry_store_unavailable",
+    )
 
 
 def _config_path_from_args(args: argparse.Namespace) -> Path:
@@ -551,6 +758,26 @@ async def _close_storage_bundle(
     return {}
 
 
+async def _close_external_registry_bundle(
+    bundle: GatewayExternalRegistryStorageBundle,
+) -> dict[str, Any]:
+    """Close unique external-registry stores that expose an async close method."""
+
+    seen: set[int] = set()
+    for store in (
+        bundle.external_registry_store,
+        bundle.credential_grant_store,
+        bundle.audit_store,
+    ):
+        if store is None or id(store) in seen:
+            continue
+        seen.add(id(store))
+        aclose = getattr(store, "aclose", None)
+        if callable(aclose):
+            await aclose()
+    return {}
+
+
 def _run_async(coro: Coroutine[Any, Any, dict[str, Any]]) -> dict[str, Any]:
     """Run an async profile-management operation from a sync CLI handler."""
 
@@ -581,6 +808,18 @@ def _optional_cli_text(value: str | None, *, field: str) -> str | None:
     if not normalized:
         raise _CliArgumentError(f"{field} cannot be empty")
     return normalized
+
+
+def _optional_bool_choice(value: str | None) -> bool | None:
+    """Convert optional argparse true/false choices into booleans."""
+
+    if value is None:
+        return None
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise _CliArgumentError("enabled must be true or false")
 
 
 def _load_json_argument_file(path: Path, *, label: str) -> dict[str, Any]:

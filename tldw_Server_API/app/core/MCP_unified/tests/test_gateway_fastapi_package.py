@@ -14,6 +14,7 @@ import mcp_unified.gateway.jsonrpc as gateway_jsonrpc
 import pytest
 from fastapi.testclient import TestClient
 from mcp_unified.gateway import create_gateway_app
+from mcp_unified.storage.models import ExternalServerDefinition
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 GATEWAY_ROOT = REPO_ROOT / "mcp_unified" / "gateway"
@@ -420,6 +421,146 @@ class _ProfileManagementErrorManagerDouble(_ProfileManagementManagerDouble):
         return await super().delete_profile(profile_id)
 
 
+def _external_server_response_payload(
+    server_id: str,
+    server_name: str,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Return a complete external server response payload for schema validation."""
+
+    timestamp = datetime(2026, 5, 31, tzinfo=timezone.utc)
+    payload: dict[str, Any] = {
+        "id": server_id,
+        "name": server_name,
+        "transport": "websocket",
+        "url": "wss://example.test/mcp",
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    payload.update(overrides)
+    return ExternalServerDefinition(**payload).model_dump(mode="json")
+
+
+class _ExternalRegistryManagerDouble:
+    """Small manager double that returns deterministic external registry payloads."""
+
+    def __init__(self, marker: str = "manager") -> None:
+        self.marker = marker
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    async def list_servers(self, enabled: bool | None = None) -> dict[str, Any]:
+        self.calls.append(("list_servers", (), {"enabled": enabled}))
+        return {
+            "ok": True,
+            "servers": [
+                _external_server_response_payload(
+                    self.marker,
+                    f"External {self.marker}",
+                )
+            ],
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def show_server(self, server_id: str) -> dict[str, Any]:
+        self.calls.append(("show_server", (server_id,), {}))
+        return {
+            "ok": True,
+            "server": _external_server_response_payload(
+                server_id,
+                f"External {server_id}",
+            ),
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def create_server(self, server_payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("create_server", (server_payload,), {}))
+        return {
+            "ok": True,
+            "server": _external_server_response_payload(
+                str(server_payload["id"]),
+                str(server_payload["name"]),
+                **{
+                    key: value
+                    for key, value in server_payload.items()
+                    if key not in {"id", "name"}
+                },
+            ),
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def patch_server(
+        self,
+        server_id: str,
+        patch_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append(("patch_server", (server_id, patch_payload), {}))
+        return {
+            "ok": True,
+            "server": _external_server_response_payload(
+                server_id,
+                f"External {server_id}",
+                **patch_payload,
+            ),
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+    async def delete_server(self, server_id: str) -> dict[str, Any]:
+        self.calls.append(("delete_server", (server_id,), {}))
+        return {
+            "ok": True,
+            "server_id": server_id,
+            "store": {"kind": "memory", "persistent": False},
+        }
+
+
+class _ExternalRegistryBootstrapDouble:
+    def __init__(self, manager: _ExternalRegistryManagerDouble) -> None:
+        self.external_registry_manager = manager
+
+
+class _ExternalRegistryErrorManagerDouble(_ExternalRegistryManagerDouble):
+    def __init__(self, method: str, reason_code: str) -> None:
+        super().__init__()
+        self.method = method
+        self.reason_code = reason_code
+
+    async def _raise_if_targeted(self, method: str) -> None:
+        if method == self.method:
+            from mcp_unified.gateway.external_registry import (
+                GatewayExternalRegistryManagementError,
+            )
+
+            raise GatewayExternalRegistryManagementError(
+                f"domain failure: {self.reason_code}",
+                reason_code=self.reason_code,
+                server_id="external-search",
+            )
+
+    async def list_servers(self, enabled: bool | None = None) -> dict[str, Any]:
+        await self._raise_if_targeted("list_servers")
+        return await super().list_servers(enabled=enabled)
+
+    async def show_server(self, server_id: str) -> dict[str, Any]:
+        await self._raise_if_targeted("show_server")
+        return await super().show_server(server_id)
+
+    async def create_server(self, server_payload: dict[str, Any]) -> dict[str, Any]:
+        await self._raise_if_targeted("create_server")
+        return await super().create_server(server_payload)
+
+    async def patch_server(
+        self,
+        server_id: str,
+        patch_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        await self._raise_if_targeted("patch_server")
+        return await super().patch_server(server_id, patch_payload)
+
+    async def delete_server(self, server_id: str) -> dict[str, Any]:
+        await self._raise_if_targeted("delete_server")
+        return await super().delete_server(server_id)
+
+
 def test_gateway_package_does_not_import_tldw_server_api() -> None:
     assert GATEWAY_ROOT.exists()
     offenders: dict[str, list[str]] = {}
@@ -742,7 +883,6 @@ def test_gateway_profile_management_routes_have_pydantic_response_models() -> No
         schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
         assert schema == {"$ref": expected_ref}
 
-
 @pytest.mark.parametrize(
     ("method", "path", "json_body", "manager_method", "reason_code", "status_code"),
     [
@@ -874,6 +1014,419 @@ def test_gateway_profile_management_malformed_or_missing_bodies_return_422() -> 
     assert malformed_default.status_code == 422
     assert missing_create.status_code == 422
     assert malformed_create.status_code == 422
+
+
+def test_gateway_external_registry_management_routes_are_not_mounted_by_default() -> None:
+    app = create_gateway_app(_FakeGatewayRuntime(), prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/external-servers")
+
+    assert response.status_code == 404
+
+
+def test_gateway_external_registry_management_routes_mount_with_manager() -> None:
+    manager = _ExternalRegistryManagerDouble("direct")
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_registry_manager=manager,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/external-servers")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "servers": [
+            _external_server_response_payload("direct", "External direct")
+        ],
+        "store": {"kind": "memory", "persistent": False},
+    }
+
+
+def test_gateway_external_registry_management_routes_mount_when_enabled_with_manager() -> None:
+    manager = _ExternalRegistryManagerDouble("enabled")
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    app.include_router(
+        gateway_fastapi.create_gateway_router(
+            _FakeGatewayRuntime(),
+            external_registry_manager=manager,
+            enable_external_registry_management=True,
+        ),
+        prefix="/mcp",
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/external-servers")
+
+    assert response.status_code == 200
+    assert response.json()["servers"] == [
+        _external_server_response_payload("enabled", "External enabled")
+    ]
+
+
+def test_gateway_external_registry_management_enabled_without_manager_raises() -> None:
+    with pytest.raises(ValueError, match="external registry management requires"):
+        gateway_fastapi.create_gateway_router(
+            _FakeGatewayRuntime(),
+            enable_external_registry_management=True,
+        )
+
+    with pytest.raises(ValueError, match="external registry management requires"):
+        create_gateway_app(
+            _FakeGatewayRuntime(),
+            prefix="/mcp",
+            enable_external_registry_management=True,
+        )
+
+
+def test_gateway_external_registry_management_explicit_manager_precedes_bootstrap_manager() -> None:
+    direct = _ExternalRegistryManagerDouble("direct")
+    bootstrap = _ExternalRegistryBootstrapDouble(
+        _ExternalRegistryManagerDouble("bootstrap")
+    )
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_registry_manager=direct,
+        profile_bootstrap=bootstrap,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/external-servers")
+
+    assert response.status_code == 200
+    assert response.json()["servers"] == [
+        _external_server_response_payload("direct", "External direct")
+    ]
+    assert direct.calls == [("list_servers", (), {"enabled": None})]
+    assert bootstrap.external_registry_manager.calls == []
+
+
+def test_gateway_external_registry_management_success_envelopes() -> None:
+    manager = _ExternalRegistryManagerDouble("default")
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_registry_manager=manager,
+    )
+
+    with TestClient(app) as client:
+        listed = client.get("/mcp/external-servers")
+        listed_enabled = client.get("/mcp/external-servers?enabled=true")
+        shown = client.get("/mcp/external-servers/search")
+        created = client.post(
+            "/mcp/external-servers",
+            json={
+                "id": "search",
+                "name": "Search",
+                "transport": "websocket",
+                "url": "wss://example.test/mcp",
+                "metadata": {"tier": "test"},
+            },
+        )
+        patched = client.patch(
+            "/mcp/external-servers/search",
+            json={
+                "name": "Search v2",
+                "enabled": False,
+            },
+        )
+        deleted = client.delete("/mcp/external-servers/search")
+
+    assert listed.json() == {
+        "ok": True,
+        "servers": [
+            _external_server_response_payload("default", "External default"),
+        ],
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert listed_enabled.json()["servers"] == [
+        _external_server_response_payload("default", "External default"),
+    ]
+    assert shown.json() == {
+        "ok": True,
+        "server": _external_server_response_payload("search", "External search"),
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert created.json() == {
+        "ok": True,
+        "server": _external_server_response_payload(
+            "search",
+            "Search",
+            metadata={"tier": "test"},
+        ),
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert patched.json() == {
+        "ok": True,
+        "server": _external_server_response_payload(
+            "search",
+            "Search v2",
+            enabled=False,
+        ),
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert deleted.json() == {
+        "ok": True,
+        "server_id": "search",
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert manager.calls == [
+        ("list_servers", (), {"enabled": None}),
+        ("list_servers", (), {"enabled": True}),
+        ("show_server", ("search",), {}),
+        (
+            "create_server",
+            (
+                {
+                    "id": "search",
+                    "name": "Search",
+                    "transport": "websocket",
+                    "command": [],
+                    "url": "wss://example.test/mcp",
+                    "metadata": {"tier": "test"},
+                },
+            ),
+            {},
+        ),
+        (
+            "patch_server",
+            ("search", {"name": "Search v2", "enabled": False}),
+            {},
+        ),
+        ("delete_server", ("search",), {}),
+    ]
+
+
+def test_gateway_external_registry_management_routes_have_pydantic_response_models() -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_registry_manager=_ExternalRegistryManagerDouble(),
+    )
+
+    paths = app.openapi()["paths"]
+    expected_refs = {
+        ("/mcp/external-servers", "get"): "#/components/schemas/ExternalServerListResponse",
+        ("/mcp/external-servers", "post"): "#/components/schemas/ExternalServerResponse",
+        (
+            "/mcp/external-servers/{server_id}",
+            "get",
+        ): "#/components/schemas/ExternalServerResponse",
+        (
+            "/mcp/external-servers/{server_id}",
+            "patch",
+        ): "#/components/schemas/ExternalServerResponse",
+        (
+            "/mcp/external-servers/{server_id}",
+            "delete",
+        ): "#/components/schemas/DeleteExternalServerResponse",
+    }
+
+    for (path, method), expected_ref in expected_refs.items():
+        schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
+        assert schema == {"$ref": expected_ref}
+
+    schemas = app.openapi()["components"]["schemas"]
+    assert schemas["ExternalServerResponse"]["properties"]["server"] == {
+        "$ref": "#/components/schemas/ExternalServerDefinition"
+    }
+    assert schemas["ExternalServerListResponse"]["properties"]["servers"]["items"] == {
+        "$ref": "#/components/schemas/ExternalServerDefinition"
+    }
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "json_body", "manager_method", "reason_code", "status_code"),
+    [
+        (
+            "GET",
+            "/mcp/external-servers/missing",
+            None,
+            "show_server",
+            "external_server_not_found",
+            404,
+        ),
+        (
+            "POST",
+            "/mcp/external-servers",
+            {
+                "id": "search",
+                "name": "Search",
+                "transport": "websocket",
+                "url": "wss://example.test/mcp",
+            },
+            "create_server",
+            "external_server_already_exists",
+            409,
+        ),
+        (
+            "GET",
+            "/mcp/external-servers",
+            None,
+            "list_servers",
+            "external_registry_store_unavailable",
+            503,
+        ),
+        (
+            "GET",
+            "/mcp/external-servers",
+            None,
+            "list_servers",
+            "credential_grant_store_unavailable",
+            503,
+        ),
+        (
+            "DELETE",
+            "/mcp/external-servers/search",
+            None,
+            "delete_server",
+            "external_server_has_credential_grants",
+            409,
+        ),
+        (
+            "PATCH",
+            "/mcp/external-servers/search",
+            {"credential_slots": ["api_key"]},
+            "patch_server",
+            "credential_slot_change_requires_disabled_server",
+            409,
+        ),
+        (
+            "POST",
+            "/mcp/external-servers",
+            {
+                "id": "search",
+                "name": "Search",
+                "transport": "websocket",
+                "url": "wss://example.test/mcp",
+            },
+            "create_server",
+            "invalid_external_server_request",
+            422,
+        ),
+        (
+            "PATCH",
+            "/mcp/external-servers/search",
+            {"name": "Search"},
+            "patch_server",
+            "invalid_external_server_patch",
+            422,
+        ),
+        (
+            "DELETE",
+            "/mcp/external-servers/search",
+            None,
+            "delete_server",
+            "unexpected_external_server_delete_result",
+            500,
+        ),
+        (
+            "DELETE",
+            "/mcp/external-servers/search",
+            None,
+            "delete_server",
+            "unknown_external_registry_reason",
+            500,
+        ),
+    ],
+)
+def test_gateway_external_registry_management_error_status_mapping(
+    method: str,
+    path: str,
+    json_body: dict[str, Any] | None,
+    manager_method: str,
+    reason_code: str,
+    status_code: int,
+) -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_registry_manager=_ExternalRegistryErrorManagerDouble(
+            manager_method,
+            reason_code,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.request(method, path, json=json_body)
+
+    assert response.status_code == status_code
+    body = response.json()
+    assert body["ok"] is False
+    assert body["reason_code"] == reason_code
+    assert body["error"] == f"domain failure: {reason_code}"
+    assert body["server_id"] == "external-search"
+
+
+def test_gateway_external_registry_management_raw_failures_return_structured_503() -> None:
+    class _FailingExternalRegistryManager:
+        async def list_servers(self, enabled: bool | None = None) -> dict[str, Any]:
+            raise RuntimeError("raw store failure")
+
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_registry_manager=_FailingExternalRegistryManager(),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/external-servers")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": "External registry store unavailable",
+        "ok": False,
+        "reason_code": "external_registry_store_unavailable",
+    }
+
+
+def test_gateway_external_registry_management_malformed_or_missing_bodies_return_422() -> None:
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_registry_manager=_ExternalRegistryManagerDouble(),
+    )
+
+    with TestClient(app) as client:
+        missing_create = client.post("/mcp/external-servers")
+        malformed_create = client.post(
+            "/mcp/external-servers",
+            content="{",
+            headers={"content-type": "application/json"},
+        )
+        missing_patch = client.patch("/mcp/external-servers/search")
+        malformed_patch = client.patch(
+            "/mcp/external-servers/search",
+            content="{",
+            headers={"content-type": "application/json"},
+        )
+        extra_create = client.post(
+            "/mcp/external-servers",
+            json={
+                "id": "search",
+                "name": "Search",
+                "transport": "websocket",
+                "url": "wss://example.test/mcp",
+                "unsupported": True,
+            },
+        )
+        extra_patch = client.patch(
+            "/mcp/external-servers/search",
+            json={"name": "Search", "unsupported": True},
+        )
+
+    assert missing_create.status_code == 422
+    assert malformed_create.status_code == 422
+    assert missing_patch.status_code == 422
+    assert malformed_patch.status_code == 422
+    assert extra_create.status_code == 422
+    assert extra_patch.status_code == 422
 
 
 def test_gateway_profile_runtime_requires_profile_for_tool_execution() -> None:
@@ -1341,6 +1894,49 @@ def test_gateway_config_bootstrap_uses_sqlite_profile_store(tmp_path: Path) -> N
     asyncio.run(bootstrap.profile_store.aclose())
 
 
+def test_gateway_config_sqlite_bootstrap_exposes_external_registry_manager(
+    tmp_path: Path,
+) -> None:
+    """Mount external registry routes from a real SQLite profile bootstrap."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+
+    sqlite_path = tmp_path / "gateway.db"
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                default_preset_id="project-researcher",
+            ),
+        )
+    )
+    app = create_gateway_app(
+        bootstrap.runtime,
+        prefix="/mcp",
+        profile_bootstrap=bootstrap,
+        enable_external_registry_management=True,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/external-servers")
+
+    assert bootstrap.external_registry_manager is not None
+    assert bootstrap.external_registry_manager.external_registry_store is bootstrap.profile_store
+    assert bootstrap.external_registry_manager.credential_grant_store is bootstrap.profile_store
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "servers": [],
+        "store": {"kind": "sqlite", "persistent": True},
+    }
+    asyncio.run(bootstrap.profile_store.aclose())
+
+
 def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Path) -> None:
     """Prefer caller-injected stores over config-selected store creation."""
 
@@ -1401,6 +1997,173 @@ def test_gateway_config_storage_reuses_injected_sqlite_store_capabilities(tmp_pa
         }
     finally:
         asyncio.run(store.aclose())
+
+
+def test_gateway_config_builds_sqlite_external_registry_storage(tmp_path: Path) -> None:
+    """Build external registry storage from the configured SQLite store."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_external_registry_storage,
+    )
+    from mcp_unified.storage.sqlite import SQLiteMCPStore
+
+    bundle = build_gateway_external_registry_storage(
+        GatewayProfileStoreConfig(kind="sqlite", sqlite_path=tmp_path / "gateway.db"),
+    )
+
+    try:
+        assert isinstance(bundle.external_registry_store, SQLiteMCPStore)
+        assert bundle.credential_grant_store is bundle.external_registry_store
+        assert bundle.audit_store is bundle.external_registry_store
+        assert bundle.metadata.to_payload() == {
+            "kind": "sqlite",
+            "persistent": True,
+        }
+    finally:
+        asyncio.run(bundle.external_registry_store.aclose())
+
+
+def test_gateway_config_external_registry_storage_reuses_injected_sqlite_store_capabilities(
+    tmp_path: Path,
+) -> None:
+    """Reuse external registry, grant, and audit capabilities from SQLite stores."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_external_registry_storage,
+    )
+    from mcp_unified.storage.sqlite import SQLiteMCPStore
+
+    sqlite_path = tmp_path / "gateway.db"
+    store = SQLiteMCPStore(sqlite_path)
+
+    try:
+        bundle = build_gateway_external_registry_storage(
+            GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+            external_registry_store=store,
+        )
+
+        assert bundle.external_registry_store is store
+        assert bundle.credential_grant_store is store
+        assert bundle.audit_store is store
+        assert bundle.metadata.to_payload() == {
+            "kind": "sqlite",
+            "persistent": True,
+        }
+    finally:
+        asyncio.run(store.aclose())
+
+
+def test_gateway_config_external_registry_storage_manager_from_storage_uses_bundle(
+    tmp_path: Path,
+) -> None:
+    """Build an external registry manager from a resolved storage bundle."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_external_registry_storage,
+        external_registry_manager_from_storage,
+    )
+
+    bundle = build_gateway_external_registry_storage(
+        GatewayProfileStoreConfig(kind="sqlite", sqlite_path=tmp_path / "gateway.db"),
+    )
+
+    try:
+        manager = external_registry_manager_from_storage(bundle)
+
+        assert manager.external_registry_store is bundle.external_registry_store
+        assert manager.credential_grant_store is bundle.credential_grant_store
+        assert manager.audit_store is bundle.audit_store
+        assert manager.store_metadata is bundle.metadata
+    finally:
+        asyncio.run(bundle.external_registry_store.aclose())
+
+
+def test_gateway_config_external_registry_memory_requires_injected_store() -> None:
+    """Reject production memory config without an injected external registry."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_external_registry_storage,
+    )
+
+    with pytest.raises(ValueError, match="sqlite.*injected equivalent"):
+        build_gateway_external_registry_storage(
+            GatewayProfileStoreConfig(kind="memory"),
+        )
+
+
+def test_gateway_config_external_registry_injected_store_can_omit_grant_store() -> None:
+    """Allow injected external registry stores without credential grant storage."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_external_registry_storage,
+        external_registry_manager_from_storage,
+    )
+    from mcp_unified.gateway.external_registry import GatewayExternalRegistryManagementError
+    from mcp_unified.storage.models import ExternalServerDefinition
+
+    class ExternalRegistryOnlyStore:
+        def __init__(self, server: ExternalServerDefinition) -> None:
+            self.server = server
+
+        async def get_server(self, server_id: str) -> ExternalServerDefinition | None:
+            if server_id == self.server.id:
+                return self.server
+            return None
+
+        async def list_servers(self) -> list[ExternalServerDefinition]:
+            return [self.server]
+
+        async def list_server_definitions(
+            self,
+            *,
+            enabled: bool | None = None,
+        ) -> list[ExternalServerDefinition]:
+            if enabled is None or enabled is self.server.enabled:
+                return [self.server]
+            return []
+
+        async def create_server(
+            self,
+            server: ExternalServerDefinition,
+        ) -> ExternalServerDefinition:
+            self.server = server
+            return server
+
+        async def upsert_server(
+            self,
+            server: ExternalServerDefinition,
+        ) -> ExternalServerDefinition:
+            self.server = server
+            return server
+
+        async def delete_server(self, server_id: str) -> bool:
+            return server_id == self.server.id
+
+    store = ExternalRegistryOnlyStore(
+        ExternalServerDefinition(
+            id="local-research",
+            name="Local Research",
+            transport="stdio",
+            command=["mcp-local-research"],
+        )
+    )
+    bundle = build_gateway_external_registry_storage(
+        GatewayProfileStoreConfig(kind="memory"),
+        external_registry_store=store,
+    )
+    manager = external_registry_manager_from_storage(bundle)
+
+    assert bundle.external_registry_store is store
+    assert bundle.credential_grant_store is None
+    assert manager.credential_grant_store is None
+    with pytest.raises(GatewayExternalRegistryManagementError) as exc_info:
+        asyncio.run(manager.delete_server("local-research"))
+    assert exc_info.value.reason_code == "credential_grant_store_unavailable"
 
 
 def test_gateway_config_rejects_sqlite_injected_store_without_assignment_store(
