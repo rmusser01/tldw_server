@@ -1,10 +1,10 @@
 ---
 id: TASK-489
 title: Implement unified first-time solo user onboarding
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-31 06:14'
+updated_date: '2026-05-31 17:15'
 labels: []
 dependencies: []
 references:
@@ -28,9 +28,9 @@ Parent implementation task for the approved unified first-time solo-user onboard
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All child implementation slices are completed or explicitly deferred with rationale
-- [ ] #2 Final verification checklist from the implementation plan is run or documented with blockers
-- [ ] #3 Bandit is run on touched backend scope before final completion
+- [x] #1 All child implementation slices are completed or explicitly deferred with rationale
+- [x] #2 Final verification checklist from the implementation plan is run or documented with blockers
+- [x] #3 Bandit is run on touched backend scope before final completion
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -41,24 +41,22 @@ Created child implementation tasks: TASK-490 backend state/access foundation, TA
 TASK-491 completed after spec and code-quality review. Provider setup now covers catalog/save/validation behavior, runtime config mapping, cache refresh, first-run write gating, local endpoint target guarding, and config-section insertion regressions.
 
 TASK-492 completed after final spec and code-quality/security review. First-chat verification, first-run completion gating, ingest/audio/optional-advanced save endpoints, public state sanitization, setup lifecycle bypass protection, and completion consistency hardening are implemented and verified.
+
+Closeout on 2026-05-31: child slices TASK-490, TASK-491, TASK-492, TASK-493, TASK-497, TASK-498, TASK-499, and TASK-500 are Done. Earlier duplicate placeholder tasks TASK-494, TASK-495, and TASK-496 were closed as superseded/fulfilled by TASK-497, TASK-498, and TASK-499/TASK-500 respectively. Final verification recorded in the implementation plan: backend setup/config gate 324 passed, docs/Makefile gate 90 passed, frontend focused Vitest 23 passed, Playwright onboarding workflow 3 passed, Bandit reports zero findings for setup scopes, and git diff --check is clean. Known residual: TASK-497 documents unrelated baseline TypeScript errors outside touched onboarding files.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+Unified first-time solo user onboarding implementation is complete on this branch. Backend state/readiness/provider/first-chat APIs, the WebUI focused progressive wizard, first-source milestone, docs/CLI/startup cleanup, E2E coverage, and setup audio release-gate cleanup are implemented through the completed child tasks. Final verification is recorded with backend setup/config, docs/Makefile, frontend Vitest, Playwright, Bandit, and whitespace checks passing; only the unrelated existing TypeScript baseline remains documented in TASK-497.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
