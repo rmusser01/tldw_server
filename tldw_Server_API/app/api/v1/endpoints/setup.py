@@ -123,6 +123,10 @@ _FIRST_RUN_STEP_DATA_ALLOWED_KEYS = {
     "audio_defaults": frozenset({"acknowledged", "selected_options"}),
     "optional_advanced": frozenset({"acknowledged", "selected_options"}),
 }
+_PUBLIC_FIRST_RUN_STEP_NAMES = frozenset(_FIRST_RUN_STEP_DATA_ALLOWED_KEYS) | {
+    "first_chat",
+    "state_recovery",
+}
 _UNSAFE_FIRST_RUN_STEP_DATA_KEY_MARKERS = (
     "api_key",
     "apikey",
@@ -267,8 +271,33 @@ def _public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, An
     return public_data
 
 
+def _is_public_first_run_step_name(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and value in _PUBLIC_FIRST_RUN_STEP_NAMES
+        and not _is_unsafe_public_step_data_value(value)
+    )
+
+
+def _public_first_run_step_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [step for step in value if _is_public_first_run_step_name(step)]
+
+
 def _public_first_run_state(state: FirstRunStateResponse) -> FirstRunStateResponse:
     payload = model_dump_compat(state)
+    current_step = payload.get("current_step")
+    payload["current_step"] = current_step if _is_public_first_run_step_name(current_step) else None
+    payload["completed_steps"] = _public_first_run_step_list(payload.get("completed_steps"))
+    payload["acknowledged_steps"] = _public_first_run_step_list(payload.get("acknowledged_steps"))
+    payload["skipped_steps"] = _public_first_run_step_list(payload.get("skipped_steps"))
+    skip_reason = payload.get("skip_reason")
+    payload["skip_reason"] = (
+        skip_reason
+        if isinstance(skip_reason, str) and _is_public_first_run_step_value(skip_reason)
+        else None
+    )
     step_data = payload.get("step_data")
     if isinstance(step_data, dict):
         payload["step_data"] = {

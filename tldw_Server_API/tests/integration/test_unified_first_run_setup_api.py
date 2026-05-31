@@ -87,7 +87,26 @@ def test_first_run_skip_endpoint_records_skipped(monkeypatch, tmp_path, setup_cl
     response = setup_client.post("/api/v1/setup/first-run/skip", json={"reason": "user_skip"})
 
     assert response.status_code == 200
-    assert response.json()["status"] == "skipped"
+    body = response.json()
+    assert body["status"] == "skipped"
+    assert body["skip_reason"] == "user_skip"
+
+
+def test_first_run_skip_endpoint_filters_secret_like_reason(monkeypatch, tmp_path, setup_client):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/skip",
+        json={"reason": "hf_abcdef1234567890"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "skipped"
+    assert body["skip_reason"] is None
+    assert "hf_abcdef1234567890" not in str(body)
 
 
 def test_first_run_metadata_returns_auth_and_setup_path_guidance(monkeypatch, tmp_path, setup_client):
@@ -626,6 +645,43 @@ def test_first_run_state_get_filters_huggingface_token_like_allowed_public_step_
     body = response.json()
     assert body["step_data"]["providers"] == {"acknowledged": True}
     assert "hf_abcdef1234567890" not in str(body)
+
+
+def test_first_run_state_get_filters_non_public_step_fields(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    state = FirstRunStateStore(state_path).update_step(
+        "providers",
+        {
+            "acknowledged": True,
+            "default_provider": "openai",
+        },
+    )
+    payload = setup_endpoint.json.loads(state.model_dump_json())
+    payload.update(
+        {
+            "current_step": "hf_abcdef1234567890",
+            "completed_steps": ["providers", "not_real", "hf_abcdef1234567890"],
+            "acknowledged_steps": ["providers", "hf_abcdef1234567890"],
+            "skipped_steps": ["audio_defaults", "hf_abcdef1234567890"],
+        }
+    )
+    state_path.write_text(setup_endpoint.json.dumps(payload), encoding="utf-8")
+
+    response = setup_client.get("/api/v1/setup/first-run/state")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["current_step"] is None
+    assert body["completed_steps"] == ["providers"]
+    assert body["acknowledged_steps"] == ["providers"]
+    assert body["skipped_steps"] == ["audio_defaults"]
+    assert "hf_abcdef1234567890" not in str(body)
+    assert "not_real" not in str(body)
 
 
 def test_skipped_first_run_state_rejected_by_shared_write_guard(
