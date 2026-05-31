@@ -10,8 +10,10 @@ labels:
 priority: High
 documentation:
 - Docs/superpowers/specs/2026-05-31-chat-siderail-collapse-design.md
+- Docs/superpowers/plans/2026-05-31-chat-siderail-edge-expand-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-05-31-chat-siderail-collapse-design.md
+- Docs/superpowers/plans/2026-05-31-chat-siderail-edge-expand-implementation-plan.md
 ---
 
 ## Description
@@ -38,6 +40,10 @@ Design addendum 2026-05-31: collapsed /chat siderails must disappear from layout
 Design spec committed and reviewed through the brainstorming spec-review loop. Initial review flagged ambiguous 768-1023px behavior and shared OptionLayout scope. Spec was updated to scope edge-mounted expand buttons to lg-and-wider /chat side-rail behavior, preserve md/tablet behavior, and require /chat/Playground-scoped layout changes. Re-review status: Approved.
 
 Follow-up spec review clarified two planning details before implementation: the right-edge expand button is only visible when an active artifact exists, and browser verification must include layout measurements for chat width, chat-shell top stability, and composer bottom docking.
+
+Implementation plan drafted at Docs/superpowers/plans/2026-05-31-chat-siderail-edge-expand-implementation-plan.md before runtime code changes.
+
+Plan review loop completed. Initial review required the Playwright plan to reuse auth/setup seeding and provider endpoint stubs, plus verify right-edge absence below lg with an active artifact. Plan was updated and re-review status was Approved.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
