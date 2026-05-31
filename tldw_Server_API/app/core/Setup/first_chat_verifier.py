@@ -38,7 +38,7 @@ _SECRET_LIKE_TEXT_RE = re.compile(
 )
 _LOCAL_PATH_TEXT_RE = re.compile(
     r"(?:"
-    r"(?:/Users|/home|/private|/var|/tmp|/etc)/[^\s,;\"']+|"
+    r"(?<![:/])/(?:[^\s,;\"']+/)+[^\s,;\"']+|"
     r"[A-Za-z]:\\[^\s,;\"']+"
     r")"
 )

@@ -217,7 +217,7 @@ _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
 )
 _LOCAL_PATH_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
     r"(?:"
-    r"(?:/Users|/home|/private|/var|/tmp|/etc)/[^\s,;\"']+|"
+    r"(?<![:/])/(?:[^\s,;\"']+/)+[^\s,;\"']+|"
     r"[A-Za-z]:\\[^\s,;\"']+"
     r")"
 )
@@ -305,6 +305,7 @@ def _is_public_first_run_step_value(value: Any, *, allow_path_like: bool = False
         return all(
             isinstance(key, str)
             and not _is_unsafe_public_step_data_key(key)
+            and not _is_unsafe_public_step_data_value(key)
             and _is_public_first_run_step_value(item, allow_path_like=allow_path_like)
             for key, item in value.items()
         )

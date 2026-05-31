@@ -665,6 +665,37 @@ def test_first_run_optional_advanced_rejects_embedded_secret_like_values(
     assert not state_path.exists()
 
 
+@pytest.mark.parametrize(
+    "secret_key",
+    [
+        "hf_abcdef1234567890",
+        "/Users/me/.env",
+    ],
+)
+def test_first_run_optional_advanced_rejects_secret_or_path_like_nested_keys(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+    secret_key,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/optional-advanced",
+        json={
+            "rag": "defer",
+            "storage_paths": "defer",
+            "values": {"notes": {secret_key: "state-only"}},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == setup_endpoint.UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL
+    assert not state_path.exists()
+
+
 def test_first_run_optional_advanced_rejects_nested_path_like_values(
     monkeypatch,
     tmp_path,
@@ -703,6 +734,39 @@ def test_first_run_optional_advanced_rejects_embedded_path_like_values(
             "rag": "defer",
             "storage_paths": "defer",
             "values": {"notes": "debug file is /Users/me/.env"},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == setup_endpoint.UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL
+    assert not state_path.exists()
+
+
+@pytest.mark.parametrize(
+    "path_text",
+    [
+        "debug file is /root/.env",
+        "config lives at /opt/app/config.txt",
+        "volume path /Volumes/Data/.env",
+        "mount path /mnt/data/config.txt",
+    ],
+)
+def test_first_run_optional_advanced_rejects_broader_embedded_path_like_values(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+    path_text,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/optional-advanced",
+        json={
+            "rag": "defer",
+            "storage_paths": "defer",
+            "values": {"notes": path_text},
         },
     )
 

@@ -107,6 +107,38 @@ async def test_first_chat_verifier_sanitizes_success_response_text(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path_text",
+    [
+        "/root/.env",
+        "/opt/app/config.txt",
+        "/Volumes/Data/.env",
+    ],
+)
+async def test_first_chat_verifier_sanitizes_broader_local_paths(monkeypatch, path_text):
+    from tldw_Server_API.app.core.Setup import first_chat_verifier
+
+    async def _fake_call_chat_completion(**_kwargs):
+        return {
+            "id": f"chatcmpl-{path_text}",
+            "choices": [{"message": {"content": f"Debug details: {path_text}"}}],
+        }
+
+    monkeypatch.setattr(first_chat_verifier, "_call_chat_completion", _fake_call_chat_completion)
+
+    result = await first_chat_verifier.verify_first_chat(
+        provider="openai",
+        model="gpt-4.1-mini",
+    )
+
+    assert result.status == "ready"
+    assert result.response_text is not None
+    assert path_text not in result.response_text
+    assert result.response_id is not None
+    assert path_text not in result.response_id
+
+
+@pytest.mark.asyncio
 async def test_first_chat_verifier_sanitizes_success_response_id(monkeypatch):
     from tldw_Server_API.app.core.Setup import first_chat_verifier
 
