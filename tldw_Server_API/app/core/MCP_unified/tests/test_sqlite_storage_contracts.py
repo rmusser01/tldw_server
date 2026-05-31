@@ -417,6 +417,31 @@ async def test_sqlite_store_lists_external_server_definitions(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_sqlite_store_create_server_rejects_duplicate_id(
+    tmp_path: Path,
+) -> None:
+    from mcp_unified.interfaces.storage import ExternalServerAlreadyExistsError
+    from mcp_unified.storage import ExternalServerDefinition, SQLiteMCPStore
+
+    store = SQLiteMCPStore(tmp_path / "mcp.sqlite")
+    server = ExternalServerDefinition(
+        id="search",
+        name="Search",
+        transport="websocket",
+        url="wss://example.test/mcp",
+    )
+
+    created = await store.create_server(server)
+    with pytest.raises(ExternalServerAlreadyExistsError) as exc_info:
+        await store.create_server(server.model_copy(update={"name": "Other"}))
+
+    assert created.id == "search"
+    assert exc_info.value.server_id == "search"
+    assert (await store.get_server("search")).name == "Search"
+    await store.aclose()
+
+
+@pytest.mark.asyncio
 async def test_sqlite_store_appends_and_queries_audit_events(tmp_path: Path) -> None:
     from mcp_unified.storage import AuditEvent, SQLiteMCPStore
 

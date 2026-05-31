@@ -15,6 +15,18 @@ if TYPE_CHECKING:
     )
 
 
+class ExternalRegistryStoreUnavailableError(RuntimeError):
+    """Raised when an external registry store cannot serve requests."""
+
+
+class ExternalServerAlreadyExistsError(RuntimeError):
+    """Raised when an atomic external server create conflicts with an existing id."""
+
+    def __init__(self, server_id: str) -> None:
+        super().__init__(f"External server already exists: {server_id}")
+        self.server_id = server_id
+
+
 class ProfileStore(Protocol):
     """Store for named MCP tool and permission profiles.
 
@@ -176,6 +188,13 @@ class ExternalRegistryStore(Protocol):
         enabled: bool | None = None,
     ) -> list[ExternalServerDefinition]:
         """Return typed external server definitions matching filters."""
+        ...
+
+    async def create_server(
+        self,
+        server: ExternalServerDefinition,
+    ) -> ExternalServerDefinition:
+        """Create an external server definition and reject existing ids."""
         ...
 
     async def upsert_server(

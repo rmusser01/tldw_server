@@ -34,6 +34,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
+from mcp_unified.interfaces.storage import ExternalServerAlreadyExistsError
 from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.profiles.store import ProfileAlreadyExistsError
 from mcp_unified.storage.models import (
@@ -229,6 +230,13 @@ class SQLiteMCPStore:
     ) -> ExternalServerDefinition:
         """Store an external server definition and return the persisted model."""
         return await self._run_db(self._upsert_server_sync, server)
+
+    async def create_server(
+        self,
+        server: ExternalServerDefinition,
+    ) -> ExternalServerDefinition:
+        """Create an external server definition only when its id is absent."""
+        return await self._run_db(self._create_server_sync, server)
 
     async def delete_server(self, server_id: str) -> bool:
         """Delete an external server definition by id and return whether it existed."""
@@ -522,6 +530,27 @@ class SQLiteMCPStore:
             },
             update_columns=("enabled", "transport", "updated_at", "payload"),
         )
+        return self._load_model(payload, ExternalServerDefinition)
+
+    def _create_server_sync(
+        self,
+        server: ExternalServerDefinition,
+    ) -> ExternalServerDefinition:
+        payload = self._dump_model(server)
+        table = self._table("mcp_external_servers")
+        statement = sqlite_insert(table).values(
+            id=server.id,
+            enabled=int(server.enabled),
+            transport=server.transport,
+            updated_at=server.updated_at.isoformat(),
+            payload=payload,
+        )
+        with self._engine.begin() as connection:
+            result = connection.execute(
+                statement.on_conflict_do_nothing(index_elements=[table.c.id])
+            )
+        if not result.rowcount:
+            raise ExternalServerAlreadyExistsError(server.id)
         return self._load_model(payload, ExternalServerDefinition)
 
     def _delete_server_sync(self, server_id: str) -> bool:
