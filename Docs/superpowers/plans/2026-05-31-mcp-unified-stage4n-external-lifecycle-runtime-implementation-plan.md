@@ -56,7 +56,7 @@ Keep all `mcp_unified` files free of `tldw_Server_API` imports.
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime.py`
 
-- [ ] **Step 1: Write test doubles**
+- [x] **Step 1: Write test doubles**
 
 Create copy-isolated test doubles:
 
@@ -82,7 +82,7 @@ class InMemoryExternalRegistryStore:
 
 Add `RecordingAuditStore` and fake transport classes that record `connect_count`, `close_count`, `calls`, `runtime_auth`, and configurable discovery/call failures.
 
-- [ ] **Step 2: Write red tests for start/status/stop**
+- [x] **Step 2: Write red tests for start/status/stop**
 
 Tests:
 
@@ -118,7 +118,7 @@ async def test_external_runtime_stop_is_idempotent_and_clears_tools():
     assert await manager.list_virtual_tools() == []
 ```
 
-- [ ] **Step 3: Verify red**
+- [x] **Step 3: Verify red**
 
 Run:
 
@@ -136,7 +136,7 @@ Expected: import failure for missing `mcp_unified.gateway.external_runtime`.
 - Modify: `mcp_unified/federation/transports.py`
 - Modify: `mcp_unified/gateway/__init__.py`
 
-- [ ] **Step 1: Add runtime manager skeleton**
+- [x] **Step 1: Add runtime manager skeleton**
 
 Implement:
 
@@ -167,7 +167,7 @@ class GatewayExternalRuntimeManager:
     ) -> None: ...
 ```
 
-- [ ] **Step 2: Implement start/status/stop**
+- [x] **Step 2: Implement start/status/stop**
 
 Use one `asyncio.Lock`. Store active transports in `self._transports`, loaded definitions in `self._servers`, virtual tools in `self._virtual_tools`, and error strings in `self._last_errors`.
 
@@ -188,11 +188,11 @@ Use one `asyncio.Lock`. Store active transports in `self._transports`, loaded de
 - clear tools and state
 - return `external_server_already_stopped` for inactive known servers
 
-- [ ] **Step 3: Implement virtual tool discovery**
+- [x] **Step 3: Implement virtual tool discovery**
 
 Reuse the `ext.<server_id>.<tool>` naming pattern and write classification from `ExternalFederationManager` if possible. Return caller-owned `VirtualExternalTool.copy()` values.
 
-- [ ] **Step 4: Run lifecycle tests**
+- [x] **Step 4: Run lifecycle tests**
 
 Run:
 
