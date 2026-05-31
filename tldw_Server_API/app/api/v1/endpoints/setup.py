@@ -139,6 +139,19 @@ _UNSAFE_FIRST_RUN_STEP_DATA_KEY_MARKERS = (
     "value",
     "input",
 )
+_SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
+    r"(?i)(?:"
+    r"^sk-[A-Za-z0-9_-]{3,}$|"
+    r"^xox[baprs]-[A-Za-z0-9-]{6,}$|"
+    r"^gh[pousr]_[A-Za-z0-9_]{6,}$|"
+    r"^github_pat_[A-Za-z0-9_]{6,}$|"
+    r"^AIza[0-9A-Za-z_-]{6,}$|"
+    r"^eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}$|"
+    r"^bearer\s+\S{6,}$|"
+    r"^(?:secret|token|password)[-_][A-Za-z0-9_.-]{3,}$|"
+    r"(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S{3,}"
+    r")"
+)
 
 
 class ConfigUpdates(BaseModel):
@@ -183,8 +196,17 @@ def _is_unsafe_public_step_data_key(key: object) -> bool:
     )
 
 
+def _is_unsafe_public_step_data_value(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    candidate = value.strip()
+    return len(candidate) >= 6 and _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE.search(candidate) is not None
+
+
 def _is_public_first_run_step_value(value: Any) -> bool:
-    if value is None or isinstance(value, str | int | float | bool):
+    if isinstance(value, str):
+        return not _is_unsafe_public_step_data_value(value)
+    if value is None or isinstance(value, int | float | bool):
         return True
     if isinstance(value, list):
         return all(_is_public_first_run_step_value(item) for item in value)
@@ -201,12 +223,10 @@ def _is_public_first_run_step_value(value: Any) -> bool:
 def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, Any]:
     allowed_keys = _FIRST_RUN_STEP_DATA_ALLOWED_KEYS.get(step)
     if allowed_keys is None:
-        if data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
-            )
-        return {}
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
+        )
 
     unsupported_keys = set(data) - allowed_keys
     if unsupported_keys or any(_is_unsafe_public_step_data_key(key) for key in data):
@@ -390,8 +410,12 @@ def _first_forwarded_for_ip(request: Request) -> str | None:
     raw = request.headers.get("x-forwarded-for")
     if not raw:
         return None
-    parsed_candidates: list[str] = []
-    for candidate in raw.split(","):
+    return _effective_forwarded_chain_ip(raw.split(","))
+
+
+def _effective_forwarded_chain_ip(candidates: list[str]) -> str | None:
+    parsed_candidates = []
+    for candidate in candidates:
         if not candidate.strip():
             return None
         parsed_candidate = _parse_forwarded_client_ip(candidate)
@@ -411,14 +435,21 @@ def _forwarded_header_for_ip(request: Request) -> str | None:
     raw = request.headers.get("forwarded")
     if not raw:
         return None
+    candidates: list[str] = []
     for forwarded_entry in raw.split(","):
+        if not forwarded_entry.strip():
+            return None
+        entry_candidates: list[str] = []
         for parameter in forwarded_entry.split(";"):
             if "=" not in parameter:
                 continue
             key, value = parameter.split("=", 1)
             if key.strip().lower() == "for":
-                return _parse_forwarded_client_ip(value)
-    return None
+                entry_candidates.append(value)
+        if len(entry_candidates) != 1:
+            return None
+        candidates.append(entry_candidates[0])
+    return _effective_forwarded_chain_ip(candidates)
 
 
 def _real_ip_header_ip(request: Request) -> str | None:
