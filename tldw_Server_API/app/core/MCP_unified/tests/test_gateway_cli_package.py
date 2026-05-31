@@ -10,10 +10,17 @@ from pathlib import Path
 
 import pytest
 from mcp_unified.gateway import cli as gateway_cli
-from mcp_unified.gateway.config import build_gateway_profile_storage
+from mcp_unified.gateway.config import (
+    build_gateway_external_registry_storage,
+    build_gateway_profile_storage,
+)
 from mcp_unified.gateway.profiles import GatewayProfileManager
 from mcp_unified.profiles.models import MCPProfile
-from mcp_unified.storage.models import ProfileAssignment
+from mcp_unified.storage.models import (
+    CredentialGrant,
+    ExternalServerDefinition,
+    ProfileAssignment,
+)
 
 try:
     import tomllib
@@ -729,6 +736,389 @@ def test_gateway_cli_patch_profile_accepts_stdin_json(
     assert payload["store"] == {"kind": "sqlite", "persistent": True}
 
 
+def test_gateway_cli_create_external_server_persists_to_sqlite_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create an external server from JSON file input and persist to SQLite."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    server_path = tmp_path / "server.json"
+    server = _server_payload("search", "Search")
+    server_path.write_text(json.dumps(server), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-external-server",
+            "--server-file",
+            str(server_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["server"]["id"] == "search"
+    assert payload["server"]["name"] == "Search"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+    show_exit_code = gateway_cli.main(
+        ["show-external-server", "search", "--config", str(config_path)]
+    )
+    show_payload = json.loads(capsys.readouterr().out)
+    assert show_exit_code == 0
+    assert show_payload["server"]["id"] == "search"
+
+
+def test_gateway_cli_show_external_server_returns_stored_server(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Show one stored external server with SQLite store metadata."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "search", "Search")
+
+    exit_code = gateway_cli.main(
+        ["show-external-server", "search", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["server"]["id"] == "search"
+    assert payload["server"]["name"] == "Search"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_list_external_servers_filters_enabled_servers(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """List external servers and honor the optional enabled filter."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "disabled-search", "Disabled", enabled=False)
+    _seed_sqlite_external_server(sqlite_path, "enabled-search", "Enabled", enabled=True)
+
+    exit_code = gateway_cli.main(
+        [
+            "list-external-servers",
+            "--enabled",
+            "true",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert [server["id"] for server in payload["servers"]] == ["enabled-search"]
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_create_external_server_accepts_stdin_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Create an external server from stdin JSON when --server-file=-."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    server_payload = _server_payload("stdin-server", "Stdin Server")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    monkeypatch.setattr(gateway_cli.sys, "stdin", io.StringIO(json.dumps(server_payload)))
+
+    exit_code = gateway_cli.main(
+        ["create-external-server", "--server-file", "-", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["server"]["id"] == "stdin-server"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_patch_external_server_updates_sqlite_server(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Patch safe mutable external server fields from a JSON file payload."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text(
+        json.dumps({"name": "Updated Search", "enabled": False}),
+        encoding="utf-8",
+    )
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "search", "Search")
+
+    exit_code = gateway_cli.main(
+        [
+            "patch-external-server",
+            "search",
+            "--patch-file",
+            str(patch_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["server"]["id"] == "search"
+    assert payload["server"]["name"] == "Updated Search"
+    assert payload["server"]["enabled"] is False
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_delete_external_server_deletes_ungranted_sqlite_server(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Delete an external server that has no enabled credential grants."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "temporary", "Temporary")
+
+    exit_code = gateway_cli.main(
+        ["delete-external-server", "temporary", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "ok": True,
+        "server_id": "temporary",
+        "store": {"kind": "sqlite", "persistent": True},
+    }
+
+
+def test_gateway_cli_external_server_json_argument_rejects_malformed_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject malformed external server JSON payload files with exit code 2."""
+
+    server_path = tmp_path / "server.json"
+    server_path.write_text("{", encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / 'gateway.db')}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-external-server",
+            "--server-file",
+            str(server_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 2
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["error"].startswith("Invalid server JSON:")
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_external_server_json_argument_rejects_non_object_payload(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject external server JSON payloads that are not JSON objects."""
+
+    server_path = tmp_path / "server.json"
+    server_path.write_text(json.dumps(["invalid"]), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / 'gateway.db')}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-external-server",
+            "--server-file",
+            str(server_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 2
+    assert captured.out == ""
+    assert payload == {"error": "server JSON must be an object", "ok": False}
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_create_external_server_duplicate_reports_reason_code(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report duplicate external server creation as a domain JSON error."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    server_path = tmp_path / "server.json"
+    server_path.write_text(
+        json.dumps(_server_payload("search", "Duplicate Search")),
+        encoding="utf-8",
+    )
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "search", "Search")
+
+    exit_code = gateway_cli.main(
+        [
+            "create-external-server",
+            "--server-file",
+            str(server_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "external_server_already_exists"
+    assert payload["server_id"] == "search"
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_patch_external_server_unsupported_field_reports_reason_code(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report unsupported external server patch fields as domain JSON errors."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text(json.dumps({"id": "renamed"}), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "search", "Search")
+
+    exit_code = gateway_cli.main(
+        [
+            "patch-external-server",
+            "search",
+            "--patch-file",
+            str(patch_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "invalid_external_server_patch"
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_delete_external_server_with_enabled_grant_reports_reason_code(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject deleting an external server that has enabled credential grants."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "search", "Search")
+    _seed_sqlite_external_server_grant(sqlite_path, "grant-search", "search")
+
+    exit_code = gateway_cli.main(
+        ["delete-external-server", "search", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "external_server_has_credential_grants"
+    assert payload["server_id"] == "search"
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_external_registry_memory_config_reports_json_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report memory-store external registry unavailability without tracebacks."""
+
+    config_path = _write_gateway_config(tmp_path, {"store": {"kind": "memory"}})
+
+    exit_code = gateway_cli.main(
+        ["list-external-servers", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["path"] == str(config_path)
+    assert "external registry management requires" in payload["error"]
+    assert "Traceback" not in captured.err
+
+
 @pytest.mark.parametrize(
     ("argv", "label"),
     [
@@ -1027,6 +1417,15 @@ def _profile_payload(profile_id: str, name: str) -> dict[str, object]:
     return MCPProfile(id=profile_id, name=name).model_dump(mode="json")
 
 
+def _server_payload(server_id: str, name: str) -> dict[str, object]:
+    return {
+        "id": server_id,
+        "name": name,
+        "transport": "websocket",
+        "url": "wss://example.test/mcp",
+    }
+
+
 def _seed_sqlite_profile(sqlite_path: Path, profile_id: str, name: str) -> None:
     bundle = build_gateway_profile_storage(
         {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
@@ -1086,3 +1485,58 @@ def _seed_sqlite_profile_assignment(
             await bundle.assignment_store.aclose()
 
     asyncio.run(_seed_assignment())
+
+
+def _seed_sqlite_external_server(
+    sqlite_path: Path,
+    server_id: str,
+    name: str,
+    *,
+    enabled: bool = True,
+) -> None:
+    bundle = build_gateway_external_registry_storage(
+        {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
+    )
+
+    async def _seed() -> None:
+        try:
+            await bundle.external_registry_store.upsert_server(
+                ExternalServerDefinition(
+                    **_server_payload(server_id, name),
+                    enabled=enabled,
+                )
+            )
+        finally:
+            await bundle.external_registry_store.aclose()
+
+    asyncio.run(_seed())
+
+
+def _seed_sqlite_external_server_grant(
+    sqlite_path: Path,
+    grant_id: str,
+    server_id: str,
+) -> None:
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+    bundle = build_gateway_external_registry_storage(
+        {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
+    )
+
+    async def _seed() -> None:
+        try:
+            grant_store = bundle.credential_grant_store
+            if grant_store is None:
+                raise RuntimeError("SQLite external registry bundle must expose grants")
+            await grant_store.upsert_grant(
+                CredentialGrant(
+                    id=grant_id,
+                    profile_id="profile",
+                    broker_id="broker",
+                    credential_slot="api_key",
+                    external_server_id=server_id,
+                )
+            )
+        finally:
+            await bundle.external_registry_store.aclose()
+
+    asyncio.run(_seed())
