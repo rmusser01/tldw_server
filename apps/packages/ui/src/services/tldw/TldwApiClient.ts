@@ -7789,6 +7789,7 @@ import { collectionsMethods } from "./domains/collections"
 import { modelsAudioMethods } from "./domains/models-audio"
 import { presentationsMethods } from "./domains/presentations"
 import { prototypeWorkspaceMethods } from "./domains/prototype-workspaces"
+import { setupOnboardingMethods } from "./domains/setup-onboarding"
 import { workspaceApiMethods } from "./domains/workspace-api"
 import { webClipperMethods } from "./domains/web-clipper"
 
@@ -7814,6 +7815,7 @@ export interface TldwApiClient
     TldwDomainMethods<typeof modelsAudioMethods>,
     TldwDomainMethods<typeof presentationsMethods>,
     TldwDomainMethods<typeof prototypeWorkspaceMethods>,
+    TldwDomainMethods<typeof setupOnboardingMethods>,
     TldwDomainMethods<typeof workspaceApiMethods>,
     TldwDomainMethods<typeof webClipperMethods> {}
 
@@ -7828,6 +7830,7 @@ Object.assign(
   modelsAudioMethods,
   presentationsMethods,
   prototypeWorkspaceMethods,
+  setupOnboardingMethods,
   workspaceApiMethods,
   webClipperMethods
 )

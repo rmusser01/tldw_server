@@ -9,5 +9,9 @@ export {
   prototypeWorkspaceMethods,
   type PrototypeWorkspaceMethods
 } from "./prototype-workspaces"
+export {
+  setupOnboardingMethods,
+  type SetupOnboardingMethods
+} from "./setup-onboarding"
 export { workspaceApiMethods, type WorkspaceApiMethods } from "./workspace-api"
 export { webClipperMethods, type WebClipperMethods } from "./web-clipper"

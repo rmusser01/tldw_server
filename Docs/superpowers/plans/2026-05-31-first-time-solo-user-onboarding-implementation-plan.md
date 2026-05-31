@@ -1569,7 +1569,7 @@ git commit -m "feat: add first-run settings endpoints"
 - Test: `apps/packages/ui/src/services/tldw/__tests__/setup-onboarding.test.ts`
 - Test: `apps/packages/ui/src/hooks/__tests__/useSetupOnboarding.test.tsx`
 
-- [ ] **Step 1: Add failing setup API client tests**
+- [x] **Step 1: Add failing setup API client tests**
 
 Create `apps/packages/ui/src/services/tldw/__tests__/setup-onboarding.test.ts`:
 
@@ -1643,7 +1643,7 @@ describe("setup onboarding API domain", () => {
 })
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 From `apps/packages/ui`:
 
@@ -1653,7 +1653,7 @@ bunx vitest run src/services/tldw/__tests__/setup-onboarding.test.ts
 
 Expected: FAIL because the domain file does not exist.
 
-- [ ] **Step 3: Add setup onboarding types**
+- [x] **Step 3: Add setup onboarding types**
 
 Create `apps/packages/ui/src/types/setup-onboarding.ts` with types matching backend schemas:
 
@@ -1723,7 +1723,7 @@ export type FirstRunMetadata = {
 
 Add request/response types for provider save, validation, ingest defaults, audio defaults, optional advanced, and first chat.
 
-- [ ] **Step 4: Add setup onboarding API domain**
+- [x] **Step 4: Add setup onboarding API domain**
 
 Create `apps/packages/ui/src/services/tldw/domains/setup-onboarding.ts`:
 
@@ -1773,7 +1773,7 @@ export type SetupOnboardingMethods = typeof setupOnboardingMethods
 
 Add all required methods before finishing this task.
 
-- [ ] **Step 5: Wire domain into `TldwApiClient`**
+- [x] **Step 5: Wire domain into `TldwApiClient`**
 
 Modify:
 
@@ -1782,7 +1782,7 @@ Modify:
 
 Add `setupOnboardingMethods` to imports, interface extension, and `Object.assign`.
 
-- [ ] **Step 6: Add setup paths to OpenAPI guard**
+- [x] **Step 6: Add setup paths to OpenAPI guard**
 
 Modify `apps/packages/ui/src/services/tldw/openapi-guard.ts` and add:
 
@@ -1800,7 +1800,7 @@ Modify `apps/packages/ui/src/services/tldw/openapi-guard.ts` and add:
   | "/api/v1/setup/first-run/complete"
 ```
 
-- [ ] **Step 7: Add hook tests**
+- [x] **Step 7: Add hook tests**
 
 Create `apps/packages/ui/src/hooks/__tests__/useSetupOnboarding.test.tsx`:
 
@@ -1833,7 +1833,7 @@ describe("useSetupOnboarding", () => {
 })
 ```
 
-- [ ] **Step 8: Implement `useSetupOnboarding`**
+- [x] **Step 8: Implement `useSetupOnboarding`**
 
 Create `apps/packages/ui/src/hooks/useSetupOnboarding.ts`. Use local React state first; use React Query only if the surrounding setup code already has a provider in the tested route. Expose:
 
@@ -1849,7 +1849,7 @@ Create `apps/packages/ui/src/hooks/useSetupOnboarding.ts`. Use local React state
 - `verifyFirstChat`
 - `complete`
 
-- [ ] **Step 9: Run frontend API/hook tests**
+- [x] **Step 9: Run frontend API/hook tests**
 
 From `apps/packages/ui`:
 
@@ -1859,7 +1859,7 @@ bunx vitest run src/services/tldw/__tests__/setup-onboarding.test.ts src/hooks/_
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit frontend setup API domain**
+- [x] **Step 10: Commit frontend setup API domain**
 
 ```bash
 git add apps/packages/ui/src/types/setup-onboarding.ts apps/packages/ui/src/services/tldw/domains/setup-onboarding.ts apps/packages/ui/src/services/tldw/domains/index.ts apps/packages/ui/src/services/tldw/TldwApiClient.ts apps/packages/ui/src/services/tldw/openapi-guard.ts apps/packages/ui/src/hooks/useSetupOnboarding.ts apps/packages/ui/src/services/tldw/__tests__/setup-onboarding.test.ts apps/packages/ui/src/hooks/__tests__/useSetupOnboarding.test.tsx
@@ -1878,7 +1878,7 @@ git commit -m "feat: add setup onboarding frontend client"
 - Test: `apps/packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx`
 - Test: `apps/packages/ui/src/routes/__tests__/option-index.unified-setup.test.tsx`
 
-- [ ] **Step 1: Write failing wizard skeleton test**
+- [x] **Step 1: Write failing wizard skeleton test**
 
 Create `apps/packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx`:
 
@@ -1943,7 +1943,7 @@ describe("UnifiedSetupWizard", () => {
 })
 ```
 
-- [ ] **Step 2: Write failing route-shell test**
+- [x] **Step 2: Write failing route-shell test**
 
 Create `apps/packages/ui/src/routes/__tests__/option-index.unified-setup.test.tsx`:
 
@@ -1997,7 +1997,7 @@ describe("OptionIndex unified setup resolver", () => {
 })
 ```
 
-- [ ] **Step 3: Run tests to verify failure**
+- [x] **Step 3: Run tests to verify failure**
 
 From `apps/packages/ui`:
 
@@ -2007,7 +2007,7 @@ bunx vitest run src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.te
 
 Expected: FAIL because wizard does not exist or route still uses old local first-run state.
 
-- [ ] **Step 4: Implement `SetupPathStep` and `MultiUserExitPanel`**
+- [x] **Step 4: Implement `SetupPathStep` and `MultiUserExitPanel`**
 
 Create small focused components. Use buttons, not decorative cards-only click targets:
 
@@ -2028,7 +2028,7 @@ export function SetupPathStep({ onSelect }: { onSelect: (path: "docker" | "local
 
 Style with existing design-system classes used in onboarding; keep text compact and non-marketing.
 
-- [ ] **Step 5: Implement `PrivacySecurityStep`**
+- [x] **Step 5: Implement `PrivacySecurityStep`**
 
 Create `apps/packages/ui/src/components/Option/Onboarding/steps/PrivacySecurityStep.tsx`.
 
@@ -2061,7 +2061,7 @@ it("requires privacy and security acknowledgement before provider setup", async 
 })
 ```
 
-- [ ] **Step 6: Implement wizard skeleton**
+- [x] **Step 6: Implement wizard skeleton**
 
 `UnifiedSetupWizard` should:
 
@@ -2074,7 +2074,7 @@ it("requires privacy and security acknowledgement before provider setup", async 
 - show `MultiUserExitPanel` after multi-user selection;
 - expose a skip button that calls backend skip state.
 
-- [ ] **Step 7: Replace first-run route usage**
+- [x] **Step 7: Replace first-run route usage**
 
 Modify `option-index.tsx`:
 
@@ -2091,7 +2091,7 @@ Modify `option-setup.tsx`:
 - label `/setup` as operator/recovery in copy;
 - keep `hideHeader hideSidebar`.
 
-- [ ] **Step 8: Run wizard and route tests**
+- [x] **Step 8: Run wizard and route tests**
 
 ```bash
 bunx vitest run src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx src/routes/__tests__/option-index.unified-setup.test.tsx
@@ -2099,7 +2099,7 @@ bunx vitest run src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.te
 
 Expected: PASS.
 
-- [ ] **Step 9: Run existing onboarding guard tests**
+- [x] **Step 9: Run existing onboarding guard tests**
 
 ```bash
 bunx vitest run src/components/Option/Onboarding/__tests__/OnboardingConnectForm.design-system.test.tsx src/components/Option/Onboarding/__tests__/OnboardingConnectForm.success-screen.guard.test.tsx
@@ -2107,7 +2107,7 @@ bunx vitest run src/components/Option/Onboarding/__tests__/OnboardingConnectForm
 
 Expected: PASS or update tests only where they intentionally asserted replaced first-run behavior.
 
-- [ ] **Step 10: Commit wizard shell**
+- [x] **Step 10: Commit wizard shell**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Onboarding/UnifiedSetupWizard.tsx apps/packages/ui/src/components/Option/Onboarding/steps/SetupPathStep.tsx apps/packages/ui/src/components/Option/Onboarding/steps/PrivacySecurityStep.tsx apps/packages/ui/src/components/Option/Onboarding/steps/MultiUserExitPanel.tsx apps/packages/ui/src/routes/option-index.tsx apps/packages/ui/src/routes/option-setup.tsx apps/packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx apps/packages/ui/src/routes/__tests__/option-index.unified-setup.test.tsx

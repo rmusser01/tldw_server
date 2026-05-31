@@ -1,29 +1,15 @@
 import React from "react"
-import { Moon, Sun } from "lucide-react"
-import { useLocation, useNavigate } from "react-router-dom"
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
+import { UnifiedSetupWizard } from "@/components/Option/Onboarding/UnifiedSetupWizard"
 import {
   useConnectionActions,
-  useConnectionState,
-  useConnectionUxState
+  useConnectionState
 } from "@/hooks/useConnectionState"
-import { ConnectionPhase } from "@/types/connection"
 import { useFocusComposerOnConnect } from "@/hooks/useComposerFocus"
-import { useDarkMode } from "@/hooks/useDarkmode"
+import { useSetupOnboarding } from "@/hooks/useSetupOnboarding"
 import OptionLayout from "~/components/Layouts/Layout"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
-import {
-  CHARACTER_CHAT_ONBOARDING_INTENT,
-  getOnboardingReturnToFromSearch,
-  resolveOnboardingEntryIntent
-} from "@/utils/onboarding-route-intent"
-
-const LazyOnboardingWizard = React.lazy(() =>
-  import("@/components/Option/Onboarding/OnboardingWizard").then((module) => ({
-    default: module.OnboardingWizard
-  }))
-)
 
 const LazyCompanionHomeShell = React.lazy(() =>
   import("@/components/Option/CompanionHome").then((module) => ({
@@ -33,20 +19,24 @@ const LazyCompanionHomeShell = React.lazy(() =>
 
 const LazyOptionHostedHome = React.lazy(() => import("./option-hosted-home"))
 
+const setupRequiredStatuses = new Set([
+  "not_started",
+  "in_progress",
+  "blocked",
+  "first_chat_complete"
+])
+
 const OptionIndex = () => {
-  const location = useLocation()
-  const navigate = useNavigate()
   const hostedMode = isHostedTldwDeployment()
   const { phase } = useConnectionState()
-  const { hasCompletedFirstRun } = useConnectionUxState()
-  const { checkOnce, beginOnboarding, markFirstRunComplete } = useConnectionActions()
-  const { mode, toggleDarkMode } = useDarkMode()
-  const onboardingInitiated = React.useRef(false)
+  const { checkOnce } = useConnectionActions()
+  const {
+    state: firstRunState,
+    metadata: firstRunMetadata,
+    loading: setupLoading,
+    adoptState: adoptFirstRunState
+  } = useSetupOnboarding()
   const [didHydrate, setDidHydrate] = React.useState(false)
-  const onboardingEntryIntent = resolveOnboardingEntryIntent(location)
-  const onboardingReturnTo = getOnboardingReturnToFromSearch(location.search)
-  const isCharacterChatOnboarding =
-    onboardingEntryIntent === CHARACTER_CHAT_ONBOARDING_INTENT
 
   React.useEffect(() => {
     if (hostedMode) {
@@ -67,24 +57,6 @@ const OptionIndex = () => {
     }
   }, [checkOnce, hostedMode])
 
-  React.useEffect(() => {
-    if (hostedMode) return
-    if (hasCompletedFirstRun) {
-      void checkOnce()
-    }
-  }, [checkOnce, hasCompletedFirstRun, hostedMode])
-
-  React.useEffect(() => {
-    if (hostedMode) return
-    if (!didHydrate) return
-    if (hasCompletedFirstRun) return
-    if (onboardingInitiated.current) return
-    if (phase !== ConnectionPhase.UNCONFIGURED) return
-
-    onboardingInitiated.current = true
-    void beginOnboarding()
-  }, [beginOnboarding, didHydrate, hasCompletedFirstRun, hostedMode, phase])
-
   useFocusComposerOnConnect(phase ?? null)
 
   if (hostedMode) {
@@ -104,69 +76,26 @@ const OptionIndex = () => {
     )
   }
 
-  // During first-time setup, hide the connection shell entirely and show only
-  // the onboarding wizard (“Welcome — Let’s get you connected”).
-  if (!hasCompletedFirstRun) {
-    const themeToggleLabel =
-      mode === "dark" ? "Switch to light theme" : "Switch to dark theme"
-    const onboardingTitle = isCharacterChatOnboarding
-      ? "Character Chat Onboarding"
-      : "Home Onboarding"
-    const onboardingDescription = isCharacterChatOnboarding
-      ? "Finish setup, then continue creating and chatting with characters."
-      : "Start here to connect your server or try local demo mode."
+  if ((setupLoading || !didHydrate) && !firstRunState) {
     return (
       <OptionLayout hideHeader hideSidebar>
-        <div className="mx-auto mb-4 w-full max-w-3xl rounded-lg border border-border bg-surface px-4 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h1 className="text-base font-semibold text-text">
-                {onboardingTitle}
-              </h1>
-              <p className="mt-1 text-xs text-text-muted">
-                {onboardingDescription}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={toggleDarkMode}
-              aria-label={themeToggleLabel}
-              title={themeToggleLabel}
-              data-testid="chat-header-theme-toggle"
-              className="inline-flex items-center justify-center rounded-md border border-border bg-surface px-2 py-2 text-text-muted transition-colors hover:bg-surface2 hover:text-text"
-            >
-              {mode === "dark" ? (
-                <Sun className="size-4" aria-hidden="true" />
-              ) : (
-                <Moon className="size-4" aria-hidden="true" />
-              )}
-            </button>
-          </div>
-        </div>
-        <React.Suspense
-          fallback={
-            <PageAssistLoader
-              label="Loading setup..."
-              description="Preparing onboarding"
-            />
-          }
-        >
-          <LazyOnboardingWizard
-            entryIntent={onboardingEntryIntent}
-            returnTo={onboardingReturnTo}
-            onFinish={async () => {
-              try {
-                await markFirstRunComplete()
-              } catch {
-                // ignore markFirstRunComplete failures here; connection state will self-heal on next load
-              }
-              if (isCharacterChatOnboarding && onboardingReturnTo) {
-                navigate(onboardingReturnTo)
-              }
-              void checkOnce().catch(() => undefined)
-            }}
-          />
-        </React.Suspense>
+        <PageAssistLoader
+          label="Loading setup..."
+          description="Reading first-run readiness from the server"
+        />
+      </OptionLayout>
+    )
+  }
+
+  const setupStatus = firstRunState?.status
+  if (!setupStatus || setupRequiredStatuses.has(setupStatus)) {
+    return (
+      <OptionLayout hideHeader hideSidebar>
+        <UnifiedSetupWizard
+          initialState={firstRunState}
+          initialMetadata={firstRunMetadata}
+          onStateChange={adoptFirstRunState}
+        />
       </OptionLayout>
     )
   }

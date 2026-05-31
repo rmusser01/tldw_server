@@ -1,68 +1,59 @@
 import React from "react"
-import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
-import OptionLayout from "~/components/Layouts/Layout"
-import { OnboardingWizard } from "@/components/Option/Onboarding/OnboardingWizard"
-import { ReadinessSetupScreen } from "@/components/Option/Setup/ReadinessSetupScreen"
+
+import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
+import { UnifiedSetupWizard } from "@/components/Option/Onboarding/UnifiedSetupWizard"
 import { SetupRequiredPanel } from "@/components/ui/state"
-import {
-  useConnectionState,
-  useConnectionUxState
-} from "@/hooks/useConnectionState"
+import { useSetupOnboarding } from "@/hooks/useSetupOnboarding"
+import OptionLayout from "~/components/Layouts/Layout"
+
+const setupRequiredStatuses = new Set([
+  "not_started",
+  "in_progress",
+  "blocked",
+  "first_chat_complete"
+])
 
 const OptionSetup = () => {
-  const { t } = useTranslation("option")
   const navigate = useNavigate()
-  const { serverUrl } = useConnectionState()
-  const { hasCompletedFirstRun, isConfigOrError } = useConnectionUxState()
-  const [readinessUnavailable, setReadinessUnavailable] = React.useState(false)
-
-  const handleFinish = React.useCallback(() => {
-    navigate("/")
-  }, [navigate])
-
-  React.useEffect(() => {
-    setReadinessUnavailable(false)
-  }, [serverUrl, isConfigOrError, hasCompletedFirstRun])
-
-  if (serverUrl && !isConfigOrError && !readinessUnavailable) {
-    return (
-      <OptionLayout hideHeader hideSidebar>
-        <ReadinessSetupScreen
-          mode={hasCompletedFirstRun ? "admin" : "first-run"}
-          onComplete={handleFinish}
-          onUnavailable={() => setReadinessUnavailable(true)}
-        />
-      </OptionLayout>
-    )
-  }
+  const { state, metadata, loading, adoptState } = useSetupOnboarding()
+  const status = state?.status
+  const showWizard = !status || setupRequiredStatuses.has(status)
 
   return (
     <OptionLayout hideHeader hideSidebar>
-      <div className="mx-auto mb-4 w-full max-w-3xl">
-        <h1 className="text-lg font-semibold text-text">
-          {t("setupRoute.title", "Setup Wizard")}
-        </h1>
-      </div>
       <SetupRequiredPanel
         className="mx-auto mb-4 w-full max-w-3xl"
-        title={t("setupRoute.panelTitle", "Connect your server")}
-        message={t(
-          "setupRoute.panelMessage",
-          "Guided connection setup for production use."
-        )}
+        title="/setup operator recovery"
+        message="Use this surface when first-run setup needs local operator recovery."
         primaryAction={{
-          label: t("setupRoute.startAction", "Start setup"),
+          label: showWizard ? "Continue setup" : "Return home",
           onClick: () => {
-            document
-              .querySelector<HTMLElement>(
-                "[data-testid='onboarding-server-url'] input, [data-testid='onboarding-server-url']"
-              )
-              ?.focus()
+            if (!showWizard) {
+              navigate("/")
+              return
+            }
+            const setupShell = document.querySelector<HTMLElement>(
+              "[data-testid='unified-setup-shell']"
+            )
+            const fallbackButton = document.querySelector<HTMLElement>("button")
+            const focusTarget = setupShell ?? fallbackButton
+            focusTarget?.focus()
           }
         }}
       />
-      <OnboardingWizard onFinish={handleFinish} />
+      {loading && !state ? (
+        <PageAssistLoader
+          label="Loading setup..."
+          description="Reading first-run readiness from the server"
+        />
+      ) : showWizard ? (
+        <UnifiedSetupWizard
+          initialState={state}
+          initialMetadata={metadata}
+          onStateChange={adoptState}
+        />
+      ) : null}
     </OptionLayout>
   )
 }
