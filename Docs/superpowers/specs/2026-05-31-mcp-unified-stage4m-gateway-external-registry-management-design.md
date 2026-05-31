@@ -30,6 +30,8 @@ external tools executable just because a registry row exists.
   that posture.
 - Emit compact audit events for successful and failed registry mutations when an
   audit store is configured.
+- Add explicit gateway storage/bootstrap wiring so CLI and FastAPI use the same
+  external registry, credential grant, audit, and persistence metadata semantics.
 - Keep registry management separate from external federation runtime lifecycle,
   discovery refresh, credential brokering, and policy execution.
 
@@ -77,8 +79,8 @@ start lifecycle state just to edit the registry.
 
 Create a `GatewayExternalRegistryManager` that depends on a typed
 `ExternalRegistryStore`, an optional `CredentialGrantStore`, an optional
-`AuditStore`, and store metadata. Runtime lifecycle remains owned by
-`ExternalFederationManager`.
+`AuditStore`, and store metadata. Add explicit gateway storage/bootstrap wiring
+for this manager. Runtime lifecycle remains owned by `ExternalFederationManager`.
 
 Tradeoff: this adds one small manager, but it keeps responsibilities clear and
 matches Stage 4K/4L.
@@ -156,6 +158,7 @@ The manager owns:
 - allowed patch-field validation
 - transport-specific semantic validation
 - duplicate detection
+- credential-slot relaxation guards
 - guarded delete behavior
 - audit event emission
 - deterministic response envelopes
@@ -172,6 +175,17 @@ stores so duplicate create is atomic, matching the Stage 4L profile create
 hardening pattern. If the SQLite implementation is touched, use SQLAlchemy Core
 and async offload through the existing `_run_db` helper.
 
+The package should also add external-registry domain exceptions that mirror the
+profile-store pattern:
+
+```python
+ExternalRegistryStoreUnavailableError
+ExternalServerAlreadyExistsError(server_id: str)
+```
+
+Store methods should raise these expected exceptions rather than forcing
+CLI/FastAPI handlers to catch broad implementation failures.
+
 The manager should require typed registry-store behavior for management. It
 should prefer `list_server_definitions` for list operations and should not build
 editable management responses from runtime health/status rows returned by a
@@ -182,6 +196,45 @@ fail with `external_server_has_credential_grants` when a `CredentialGrantStore`
 is available. If no grant store is configured, deletion should fail closed for
 persistent stores unless the implementation can prove no grants exist in the
 same store. Disabling remains allowed because it does not orphan grants.
+
+## Gateway Storage Wiring
+
+Stage 4M should add explicit storage wiring rather than relying on the existing
+profile-only bootstrap bundle.
+
+Recommended shape:
+
+```python
+GatewayExternalRegistryStorageBundle
+  external_registry_store: ExternalRegistryStore
+  credential_grant_store: CredentialGrantStore | None
+  audit_store: AuditStore | None
+  metadata: GatewayStoreMetadata
+```
+
+The existing `GatewayProfileStoreMetadata` shape can be generalized or reused if
+the implementation keeps the same JSON payload, but naming should not imply that
+external-registry management is backed by a separate profile-only store.
+
+For `sqlite` gateway config, the storage builder should reuse the same
+`SQLiteMCPStore` instance for external registry, credential grants, and audit
+when no explicit stores are injected. That gives delete and credential-slot
+guards a consistent view of grant state.
+
+For injected stores:
+
+- `external_registry_store` is required for external registry management.
+- `credential_grant_store` is required for operations that delete a server or
+  remove/rename credential slots.
+- `audit_store` is optional for management operations and remains best-effort.
+
+FastAPI should accept either an explicit `external_registry_manager` or a
+bootstrap object that exposes one. If
+`enable_external_registry_management=True` is set without a resolved manager,
+router construction should fail fast with a clear configuration error.
+
+CLI commands should use the same config/storage builder as FastAPI. They should
+not construct a separate store graph with different guard behavior.
 
 ## Patch Semantics
 
@@ -217,6 +270,29 @@ scrub unused transport fields automatically. Operators can clear no-longer-used
 fields by patching them to `[]` or `null` where the model supports it.
 `auto_start` remains a future lifecycle hint in Stage 4M and must not start a
 transport.
+
+`credential_slots` changes are security-sensitive because the federation manager
+uses these slots to decide whether credential grants are required before
+execution. Stage 4M should allow adding slots, but removing or renaming existing
+slots is credential-requirement relaxation. That relaxation must be guarded:
+
+- if the server is enabled, slot removal or rename must fail unless the same
+  patch disables the server
+- if enabled credential grants reference the server, removal or rename must fail
+  with `external_server_has_credential_grants`
+- if grant state is unavailable, removal or rename must fail closed with
+  `credential_grant_store_unavailable`
+- if the server is already disabled and no enabled grants reference it, slot
+  replacement is allowed and audited
+
+This keeps operators from accidentally making a credential-bearing external
+server executable under only an external-server grant.
+
+In Stage 4M, the `ws://`/`wss://` URL rule lives in the gateway registry manager
+and request validation path. Do not tighten `ExternalServerDefinition` itself in
+this slice unless all existing config-loader and storage tests are updated in the
+same PR. Direct store primitives remain lower-level persistence contracts; the
+gateway management surface is responsible for the stricter public contract.
 
 Disabled draft servers may omit transport-specific runtime details, matching the
 current model behavior.
@@ -299,9 +375,11 @@ Expected reason codes:
 
 ```text
 external_registry_store_unavailable -> HTTP 503
+credential_grant_store_unavailable -> HTTP 503
 external_server_not_found -> HTTP 404
 external_server_already_exists -> HTTP 409
 external_server_has_credential_grants -> HTTP 409
+credential_slot_change_requires_disabled_server -> HTTP 409
 invalid_external_server_request -> HTTP 422
 invalid_external_server_patch -> HTTP 422
 unexpected_external_server_delete_result -> HTTP 500
@@ -366,6 +444,11 @@ Focused tests should cover:
 - `auto_start` persistence without lifecycle side effects
 - delete not found
 - delete blocked by credential grants when grant information is available
+- delete and credential-slot relaxation fail closed when credential grant state
+  is unavailable
+- credential slot additions are allowed, but enabled-server slot removals or
+  renames are blocked unless the same patch disables the server
+- FastAPI and CLI use the same external registry storage bundle semantics
 - SQLite persistence round trips and caller-owned returned payloads
 - FastAPI success/error status mappings
 - CLI success/error JSON and persistent-store requirement
@@ -392,8 +475,10 @@ Expected touched areas for the implementation plan:
 - `mcp_unified/gateway/external_registry.py` or equivalent new manager module
 - `mcp_unified/gateway/fastapi.py`
 - `mcp_unified/gateway/cli.py`
-- `mcp_unified/gateway/config.py` if storage bundle wiring needs a named
-  external-registry manager factory
+- `mcp_unified/gateway/config.py` for external registry storage bundle wiring
+  and manager factory support
+- `mcp_unified/gateway/bootstrap.py` if the existing bootstrap result becomes
+  the place to expose the external registry manager
 - `mcp_unified/interfaces/storage.py` for the persistent-store atomic
   `create_server` capability and any guarded-delete helper selected during
   planning

@@ -4,7 +4,7 @@ title: Design MCP Unified Stage 4M gateway external registry management
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-31 19:34'
+updated_date: '2026-05-31 19:43'
 labels:
   - mcp-unified
   - stage-4m
@@ -39,12 +39,14 @@ Write and review the Stage 4M design spec for standalone gateway external-server
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Self-review pass completed. Tightened the draft around typed registry-store requirements, persistent-store atomic create, server-id slug validation for virtual tool names, websocket URL validation, persistent CLI store requirements, and no lifecycle side effects from registry mutations. Subagent review was not dispatched because current tool policy requires explicit user authorization for subagent delegation.
+
+Incorporated the requested review pass before implementation planning: added grant-aware credential-slot patch guards, explicit external registry storage/bootstrap bundle semantics, external-registry store exception contracts, and a clear Stage 4M location for websocket URL validation without broadening the storage model.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the Stage 4M gateway external registry management design spec at Docs/superpowers/specs/2026-05-31-mcp-unified-stage4m-gateway-external-registry-management-design.md. The spec defines a manager-first CLI/FastAPI scope for external server definition list/show/create/patch/delete, persistent SQLite-backed registry behavior, deterministic errors, audit posture, server-id and transport validation, concurrency/runtime-state boundaries, and focused implementation verification. Bandit skipped because this task only adds documentation and Backlog tracking; git diff --check and marker scans were clean.
+Created and revised the Stage 4M gateway external registry management design spec at Docs/superpowers/specs/2026-05-31-mcp-unified-stage4m-gateway-external-registry-management-design.md. The reviewed spec defines manager-first CLI/FastAPI scope for external server definition list/show/create/patch/delete, persistent SQLite-backed registry behavior, deterministic store/domain errors, grant-aware credential-slot safeguards, explicit external-registry storage/bootstrap wiring, audit posture, server-id and transport validation, concurrency/runtime-state boundaries, and focused implementation verification. Bandit skipped because this task only adds documentation and Backlog tracking; marker scan, ASCII scan, and git diff --check were clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
