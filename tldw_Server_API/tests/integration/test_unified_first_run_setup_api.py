@@ -193,6 +193,37 @@ def test_first_run_provider_save_rejects_blank_hosted_api_key_without_config_wri
     assert "openai_api_key" not in config_text
 
 
+def test_first_run_provider_save_writes_kobold_runtime_endpoint_key(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    config_path = tmp_path / "config.txt"
+    config_path.write_text("[API]\ndefault_api = openai\n\n[Local-API]\n", encoding="utf-8")
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    monkeypatch.setattr(setup_endpoint.setup_manager, "get_config_file_path", lambda: config_path)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers",
+        json={
+            "provider_key": "koboldcpp",
+            "base_url": "http://127.0.0.1:5001/api/v1/generate",
+            "make_default": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "saved"
+    assert body["make_default"] is True
+    config_text = config_path.read_text(encoding="utf-8")
+    assert "default_api = kobold" in config_text
+    assert "kobold_api_IP = http://127.0.0.1:5001/api/v1/generate" in config_text
+    assert "kobold_openai_api_IP" not in config_text
+
+
 def test_completed_setup_rejects_provider_save_through_first_run_write_guard(
     monkeypatch,
     tmp_path,

@@ -26,6 +26,15 @@ def test_catalog_marks_local_providers_as_endpoint_based():
     assert providers["custom_openai"].provider_type is SetupProviderType.LOCAL_ENDPOINT
 
 
+def test_catalog_local_provider_fields_align_with_runtime_adapter_config_keys():
+    catalog = get_setup_provider_catalog()
+    providers = {provider.provider_key: provider for provider in catalog.providers}
+
+    assert providers["koboldcpp"].base_url_field == "kobold_api_IP"
+    assert providers["koboldcpp"].default_base_url == "http://127.0.0.1:5001/api/v1/generate"
+    assert providers["tabbyapi"].model_field == "tabby_model"
+
+
 def test_catalog_defaults_align_with_runtime_adapter_defaults():
     catalog = get_setup_provider_catalog()
     providers = {provider.provider_key: provider for provider in catalog.providers}

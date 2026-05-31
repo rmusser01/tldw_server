@@ -3852,7 +3852,11 @@ def load_and_log_configs():
 
         tabby_api_IP = config_parser_object.get('Local-API', 'tabby_api_IP', fallback='http://127.0.0.1:5000/api/v1/generate')
         tabby_api_key = config_parser_object.get('Local-API', 'tabby_api_key', fallback=None)
-        tabby_model = config_parser_object.get('models', 'tabby_model', fallback=None)
+        tabby_model = config_parser_object.get(
+            'Local-API',
+            'tabby_model',
+            fallback=config_parser_object.get('models', 'tabby_model', fallback=None),
+        )
         tabby_streaming = config_parser_object.get('Local-API', 'tabby_streaming', fallback='False')
         tabby_temperature = config_parser_object.get('Local-API', 'tabby_temperature', fallback='0.7')
         tabby_top_p = config_parser_object.get('Local-API', 'tabby_top_p', fallback='0.95')

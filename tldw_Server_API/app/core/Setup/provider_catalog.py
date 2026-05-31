@@ -191,9 +191,9 @@ _LOCAL_PROVIDERS: tuple[SetupProviderCatalogEntry, ...] = (
         provider_type=SetupProviderType.LOCAL_ENDPOINT,
         config_section="Local-API",
         api_key_field="kobold_api_key",
-        base_url_field="kobold_openai_api_IP",
+        base_url_field="kobold_api_IP",
         model_field="kobold_model",
-        default_base_url="http://127.0.0.1:5001/v1",
+        default_base_url="http://127.0.0.1:5001/api/v1/generate",
         supports_preflight=True,
     ),
     SetupProviderCatalogEntry(

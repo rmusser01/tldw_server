@@ -55,6 +55,28 @@ def test_setup_saved_moonshot_and_zai_fields_load_into_runtime_adapter_config(mo
     assert data["zai_api"]["api_base_url"] == "https://zai.example/api/paas/v4"
 
 
+def test_setup_saved_kobold_and_tabby_fields_load_into_runtime_adapter_config(monkeypatch):
+    from tldw_Server_API.app.core import config as cfg
+
+    parser = configparser.ConfigParser()
+    parser["Local-API"] = {
+        "kobold_api_IP": "http://127.0.0.1:5001/api/v1/generate",
+        "kobold_api_key": "kobold-secret",
+        "tabby_api_IP": "http://127.0.0.1:5000/v1",
+        "tabby_api_key": "tabby-secret",
+        "tabby_model": "tabby-local-model",
+    }
+    monkeypatch.setattr(cfg, "load_comprehensive_config", lambda: parser)
+
+    data = cfg.load_and_log_configs()
+
+    assert data["kobold_api"]["api_ip"] == "http://127.0.0.1:5001/api/v1/generate"
+    assert data["kobold_api"]["api_key"] == "kobold-secret"
+    assert data["tabby_api"]["api_ip"] == "http://127.0.0.1:5000/v1"
+    assert data["tabby_api"]["api_key"] == "tabby-secret"
+    assert data["tabby_api"]["model"] == "tabby-local-model"
+
+
 def _make_mock_request(client_host: str = "127.0.0.1") -> MagicMock:
     """Create a mock FastAPI Request with a client IP."""
     req = MagicMock()
