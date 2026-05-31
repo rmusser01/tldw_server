@@ -31,6 +31,8 @@ import {
 } from "../undo-manager"
 import { buildProposalDeepResearchVerificationSections } from "./proposal-deep-research-verification"
 
+const MAX_DISPLAYED_UNRESOLVED_QUESTIONS = 3
+
 export const MindMapArtifactViewer: React.FC<{
   title: string
   content: string
@@ -307,7 +309,7 @@ export const ProposalDeepResearchVerificationViewer: React.FC<{
                       </p>
                       <ul className="mt-1 list-disc space-y-1 pl-4 text-text-muted">
                         {section.verification.unresolvedQuestions
-                          .slice(0, 3)
+                          .slice(0, MAX_DISPLAYED_UNRESOLVED_QUESTIONS)
                           .map((question, questionIndex) => (
                             <li key={`${question}-${questionIndex}`}>
                               {question}
