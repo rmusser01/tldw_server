@@ -1,28 +1,26 @@
 ---
 id: TASK-491
 title: Implement onboarding provider catalog and validation
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-31 09:54'
+updated_date: 2026-05-31 09:54
 labels: []
 dependencies: []
 references:
-  - TASK-489
-  - >-
-    Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md
+- TASK-489
+- Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md
 documentation:
-  - >-
-    Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md#task-3-provider-catalog-config-writes-and-validation
+- Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md#task-3-provider-catalog-config-writes-and-validation
 modified_files:
-  - tldw_Server_API/app/core/Setup/provider_catalog.py
-  - tldw_Server_API/app/core/Setup/provider_validation.py
-  - tldw_Server_API/app/api/v1/schemas/setup_schemas.py
-  - tldw_Server_API/app/api/v1/endpoints/setup.py
-  - tldw_Server_API/tests/Setup/test_setup_provider_catalog.py
-  - tldw_Server_API/tests/Setup/test_setup_provider_validation.py
-  - tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
-  - tldw_Server_API/tests/Config/test_config_providers_endpoints.py
+- tldw_Server_API/app/core/Setup/provider_catalog.py
+- tldw_Server_API/app/core/Setup/provider_validation.py
+- tldw_Server_API/app/core/Setup/setup_manager.py
+- tldw_Server_API/app/api/v1/schemas/setup_schemas.py
+- tldw_Server_API/app/api/v1/endpoints/setup.py
+- tldw_Server_API/tests/Setup/test_setup_provider_catalog.py
+- tldw_Server_API/tests/Setup/test_setup_provider_validation.py
+- tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
 ---
 
 ## Description
@@ -47,6 +45,7 @@ Started Task 3 subagent-driven slice after TASK-490 cleared spec and code-qualit
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented backend setup provider catalog and local endpoint validation for Task 3. Added typed setup provider catalog/save/validation schemas, first-run provider catalog/save/validate endpoints guarded as required, deterministic PRD provider coverage, secret masking, real config writes for catalog fields, and local OpenAI-compatible /models validation that safely maps unreachable/auth/API-shape failures. Verification: provider/setup/config pytest command passed with 75 passed; setup guard/state/masking pytest command passed with 33 passed; Ruff passed on touched scope; Bandit JSON reported zero findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

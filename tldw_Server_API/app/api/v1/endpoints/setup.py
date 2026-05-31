@@ -56,6 +56,12 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
     SetupReadinessProvisionResponse,
     SetupReadinessVerifyRequest,
     SetupReadinessVerifyResponse,
+    SetupProviderCatalogResponse,
+    SetupProviderSaveRequest,
+    SetupProviderSaveResponse,
+    SetupProviderSaveStatus,
+    SetupProviderType,
+    SetupProviderValidationResponse,
     SetupResetResponse,
     SetupStatusResponse,
 )
@@ -80,6 +86,15 @@ from tldw_Server_API.app.core.Setup.first_run_state import (
 )
 from tldw_Server_API.app.core.Setup.install_manager import execute_install_plan
 from tldw_Server_API.app.core.Setup.install_schema import InstallPlan
+from tldw_Server_API.app.core.Setup.provider_catalog import (
+    get_setup_provider_catalog,
+    get_setup_provider_entry,
+    mask_secret,
+)
+from tldw_Server_API.app.core.Setup.provider_validation import (
+    LocalEndpointValidationRequest,
+    validate_local_openai_endpoint,
+)
 from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
 from tldw_Server_API.app.core.Setup.readiness_models import LANE_IDS, LANE_STATUSES, OVERLAY_IDS
 from tldw_Server_API.app.core.Setup.readiness_service import preview_readiness_selection, verify_readiness_lanes
@@ -160,6 +175,12 @@ _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
     r"(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S{3,}"
     r")"
 )
+_SETUP_DEFAULT_PROVIDER_KEYS = {
+    "llamacpp": "llama.cpp",
+    "koboldcpp": "kobold",
+    "oobabooga": "ooba",
+    "custom_openai": "custom-openai-api",
+}
 
 
 class ConfigUpdates(BaseModel):
@@ -494,6 +515,33 @@ def build_first_run_metadata(request: Request) -> FirstRunMetadataResponse:
     )
 
 
+def _default_provider_config_key(provider_key: str) -> str:
+    return _SETUP_DEFAULT_PROVIDER_KEYS.get(provider_key, provider_key)
+
+
+def _provider_config_updates(payload: SetupProviderSaveRequest) -> dict[str, dict[str, Any]]:
+    provider_key = payload.provider_key.strip().lower()
+    entry = get_setup_provider_entry(provider_key)
+    if entry is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unknown_setup_provider")
+
+    section_updates: dict[str, Any] = {}
+    if payload.api_key is not None and entry.api_key_field:
+        section_updates[entry.api_key_field] = payload.api_key
+    if payload.base_url is not None and entry.base_url_field:
+        section_updates[entry.base_url_field] = payload.base_url
+    if payload.model is not None and entry.model_field:
+        section_updates[entry.model_field] = payload.model
+
+    updates: dict[str, dict[str, Any]] = {}
+    if section_updates:
+        updates[entry.config_section] = section_updates
+    if payload.make_default:
+        updates.setdefault("API", {})["default_api"] = _default_provider_config_key(provider_key)
+
+    return updates
+
+
 def _sanitize_setup_payload(value: Any) -> Any:
     if isinstance(value, str):
         return (
@@ -649,6 +697,94 @@ async def get_first_run_metadata(
     _guard: None = Depends(require_local_setup_access),
 ) -> FirstRunMetadataResponse:
     return build_first_run_metadata(request)
+
+
+@router.get(
+    "/first-run/providers/catalog",
+    openapi_extra={"security": []},
+    response_model=SetupProviderCatalogResponse,
+)
+async def get_first_run_provider_catalog(
+    _guard: None = Depends(require_local_setup_access),
+) -> SetupProviderCatalogResponse:
+    return get_setup_provider_catalog()
+
+
+@router.post(
+    "/first-run/providers",
+    openapi_extra={"security": []},
+    response_model=SetupProviderSaveResponse,
+)
+async def save_first_run_provider(
+    payload: SetupProviderSaveRequest,
+    _guard: None = Depends(_require_first_run_write_access),
+) -> SetupProviderSaveResponse:
+    provider_key = payload.provider_key.strip().lower()
+    entry = get_setup_provider_entry(provider_key)
+    if entry is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unknown_setup_provider")
+
+    updates = _provider_config_updates(payload)
+    if not updates:
+        return SetupProviderSaveResponse(
+            provider_key=provider_key,
+            status=SetupProviderSaveStatus.FAILED,
+            failure_category="no_updates",
+            message="No provider settings were supplied.",
+        )
+
+    try:
+        setup_manager.update_config(updates)
+    except Exception as exc:  # noqa: BLE001 - public response must stay sanitized
+        logger.warning(
+            "Provider setup config write failed for {}: {}",
+            provider_key,
+            type(exc).__name__,
+        )
+        return SetupProviderSaveResponse(
+            provider_key=provider_key,
+            status=SetupProviderSaveStatus.FAILED,
+            masked_api_key=mask_secret(payload.api_key) if payload.api_key is not None else None,
+            base_url=payload.base_url,
+            model=payload.model,
+            make_default=payload.make_default,
+            failure_category="config_write_failed",
+            message="Provider settings could not be saved.",
+        )
+
+    return SetupProviderSaveResponse(
+        provider_key=provider_key,
+        status=SetupProviderSaveStatus.SAVED,
+        masked_api_key=mask_secret(payload.api_key) if payload.api_key is not None else None,
+        base_url=payload.base_url,
+        model=payload.model,
+        make_default=payload.make_default,
+    )
+
+
+@router.post(
+    "/first-run/providers/validate",
+    openapi_extra={"security": []},
+    response_model=SetupProviderValidationResponse,
+)
+async def validate_first_run_provider(
+    payload: LocalEndpointValidationRequest,
+    _guard: None = Depends(_require_first_run_write_access),
+) -> SetupProviderValidationResponse:
+    provider_key = payload.provider_key.strip().lower()
+    entry = get_setup_provider_entry(provider_key)
+    if entry is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unknown_setup_provider")
+    if entry.provider_type is not SetupProviderType.LOCAL_ENDPOINT:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="provider_validation_not_supported")
+
+    normalized_payload = LocalEndpointValidationRequest(
+        provider_key=provider_key,
+        base_url=payload.base_url,
+        model=payload.model,
+        api_key=payload.api_key,
+    )
+    return await validate_local_openai_endpoint(normalized_payload)
 
 
 @router.post("/first-run/state", openapi_extra={"security": []}, response_model=FirstRunStateResponse)

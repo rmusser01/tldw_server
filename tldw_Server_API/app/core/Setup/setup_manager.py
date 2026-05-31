@@ -60,6 +60,7 @@ _OPTIONAL_EMPTY_VALUE_FIELDS = {
     ("LlamaCpp", "allowed_paths"),
     ("LlamaCpp", "log_output_file"),
 }
+_provider_catalog_update_fields: set[tuple[str, str]] | None = None
 
 _remote_access_hook: Callable[[bool], None] | None = None
 
@@ -411,6 +412,28 @@ def _validate_ingestion_source_allowed_roots_update(new_value: Any) -> None:
             raise ValueError("Ingestion source allowed roots must not contain empty entries")
 
 
+def _setup_provider_catalog_update_fields() -> set[tuple[str, str]]:
+    """Return setup provider catalog fields that may be added to existing sections."""
+    global _provider_catalog_update_fields
+    if _provider_catalog_update_fields is not None:
+        return _provider_catalog_update_fields
+
+    from tldw_Server_API.app.core.Setup.provider_catalog import get_setup_provider_catalog
+
+    fields: set[tuple[str, str]] = set()
+    for entry in get_setup_provider_catalog().providers:
+        for key in (entry.api_key_field, entry.base_url_field, entry.model_field):
+            if key:
+                fields.add((entry.config_section, key))
+    _provider_catalog_update_fields = fields
+    return fields
+
+
+def _is_setup_provider_catalog_update(section: str, key: str) -> bool:
+    """Return True when the field belongs to the first-run provider catalog."""
+    return (section, key) in _setup_provider_catalog_update_fields()
+
+
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
     return any(marker in lowered for marker in SENSITIVE_KEY_MARKERS)
@@ -679,7 +702,12 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
                 section == _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION
                 and key == _INGESTION_SOURCE_ALLOWED_ROOTS_KEY
             )
-            if not parser.has_option(section, key) and not allows_new_ingestion_roots:
+            allows_provider_catalog_field = _is_setup_provider_catalog_update(section, key)
+            if (
+                not parser.has_option(section, key)
+                and not allows_new_ingestion_roots
+                and not allows_provider_catalog_field
+            ):
                 raise ValueError(f"Unknown key '{key}' in section '{section}'")
 
             if section == _USER_DB_BASE_DIR_SECTION and key == _USER_DB_BASE_DIR_KEY:
@@ -687,7 +715,7 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
             if section == _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION and key == _INGESTION_SOURCE_ALLOWED_ROOTS_KEY:
                 _validate_ingestion_source_allowed_roots_update(new_value)
 
-            if allows_new_ingestion_roots and not parser.has_option(section, key):
+            if (allows_new_ingestion_roots or allows_provider_catalog_field) and not parser.has_option(section, key):
                 continue
 
             current_value = parser.get(section, key, fallback="")

@@ -2,13 +2,17 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from tldw_Server_API.app import main as app_main
 from tldw_Server_API.app.api.v1.endpoints import setup as setup_endpoint
 from tldw_Server_API.app.core.Setup.first_run_state import (
     REQUIRED_FIRST_RUN_STEPS,
     FirstRunStateStore,
     FirstRunStatus,
 )
-from tldw_Server_API.app.main import app
+from tldw_Server_API.app.core.Setup.provider_catalog import REQUIRED_SETUP_PROVIDER_KEYS
+
+app = app_main.app
+app_main._shared_is_explicit_pytest_runtime = lambda: True
 
 
 @pytest.fixture
@@ -129,6 +133,110 @@ def test_first_run_metadata_returns_auth_and_setup_path_guidance(monkeypatch, tm
         "multi_user",
     }
     assert body["multi_user_exit"]["guide_path"]
+
+
+def test_first_run_provider_catalog_returns_required_provider_keys(setup_client):
+    response = setup_client.get("/api/v1/setup/first-run/providers/catalog")
+
+    assert response.status_code == 200
+    body = response.json()
+    keys = {provider["provider_key"] for provider in body["providers"]}
+    assert set(REQUIRED_SETUP_PROVIDER_KEYS) <= keys
+
+
+def test_first_run_provider_save_masks_key_and_writes_config(monkeypatch, tmp_path, setup_client):
+    state_path = tmp_path / "first_run_state.json"
+    config_path = tmp_path / "config.txt"
+    config_path.write_text("[API]\ndefault_api = openai\n", encoding="utf-8")
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    monkeypatch.setattr(setup_endpoint.setup_manager, "get_config_file_path", lambda: config_path)
+    _setup_needs_setup(monkeypatch)
+
+    raw_key = "sk-abcdefghijklmnopqrstuvwxyz"
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers",
+        json={"provider_key": "openai", "api_key": raw_key, "make_default": True},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider_key"] == "openai"
+    assert body["status"] == "saved"
+    assert body["masked_api_key"] == "sk-...wxyz"
+    assert body["make_default"] is True
+    assert raw_key not in str(body)
+    config_text = config_path.read_text(encoding="utf-8")
+    assert "openai_api_key = sk-abcdefghijklmnopqrstuvwxyz" in config_text
+    assert "default_api = openai" in config_text
+
+
+def test_completed_setup_rejects_provider_save_through_first_run_write_guard(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    for step in REQUIRED_FIRST_RUN_STEPS:
+        store.update_step(step, {"acknowledged": True})
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    store.mark_completed()
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers",
+        json={"provider_key": "openai", "api_key": "sk-abcdefghijklmnopqrstuvwxyz"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "setup_already_completed"
+
+
+def test_first_run_provider_validate_returns_typed_response_without_token_echo(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    raw_token = "secret-local-token"
+
+    async def _fake_validate(payload):
+        assert payload.api_key == raw_token
+        return setup_endpoint.SetupProviderValidationResponse(
+            provider_key=payload.provider_key,
+            status="ready",
+            models=["local-model"],
+        )
+
+    monkeypatch.setattr(setup_endpoint, "validate_local_openai_endpoint", _fake_validate)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers/validate",
+        json={
+            "provider_key": "ollama",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "model": "local-model",
+            "api_key": raw_token,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "provider_key": "ollama",
+        "status": "ready",
+        "failure_category": None,
+        "message": None,
+        "models": ["local-model"],
+    }
+    assert raw_token not in str(body)
 
 
 def test_first_run_metadata_classifies_forwarded_remote_browser_as_remote(
