@@ -129,11 +129,6 @@ def _first_run_store() -> FirstRunStateStore:
 async def _require_first_run_write_access(request: Request) -> None:
     await require_local_setup_access(request)
     status_snapshot = setup_manager.get_status_snapshot()
-    if not status_snapshot.get("enabled"):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="setup_disabled",
-        )
     if (
         status_snapshot.get("setup_completed")
         or status_snapshot.get("completed")
@@ -143,11 +138,22 @@ async def _require_first_run_write_access(request: Request) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail="setup_already_completed",
         )
+    if not status_snapshot.get("enabled"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="setup_disabled",
+        )
     state = _first_run_store().load()
-    if state.status == FirstRunStatus.COMPLETED:
+    terminal_details = {
+        FirstRunStatus.COMPLETED: "setup_already_completed",
+        FirstRunStatus.SKIPPED: "state_skipped",
+        FirstRunStatus.BLOCKED: "state_blocked",
+    }
+    terminal_detail = terminal_details.get(state.status)
+    if terminal_detail:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="setup_already_completed",
+            detail=terminal_detail,
         )
 
 
@@ -197,7 +203,12 @@ def _is_local_host(host: str | None) -> bool:
     if not host:
         return False
     normalized = host.strip().lower().strip("[]")
-    return normalized in {"localhost", "127.0.0.1", "::1", "testclient", "testserver"}
+    if normalized in {"localhost", "127.0.0.1", "::1", "testclient", "testserver"}:
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 def _is_lan_host(host: str | None) -> bool:
@@ -207,20 +218,44 @@ def _is_lan_host(host: str | None) -> bool:
         address = ipaddress.ip_address(host.strip().lower().strip("[]"))
     except ValueError:
         return False
-    return address.is_private
+    if address.version == 4:
+        return any(
+            address in network
+            for network in (
+                ipaddress.ip_network("10.0.0.0/8"),
+                ipaddress.ip_network("172.16.0.0/12"),
+                ipaddress.ip_network("192.168.0.0/16"),
+                ipaddress.ip_network("169.254.0.0/16"),
+            )
+        )
+    return address.is_private or address.is_link_local
+
+
+def _first_forwarded_host(request: Request) -> str | None:
+    raw = request.headers.get("x-forwarded-for")
+    if not raw:
+        return None
+    first = raw.split(",", 1)[0].strip()
+    return first or None
+
+
+def _classify_source_host(host: str | None) -> str:
+    if not host:
+        return "unknown"
+    if _is_local_host(host):
+        return "local"
+    if _is_lan_host(host):
+        return "lan"
+    return "remote"
 
 
 def _classify_browser_access(request: Request) -> str:
-    host = request.url.hostname
-    client_host = request.client.host if request.client else None
+    forwarded_host = _first_forwarded_host(request)
+    if forwarded_host:
+        return _classify_source_host(forwarded_host)
 
-    if _is_local_host(host) or _is_local_host(client_host):
-        return "local"
-    if _is_lan_host(host) or _is_lan_host(client_host):
-        return "lan"
-    if host or client_host:
-        return "remote"
-    return "unknown"
+    client_host = request.client.host if request.client else None
+    return _classify_source_host(client_host)
 
 
 def build_first_run_metadata(request: Request) -> FirstRunMetadataResponse:
