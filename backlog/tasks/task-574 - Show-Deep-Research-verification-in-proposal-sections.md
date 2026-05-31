@@ -1,5 +1,5 @@
 ---
-id: TASK-571
+id: TASK-574
 title: Show Deep Research verification in proposal sections
 status: Done
 documentation:
@@ -20,6 +20,8 @@ modified_files:
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Follow-up after the Research Workspace literature work-products MVP. Display Deep Research verification summaries next to compatible Research Proposal Pack sections without replacing the MVP sourceCoverage and review checklist contracts.
+
+Tracker hygiene note: this record was renumbered from TASK-571 to TASK-574 after PR #2186 merged because TASK-571 is the canonical MCP Unified Stage 4K implementation task.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -44,7 +46,7 @@ Follow-up after the Research Workspace literature work-products MVP. Display Dee
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented TASK-571 by showing imported Deep Research verification beside compatible Research Proposal Pack sections. The matching contract is strict and local to imported bundle artifacts: completed `deep_research_bundle_import` artifacts must point back to the proposal artifact through `data.deepResearch.sourceArtifact.id`. The modal display keeps proposal markdown, source coverage, and review checklist data unchanged while surfacing run ID, supported/unsupported claim counts, contradiction count, source trust count, and unresolved questions from the imported bundle.
+Implemented TASK-574 by showing imported Deep Research verification beside compatible Research Proposal Pack sections. The matching contract is strict and local to imported bundle artifacts: completed `deep_research_bundle_import` artifacts must point back to the proposal artifact through `data.deepResearch.sourceArtifact.id`. The modal display keeps proposal markdown, source coverage, and review checklist data unchanged while surfacing run ID, supported/unsupported claim counts, contradiction count, source trust count, and unresolved questions from the imported bundle.
 
 Verification:
 - `bunx vitest run src/components/Option/ResearchWorkspace/__tests__/deep-research-bundle-import.test.ts src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 2 files / 37 tests after review follow-up.

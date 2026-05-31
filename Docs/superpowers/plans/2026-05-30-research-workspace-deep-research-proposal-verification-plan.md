@@ -56,7 +56,7 @@
 
 ## Stage 4: Verification And Closeout
 
-**Goal:** Run focused tests, type-check if feasible, diff check, Bandit applicability, and update TASK-571.
+**Goal:** Run focused tests, type-check if feasible, diff check, Bandit applicability, and update TASK-574.
 
 **Success Criteria:** Verification results are recorded in the task and the branch is ready for PR.
 

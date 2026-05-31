@@ -1,5 +1,5 @@
 ---
-id: TASK-570
+id: TASK-573
 title: Implement Deep Research bundle import into Research Workspace artifacts
 status: Done
 documentation:
@@ -11,6 +11,8 @@ documentation:
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Implement the next post-MVP Research Workspace / Deep Research bridge: import a completed Deep Research bundle.json into the active Research Workspace as a generated artifact, preserving run provenance, source coverage, verification summary metadata, and the source artifact return context. This implementation task references the existing follow-up TASK-572, which was originally created as TASK-489 before tracker hygiene renumbered it away from colliding older task files.
+
+Tracker hygiene note: this record was renumbered from TASK-570 to TASK-573 after PR #2186 merged because TASK-570 is the canonical MCP Unified Stage 4K planning task.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -42,7 +44,7 @@ Docs/superpowers/plans/2026-05-30-research-workspace-deep-research-bundle-import
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented TASK-570 by adding a frontend-only Deep Research bundle import path for Research Workspace return handoffs. A matching returned run can now fetch the existing `/api/v1/research/runs/{id}/bundle` response through `tldwClient.getResearchBundle`, normalize it into a completed Research Workspace report artifact, preserve source artifact provenance in producer metadata and `data.deepResearch`, carry source lineage/source coverage from the source artifact or fallback bundle source inventory, and show explicit importing/imported/error states in the handoff banner. Imported artifacts intentionally do not set a literature `templateId`, so they are not mistaken for launchable literature work products.
+Implemented TASK-573 by adding a frontend-only Deep Research bundle import path for Research Workspace return handoffs. A matching returned run can now fetch the existing `/api/v1/research/runs/{id}/bundle` response through `tldwClient.getResearchBundle`, normalize it into a completed Research Workspace report artifact, preserve source artifact provenance in producer metadata and `data.deepResearch`, carry source lineage/source coverage from the source artifact or fallback bundle source inventory, and show explicit importing/imported/error states in the handoff banner. Imported artifacts intentionally do not set a literature `templateId`, so they are not mistaken for launchable literature work products.
 
 PR #2181 review remediation also now cancels in-flight imports if the user switches workspaces or unmounts Research Workspace before the bundle fetch completes, and caps imported bundle lists before they are used for source coverage, source lineage, readable content, or persisted Deep Research metadata.
 
