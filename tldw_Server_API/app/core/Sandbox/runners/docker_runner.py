@@ -371,36 +371,101 @@ class DockerRunner:
         staged_input_dir: str | None = None
 
         def _cleanup_staged_inputs() -> None:
+            """Remove the host-side staged input directory after Docker startup or failure."""
             nonlocal staged_input_tmpdir, staged_input_dir
             if staged_input_tmpdir is None:
                 return
-            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
+            try:
                 staged_input_tmpdir.cleanup()
+            except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"Failed to clean Docker staged inputs for run {run_id}: {exc}")
             staged_input_tmpdir = None
             staged_input_dir = None
 
+        def _normalize_staged_dir(path: str) -> None:
+            """Make staged directories readable and traversable by the container user."""
+            try:
+                os.chmod(path, 0o755)  # nosec B103
+            except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"Failed to chmod Docker staged input directory {path!r}: {exc}")
+
+        def _normalize_staged_parent_dirs(path: str, root_dir: str) -> None:
+            """Normalize every staged directory from the staging root to the target path."""
+            root_abs = os.path.abspath(root_dir)
+            path_abs = os.path.abspath(path)
+            _normalize_staged_dir(root_abs)
+            try:
+                rel_path = os.path.relpath(path_abs, root_abs)
+            except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"Failed to normalize Docker staged input path {path!r}: {exc}")
+                _normalize_staged_dir(path_abs)
+                return
+            if rel_path == ".":
+                return
+            if rel_path == os.pardir or rel_path.startswith(os.pardir + os.sep):
+                logger.debug(f"Skipping chmod normalization outside Docker staged root {path!r}")
+                return
+            current = root_abs
+            for part in rel_path.split(os.sep):
+                if not part or part == ".":
+                    continue
+                current = os.path.join(current, part)
+                _normalize_staged_dir(current)
+
+        def _normalize_staged_file(path: str) -> None:
+            """Make staged files readable by the configured non-root container user."""
+            try:
+                os.chmod(path, 0o644)  # nosec B103
+            except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"Failed to chmod Docker staged input file {path!r}: {exc}")
+
         def _safe_workspace_path(path: str) -> str:
+            """Return a relative destination path safe for staging under /workspace."""
             return path.lstrip("/\\").replace("..", "_")
 
         def _copy_workspace_contents(src_dir: str, dst_dir: str) -> None:
+            """Copy regular workspace files into the staging directory without following symlinks."""
             base_dir = os.path.abspath(src_dir)
+            base_real = os.path.realpath(base_dir)
             for root, _dirs, files in os.walk(base_dir):
                 rel_root = os.path.relpath(root, base_dir)
                 for fname in files:
                     src_path = os.path.join(root, fname)
+                    if os.path.islink(src_path):
+                        logger.debug(f"Skipping symlinked Docker staged workspace input {src_path!r}")
+                        continue
+                    src_real = os.path.realpath(src_path)
+                    try:
+                        if os.path.commonpath([base_real, src_real]) != base_real:
+                            logger.debug(f"Skipping Docker staged workspace input outside base dir {src_path!r}")
+                            continue
+                    except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
+                        logger.debug(f"Skipping Docker staged workspace input {src_path!r}: {exc}")
+                        continue
                     rel_path = fname if rel_root == "." else os.path.join(rel_root, fname)
                     safe_rel_path = _safe_workspace_path(rel_path)
                     dst_path = os.path.join(dst_dir, safe_rel_path)
-                    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                    shutil.copy2(src_path, dst_path)
+                    dst_parent = os.path.dirname(dst_path)
+                    os.makedirs(dst_parent, exist_ok=True)
+                    _normalize_staged_parent_dirs(dst_parent, dst_dir)
+                    try:
+                        shutil.copy2(src_path, dst_path, follow_symlinks=False)
+                    except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
+                        logger.debug(f"Skipping unreadable Docker staged workspace input {src_path!r}: {exc}")
+                        continue
+                    _normalize_staged_file(dst_path)
 
         def _write_inline_files(dst_dir: str) -> None:
+            """Write inline run files into the staged input directory with readable modes."""
             for path, data in spec.files_inline or []:
                 safe_path = _safe_workspace_path(path)
                 full_path = os.path.join(dst_dir, safe_path)
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                full_parent = os.path.dirname(full_path)
+                os.makedirs(full_parent, exist_ok=True)
+                _normalize_staged_parent_dirs(full_parent, dst_dir)
                 with open(full_path, "wb") as file_handle:
                     file_handle.write(data)
+                _normalize_staged_file(full_path)
 
         session_workspace_dir = (
             os.path.abspath(session_workspace)
@@ -416,8 +481,7 @@ class DockerRunner:
             staged_input_dir = staged_input_tmpdir.name
             # The container runs as a configured non-root uid/gid; this random
             # input-only dir is read-only mounted and removed after the run.
-            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                os.chmod(staged_input_dir, 0o755)  # nosec B103
+            _normalize_staged_dir(staged_input_dir)
             if session_workspace_dir and not container_workspace_is_bind:
                 _copy_workspace_contents(session_workspace_dir, staged_input_dir)
             if spec.files_inline:
@@ -483,7 +547,7 @@ class DockerRunner:
         # In granular enforcement mode, add a short delay to allow host iptables to be applied
         delay_prefix = "sleep 1 && " if (net_policy == "allowlist" and enforced and granular) else ""
         staged_input_prefix = (
-            "cp -a /tldw-staged-workspace/. /workspace/ && "
+            "cp -R /tldw-staged-workspace/. /workspace/ && "
             if staged_input_dir
             else ""
         )

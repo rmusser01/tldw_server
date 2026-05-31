@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import stat
+from pathlib import Path
+
 import pytest
 
 from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType
@@ -32,6 +36,43 @@ def _capture_docker_create_command(monkeypatch, spec: RunSpec) -> list[str]:
     if not create_cmd:
         pytest.fail(f"docker create command not captured: {recorded_cmds!r}")
     return create_cmd
+
+
+def _staged_mount_source(create_cmd: list[str]) -> str:
+    staged_mount = next(
+        (
+            create_cmd[idx + 1]
+            for idx, token in enumerate(create_cmd[:-1])
+            if token == "--mount" and "dst=/tldw-staged-workspace" in create_cmd[idx + 1]
+        ),
+        "",
+    )
+    if not staged_mount:
+        pytest.fail(f"Expected staged input mount, got: {create_cmd!r}")
+    src_part = next((part for part in staged_mount.split(",") if part.startswith("src=")), "")
+    if not src_part:
+        pytest.fail(f"Expected staged input mount src, got: {staged_mount!r}")
+    return src_part.removeprefix("src=")
+
+
+def _capture_staged_input_dir(monkeypatch, spec: RunSpec, session_workspace: str | None = None) -> str:
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
+    monkeypatch.delenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", raising=False)
+
+    def _fake_check_output(cmd, text: bool = False, timeout: int | None = None) -> str:
+        cmd_list = list(cmd)
+        if cmd_list[:3] == ["docker", "version", "--format"]:
+            return "24.0.0"
+        if cmd_list[:2] == ["docker", "create"]:
+            staged_src = _staged_mount_source(cmd_list)
+            raise _StopAfterCreate(staged_src)
+        raise AssertionError(f"Unexpected check_output call before docker create: {cmd_list!r}")
+
+    monkeypatch.setattr("subprocess.check_output", _fake_check_output)
+    runner = DockerRunner()
+    with pytest.raises(_StopAfterCreate) as exc_info:
+        runner.start_run(run_id="rid-staged-inputs-1234", spec=spec, session_workspace=session_workspace)
+    return str(exc_info.value)
 
 
 @pytest.mark.unit
@@ -94,6 +135,69 @@ def test_docker_runner_bind_mounts_staged_workspace_for_inline_files(monkeypatch
     shell_cmd = create_cmd[-1]
     if "/tldw-staged-workspace/." not in shell_cmd:
         pytest.fail(f"Expected shell prelude to copy staged inputs, got: {shell_cmd!r}")
+    if "cp -a" in shell_cmd:
+        pytest.fail(f"Expected staged copy not to preserve host ownership, got: {shell_cmd!r}")
+
+
+@pytest.mark.unit
+def test_docker_runner_skips_symlinked_session_workspace_inputs(monkeypatch, tmp_path: Path) -> None:
+    outside_file = tmp_path.parent / "outside-workspace.txt"
+    outside_file.write_text("outside\n", encoding="utf-8")
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir()
+    (workspace_dir / "safe.txt").write_text("safe\n", encoding="utf-8")
+    try:
+        os.symlink(outside_file, workspace_dir / "escaped.txt")
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "-c", "print('ok')"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+    )
+
+    staged_src = _capture_staged_input_dir(monkeypatch, spec, session_workspace=str(workspace_dir))
+
+    if not os.path.exists(os.path.join(staged_src, "safe.txt")):
+        pytest.fail(f"Expected safe file to be staged under {staged_src!r}")
+    if os.path.exists(os.path.join(staged_src, "escaped.txt")):
+        pytest.fail(f"Expected symlinked file to be skipped under {staged_src!r}")
+
+
+@pytest.mark.unit
+def test_docker_runner_normalizes_staged_input_modes(monkeypatch) -> None:
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "/workspace/nested/deep/hello.py"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+        files_inline=[("nested/deep/hello.py", b"print('ok')\n")],
+    )
+
+    previous_umask = os.umask(0o077)
+    try:
+        staged_src = _capture_staged_input_dir(monkeypatch, spec)
+    finally:
+        os.umask(previous_umask)
+    nested_dir_mode = stat.S_IMODE(os.stat(os.path.join(staged_src, "nested")).st_mode)
+    deep_dir_mode = stat.S_IMODE(os.stat(os.path.join(staged_src, "nested", "deep")).st_mode)
+    file_mode = stat.S_IMODE(os.stat(os.path.join(staged_src, "nested", "deep", "hello.py")).st_mode)
+
+    if not nested_dir_mode & stat.S_IROTH or not nested_dir_mode & stat.S_IXOTH:
+        pytest.fail(f"Expected staged dirs to be world-readable/executable, got {oct(nested_dir_mode)}")
+    if not deep_dir_mode & stat.S_IROTH or not deep_dir_mode & stat.S_IXOTH:
+        pytest.fail(f"Expected staged dirs to be world-readable/executable, got {oct(deep_dir_mode)}")
+    if not file_mode & stat.S_IROTH:
+        pytest.fail(f"Expected staged inline files to be world-readable, got {oct(file_mode)}")
 
 
 @pytest.mark.unit
