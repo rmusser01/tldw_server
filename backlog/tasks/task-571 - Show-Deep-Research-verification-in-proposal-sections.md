@@ -1,5 +1,5 @@
 ---
-id: TASK-490
+id: TASK-571
 title: Show Deep Research verification in proposal sections
 status: To Do
 documentation:
