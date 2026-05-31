@@ -1,6 +1,7 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
 import { CreateTableWizard } from "../CreateTableWizard"
 import type { DataTable } from "@/types/data-tables"
 
@@ -52,15 +53,6 @@ vi.mock("../TablePreview", () => ({
 vi.mock("../SaveTablePanel", () => ({
   SaveTablePanel: () => <div data-testid="save-table-panel" />
 }))
-
-const expectInsideDesignSystemAlert = (text: string | RegExp) => {
-  const node = screen.getByText(text)
-  const alert = node.closest('[data-ds-component="Alert"]')
-  expect(alert).not.toBeNull()
-  const alertEl = alert as HTMLElement
-  expect(alertEl).toHaveAttribute("data-ds-component", "Alert")
-  return alertEl
-}
 
 describe("CreateTableWizard design-system alerts", () => {
   beforeAll(() => {

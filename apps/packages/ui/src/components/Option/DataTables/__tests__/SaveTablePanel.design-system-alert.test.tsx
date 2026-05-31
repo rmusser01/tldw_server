@@ -2,6 +2,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
 import { SaveTablePanel } from "../SaveTablePanel"
 import type { DataTable } from "@/types/data-tables"
 
@@ -57,15 +58,6 @@ const renderPanel = () => {
       <SaveTablePanel />
     </QueryClientProvider>
   )
-}
-
-const expectInsideDesignSystemAlert = (text: string | RegExp) => {
-  const node = screen.getByText(text)
-  const alert = node.closest('[data-ds-component="Alert"]')
-  expect(alert).not.toBeNull()
-  const alertEl = alert as HTMLElement
-  expect(alertEl).toHaveAttribute("data-ds-component", "Alert")
-  return alertEl
 }
 
 describe("SaveTablePanel design-system alerts", () => {

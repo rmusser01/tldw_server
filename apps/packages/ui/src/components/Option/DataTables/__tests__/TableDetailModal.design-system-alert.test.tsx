@@ -2,6 +2,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { expectInsideDesignSystemAlertAsync } from "@/test-utils/designSystemAlert"
 import { TableDetailModal } from "../TableDetailModal"
 import type { DataTable } from "@/types/data-tables"
 
@@ -80,15 +81,6 @@ const renderModal = () => {
   )
 }
 
-const expectInsideDesignSystemAlert = async (text: string | RegExp) => {
-  const node = await screen.findByText(text)
-  const alert = node.closest('[data-ds-component="Alert"]')
-  expect(alert).not.toBeNull()
-  const alertEl = alert as HTMLElement
-  expect(alertEl).toHaveAttribute("data-ds-component", "Alert")
-  return alertEl
-}
-
 describe("TableDetailModal design-system alerts", () => {
   beforeAll(() => {
     if (typeof window.matchMedia !== "function") {
@@ -129,7 +121,7 @@ describe("TableDetailModal design-system alerts", () => {
   it("renders load failures through the design-system Alert primitive", async () => {
     renderModal()
 
-    const alert = await expectInsideDesignSystemAlert("Error")
+    const alert = await expectInsideDesignSystemAlertAsync("Error")
     expect(alert).toHaveAttribute("role", "alert")
     expect(screen.getByText("Failed to load table details")).toBeInTheDocument()
   })

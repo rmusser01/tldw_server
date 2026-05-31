@@ -4,7 +4,7 @@ title: Migrate remaining DataTables alerts to design-system Alert
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-31 16:35'
+updated_date: '2026-05-31 16:46'
 labels:
   - design-system
   - webui
@@ -43,6 +43,9 @@ Continue the Ingestion/Library/media product-state migration by replacing the re
 - Removed the three matching DataTables baseline exceptions; baseline count moved from 82 to 79 and the touched paths now have zero baseline entries.
 - Verification: focused DataTables Alert tests passed 3/3; product-state guard unit passed 54/54; bun run verify:design-system-state exited 0 with 79 baseline exceptions; node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit --pretty false exited 0; git diff --check exited 0.
 - Bandit skipped because this slice touched frontend TSX/test/JSON/Backlog markdown only, with no Python code.
+
+- PR review follow-up: extracted the repeated DataTables design-system Alert ancestor assertion into src/test-utils/designSystemAlert.ts with sync and async helpers, then updated the three new DataTables alert tests to import the shared helper without changing assertion semantics.
+- Review-fix verification: focused DataTables Alert tests passed 3/3; node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit --pretty false exited 0; git diff --check exited 0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
