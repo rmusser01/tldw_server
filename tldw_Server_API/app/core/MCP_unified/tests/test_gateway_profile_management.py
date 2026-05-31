@@ -282,6 +282,80 @@ async def test_get_default_profile_rejects_missing_default() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_default_profile_audits_missing_assigned_target_profile() -> None:
+    audit_store = InMemoryAuditStore()
+    assignment_store = InMemoryProfileAssignmentStore(
+        [
+            ProfileAssignment(
+                id="gateway-default",
+                profile_id="missing-default",
+                is_default=True,
+            )
+        ]
+    )
+    manager = _manager(
+        InMemoryProfileStore(),
+        assignment_store,
+        audit_store=audit_store,
+    )
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.get_default_profile()
+
+    assert exc_info.value.reason_code == "profile_not_found"
+    assert exc_info.value.to_payload()["profile_id"] == "missing-default"
+    assert [event.event_type for event in audit_store.events] == ["profile.default_read_failed"]
+    assert audit_store.events[0].target_type == "profile_assignment"
+    assert audit_store.events[0].target_id == "gateway-default"
+    assert audit_store.events[0].payload == {
+        "assignment_id": "gateway-default",
+        "profile_id": "missing-default",
+        "reason_code": "profile_not_found",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_default_profile_audits_disabled_assigned_target_profile() -> None:
+    audit_store = InMemoryAuditStore()
+    assignment_store = InMemoryProfileAssignmentStore(
+        [
+            ProfileAssignment(
+                id="gateway-default",
+                profile_id="disabled-default",
+                is_default=True,
+            )
+        ]
+    )
+    manager = _manager(
+        InMemoryProfileStore(
+            [
+                MCPProfile(
+                    id="disabled-default",
+                    name="Disabled Default",
+                    enabled=False,
+                )
+            ]
+        ),
+        assignment_store,
+        audit_store=audit_store,
+    )
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.get_default_profile()
+
+    assert exc_info.value.reason_code == "profile_disabled"
+    assert exc_info.value.to_payload()["profile_id"] == "disabled-default"
+    assert [event.event_type for event in audit_store.events] == ["profile.default_read_failed"]
+    assert audit_store.events[0].target_type == "profile_assignment"
+    assert audit_store.events[0].target_id == "gateway-default"
+    assert audit_store.events[0].payload == {
+        "assignment_id": "gateway-default",
+        "profile_id": "disabled-default",
+        "reason_code": "profile_disabled",
+    }
+
+
+@pytest.mark.asyncio
 async def test_set_default_profile_rejects_missing_target_profile() -> None:
     manager = _manager(InMemoryProfileStore())
 

@@ -211,12 +211,28 @@ class GatewayProfileManager:
 
         profile = await self._get_profile(resolved_profile_id)
         if profile is None:
+            await self._audit_expected_failure(
+                "profile.default_read_failed",
+                reason_code="profile_not_found",
+                profile_id=resolved_profile_id,
+                assignment_id=assignment.id if assignment is not None else None,
+                target_type="profile_assignment" if assignment is not None else "profile",
+                target_id=assignment.id if assignment is not None else resolved_profile_id,
+            )
             raise self._error(
                 f"Profile not found: {resolved_profile_id}",
                 reason_code="profile_not_found",
                 profile_id=resolved_profile_id,
             )
         if not profile.enabled:
+            await self._audit_expected_failure(
+                "profile.default_read_failed",
+                reason_code="profile_disabled",
+                profile_id=resolved_profile_id,
+                assignment_id=assignment.id if assignment is not None else None,
+                target_type="profile_assignment" if assignment is not None else "profile",
+                target_id=assignment.id if assignment is not None else resolved_profile_id,
+            )
             raise self._error(
                 f"Profile disabled: {resolved_profile_id}",
                 reason_code="profile_disabled",
@@ -344,6 +360,7 @@ class GatewayProfileManager:
         reason_code: str,
         profile_id: str | None = None,
         preset_id: str | None = None,
+        assignment_id: str | None = None,
         target_type: str | None = None,
         target_id: str | None = None,
     ) -> None:
@@ -352,6 +369,8 @@ class GatewayProfileManager:
             payload["profile_id"] = profile_id
         if preset_id is not None:
             payload["preset_id"] = preset_id
+        if assignment_id is not None:
+            payload["assignment_id"] = assignment_id
         await self._append_audit_event(
             event_type,
             profile_id=profile_id,
