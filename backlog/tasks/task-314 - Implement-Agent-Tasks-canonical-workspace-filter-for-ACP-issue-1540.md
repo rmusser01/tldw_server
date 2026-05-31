@@ -1,11 +1,11 @@
 ---
 id: TASK-314
 title: Implement Agent Tasks canonical workspace filter for ACP issue 1540
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-05-13 05:49'
-updated_date: '2026-05-13 14:30'
+updated_date: '2026-05-31 21:03'
 labels:
   - ACP
   - workspace
@@ -72,7 +72,15 @@ Post-rebase verification on current origin/dev: focused Vitest passed again with
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1627. Kept draft because the AI-generated PR policy requires a human-owned Change summary before merge and #1540 has later history/diagnostic-link slices remaining.
 
 PR #1627 review sweep: addressed 6 unresolved review threads. Changes: switched Agent Tasks workspace filter parsing to React Router location/navigation for MemoryRouter compatibility; synchronized manual workspace filter changes back to router search; suppressed workspace setup warnings unless project data loaded successfully; reused filteredProjects in workspace setup calculation; only reports unlinked bridge warning when no matching linked project exists; removed redundant active-workspace Tag. Added regression tests for MemoryRouter route updates, project-load failure diagnostics, and mixed linked/stale project state. Verification: focused Vitest now 2 files/40 tests passed; targeted touched-file TypeScript passed; git diff --check passed.
+
+Closeout refresh on 2026-05-31 after PR #1627 was merged and issue #1540 was closed. Current verification on origin/dev: `bunx vitest run src/components/Option/AgentTasks/__tests__/AgentTasksPage.connection.test.tsx src/components/Option/WorkspacePlayground/__tests__/WorkspaceHeader.test.tsx --maxWorkers=1 --no-file-parallelism` discovered the retained AgentTasksPage file and passed 11 tests; the historical WorkspaceHeader path has moved to ResearchWorkspace, so `bunx vitest run src/components/Option/ResearchWorkspace/__tests__/WorkspaceHeader.test.tsx --maxWorkers=1 --no-file-parallelism` passed 39 tests. `git diff --check` passed before task edits. Bandit remains not applicable because this closeout changes Backlog metadata only.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed TASK-314 after confirming the implementation PR #1627 was merged and linked ACP workspace integration issue #1540 is closed. Current focused verification on origin/dev passed for Agent Tasks workspace filtering and the renamed ResearchWorkspace WorkspaceHeader handoff coverage: 11 AgentTasksPage tests and 39 WorkspaceHeader tests. The only repository change in this closeout is Backlog metadata; Bandit is not applicable.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -80,6 +88,6 @@ PR #1627 review sweep: addressed 6 unresolved review threads. Changes: switched 
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
