@@ -9,8 +9,10 @@ labels:
 - quick-ingest
 documentation:
 - Docs/superpowers/specs/2026-05-31-unified-solo-onboarding-uat-repair-design.md
+- Docs/superpowers/plans/2026-05-31-unified-solo-onboarding-uat-repair-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-05-31-unified-solo-onboarding-uat-repair-design.md
+- Docs/superpowers/plans/2026-05-31-unified-solo-onboarding-uat-repair-implementation-plan.md
 ---
 
 ## Description
@@ -26,7 +28,7 @@ Plan and implement repairs required for a clean first-time solo-user walkthrough
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design spec created and reviewed: Docs/superpowers/specs/2026-05-31-unified-solo-onboarding-uat-repair-design.md. Self-review tightened local-only auth handoff, inline auth readiness, deterministic first-source UAT fixture, and durable web-ingest semantics. Spec review then found one visibility/searchability wording conflict; it was corrected and the final review approved with no blocking issues. Implementation planning should start after the user review gate passes.
+Design spec created and reviewed: Docs/superpowers/specs/2026-05-31-unified-solo-onboarding-uat-repair-design.md. Implementation plan created: Docs/superpowers/plans/2026-05-31-unified-solo-onboarding-uat-repair-implementation-plan.md. Current preflight result: focused implementation can start after the current ~2.1GiB free-space check, but Docker rebuild/fresh-install UAT remains blocked until at least 10GiB is available. Next step after user approval is targeted cleanup if heavy UAT/build work is needed, otherwise Stage 1 red-green implementation can begin.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
