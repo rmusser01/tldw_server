@@ -1,3 +1,5 @@
+from configparser import ConfigParser
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -168,6 +170,39 @@ def test_first_run_provider_save_masks_key_and_writes_config(monkeypatch, tmp_pa
     config_text = config_path.read_text(encoding="utf-8")
     assert "openai_api_key = sk-abcdefghijklmnopqrstuvwxyz" in config_text
     assert "default_api = openai" in config_text
+
+
+def test_first_run_provider_save_places_new_key_in_api_section(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    config_path = tmp_path / "config.txt"
+    config_path.write_text(
+        "[API]\n"
+        "default_api = openai\n"
+        "\n"
+        "[Local-API]\n"
+        "ollama_api_IP = http://127.0.0.1:11434/v1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    monkeypatch.setattr(setup_endpoint.setup_manager, "get_config_file_path", lambda: config_path)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers",
+        json={"provider_key": "openai", "api_key": "sk-abcdefghijklmnopqrstuvwxyz"},
+    )
+
+    parser = ConfigParser()
+    parser.optionxform = str
+    parser.read(config_path, encoding="utf-8")
+    assert response.status_code == 200
+    assert response.json()["status"] == "saved"
+    assert parser.get("API", "openai_api_key") == "sk-abcdefghijklmnopqrstuvwxyz"
+    assert not parser.has_option("Local-API", "openai_api_key")
 
 
 def test_first_run_provider_save_rejects_blank_hosted_api_key_without_config_write(

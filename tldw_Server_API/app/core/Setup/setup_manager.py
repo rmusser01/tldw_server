@@ -623,12 +623,23 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
     current_section: str | None = None
     out_lines: list[str] = []
 
+    def _append_pending_items_for_section(section: str | None) -> None:
+        if not section:
+            return
+        items = pending.get(section, {})
+        if not items:
+            return
+        for key, value in list(items.items()):
+            out_lines.append(f"{key} = {value}\n")
+            items.pop(key)
+
     for raw in original_lines:
         line = raw
         stripped = line.strip()
 
         # Section header detection: [Section]
         if stripped.startswith("[") and stripped.endswith("]") and len(stripped) >= 2:
+            _append_pending_items_for_section(current_section)
             current_section = stripped[1:-1].strip()
             out_lines.append(line)
             continue
@@ -663,22 +674,20 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
 
         out_lines.append(line)
 
-    # Sanity: Ensure all keys were applied; if not, fall back to parser write for missed keys
+    _append_pending_items_for_section(current_section)
+
+    # Sanity: Ensure all keys were applied; if not, create missing sections at EOF.
     leftovers = sum(len(items) for items in pending.values())
     if leftovers:
-        logger.warning("Some config updates were not applied via comment-preserving writer; falling back for {} keys.", leftovers)
-        # As a conservative fallback: append missing keys at end of their section
-        text = "".join(out_lines)
+        logger.warning("Some config updates targeted missing sections; appending {} keys at EOF.", leftovers)
         for section, items in pending.items():
             if not items:
                 continue
-            # Append under a section header (create if missing)
-            header = f"[{section}]"
-            if header not in text:
-                text += f"{default_line_ending}{header}{default_line_ending}"
-            for k, v in items.items():
-                text += f"{k} = {v}{default_line_ending}"
-        out_lines = [text]
+            if out_lines and out_lines[-1].strip():
+                out_lines.append(default_line_ending)
+            out_lines.append(f"[{section}]{default_line_ending}")
+            for key, value in items.items():
+                out_lines.append(f"{key} = {value}{default_line_ending}")
 
     with config_path.open("w", encoding="utf-8", newline="") as handle:
         handle.write("".join(out_lines))
@@ -694,7 +703,10 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
         the current value is boolean/integer/number. String values accept any.
     """
     for section, items in updates.items():
-        if not parser.has_section(section):
+        section_allows_provider_catalog_fields = bool(items) and all(
+            _is_setup_provider_catalog_update(section, key) for key in items
+        )
+        if not parser.has_section(section) and not section_allows_provider_catalog_fields:
             raise ValueError(f"Unknown section '{section}' in updates")
         for key, new_value in items.items():
             serialized_value = validate_config_value_single_line(section, key, new_value)
