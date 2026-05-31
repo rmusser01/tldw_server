@@ -68,7 +68,7 @@ When the right artifact rail is expanded on desktop:
 
 When both rails are collapsed on desktop:
 
-- Both same-side edge expand buttons are visible.
+- The left-edge expand button is visible, and the right-edge expand button is visible when an active artifact exists.
 - The chat body occupies the combined available width.
 - The composer remains docked at the bottom and the transcript remains vertically anchored.
 - The page does not introduce a blank horizontal gutter where either rail used to be.
@@ -126,6 +126,7 @@ Implementation should include focused regression coverage plus browser verificat
   - Left collapsed, right open: left edge expand button visible; chat uses freed left width.
   - Right collapsed, left open or collapsed: right edge expand button visible; chat uses freed right width.
   - Both collapsed: both edge buttons visible; chat body/composer remain vertically anchored.
+  - Record layout measurements, not only screenshots: chat shell width increases after each rail collapse, chat shell top remains stable, and composer bottom remains docked.
 - Browser smoke at mobile viewport:
   - No desktop edge buttons appear unexpectedly.
   - Existing drawer/sheet controls still work.
