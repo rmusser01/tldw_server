@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
+import os
 import re
+import sys
+from configparser import ConfigParser
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-import sys
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
@@ -33,6 +36,13 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
     AudioPackImportResponse,
     AudioReadinessResetResponse,
     AudioRecommendationsResponse,
+    FirstRunConnectionDiagnostics,
+    FirstRunMetadataResponse,
+    FirstRunMultiUserExit,
+    FirstRunSetupPath,
+    FirstRunSkipRequest,
+    FirstRunStateResponse,
+    FirstRunStepUpdateRequest,
     SetupAssistantResponse,
     SetupCompleteResponse,
     SetupConfigUpdateResponse,
@@ -48,17 +58,25 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.Setup import install_manager, setup_manager
-from tldw_Server_API.app.core.Setup import audio_pack_service
-from tldw_Server_API.app.core.Setup import audio_profile_service
-from tldw_Server_API.app.core.Setup import audio_readiness_store
-from tldw_Server_API.app.core.Setup import readiness_store
+from tldw_Server_API.app.core.Setup import (
+    audio_pack_service,
+    audio_profile_service,
+    audio_readiness_store,
+    install_manager,
+    readiness_store,
+    setup_manager,
+)
 from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     DEFAULT_AUDIO_RESOURCE_PROFILE,
     get_audio_bundle_catalog,
 )
-from tldw_Server_API.app.core.Setup.install_schema import InstallPlan
+from tldw_Server_API.app.core.Setup.first_run_state import (
+    FirstRunStateStore,
+    FirstRunStatus,
+    InvalidFirstRunTransition,
+)
 from tldw_Server_API.app.core.Setup.install_manager import execute_install_plan
+from tldw_Server_API.app.core.Setup.install_schema import InstallPlan
 from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
 from tldw_Server_API.app.core.Setup.readiness_models import LANE_IDS, LANE_STATUSES, OVERLAY_IDS
 from tldw_Server_API.app.core.Setup.readiness_service import preview_readiness_selection, verify_readiness_lanes
@@ -67,6 +85,7 @@ from tldw_Server_API.app.services.auth_service import mark_user_verified
 
 router = APIRouter(prefix="/setup", tags=["setup"], include_in_schema=True)
 
+FIRST_RUN_STATE_PATH = setup_manager.resolve_config_root() / "first_run_state.json"
 INVALID_AUDIO_BUNDLE_REQUEST_DETAIL = "Invalid audio bundle request"
 INVALID_AUDIO_PACK_EXPORT_REQUEST_DETAIL = "Invalid audio pack export request"
 AUDIO_BUNDLE_NOT_FOUND_DETAIL = "Audio bundle not found"
@@ -101,6 +120,156 @@ class AssistantQuestion(BaseModel):
 def _legacy_pack_name(path_value: str) -> str:
     normalized = str(path_value).replace("\\", "/")
     return normalized.rsplit("/", 1)[-1]
+
+
+def _first_run_store() -> FirstRunStateStore:
+    return FirstRunStateStore(FIRST_RUN_STATE_PATH)
+
+
+async def _require_first_run_write_access(request: Request) -> None:
+    await require_local_setup_access(request)
+    status_snapshot = setup_manager.get_status_snapshot()
+    if not status_snapshot.get("enabled"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="setup_disabled",
+        )
+    if (
+        status_snapshot.get("setup_completed")
+        or status_snapshot.get("completed")
+        or not status_snapshot.get("needs_setup")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="setup_already_completed",
+        )
+    state = _first_run_store().load()
+    if state.status == FirstRunStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="setup_already_completed",
+        )
+
+
+def _read_config_auth_mode() -> str | None:
+    try:
+        parser = ConfigParser()
+        parser.read(setup_manager.get_config_file_path(), encoding="utf-8")
+        auth_mode = parser.get("AuthNZ", "auth_mode", fallback=None)
+    except Exception as exc:  # noqa: BLE001 - metadata should remain best-effort
+        logger.debug("Unable to read auth mode for first-run metadata: {}", type(exc).__name__)
+        return None
+    return auth_mode.strip() if auth_mode else None
+
+
+def _resolve_auth_mode(status_snapshot: dict[str, Any]) -> str:
+    raw_auth_mode = status_snapshot.get("auth_mode") or os.getenv("AUTH_MODE") or _read_config_auth_mode()
+    return str(raw_auth_mode or "single_user").strip() or "single_user"
+
+
+def _origin_from_request(request: Request) -> str | None:
+    try:
+        return str(request.base_url).rstrip("/")
+    except Exception:  # noqa: BLE001 - diagnostics should not fail setup metadata
+        return None
+
+
+def _frontend_origin_from_headers(request: Request) -> str | None:
+    origin = request.headers.get("origin")
+    if origin:
+        return origin.rstrip("/")
+
+    referer = request.headers.get("referer")
+    if not referer:
+        return None
+    try:
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(referer)
+    except Exception:  # noqa: BLE001
+        return None
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _is_local_host(host: str | None) -> bool:
+    if not host:
+        return False
+    normalized = host.strip().lower().strip("[]")
+    return normalized in {"localhost", "127.0.0.1", "::1", "testclient", "testserver"}
+
+
+def _is_lan_host(host: str | None) -> bool:
+    if not host:
+        return False
+    try:
+        address = ipaddress.ip_address(host.strip().lower().strip("[]"))
+    except ValueError:
+        return False
+    return address.is_private
+
+
+def _classify_browser_access(request: Request) -> str:
+    host = request.url.hostname
+    client_host = request.client.host if request.client else None
+
+    if _is_local_host(host) or _is_local_host(client_host):
+        return "local"
+    if _is_lan_host(host) or _is_lan_host(client_host):
+        return "lan"
+    if host or client_host:
+        return "remote"
+    return "unknown"
+
+
+def build_first_run_metadata(request: Request) -> FirstRunMetadataResponse:
+    status_snapshot = setup_manager.get_status_snapshot()
+    auth_mode = _resolve_auth_mode(status_snapshot)
+    browser_access = _classify_browser_access(request)
+    setup_completed = bool(status_snapshot.get("setup_completed") or status_snapshot.get("completed"))
+    remote_setup_enabled = bool(
+        status_snapshot.get("remote_access_active")
+        or status_snapshot.get("allow_remote_setup_access")
+        or status_snapshot.get("remote_access_env_override")
+    )
+    bundled_single_user_auth_available = auth_mode == "single_user" and browser_access == "local"
+
+    return FirstRunMetadataResponse(
+        auth_mode=auth_mode,
+        bundled_single_user_auth_available=bundled_single_user_auth_available,
+        manual_auth_required=not bundled_single_user_auth_available,
+        setup_required=bool(status_snapshot.get("needs_setup")),
+        setup_completed=setup_completed,
+        remote_setup_enabled=remote_setup_enabled,
+        connection=FirstRunConnectionDiagnostics(
+            frontend_origin=_frontend_origin_from_headers(request),
+            api_origin=_origin_from_request(request),
+            browser_access=browser_access,
+        ),
+        setup_paths=[
+            FirstRunSetupPath(
+                key="docker_single_user",
+                label="Docker single-user",
+                recommended=True,
+                guide_path="Docs/Getting_Started/Profile_Docker_Single_User.md",
+            ),
+            FirstRunSetupPath(
+                key="local_single_user",
+                label="Local single-user",
+                guide_path="Docs/Getting_Started/Profile_Local_Single_User.md",
+            ),
+            FirstRunSetupPath(
+                key="multi_user",
+                label="Multi-user",
+                guide_path="Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md",
+            ),
+        ],
+        multi_user_exit=FirstRunMultiUserExit(
+            guide_path="Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md",
+            checklist_path="Docs/User_Guides/Server/Multi-User_Deployment_Guide.md",
+        ),
+    )
 
 
 def _sanitize_setup_payload(value: Any) -> Any:
@@ -238,13 +407,48 @@ def _normalize_audio_pack_name(pack_name: str) -> str:
 
 
 def _raise_audio_bundle_lookup_not_found(exc: KeyError) -> None:
-    raise HTTPException(status.HTTP_404_NOT_FOUND, detail=_AUDIO_BUNDLE_LOOKUP_DETAIL) from exc
+    raise HTTPException(status.HTTP_404_NOT_FOUND, detail=AUDIO_BUNDLE_NOT_FOUND_DETAIL) from exc
 
 
 @router.get("/status", openapi_extra={"security": []}, response_model=SetupStatusResponse)
 async def get_setup_status(_guard: None = Depends(require_local_setup_access)) -> SetupStatusResponse:
     """Return setup availability and placeholder diagnostics."""
     return setup_manager.get_status_snapshot()
+
+
+@router.get("/first-run/state", openapi_extra={"security": []}, response_model=FirstRunStateResponse)
+async def get_first_run_state(_guard: None = Depends(require_local_setup_access)) -> FirstRunStateResponse:
+    return _first_run_store().load()
+
+
+@router.get("/first-run/metadata", openapi_extra={"security": []}, response_model=FirstRunMetadataResponse)
+async def get_first_run_metadata(
+    request: Request,
+    _guard: None = Depends(require_local_setup_access),
+) -> FirstRunMetadataResponse:
+    return build_first_run_metadata(request)
+
+
+@router.post("/first-run/state", openapi_extra={"security": []}, response_model=FirstRunStateResponse)
+async def update_first_run_state(
+    payload: FirstRunStepUpdateRequest,
+    _guard: None = Depends(_require_first_run_write_access),
+) -> FirstRunStateResponse:
+    try:
+        return _first_run_store().update_step(payload.step, payload.data)
+    except InvalidFirstRunTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/first-run/skip", openapi_extra={"security": []}, response_model=FirstRunStateResponse)
+async def skip_first_run(
+    payload: FirstRunSkipRequest,
+    _guard: None = Depends(_require_first_run_write_access),
+) -> FirstRunStateResponse:
+    try:
+        return _first_run_store().mark_skipped(reason=payload.reason)
+    except InvalidFirstRunTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.get("/config", openapi_extra={"security": []})

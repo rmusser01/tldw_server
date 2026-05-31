@@ -17,13 +17,28 @@ def _make_request() -> Request:
     return Request(scope)
 
 
+def _make_remote_post_request(path="/api/v1/setup/first-run/state") -> Request:
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": path,
+        "headers": [(b"host", b"example.test")],
+        "client": ("203.0.113.10", 4444),
+    }
+    return Request(scope)
+
+
 def _capture_setup_deps_records() -> tuple[list[dict], int]:
     records: list[dict] = []
     sink_id = setup_deps.logger.add(
         lambda message: records.append(
             {
                 "message": str(message.record.get("message") or ""),
-                "extra": dict(message.record.get("extra") or {}),
+                "extra": {
+                    key: value
+                    for key, value in dict(message.record.get("extra") or {}).items()
+                    if value not in ("", None)
+                },
                 "exception": message.record.get("exception"),
             }
         ),
@@ -115,6 +130,34 @@ async def test_require_local_setup_access_calls_admin_guard(monkeypatch):
     monkeypatch.setattr(setup_deps, "_require_admin_for_remote", fake_guard)
 
     await setup_deps.require_local_setup_access(_make_request())
+
+    assert called["value"] is True
+
+
+@pytest.mark.asyncio
+async def test_remote_setup_write_rejected_when_remote_setup_disabled(monkeypatch):
+    monkeypatch.delenv("TLDW_SETUP_ALLOW_REMOTE", raising=False)
+    monkeypatch.setattr(setup_deps, "_config_allows_remote", lambda: False)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await setup_deps.require_local_setup_access(_make_remote_post_request())
+
+    assert excinfo.value.status_code == 403
+    assert "localhost" in str(excinfo.value.detail).lower()
+
+
+@pytest.mark.asyncio
+async def test_remote_setup_write_requires_admin_guard_when_remote_override_enabled(monkeypatch):
+    called = {"value": False}
+
+    async def fake_guard(_request):
+        called["value"] = True
+
+    monkeypatch.setenv("TLDW_SETUP_ALLOW_REMOTE", "1")
+    monkeypatch.setattr(setup_deps, "_config_allows_remote", lambda: False)
+    monkeypatch.setattr(setup_deps, "_require_admin_for_remote", fake_guard)
+
+    await setup_deps.require_local_setup_access(_make_remote_post_request())
 
     assert called["value"] is True
 

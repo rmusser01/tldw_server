@@ -120,6 +120,45 @@ class AssistantQuestion(BaseModel):
     question: str = Field(..., min_length=1, description="Natural language question for the setup assistant")
 
 
+class FirstRunStepUpdateRequest(BaseModel):
+    step: str = Field(..., min_length=1)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class FirstRunSkipRequest(BaseModel):
+    reason: str | None = Field(None, max_length=120)
+
+
+class FirstRunSetupPath(BaseModel):
+    key: str
+    label: str
+    recommended: bool = False
+    guide_path: str | None = None
+
+
+class FirstRunMultiUserExit(BaseModel):
+    guide_path: str
+    checklist_path: str | None = None
+
+
+class FirstRunConnectionDiagnostics(BaseModel):
+    frontend_origin: str | None = None
+    api_origin: str | None = None
+    browser_access: str | None = None
+
+
+class FirstRunMetadataResponse(BaseModel):
+    auth_mode: str
+    bundled_single_user_auth_available: bool
+    manual_auth_required: bool
+    setup_required: bool
+    setup_completed: bool
+    remote_setup_enabled: bool
+    connection: FirstRunConnectionDiagnostics
+    setup_paths: list[FirstRunSetupPath]
+    multi_user_exit: FirstRunMultiUserExit
+
+
 class AudioBundleProvisionRequest(BaseModel):
     bundle_id: str = Field(..., min_length=1, description="Curated audio bundle identifier to provision.")
     resource_profile: str = Field(

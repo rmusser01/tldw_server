@@ -32,6 +32,9 @@ _CONFIG_REMOTE_CACHE_TTL = 30.0  # seconds
 _config_remote_cached: bool | None = None
 _config_remote_cached_at = 0.0
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_REMOTE_SETUP_WRITE_DENIED_DETAIL = (
+    "Setup writes are only available from localhost unless remote setup access is explicitly enabled."
+)
 
 
 def _principal_has_admin_claims(principal) -> bool:
@@ -293,10 +296,7 @@ async def require_local_setup_access(request: Request) -> None:
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "Setup changes are restricted to local requests. Forwarded client is not local. "
-                    "Set TLDW_SETUP_ALLOW_REMOTE=1 or enable allow_remote_setup_access in config.txt to bypass."
-                ),
+                detail=_REMOTE_SETUP_WRITE_DENIED_DETAIL,
             )
         return
 
@@ -306,10 +306,7 @@ async def require_local_setup_access(request: Request) -> None:
     logger.warning("Blocked remote setup access from host={}", client_host)
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail=(
-            "Setup changes are restricted to local requests. Set TLDW_SETUP_ALLOW_REMOTE=1 "
-            "or enable allow_remote_setup_access in config.txt to permit remote access temporarily."
-        ),
+        detail=_REMOTE_SETUP_WRITE_DENIED_DETAIL,
     )
 
 

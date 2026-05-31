@@ -16,8 +16,12 @@ documentation:
 modified_files:
 - tldw_Server_API/app/core/Setup/first_run_state.py
 - tldw_Server_API/app/core/Setup/first_run_models.py
+- tldw_Server_API/app/api/v1/API_Deps/setup_deps.py
+- tldw_Server_API/app/api/v1/endpoints/setup.py
 - tldw_Server_API/app/api/v1/schemas/setup_schemas.py
 - tldw_Server_API/tests/Setup/test_first_run_state.py
+- tldw_Server_API/tests/Setup/test_setup_deps_remote_admin.py
+- tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
 ---
 
 ## Description
@@ -37,12 +41,16 @@ Task 1-2 slice from the unified onboarding plan. Add durable first-run state, re
 
 <!-- SECTION:NOTES:BEGIN -->
 Started Task 1 subagent-driven slice: backend first-run state store and setup schemas. Baseline before implementation: tldw_Server_API/tests/Setup/test_setup_deps_remote_admin.py 8 passed; tldw_Server_API/tests/Config/test_config_providers_endpoints.py 33 passed; apps/packages/ui OnboardingConnectForm design-system Vitest 4 passed.
+
+Task 2 slice implemented first-run state/metadata/skip endpoints plus setup write access boundary checks. Red phase captured expected failures before production changes: remote disabled write detail lacked "localhost", `/api/v1/setup/first-run/state` returned 404, and `/api/v1/setup/first-run/skip` was missing; the initial red command timed out during TestClient lifespan shutdown after those failures, so the new integration tests were adjusted to use the existing setup-test pattern of `TestClient(app)` without a context manager.
+
+Task 2 verification: `python -m pytest tldw_Server_API/tests/Setup/test_setup_deps_remote_admin.py tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py -v` passed 15 tests; `python -m pytest tldw_Server_API/tests/Setup/test_first_run_state.py tldw_Server_API/tests/Setup/test_setup_manager_masking.py -q` passed 20 tests; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings; `git diff --check` passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 1 secret-redaction marker fix slice: first-run step_data redaction now covers private_key, access_key, and auth_key normalized variants without adding a broad suffix rule. TASK-490 remains In Progress because Task 2 endpoint/access-boundary work is intentionally not implemented. Red phase captured 1 expected failure in test_first_run_state.py before production changes: private_key/access_key/auth_key values persisted raw. Verification after fix: test_first_run_state.py - 19 passed; test_setup_manager_masking.py - 1 passed; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings; git diff --check passed.
+Task 1 delivered the durable first-run state store and setup schema re-exports, including secret redaction for private_key, access_key, and auth_key normalized variants. Task 2 delivered setup access-boundary coverage, first-run state/metadata/update/skip endpoints, setup-completed write rejection, and first-run metadata for auth/setup path/connection guidance. TASK-490 remains In Progress because later review gates still run here.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
