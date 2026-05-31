@@ -8,10 +8,10 @@ const toJsonValue = (value: unknown): JsonValue => {
     typeof value === "number" ||
     typeof value === "boolean"
   ) {
-    return value
+    return value as JsonPrimitive
   }
   if (Array.isArray(value)) {
-    return value.map((item) => toJsonValue(item))
+    return value.map((item) => toJsonValue(item)) as JsonValue
   }
   if (value && typeof value === "object") {
     const record: Record<string, JsonValue> = {}

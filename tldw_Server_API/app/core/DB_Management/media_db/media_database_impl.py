@@ -146,6 +146,14 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.tts_history_ops imp
     soft_delete_tts_history_entry,
     update_tts_history_favorite,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.audio_preset_ops import (
+    count_audio_presets,
+    create_audio_preset,
+    get_audio_preset,
+    list_audio_presets,
+    soft_delete_audio_preset,
+    update_audio_preset,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.document_keyword_ops import (
     create_document_version,
     get_all_document_versions,
@@ -284,6 +292,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_search_ops i
     search_claims,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_metrics_ops import (
+    count_claims_review_extractor_metrics_daily,
     get_claims_review_extractor_metrics_daily,
     list_claims_review_extractor_metrics_daily,
     list_claims_review_user_ids,
@@ -365,6 +374,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.query_ops import (
     get_distinct_media_types,
     get_media_by_id,
     get_media_by_hash,
+    get_media_status_by_id,
     get_media_by_title,
     get_media_by_url,
     get_media_by_uuid,
@@ -449,6 +459,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_data_table_
 from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_tts_source_hash_structures import (
     ensure_postgres_source_hash_column,
     ensure_postgres_tts_history,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_audio_preset_structures import (
+    ensure_postgres_audio_presets,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_claims_collection_structures import (
     ensure_postgres_claims_extensions,
@@ -1254,6 +1267,38 @@ class MediaDatabase:
     CREATE INDEX IF NOT EXISTS idx_tts_history_user_text_hash ON tts_history(user_id, text_hash);
     """
 
+    _AUDIO_PRESETS_TABLE_SQL = """
+    -- Audio Presets Table --
+    CREATE TABLE IF NOT EXISTS audio_presets (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        favorite BOOLEAN NOT NULL DEFAULT 0,
+        is_default BOOLEAN NOT NULL DEFAULT 0,
+        config_json TEXT NOT NULL,
+        capability_assumptions_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        deleted_at TEXT,
+        version INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_audio_presets_user_kind_updated
+        ON audio_presets(user_id, kind, deleted, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_audio_presets_user_kind_favorite
+        ON audio_presets(user_id, kind, favorite, deleted);
+    CREATE INDEX IF NOT EXISTS idx_audio_presets_user_kind_default
+        ON audio_presets(user_id, kind, is_default, deleted);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_presets_user_kind_name_active
+        ON audio_presets(user_id, kind, LOWER(name))
+        WHERE deleted = FALSE;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_presets_user_kind_default_active
+        ON audio_presets(user_id, kind)
+        WHERE is_default = TRUE AND deleted = FALSE;
+    """
+
     _DATA_TABLES_SQL = """
     -- Data Tables (LLM-generated structured tables) --
     CREATE TABLE IF NOT EXISTS data_tables (
@@ -1733,6 +1778,7 @@ MediaDatabase.get_chunking_template = get_chunking_template
 MediaDatabase.get_distinct_media_types = get_distinct_media_types
 MediaDatabase.get_media_by_id = get_media_by_id
 MediaDatabase.get_media_by_hash = get_media_by_hash
+MediaDatabase.get_media_status_by_id = get_media_status_by_id
 MediaDatabase.get_media_by_title = get_media_by_title
 MediaDatabase.get_media_by_url = get_media_by_url
 MediaDatabase.get_media_by_uuid = get_media_by_uuid
@@ -1783,6 +1829,7 @@ MediaDatabase._ensure_postgres_data_tables = ensure_postgres_data_tables
 MediaDatabase._ensure_postgres_columns = ensure_postgres_columns
 MediaDatabase._ensure_postgres_data_tables_columns = ensure_postgres_data_tables_columns
 MediaDatabase._ensure_postgres_tts_history = ensure_postgres_tts_history
+MediaDatabase._ensure_postgres_audio_presets = ensure_postgres_audio_presets
 MediaDatabase._ensure_postgres_source_hash_column = ensure_postgres_source_hash_column
 MediaDatabase._ensure_postgres_claims_tables = ensure_postgres_claims_tables
 MediaDatabase._ensure_postgres_collections_tables = ensure_postgres_collections_tables
@@ -1895,6 +1942,9 @@ MediaDatabase.upsert_claims_review_extractor_metrics_daily = (
 MediaDatabase.list_claims_review_extractor_metrics_daily = (
     list_claims_review_extractor_metrics_daily
 )
+MediaDatabase.count_claims_review_extractor_metrics_daily = (
+    count_claims_review_extractor_metrics_daily
+)
 MediaDatabase.list_claims_review_user_ids = list_claims_review_user_ids
 MediaDatabase.get_claim_clusters_by_ids = get_claim_clusters_by_ids
 MediaDatabase.get_claim_cluster_member_counts = get_claim_cluster_member_counts
@@ -2002,6 +2052,12 @@ MediaDatabase.mark_tts_history_artifacts_deleted_for_file_id = (
 )
 MediaDatabase.purge_tts_history_for_user = purge_tts_history_for_user
 MediaDatabase.list_tts_history_user_ids = list_tts_history_user_ids
+MediaDatabase.create_audio_preset = create_audio_preset
+MediaDatabase.list_audio_presets = list_audio_presets
+MediaDatabase.count_audio_presets = count_audio_presets
+MediaDatabase.get_audio_preset = get_audio_preset
+MediaDatabase.update_audio_preset = update_audio_preset
+MediaDatabase.soft_delete_audio_preset = soft_delete_audio_preset
 MediaDatabase.get_connection = get_connection
 MediaDatabase.close_connection = close_connection
 MediaDatabase.release_context_connection = release_context_connection

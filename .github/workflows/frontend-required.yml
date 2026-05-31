@@ -49,6 +49,7 @@ jobs:
       MINIMAL_TEST_APP: '1'
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
       PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
+      SKIP_WXT_PREPARE: '1'
     steps:
       - name: No-op pass (frontend unchanged)
         if: needs.changes.outputs.frontend_changed != 'true'

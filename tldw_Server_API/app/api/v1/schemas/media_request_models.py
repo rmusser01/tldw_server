@@ -21,6 +21,7 @@ import yaml
 #
 # Functions:
 
+
 ######################## /api/v1/media/ Endpoint Models ########################
 #
 #
@@ -34,11 +35,13 @@ class MediaItemResponse(BaseModel):
 
     model_config = ConfigDict()
 
+
 class PaginationInfo(BaseModel):
     page: int
     per_page: int
     total: int
     total_pages: int
+
 
 class MediaItem(BaseModel):
     id: int
@@ -50,9 +53,11 @@ class MediaItem(BaseModel):
     date: Optional[datetime]
     keywords: list[str]
 
+
 class MediaSearchResponse(BaseModel):
     results: list[MediaItem]
     pagination: PaginationInfo
+
 
 class MediaUpdateRequest(BaseModel):
     title: Optional[str] = Field(None, max_length=500, description="Title (max 500 chars)")
@@ -65,18 +70,23 @@ class MediaUpdateRequest(BaseModel):
 
 class MediaKeywordsUpdateRequest(BaseModel):
     """Request payload for updating media keywords (add/remove/set)."""
+
     keywords: list[str] = Field(..., description="Keywords to apply")
     mode: Literal["add", "remove", "set"] = Field(
         "add",
         description="Update mode: add/remove/set (set replaces all keywords).",
     )
 
+
 # Make prompt and analysis_content REQUIRED so missing them yields 422
 class VersionCreateRequest(BaseModel):
     content: str = Field(..., max_length=5000000, description="Content (max 5MB)")
     prompt: str = Field(..., max_length=10000, description="Prompt (max 10KB)")
     analysis_content: str = Field(..., max_length=100000, description="Analysis content (max 100KB)")
-    safe_metadata: Optional[dict[str, Any]] = Field(None, description="Optional safe metadata JSON to store with this version.")
+    safe_metadata: Optional[dict[str, Any]] = Field(
+        None, description="Optional safe metadata JSON to store with this version."
+    )
+
 
 class VersionResponse(BaseModel):
     id: int
@@ -84,11 +94,13 @@ class VersionResponse(BaseModel):
     created_at: str
     content_length: int
 
+
 class VersionRollbackRequest(BaseModel):
     version_number: int
 
+
 class SearchRequest(BaseModel):
-    model_config = ConfigDict(extra='forbid')
+    model_config = ConfigDict(extra="forbid")
 
     query: Optional[str] = Field(None, max_length=1000, description="Search query (max 1000 chars)")
     fields: list[str] = ["title", "content"]
@@ -135,53 +147,102 @@ class ProcessCodeForm(BaseModel):
         description="Overlap: chars for 'code', lines for 'lines'",
     )
 
+
 class MetadataFilter(BaseModel):
     field: str = Field(..., description="Metadata key to search (e.g., doi, pmid, journal, license)")
-    op: Literal['eq','contains','icontains','startswith','endswith'] = Field('icontains', description="Match operator")
+    op: Literal["eq", "contains", "icontains", "startswith", "endswith"] = Field(
+        "icontains", description="Match operator"
+    )
     value: str = Field(..., description="Value to match")
+
 
 class MetadataSearchRequest(BaseModel):
     filters: Optional[list[MetadataFilter]] = Field(None, description="List of metadata filters")
-    match_mode: Literal['all','any'] = Field('all', description="Combine filters with AND/OR")
+    match_mode: Literal["all", "any"] = Field("all", description="Combine filters with AND/OR")
     group_by_media: bool = Field(True, description="Group results by media (latest matching version per media)")
     page: int = Field(1, ge=1)
     per_page: int = Field(20, ge=1, le=100)
+
 
 class MetadataPatchRequest(BaseModel):
     safe_metadata: dict[str, Any] = Field(..., description="Safe metadata JSON to set or merge")
     merge: bool = Field(True, description="Merge with existing metadata if present")
     new_version: bool = Field(False, description="Create a new version with updated metadata")
 
+
 class AdvancedVersionUpsertRequest(BaseModel):
-    content: Optional[str] = Field(None, description="Optional content; if omitted and new_version=true, uses latest content")
-    prompt: Optional[str] = Field(None, description="Optional prompt; if omitted and new_version=true, uses latest prompt")
-    analysis_content: Optional[str] = Field(None, description="Optional analysis; if omitted and new_version=true, uses latest analysis")
+    content: Optional[str] = Field(
+        None, description="Optional content; if omitted and new_version=true, uses latest content"
+    )
+    prompt: Optional[str] = Field(
+        None, description="Optional prompt; if omitted and new_version=true, uses latest prompt"
+    )
+    analysis_content: Optional[str] = Field(
+        None, description="Optional analysis; if omitted and new_version=true, uses latest analysis"
+    )
     safe_metadata: Optional[dict[str, Any]] = Field(None, description="Optional safe metadata JSON to set or merge")
     merge: bool = Field(True, description="Merge safe metadata when updating or creating new version")
-    new_version: bool = Field(True, description="Create a new version (default). If false, only safe_metadata may be updated in place")
+    new_version: bool = Field(
+        True, description="Create a new version (default). If false, only safe_metadata may be updated in place"
+    )
+
 
 # Define allowed media types using Literal for validation
-MediaType = Literal['video', 'audio', 'document', 'pdf', 'ebook', 'email', 'code']
+MediaType = Literal["video", "audio", "document", "pdf", "ebook", "email", "code"]
 
 # Define allowed chunking methods (adjust as needed based on your library)
-ChunkMethod = Literal['semantic', 'tokens', 'paragraphs', 'sentences','words', 'ebook_chapters', 'json', 'propositions']
+ChunkMethod = Literal[
+    "semantic",
+    "structure_aware",
+    "tokens",
+    "paragraphs",
+    "sentences",
+    "words",
+    "ebook_chapters",
+    "json",
+    "propositions",
+]
+
+ChunkingMode = Literal["auto", "manual"]
+
+AutoChunkingGoal = Literal["balanced", "qa_search", "navigation_summary"]
 
 # Define allowed PDF parsing engines
-PdfEngine = Literal['pymupdf4llm', 'pymupdf', 'docling'] # Add others if supported
+PdfEngine = Literal["pymupdf4llm", "pymupdf", "docling"]  # Add others if supported
 
 # OCR options
-OcrMode = Literal['always', 'fallback']
+OcrMode = Literal["always", "fallback"]
+
 
 class ChunkingOptions(BaseModel):
     """Pydantic model for chunking specific options"""
+
     perform_chunking: bool = Field(True, description="Enable chunk-based processing of the media content")
-    chunk_method: Optional[ChunkMethod] = Field(None, description="Method used to chunk content (e.g., 'sentences', 'recursive', 'chapter')")
+    chunking_mode: Optional[ChunkingMode] = Field(
+        None,
+        description="Chunking control mode. Omitted preserves legacy/manual behavior; 'auto' lets the server plan media-aware chunking.",
+    )
+    auto_chunking_goal: AutoChunkingGoal = Field(
+        "balanced",
+        description="Goal used by automatic chunking when chunking_mode='auto'",
+    )
+    auto_chunking_use_llm: bool = Field(
+        False,
+        description="Explicit opt-in to AI-assisted automatic chunk boundary refinement when available",
+    )
+    chunk_method: Optional[ChunkMethod] = Field(
+        None, description="Method used to chunk content (e.g., 'sentences', 'recursive', 'chapter')"
+    )
     use_adaptive_chunking: bool = Field(False, description="Whether to enable adaptive chunking")
     use_multi_level_chunking: bool = Field(False, description="Whether to enable multi-level chunking")
-    chunk_language: Optional[str] = Field(None, description="Optional language override for chunking (ISO 639-1 code, e.g., 'en')")
+    chunk_language: Optional[str] = Field(
+        None, description="Optional language override for chunking (ISO 639-1 code, e.g., 'en')"
+    )
     chunk_size: int = Field(500, gt=0, description="Target size of each chunk (positive integer)")
     chunk_overlap: int = Field(200, ge=0, description="Overlap size between chunks (non-negative integer)")
-    custom_chapter_pattern: Optional[str] = Field(None, description="Optional regex pattern for custom chapter splitting (ebook/docs)")
+    custom_chapter_pattern: Optional[str] = Field(
+        None, description="Optional regex pattern for custom chapter splitting (ebook/docs)"
+    )
     proposition_engine: Optional[str] = Field(
         None,
         description="Override proposition extraction engine (heuristic|spacy|llm|auto)",
@@ -201,53 +262,67 @@ class ChunkingOptions(BaseModel):
         description="Prompt profile for proposition extraction (generic|claimify|gemma_aps)",
     )
     # Template auto-apply options
-    auto_apply_template: bool = Field(False, description="Automatically select and apply a matching chunking template by metadata")
+    auto_apply_template: bool = Field(
+        False, description="Automatically select and apply a matching chunking template by metadata"
+    )
     chunking_template_name: Optional[str] = Field(None, description="Explicit template name to apply for chunking")
     # Contextual Chunking Options
-    enable_contextual_chunking: bool = Field(False, description="Add LLM-generated context to chunks for better retrieval")
-    contextual_llm_model: Optional[str] = Field(None, description="LLM model to use for generating contextual summaries (e.g., 'gpt-3.5-turbo')")
-    context_window_size: Optional[int] = Field(None, ge=100, le=2000, description="Size of context window around chunks in characters")
-    context_strategy: Optional[Literal['auto','full','window','outline_window']] = Field(
+    enable_contextual_chunking: bool = Field(
+        False, description="Add LLM-generated context to chunks for better retrieval"
+    )
+    contextual_llm_model: Optional[str] = Field(
+        None, description="LLM model to use for generating contextual summaries (e.g., 'gpt-3.5-turbo')"
+    )
+    context_window_size: Optional[int] = Field(
+        None, ge=100, le=2000, description="Size of context window around chunks in characters"
+    )
+    context_strategy: Optional[Literal["auto", "full", "window", "outline_window"]] = Field(
         None, description="Context selection strategy: 'auto' (default), 'full', 'window', or 'outline_window'"
     )
     context_token_budget: Optional[int] = Field(
         None, ge=1000, le=200000, description="Approximate token budget for 'auto' strategy (len(text)/4 heuristic)"
     )
     # Hierarchical options (flattened into chunks for indexing)
-    hierarchical_chunking: Optional[bool] = Field(False, description="Enable hierarchical parsing and flattening to leaf chunks")
-    hierarchical_template: Optional[dict[str, Any]] = Field(None, description="Custom boundary rules: {'boundaries': [{'kind','pattern','flags'}]}")
+    hierarchical_chunking: Optional[bool] = Field(
+        False, description="Enable hierarchical parsing and flattening to leaf chunks"
+    )
+    hierarchical_template: Optional[dict[str, Any]] = Field(
+        None, description="Custom boundary rules: {'boundaries': [{'kind','pattern','flags'}]}"
+    )
 
-    @field_validator('chunk_method', mode='before')
+    @field_validator("chunk_method", mode="before")
     @classmethod
-    def empty_str_to_none(cls, v: Any) -> Optional[Any]: # Accept Any for input
+    def empty_str_to_none(cls, v: Any) -> Optional[Any]:  # Accept Any for input
         if v == "":
             return None
         return v
 
-    @field_validator('chunk_overlap')
+    @field_validator("chunk_overlap")
     @classmethod
     def overlap_less_than_size(cls, v: int, info: ValidationInfo) -> int:
         # Check if 'chunk_size' is available in the already validated data
-        if 'chunk_size' in info.data and info.data['chunk_size'] is not None:
-            chunk_size = info.data['chunk_size']
+        if "chunk_size" in info.data and info.data["chunk_size"] is not None:
+            chunk_size = info.data["chunk_size"]
             if v >= chunk_size:
-                raise ValueError('chunk_overlap must be less than chunk_size')
+                raise ValueError("chunk_overlap must be less than chunk_size")
         # If chunk_size hasn't been validated yet or is missing, this check might implicitly pass
         # or you might want to handle that case explicitly if chunk_size is always required before overlap.
         return v
 
-    @field_validator('custom_chapter_pattern')
+    @field_validator("custom_chapter_pattern")
     @classmethod
     def validate_regex(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
             try:
                 re.compile(v)
-            except re.error as e: # Catch specific error
+            except re.error as e:  # Catch specific error
                 raise ValueError(f"Invalid regex pattern provided for custom_chapter_pattern: {v}. Error: {e}") from e
         return v
 
+
 class TranscriptionModel(str, Enum):
     """Available transcription models and backends"""
+
     # Whisper Models (faster-whisper)
     WHISPER_TINY = "whisper-tiny"
     WHISPER_TINY_EN = "whisper-tiny.en"
@@ -296,11 +371,16 @@ class TranscriptionModel(str, Enum):
     VIBEVOICE_ASR = "vibevoice-asr"
     VIBEVOICE_HF = "microsoft/VibeVoice-ASR"
 
+
 TRANSCRIPTION_MODEL_ENUM = [m.value for m in TranscriptionModel]
+
 
 class AudioVideoOptions(BaseModel):
     """Pydantic model for Audio/Video specific options"""
-    transcription_model: str = Field("deepdml/faster-distil-whisper-large-v3.5", description="Model ID for audio/video transcription")
+
+    transcription_model: str = Field(
+        "deepdml/faster-distil-whisper-large-v3.5", description="Model ID for audio/video transcription"
+    )
     transcription_language: str = Field("en", description="Language for audio/video transcription (ISO 639-1 code)")
     hotwords: Optional[str] = Field(
         None,
@@ -308,18 +388,26 @@ class AudioVideoOptions(BaseModel):
     )
     diarize: bool = Field(False, description="Enable speaker diarization (audio/video)")
     timestamp_option: bool = Field(True, description="Include timestamps in the transcription (audio/video)")
-    vad_use: bool = Field(False, description="Enable Voice Activity Detection filter during transcription (audio/video)")
-    perform_confabulation_check_of_analysis: bool = Field(False, description="Enable a confabulation check on analysis (if applicable)")
+    vad_use: bool = Field(
+        False, description="Enable Voice Activity Detection filter during transcription (audio/video)"
+    )
+    perform_confabulation_check_of_analysis: bool = Field(
+        False, description="Enable a confabulation check on analysis (if applicable)"
+    )
+
 
 class PdfOptions(BaseModel):
     """Pydantic model for PDF specific options"""
+
     pdf_parsing_engine: Optional[PdfEngine] = Field("pymupdf4llm", description="PDF parsing engine to use")
     enable_ocr: bool = Field(False, description="Enable OCR for scanned/low-text PDFs")
     ocr_backend: Optional[str] = Field(None, description="OCR backend name (e.g., 'tesseract' or 'auto')")
     ocr_lang: Optional[str] = Field("eng", description="OCR language (ISO 639-2 Tesseract codes, e.g., 'eng')")
     ocr_dpi: int = Field(300, ge=72, le=600, description="DPI for page rendering before OCR (72-600)")
     ocr_mode: Optional[OcrMode] = Field("fallback", description="'always' to force OCR, 'fallback' when no text")
-    ocr_min_page_text_chars: int = Field(40, ge=0, description="Threshold to treat a page as 'no text' for OCR fallback")
+    ocr_min_page_text_chars: int = Field(
+        40, ge=0, description="Threshold to treat a page as 'no text' for OCR fallback"
+    )
     ocr_output_format: Optional[str] = Field(
         None,
         description="OCR output format: text|markdown|json (structured outputs persisted in analysis_details)",
@@ -329,11 +417,13 @@ class PdfOptions(BaseModel):
         description="OCR prompt preset (e.g., 'general', 'doc', 'table', 'spotting', 'json')",
     )
 
+
 class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
     """
     Pydantic model representing the form data for the /add endpoint.
     Excludes 'files' (handled via File(...)) and 'token' (handled via Header(...)).
     """
+
     # --- Required Fields ---
     media_type: MediaType = Field(..., description="Type of media")
 
@@ -344,29 +434,35 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
     # --- Common Optional Fields ---
     title: Optional[str] = Field(None, max_length=500, description="Optional title (max 500 chars)")
     author: Optional[str] = Field(None, max_length=255, description="Optional author (max 255 chars)")
-    keywords_str: str = Field("", alias="keywords", max_length=1000, description="Comma-separated keywords (max 1000 chars)")
+    keywords_str: str = Field(
+        "", alias="keywords", max_length=1000, description="Comma-separated keywords (max 1000 chars)"
+    )
     custom_prompt: Optional[str] = Field(None, max_length=100000, description="Optional custom prompt (max 100KB)")
     system_prompt: Optional[str] = Field(None, max_length=10000, description="Optional system prompt (max 10KB)")
-    overwrite_existing: bool = Field(False, description="Overwrite any existing media with the same identifier (URL/filename)")
+    overwrite_existing: bool = Field(
+        False, description="Overwrite any existing media with the same identifier (URL/filename)"
+    )
     keep_original_file: bool = Field(False, description="Whether to retain original uploaded files after processing")
-    perform_analysis: bool = Field(True, description="Perform analysis (e.g., summarization) if applicable (default=True)")
+    perform_analysis: bool = Field(
+        True, description="Perform analysis (e.g., summarization) if applicable (default=True)"
+    )
     perform_claims_extraction: Optional[bool] = Field(
-        None,
-        description="Extract factual claims during analysis (defaults to server configuration when unset)."
+        None, description="Extract factual claims during analysis (defaults to server configuration when unset)."
     )
     claims_extractor_mode: Optional[str] = Field(
-        None,
-        description="Optional override for claims extractor mode (e.g., 'heuristic', 'ner', provider id)."
+        None, description="Optional override for claims extractor mode (e.g., 'heuristic', 'ner', provider id)."
     )
     claims_max_per_chunk: Optional[int] = Field(
         None,
         ge=1,
         le=12,
-        description="Maximum number of claims to extract per chunk (uses configuration defaults when unset)."
+        description="Maximum number of claims to extract per chunk (uses configuration defaults when unset).",
     )
 
     # --- Video/Audio Specific Timing --- ADD THESE ---
-    start_time: Optional[str] = Field(None, description="Optional start time for processing (e.g., HH:MM:SS or seconds)")
+    start_time: Optional[str] = Field(
+        None, description="Optional start time for processing (e.g., HH:MM:SS or seconds)"
+    )
     end_time: Optional[str] = Field(None, description="Optional end time for processing (e.g., HH:MM:SS or seconds)")
     # -----------------------------------------------
 
@@ -381,11 +477,19 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
     api_name: Optional[str] = Field(None, description="DEPRECATED - use api_provider instead")
 
     # --- Email-specific options (optional, used when media_type='email') ---
-    ingest_attachments: Optional[bool] = Field(False, description="For emails: parse nested .eml attachments and ingest as separate items")
-    max_depth: Optional[int] = Field(2, ge=1, le=5, description="Max depth for nested email parsing when ingest_attachments is true")
-    accept_archives: Optional[bool] = Field(False, description="Allow and expand .zip archives of .eml files for email ingestion")
+    ingest_attachments: Optional[bool] = Field(
+        False, description="For emails: parse nested .eml attachments and ingest as separate items"
+    )
+    max_depth: Optional[int] = Field(
+        2, ge=1, le=5, description="Max depth for nested email parsing when ingest_attachments is true"
+    )
+    accept_archives: Optional[bool] = Field(
+        False, description="Allow and expand .zip archives of .eml files for email ingestion"
+    )
     accept_mbox: Optional[bool] = Field(False, description="Allow and expand .mbox mailboxes for email ingestion")
-    accept_pst: Optional[bool] = Field(False, description="Enable PST/OST container uploads (feature-flag; parsing may require external tools")
+    accept_pst: Optional[bool] = Field(
+        False, description="Enable PST/OST container uploads (feature-flag; parsing may require external tools"
+    )
 
     # --- Embedding Options ---
     generate_embeddings: bool = Field(False, description="Generate embeddings after media processing")
@@ -393,12 +497,32 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
         None,
         description="Embeddings dispatch strategy override for /media/add",
     )
-    embedding_model: Optional[str] = Field(None, description="Specific embedding model to use (e.g., 'Qwen/Qwen3-Embedding-4B-GGUF')")
+    embedding_model: Optional[str] = Field(
+        None, description="Specific embedding model to use (e.g., 'Qwen/Qwen3-Embedding-4B-GGUF')"
+    )
     embedding_provider: Optional[str] = Field(None, description="Embedding provider (huggingface, openai, etc)")
+
+    # --- Durable media collection binding (used by async-job fallback paths) ---
+    media_collection_id: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Optional numeric durable media collection id associated with this ingest item",
+    )
+    media_collection_item_id: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Optional numeric planned durable media collection item id to resolve after ingest",
+    )
+    media_ingest_job_id: Optional[str] = Field(
+        None,
+        description="Optional media ingest job id that produced this fallback ingest",
+    )
 
     # --- Deprecated/Less Common ---
     perform_rolling_summarization: bool = Field(False, description="Perform rolling summarization (legacy?)")
-    summarize_recursively: bool = Field(False, description="Perform recursive summarization on chunks (if chunking enabled)")
+    summarize_recursively: bool = Field(
+        False, description="Perform recursive summarization on chunks (if chunking enabled)"
+    )
 
     # --- Computed Fields / Validators ---
     @computed_field
@@ -411,9 +535,9 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
 
     def model_post_init(self, __context):
         """Handle legacy api_name field by splitting into provider/model."""
-        if self.api_name and '/' in self.api_name:
+        if self.api_name and "/" in self.api_name:
             # If api_name contains '/', treat it as 'provider/model' format
-            provider, model = self.api_name.split('/', 1)
+            provider, model = self.api_name.split("/", 1)
             if not self.api_provider:
                 self.api_provider = provider
             if not self.model_name:
@@ -441,17 +565,17 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
                 "generate_embeddings": True,
                 "embedding_dispatch_mode": "background",
                 "embedding_provider": "huggingface",
-                "embedding_model": "sentence-transformers/all-MiniLM-L6-v2"
+                "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
             }
-        }
+        },
     )
 
     # Provide a stable, test-friendly error message for invalid media_type values
-    @field_validator('media_type', mode='before')
+    @field_validator("media_type", mode="before")
     @classmethod
     def validate_media_type_choices(cls, v):
         # Accept only known values; for invalid input, emit the exact message expected by tests
-        allowed = {'video', 'audio', 'document', 'pdf', 'ebook', 'email', 'json'}
+        allowed = {"video", "audio", "document", "pdf", "ebook", "email", "json"}
         if isinstance(v, str):
             lv = v.strip().lower()
             if lv not in allowed:
@@ -460,24 +584,24 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
             return lv
         return v
 
-    @field_validator('start_time', 'end_time')
+    @field_validator("start_time", "end_time")
     @classmethod
     def check_time_format(cls, v: Optional[str]) -> Optional[str]:
         if v is None or v == "":  # MODIFIED: Treat empty string like None
             return None  # Return None, which is valid for Optional[str]
 
         # Example basic check: Allow seconds or HH:MM:SS format
-        if re.fullmatch(r'\d+', v) or re.fullmatch(r'\d{1,2}:\d{2}:\d{2}', v):
+        if re.fullmatch(r"\d+", v) or re.fullmatch(r"\d{1,2}:\d{2}:\d{2}", v):
             return v
         raise ValueError("Time format must be seconds or HH:MM:SS")
 
     # Validator to ensure 'cookies' is provided if 'use_cookies' is True
-    @field_validator('cookies')
+    @field_validator("cookies")
     @classmethod
     def check_cookies_provided(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
         # Access other validated fields via info.data
         # Check if 'use_cookies' exists in data AND is True
-        if info.data.get('use_cookies') and not v:
+        if info.data.get("use_cookies") and not v:
             raise ValueError("Cookie string must be provided when 'use_cookies' is set to True.")
         return v
 
@@ -486,27 +610,27 @@ class MediaItemProcessResponse(BaseModel):
     """
     Pydantic model for media item details after processing. Details returned from a processing request
     """
-    status: Literal['Success', 'Error', 'Warning']
-    input_ref: str # The original URL or filename provided by the user
-    processing_source: str # The actual path or URL used by the processor, e.g., temp file path
-    media_type: (Literal['video', 'audio', 'document', 'pdf', 'ebook', 'email']) # 'video', 'pdf', 'audio', etc.
-    metadata: dict[str, Any] # Extracted info like title, author, duration, etc.
-    content: str # The main extracted text or full transcript
-    segments: Optional[list[dict[str, Any]]] # For timestamped transcripts, if applicable
-    chunks: Optional[list[dict[str, Any]]] # If chunking happened within the processor
-    analysis: Optional[str] # The generated analysis, if analysis was performed
-    analysis_details: Optional[dict[str, Any]] # e.g., whisper model used, summarization prompt
+
+    status: Literal["Success", "Error", "Warning"]
+    input_ref: str  # The original URL or filename provided by the user
+    processing_source: str  # The actual path or URL used by the processor, e.g., temp file path
+    media_type: Literal["video", "audio", "document", "pdf", "ebook", "email"]  # 'video', 'pdf', 'audio', etc.
+    metadata: dict[str, Any]  # Extracted info like title, author, duration, etc.
+    content: str  # The main extracted text or full transcript
+    segments: Optional[list[dict[str, Any]]]  # For timestamped transcripts, if applicable
+    chunks: Optional[list[dict[str, Any]]]  # If chunking happened within the processor
+    analysis: Optional[str]  # The generated analysis, if analysis was performed
+    analysis_details: Optional[dict[str, Any]]  # e.g., whisper model used, summarization prompt
     claims: Optional[list[dict[str, Any]]] = Field(None, description="Extracted factual claims, if enabled")
     claims_details: Optional[dict[str, Any]] = Field(None, description="Metadata about the claims extraction process")
-    error: Optional[str] # Detailed error message if status != 'Success'
-    warnings: Optional[list[str]] # For non-critical issues
-    model_config = ConfigDict(
-        extra="forbid"  # Disallow extra fields not defined in the model
-    )
+    error: Optional[str]  # Detailed error message if status != 'Success'
+    warnings: Optional[list[str]]  # For non-critical issues
+    model_config = ConfigDict(extra="forbid")  # Disallow extra fields not defined in the model
 
 
 class ReprocessMediaRequest(ChunkingOptions):
     """Request model for reprocessing stored media content."""
+
     perform_chunking: bool = Field(True, description="Rebuild chunks for the current media content")
     generate_embeddings: bool = Field(False, description="Regenerate embeddings after re-chunking")
     embedding_model: Optional[str] = Field(None, description="Embedding model override")
@@ -515,6 +639,7 @@ class ReprocessMediaRequest(ChunkingOptions):
         False,
         description="Delete existing embeddings before regeneration when possible",
     )
+
 
 ######################## Processing-only Forms ###################################
 #
@@ -546,6 +671,7 @@ class ProcessVideosForm(AddMediaForm):
 
     media_type: Literal["video"] = "video"
     keep_original_file: bool = Field(False)
+
 
 class VideoIngestRequest(BaseModel):
     # You can rename / remove / add fields as you prefer:
@@ -580,6 +706,7 @@ class VideoIngestRequest(BaseModel):
 
     start_time: Optional[str] = None
     end_time: Optional[str] = None
+
 
 #
 # End of Video ingestion and analysis model schema
@@ -619,6 +746,7 @@ class ProcessEbooksForm(AddMediaForm):
     )
     keep_original_file: bool = Field(False)
 
+
 class ProcessEmailsForm(AddMediaForm):
     """
     Processing-only form for emails used by /process-emails (no DB writes).
@@ -627,27 +755,18 @@ class ProcessEmailsForm(AddMediaForm):
     media_type: Literal["email"] = "email"
     keep_original_file: bool = Field(False)
     perform_chunking: bool = Field(True)
-    chunk_method: Optional[ChunkMethod] = Field(
-        "sentences", description="Default chunking method for emails"
-    )
+    chunk_method: Optional[ChunkMethod] = Field("sentences", description="Default chunking method for emails")
     chunk_size: int = Field(1000, gt=0, description="Target chunk size for emails")
     chunk_overlap: int = Field(200, ge=0, description="Chunk overlap size for emails")
     ingest_attachments: bool = Field(
         False,
         description="Parse and include nested .eml attachments as children",
     )
-    max_depth: int = Field(
-        2, ge=1, le=5, description="Max depth for nested email parsing"
-    )
-    accept_archives: bool = Field(
-        False, description="Accept .zip archives of EMLs and expand members"
-    )
-    accept_mbox: bool = Field(
-        False, description="Accept .mbox mailboxes and expand/process messages"
-    )
-    accept_pst: bool = Field(
-        False, description="Accept .pst/.ost containers (feature-flag)"
-    )
+    max_depth: int = Field(2, ge=1, le=5, description="Max depth for nested email parsing")
+    accept_archives: bool = Field(False, description="Accept .zip archives of EMLs and expand members")
+    accept_mbox: bool = Field(False, description="Accept .mbox mailboxes and expand/process messages")
+    accept_pst: bool = Field(False, description="Accept .pst/.ost containers (feature-flag)")
+
 
 class AudioIngestRequest(BaseModel):
     mode: str = "persist"  # "ephemeral" or "persist"
@@ -676,6 +795,7 @@ class AudioIngestRequest(BaseModel):
     cookies: Optional[str] = None
     custom_title: Optional[str] = None
 
+
 #
 # End of Audio ingestion and analysis model schema
 ####################################################################################
@@ -685,10 +805,11 @@ class AudioIngestRequest(BaseModel):
 #
 # This is a schema for Web-Scraping ingestion and analysis.
 
+
 class ScrapeMethod(str, Enum):
-    INDIVIDUAL = "individual"          # “Individual URLs”
-    SITEMAP = "sitemap"               # “Sitemap”
-    URL_LEVEL = "url_level"           # “URL Level”
+    INDIVIDUAL = "individual"  # “Individual URLs”
+    SITEMAP = "sitemap"  # “Sitemap”
+    URL_LEVEL = "url_level"  # “URL Level”
     RECURSIVE = "recursive_scraping"  # “Recursive Scraping”
 
 
@@ -721,10 +842,15 @@ class WebScrapingRequest(BaseModel):
     crawl_strategy: Optional[str] = None
     include_external: Optional[bool] = None
     score_threshold: Optional[float] = None
+    perform_chunking: bool = True
+    chunking_mode: Optional[ChunkingMode] = None
+    auto_chunking_goal: AutoChunkingGoal = "balanced"
+    auto_chunking_use_llm: bool = False
+
 
 class IngestWebContentRequest(BaseModel):
     # Core fields
-    urls: list[str]                      # Usually 1+ URLs.
+    urls: list[str]  # Usually 1+ URLs.
     titles: Optional[list[str]] = None
     authors: Optional[list[str]] = None
     keywords: Optional[list[str]] = None
@@ -751,6 +877,9 @@ class IngestWebContentRequest(BaseModel):
     api_name: Optional[str] = None
     api_key: Optional[str] = None
     perform_chunking: bool = True
+    chunking_mode: Optional[ChunkingMode] = None
+    auto_chunking_goal: AutoChunkingGoal = "balanced"
+    auto_chunking_use_llm: bool = False
     chunk_method: Optional[str] = None
     use_adaptive_chunking: bool = False
     use_multi_level_chunking: bool = False
@@ -769,6 +898,7 @@ class IngestWebContentRequest(BaseModel):
     include_external: Optional[bool] = None
     score_threshold: Optional[float] = None
 
+
 #
 # End of Web-Scraping ingestion and analysis model schema
 ####################################################################################
@@ -777,14 +907,11 @@ class IngestWebContentRequest(BaseModel):
 #
 # This is a schema for MediaWiki ingestion and analysis.
 
+
 def _load_mediawiki_global_config() -> dict[str, Any]:
     """Load MediaWiki defaults without importing heavy MediaWiki ingestion module."""
     try:
-        config_path = (
-            Path(__file__).resolve().parents[4]
-            / "Config_Files"
-            / "mediawiki_import_config.yaml"
-        )
+        config_path = Path(__file__).resolve().parents[4] / "Config_Files" / "mediawiki_import_config.yaml"
         with config_path.open("r", encoding="utf-8") as handle:
             parsed = yaml.safe_load(handle) or {}
             return parsed if isinstance(parsed, dict) else {}
@@ -794,15 +921,23 @@ def _load_mediawiki_global_config() -> dict[str, Any]:
 
 media_wiki_global_config = _load_mediawiki_global_config()
 
+
 class MediaWikiDumpOptionsForm(BaseModel):
     wiki_name: str = Field(..., description="A unique name for this MediaWiki instance (e.g., 'my_custom_wiki').")
-    namespaces_str: Optional[str] = Field(None, description="Comma-separated list of namespace IDs (e.g., '0,1'). Imports all if None.")
+    namespaces_str: Optional[str] = Field(
+        None, description="Comma-separated list of namespace IDs (e.g., '0,1'). Imports all if None."
+    )
     skip_redirects: bool = Field(True, description="Skip redirect pages.")
-    chunk_max_size: int = Field(default_factory=lambda: media_wiki_global_config.get('chunking', {}).get('default_size', 1000), description="Maximum chunk size for MediaWiki content processing.")
-    api_name_vector_db: Optional[str] = Field(None, description="API name for vector DB/embedding/summary service (e.g., 'openai') used during ingestion.")
+    chunk_max_size: int = Field(
+        default_factory=lambda: media_wiki_global_config.get("chunking", {}).get("default_size", 1000),
+        description="Maximum chunk size for MediaWiki content processing.",
+    )
+    api_name_vector_db: Optional[str] = Field(
+        None, description="API name for vector DB/embedding/summary service (e.g., 'openai') used during ingestion."
+    )
     api_key_vector_db: Optional[str] = Field(None, description="API key for the vector DB/embedding/summary service.")
 
-    @field_validator('wiki_name')
+    @field_validator("wiki_name")
     @classmethod
     def validate_wiki_name(cls, v: str) -> str:
         """Validate wiki name to prevent path traversal and injection attacks."""
@@ -810,11 +945,13 @@ class MediaWikiDumpOptionsForm(BaseModel):
             raise ValueError("Wiki name cannot be empty")
 
         # Only allow alphanumeric, underscore, hyphen, and spaces
-        if not re.match(r'^[a-zA-Z0-9_\- ]+$', v):
-            raise ValueError("Invalid wiki name: Only alphanumeric characters, underscores, hyphens, and spaces are allowed")
+        if not re.match(r"^[a-zA-Z0-9_\- ]+$", v):
+            raise ValueError(
+                "Invalid wiki name: Only alphanumeric characters, underscores, hyphens, and spaces are allowed"
+            )
 
         # Additional security checks for path traversal patterns
-        if any(pattern in v for pattern in ['..', '/', '\\', '\x00']):
+        if any(pattern in v for pattern in ["..", "/", "\\", "\x00"]):
             raise ValueError("Invalid wiki name: Contains forbidden characters")
 
         # Length validation
@@ -823,7 +960,7 @@ class MediaWikiDumpOptionsForm(BaseModel):
 
         return v
 
-    @field_validator('namespaces_str')
+    @field_validator("namespaces_str")
     @classmethod
     def validate_namespaces(cls, v: Optional[str]) -> Optional[str]:
         """Validate namespace string format."""
@@ -832,7 +969,7 @@ class MediaWikiDumpOptionsForm(BaseModel):
 
         # Check format: should be comma-separated integers
         try:
-            namespaces = [int(ns.strip()) for ns in v.split(',')]
+            namespaces = [int(ns.strip()) for ns in v.split(",")]
             # Validate namespace IDs are reasonable
             for ns in namespaces:
                 if ns < -2 or ns > 9999:  # MediaWiki namespace IDs typically range from -2 to a few hundred
@@ -842,23 +979,24 @@ class MediaWikiDumpOptionsForm(BaseModel):
 
         return v
 
+
 class ProcessedMediaWikiPage(BaseModel):
     title: str
-    content: str # The plain text content
+    content: str  # The plain text content
     namespace: Optional[int] = None
     page_id: Optional[int] = None
     revision_id: Optional[int] = None
-    timestamp: Optional[str] = None # ISO format
+    timestamp: Optional[str] = None  # ISO format
     chunks: list[dict[str, Any]] = []
-    media_id: Optional[int] = None # Populated if stored to DB
+    media_id: Optional[int] = None  # Populated if stored to DB
     message: Optional[str] = None
     status: str = "Pending"
     error_message: Optional[str] = None
 
+
 #
 # End of MediaWiki ingestion and analysis model schema
 ######################################################################################
-
 
 
 #

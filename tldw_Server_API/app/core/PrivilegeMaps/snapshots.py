@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
 
@@ -153,6 +154,12 @@ class PrivilegeSnapshotStore:
             "page": page,
             "page_size": page_size,
             "total_items": total_items,
+            "pagination": build_page_pagination_meta(
+                page=page,
+                per_page=page_size,
+                total=total_items,
+                total_pages=(total_items + page_size - 1) // page_size,
+            ),
             "items": items,
             "filters": {
                 "date_from": date_from.isoformat() if date_from else None,
@@ -363,6 +370,12 @@ class PrivilegeSnapshotStore:
             "page": page,
             "page_size": page_size,
             "total_items": total_items,
+            "pagination": build_page_pagination_meta(
+                page=page,
+                per_page=page_size,
+                total=total_items,
+                total_pages=(total_items + page_size - 1) // page_size,
+            ),
             "items": detail_items,
         }
 

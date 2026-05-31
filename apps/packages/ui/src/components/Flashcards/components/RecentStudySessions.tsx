@@ -1,15 +1,96 @@
 import React from "react"
-import { Button, Card, Empty, List, Space, Tag, Typography } from "antd"
+import { Button, Card, List, Tag, Typography } from "antd"
+import { useTranslation } from "react-i18next"
 
+import { EmptyState } from "@/components/ui/feedback/EmptyState"
+import { LoadingState } from "@/components/ui/feedback/LoadingState"
+import type { Deck, FlashcardReviewSessionSummary } from "@/services/flashcards"
 import { useRecentFlashcardReviewSessionsQuery } from "../hooks"
+import { formatFlashcardAbsoluteDateTime } from "../utils/date-display"
 
 const { Text } = Typography
 
 export interface RecentStudySessionsProps {
   deckId?: number | null
+  decks?: Deck[]
   selectedSessionId?: number | null
   onOpenSession: (sessionId: number) => void
   isActive: boolean
+}
+
+const getSessionModeLabel = (
+  session: FlashcardReviewSessionSummary,
+  t: ReturnType<typeof useTranslation>["t"]
+) => {
+  const mode = String(session.review_mode || "").toLowerCase()
+  const scope = String(session.scope_key || "").toLowerCase()
+
+  if (mode === "cram" || scope.startsWith("cram:")) {
+    return t("option:flashcards.recentStudySessionsModeCram", {
+      defaultValue: "Cram review"
+    })
+  }
+  if (mode === "due" || scope.startsWith("due:")) {
+    return t("option:flashcards.recentStudySessionsModeDue", {
+      defaultValue: "Due review"
+    })
+  }
+  if (mode === "deck" || scope.startsWith("deck:")) {
+    return t("option:flashcards.recentStudySessionsModeDeck", {
+      defaultValue: "Deck review"
+    })
+  }
+  if (mode === "tag" || scope.startsWith("tag:")) {
+    return t("option:flashcards.recentStudySessionsModeTag", {
+      defaultValue: "Tag review"
+    })
+  }
+  if (mode === "study_pack" || scope.startsWith("study_pack:")) {
+    return t("option:flashcards.recentStudySessionsModeStudyPack", {
+      defaultValue: "Study pack review"
+    })
+  }
+
+  return t("option:flashcards.recentStudySessionsModeGeneric", {
+    defaultValue: "Review session"
+  })
+}
+
+const getReviewedCountLabel = (
+  session: FlashcardReviewSessionSummary,
+  t: ReturnType<typeof useTranslation>["t"]
+) => {
+  const count = session.cards_reviewed
+  if (typeof count !== "number" || !Number.isFinite(count) || count < 0) {
+    return null
+  }
+
+  return t("option:flashcards.recentStudySessionsReviewedCount", {
+    defaultValue: count === 1 ? "{{count}} card reviewed" : "{{count}} cards reviewed",
+    count
+  })
+}
+
+const getDeckLabel = (
+  session: FlashcardReviewSessionSummary,
+  deckNamesById: Map<number, string>,
+  t: ReturnType<typeof useTranslation>["t"]
+) => {
+  const snapshotName = session.deck_name_snapshot?.trim()
+  if (snapshotName) return snapshotName
+
+  if (session.deck_id == null) {
+    return t("option:flashcards.recentStudySessionsAllDecks", {
+      defaultValue: "All decks"
+    })
+  }
+
+  return (
+    deckNamesById.get(session.deck_id) ??
+    t("option:flashcards.recentStudySessionsDeckUnavailable", {
+      defaultValue: "Deck unavailable"
+    })
+  )
 }
 
 /**
@@ -17,12 +98,13 @@ export interface RecentStudySessionsProps {
  */
 export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
   deckId,
+  decks = [],
   selectedSessionId,
   onOpenSession,
   isActive
 }) => {
-  const recentSessionsQuery =
-    useRecentFlashcardReviewSessionsQuery(
+  const { t } = useTranslation(["option"])
+  const recentSessionsQuery = useRecentFlashcardReviewSessionsQuery(
     {
       deckId,
       status: "completed",
@@ -31,54 +113,109 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
     {
       enabled: isActive
     }
-    )
+  )
 
   const sessions = recentSessionsQuery.data ?? []
+  const deckNamesById = React.useMemo(() => {
+    const names = new Map<number, string>()
+    for (const deck of decks) {
+      if (deck.name.trim()) names.set(deck.id, deck.name)
+    }
+    return names
+  }, [decks])
   const errorMessage =
     recentSessionsQuery.error instanceof Error
       ? recentSessionsQuery.error.message
-      : "Failed to load recent study sessions."
+      : t("option:flashcards.recentStudySessionsLoadFailedFallback", {
+          defaultValue: "Failed to load recent study sessions."
+        })
 
   return (
-    <Card size="small" title="Recent study sessions">
+    <Card
+      size="small"
+      title={t("option:flashcards.recentStudySessionsTitle", {
+        defaultValue: "Recent study sessions"
+      })}
+    >
       {recentSessionsQuery.isLoading ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Loading recent study sessions..." />
+        <LoadingState
+          mode="spinner"
+          size="sm"
+          label={t("option:flashcards.recentStudySessionsLoading", {
+            defaultValue: "Loading recent study sessions..."
+          })}
+        />
       ) : recentSessionsQuery.isError ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        <EmptyState
+          variant="inline"
+          size="sm"
+          title={t("option:flashcards.recentStudySessionsLoadFailed", {
+            defaultValue: "Failed to load recent study sessions"
+          })}
           description={errorMessage}
-        >
-          <Button onClick={() => void recentSessionsQuery.refetch()}>Retry</Button>
-        </Empty>
+          primaryAction={{
+            label: t("option:flashcards.recentStudySessionsRetry", {
+              defaultValue: "Retry"
+            }),
+            onClick: () => void recentSessionsQuery.refetch()
+          }}
+        />
       ) : sessions.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No completed study sessions yet." />
+        <EmptyState
+          variant="inline"
+          size="sm"
+          title={t("option:flashcards.recentStudySessionsEmpty", {
+            defaultValue: "No completed study sessions yet."
+          })}
+        />
       ) : (
         <List
           dataSource={sessions}
           renderItem={(session) => {
             const isSelected = selectedSessionId === session.id
+            const deckLabel = getDeckLabel(session, deckNamesById, t)
+            const modeLabel = getSessionModeLabel(session, t)
+            const reviewedCountLabel = getReviewedCountLabel(session, t)
+            const completedAtLabel = formatFlashcardAbsoluteDateTime(
+              session.completed_at ?? session.last_activity_at
+            )
+
             return (
               <List.Item key={session.id}>
-                <Space direction="vertical" size={6} className="w-full">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Tag color="green">Completed</Tag>
-                    <Tag>Session #{session.id}</Tag>
-                    {session.deck_id != null ? <Tag>Deck {session.deck_id}</Tag> : null}
-                  </div>
+                <div className="flex w-full flex-col gap-1.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Text type="secondary" className="text-xs">
-                      {session.scope_key}
-                    </Text>
+                    <Text strong>{deckLabel}</Text>
                     <Button
                       type={isSelected ? "primary" : "default"}
                       onClick={() => onOpenSession(session.id)}
                     >
                       {isSelected
-                        ? "Viewing snapshot"
-                        : `Reopen snapshot for session ${session.id}`}
+                        ? t("option:flashcards.recentStudySessionsViewingCompleted", {
+                            defaultValue: "Viewing completed session"
+                          })
+                        : t("option:flashcards.recentStudySessionsViewCompleted", {
+                            defaultValue: "View completed session"
+                          })}
                     </Button>
                   </div>
-                </Space>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Tag color="green">
+                      {t("option:flashcards.recentStudySessionsCompletedTag", {
+                        defaultValue: "Completed"
+                      })}
+                    </Tag>
+                    <Tag>{modeLabel}</Tag>
+                    {reviewedCountLabel ? <Tag>{reviewedCountLabel}</Tag> : null}
+                  </div>
+                  {completedAtLabel ? (
+                    <Text type="secondary" className="text-xs">
+                      {t("option:flashcards.recentStudySessionsCompletedAt", {
+                        defaultValue: "Completed {{time}}",
+                        time: completedAtLabel
+                      })}
+                    </Text>
+                  ) : null}
+                </div>
               </List.Item>
             )
           }}

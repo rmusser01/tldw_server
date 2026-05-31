@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useEffect, useRef } from "react"
-import { Input, Radio, Button, Space, Alert, Spin, message } from "antd"
-import { Copy, Download, MessageSquare, CheckCircle, Globe } from "lucide-react"
+import { Input, Radio, Button, Space, Spin, message } from "antd"
+import { Copy, Download, MessageSquare, Globe } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { useWorkflowsStore } from "@/store/workflows"
 import { WizardShell } from "../WizardShell"
 import { SUMMARIZE_PAGE_WORKFLOW } from "../workflow-definitions"
@@ -177,20 +178,17 @@ const CaptureStep: React.FC = () => {
     return (
       <div className="space-y-4">
         <Alert
-          type="success"
-          showIcon
-          icon={<CheckCircle className="h-4 w-4" />}
+          variant="success"
           title={t("workflows:summarizePage.captured", "Page captured")}
-          description={
-            <div className="mt-2">
-              <p className="font-medium">{pageInfo.title}</p>
-              <p className="text-xs text-text-muted flex items-center gap-1 mt-1">
-                <Globe className="h-3 w-3" />
-                {pageInfo.url}
-              </p>
-            </div>
-          }
-        />
+        >
+          <div className="mt-2">
+            <p className="font-medium">{pageInfo.title}</p>
+            <p className="text-xs text-text-muted flex items-center gap-1 mt-1">
+              <Globe className="h-3 w-3" />
+              {pageInfo.url}
+            </p>
+          </div>
+        </Alert>
         <p className="text-sm text-text-muted">
           {t(
             "workflows:summarizePage.contentPreview",

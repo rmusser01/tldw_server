@@ -42,11 +42,11 @@ export const FEATURE_FLAGS = {
   /** Use generated fallback as default in media navigation */
   MEDIA_NAVIGATION_GENERATED_FALLBACK_DEFAULT:
     "ff_mediaNavigationGeneratedFallbackDefault",
-  /** Provenance tracking in Research Studio */
-  RESEARCH_STUDIO_PROVENANCE_V1: "research_studio_provenance_v1",
-  /** Status guardrails in Research Studio */
-  RESEARCH_STUDIO_STATUS_GUARDRAILS_V1:
-    "research_studio_status_guardrails_v1"
+  /** Provenance tracking in Research Workspace */
+  RESEARCH_WORKSPACE_PROVENANCE_V1: "research_workspace_provenance_v1",
+  /** Status guardrails in Research Workspace */
+  RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1:
+    "research_workspace_status_guardrails_v1"
 } as const
 
 export type FeatureFlagKey = (typeof FEATURE_FLAGS)[keyof typeof FEATURE_FLAGS]
@@ -60,53 +60,53 @@ const FEATURE_FLAG_DEFAULTS: Partial<Record<FeatureFlagKey, boolean>> = {
   [FEATURE_FLAGS.MEDIA_RICH_RENDERING]: true,
   [FEATURE_FLAGS.MEDIA_ANALYSIS_DISPLAY_MODE_SELECTOR]: true,
   [FEATURE_FLAGS.MEDIA_NAVIGATION_GENERATED_FALLBACK_DEFAULT]: true,
-  [FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1]: true,
-  [FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1]: true
+  [FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1]: true,
+  [FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1]: true
 }
 
-type ResearchStudioRolloutFlag =
-  | typeof FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1
-  | typeof FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1
+type ResearchWorkspaceRolloutFlag =
+  | typeof FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1
+  | typeof FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1
 
-const RESEARCH_STUDIO_ROLLOUT_DEFAULT_PERCENTAGE = 100
+const RESEARCH_WORKSPACE_ROLLOUT_DEFAULT_PERCENTAGE = 100
 
-const RESEARCH_STUDIO_ROLLOUT_CONFIG: Record<
-  ResearchStudioRolloutFlag,
+const RESEARCH_WORKSPACE_ROLLOUT_CONFIG: Record<
+  ResearchWorkspaceRolloutFlag,
   {
     storageKey: string
     viteEnvKey: string
     nextEnvKey: string
   }
 > = {
-  [FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1]: {
+  [FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1]: {
     storageKey:
-      FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_studio_provenance_v1,
-    viteEnvKey: "VITE_RESEARCH_STUDIO_PROVENANCE_V1_ROLLOUT_PERCENTAGE",
-    nextEnvKey: "NEXT_PUBLIC_RESEARCH_STUDIO_PROVENANCE_V1_ROLLOUT_PERCENTAGE"
+      FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_workspace_provenance_v1,
+    viteEnvKey: "VITE_RESEARCH_WORKSPACE_PROVENANCE_V1_ROLLOUT_PERCENTAGE",
+    nextEnvKey: "NEXT_PUBLIC_RESEARCH_WORKSPACE_PROVENANCE_V1_ROLLOUT_PERCENTAGE"
   },
-  [FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1]: {
+  [FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1]: {
     storageKey:
       FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS
-        .research_studio_status_guardrails_v1,
-    viteEnvKey: "VITE_RESEARCH_STUDIO_STATUS_GUARDRAILS_V1_ROLLOUT_PERCENTAGE",
+        .research_workspace_status_guardrails_v1,
+    viteEnvKey: "VITE_RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1_ROLLOUT_PERCENTAGE",
     nextEnvKey:
-      "NEXT_PUBLIC_RESEARCH_STUDIO_STATUS_GUARDRAILS_V1_ROLLOUT_PERCENTAGE"
+      "NEXT_PUBLIC_RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1_ROLLOUT_PERCENTAGE"
   }
 }
 
-export const RESEARCH_STUDIO_ROLLOUT_PERCENTAGE_STORAGE_KEYS = {
-  [FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1]:
-    FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_studio_provenance_v1,
-  [FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1]:
+export const RESEARCH_WORKSPACE_ROLLOUT_PERCENTAGE_STORAGE_KEYS = {
+  [FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1]:
+    FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_workspace_provenance_v1,
+  [FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1]:
     FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS
-      .research_studio_status_guardrails_v1
+      .research_workspace_status_guardrails_v1
 } as const
 
-const isResearchStudioRolloutFlag = (
+const isResearchWorkspaceRolloutFlag = (
   flag: FeatureFlagKey
-): flag is ResearchStudioRolloutFlag =>
-  flag === FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1 ||
-  flag === FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1
+): flag is ResearchWorkspaceRolloutFlag =>
+  flag === FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1 ||
+  flag === FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1
 
 const readLocalStorageValue = (key: string): string | null => {
   if (typeof window === "undefined") return null
@@ -129,8 +129,8 @@ const writeLocalStorageValue = (key: string, value: string): void => {
 const readRolloutWindowOverrides = (): Record<string, unknown> | null => {
   if (typeof window === "undefined") return null
   const overrideValue = (
-    window as Window & { __TLDW_RESEARCH_STUDIO_ROLLOUT__?: unknown }
-  ).__TLDW_RESEARCH_STUDIO_ROLLOUT__
+    window as Window & { __TLDW_RESEARCH_WORKSPACE_ROLLOUT__?: unknown }
+  ).__TLDW_RESEARCH_WORKSPACE_ROLLOUT__
   if (!overrideValue || typeof overrideValue !== "object") return null
   return overrideValue as Record<string, unknown>
 }
@@ -163,9 +163,9 @@ const resolveRolloutSubjectId = (): string => {
 }
 
 const resolveRolloutPercentageForFlag = (
-  flag: ResearchStudioRolloutFlag
+  flag: ResearchWorkspaceRolloutFlag
 ): number => {
-  const config = RESEARCH_STUDIO_ROLLOUT_CONFIG[flag]
+  const config = RESEARCH_WORKSPACE_ROLLOUT_CONFIG[flag]
   const overridePayload = readRolloutWindowOverrides()
   const overrideValue = overridePayload?.[flag]
   const storageValue = readLocalStorageValue(config.storageKey)
@@ -182,12 +182,12 @@ const resolveRolloutPercentageForFlag = (
 
   return resolveRolloutPercentageFromCandidates(
     [overrideValue, storageValue, viteValue, nextEnvValue],
-    RESEARCH_STUDIO_ROLLOUT_DEFAULT_PERCENTAGE
+    RESEARCH_WORKSPACE_ROLLOUT_DEFAULT_PERCENTAGE
   )
 }
 
 const isFeatureFlagEnabledByRollout = (flag: FeatureFlagKey): boolean => {
-  if (!isResearchStudioRolloutFlag(flag)) return true
+  if (!isResearchWorkspaceRolloutFlag(flag)) return true
 
   const rolloutPercentage = resolveRolloutPercentageForFlag(flag)
   const subjectId = resolveRolloutSubjectId()
@@ -274,15 +274,15 @@ export function useAllFeatureFlags() {
       FEATURE_FLAGS.MEDIA_NAVIGATION_GENERATED_FALLBACK_DEFAULT
     ] ?? true
   )
-  const [researchStudioProvenanceV1, setResearchStudioProvenanceV1] = useStorage(
-    FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1,
-    FEATURE_FLAG_DEFAULTS[FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1] ?? true
+  const [researchWorkspaceProvenanceV1, setResearchWorkspaceProvenanceV1] = useStorage(
+    FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1,
+    FEATURE_FLAG_DEFAULTS[FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1] ?? true
   )
-  const [researchStudioStatusGuardrailsV1, setResearchStudioStatusGuardrailsV1] =
+  const [researchWorkspaceStatusGuardrailsV1, setResearchWorkspaceStatusGuardrailsV1] =
     useStorage(
-      FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1,
+      FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1,
       FEATURE_FLAG_DEFAULTS[
-        FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1
+        FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1
       ] ?? true
     )
 
@@ -301,8 +301,8 @@ export function useAllFeatureFlags() {
       mediaRichRendering,
       mediaAnalysisDisplayModeSelector,
       mediaNavigationGeneratedFallbackDefault,
-      researchStudioProvenanceV1,
-      researchStudioStatusGuardrailsV1
+      researchWorkspaceProvenanceV1,
+      researchWorkspaceStatusGuardrailsV1
     },
     setters: {
       setNewChat,
@@ -318,8 +318,8 @@ export function useAllFeatureFlags() {
       setMediaRichRendering,
       setMediaAnalysisDisplayModeSelector,
       setMediaNavigationGeneratedFallbackDefault,
-      setResearchStudioProvenanceV1,
-      setResearchStudioStatusGuardrailsV1
+      setResearchWorkspaceProvenanceV1,
+      setResearchWorkspaceStatusGuardrailsV1
     },
     // Enable all new UX features
     enableAll: useCallback(() => {
@@ -336,8 +336,8 @@ export function useAllFeatureFlags() {
       setMediaRichRendering(true)
       setMediaAnalysisDisplayModeSelector(true)
       setMediaNavigationGeneratedFallbackDefault(true)
-      setResearchStudioProvenanceV1(true)
-      setResearchStudioStatusGuardrailsV1(true)
+      setResearchWorkspaceProvenanceV1(true)
+      setResearchWorkspaceStatusGuardrailsV1(true)
     }, [
       setNewChat,
       setNewSettings,
@@ -352,8 +352,8 @@ export function useAllFeatureFlags() {
       setMediaRichRendering,
       setMediaAnalysisDisplayModeSelector,
       setMediaNavigationGeneratedFallbackDefault,
-      setResearchStudioProvenanceV1,
-      setResearchStudioStatusGuardrailsV1
+      setResearchWorkspaceProvenanceV1,
+      setResearchWorkspaceStatusGuardrailsV1
     ]),
     // Disable all new UX features (revert to old)
     disableAll: useCallback(() => {
@@ -370,8 +370,8 @@ export function useAllFeatureFlags() {
       setMediaRichRendering(false)
       setMediaAnalysisDisplayModeSelector(false)
       setMediaNavigationGeneratedFallbackDefault(false)
-      setResearchStudioProvenanceV1(false)
-      setResearchStudioStatusGuardrailsV1(false)
+      setResearchWorkspaceProvenanceV1(false)
+      setResearchWorkspaceStatusGuardrailsV1(false)
     }, [
       setNewChat,
       setNewSettings,
@@ -386,8 +386,8 @@ export function useAllFeatureFlags() {
       setMediaRichRendering,
       setMediaAnalysisDisplayModeSelector,
       setMediaNavigationGeneratedFallbackDefault,
-      setResearchStudioProvenanceV1,
-      setResearchStudioStatusGuardrailsV1
+      setResearchWorkspaceProvenanceV1,
+      setResearchWorkspaceStatusGuardrailsV1
     ])
   }
 }
@@ -443,10 +443,10 @@ export function useMediaNavigationGeneratedFallbackDefault() {
   return useFeatureFlag(FEATURE_FLAGS.MEDIA_NAVIGATION_GENERATED_FALLBACK_DEFAULT)
 }
 
-export function useResearchStudioProvenance() {
-  return useFeatureFlag(FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1)
+export function useResearchWorkspaceProvenance() {
+  return useFeatureFlag(FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1)
 }
 
-export function useResearchStudioStatusGuardrails() {
-  return useFeatureFlag(FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1)
+export function useResearchWorkspaceStatusGuardrails() {
+  return useFeatureFlag(FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1)
 }

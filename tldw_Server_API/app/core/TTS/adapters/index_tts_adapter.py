@@ -47,6 +47,11 @@ from .base import (
 # IndexTTS2 Adapter Implementation
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 class IndexTTS2Adapter(TTSAdapter):
     """Adapter integrating the IndexTTS2 autoregressive TTS engine."""
 
@@ -139,7 +144,10 @@ class IndexTTS2Adapter(TTSAdapter):
                 if asyncio.iscoroutine(register_result):
                     await register_result
             except Exception as registration_error:
-                logger.debug("IndexTTS provider registration failed; continuing", exc_info=registration_error)
+                logger.debug(
+                    "IndexTTS provider registration failed; continuing; exception_type={}",
+                    _safe_exception_label(registration_error),
+                )
 
             # Cache capabilities for later use
             self._capabilities = await self.get_capabilities()
@@ -310,7 +318,10 @@ class IndexTTS2Adapter(TTSAdapter):
         except TTSVoiceCloningError:
             raise
         except Exception as exc:
-            logger.error("IndexTTS2 generation failed: {}", exc, exc_info=True)
+            logger.error(
+                "IndexTTS2 generation failed; exception_type={}",
+                _safe_exception_label(exc),
+            )
             raise TTSGenerationError(
                 "IndexTTS2 generation failed",
                 provider=self.provider_name,
@@ -441,7 +452,10 @@ class IndexTTS2Adapter(TTSAdapter):
                 if final_bytes:
                     yield final_bytes
             except Exception as exc:
-                logger.error("IndexTTS2 streaming failed: {}", exc, exc_info=True)
+                logger.error(
+                    "IndexTTS2 streaming failed; exception_type={}",
+                    _safe_exception_label(exc),
+                )
                 raise TTSGenerationError(
                     "IndexTTS2 streaming failed",
                     provider=self.provider_name,
@@ -467,7 +481,10 @@ class IndexTTS2Adapter(TTSAdapter):
         try:
             np_chunk = chunk.detach().cpu().numpy() if hasattr(chunk, "detach") else np.asarray(chunk)
         except Exception as exc:
-            logger.warning("IndexTTS2 streaming chunk conversion error: {}", exc)
+            logger.warning(
+                "IndexTTS2 streaming chunk conversion error; exception_type={}",
+                _safe_exception_label(exc),
+            )
             return b""
 
         np_chunk = np.squeeze(np_chunk)
@@ -490,8 +507,8 @@ class IndexTTS2Adapter(TTSAdapter):
                 audio_float = resampled.squeeze(0).cpu().numpy()
             except Exception as exc:
                 logger.warning(
-                    'IndexTTS2 streaming using numpy resample fallback: {}',
-                    exc,
+                    'IndexTTS2 streaming using numpy resample fallback; exception_type={}',
+                    _safe_exception_label(exc),
                 )
                 try:
                     orig_len = audio_float.shape[0]
@@ -504,8 +521,8 @@ class IndexTTS2Adapter(TTSAdapter):
                     audio_float = np.interp(target_idx, orig_idx, audio_float).astype(np.float32)
                 except Exception as interp_exc:
                     logger.error(
-                        'IndexTTS2 streaming interpolation failed: {}',
-                        interp_exc,
+                        'IndexTTS2 streaming interpolation failed; exception_type={}',
+                        _safe_exception_label(interp_exc),
                     )
                     # Fall back to native sample rate
                     target_sample_rate = self.STREAM_SAMPLE_RATE

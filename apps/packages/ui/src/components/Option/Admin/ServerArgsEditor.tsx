@@ -1,6 +1,7 @@
 import React from "react"
-import { Input, Button, Space, Typography, Switch, Alert } from "antd"
+import { Input, Button, Space, Typography, Switch } from "antd"
 import { Plus, Trash2 } from "lucide-react"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -124,6 +125,7 @@ export const ServerArgsEditor: React.FC<ServerArgsEditorProps> = ({
           </Text>
           <Switch
             size="small"
+            aria-label="Toggle JSON mode"
             checked={jsonMode}
             onChange={handleModeSwitch}
           />
@@ -141,11 +143,10 @@ export const ServerArgsEditor: React.FC<ServerArgsEditorProps> = ({
             className="font-mono text-xs"
           />
           {jsonError && (
-            <Alert
-              type="error"
+            <DesignSystemAlert
+              variant="error"
               title={jsonError}
               className="mt-2"
-              showIcon
             />
           )}
         </div>

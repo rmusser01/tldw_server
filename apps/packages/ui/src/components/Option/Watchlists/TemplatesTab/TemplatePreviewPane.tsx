@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react"
-import { Alert, Button, Radio, Select, Spin } from "antd"
+import { Button, Radio, Select, Spin } from "antd"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives/Alert"
 import {
   flowCheckWatchlistTemplateSections,
   previewWatchlistTemplate,
@@ -242,23 +243,22 @@ export const TemplatePreviewPane: React.FC<TemplatePreviewPaneProps> = ({
 
       {mode === "live" && !hasRuns && (
         <Alert
-          type="warning"
-          showIcon
+          variant="warning"
           title={t(
             "watchlists:templates.preview.noRunsTitle",
             "No completed runs available for live preview."
           )}
-          description={t(
+        >
+          {t(
             "watchlists:templates.preview.noRunsDescription",
             "Run a monitor once from Activity, then return here to preview templates with real data."
           )}
-        />
+        </Alert>
       )}
 
       {mode === "live" && hasRuns && !selectedRunId && (
         <Alert
-          type="info"
-          showIcon
+          variant="info"
           title={t(
             "watchlists:templates.preview.selectRunTitle",
             "Select a run to preview the template with real data."
@@ -268,36 +268,32 @@ export const TemplatePreviewPane: React.FC<TemplatePreviewPaneProps> = ({
 
       {error && (
         <Alert
-          type="error"
-          showIcon
+          variant="error"
           title={t("watchlists:templates.preview.renderErrorTitle", "Live preview failed")}
-          description={
+        >
+          <div>
             <div>
-              <div>
-                {t(
-                  "watchlists:templates.preview.renderErrorHint",
-                  "Check template syntax or choose another run, then try live preview again."
-                )}
-              </div>
-              <div className="mt-1 text-xs text-text-muted">{error}</div>
+              {t(
+                "watchlists:templates.preview.renderErrorHint",
+                "Check template syntax or choose another run, then try live preview again."
+              )}
             </div>
-          }
-        />
+            <div className="mt-1 text-xs text-text-muted">{error}</div>
+          </div>
+        </Alert>
       )}
 
       {warnings.length > 0 && (
         <Alert
-          type="warning"
-          showIcon
+          variant="warning"
           title={t("watchlists:templates.preview.renderWarningsTitle", "Render warnings")}
-          description={
-            <ul className="mb-0 pl-4">
-              {warnings.map((warning, index) => (
-                <li key={`${warning}-${index}`}>{warning}</li>
-              ))}
-            </ul>
-          }
-        />
+        >
+          <ul className="mb-0 pl-4">
+            {warnings.map((warning, index) => (
+              <li key={`${warning}-${index}`}>{warning}</li>
+            ))}
+          </ul>
+        </Alert>
       )}
 
       {mode === "static" ? (
@@ -349,7 +345,7 @@ export const TemplatePreviewPane: React.FC<TemplatePreviewPaneProps> = ({
           </Button>
         </div>
 
-        {flowError ? <Alert type="error" showIcon title={flowError} /> : null}
+        {flowError ? <Alert variant="error" title={flowError} /> : null}
 
         {(flowDiff || flowIssues.length > 0) ? (
           <FlowCheckDiffPanel

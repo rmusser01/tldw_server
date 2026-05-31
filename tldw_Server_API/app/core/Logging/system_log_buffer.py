@@ -126,8 +126,8 @@ def _init_log_file_settings() -> None:
                                 "system_log_file_compact_every_writes",
                                 fallback=None,
                             )
-                except Exception as exc:
-                    logger.debug("System log settings config read failed: {}", exc)
+                except Exception:
+                    logger.debug("System log settings config read failed")
 
             _LOG_FILE_ENABLED = _coerce_bool(env_enabled, True)
             path_value = env_path or config_path
@@ -307,8 +307,8 @@ def _read_log_file_entries() -> list[dict[str, Any]]:
     try:
         with _log_file_lock():
             lines = _LOG_FILE_PATH.read_text(encoding="utf-8").splitlines()
-    except Exception as exc:
-        logger.debug("Failed to read system log file: {}", exc)
+    except Exception:
+        logger.debug("Failed to read system log file")
         return []
     for line in lines:
         if not line.strip():

@@ -1,18 +1,18 @@
+from typing import Any
+
 import pytest
 
-from typing import Dict, Any
-
-from tldw_Server_API.app.core.MCP_unified.config import get_config
 from tldw_Server_API.app.core.MCP_unified.command_runtime.adapters import (
     derive_step_idempotency_key,
 )
+from tldw_Server_API.app.core.MCP_unified.config import get_config
+from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig, create_tool_definition
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module import (
     RunCommandModule,
 )
-from tldw_Server_API.app.core.MCP_unified.protocol import IdempotencyManager, MCPProtocol, MCPRequest, RequestContext
-from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig, create_tool_definition
 from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
 from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_collector
+from tldw_Server_API.app.core.MCP_unified.protocol import IdempotencyManager, MCPProtocol, MCPRequest, RequestContext
 
 
 class AllowAllRBAC:
@@ -31,10 +31,10 @@ class _CountingWriteModule(BaseModule):
     async def on_shutdown(self) -> None:
         return None
 
-    async def check_health(self) -> Dict[str, bool]:
+    async def check_health(self) -> dict[str, bool]:
         return {"ok": True}
 
-    async def get_tools(self) -> list[Dict[str, Any]]:
+    async def get_tools(self) -> list[dict[str, Any]]:
         return [
             create_tool_definition(
                 name="write_count",
@@ -44,11 +44,11 @@ class _CountingWriteModule(BaseModule):
             )
         ]
 
-    def validate_tool_arguments(self, tool_name: str, arguments: Dict[str, Any]):
+    def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]):
         if tool_name == "write_count" and (not isinstance(arguments, dict) or "x" not in arguments):
             raise ValueError("x required")
 
-    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], context=None):
+    async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context=None):
         # Side effect: increment counter when actually executed
         self.counter += 1
         return f"count:{self.counter}:{arguments.get('x')}"
@@ -174,10 +174,10 @@ class _CategoryModule(BaseModule):
     async def on_shutdown(self) -> None:
         return None
 
-    async def check_health(self) -> Dict[str, bool]:
+    async def check_health(self) -> dict[str, bool]:
         return {"ok": True}
 
-    async def get_tools(self) -> list[Dict[str, Any]]:
+    async def get_tools(self) -> list[dict[str, Any]]:
         # Explicit metadata category must be preferred by protocol
         return [create_tool_definition(
             name="echo_meta_ingestion",
@@ -186,11 +186,11 @@ class _CategoryModule(BaseModule):
             metadata={"category": "ingestion"},
         )]
 
-    def validate_tool_arguments(self, tool_name: str, arguments: Dict[str, Any]):
+    def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]):
         if "m" not in arguments:
             raise ValueError("m required")
 
-    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], context=None):
+    async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context=None):
         return arguments.get("m")
 
 
@@ -234,6 +234,37 @@ async def test_idempotency_local_lock_map_prunes_with_cache_bounds():
     # Local cache is size-bounded, and lock bookkeeping should track cache lifetime.
     assert len(manager._local_cache) <= 3
     assert len(manager._local_locks) <= 3
+
+
+@pytest.mark.asyncio
+async def test_idempotency_warns_when_redis_factory_returns_none(monkeypatch):
+    from tldw_Server_API.app.core.MCP_unified import protocol as protocol_mod
+
+    class _Config:
+        """Config double that advertises Redis connection settings."""
+
+        def get_redis_connection_params(self) -> dict[str, str]:
+            """Return non-empty Redis params so the factory path is exercised."""
+            return {"url": "redis://localhost:6379/0"}
+
+    async def _none_factory(**_kwargs: Any) -> None:
+        """Return None to simulate a misconfigured Redis factory."""
+        return None
+
+    warnings: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def _record_warning(message: str, *args: Any, **kwargs: Any) -> None:
+        """Record warnings emitted by the protocol logger."""
+        warnings.append((message, args, kwargs))
+
+    monkeypatch.setattr(protocol_mod, "get_config", lambda: _Config())
+    monkeypatch.setattr(protocol_mod.logger, "warning", _record_warning)
+
+    manager = IdempotencyManager(redis_client_factory=_none_factory)
+
+    assert await manager._ensure_redis() is False
+    assert manager._redis_client is None
+    assert any("returned None" in message for message, _args, _kwargs in warnings)
 
 
 def test_nested_step_idempotency_is_stable_and_content_derived():

@@ -1,7 +1,8 @@
 import React from "react"
-import { Alert, Button, Empty, Input, Spin, Tag, Typography } from "antd"
+import { Button, Empty, Input, Spin, Tag, Typography } from "antd"
 import { Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import type {
   FlashcardTemplate,
@@ -256,18 +257,19 @@ export const TemplatesTab: React.FC = () => {
   if (templatesQuery.error) {
     return (
       <Alert
-        type="error"
-        message={t("option:flashcards.templatesLoadError", {
+        variant="error"
+        title={t("option:flashcards.templatesLoadError", {
           defaultValue: "Could not load templates."
         })}
-        description={
+      >
+        {
           templatesQuery.error instanceof Error
             ? templatesQuery.error.message
             : t("option:flashcards.templatesLoadErrorFallback", {
                 defaultValue: "Try refreshing the page."
               })
         }
-      />
+      </Alert>
     )
   }
 

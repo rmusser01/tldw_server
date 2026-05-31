@@ -54,10 +54,16 @@ import { HEADER_SHORTCUT_SELECTION_SETTING } from "@/services/settings/ui-settin
 import { getDefaultShortcutsForPersona } from "@/components/Layouts/header-shortcut-items"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { getProviderDisplayName, normalizeProviderKey } from "@/utils/provider-registry"
+import { getDesignSystemState } from "@/design-system"
 import {
   trackOnboardingFirstIngestSuccess,
   trackOnboardingSuccessReached
 } from "@/utils/onboarding-ingestion-telemetry"
+import {
+  buildCharacterOnboardingRoute,
+  CHARACTER_CHAT_ONBOARDING_INTENT,
+  type OnboardingEntryIntent
+} from "@/utils/onboarding-route-intent"
 import {
   validateApiKey,
   validateMultiUserAuth,
@@ -66,6 +72,7 @@ import {
   type ConnectionErrorKind,
   type ValidationResult,
 } from "./validation"
+import { CharacterChatOnboardingLane } from "./CharacterChatOnboardingLane"
 import { ProgressItem, type ProgressStatus } from "./ProgressItem"
 
 type AuthMode = "single-user" | "multi-user"
@@ -171,7 +178,9 @@ function connectionUiReducer(
 }
 
 interface Props {
+  entryIntent?: OnboardingEntryIntent | null
   onFinish?: () => void
+  returnTo?: string | null
 }
 
 const QUICK_INGEST_OPEN_DELAY_MS = 120
@@ -248,7 +257,11 @@ function IntentSteps({
  * - Granular error messages
  * - All fields on one page (no multi-step wizard)
  */
-export function OnboardingConnectForm({ onFinish }: Props) {
+export function OnboardingConnectForm({
+  entryIntent,
+  onFinish,
+  returnTo
+}: Props) {
   const { t } = useTranslation(["settings", "common"])
   const navigate = useNavigate()
   const { setDemoEnabled } = useDemoMode()
@@ -297,6 +310,8 @@ export function OnboardingConnectForm({ onFinish }: Props) {
 
   // Post-connection guided flow: when user selects an intent, show persona-specific steps
   const [selectedIntent, setSelectedIntent] = useState<"chat" | "family" | "research" | null>(null)
+  const isCharacterChatEntry =
+    entryIntent === CHARACTER_CHAT_ONBOARDING_INTENT
 
   const {
     data: availableModels = [],
@@ -929,6 +944,37 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     await finishAndNavigate("/settings/tldw")
   }, [finishAndNavigate])
 
+  const handleCreateCharacterFlow = useCallback(async () => {
+    await finishAndNavigate(
+      buildCharacterOnboardingRoute({
+        returnTo,
+        action: "create"
+      })
+    )
+  }, [finishAndNavigate, returnTo])
+
+  const handleImportCharacterFlow = useCallback(async () => {
+    await finishAndNavigate(
+      buildCharacterOnboardingRoute({
+        returnTo,
+        action: "import"
+      })
+    )
+  }, [finishAndNavigate, returnTo])
+
+  const handleChooseCharacterModelFlow = useCallback(async () => {
+    await finishAndNavigate("/settings/model?from=character-chat-onboarding")
+  }, [finishAndNavigate])
+
+  const handleStartCharacterChatFlow = useCallback(async () => {
+    try {
+      await openSidepanelForActiveTab()
+    } catch (err) {
+      console.debug("[OnboardingConnectForm] Failed to open sidepanel", err)
+    }
+    await finishAndNavigate("/chat?from=character-chat-onboarding")
+  }, [finishAndNavigate])
+
   const handleOpenFamilyFlow = useCallback(async () => {
     try {
       await actions.setUserPersona("family")
@@ -970,6 +1016,22 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     quickIngestLastRun.status === "success" && quickIngestLastRun.successCount > 0
   const hasFailedIngest = quickIngestLastRun.status === "error"
   const shouldPrioritizeMedia = hasSuccessfulIngest
+  const setupState = getDesignSystemState("setup_required")
+  const authRequiredState = getDesignSystemState("auth_required")
+  const unavailableState = getDesignSystemState("unavailable")
+  const retryingState = getDesignSystemState("retrying")
+  const readyState = getDesignSystemState("ready")
+  const loadingState = getDesignSystemState("loading")
+  const activeErrorState =
+    errorKind === "auth_invalid" ? authRequiredState : unavailableState
+  const progressHeaderState = isConnecting
+    ? retryingState
+    : errorKind
+      ? activeErrorState
+      : progress.serverReachable === "success" &&
+          progress.authentication === "success"
+        ? readyState
+        : loadingState
   const primarySourcePreview = useMemo(() => {
     const label = quickIngestLastRun.primarySourceLabel
     if (!label) return null
@@ -1015,11 +1077,21 @@ export function OnboardingConnectForm({ onFinish }: Props) {
         data-ingest-status={quickIngestLastRun.status}
       >
         <div className="mb-8 text-center">
+          <div className="mb-3 flex justify-center">
+            <span className="inline-flex rounded-full border border-state-ready/30 bg-state-ready/10 px-2 py-0.5 text-xs font-semibold text-state-ready">
+              {readyState.label}
+            </span>
+          </div>
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-success/10">
             <Check className="size-7 text-success" />
           </div>
           <h2 className="text-2xl font-semibold text-text tracking-tight">
-            {hasSuccessfulIngest
+            {isCharacterChatEntry
+              ? t(
+                  "settings:onboarding.success.titleCharacterChat",
+                  "You're connected. Set up character chat."
+                )
+              : hasSuccessfulIngest
               ? t(
                   "settings:onboarding.success.titlePostIngest",
                   "Connected and ingest is working. Continue to verification."
@@ -1030,7 +1102,12 @@ export function OnboardingConnectForm({ onFinish }: Props) {
                 )}
           </h2>
           <p className="mt-2 text-sm text-text-muted">
-            {hasSuccessfulIngest
+            {isCharacterChatEntry
+              ? t(
+                  "settings:onboarding.success.subtitleCharacterChat",
+                  "Create or import a character, choose a model, then start chatting."
+                )
+              : hasSuccessfulIngest
               ? t(
                   "settings:onboarding.success.subtitlePostIngest",
                   "Great start. Next, verify the result in Media, then ask Chat for a summary."
@@ -1044,7 +1121,14 @@ export function OnboardingConnectForm({ onFinish }: Props) {
 
         {/* Intent selector — route to persona-appropriate next step */}
         <div data-testid="intent-selector" className="mb-6">
-          {selectedIntent == null ? (
+          {isCharacterChatEntry ? (
+            <CharacterChatOnboardingLane
+              onCreateCharacter={handleCreateCharacterFlow}
+              onImportCharacter={handleImportCharacterFlow}
+              onChooseModel={handleChooseCharacterModelFlow}
+              onStartCharacterChat={handleStartCharacterChatFlow}
+            />
+          ) : selectedIntent == null ? (
             <>
               <p className="mb-3 text-sm font-medium text-text-muted">
                 {t("settings:onboarding.success.intentTitle", "What would you like to do first?")}
@@ -1436,6 +1520,9 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     <div className="mx-auto w-full max-w-2xl rounded-3xl border border-border/70 bg-surface/95 p-8 shadow-lg shadow-black/5 backdrop-blur">
       {/* Header */}
       <div className="mb-8">
+        <span className="mb-3 inline-flex rounded-full border border-state-setupRequired/30 bg-state-setupRequired/10 px-2 py-0.5 text-xs font-semibold text-state-setupRequired">
+          {setupState.label}
+        </span>
         <h2 className="text-2xl font-semibold text-text tracking-tight">
           {t("settings:onboarding.title", "Welcome to tldw Assistant")}
         </h2>
@@ -1895,6 +1982,8 @@ export function OnboardingConnectForm({ onFinish }: Props) {
           >
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-primary">
               {isConnecting && <Loader2 className="size-3 animate-spin" />}
+              <span>{progressHeaderState.label}</span>
+              <span aria-hidden="true">·</span>
               {t("settings:onboarding.progress.title", "Connection Status")}
             </div>
             <ProgressItem
@@ -1932,6 +2021,9 @@ export function OnboardingConnectForm({ onFinish }: Props) {
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 size-4 shrink-0 text-danger" />
               <div>
+                <div className="mb-1 inline-flex rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">
+                  {activeErrorState.label}
+                </div>
                 <div className="text-sm font-medium text-danger">
                   {t("settings:onboarding.connectionFailed", "Connection failed")}
                 </div>

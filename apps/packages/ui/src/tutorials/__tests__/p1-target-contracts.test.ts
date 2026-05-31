@@ -16,7 +16,7 @@ describe("P0/P1 tutorial selector contracts", () => {
       "playground-basics",
       "playground-tools",
       "playground-voice",
-      "workspace-playground-basics",
+      "research-workspace-basics",
       "media-basics",
       "knowledge-basics",
       "characters-basics",
@@ -85,9 +85,9 @@ describe("P0/P1 tutorial selector contracts", () => {
     expect(chatSidebarContent).toContain('data-testid="chat-sidebar-new-chat"')
   })
 
-  it("keeps required workspace playground tutorial anchors in source", () => {
-    const workspaceContent = readSource("components/Option/WorkspacePlayground/index.tsx")
-    const headerContent = readSource("components/Option/WorkspacePlayground/WorkspaceHeader.tsx")
+  it("keeps required research workspace tutorial anchors in source", () => {
+    const workspaceContent = readSource("components/Option/ResearchWorkspace/index.tsx")
+    const headerContent = readSource("components/Option/ResearchWorkspace/WorkspaceHeader.tsx")
 
     expect(workspaceContent).toContain('id="workspace-sources-panel"')
     expect(workspaceContent).toContain('id="workspace-main-content"')

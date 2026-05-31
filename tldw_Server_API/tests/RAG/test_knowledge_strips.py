@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import tldw_Server_API.app.core.RAG.rag_service.knowledge_strips as knowledge_strips
 from tldw_Server_API.app.core.RAG.rag_service.knowledge_strips import (
     KnowledgeStrip,
     KnowledgeStripsResult,
@@ -338,6 +339,53 @@ class TestKnowledgeStripsProcessor:
 
         assert result.strips
         assert result.strips[0].relevance_score == pytest.approx(0.92, rel=1e-6)
+
+    @pytest.mark.asyncio
+    async def test_llm_scoring_fallback_log_sanitizes_exception_details(self):
+        """LLM fallback logs should not expose raw scorer exception details."""
+        secret_path = "/private/rag-knowledge-strips.db?token=strip-secret-token"
+
+        def _mock_analyze(*args, **kwargs):
+            raise RuntimeError(f"scorer failed at {secret_path}")
+
+        docs = [
+            Document(
+                id="doc1",
+                content="Machine learning algorithms improve data systems.",
+                source=DataSource.MEDIA_DB,
+                score=0.8,
+                metadata={},
+            )
+        ]
+        processor = KnowledgeStripsProcessor(
+            strip_size_tokens=200,
+            min_relevance_score=0.0,
+            analyze_fn=_mock_analyze,
+        )
+
+        messages: list[str] = []
+        sink_id = knowledge_strips.logger.add(
+            lambda message: messages.append(str(message.record.get("message") or "")),
+            level="WARNING",
+        )
+        try:
+            result = await processor.process(
+                query="machine learning",
+                documents=docs,
+                top_k=5,
+            )
+        finally:
+            knowledge_strips.logger.remove(sink_id)
+
+        assert result.strips
+        assert result.strips[0].relevance_score == pytest.approx(
+            _score_strip_relevance("machine learning", result.strips[0].text),
+            rel=1e-6,
+        )
+        joined = "\n".join(messages)
+        assert "LLM strip scoring failed, falling back to heuristic" in joined
+        assert "rag-knowledge-strips.db" not in joined
+        assert "strip-secret-token" not in joined
 
 
 class TestProcessKnowledgeStrips:

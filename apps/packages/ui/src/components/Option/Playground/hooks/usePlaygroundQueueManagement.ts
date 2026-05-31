@@ -9,8 +9,12 @@ import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
   IMAGE_GENERATION_USER_MESSAGE_TYPE
 } from "@/utils/image-generation-chat"
+import {
+  throwIfChatSubmitUnsuccessful,
+  type ChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
 import { projectTokenBudget } from "../usage-metrics"
-import type { QueuedRequest } from "@/utils/chat-request-queue"
+import type { QueuedRequest, QueuedRequestSnapshot } from "@/utils/chat-request-queue"
 import type { ChatDocuments } from "@/models/ChatTypes"
 
 // ---------------------------------------------------------------------------
@@ -21,6 +25,9 @@ type PlaygroundQueuedSourceContext = {
   documents?: ChatDocuments
   imageBackendOverride?: string
   isImageCommand?: boolean
+  requestOverrides?: {
+    messageForModel?: string
+  }
 }
 
 type SubmissionIntent = {
@@ -51,7 +58,7 @@ export interface UsePlaygroundQueueManagementDeps {
   toolChoice: string
   useOCR: boolean
   selectedDocuments: Array<{
-    id: string
+    id: number
     title?: string
     url?: string
     favIconUrl?: string
@@ -83,7 +90,7 @@ export interface UsePlaygroundQueueManagementDeps {
     models: string[],
     capability: string
   ) => boolean
-  sendMessage: (payload: Record<string, any>) => Promise<void>
+  sendMessage: (payload: Record<string, any>) => Promise<ChatSubmitResult | void>
   stopStreamingRequest: (options?: { discardTurn?: boolean }) => void
   form: {
     setFieldError: (field: string, error: string) => void
@@ -174,9 +181,10 @@ export function usePlaygroundQueueManagement(
   )
 
   const buildQueuedRequestSnapshot = React.useCallback(
-    () => ({
+    (): Partial<QueuedRequestSnapshot> => ({
       selectedModel,
-      chatMode,
+      chatMode:
+        chatMode === "rag" || chatMode === "vision" ? chatMode : "normal",
       webSearch,
       compareMode: compareModeActive,
       compareSelectedModels,
@@ -339,13 +347,14 @@ export function usePlaygroundQueueManagement(
       }
 
       setLastSubmittedContext(currentContextSnapshot)
-      await sendMessage({
+      const submitResult = await sendMessage({
         image: sourceContext?.isImageCommand ? "" : item.image,
         message: item.promptText,
         docs: sourceContext?.isImageCommand ? [] : documents,
         requestOverrides: {
           selectedModel: item.snapshot.selectedModel,
           selectedSystemPrompt: item.snapshot.selectedSystemPrompt,
+          ...(sourceContext?.requestOverrides ?? {}),
           toolChoice:
             item.snapshot.toolChoice === "auto" ||
             item.snapshot.toolChoice === "required" ||
@@ -368,6 +377,7 @@ export function usePlaygroundQueueManagement(
           ? "slash-command"
           : undefined
       })
+      throwIfChatSubmitUnsuccessful(submitResult)
     },
     [
       conversationTokenCount,
@@ -470,11 +480,15 @@ export function usePlaygroundQueueManagement(
     ({
       promptText,
       image,
-      intent
+      intent,
+      requestOverrides
     }: {
       promptText: string
       image: string
       intent: SubmissionIntent
+      requestOverrides?: {
+        messageForModel?: string
+      }
     }) => {
       const documents = buildQueuedDocuments()
       return queue.enqueue({
@@ -486,7 +500,8 @@ export function usePlaygroundQueueManagement(
           imageBackendOverride: intent.isImageCommand
             ? intent.imageBackendOverride
             : undefined,
-          isImageCommand: intent.isImageCommand
+          isImageCommand: intent.isImageCommand,
+          requestOverrides
         },
         blockedReason: isQueuedDispatchBlockedByComposerState
           ? "draft-attachments-conflict"

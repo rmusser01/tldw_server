@@ -176,6 +176,19 @@ acp = [
   "asyncssh>=2.14.0",
 ]
 
+# Native CodeGraph parser dependencies
+codegraph = [
+  "tree-sitter>=0.25,<0.26",
+  "tree-sitter-python>=0.25,<0.26",
+  "tree-sitter-javascript>=0.25,<0.26",
+  "tree-sitter-typescript>=0.23,<0.24",
+  "tree-sitter-java>=0.23,<0.24",
+  "tree-sitter-kotlin>=1.1,<1.2",
+  "tree-sitter-c-sharp>=0.23,<0.24",
+  "tree-sitter-c>=0.24,<0.25",
+  "tree-sitter-cpp>=0.23,<0.24",
+]
+
 # Multi-User
 multiplayer = [
     "pyotp",
@@ -492,6 +505,7 @@ tldw-server = "tldw_Server_API.app.main:run_server"
 # Point tldw-evals to the richer, unified CLI
 tldw-evals = "tldw_Server_API.cli.evals_cli:main"
 tldw-setup = "tldw_Server_API.cli.wizard.cli:main"
+mcp-unified-gateway = "mcp_unified.gateway.cli:main"
 
 ###########################
 # Tools - Package Discovery
@@ -501,7 +515,7 @@ include-package-data = false
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["tldw_Server_API", "tldw_Server_API.*"]
+include = ["tldw_Server_API", "tldw_Server_API.*", "mcp_unified", "mcp_unified.*"]
 namespaces = false
 exclude = [
   "tests*",
@@ -521,7 +535,9 @@ tldw_Server_API = [
   "Config_Files/**/*",
   "app/static/**/*",
   "app/Setup_UI/*.html",
+  "app/core/Evaluations/data/*.json",
   "app/core/Evaluations/data/**/*.json",
+  "app/core/Persona/assets/**/*.png",
   "app/core/Slides/revealjs/**/*",
   "Databases/**/*.sql",
   "Samples/Workflows/*.json",
@@ -593,6 +609,8 @@ markers = [
     "sandbox_no_auth: marks sandbox tests that must run without default auth headers",
     "sandbox_no_reload: marks sandbox tests that should not reload app.main",
     "sandbox_real_docker: marks sandbox tests that require real Docker execution paths",
+    "vz_linux_host_smoke: marks opt-in Apple silicon VZ Linux host smoke tests",
+    "vz_linux_host_failure_drill: marks manual opt-in Apple silicon VZ Linux host failure drills",
     "legacy_tts: marks legacy TTS tests",
     "concurrent: marks concurrency tests",
     "streaming: marks streaming tests",
@@ -613,7 +631,7 @@ markers = [
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-testpaths = ["tldw_Server_API/tests"]
+testpaths = ["tldw_Server_API/tests", "tldw_Server_API/app/core/MCP_unified/tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -673,7 +691,7 @@ extend-exclude = '''
 [tool.ruff]
 line-length = 120
 target-version = "py39"
-src = ["tldw_Server_API"]
+src = ["tldw_Server_API", "mcp_unified"]
 extend-include = ["*.ipynb"]
 exclude = [
   "migrations",
@@ -724,7 +742,6 @@ ignore = [
     "TRY002", # raise-vanilla-class — project raises Exception in some valid contexts
     "TRY003", # wants custom exception classes for every raise ValueError("msg")
     "TRY004", # type-check-without-type-error — ValueError vs TypeError is debatable
-    "TRY203", # useless-try-except — sometimes try/except/raise is for clarity
     "TRY300", # try-consider-else — opinionated, return in try is idiomatic Python
     "TRY301", # abstract raise to inner function — impractical
     "TRY401", # verbose log message — debatable
@@ -1807,7 +1824,7 @@ warn_no_return = true
 follow_imports = "silent"
 show_error_codes = true
 strict_equality = true
-files = ["tldw_Server_API"]
+files = ["tldw_Server_API", "mcp_unified"]
 exclude = [
     "tests",
     "migrations",

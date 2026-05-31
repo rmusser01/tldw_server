@@ -22,7 +22,7 @@ except (ImportError, AttributeError):  # v1 fallback
 from loguru import logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from .environment import env_flag_enabled, is_explicit_pytest_runtime, is_test_mode
 
 _MCP_CONFIG_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -424,7 +424,6 @@ class MCPConfig(BaseSettings):
         """
         try:
             # Optional opt-out to inherit global logger configuration
-            import os as _os
             if env_flag_enabled("MCP_INHERIT_GLOBAL_LOGGER"):
                 return
         except _MCP_CONFIG_NONCRITICAL_EXCEPTIONS:
@@ -499,7 +498,10 @@ def get_config() -> MCPConfig:
         logger.info("MCP configuration loaded successfully")
         return config
     except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
+        logger.error(
+            "Failed to load configuration ({})",
+            type(e).__name__,
+        )
         raise
 
 
@@ -511,7 +513,7 @@ def validate_config() -> bool:
         try:
             test_mode = (
                 is_test_mode()
-                or bool(os.getenv("PYTEST_CURRENT_TEST"))
+                or is_explicit_pytest_runtime()
             )
         except _MCP_CONFIG_NONCRITICAL_EXCEPTIONS:
             test_mode = False
@@ -580,5 +582,8 @@ def validate_config() -> bool:
         return True
 
     except _MCP_CONFIG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Configuration validation failed: {e}")
+        logger.error(
+            "Configuration validation failed ({})",
+            type(e).__name__,
+        )
         return False

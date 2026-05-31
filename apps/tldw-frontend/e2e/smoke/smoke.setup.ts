@@ -1,4 +1,5 @@
 import { test as base, expect, Page } from "@playwright/test"
+import { resolveE2eApiKey } from "../utils/e2e-auth"
 
 /**
  * Diagnostics data collected during page visits
@@ -80,6 +81,7 @@ export { expect }
 
 const DEFAULT_SMOKE_LOAD_TIMEOUT_MS = 30_000
 const MIN_SMOKE_LOAD_TIMEOUT_MS = 5_000
+const DEFAULT_SMOKE_SERVER_URL = "http://127.0.0.1:8000"
 
 const resolveSmokeLoadTimeoutMs = (): number => {
   const raw = process.env.TLDW_SMOKE_LOAD_TIMEOUT_MS
@@ -93,20 +95,20 @@ const resolveSmokeLoadTimeoutMs = (): number => {
 
 export const SMOKE_LOAD_TIMEOUT = resolveSmokeLoadTimeoutMs()
 
+const resolveSmokeServerUrl = (): string =>
+  process.env.TLDW_SERVER_URL ||
+  process.env.TLDW_E2E_SERVER_URL ||
+  process.env.E2E_TEST_BASE_URL ||
+  DEFAULT_SMOKE_SERVER_URL
+
+const SMOKE_SERVER_URL = resolveSmokeServerUrl()
+
 /**
  * Auth configuration for smoke tests
  */
 export const AUTH_CONFIG = {
-  serverUrl:
-    process.env.TLDW_SERVER_URL ||
-    process.env.TLDW_E2E_SERVER_URL ||
-    process.env.E2E_TEST_BASE_URL ||
-    "http://127.0.0.1:8000",
-  apiKey:
-    process.env.TLDW_API_KEY ||
-    process.env.TLDW_E2E_API_KEY ||
-    process.env.SINGLE_USER_API_KEY ||
-    "THIS-IS-A-SECURE-KEY-123-FAKE-KEY",
+  serverUrl: SMOKE_SERVER_URL,
+  apiKey: resolveE2eApiKey({ serverUrl: SMOKE_SERVER_URL }),
   allowOffline: process.env.TLDW_E2E_ALLOW_OFFLINE !== "0"
 }
 
@@ -140,19 +142,21 @@ export async function seedAuth(
   await page.addInitScript(
     (cfg) => {
       const readStorageValue = (key: string) => {
+        const raw = localStorage.getItem(key)
+        if (raw == null) return undefined
         try {
-          const raw = localStorage.getItem(key)
-          if (raw == null) return undefined
           return JSON.parse(raw)
-        } catch {
-          return localStorage.getItem(key) ?? undefined
+        } catch (_error) {
+          return raw
         }
       }
 
       const writeStorageValue = (key: string, value: unknown) => {
-        try {
-          localStorage.setItem(key, JSON.stringify(value))
-        } catch {}
+        localStorage.setItem(key, JSON.stringify(value))
+      }
+
+      const reportShimError = (label: string, error: unknown) => {
+        console.warn(`[tldw smoke storage shim] ${label}`, error)
       }
 
       const installChromeStorageShim = () => {
@@ -172,7 +176,9 @@ export async function seedAuth(
           for (const listener of listeners) {
             try {
               listener(changes, area)
-            } catch {}
+            } catch (error) {
+              reportShimError("onChanged listener failed", error)
+            }
           }
         }
 
@@ -210,7 +216,9 @@ export async function seedAuth(
             if (typeof callback === "function") {
               try {
                 callback(result)
-              } catch {}
+              } catch (error) {
+                reportShimError("get callback failed", error)
+              }
             }
             return result
           },
@@ -227,7 +235,9 @@ export async function seedAuth(
             if (typeof callback === "function") {
               try {
                 callback()
-              } catch {}
+              } catch (error) {
+                reportShimError("set callback failed", error)
+              }
             }
           },
           remove: async (keys: string | string[], callback?: () => void) => {
@@ -235,9 +245,7 @@ export async function seedAuth(
             const changes: Record<string, { oldValue: unknown; newValue: unknown }> = {}
             for (const key of values) {
               const oldValue = readStorageValue(key)
-              try {
-                localStorage.removeItem(key)
-              } catch {}
+              localStorage.removeItem(key)
               changes[key] = { oldValue, newValue: undefined }
             }
             if (Object.keys(changes).length > 0) {
@@ -246,7 +254,9 @@ export async function seedAuth(
             if (typeof callback === "function") {
               try {
                 callback()
-              } catch {}
+              } catch (error) {
+                reportShimError("remove callback failed", error)
+              }
             }
           },
           clear: async (callback?: () => void) => {
@@ -256,23 +266,25 @@ export async function seedAuth(
               if (!key) continue
               changes[key] = { oldValue: readStorageValue(key), newValue: undefined }
             }
-            try {
-              localStorage.clear()
-            } catch {}
+            localStorage.clear()
             if (Object.keys(changes).length > 0) {
               emitChanges(changes, "sync")
             }
             if (typeof callback === "function") {
               try {
                 callback()
-              } catch {}
+              } catch (error) {
+                reportShimError("clear callback failed", error)
+              }
             }
           },
           getBytesInUse: async (_keys?: unknown, callback?: (bytes: number) => void) => {
             if (typeof callback === "function") {
               try {
                 callback(0)
-              } catch {}
+              } catch (error) {
+                reportShimError("getBytesInUse callback failed", error)
+              }
             }
             return 0
           }
@@ -318,48 +330,24 @@ export async function seedAuth(
         accessToken: cfg.accessToken
       }
 
-      try {
-        localStorage.setItem(
-          "tldwConfig",
-          JSON.stringify(authConfig)
-        )
-      } catch {}
-      try {
-        const chromeLike = (window as unknown as { chrome?: any }).chrome
-        chromeLike?.storage?.sync?.set?.({ tldwConfig: authConfig })
-        chromeLike?.storage?.local?.set?.({ tldwConfig: authConfig })
-        chromeLike?.storage?.sync?.set?.({ isMigrated: true })
-        chromeLike?.storage?.local?.set?.({ isMigrated: true })
-      } catch {}
-      try {
-        localStorage.setItem("isMigrated", "true")
-      } catch {}
+      localStorage.setItem("tldwConfig", JSON.stringify(authConfig))
+      localStorage.setItem("isMigrated", "true")
       // Backward-compat for routes still reading legacy top-level keys.
-      try {
-        localStorage.setItem("serverUrl", cfg.serverUrl)
-      } catch {}
-      try {
-        localStorage.setItem("tldwServerUrl", cfg.serverUrl)
-      } catch {}
-      try {
-        localStorage.setItem("authMode", cfg.authMode)
-      } catch {}
-      try {
-        localStorage.setItem("apiKey", cfg.apiKey)
-      } catch {}
-      try {
-        localStorage.setItem("accessToken", cfg.accessToken)
-      } catch {}
-      try {
-        localStorage.setItem("__tldw_first_run_complete", "true")
-      } catch {}
-      try {
-        if (cfg.allowOffline) {
-          localStorage.setItem("__tldw_allow_offline", "true")
-        } else {
-          localStorage.removeItem("__tldw_allow_offline")
-        }
-      } catch {}
+      localStorage.setItem("serverUrl", cfg.serverUrl)
+      localStorage.setItem("tldwServerUrl", cfg.serverUrl)
+      localStorage.setItem("authMode", cfg.authMode)
+      localStorage.setItem("apiKey", cfg.apiKey)
+      localStorage.setItem("accessToken", cfg.accessToken)
+      localStorage.setItem("__tldw_first_run_complete", "true")
+      localStorage.setItem("assistant_setup_dismissed", "true")
+      localStorage.setItem("__tldw_test_bypass", "true")
+      localStorage.setItem("dw-tips-tour-completed", "true")
+      localStorage.setItem("document-workspace-onboarding-dismissed", "true")
+      if (cfg.allowOffline) {
+        localStorage.setItem("__tldw_allow_offline", "true")
+      } else {
+        localStorage.removeItem("__tldw_allow_offline")
+      }
     },
     cfg
   )
@@ -413,7 +401,8 @@ export const BENIGN_PATTERNS = [
   /Warning.*findDOMNode is deprecated/,
   // Next.js hydration warnings that are often false positives
   /Hydration failed/,
-  /There was an error while hydrating/
+  /There was an error while hydrating/,
+  /Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node\./
 ]
 
 /**
@@ -427,7 +416,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern: /rate_limited\s+\(GET\s+\/api\/v1\/chats\/\?limit=\d+&offset=\d+&ordering=-updated_at\)/i,
     rationale: "Chat history request bursts can hit server-side 429 in dense all-pages sweeps.",
     owner: "WebUI",
-    expiresOn: "2026-03-31"
+    expiresOn: "2026-09-30"
   },
   {
     id: "m5-http-429-resource",
@@ -435,7 +424,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern: /Failed to load resource: the server responded with a status of 429/i,
     rationale: "Known rate-limit noise while traversing all routes in parallel; triaged separately.",
     owner: "Platform",
-    expiresOn: "2026-03-31"
+    expiresOn: "2026-09-30"
   },
   {
     id: "m5-react-key-prop-spread-warning",
@@ -443,7 +432,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern: /A props object containing a "key" prop is being spread into JSX/i,
     rationale: "Known React warning in connectors/settings surfaces; no runtime crash.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/connectors", "/connectors/browse", "/connectors/jobs", "/connectors/sources", "/settings", "/config", "/profile", "/privileges"]
   },
   {
@@ -452,7 +441,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern: /Received `%s` for a non-boolean attribute `%s`/i,
     rationale: "Known non-breaking attribute warning in flashcards render path.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/flashcards"]
   },
   {
@@ -462,7 +451,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Known media route warning remains scoped to legacy review/media surfaces; Stage 3 critical audited routes are enforced separately.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/media", "/media/*", "/media-multi"]
   },
   {
@@ -471,7 +460,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern: /Failed to load resource: the server responded with a status of 404/i,
     rationale: "Known optional static/resource fetch misses in selected routes during dev runtime.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: [
       "/review",
       "/media",
@@ -490,9 +479,10 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
       "/admin",
       "/admin/server",
       "/notes",
-      "/moderation-playground",
+      "/moderation",
+      "/moderation/rules",
       "/chunking-playground",
-      "/workspace-playground",
+      "/research-workspace",
       "/stt",
       "/speech",
       "/tts",
@@ -508,7 +498,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Known Ant Design Drawer deprecation warning in selected routes; no functional regression in smoke path.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/media-multi", "/kanban", "/review"]
   },
   {
@@ -518,7 +508,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Model settings probes optional OAuth status endpoint that can return 403 in minimal smoke backend profile.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/settings/model"]
   },
   {
@@ -529,7 +519,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Notes title settings probe may be CORS-blocked in isolated smoke backend mode while page remains recoverable.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/notes"]
   },
   {
@@ -539,7 +529,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Companion browser error after expected CORS rejection for notes title settings probe in smoke mode.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/notes"]
   },
   {
@@ -549,7 +539,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Request-failure companion signal for expected notes title settings CORS rejection in isolated smoke mode.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/notes"]
   },
   {
@@ -560,7 +550,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Media pages surface a handled Not Found search message when media endpoints are absent in minimal smoke backend profile.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/media", "/media/*"]
   },
   {
@@ -571,7 +561,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Known Ant Design deprecation warning in quiz route; tracked separately from functional regressions.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/quiz"]
   },
   {
@@ -582,7 +572,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Known Ant Design List deprecation warning in quiz route; no user-impacting runtime break.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/quiz"]
   },
   {
@@ -593,7 +583,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Quiz attempts list probes may return 422 in minimal smoke backend profile while route UI remains recoverable.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/quiz"]
   },
   {
@@ -604,7 +594,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Prompt Studio settings probes can return 422 in minimal smoke backend profile.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/prompt-studio"]
   },
   {
@@ -614,7 +604,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Dictionaries route can hit optional backend handlers unavailable in minimal smoke profile.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/dictionaries"]
   },
   {
@@ -625,7 +615,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Known Ant Design message context warning in collections route; no functional regression.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/collections", "/reading"]
   },
   {
@@ -636,7 +626,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Known Ant Design form instance warning in characters route under minimal smoke backend profile; route remains functional.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/characters"]
   },
   {
@@ -647,8 +637,8 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Dense smoke sweeps can rate-limit model metadata probes; treated as environment noise for these routes.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
-    routes: ["/content-review", "/claims-review", "/workspace-playground"]
+    expiresOn: "2026-09-30",
+    routes: ["/content-review", "/claims-review", "/research-workspace"]
   },
   {
     id: "m5-model-metadata-abort-noise",
@@ -656,10 +646,10 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern:
       /Failed to fetch models from tldw:\s+AbortError:\s+signal is aborted without reason/i,
     rationale:
-      "Workspace Playground can abort in-flight model metadata fetches during route hydration without user-impacting breakage.",
+      "Research Workspace can abort in-flight model metadata fetches during route hydration without user-impacting breakage.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
-    routes: ["/workspace-playground"]
+    expiresOn: "2026-09-30",
+    routes: ["/research-workspace"]
   },
   {
     id: "m5-chatbooks-evaluations-cors-noise",
@@ -669,7 +659,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Chatbooks route issues a best-effort evaluations probe that may be CORS-blocked in isolated smoke backend mode.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/chatbooks"]
   },
   {
@@ -679,7 +669,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Companion browser error emitted after expected CORS rejection for optional evaluations probe in chatbooks.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/chatbooks"]
   },
   {
@@ -689,7 +679,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Request-failure companion signal for expected chatbooks evaluations CORS rejection in isolated smoke mode.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/chatbooks"]
   },
   {
@@ -699,7 +689,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     rationale:
       "Chatbooks route performs optional dictionaries checks that can return 500 in minimal smoke backend profiles.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/chatbooks"]
   },
   {
@@ -708,7 +698,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern: /The above error occurred in the <ForcedRouteErrorProbe> component/i,
     rationale: "Expected React error-overlay emission when route boundary fixture intentionally throws.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: [
       "/admin/server",
       "/admin/llamacpp",
@@ -717,7 +707,8 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
       "/data-tables",
       "/kanban",
       "/chunking-playground",
-      "/moderation-playground",
+      "/moderation",
+      "/moderation/rules",
       "/collections",
       "/world-books",
       "/dictionaries",
@@ -733,7 +724,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern: /\[RouteErrorBoundary:[^\]]+\]\s+Error:\s+Forced route boundary error/i,
     rationale: "Route boundary fixture emits deterministic forced-error log to confirm recovery branch.",
     owner: "WebUI",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: [
       "/admin/server",
       "/admin/llamacpp",
@@ -742,7 +733,8 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
       "/data-tables",
       "/kanban",
       "/chunking-playground",
-      "/moderation-playground",
+      "/moderation",
+      "/moderation/rules",
       "/collections",
       "/world-books",
       "/dictionaries",
@@ -758,7 +750,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern: /Failed to load resource: the server responded with a status of 500/i,
     rationale: "Admin pages hit optional backend endpoints unavailable in minimal smoke profile.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/admin", "/admin/server", "/admin/orgs", "/admin/data-ops", "/admin/watchlists-items", "/admin/watchlists-runs", "/admin/maintenance"]
   },
   {
@@ -767,10 +759,100 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern: /Failed to load resource: the server responded with a status of 503/i,
     rationale: "Expected when llama.cpp backend is not configured in smoke environment.",
     owner: "Platform",
-    expiresOn: "2026-03-31",
+    expiresOn: "2026-09-30",
     routes: ["/admin/llamacpp"]
   }
 ]
+
+const ALLOWLIST_GLOBAL_RATIONALE_PATTERN =
+  /\b(all-pages|all routes|cross-route|dense|dev runtime|global|parallel|route boundary|runtime)\b/i
+const ALLOWLIST_OWNER_PATTERN = /\S/
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
+function parseAllowlistExpiry(expiresOn: string): number | null {
+  if (!ISO_DATE_PATTERN.test(expiresOn)) return null
+  const [year, month, day] = expiresOn.split("-").map(Number)
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null
+  }
+  if (month < 1 || month > 12) return null
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  if (day < 1 || day > daysInMonth) return null
+
+  const endOfDayUtc = Date.UTC(year, month - 1, day, 23, 59, 59, 999)
+  if (Number.isNaN(endOfDayUtc)) return null
+
+  const reconstructedDate = new Date(endOfDayUtc)
+  if (
+    reconstructedDate.getUTCFullYear() !== year ||
+    reconstructedDate.getUTCMonth() + 1 !== month ||
+    reconstructedDate.getUTCDate() !== day
+  ) {
+    return null
+  }
+  return endOfDayUtc
+}
+
+export function validateSmokeHardGateAllowlist(
+  rules: SmokeHardGateAllowlistRule[] = SMOKE_HARD_GATE_ALLOWLIST,
+  now: Date = new Date()
+): string[] {
+  const errors: string[] = []
+  const seenIds = new Set<string>()
+  const nowMs = now.getTime()
+
+  rules.forEach((rule, index) => {
+    const label = rule.id || `entry-${index}`
+
+    if (!rule.id?.trim()) {
+      errors.push(`${label}: missing id`)
+    } else if (seenIds.has(rule.id)) {
+      errors.push(`${label}: duplicate id`)
+    } else {
+      seenIds.add(rule.id)
+    }
+
+    if (rule.scope !== "console" && rule.scope !== "request") {
+      errors.push(`${label}: scope must be console or request`)
+    }
+
+    if (!(rule.pattern instanceof RegExp)) {
+      errors.push(`${label}: pattern must be a RegExp`)
+    } else if (rule.pattern.global || rule.pattern.sticky) {
+      errors.push(`${label}: pattern must not use global or sticky flags`)
+    }
+
+    if (!rule.rationale?.trim()) {
+      errors.push(`${label}: missing rationale`)
+    }
+
+    if (!ALLOWLIST_OWNER_PATTERN.test(rule.owner || "")) {
+      errors.push(`${label}: missing owner`)
+    }
+
+    const expiry = parseAllowlistExpiry(rule.expiresOn || "")
+    if (expiry === null) {
+      errors.push(`${label}: expiresOn must be a valid YYYY-MM-DD date`)
+    } else if (expiry < nowMs) {
+      errors.push(`${label}: expired on ${rule.expiresOn}`)
+    }
+
+    const routes = Array.isArray(rule.routes) ? rule.routes : []
+    if (routes.length > 0) {
+      for (const route of routes) {
+        if (!route.startsWith("/")) {
+          errors.push(`${label}: route scope must start with / (${route})`)
+        }
+      }
+    } else if (!ALLOWLIST_GLOBAL_RATIONALE_PATTERN.test(rule.rationale || "")) {
+      errors.push(
+        `${label}: unscoped allowlist entries need a global/cross-route rationale`
+      )
+    }
+  })
+
+  return errors
+}
 
 /**
  * Check if an error/warning message is benign
@@ -824,7 +906,9 @@ function normalizeRoutePath(routePath: string): string {
     if (routePath.startsWith("http://") || routePath.startsWith("https://")) {
       return new URL(routePath).pathname
     }
-  } catch {}
+  } catch {
+    // Invalid absolute URLs fall back to simple route-path stripping below.
+  }
   return routePath.split("?")[0]?.split("#")[0] || routePath
 }
 

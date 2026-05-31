@@ -2,16 +2,44 @@
 #
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.api.v1.endpoints.media import document_references as refs_mod
 from tldw_Server_API.app.api.v1.schemas.document_references import ReferenceEntry
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+
+
+async def _allow_non_authz_dep() -> None:
+    return None
+
+
+app = FastAPI()
+app.include_router(refs_mod.router, prefix="/api/v1/media")
+
+
+def _install_route_dependency_overrides() -> None:
+    for route in app.routes:
+        dependant = getattr(route, "dependant", None)
+        if dependant is None:
+            continue
+        for dep in getattr(dependant, "dependencies", []):
+            call = getattr(dep, "call", None)
+            if getattr(call, "_tldw_rate_limit_resource", None) is not None:
+                app.dependency_overrides[call] = _allow_non_authz_dep
+
+
+@pytest.fixture(autouse=True)
+def reset_app_dependency_overrides():
+    app.dependency_overrides.clear()
+    _install_route_dependency_overrides()
+    yield
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -27,6 +55,54 @@ def mock_db(tmp_path):
     db = MagicMock()
     db.db_path_str = str(tmp_path / "test_media.db")
     return db
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.error_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.debug_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.warning_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def error(self, *args: Any, **kwargs: Any) -> None:
+        self.error_calls.append((args, kwargs))
+
+    def debug(self, *_args: Any, **_kwargs: Any) -> None:
+        self.debug_calls.append((_args, _kwargs))
+
+    def warning(self, *_args: Any, **_kwargs: Any) -> None:
+        self.warning_calls.append((_args, _kwargs))
+
+
+class _FailingReferenceCacheDb:
+    def transaction(self):
+        raise RuntimeError("references cache failed at /private/references-cache.db")
+
+    def execute_query(self, *_args: Any, **_kwargs: Any):
+        raise RuntimeError("references cache failed at /private/references-cache.db")
+
+
+def _assert_log_sanitized(
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]],
+    expected_message: str,
+) -> None:
+    assert calls
+    assert [args[0] for args, _kwargs in calls if args] == [expected_message]
+    assert all(not kwargs.get("exc_info") for _args, kwargs in calls)
+    rendered_calls = repr(calls)
+    assert "references cache failed" not in rendered_calls
+    assert "/private/references-cache.db" not in rendered_calls
+
+
+def _assert_sanitized_debug_messages(
+    logger_mock: MagicMock,
+    expected_messages: list[str],
+    forbidden_markers: list[str],
+) -> None:
+    messages = [args[0] for args, _kwargs in logger_mock.debug.call_args_list if args]
+    assert messages == expected_messages
+    rendered_calls = repr(logger_mock.debug.call_args_list)
+    for marker in forbidden_markers:
+        assert marker not in rendered_calls
 
 
 @pytest.mark.asyncio
@@ -77,9 +153,7 @@ async def test_references_endpoint_applies_pagination_window(mock_user, mock_db)
 
     with patch.object(refs_mod, "get_cached_response", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get(
-                "/api/v1/media/1/references?enrich=false&offset=2&limit=2"
-            )
+            response = await client.get("/api/v1/media/1/references?enrich=false&offset=2&limit=2")
 
     assert response.status_code == 200
     data = response.json()
@@ -87,6 +161,14 @@ async def test_references_endpoint_applies_pagination_window(mock_user, mock_db)
     assert data["total_available"] == 6
     assert data["has_more"] is True
     assert data["next_offset"] == 4
+    assert data["pagination"] == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 2,
+        "total": 6,
+        "has_more": True,
+        "next_offset": 4,
+    }
     assert "Example 3" in data["references"][0]["raw_text"]
     assert "Example 4" in data["references"][1]["raw_text"]
 
@@ -112,9 +194,7 @@ async def test_references_endpoint_applies_search_before_pagination(mock_user, m
 
     with patch.object(refs_mod, "get_cached_response", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get(
-                "/api/v1/media/1/references?enrich=false&offset=0&limit=2&search=Example%206"
-            )
+            response = await client.get("/api/v1/media/1/references?enrich=false&offset=0&limit=2&search=Example%206")
 
     assert response.status_code == 200
     data = response.json()
@@ -122,6 +202,14 @@ async def test_references_endpoint_applies_search_before_pagination(mock_user, m
     assert data["total_available"] == 1
     assert data["has_more"] is False
     assert data["next_offset"] is None
+    assert data["pagination"] == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
     assert "Example 6" in data["references"][0]["raw_text"]
 
     app.dependency_overrides.clear()
@@ -146,9 +234,7 @@ async def test_references_endpoint_parse_cap_limits_available_refs(mock_user, mo
 
     with patch.object(refs_mod, "get_cached_response", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get(
-                "/api/v1/media/1/references?enrich=false&parse_cap=3&limit=50"
-            )
+            response = await client.get("/api/v1/media/1/references?enrich=false&parse_cap=3&limit=50")
 
     assert response.status_code == 200
     data = response.json()
@@ -163,11 +249,7 @@ async def test_references_endpoint_parse_cap_limits_available_refs(mock_user, mo
 
 @pytest.mark.asyncio
 async def test_references_endpoint_uses_parsed_reference_db_cache(mock_user, mock_db):
-    content = (
-        "Intro text\\n"
-        "References\\n"
-        "[1] This content should not be parsed when cache is present.\\n"
-    )
+    content = "Intro text\\n" "References\\n" "[1] This content should not be parsed when cache is present.\\n"
     mock_db.get_media_by_id = MagicMock(return_value={"id": 1, "content": content})
 
     app.dependency_overrides[get_request_user] = lambda: mock_user
@@ -178,17 +260,19 @@ async def test_references_endpoint_uses_parsed_reference_db_cache(mock_user, moc
         "[2] Cached Author. 2021. Cached Example Two.",
     ]
 
-    with patch.object(refs_mod, "get_cached_response", return_value=None), \
+    with (
+        patch.object(refs_mod, "get_cached_response", return_value=None),
         patch.object(
             refs_mod,
             "_load_parsed_references_cache",
             return_value=(cached_refs, 2),
-        ), \
+        ),
         patch.object(
             refs_mod,
             "_split_references_with_meta",
             side_effect=AssertionError("Parser should not run on cache hit"),
-        ):
+        ),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/media/1/references?enrich=false")
 
@@ -207,9 +291,7 @@ async def test_references_endpoint_cache_hit(mock_user, mock_db):
     cached_payload = {
         "media_id": 1,
         "has_references": True,
-        "references": [
-            {"raw_text": "Cached ref", "title": "Cached Title"}
-        ],
+        "references": [{"raw_text": "Cached ref", "title": "Cached Title"}],
         "enrichment_source": None,
         "total_detected": 1,
         "truncated": False,
@@ -226,8 +308,94 @@ async def test_references_endpoint_cache_hit(mock_user, mock_db):
     assert response.status_code == 200
     data = response.json()
     assert data["references"][0]["title"] == "Cached Title"
+    assert data["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
 
     app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_references_endpoint_sanitizes_db_fetch_error_log(
+    mock_user,
+    mock_db,
+    monkeypatch,
+):
+    mock_db.get_media_by_id = MagicMock(side_effect=RuntimeError("reference db failed at /private/references.db"))
+    app.dependency_overrides[get_request_user] = lambda: mock_user
+    app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(refs_mod, "logger", logger_stub, raising=True)
+
+    try:
+        with patch.object(refs_mod, "get_cached_response", return_value=None):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.get("/api/v1/media/1/references")
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Database error while fetching media item"
+        assert [args[0] for args, _kwargs in logger_stub.error_calls if args] == ["Database error fetching media item"]
+        assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.error_calls)
+        rendered_calls = repr(logger_stub.error_calls)
+        assert "reference db failed" not in rendered_calls
+        assert "/private/references.db" not in rendered_calls
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_parsed_reference_cache_table_warning_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(refs_mod, "logger", logger_stub, raising=True)
+
+    refs_mod._ensure_parsed_references_cache_table(_FailingReferenceCacheDb())
+
+    _assert_log_sanitized(
+        logger_stub.warning_calls,
+        "Could not ensure parsed references cache table",
+    )
+
+
+def test_parsed_reference_cache_load_debug_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(refs_mod, "logger", logger_stub, raising=True)
+
+    result = refs_mod._load_parsed_references_cache(
+        _FailingReferenceCacheDb(),
+        media_id=1,
+        user_id="1",
+        content_hash="abc",
+    )
+
+    assert result is None
+    _assert_log_sanitized(
+        logger_stub.debug_calls,
+        "Failed loading parsed references cache",
+    )
+
+
+def test_parsed_reference_cache_save_debug_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(refs_mod, "logger", logger_stub, raising=True)
+
+    refs_mod._save_parsed_references_cache(
+        _FailingReferenceCacheDb(),
+        media_id=1,
+        user_id="1",
+        content_hash="abc",
+        references=["[1] Example"],
+        total_detected=1,
+    )
+
+    _assert_log_sanitized(
+        logger_stub.debug_calls,
+        "Failed saving parsed references cache",
+    )
 
 
 def test_apply_crossref_data_sets_fields():
@@ -310,24 +478,14 @@ def test_find_reference_section_rejects_inline_references_mentions():
 
 
 def test_find_reference_section_accepts_markdown_bold_heading():
-    content = (
-        "## Method\n"
-        "Some body text.\n\n"
-        "### **References**\n"
-        "Smith, J. 2020. Example reference.\n"
-    )
+    content = "## Method\n" "Some body text.\n\n" "### **References**\n" "Smith, J. 2020. Example reference.\n"
     section = refs_mod._find_reference_section(content)
     assert section is not None
     assert "Smith, J. 2020. Example reference." in section
 
 
 def test_find_reference_section_accepts_bold_heading_without_markdown_hash():
-    content = (
-        "Discussion\n"
-        "Some body text.\n\n"
-        "**References**\n"
-        "Smith, J. 2020. Example reference.\n"
-    )
+    content = "Discussion\n" "Some body text.\n\n" "**References**\n" "Smith, J. 2020. Example reference.\n"
     section = refs_mod._find_reference_section(content)
     assert section is not None
     assert "Smith, J. 2020. Example reference." in section
@@ -434,13 +592,12 @@ def test_split_references_supports_bracket_code_labels():
     assert len(refs) >= 2
     assert any("Multiple randomization designs" in r for r in refs)
     assert any("hypertextual Web search engine" in r for r in refs)
-    assert all("13" != r.strip() for r in refs)
+    assert all(r.strip() != "13" for r in refs)
 
 
 def test_split_references_with_meta_reports_truncation():
     refs_text = "\n\n".join(
-        f"[{idx}] Author, A. {2000 + (idx % 20)}. Example reference {idx}."
-        for idx in range(1, 113)
+        f"[{idx}] Author, A. {2000 + (idx % 20)}. Example reference {idx}." for idx in range(1, 113)
     )
     refs, total_detected, truncated = refs_mod._split_references_with_meta(refs_text)
     assert total_detected == 112
@@ -696,27 +853,27 @@ async def test_references_endpoint_enriches_only_requested_reference_index(mock_
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(refs_mod, "get_cached_response", return_value=None), \
-        patch.object(refs_mod, "_is_provider_cooldown", return_value=False), \
+    with (
+        patch.object(refs_mod, "get_cached_response", return_value=None),
+        patch.object(refs_mod, "_is_provider_cooldown", return_value=False),
         patch.object(
             refs_mod,
             "_enrich_with_semantic_scholar",
             new=AsyncMock(side_effect=enrich_semantic),
-        ), \
+        ),
         patch.object(
             refs_mod,
             "_enrich_with_crossref",
             new=AsyncMock(side_effect=lambda refs: (refs, False)),
-        ), \
+        ),
         patch.object(
             refs_mod,
             "_enrich_with_arxiv",
             new=AsyncMock(side_effect=lambda refs: (refs, False)),
-        ):
+        ),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get(
-                "/api/v1/media/1/references?enrich=true&reference_index=1"
-            )
+            response = await client.get("/api/v1/media/1/references?enrich=true&reference_index=1")
 
     assert response.status_code == 200
     data = response.json()
@@ -729,19 +886,14 @@ async def test_references_endpoint_enriches_only_requested_reference_index(mock_
 
 @pytest.mark.asyncio
 async def test_references_endpoint_reference_index_out_of_range_returns_400(mock_user, mock_db):
-    content = (
-        "References\\n"
-        "[1] Smith, J. (2020). Example Paper. https://doi.org/10.1234/abcd\\n"
-    )
+    content = "References\\n" "[1] Smith, J. (2020). Example Paper. https://doi.org/10.1234/abcd\\n"
     mock_db.get_media_by_id = MagicMock(return_value={"id": 1, "content": content})
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
     with patch.object(refs_mod, "get_cached_response", return_value=None):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get(
-                "/api/v1/media/1/references?enrich=true&reference_index=5"
-            )
+            response = await client.get("/api/v1/media/1/references?enrich=true&reference_index=5")
 
     assert response.status_code == 400
     assert response.json()["detail"] == "reference_index out of range"
@@ -751,10 +903,7 @@ async def test_references_endpoint_reference_index_out_of_range_returns_400(mock
 
 @pytest.mark.asyncio
 async def test_references_endpoint_skips_enrichment_when_all_providers_in_cooldown(mock_user, mock_db):
-    content = (
-        "References\\n"
-        "[1] Smith, J. (2020). Example Paper. https://doi.org/10.1234/abcd\\n"
-    )
+    content = "References\\n" "[1] Smith, J. (2020). Example Paper. https://doi.org/10.1234/abcd\\n"
     mock_db.get_media_by_id = MagicMock(return_value={"id": 1, "content": content})
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
@@ -763,11 +912,13 @@ async def test_references_endpoint_skips_enrichment_when_all_providers_in_cooldo
     crossref = AsyncMock(side_effect=lambda refs: (refs, True))
     arxiv = AsyncMock(side_effect=lambda refs: (refs, True))
 
-    with patch.object(refs_mod, "get_cached_response", return_value=None), \
-        patch.object(refs_mod, "_is_provider_cooldown", return_value=True), \
-        patch.object(refs_mod, "_enrich_with_semantic_scholar", new=semantic), \
-        patch.object(refs_mod, "_enrich_with_crossref", new=crossref), \
-        patch.object(refs_mod, "_enrich_with_arxiv", new=arxiv):
+    with (
+        patch.object(refs_mod, "get_cached_response", return_value=None),
+        patch.object(refs_mod, "_is_provider_cooldown", return_value=True),
+        patch.object(refs_mod, "_enrich_with_semantic_scholar", new=semantic),
+        patch.object(refs_mod, "_enrich_with_crossref", new=crossref),
+        patch.object(refs_mod, "_enrich_with_arxiv", new=arxiv),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/api/v1/media/1/references?enrich=true")
 
@@ -780,11 +931,43 @@ async def test_references_endpoint_skips_enrichment_when_all_providers_in_cooldo
 
 
 @pytest.mark.asyncio
-async def test_enrich_with_semantic_scholar_caps_external_calls_at_five():
-    refs = [
-        ReferenceEntry(raw_text=f"Ref {i}", doi=f"10.1234/{i}")
-        for i in range(7)
+async def test_references_endpoint_sanitizes_enrichment_failure_log(mock_user, mock_db, monkeypatch):
+    content = "References\\n" "[1] Smith, J. (2020). Example Paper. https://doi.org/10.1234/abcd\\n"
+    mock_db.get_media_by_id = MagicMock(return_value={"id": 1, "content": content})
+    app.dependency_overrides[get_request_user] = lambda: mock_user
+    app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(refs_mod, "logger", logger_stub, raising=True)
+
+    with (
+        patch.object(refs_mod, "get_cached_response", return_value=None),
+        patch.object(refs_mod, "_is_provider_cooldown", return_value=False),
+        patch.object(
+            refs_mod,
+            "_enrich_with_semantic_scholar",
+            new=AsyncMock(side_effect=RuntimeError("enrichment failed at /private/provider.key")),
+        ),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/api/v1/media/1/references?enrich=true")
+
+    assert response.status_code == 200
+    assert response.json()["enrichment_source"] is None
+    assert [args[0] for args, _kwargs in logger_stub.warning_calls if args] == [
+        "Failed to enrich references"
     ]
+    assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.warning_calls)
+    rendered_calls = repr(logger_stub.warning_calls)
+    assert "media_id" not in rendered_calls
+    assert "enrichment failed" not in rendered_calls
+    assert "/private/provider.key" not in rendered_calls
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_enrich_with_semantic_scholar_caps_external_calls_at_five():
+    refs = [ReferenceEntry(raw_text=f"Ref {i}", doi=f"10.1234/{i}") for i in range(7)]
     call_count = 0
 
     async def fake_to_thread(_func, *_args, **_kwargs):
@@ -792,9 +975,11 @@ async def test_enrich_with_semantic_scholar_caps_external_calls_at_five():
         call_count += 1
         return {"paperId": "p1", "citationCount": 1, "title": "Paper"}, None
 
-    with patch.object(refs_mod, "_get_cached_external", return_value=None), \
-        patch.object(refs_mod, "_set_cached_external", return_value=None), \
-        patch.object(refs_mod.asyncio, "to_thread", side_effect=fake_to_thread):
+    with (
+        patch.object(refs_mod, "_get_cached_external", return_value=None),
+        patch.object(refs_mod, "_set_cached_external", return_value=None),
+        patch.object(refs_mod.asyncio, "to_thread", side_effect=fake_to_thread),
+    ):
         enriched, performed = await refs_mod._enrich_with_semantic_scholar(refs)
 
     assert performed is True
@@ -803,11 +988,53 @@ async def test_enrich_with_semantic_scholar_caps_external_calls_at_five():
 
 
 @pytest.mark.asyncio
-async def test_enrich_with_crossref_sets_cooldown_on_rate_limit():
+async def test_enrich_with_semantic_scholar_sanitizes_lookup_failure_logs(monkeypatch):
+    logger_mock = MagicMock()
+    monkeypatch.setattr(refs_mod, "logger", logger_mock)
     refs = [
-        ReferenceEntry(raw_text=f"Ref {i}", doi=f"10.1234/{i}")
-        for i in range(3)
+        ReferenceEntry(
+            raw_text="Ref 1",
+            doi="10.9999/private-doi",
+            arxiv_id="2401.99999",
+            title="Sensitive Title /private/reference.txt",
+        )
     ]
+
+    with (
+        patch.object(refs_mod, "_get_cached_external", return_value=None),
+        patch.object(refs_mod, "_set_cached_external", return_value=None),
+        patch.object(refs_mod.asyncio, "sleep", new=AsyncMock()),
+        patch.object(
+            refs_mod.asyncio,
+            "to_thread",
+            new=AsyncMock(side_effect=RuntimeError("provider leaked /private/token")),
+        ),
+    ):
+        enriched, performed = await refs_mod._enrich_with_semantic_scholar(refs)
+
+    assert performed is False
+    assert enriched[0] == refs[0]
+    _assert_sanitized_debug_messages(
+        logger_mock,
+        [
+            "Semantic Scholar DOI lookup failed",
+            "Semantic Scholar arXiv lookup failed",
+            "Semantic Scholar title search failed",
+        ],
+        [
+            "10.9999/private-doi",
+            "2401.99999",
+            "Sensitive Title",
+            "provider leaked",
+            "/private/token",
+            "/private/reference.txt",
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_enrich_with_crossref_sets_cooldown_on_rate_limit():
+    refs = [ReferenceEntry(raw_text=f"Ref {i}", doi=f"10.1234/{i}") for i in range(3)]
     call_count = 0
 
     async def fake_to_thread(_func, *_args, **_kwargs):
@@ -815,16 +1042,68 @@ async def test_enrich_with_crossref_sets_cooldown_on_rate_limit():
         call_count += 1
         return None, "429 Too Many Requests"
 
-    with patch.object(refs_mod, "_get_cached_external", return_value=None), \
-        patch.object(refs_mod, "_set_cached_external", return_value=None), \
-        patch.object(refs_mod, "_set_provider_cooldown") as set_cooldown, \
-        patch.object(refs_mod.asyncio, "to_thread", side_effect=fake_to_thread):
+    with (
+        patch.object(refs_mod, "_get_cached_external", return_value=None),
+        patch.object(refs_mod, "_set_cached_external", return_value=None),
+        patch.object(refs_mod, "_set_provider_cooldown") as set_cooldown,
+        patch.object(refs_mod.asyncio, "to_thread", side_effect=fake_to_thread),
+    ):
         enriched, performed = await refs_mod._enrich_with_crossref(refs)
 
     assert performed is False
     assert len(enriched) == 3
     assert call_count == 1
     set_cooldown.assert_called_once_with("crossref")
+
+
+@pytest.mark.asyncio
+async def test_enrich_with_crossref_and_arxiv_sanitizes_lookup_failure_logs(monkeypatch):
+    logger_mock = MagicMock()
+    monkeypatch.setattr(refs_mod, "logger", logger_mock)
+
+    with (
+        patch.object(refs_mod, "_get_cached_external", return_value=None),
+        patch.object(refs_mod, "_set_cached_external", return_value=None),
+        patch.object(
+            refs_mod.asyncio,
+            "to_thread",
+            new=AsyncMock(side_effect=RuntimeError("provider leaked /private/token")),
+        ),
+    ):
+        crossref_enriched, crossref_performed = await refs_mod._enrich_with_crossref(
+            [ReferenceEntry(raw_text="Ref 1", doi="10.9999/private-doi")]
+        )
+
+    with (
+        patch.object(refs_mod, "_get_cached_external", return_value=None),
+        patch.object(refs_mod, "_set_cached_external", return_value=None),
+        patch.object(
+            refs_mod.asyncio,
+            "to_thread",
+            new=AsyncMock(side_effect=RuntimeError("provider leaked /private/token")),
+        ),
+    ):
+        arxiv_enriched, arxiv_performed = await refs_mod._enrich_with_arxiv(
+            [ReferenceEntry(raw_text="Ref 2", arxiv_id="2401.99999")]
+        )
+
+    assert crossref_performed is False
+    assert arxiv_performed is False
+    assert crossref_enriched[0].doi == "10.9999/private-doi"
+    assert arxiv_enriched[0].arxiv_id == "2401.99999"
+    _assert_sanitized_debug_messages(
+        logger_mock,
+        [
+            "Crossref lookup failed",
+            "arXiv lookup failed",
+        ],
+        [
+            "10.9999/private-doi",
+            "2401.99999",
+            "provider leaked",
+            "/private/token",
+        ],
+    )
 
 
 @pytest.mark.asyncio
@@ -840,13 +1119,15 @@ async def test_enrich_with_crossref_uses_cached_external_result_without_network_
         "pdf_url": "https://example.com/cached.pdf",
     }
 
-    with patch.object(
-        refs_mod,
-        "_get_cached_external",
-        return_value=(cached_item, None),
-    ), patch.object(refs_mod, "_set_cached_external", return_value=None), patch.object(
-        refs_mod.asyncio, "to_thread", new=AsyncMock()
-    ) as to_thread_mock:
+    with (
+        patch.object(
+            refs_mod,
+            "_get_cached_external",
+            return_value=(cached_item, None),
+        ),
+        patch.object(refs_mod, "_set_cached_external", return_value=None),
+        patch.object(refs_mod.asyncio, "to_thread", new=AsyncMock()) as to_thread_mock,
+    ):
         enriched, performed = await refs_mod._enrich_with_crossref(refs)
 
     assert performed is True

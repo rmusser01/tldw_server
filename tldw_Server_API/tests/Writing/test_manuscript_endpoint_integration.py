@@ -245,6 +245,181 @@ def test_project_list_and_filter(client: TestClient):
     assert any(p["title"] == "Completed Novel B" for p in data["projects"])
 
 
+def test_project_list_includes_canonical_pagination(client: TestClient):
+    client.post(f"{PREFIX}/projects", json={"title": "Pagination Novel A", "status": "draft"})
+    client.post(f"{PREFIX}/projects", json={"title": "Pagination Novel B", "status": "complete"})
+
+    page1_resp = client.get(f"{PREFIX}/projects", params={"limit": 1, "offset": 0})
+    assert page1_resp.status_code == 200, page1_resp.text
+    page1 = page1_resp.json()
+    assert page1["total"] >= 2
+    assert len(page1["projects"]) == 1
+    assert page1["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": page1["total"],
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert page1["has_more"] is True
+    assert page1["next_offset"] == 1
+
+    page2_resp = client.get(f"{PREFIX}/projects", params={"limit": 1, "offset": 1})
+    assert page2_resp.status_code == 200, page2_resp.text
+    page2 = page2_resp.json()
+    assert len(page2["projects"]) == 1
+    assert page2["pagination"]["mode"] == "offset"
+    assert page2["pagination"]["limit"] == 1
+    assert page2["pagination"]["offset"] == 1
+    assert page2["pagination"]["total"] == page2["total"]
+    assert page2["has_more"] == page2["pagination"]["has_more"]
+    assert page2["next_offset"] == page2["pagination"]["next_offset"]
+
+
+def test_manuscript_version_history_and_trash_restore(client: TestClient):
+    project_resp = client.post(f"{PREFIX}/projects", json={"title": "Versioned Novel"})
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    part_resp = client.post(f"{PREFIX}/projects/{project_id}/parts", json={"title": "Book One"})
+    assert part_resp.status_code == 201, part_resp.text
+
+    chapter_resp = client.post(f"{PREFIX}/projects/{project_id}/chapters", json={"title": "Chapter One"})
+    assert chapter_resp.status_code == 201, chapter_resp.text
+    chapter_id = chapter_resp.json()["id"]
+
+    scene_resp = client.post(
+        f"{PREFIX}/chapters/{chapter_id}/scenes",
+        json={"title": "Opening", "content_plain": "First draft"},
+    )
+    assert scene_resp.status_code == 201, scene_resp.text
+    scene = scene_resp.json()
+    scene_id = scene["id"]
+
+    version_resp = client.post(
+        f"{PREFIX}/scene/{scene_id}/versions",
+        json={"label": "First draft"},
+    )
+    assert version_resp.status_code == 201, version_resp.text
+    version = version_resp.json()
+    assert version["entity_type"] == "scene"
+    assert version["entity_id"] == scene_id
+    assert version["version_number"] == 1
+    assert version["label"] == "First draft"
+    assert version["payload"]["content_plain"] == "First draft"
+
+    updated_resp = client.patch(
+        f"{PREFIX}/scenes/{scene_id}",
+        json={"content_plain": "Second draft"},
+        headers={"expected-version": str(scene["version"])},
+    )
+    assert updated_resp.status_code == 200, updated_resp.text
+    updated_scene = updated_resp.json()
+
+    list_resp = client.get(f"{PREFIX}/scene/{scene_id}/versions")
+    assert list_resp.status_code == 200, list_resp.text
+    assert list_resp.json()["versions"][0]["version_number"] == 1
+
+    get_resp = client.get(f"{PREFIX}/scene/{scene_id}/versions/1")
+    assert get_resp.status_code == 200, get_resp.text
+    assert get_resp.json()["payload"]["content_plain"] == "First draft"
+
+    restore_version_resp = client.post(
+        f"{PREFIX}/scene/{scene_id}/versions/1/restore",
+        headers={"expected-version": str(updated_scene["version"])},
+    )
+    assert restore_version_resp.status_code == 200, restore_version_resp.text
+    restored_scene = restore_version_resp.json()
+    assert restored_scene["content_plain"] == "First draft"
+    assert restored_scene["version"] == updated_scene["version"] + 1
+
+    delete_resp = client.delete(
+        f"{PREFIX}/scenes/{scene_id}",
+        headers={"expected-version": str(restored_scene["version"])},
+    )
+    assert delete_resp.status_code == 204, delete_resp.text
+
+    trash_resp = client.get(f"{PREFIX}/trash", params={"entity_type": "scene"})
+    assert trash_resp.status_code == 200, trash_resp.text
+    trash = trash_resp.json()
+    assert trash["total"] == 1
+    assert trash["items"][0]["id"] == scene_id
+    assert trash["items"][0]["deleted"] is True
+
+    restore_trash_resp = client.post(
+        f"{PREFIX}/trash/scene/{scene_id}/restore",
+        headers={"expected-version": str(trash["items"][0]["version"])},
+    )
+    assert restore_trash_resp.status_code == 200, restore_trash_resp.text
+    restored_from_trash = restore_trash_resp.json()
+    assert restored_from_trash["id"] == scene_id
+    assert restored_from_trash["deleted"] is False
+    assert restored_from_trash["version"] == trash["items"][0]["version"] + 1
+
+    final_resp = client.get(f"{PREFIX}/scenes/{scene_id}")
+    assert final_resp.status_code == 200, final_resp.text
+
+
+def test_manuscript_restore_endpoints_reject_invalid_entity_type(client: TestClient):
+    create_version_resp = client.post(f"{PREFIX}/invalid/entity-1/versions", json={})
+    assert create_version_resp.status_code == 422
+
+    list_versions_resp = client.get(f"{PREFIX}/invalid/entity-1/versions")
+    assert list_versions_resp.status_code == 422
+
+    get_version_resp = client.get(f"{PREFIX}/invalid/entity-1/versions/1")
+    assert get_version_resp.status_code == 422
+
+    restore_version_resp = client.post(f"{PREFIX}/invalid/entity-1/versions/1/restore")
+    assert restore_version_resp.status_code == 422
+
+    list_trash_resp = client.get(f"{PREFIX}/trash", params={"entity_type": "invalid"})
+    assert list_trash_resp.status_code == 422
+
+    restore_trash_resp = client.post(f"{PREFIX}/trash/invalid/entity-1/restore")
+    assert restore_trash_resp.status_code == 422
+
+
+def test_manuscript_restore_trash_rejects_deleted_parent_chapter(client: TestClient):
+    project_resp = client.post(f"{PREFIX}/projects", json={"title": "Parent Guard Novel"})
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    chapter_resp = client.post(f"{PREFIX}/projects/{project_id}/chapters", json={"title": "Deleted Parent"})
+    assert chapter_resp.status_code == 201, chapter_resp.text
+    chapter = chapter_resp.json()
+
+    scene_resp = client.post(
+        f"{PREFIX}/chapters/{chapter['id']}/scenes",
+        json={"title": "Orphan Candidate", "content_plain": "Scene text"},
+    )
+    assert scene_resp.status_code == 201, scene_resp.text
+    scene_id = scene_resp.json()["id"]
+
+    current_chapter_resp = client.get(f"{PREFIX}/chapters/{chapter['id']}")
+    assert current_chapter_resp.status_code == 200, current_chapter_resp.text
+    current_chapter = current_chapter_resp.json()
+
+    delete_chapter_resp = client.delete(
+        f"{PREFIX}/chapters/{chapter['id']}",
+        headers={"expected-version": str(current_chapter["version"])},
+    )
+    assert delete_chapter_resp.status_code == 204, delete_chapter_resp.text
+
+    trash_resp = client.get(f"{PREFIX}/trash", params={"entity_type": "scene"})
+    assert trash_resp.status_code == 200, trash_resp.text
+    scene_trash = next(item for item in trash_resp.json()["items"] if item["id"] == scene_id)
+
+    restore_trash_resp = client.post(
+        f"{PREFIX}/trash/scene/{scene_id}/restore",
+        headers={"expected-version": str(scene_trash["version"])},
+    )
+
+    assert restore_trash_resp.status_code == 409
+    assert client.get(f"{PREFIX}/scenes/{scene_id}").status_code == 404
+
+
 def test_project_settings_round_trip(client: TestClient):
     """Project settings survive create/get/list responses."""
     settings = {"theme": "dark", "editor": {"mode": "focus"}}

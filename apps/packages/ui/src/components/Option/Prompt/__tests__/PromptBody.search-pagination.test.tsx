@@ -1,16 +1,24 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { notification } from "antd"
 import { MemoryRouter, useLocation, useSearchParams } from "react-router-dom"
-import { PromptBody } from "../index"
+import {
+  PromptBody,
+  PROMPTS_COPILOT_HELP_STORAGE_KEY as COPILOT_HELP_STORAGE_KEY
+} from "../index"
 
 const state = vi.hoisted(() => ({
   isOnline: true,
   privateMode: false,
   prompts: [] as any[]
 }))
+
+const FILTER_PRESETS_STORAGE_KEY = "tldw-prompt-filter-presets-v1"
+const FILTER_PRESET_HINT_DISMISSED_KEY =
+  "tldw-prompt-hint-dismissed-filter-presets"
+const FILTER_PRESET_HINT_SHOWN_KEY = "tldw-prompt-hint-shown-filter-presets"
 
 const promptStudioStore = vi.hoisted(() => ({
   setActiveSubTab: vi.fn(),
@@ -354,12 +362,33 @@ vi.mock("../PromptActionsMenu", () => ({
       >
         view history
       </button>
+      {props?.onRetrySync && (
+        <button
+          type="button"
+          data-testid={`mock-retry-sync-${props?.promptId || "unknown"}`}
+          onClick={() => props.onRetrySync()}
+        >
+          retry sync
+        </button>
+      )}
     </div>
   )
 }))
 
 vi.mock("../SyncStatusBadge", () => ({
-  SyncStatusBadge: () => <span data-testid="mock-sync-status-badge" />
+  SyncStatusBadge: (props: any) => (
+    <span data-testid="mock-sync-status-badge">
+      {props?.onRetry && (
+        <button
+          type="button"
+          data-testid="mock-sync-status-retry"
+          onClick={() => props.onRetry()}
+        >
+          retry status
+        </button>
+      )}
+    </span>
+  )
 }))
 
 vi.mock("../ConflictResolutionModal", () => ({
@@ -436,6 +465,7 @@ describe("PromptBody server search and pagination", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.sessionStorage.clear()
+    window.localStorage.clear()
     mocks.navigate.mockReset()
     mocks.setSelectedQuickPrompt.mockReset()
     mocks.setSelectedSystemPrompt.mockReset()
@@ -552,6 +582,7 @@ describe("PromptBody server search and pagination", () => {
   afterEach(() => {
     setViewportWidth(1280)
     vi.clearAllMocks()
+    vi.restoreAllMocks()
   })
 
   it("exposes the screen-reader status live region", async () => {
@@ -702,6 +733,235 @@ describe("PromptBody server search and pagination", () => {
     })
     expect(getVisibleRowNames()).toEqual(["Beta Prompt"])
     expect(mocks.searchPromptsServer).not.toHaveBeenCalled()
+  })
+
+  it("saves the current custom filters from the toolbar", async () => {
+    renderPromptBody()
+
+    await screen.findByTestId("prompts-table")
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-save-toolbar"))
+    fireEvent.change(screen.getByTestId("prompts-filter-preset-toolbar-name"), {
+      target: { value: "Working set" }
+    })
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-toolbar-confirm"))
+
+    const saved = JSON.parse(
+      window.localStorage.getItem(FILTER_PRESETS_STORAGE_KEY) || "[]"
+    )
+    expect(saved).toHaveLength(1)
+    expect(saved[0]).toMatchObject({
+      name: "Working set",
+      typeFilter: "all",
+      syncFilter: "all",
+      usageFilter: "all",
+      tagFilter: [],
+      tagMatchMode: "any",
+      savedView: "all"
+    })
+    expect(screen.getByTestId("prompts-filter-preset-chips")).toHaveTextContent(
+      "Working set"
+    )
+  })
+
+  it("rejects duplicate toolbar filter preset names", async () => {
+    const warningSpy = vi.spyOn(notification, "warning")
+    window.localStorage.setItem(
+      FILTER_PRESETS_STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: "working-set",
+          name: "Working set",
+          typeFilter: "all",
+          syncFilter: "all",
+          usageFilter: "all",
+          tagFilter: [],
+          tagMatchMode: "any",
+          savedView: "all"
+        }
+      ])
+    )
+
+    renderPromptBody()
+
+    await screen.findByTestId("prompts-filter-preset-chip-working-set")
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-save-toolbar"))
+
+    const nameInput = screen.getByTestId("prompts-filter-preset-toolbar-name")
+    await waitFor(() => {
+      expect(nameInput).toHaveFocus()
+    })
+    expect(nameInput).toHaveAttribute("maxlength", "50")
+
+    fireEvent.change(nameInput, { target: { value: " working SET " } })
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-toolbar-confirm"))
+
+    await waitFor(() => {
+      expect(warningSpy).toHaveBeenCalled()
+    })
+    const latestWarning = warningSpy.mock.calls.at(-1)?.[0] as
+      | { message?: string }
+      | undefined
+    expect(latestWarning?.message).toBe("A preset with this name already exists.")
+
+    const saved = JSON.parse(
+      window.localStorage.getItem(FILTER_PRESETS_STORAGE_KEY) || "[]"
+    )
+    expect(saved).toHaveLength(1)
+    expect(saved[0]).toMatchObject({ id: "working-set", name: "Working set" })
+  })
+
+  it("loads saved filter presets from quick chips above the prompt table", async () => {
+    state.prompts = [
+      {
+        id: "system-unused",
+        name: "System Unused",
+        title: "System Unused",
+        content: "system",
+        is_system: true,
+        createdAt: 100,
+        usageCount: 0,
+        keywords: []
+      },
+      {
+        id: "system-used",
+        name: "System Used",
+        title: "System Used",
+        content: "system used",
+        is_system: true,
+        createdAt: 90,
+        usageCount: 3,
+        keywords: []
+      },
+      {
+        id: "quick-unused",
+        name: "Quick Unused",
+        title: "Quick Unused",
+        content: "quick",
+        is_system: false,
+        createdAt: 80,
+        usageCount: 0,
+        keywords: []
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    window.localStorage.setItem(
+      FILTER_PRESETS_STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: "unused-system",
+          name: "Unused systems",
+          typeFilter: "system",
+          syncFilter: "all",
+          usageFilter: "unused",
+          tagFilter: [],
+          tagMatchMode: "any",
+          savedView: "all"
+        }
+      ])
+    )
+
+    renderPromptBody()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("3")
+    })
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-chip-unused-system"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
+    })
+    expect(getVisibleRowNames()).toEqual(["System Unused"])
+  })
+
+  it("resets pagination when a preset narrows the local result set", async () => {
+    state.isOnline = false
+    state.prompts = [
+      ...Array.from({ length: 20 }, (_, index) => ({
+        id: `used-${index + 1}`,
+        name: `Used Prompt ${index + 1}`,
+        title: `Used Prompt ${index + 1}`,
+        content: `used content ${index + 1}`,
+        is_system: false,
+        createdAt: 1_000 - index,
+        usageCount: index + 1,
+        keywords: []
+      })),
+      {
+        id: "unused-only",
+        name: "Unused Only",
+        title: "Unused Only",
+        content: "unused content",
+        is_system: false,
+        createdAt: 1,
+        usageCount: 0,
+        keywords: []
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    window.localStorage.setItem(
+      FILTER_PRESETS_STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: "used-only",
+          name: "Used only",
+          typeFilter: "all",
+          syncFilter: "all",
+          usageFilter: "used",
+          tagFilter: [],
+          tagMatchMode: "any",
+          savedView: "all"
+        }
+      ])
+    )
+
+    renderPromptBody()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("20")
+    })
+    fireEvent.click(screen.getByTestId("table-next-page"))
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
+    })
+    expect(getVisibleRowNames()).toEqual(["Unused Only"])
+
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-chip-used-only"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("20")
+    })
+    expect(getVisibleRowNames()[0]).toBe("Used Prompt 1")
+  })
+
+  it("shows the filter preset hint after repeated filter changes", async () => {
+    const { unmount } = renderPromptBody()
+
+    await screen.findByTestId("prompts-table")
+    fireEvent.click(screen.getByTestId("facet-type-system"))
+    fireEvent.click(screen.getByTestId("facet-sync-local"))
+    fireEvent.click(screen.getByTestId("smart-collection-favorites"))
+
+    expect(await screen.findByTestId("hint-filter-presets")).toHaveTextContent(
+      "Save this filter combination as a preset to reuse it later."
+    )
+    await waitFor(() => {
+      expect(window.localStorage.getItem(FILTER_PRESET_HINT_SHOWN_KEY)).toBe("1")
+      expect(window.localStorage.getItem(FILTER_PRESET_HINT_DISMISSED_KEY)).toBe(
+        "true"
+      )
+    })
+
+    unmount()
+    renderPromptBody()
+
+    await screen.findByTestId("prompts-table")
+    fireEvent.click(screen.getByTestId("facet-type-system"))
+    fireEvent.click(screen.getByTestId("facet-sync-local"))
+    fireEvent.click(screen.getByTestId("smart-collection-favorites"))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("hint-filter-presets")).not.toBeInTheDocument()
+    })
   })
 
   it("applies title sort override and persists sort state in session storage", async () => {
@@ -954,6 +1214,118 @@ describe("PromptBody server search and pagination", () => {
     })
   })
 
+  it("wires per-prompt retry from pending sync badges and row actions", async () => {
+    state.prompts = [
+      {
+        id: "pending-retry",
+        name: "Pending Retry Prompt",
+        title: "Pending Retry Prompt",
+        content: "Needs sync retry",
+        is_system: false,
+        createdAt: 100,
+        updatedAt: 150,
+        serverId: 201,
+        studioProjectId: 77,
+        syncStatus: "pending",
+        sourceSystem: "workspace"
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    mocks.pushToStudio.mockResolvedValue({ success: true })
+
+    renderPromptBody()
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
+    })
+
+    fireEvent.click(screen.getByTestId("mock-sync-status-retry"))
+
+    await waitFor(() => {
+      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77)
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId("prompts-batch-sync-status")).not.toBeInTheDocument()
+    })
+
+    mocks.pushToStudio.mockClear()
+    fireEvent.click(screen.getByTestId("mock-retry-sync-pending-retry"))
+
+    await waitFor(() => {
+      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77)
+    })
+  })
+
+  it("does not start overlapping per-prompt retry runs", async () => {
+    state.prompts = [
+      {
+        id: "pending-retry",
+        name: "Pending Retry Prompt",
+        title: "Pending Retry Prompt",
+        content: "Needs sync retry",
+        is_system: false,
+        createdAt: 100,
+        updatedAt: 150,
+        serverId: 201,
+        studioProjectId: 77,
+        syncStatus: "pending",
+        sourceSystem: "workspace"
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    let resolvePush: (() => void) | undefined
+    mocks.pushToStudio.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePush = () => resolve({ success: true })
+        })
+    )
+
+    renderPromptBody()
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
+    })
+
+    const retryButton = screen.getByTestId("mock-sync-status-retry")
+    fireEvent.click(retryButton)
+    fireEvent.click(retryButton)
+
+    await waitFor(() => {
+      expect(mocks.pushToStudio).toHaveBeenCalledTimes(1)
+    })
+
+    resolvePush?.()
+    await waitFor(() => {
+      expect(screen.queryByTestId("prompts-batch-sync-status")).not.toBeInTheDocument()
+    })
+  })
+
+  it("does not expose per-prompt retry for pending copilot prompts", async () => {
+    state.prompts = [
+      {
+        id: "copilot-pending",
+        name: "Copilot Pending Prompt",
+        title: "Copilot Pending Prompt",
+        content: "Managed prompt",
+        is_system: false,
+        createdAt: 100,
+        updatedAt: 150,
+        serverId: 301,
+        studioProjectId: 77,
+        syncStatus: "pending",
+        sourceSystem: "copilot"
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+
+    renderPromptBody()
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
+    })
+
+    expect(screen.queryByTestId("mock-sync-status-retry")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("mock-retry-sync-copilot-pending")).not.toBeInTheDocument()
+  })
+
   it("preserves use-in-chat modal behavior and navigates with both prompt parts", async () => {
     state.prompts = [
       {
@@ -1090,7 +1462,7 @@ describe("PromptBody server search and pagination", () => {
   })
 
   it("copies a share link from custom prompt actions for synced prompts", async () => {
-    const writeText = vi.fn(async () => undefined)
+    const writeText = vi.fn(async (_text: string) => undefined)
     Object.defineProperty(window.navigator, "clipboard", {
       configurable: true,
       value: { writeText }
@@ -1107,7 +1479,7 @@ describe("PromptBody server search and pagination", () => {
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledTimes(1)
     })
-    const copiedUrl = writeText.mock.calls[0]?.[0] as string
+    const copiedUrl = String(writeText.mock.calls[0]?.[0] ?? "")
     expect(copiedUrl).toContain("prompt=101")
     expect(copiedUrl).toContain("source=studio")
   })
@@ -1183,6 +1555,65 @@ describe("PromptBody server search and pagination", () => {
     expect(screen.getByTestId("mock-prompt-drawer")).toHaveTextContent(
       "Imported Shared Prompt"
     )
+  })
+
+  it("does not open a shared prompt deep-link drawer after switching segments during import", async () => {
+    const infoSpy = vi.spyOn(notification, "info")
+    let resolvePull!: () => void
+    const importedPrompt = {
+      id: "imported-1",
+      name: "Imported Shared Prompt",
+      title: "Imported Shared Prompt",
+      content: "imported content",
+      is_system: false,
+      createdAt: 200,
+      serverId: 101,
+      keywords: []
+    }
+
+    state.prompts = []
+    mocks.getAllPrompts.mockImplementation(async () => state.prompts)
+    mocks.pullFromStudio.mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        resolvePull = () => {
+          state.prompts = [importedPrompt]
+          resolve()
+        }
+      })
+      return {
+        success: true,
+        localId: importedPrompt.id,
+        syncStatus: "synced"
+      }
+    })
+
+    renderPromptBody(["/prompts?prompt=101&source=studio"])
+
+    await waitFor(() => {
+      expect(mocks.pullFromStudio).toHaveBeenCalledWith(101)
+    })
+
+    fireEvent.click(screen.getByTestId("sidebar-ws-copilot"))
+    await waitFor(() => {
+      expect(screen.getByTestId("prompt-location-search")).toHaveTextContent(
+        "?tab=copilot"
+      )
+    })
+
+    resolvePull()
+
+    await waitFor(() => {
+      expect(infoSpy).toHaveBeenCalled()
+    })
+    const latestInfo = infoSpy.mock.calls.at(-1)?.[0] as
+      | { message?: string; description?: string }
+      | undefined
+    expect(latestInfo?.message).toBe("Shared prompt imported")
+    expect(latestInfo?.description).toBe(
+      "The prompt was imported but you navigated away. Switch back to the Custom tab to view it."
+    )
+    expect(screen.queryByTestId("mock-prompt-drawer")).not.toBeInTheDocument()
+    infoSpy.mockRestore()
   })
 
   it("handles later shared prompt deep-links after the first link is cleared", async () => {
@@ -1679,6 +2110,46 @@ describe("PromptBody server search and pagination", () => {
     })
   })
 
+  it("requires typing DELETE before emptying all trashed prompts", async () => {
+    const deletedAt = 1_700_000_000_000
+    mocks.getDeletedPrompts.mockResolvedValue([
+      { id: "trash-1", name: "Trash 1", content: "one", deletedAt },
+      { id: "trash-2", name: "Trash 2", content: "two", deletedAt }
+    ])
+    mocks.emptyTrash.mockResolvedValue(2)
+
+    renderPromptBody(["/prompts?tab=trash"])
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("2")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Empty Trash" }))
+
+    const confirmBody = await screen.findByTestId("prompts-empty-trash-confirm")
+    expect(confirmBody).toHaveTextContent("This permanently deletes every prompt in trash")
+    const confirmButton = screen.getAllByRole("button", { name: "Empty Trash" }).at(-1)
+    expect(confirmButton).toBeDisabled()
+    expect(mocks.emptyTrash).not.toHaveBeenCalled()
+
+    fireEvent.change(within(confirmBody).getByTestId("prompts-empty-trash-confirm-input"), {
+      target: { value: "delete" }
+    })
+    expect(confirmButton).toBeDisabled()
+
+    fireEvent.change(within(confirmBody).getByTestId("prompts-empty-trash-confirm-input"), {
+      target: { value: "DELETE" }
+    })
+    expect(confirmButton).not.toBeDisabled()
+
+    fireEvent.click(confirmButton!)
+    fireEvent.click(confirmButton!)
+
+    await waitFor(() => {
+      expect(mocks.emptyTrash).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it("shows a specific error for empty import files", async () => {
     const errorSpy = vi.spyOn(notification, "error")
 
@@ -1784,6 +2255,30 @@ describe("PromptBody server search and pagination", () => {
     await waitFor(() => {
       expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
     })
+  })
+
+  it("shows dismissible help on the copilot prompts tab", async () => {
+    renderPromptBody(["/prompts?tab=copilot"])
+
+    const help = await screen.findByTestId("prompts-copilot-help")
+    expect(help).toHaveTextContent("Copilot prompts")
+    expect(help).toHaveTextContent(
+      "server-provided prompt templates for common tasks"
+    )
+
+    fireEvent.click(screen.getByTestId("prompts-copilot-help-dismiss"))
+
+    expect(screen.queryByTestId("prompts-copilot-help")).not.toBeInTheDocument()
+    expect(window.localStorage.getItem(COPILOT_HELP_STORAGE_KEY)).toBe("true")
+  })
+
+  it("keeps copilot help dismissed after reload", async () => {
+    window.localStorage.setItem(COPILOT_HELP_STORAGE_KEY, "true")
+
+    renderPromptBody(["/prompts?tab=copilot"])
+
+    await screen.findByTestId("prompt-location-search")
+    expect(screen.queryByTestId("prompts-copilot-help")).not.toBeInTheDocument()
   })
 
   it("copies a copilot prompt into custom drawer defaults", async () => {

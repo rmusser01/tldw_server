@@ -1,7 +1,9 @@
 import asyncio
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
@@ -118,3 +120,52 @@ async def test_initialize_and_shutdown_do_not_overlap():
     module.shutdown_release.set()
     await asyncio.wait_for(shutdown_task, timeout=2.0)
     _ensure(not module._initialized, "module should be shut down at the end")
+
+
+def test_default_mcp_modules_config_declares_codegraph_disabled():
+    config_path = Path("tldw_Server_API/Config_Files/mcp_modules.yaml")
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    entry = next((module for module in data["modules"] if module.get("id") == "codegraph"), None)
+
+    assert entry is not None  # nosec B101
+    assert entry["enabled"] is False  # nosec B101
+    assert entry["class"] == (  # nosec B101
+        "tldw_Server_API.app.core.MCP_unified.modules.implementations.codegraph_module:CodeGraphModule"
+    )
+
+
+@pytest.mark.asyncio
+async def test_server_skips_disabled_codegraph_module_from_config(monkeypatch, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    config_path = tmp_path / "mcp_modules.yaml"
+    config_path.write_text(
+        """
+modules:
+  - id: codegraph
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.codegraph_module:CodeGraphModule
+    enabled: false
+    name: CodeGraph
+    version: "0.1.0"
+    department: code
+    settings: {}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    server = MCPServer()
+    registered_module_ids: list[str] = []
+
+    async def _capture_registration(module_id, module_type, config):  # noqa: ANN001, ARG001
+        registered_module_ids.append(str(module_id))
+
+    monkeypatch.setattr(server.module_registry, "register_module", _capture_registration)
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(config_path))
+    monkeypatch.setenv("MCP_MODULES", "")
+    monkeypatch.setenv("MCP_ENABLE_MEDIA_MODULE", "0")
+    monkeypatch.setenv("MCP_ENABLE_FILESYSTEM_MODULE", "0")
+
+    await server._register_default_modules()
+
+    assert "codegraph" not in registered_module_ids  # nosec B101

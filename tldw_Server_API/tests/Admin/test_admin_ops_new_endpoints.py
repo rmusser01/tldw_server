@@ -15,6 +15,19 @@ from typing import Any
 from unittest import mock
 
 import pytest
+from fastapi import HTTPException
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debug_records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.warning_records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.debug_records.append((message, args, kwargs))
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.warning_records.append((message, args, kwargs))
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +127,11 @@ class TestIncidentSlaMetrics:
 
         # list_incidents computes mtta_minutes and mttr_minutes per incident
         incidents, total = service.list_incidents(
-            status=None, severity=None, tag=None, limit=10000, offset=0,
+            status=None,
+            severity=None,
+            tag=None,
+            limit=10000,
+            offset=0,
         )
 
         assert total == 2
@@ -133,7 +150,7 @@ class TestIncidentSlaMetrics:
         """Open incidents without acknowledged_at have null MTTA."""
         service, _ = _configure_store(monkeypatch, tmp_path)
 
-        incident = service.create_incident(
+        service.create_incident(
             title="New issue",
             status="open",
             severity="low",
@@ -143,7 +160,11 @@ class TestIncidentSlaMetrics:
         )
 
         incidents, _ = service.list_incidents(
-            status=None, severity=None, tag=None, limit=100, offset=0,
+            status=None,
+            severity=None,
+            tag=None,
+            limit=100,
+            offset=0,
         )
 
         assert len(incidents) == 1
@@ -182,7 +203,11 @@ class TestIncidentSlaMetrics:
         store_path.write_text(json.dumps(store_data), encoding="utf-8")
 
         incidents, total = service.list_incidents(
-            status=None, severity=None, tag=None, limit=100, offset=0,
+            status=None,
+            severity=None,
+            tag=None,
+            limit=100,
+            offset=0,
         )
 
         assert total == 1
@@ -194,7 +219,11 @@ class TestIncidentSlaMetrics:
         service, _ = _configure_store(monkeypatch, tmp_path)
 
         incidents, total = service.list_incidents(
-            status=None, severity=None, tag=None, limit=100, offset=0,
+            status=None,
+            severity=None,
+            tag=None,
+            limit=100,
+            offset=0,
         )
 
         assert total == 0
@@ -337,6 +366,28 @@ class TestEmailDeliveries:
         assert len(items) == 3
         # Newest first
         assert items[0]["recipient"] == "user4@example.com"
+
+    def test_email_delivery_order_uses_append_order_for_timestamp_ties(self, monkeypatch, tmp_path):
+        """Records with equal timestamps still list the most recent append first."""
+        service, _ = _configure_store(monkeypatch, tmp_path)
+        monkeypatch.setattr(service, "_now_iso", lambda: "2026-04-26T01:00:00Z")
+
+        for i in range(5):
+            service.record_email_delivery(
+                recipient=f"user{i}@example.com",
+                subject=f"Subject {i}",
+                template="welcome",
+                status="sent",
+            )
+
+        items, total = service.list_email_deliveries(limit=3, offset=0)
+
+        assert total == 5
+        assert [item["recipient"] for item in items] == [
+            "user4@example.com",
+            "user3@example.com",
+            "user2@example.com",
+        ]
 
     def test_email_delivery_pagination_offset(self, monkeypatch, tmp_path):
         """Offset parameter correctly skips entries."""
@@ -487,6 +538,8 @@ class TestRealtimeStats:
         """When ACP store is unavailable, stats return zeroed values."""
         from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
 
+        logger_stub = _LoggerStub()
+        monkeypatch.setattr(admin_ops, "logger", logger_stub)
         monkeypatch.setattr(
             "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops._require_platform_admin",
             lambda _: None,
@@ -508,6 +561,7 @@ class TestRealtimeStats:
         assert result["tokens_today"]["prompt"] == 0
         assert result["tokens_today"]["completion"] == 0
         assert result["tokens_today"]["total"] == 0
+        assert logger_stub.debug_records == [("Realtime stats: ACP session store unavailable", (), {})]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -609,6 +663,8 @@ class TestCompliancePosture:
         """DB errors yield zeroed metrics rather than an exception."""
         from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
 
+        logger_stub = _LoggerStub()
+        monkeypatch.setattr(admin_ops, "logger", logger_stub)
         monkeypatch.setattr(
             "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops._require_platform_admin",
             lambda _: None,
@@ -635,6 +691,10 @@ class TestCompliancePosture:
         assert result["mfa_adoption_pct"] == 0.0
         assert result["key_rotation_compliance_pct"] == 0.0
         assert result["overall_score"] == 20.0
+        assert logger_stub.warning_records == [
+            ("compliance/posture: MFA query failed", (), {}),
+            ("compliance/posture: API key rotation query failed", (), {}),
+        ]
 
     @pytest.mark.asyncio
     async def test_compliance_posture_overall_score_capped_at_100(self, monkeypatch):
@@ -668,3 +728,190 @@ class TestCompliancePosture:
 
         # 100*0.4 + 100*0.4 + 20 = 100.0 (capped)
         assert result["overall_score"] == 100.0
+
+
+class TestAdminOpsErrorSanitization:
+    """Direct endpoint tests for narrow admin_ops fallback sanitization."""
+
+    @pytest.mark.asyncio
+    async def test_billing_analytics_sanitizes_backend_warning_log(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        class _ExplodingBillingRepo:
+            def __init__(self, db_pool: object) -> None:
+                self.db_pool = db_pool
+
+            async def list_all_subscriptions(self):
+                raise RuntimeError("billing backend exploded at /private/billing.db")
+
+        logger_stub = _LoggerStub()
+        monkeypatch.setattr(admin_ops, "logger", logger_stub)
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops._require_platform_admin",
+            lambda _: None,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Billing.runtime_flags.is_billing_enabled",
+            lambda: True,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.repos.billing_repo.AuthnzBillingRepo",
+            _ExplodingBillingRepo,
+        )
+        monkeypatch.setattr(admin_ops, "get_db_pool", mock.AsyncMock(return_value=object()))
+
+        result = await admin_ops.get_billing_analytics(principal=mock.MagicMock())
+
+        assert result["mrr_cents"] == 0
+        assert result["subscriber_count"] == 0
+        assert result["plan_distribution"] == []
+        assert logger_stub.warning_records == [("billing/analytics: failed to compute metrics", (), {})]
+
+    @pytest.mark.asyncio
+    async def test_get_dependency_uptime_sanitizes_backend_error(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops._require_platform_admin",
+            lambda _: None,
+        )
+
+        def _raise_uptime(name: str, days: int) -> dict[str, Any]:
+            _ = (name, days)
+            raise OSError("uptime backend exploded")
+
+        monkeypatch.setattr(admin_ops, "svc_get_uptime_stats", _raise_uptime)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_ops.get_dependency_uptime(
+                name="authnz",
+                days=30,
+                principal=mock.MagicMock(),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to get dependency uptime"
+
+    @pytest.mark.asyncio
+    async def test_list_email_deliveries_sanitizes_backend_error(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops._require_platform_admin",
+            lambda _: None,
+        )
+
+        def _raise_deliveries(*, limit: int, offset: int, status: str | None):
+            _ = (limit, offset, status)
+            raise OSError("email delivery backend exploded")
+
+        monkeypatch.setattr(admin_ops, "svc_list_email_deliveries", _raise_deliveries)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_ops.list_email_deliveries(
+                limit=50,
+                offset=0,
+                status=None,
+                principal=mock.MagicMock(),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to list email deliveries"
+
+    @pytest.mark.asyncio
+    async def test_list_email_deliveries_returns_canonical_pagination(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops._require_platform_admin",
+            lambda _: None,
+        )
+
+        def _list_deliveries(*, limit: int, offset: int, status: str | None):
+            assert limit == 2
+            assert offset == 1
+            assert status == "failed"
+            return ([{"id": "delivery-2"}], 3)
+
+        monkeypatch.setattr(admin_ops, "svc_list_email_deliveries", _list_deliveries)
+
+        response = await admin_ops.list_email_deliveries(
+            limit=2,
+            offset=1,
+            status="failed",
+            principal=mock.MagicMock(),
+        )
+        payload = response.model_dump(mode="json")
+
+        assert payload["items"] == [
+            {
+                "id": "delivery-2",
+                "recipient": "",
+                "subject": "",
+                "template": None,
+                "status": "",
+                "error": None,
+                "sent_at": None,
+            }
+        ]
+        assert payload["total"] == 3
+        assert payload["limit"] == 2
+        assert payload["offset"] == 1
+        assert payload["pagination"] == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 1,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 3,
+        }
+        assert payload["has_more"] is True
+        assert payload["next_offset"] == 3
+
+    @pytest.mark.asyncio
+    async def test_reload_llm_pricing_catalog_sanitizes_backend_error_log(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        def _raise_reload() -> None:
+            raise RuntimeError("pricing reload exploded at /private/pricing.json")
+
+        messages: list[str] = []
+        sink_id = admin_ops.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+        monkeypatch.setattr(admin_ops, "reset_pricing_catalog", _raise_reload)
+
+        try:
+            with pytest.raises(HTTPException) as exc_info:
+                await admin_ops.reload_llm_pricing_catalog()
+        finally:
+            admin_ops.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to reload pricing catalog"
+        assert "Failed to reload pricing catalog" in joined
+        assert "pricing reload exploded" not in joined
+        assert "/private/" not in joined
+
+    @pytest.mark.asyncio
+    async def test_reload_chat_model_alias_caches_sanitizes_backend_error_log(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        def _raise_reload() -> None:
+            raise RuntimeError("model alias reload exploded at /private/model_aliases.json")
+
+        messages: list[str] = []
+        sink_id = admin_ops.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+        monkeypatch.setattr(admin_ops, "invalidate_model_alias_caches", _raise_reload)
+
+        try:
+            with pytest.raises(HTTPException) as exc_info:
+                await admin_ops.reload_chat_model_alias_caches()
+        finally:
+            admin_ops.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to reload chat model alias caches"
+        assert "Failed to reload chat model alias caches" in joined
+        assert "model alias reload exploded" not in joined
+        assert "/private/" not in joined

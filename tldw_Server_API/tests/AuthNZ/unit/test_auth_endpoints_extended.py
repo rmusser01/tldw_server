@@ -1423,6 +1423,28 @@ async def test_revoke_all_sessions_returns_revoked_count():
 
 
 @pytest.mark.asyncio
+async def test_list_user_sessions_sanitizes_backend_error_in_test_mode(monkeypatch):
+    reset_settings()
+
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    class _FailingSessionManager:
+        async def get_user_sessions(self, user_id: int):
+            raise RuntimeError(f"session backend exploded for user {user_id}")
+
+    monkeypatch.setattr(auth, "_is_test_mode", lambda: True)
+
+    with pytest.raises(HTTPException) as exc:
+        await auth.list_user_sessions(
+            current_user=SimpleNamespace(id=77),
+            session_manager=_FailingSessionManager(),
+        )
+
+    assert exc.value.status_code == 500
+    assert exc.value.detail == "Failed to retrieve sessions"
+
+
+@pytest.mark.asyncio
 async def test_logout_raises_when_access_token_revoke_fails(monkeypatch):
     reset_settings()
 

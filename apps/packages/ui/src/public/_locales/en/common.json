@@ -56,6 +56,18 @@
   "close": {
     "message": "Close"
   },
+  "storageQuota_exceededTitle": {
+    "message": "Storage nearly full"
+  },
+  "storageQuota_exceededDescription": {
+    "message": "Workspace storage is {{pct}}% full ({{usedMB}}/{{budgetMB}} MB). New data may not save. Archive or delete old workspaces to free space."
+  },
+  "storageQuota_warningTitle": {
+    "message": "Storage getting full"
+  },
+  "storageQuota_warningDescription": {
+    "message": "Workspace storage is {{pct}}% full ({{usedMB}}/{{budgetMB}} MB). Consider archiving old workspaces."
+  },
   "loadMore": {
     "message": "Load More..."
   },
@@ -1383,7 +1395,7 @@
     "message": "Go to Media"
   },
   "shortcuts_goToKnowledge": {
-    "message": "Go to Knowledge QA"
+    "message": "Go to Knowledge"
   },
   "shortcuts_goToNotes": {
     "message": "Go to Notes"
@@ -1401,7 +1413,7 @@
     "message": "for commands"
   },
   "commandPalette_goToKnowledge": {
-    "message": "Go to Knowledge QA"
+    "message": "Go to Knowledge"
   },
   "commandPalette_goToPrompts": {
     "message": "Go to Prompts"

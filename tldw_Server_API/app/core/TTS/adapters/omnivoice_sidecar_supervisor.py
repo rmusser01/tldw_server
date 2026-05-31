@@ -18,6 +18,14 @@ from .omnivoice_sidecar_protocol import X_TLDW_SIDECAR_TOKEN_HEADER, build_sidec
 from .omnivoice_sidecar_server import validate_loopback_host
 
 
+_READY_OR_REACHABLE_HEALTH_STATUSES = {
+    "idle_stopped",
+    "model_unavailable",
+    "runtime_missing",
+    "degraded",
+}
+
+
 def create_sidecar_async_client(*, timeout: float | None = None) -> httpx.AsyncClient:
     """Create an httpx client dedicated to loopback sidecar traffic."""
     kwargs: dict[str, Any] = {"trust_env": False}
@@ -41,6 +49,15 @@ class OmniVoiceSidecarSupervisor:
         self._healthcheck_interval_seconds = float(self._coalesce_extra_param("healthcheck_interval_seconds", 0.25))
         self._startup_backoff_seconds = float(self._coalesce_extra_param("startup_backoff_seconds", 5.0))
         self._idle_shutdown_seconds = float(self._coalesce_extra_param("idle_shutdown_seconds", 900.0))
+        self._model = self._resolve_non_empty_value(self._provider_config.get("model"))
+        self._model_path = self._resolve_optional_path(self._extra_params.get("model_path"))
+        self._runtime_path = self._resolve_optional_path(self._extra_params.get("runtime_path"))
+        scratch_dir = self._resolve_optional_path(self._extra_params.get("scratch_dir"))
+        if scratch_dir is None and self._runtime_path is not None:
+            scratch_dir = self._runtime_path / "scratch"
+        self._scratch_dir = scratch_dir
+        self._device_map = self._resolve_non_empty_value(self._extra_params.get("device_map"))
+        self._dtype = self._resolve_non_empty_value(self._extra_params.get("dtype"))
         self._closing = False
         self._token = secrets.token_urlsafe(32)
         self._client: httpx.AsyncClient | None = None
@@ -54,6 +71,22 @@ class OmniVoiceSidecarSupervisor:
     def _coalesce_extra_param(self, key: str, default: Any) -> Any:
         value = self._extra_params.get(key)
         return default if value is None else value
+
+    @staticmethod
+    def _resolve_non_empty_value(value: Any) -> str | None:
+        if value is None:
+            return None
+        resolved = str(value).strip()
+        return resolved or None
+
+    def _resolve_optional_path(self, value: Any) -> Path | None:
+        resolved = self._resolve_non_empty_value(value)
+        if resolved is None:
+            return None
+        path = Path(resolved).expanduser()
+        if not path.is_absolute():
+            path = self._repo_root / path
+        return path.resolve()
 
     def _resolve_interpreter(self) -> str:
         configured = self._extra_params.get("python_path") or self._extra_params.get("interpreter_path")
@@ -160,7 +193,21 @@ class OmniVoiceSidecarSupervisor:
                 "OMNIVOICE_SIDECAR_PORT": str(port),
             }
         )
+        optional_env_values = {
+            "OMNIVOICE_MODEL": self._model,
+            "OMNIVOICE_MODEL_PATH": str(self._model_path) if self._model_path is not None else None,
+            "OMNIVOICE_RUNTIME_PATH": str(self._runtime_path) if self._runtime_path is not None else None,
+            "OMNIVOICE_SCRATCH_DIR": str(self._scratch_dir) if self._scratch_dir is not None else None,
+            "OMNIVOICE_DEVICE_MAP": self._device_map,
+            "OMNIVOICE_DTYPE": self._dtype,
+        }
+        env.update({key: value for key, value in optional_env_values.items() if value})
         return env
+
+    def _prepare_runtime_directories(self) -> None:
+        for directory in (self._runtime_path, self._scratch_dir):
+            if directory is not None:
+                directory.mkdir(parents=True, exist_ok=True)
 
     async def shutdown_if_idle(self) -> bool:
         async with self._lock:
@@ -200,6 +247,7 @@ class OmniVoiceSidecarSupervisor:
         )
 
     async def _spawn_sidecar(self, port: int) -> asyncio.subprocess.Process:
+        self._prepare_runtime_directories()
         env = self._build_subprocess_env(port=port)
         logger.debug("Starting OmniVoice sidecar on {}:{}", self._host, port)
         return await asyncio.create_subprocess_exec(
@@ -217,6 +265,7 @@ class OmniVoiceSidecarSupervisor:
         deadline = asyncio.get_running_loop().time() + self._healthcheck_timeout_seconds
         headers = build_sidecar_auth_headers(self._token)
         client = await self.get_http_client(timeout=self._healthcheck_interval_seconds)
+        last_http_error: httpx.HTTPError | None = None
 
         while asyncio.get_running_loop().time() < deadline:
             if self._process is not None and self._process.returncode is not None:
@@ -231,12 +280,18 @@ class OmniVoiceSidecarSupervisor:
                 )
                 if response.status_code == 200:
                     payload = response.json()
-                    if bool(payload.get("ready", True)):
+                    if bool(payload.get("ready")) or payload.get("status") in _READY_OR_REACHABLE_HEALTH_STATUSES:
                         return
-            except httpx.HTTPError:
-                pass
+            except httpx.HTTPError as exc:
+                last_http_error = exc
             await asyncio.sleep(self._healthcheck_interval_seconds)
 
+        if last_http_error is not None:
+            logger.debug(
+                "OmniVoice sidecar health polling failed; last HTTP error: {}",
+                last_http_error,
+            )
+            raise RuntimeError("OmniVoice sidecar did not reach /health") from last_http_error
         raise RuntimeError("OmniVoice sidecar did not reach /health")
 
     def _clear_process_state(self, process: asyncio.subprocess.Process | None = None) -> None:

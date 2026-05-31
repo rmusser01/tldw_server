@@ -334,6 +334,41 @@ describe("useServerChatHistory", () => {
     queryClient.clear()
   })
 
+  it("passes character filter mode through server-side search as character scope", async () => {
+    searchConversationsWithMetaMock.mockResolvedValueOnce({
+      chats: [createChat(17, { character_id: 7, title: "Mira replay" })],
+      total: 1
+    })
+
+    const { queryClient, wrapper } = createWrapper()
+    const { result } = renderHook(
+      () =>
+        useServerChatHistory("mira", {
+          enabled: true,
+          mode: "search",
+          filterMode: "character"
+        }),
+      { wrapper }
+    )
+
+    await waitFor(() =>
+      expect(result.current.data.map((chat) => chat.id)).toEqual(["chat-17"])
+    )
+
+    expect(searchConversationsWithMetaMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: "mira",
+        limit: 50,
+        offset: 0,
+        order_by: "recency",
+        character_scope: "character"
+      }),
+      expect.anything()
+    )
+
+    queryClient.clear()
+  })
+
   it("pages server-side search results when search mode receives page and limit", async () => {
     searchConversationsWithMetaMock.mockResolvedValueOnce({
       chats: [createChat(26, { title: "Quota page 2" })],

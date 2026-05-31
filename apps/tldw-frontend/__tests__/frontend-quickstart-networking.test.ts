@@ -103,11 +103,24 @@ describe("frontend quickstart networking", () => {
     expect(rewrites).toEqual(
       expect.arrayContaining([
         {
+          source: "/api/:path*/",
+          destination: "http://app:8000/api/:path*/",
+        },
+        {
           source: "/api/:path*",
           destination: "http://app:8000/api/:path*",
         },
       ])
     )
+  })
+
+  it("preserves API trailing slashes so quickstart rewrites hit backend-canonical routes", async () => {
+    const nextConfig = await loadNextConfig({
+      NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "quickstart",
+      TLDW_INTERNAL_API_ORIGIN: "http://app:8000",
+    })
+
+    expect(nextConfig.skipTrailingSlashRedirect).toBe(true)
   })
 
   it("requires TLDW_INTERNAL_API_ORIGIN in quickstart mode", async () => {
@@ -206,6 +219,10 @@ describe("frontend quickstart networking", () => {
 
     expect(rewrites).toEqual(
       expect.arrayContaining([
+        {
+          source: "/api/:path*/",
+          destination: "http://app:8000/api/:path*/",
+        },
         {
           source: "/api/:path*",
           destination: "http://app:8000/api/:path*",

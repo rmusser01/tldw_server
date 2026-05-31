@@ -92,7 +92,7 @@
     "modeSpeech": "Tale",
     "moreTools": "Mere",
     "writingPlayground": "Skriveværksted",
-    "workspacePlayground": "Model Playground",
+    "researchWorkspace": "Research Workspace",
     "acpPlayground": "ACP Playground",
     "skills": "Skills",
     "adminLlamacpp": "Llama.cpp Admin",
@@ -101,7 +101,7 @@
     "collections": "Collections",
     "dataTables": "Data Tables",
     "documentWorkspace": "Document Workspace",
-    "modelPlayground": "Workspace Playground",
+    "modelPlayground": "Model Playground",
     "workflowEditor": "Workflow Editor",
     "modeRepo2txt": "Repo2Txt"
   },

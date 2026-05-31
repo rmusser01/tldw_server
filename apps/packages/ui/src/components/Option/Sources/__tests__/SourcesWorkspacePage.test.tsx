@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -176,12 +176,49 @@ describe("SourcesWorkspacePage", () => {
 
     renderWorkspace(<SourcesWorkspacePage />)
 
+    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Sources are unavailable")).toBeInTheDocument()
     expect(
-      screen.getByText("This server does not advertise ingestion source support.")
+      screen.getByRole("heading", { name: "Sources are unavailable on this server" })
     ).toBeInTheDocument()
+    expect(
+      screen.getByText("The connected server does not advertise ingestion source management.")
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/ingestion-sources"
+    )
     expect(hookMocks.useIngestionSourcesQuery).toHaveBeenCalledWith(undefined, {
       enabled: false
     })
+  })
+
+  it("moves raw sources load failures into diagnostics", () => {
+    const rawError = Object.assign(
+      new Error("Request failed: 404 (GET /api/v1/ingestion-sources)"),
+      { status: 404 }
+    )
+    hookMocks.useIngestionSourcesQuery.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: rawError,
+      refetch: vi.fn()
+    })
+
+    renderWorkspace(<SourcesWorkspacePage />)
+
+    expect(
+      screen.getByRole("heading", { name: "Sources are unavailable on this server" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("The connected server does not advertise ingestion source management.")
+    ).toBeInTheDocument()
+
+    const diagnostics = screen.getByLabelText("Diagnostics")
+    expect(within(diagnostics).getByText("/api/v1/ingestion-sources")).toBeInTheDocument()
+    expect(within(diagnostics).getByText("404")).toBeInTheDocument()
+    expect(
+      within(diagnostics).getByText("Request failed: 404 (GET /api/v1/ingestion-sources)")
+    ).toBeInTheDocument()
   })
 
   it("wires enable disable actions through the update mutation", async () => {

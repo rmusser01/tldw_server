@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import AudioBriefingTriggerResult
 
 
 pytestmark = pytest.mark.unit
@@ -61,7 +62,6 @@ def client_with_mutable_user(monkeypatch, tmp_path):
 
 def test_sources_crud_and_tags(client_with_user):
 
-
     c = client_with_user
 
     # Create groups for source membership updates
@@ -92,6 +92,12 @@ def test_sources_crud_and_tags(client_with_user):
     assert r.status_code == 200
     data = r.json()
     assert data["total"] >= 1
+    assert data["pagination"]["total"] >= 1
+    assert data["pagination"]["limit"] == 50
+    assert data["pagination"]["offset"] == 0
+    assert data["pagination"]["has_more"] is False
+    assert data["has_more"] is False
+    assert data["next_offset"] is None
     assert any(it["id"] == sid for it in data["items"])
 
     # Get source
@@ -116,7 +122,14 @@ def test_sources_crud_and_tags(client_with_user):
     # Tags list
     r = c.get("/api/v1/watchlists/tags")
     assert r.status_code == 200
-    tags = r.json().get("items", [])
+    tags_payload = r.json()
+    tags = tags_payload.get("items", [])
+    pagination = tags_payload["pagination"]
+    assert pagination["total"] >= 2
+    assert pagination["limit"] == 50
+    assert pagination["offset"] == 0
+    assert tags_payload["has_more"] == pagination["has_more"]
+    assert tags_payload["next_offset"] == pagination["next_offset"]
     names = {t["name"] for t in tags}
     assert {"news", "tech", "updates"}.issubset(names)
 
@@ -238,13 +251,21 @@ def test_sources_check_now_endpoint_triggers_runs_and_items(client_with_user, mo
 
     runs_resp = c.get("/api/v1/watchlists/runs", params={"page": 1, "size": 20})
     assert runs_resp.status_code == 200, runs_resp.text
-    run_ids = [int(run["id"]) for run in runs_resp.json().get("items", [])]
+    runs_payload = runs_resp.json()
+    assert runs_payload["pagination"]["total"] >= 1
+    assert runs_payload["pagination"]["limit"] == 20
+    assert runs_payload["pagination"]["offset"] == 0
+    assert runs_payload["has_more"] == runs_payload["pagination"]["has_more"]
+    assert runs_payload["next_offset"] == runs_payload["pagination"]["next_offset"]
+    run_ids = [int(run["id"]) for run in runs_payload.get("items", [])]
     assert run_id in run_ids
 
     items_resp = c.get("/api/v1/watchlists/items", params={"source_id": source_id, "page": 1, "size": 20})
     assert items_resp.status_code == 200, items_resp.text
     items_payload = items_resp.json()
     assert int(items_payload.get("total", 0)) >= 1
+    assert items_payload["has_more"] == items_payload["pagination"]["has_more"]
+    assert items_payload["next_offset"] == items_payload["pagination"]["next_offset"]
     assert any(int(item.get("source_id", -1)) == source_id for item in items_payload.get("items", []))
 
 
@@ -283,8 +304,8 @@ def test_sources_check_now_reports_run_errors_and_missing_sources(client_with_us
     assert by_source[source_id]["detail"] == "run_trigger_failed"
     assert by_source[999999]["status"] == "not_found"
 
-def test_source_group_validation_and_idempotent_create(client_with_user):
 
+def test_source_group_validation_and_idempotent_create(client_with_user):
 
     c = client_with_user
 
@@ -480,8 +501,8 @@ def test_job_delete_and_restore_fidelity(client_with_user):
     assert restored_filters["filters"][0]["action"] == "include"
     assert restored_filters["filters"][0]["value"] == {"keywords": ["ai"]}
 
-def test_bulk_sources_and_groups_and_jobs(client_with_user):
 
+def test_bulk_sources_and_groups_and_jobs(client_with_user):
 
     c = client_with_user
 
@@ -504,7 +525,13 @@ def test_bulk_sources_and_groups_and_jobs(client_with_user):
     gid = g["id"]
     r = c.get("/api/v1/watchlists/groups")
     assert r.status_code == 200
-    assert any(x["id"] == gid for x in r.json().get("items", []))
+    groups_payload = r.json()
+    assert groups_payload["pagination"]["total"] >= 1
+    assert groups_payload["pagination"]["limit"] == 50
+    assert groups_payload["pagination"]["offset"] == 0
+    assert groups_payload["has_more"] == groups_payload["pagination"]["has_more"]
+    assert groups_payload["next_offset"] == groups_payload["pagination"]["next_offset"]
+    assert any(x["id"] == gid for x in groups_payload.get("items", []))
     r = c.patch(f"/api/v1/watchlists/groups/{gid}", json={"description": "Updated"})
     assert r.status_code == 200
     assert r.json()["description"] == "Updated"
@@ -523,7 +550,13 @@ def test_bulk_sources_and_groups_and_jobs(client_with_user):
     jid = job["id"]
     r = c.get("/api/v1/watchlists/jobs")
     assert r.status_code == 200
-    assert any(x["id"] == jid for x in r.json().get("items", []))
+    jobs_payload = r.json()
+    assert jobs_payload["pagination"]["total"] >= 1
+    assert jobs_payload["pagination"]["limit"] == 50
+    assert jobs_payload["pagination"]["offset"] == 0
+    assert jobs_payload["has_more"] == jobs_payload["pagination"]["has_more"]
+    assert jobs_payload["next_offset"] == jobs_payload["pagination"]["next_offset"]
+    assert any(x["id"] == jid for x in jobs_payload.get("items", []))
     r = c.get(f"/api/v1/watchlists/jobs/{jid}")
     assert r.status_code == 200
     # Update job
@@ -608,13 +641,7 @@ def test_create_job_email_validation_returns_structured_detail(client_with_user)
             "schedule_expr": None,
             "timezone": "UTC",
             "active": True,
-            "output_prefs": {
-                "deliveries": {
-                    "email": {
-                        "recipients": ["valid@example.com", "bad-email", "also bad"]
-                    }
-                }
-            },
+            "output_prefs": {"deliveries": {"email": {"recipients": ["valid@example.com", "bad-email", "also bad"]}}},
         },
     )
     detail = _assert_watchlists_validation_error(
@@ -645,11 +672,7 @@ def test_update_job_email_validation_returns_structured_detail(client_with_user)
 
     update_resp = c.patch(
         f"/api/v1/watchlists/jobs/{job_id}",
-        json={
-            "output_prefs": {
-                "deliveries": {"email": {"recipients": ["not-an-email"]}}
-            }
-        },
+        json={"output_prefs": {"deliveries": {"email": {"recipients": ["not-an-email"]}}}},
     )
     detail = _assert_watchlists_validation_error(
         update_resp,
@@ -716,6 +739,7 @@ def test_cancel_run_endpoint_rejects_terminal_runs(client_with_user):
     assert payload["status"] == "completed"
     assert payload["message"] == "run_not_cancellable"
 
+
 def test_forum_sources_feature_flag(client_with_user, monkeypatch):
     c = client_with_user
 
@@ -766,7 +790,6 @@ def test_watchlists_run_stream_ws(client_with_user, tmp_path):
 
 def test_items_and_outputs_flow(client_with_user, monkeypatch):
 
-
     c = client_with_user
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("WATCHLIST_OUTPUT_DEFAULT_TTL_SECONDS", "0")
@@ -806,6 +829,11 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["total"] >= 1
+    assert data["pagination"]["total"] >= 1
+    assert data["pagination"]["limit"] == 50
+    assert data["pagination"]["offset"] == 0
+    assert data["has_more"] == data["pagination"]["has_more"]
+    assert data["next_offset"] == data["pagination"]["next_offset"]
     first_item = data["items"][0]
     item_id = first_item["id"]
     assert first_item["status"] in {"ingested", "error", "duplicate"}
@@ -920,6 +948,11 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     assert r.status_code == 200, r.text
     outputs = r.json()
     assert outputs["total"] >= 2
+    assert outputs["pagination"]["total"] >= 2
+    assert outputs["pagination"]["limit"] == 50
+    assert outputs["pagination"]["offset"] == 0
+    assert outputs["has_more"] == outputs["pagination"]["has_more"]
+    assert outputs["next_offset"] == outputs["pagination"]["next_offset"]
     assert any(o["id"] == output_id for o in outputs["items"])
 
     # Output metadata
@@ -947,7 +980,9 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     db_template = r.json()
     assert db_template["name"] == db_template_name
 
-    r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": db_template_name, "temporary": True})
+    r = c.post(
+        "/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": db_template_name, "temporary": True}
+    )
     assert r.status_code == 200, r.text
     db_output = r.json()
     assert db_output["version"] == 4
@@ -984,7 +1019,9 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     assert "Markdown summary template" in template_detail["description"]
 
     # Generate output using stored template
-    r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": legacy_template_name, "temporary": True})
+    r = c.post(
+        "/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": legacy_template_name, "temporary": True}
+    )
     assert r.status_code == 200, r.text
     templated = r.json()
     assert templated["version"] == 5
@@ -1005,7 +1042,9 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     assert r.status_code == 200, r.text
     colliding_db_template = r.json()
 
-    r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": legacy_template_name, "temporary": True})
+    r = c.post(
+        "/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": legacy_template_name, "temporary": True}
+    )
     assert r.status_code == 200, r.text
     collision_output = r.json()
     assert collision_output["version"] == 6
@@ -1027,7 +1066,6 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
 
 def test_watchlists_outputs_variants_and_ingest(client_with_user, monkeypatch):
 
-
     c = client_with_user
     monkeypatch.setenv("TEST_MODE", "1")
 
@@ -1040,6 +1078,10 @@ def test_watchlists_outputs_variants_and_ingest(client_with_user, monkeypatch):
 
     monkeypatch.setattr(
         "tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2",
+        _fake_get_tts_service_v2,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.outputs_service.get_tts_service_v2",
         _fake_get_tts_service_v2,
     )
 
@@ -1185,6 +1227,12 @@ def test_watchlists_outputs_pagination_excludes_mixed_origin_rows(client_with_us
     assert r.status_code == 200, r.text
     page1 = r.json()
     assert page1["total"] == 2
+    assert page1["pagination"]["total"] == 2
+    assert page1["pagination"]["limit"] == 1
+    assert page1["pagination"]["offset"] == 0
+    assert page1["pagination"]["has_more"] is True
+    assert page1["has_more"] is True
+    assert page1["next_offset"] == page1["pagination"]["next_offset"]
     assert len(page1["items"]) == 1
     assert page1["items"][0]["id"] == wl_new.id
 
@@ -1192,6 +1240,12 @@ def test_watchlists_outputs_pagination_excludes_mixed_origin_rows(client_with_us
     assert r.status_code == 200, r.text
     page2 = r.json()
     assert page2["total"] == 2
+    assert page2["pagination"]["total"] == 2
+    assert page2["pagination"]["limit"] == 1
+    assert page2["pagination"]["offset"] == 1
+    assert page2["pagination"]["has_more"] is False
+    assert page2["has_more"] is False
+    assert page2["next_offset"] is None
     assert len(page2["items"]) == 1
     assert page2["items"][0]["id"] == wl_old.id
 
@@ -1203,7 +1257,6 @@ def test_watchlists_outputs_pagination_excludes_mixed_origin_rows(client_with_us
 
 def test_preview_site_sources_returns_items(client_with_user, monkeypatch):
 
-
     c = client_with_user
     monkeypatch.delenv("TEST_MODE", raising=False)
 
@@ -1211,6 +1264,7 @@ def test_preview_site_sources_returns_items(client_with_user, monkeypatch):
         return [{"title": "Stub Item", "url": "https://example.com/x", "summary": "Stub summary"}]
 
     from tldw_Server_API.app.api.v1.endpoints import watchlists as watchlists_endpoints
+
     monkeypatch.setattr(watchlists_endpoints, "fetch_site_items_with_rules", _fake_fetch)
 
     # Create site source
@@ -1243,7 +1297,6 @@ def test_preview_site_sources_returns_items(client_with_user, monkeypatch):
 
 
 def test_output_deliveries_email_and_chatbook(client_with_user, monkeypatch, tmp_path):
-
 
     c = client_with_user
     monkeypatch.setenv("TEST_MODE", "1")
@@ -1315,7 +1368,6 @@ def test_output_deliveries_email_and_chatbook(client_with_user, monkeypatch, tmp
 
 def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(client_with_user, monkeypatch):
 
-
     c = client_with_user
     monkeypatch.setenv("TEST_MODE", "1")
 
@@ -1342,10 +1394,26 @@ def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(
     r = c.post(f"/api/v1/watchlists/jobs/{job_id}/run")
     assert r.status_code == 200, r.text
     run_id = r.json()["id"]
+    audio_cast = {
+        "speaker_count": 2,
+        "speakers": [
+            {
+                "id": "host",
+                "label": "Host",
+                "role": "anchor",
+                "voice": "af_bella",
+            },
+            {
+                "id": "analyst",
+                "label": "Analyst",
+                "voice": "am_adam",
+            },
+        ],
+    }
 
     with patch(
         "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
-        new=AsyncMock(return_value="task_output_audio"),
+        new=AsyncMock(return_value=AudioBriefingTriggerResult(status="submitted", task_id="task_output_audio")),
     ) as mock_trigger:
         r = c.post(
             "/api/v1/watchlists/outputs",
@@ -1369,6 +1437,7 @@ def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(
                 "persona_provider": "openai",
                 "persona_model": "gpt-4o-mini",
                 "voice_map": {"HOST": "af_bella"},
+                "audio_cast": audio_cast,
             },
         )
     assert r.status_code == 200, r.text
@@ -1376,7 +1445,7 @@ def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(
     metadata = output.get("metadata", {})
     assert metadata.get("audio_briefing_requested") is True
     assert metadata.get("audio_briefing_task_id") == "task_output_audio"
-    assert metadata.get("audio_briefing_status") == "pending"
+    assert metadata.get("audio_briefing_status") == "queued"
 
     assert mock_trigger.await_count == 1
     kwargs = mock_trigger.await_args.kwargs
@@ -1400,6 +1469,7 @@ def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(
     assert kwargs["output_prefs"]["persona_provider"] == "openai"
     assert kwargs["output_prefs"]["persona_model"] == "gpt-4o-mini"
     assert kwargs["output_prefs"]["voice_map"] == {"HOST": "af_bella"}
+    assert kwargs["output_prefs"]["audio_cast"] == audio_cast
 
     r = c.get(f"/api/v1/watchlists/runs/{run_id}")
     assert r.status_code == 200, r.text
@@ -1408,7 +1478,6 @@ def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(
 
 
 def test_outputs_generate_audio_false_does_not_trigger_workflow(client_with_user, monkeypatch):
-
 
     c = client_with_user
     monkeypatch.setenv("TEST_MODE", "1")
@@ -1488,10 +1557,25 @@ def test_outputs_generate_audio_trigger_returns_none_marks_skipped_metadata(
     r = c.post(f"/api/v1/watchlists/jobs/{job_id}/run")
     assert r.status_code == 200, r.text
     run_id = r.json()["id"]
+    WatchlistsDatabase.for_user(555).update_run(
+        run_id,
+        stats_json=json.dumps(
+            {
+                "audio_briefing_status": "queued",
+                "audio_briefing_task_id": "stale-task",
+                "audio_briefing_reason": "old_reason",
+            }
+        ),
+    )
 
     with patch(
         "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
-        new=AsyncMock(return_value=None),
+        new=AsyncMock(
+            return_value=AudioBriefingTriggerResult(
+                status="skipped_no_items",
+                reason="no_ingested_items",
+            )
+        ),
     ) as mock_trigger:
         r = c.post(
             "/api/v1/watchlists/outputs",
@@ -1506,7 +1590,8 @@ def test_outputs_generate_audio_trigger_returns_none_marks_skipped_metadata(
     output = r.json()
     metadata = output.get("metadata", {})
     assert metadata.get("audio_briefing_requested") is True
-    assert metadata.get("audio_briefing_status") == "skipped"
+    assert metadata.get("audio_briefing_status") == "skipped_no_items"
+    assert metadata.get("audio_briefing_reason") == "no_ingested_items"
     assert "audio_briefing_task_id" not in metadata
     assert mock_trigger.await_count == 1
 
@@ -1514,6 +1599,7 @@ def test_outputs_generate_audio_trigger_returns_none_marks_skipped_metadata(
     assert r.status_code == 200, r.text
     run_payload = r.json()
     assert run_payload.get("stats", {}).get("audio_briefing_task_id") is None
+    assert run_payload.get("stats", {}).get("audio_briefing_reason") == "no_ingested_items"
 
 
 def test_outputs_generate_audio_trigger_failure_marks_enqueue_failed_metadata(
@@ -1566,7 +1652,7 @@ def test_outputs_generate_audio_trigger_failure_marks_enqueue_failed_metadata(
     metadata = output.get("metadata", {})
     assert metadata.get("audio_briefing_requested") is True
     assert metadata.get("audio_briefing_status") == "enqueue_failed"
-    assert "scheduler unavailable" in str(metadata.get("audio_briefing_error", ""))
+    assert metadata.get("audio_briefing_error") == "RuntimeError"
     assert "audio_briefing_task_id" not in metadata
     assert mock_trigger.await_count == 1
 

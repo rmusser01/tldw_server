@@ -14,8 +14,8 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import build_sqlite_in_clause, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_memberships_for_user
+from tldw_Server_API.app.core.MCP_unified.environment import is_truthy
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
-from tldw_Server_API.app.core.testing import is_truthy
 
 from ..base import BaseModule, create_tool_definition
 
@@ -248,8 +248,8 @@ class MCPDiscoveryModule(BaseModule):
                 except (TypeError, ValueError):
                     continue
                 org_ids.add(org_id)
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.debug(f"MCP discovery: org membership lookup failed: {exc}")
+        except (OSError, RuntimeError, TypeError, ValueError):
+            logger.debug("MCP discovery: org membership lookup failed; details redacted")
 
         try:
             pool = await get_db_pool()
@@ -263,8 +263,8 @@ class MCPDiscoveryModule(BaseModule):
                     team_ids.add(int(val))
                 except (TypeError, ValueError):
                     continue
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.debug(f"MCP discovery: team membership lookup failed: {exc}")
+        except (OSError, RuntimeError, TypeError, ValueError):
+            logger.debug("MCP discovery: team membership lookup failed; details redacted")
 
         return org_ids, team_ids
 

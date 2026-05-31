@@ -21,6 +21,14 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_api_key_env_keys,
+    custom_openai_config_option_names,
+    custom_openai_endpoint_env_keys,
+    custom_openai_model_env_keys,
+    custom_openai_section_name,
+    iter_custom_openai_provider_numbers,
+)
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
@@ -62,6 +70,67 @@ def _safe_json_dict(raw: Optional[str]) -> dict:
     except _CONFIG_NONCRITICAL_EXCEPTIONS:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+CUSTOM_OPENAI_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(1)
+CUSTOM_OPENAI2_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(2)
+
+
+def _first_nonempty_env(env_keys: tuple[str, ...]) -> Optional[str]:
+    """Return the first non-empty environment value from ordered candidates."""
+    for env_key in env_keys:
+        value = os.getenv(env_key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _env_or_config_value(
+    env_keys: tuple[str, ...],
+    config_parser_object: configparser.ConfigParser,
+    section: str,
+    key: str,
+    *,
+    fallback: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve an env-first value with a single config option fallback."""
+    return _first_nonempty_env(env_keys) or config_parser_object.get(section, key, fallback=fallback)
+
+
+def _first_config_option_value(
+    config_parser_object: configparser.ConfigParser,
+    section: str,
+    keys: tuple[str, ...],
+    *,
+    fallback: Optional[str] = None,
+) -> Optional[str]:
+    """Return the first non-empty value from equivalent config option names."""
+    sentinel = object()
+    for key in keys:
+        value = config_parser_object.get(section, key, fallback=sentinel)
+        if value is sentinel or value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return fallback
+
+
+def _env_or_config_option_value(
+    env_keys: tuple[str, ...],
+    config_parser_object: configparser.ConfigParser,
+    section: str,
+    keys: tuple[str, ...],
+    *,
+    fallback: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve ordered env aliases before ordered config option aliases."""
+    return _first_nonempty_env(env_keys) or _first_config_option_value(
+        config_parser_object,
+        section,
+        keys,
+        fallback=fallback,
+    )
 
 
 def _int_env_or_cfg(
@@ -532,7 +601,8 @@ RAG_SERVICE_CONFIG = {
         "max_context_length": 4096,
         "context_padding_tokens": 100,
         "enable_metadata_filtering": True,
-        "token_counter": "tiktoken"
+        # Tokenizer name, not a secret.
+        "token_counter": "tiktoken"  # nosec B105
     },
 
     # Generator configuration
@@ -592,7 +662,8 @@ DIARIZATION_CONFIG = {
     "num_threads": 4,  # Number of threads for processing
     "memory_efficient": False,
     "max_memory_mb": 2048,
-    "use_auth_token": None,  # HuggingFace auth token if needed
+    # Default sentinel; real HuggingFace auth token is supplied via config/env.
+    "use_auth_token": None,  # nosec B105
     "cache_dir": None,  # Directory for model cache
 
     # Output settings
@@ -1209,6 +1280,99 @@ def load_settings():
     # Default to in-memory store for MVP to align with PRD (can be overridden to 'sqlite')
     SANDBOX_STORE_BACKEND = _sbx_env_or_cfg("SANDBOX_STORE_BACKEND", "store_backend", "memory").lower()
     SANDBOX_STORE_DB_PATH = os.getenv("SANDBOX_STORE_DB_PATH") or _sbx_get("store_db_path", None)
+
+    persona_config = load_comprehensive_config()
+
+    def _persona_cfg_get(option: str) -> Optional[str]:
+        try:
+            if persona_config and persona_config.has_section("persona"):
+                return persona_config.get("persona", option, fallback=None)
+        except _CONFIG_NONCRITICAL_EXCEPTIONS:
+            return None
+        return None
+
+    def _persona_bool(env_key: str, option: str, default: bool) -> bool:
+        env_value = os.getenv(env_key)
+        if env_value is not None:
+            text = str(env_value).strip()
+            if text and text.lower() not in {"none", "null", "nil"}:
+                return is_truthy(text)
+        cfg_value = _persona_cfg_get(option)
+        if cfg_value is None:
+            return default
+        return is_truthy(str(cfg_value))
+
+    def _persona_int(env_key: str, option: str, default: int) -> int:
+        env_value = os.getenv(env_key)
+        if env_value is not None:
+            text = str(env_value).strip()
+            if text and text.lower() not in {"none", "null", "nil"}:
+                try:
+                    return int(text)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{env_key} must be an integer") from exc
+
+        cfg_value = _persona_cfg_get(option)
+        if cfg_value is None:
+            return default
+        text = str(cfg_value).strip()
+        if not text or text.lower() in {"none", "null", "nil"}:
+            return default
+        try:
+            return int(text)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"[persona] {option} must be an integer") from exc
+
+    PERSONA_DIALOGUE_TREE_EVAL_ENABLED = _persona_bool(
+        "PERSONA_DIALOGUE_TREE_EVAL_ENABLED",
+        "dialogue_tree_eval_enabled",
+        False,
+    )
+    PERSONA_RUNTIME_EXPLORER_ENABLED = _persona_bool(
+        "PERSONA_RUNTIME_EXPLORER_ENABLED",
+        "runtime_explorer_enabled",
+        False,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_DEPTH = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_DEPTH",
+        "runtime_explorer_max_depth",
+        1,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING",
+        "runtime_explorer_max_branching",
+        2,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS",
+        "runtime_explorer_max_provider_calls",
+        1,
+    )
+    PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS",
+        "runtime_explorer_timeout_ms",
+        750,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_TOKENS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_TOKENS",
+        "runtime_explorer_max_tokens",
+        256,
+    )
+    PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS",
+        "runtime_explorer_p95_added_latency_ms",
+        1000,
+    )
+    PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED = _persona_bool(
+        "PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED",
+        "runtime_explorer_llm_judges_enabled",
+        False,
+    )
+    PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS = _persona_int(
+        "PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS",
+        "dialogue_tree_trace_retention_days",
+        7,
+    )
 
     config_dict = {
         # General App
@@ -1853,33 +2017,69 @@ def load_settings():
         "PERSONA_DEFAULT_PERSONA": (lambda _cp: (
             _cp.get('persona', 'default_persona', fallback='Research Assistant') if _cp and _cp.has_section('persona') else 'Research Assistant'
         ))(load_comprehensive_config()),
-        "PERSONA_VOICE": (lambda _cp: (
-            _cp.get('persona', 'voice', fallback='default') if _cp and _cp.has_section('persona') else 'default'
-        ))(load_comprehensive_config()),
-        "PERSONA_STT": (lambda _cp: (
-            _cp.get('persona', 'stt', fallback='faster_whisper') if _cp and _cp.has_section('persona') else 'faster_whisper'
-        ))(load_comprehensive_config()),
-        "PERSONA_MAX_TOOL_STEPS": (lambda _cp: (
-            int(_cp.get('persona', 'max_tool_steps', fallback='3')) if _cp and _cp.has_section('persona') else 3
-        ))(load_comprehensive_config()),
-        "PERSONA_MEMORY_READ_MODE": (lambda _env, _cp: (
-            str(_env).strip().lower() if _env is not None else (
-                _cp.get('persona', 'persona_memory_read_mode', fallback='legacy_only').strip().lower()
-                if _cp and _cp.has_section('persona') else 'legacy_only'
+        "PERSONA_VOICE": (
+            lambda _cp: (
+                _cp.get("persona", "voice", fallback="default") if _cp and _cp.has_section("persona") else "default"
             )
-        ))(os.getenv('PERSONA_MEMORY_READ_MODE'), load_comprehensive_config()),
-        "PERSONA_MEMORY_WRITE_MODE": (lambda _env, _cp: (
-            str(_env).strip().lower() if _env is not None else (
-                _cp.get('persona', 'persona_memory_write_mode', fallback='legacy_only').strip().lower()
-                if _cp and _cp.has_section('persona') else 'legacy_only'
+        )(load_comprehensive_config()),
+        "PERSONA_STT": (
+            lambda _cp: (
+                _cp.get("persona", "stt", fallback="faster_whisper")
+                if _cp and _cp.has_section("persona")
+                else "faster_whisper"
             )
-        ))(os.getenv('PERSONA_MEMORY_WRITE_MODE'), load_comprehensive_config()),
-        "PERSONA_RBAC_ALLOW_EXPORT": (lambda _cp: (
-            _cp.getboolean('persona.rbac', 'allow_export', fallback=False) if _cp and _cp.has_section('persona.rbac') else False
-        ))(load_comprehensive_config()),
-        "PERSONA_RBAC_ALLOW_DELETE": (lambda _cp: (
-            _cp.getboolean('persona.rbac', 'allow_delete', fallback=False) if _cp and _cp.has_section('persona.rbac') else False
-        ))(load_comprehensive_config()),
+        )(load_comprehensive_config()),
+        "PERSONA_MAX_TOOL_STEPS": (
+            lambda _cp: (
+                int(_cp.get("persona", "max_tool_steps", fallback="3")) if _cp and _cp.has_section("persona") else 3
+            )
+        )(load_comprehensive_config()),
+        "PERSONA_MEMORY_READ_MODE": (
+            lambda _env, _cp: (
+                str(_env).strip().lower()
+                if _env is not None
+                else (
+                    _cp.get("persona", "persona_memory_read_mode", fallback="legacy_only").strip().lower()
+                    if _cp and _cp.has_section("persona")
+                    else "legacy_only"
+                )
+            )
+        )(os.getenv("PERSONA_MEMORY_READ_MODE"), load_comprehensive_config()),
+        "PERSONA_MEMORY_WRITE_MODE": (
+            lambda _env, _cp: (
+                str(_env).strip().lower()
+                if _env is not None
+                else (
+                    _cp.get("persona", "persona_memory_write_mode", fallback="legacy_only").strip().lower()
+                    if _cp and _cp.has_section("persona")
+                    else "legacy_only"
+                )
+            )
+        )(os.getenv("PERSONA_MEMORY_WRITE_MODE"), load_comprehensive_config()),
+        "PERSONA_DIALOGUE_TREE_EVAL_ENABLED": PERSONA_DIALOGUE_TREE_EVAL_ENABLED,
+        "PERSONA_RUNTIME_EXPLORER_ENABLED": PERSONA_RUNTIME_EXPLORER_ENABLED,
+        "PERSONA_RUNTIME_EXPLORER_MAX_DEPTH": PERSONA_RUNTIME_EXPLORER_MAX_DEPTH,
+        "PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING": PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING,
+        "PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS": PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS,
+        "PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS": PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS,
+        "PERSONA_RUNTIME_EXPLORER_MAX_TOKENS": PERSONA_RUNTIME_EXPLORER_MAX_TOKENS,
+        "PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS": PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS,
+        "PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED": PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED,
+        "PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS": PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS,
+        "PERSONA_RBAC_ALLOW_EXPORT": (
+            lambda _cp: (
+                _cp.getboolean("persona.rbac", "allow_export", fallback=False)
+                if _cp and _cp.has_section("persona.rbac")
+                else False
+            )
+        )(load_comprehensive_config()),
+        "PERSONA_RBAC_ALLOW_DELETE": (
+            lambda _cp: (
+                _cp.getboolean("persona.rbac", "allow_delete", fallback=False)
+                if _cp and _cp.has_section("persona.rbac")
+                else False
+            )
+        )(load_comprehensive_config()),
     }
     # Only include explicit Character-Chat CHARACTER_RATE_LIMIT_ENABLED if present in config.txt
     try:
@@ -1900,6 +2100,10 @@ def load_settings():
         "custom_openai_api",
         "custom_openai_api_2",
     ]
+    provider_keys.extend(
+        custom_openai_section_name(number)
+        for number in iter_custom_openai_provider_numbers(start=3)
+    )
     for provider_key in provider_keys:
         provider_cfg = comprehensive_config.get(provider_key)
         if isinstance(provider_cfg, dict):
@@ -3666,9 +3870,27 @@ def load_and_log_configs():
         aphrodite_api_retries = config_parser_object.get('Local-API', 'aphrodite_api_retry', fallback='3')
         aphrodite_api_retry_delay = config_parser_object.get('Local-API', 'aphrodite_api_retry_delay', fallback='5')
 
-        custom_openai_api_key = config_parser_object.get('API', 'custom_openai_api_key', fallback=None)
-        custom_openai_api_ip = config_parser_object.get('API', 'custom_openai_api_ip', fallback=None)
-        custom_openai_api_model = config_parser_object.get('API', 'custom_openai_api_model', fallback=None)
+        custom_openai_api_key = _env_or_config_option_value(
+            custom_openai_api_key_env_keys(1),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(1, 'key'),
+            fallback=None,
+        )
+        custom_openai_api_ip = _env_or_config_value(
+            CUSTOM_OPENAI_ENDPOINT_ENV_KEYS,
+            config_parser_object,
+            'API',
+            'custom_openai_api_ip',
+            fallback=None,
+        )
+        custom_openai_api_model = _env_or_config_option_value(
+            custom_openai_model_env_keys(1),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(1, 'model'),
+            fallback=None,
+        )
         custom_openai_api_streaming = config_parser_object.get('API', 'custom_openai_api_streaming', fallback='False')
         custom_openai_api_temperature = config_parser_object.get('API', 'custom_openai_api_temperature', fallback='0.7')
         custom_openai_api_top_p = config_parser_object.get('API', 'custom_openai_api_top_p', fallback='0.95')
@@ -3679,9 +3901,27 @@ def load_and_log_configs():
         custom_openai_api_retry_delay = config_parser_object.get('API', 'custom_openai_api_retry_delay', fallback='5')
 
         # 2nd Custom OpenAI API
-        custom_openai2_api_key = config_parser_object.get('API', 'custom_openai2_api_key', fallback=None)
-        custom_openai2_api_ip = config_parser_object.get('API', 'custom_openai2_api_ip', fallback=None)
-        custom_openai2_api_model = config_parser_object.get('API', 'custom_openai2_api_model', fallback=None)
+        custom_openai2_api_key = _env_or_config_option_value(
+            custom_openai_api_key_env_keys(2),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(2, 'key'),
+            fallback=None,
+        )
+        custom_openai2_api_ip = _env_or_config_option_value(
+            CUSTOM_OPENAI2_ENDPOINT_ENV_KEYS,
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(2, 'ip'),
+            fallback=None,
+        )
+        custom_openai2_api_model = _env_or_config_option_value(
+            custom_openai_model_env_keys(2),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(2, 'model'),
+            fallback=None,
+        )
         custom_openai2_api_streaming = config_parser_object.get('API', 'custom_openai2_api_streaming', fallback='False')
         custom_openai2_api_temperature = config_parser_object.get('API', 'custom_openai2_api_temperature', fallback='0.7')
         custom_openai2_api_top_p = config_parser_object.get('API', 'custom_openai2_api_top_p', fallback='0.95')
@@ -4450,6 +4690,85 @@ def load_and_log_configs():
         stt_vnext_config = load_stt_config(config_parser_object)
         stt_vnext_items = dict(vars(stt_vnext_config))
 
+        def _numbered_custom_openai_config(provider_number: int) -> Optional[dict[str, Any]]:
+            api_ip = _env_or_config_option_value(
+                custom_openai_endpoint_env_keys(provider_number),
+                config_parser_object,
+                'API',
+                custom_openai_config_option_names(provider_number, 'ip'),
+                fallback=None,
+            )
+            api_key = _env_or_config_option_value(
+                custom_openai_api_key_env_keys(provider_number),
+                config_parser_object,
+                'API',
+                custom_openai_config_option_names(provider_number, 'key'),
+                fallback=None,
+            )
+            model = _env_or_config_option_value(
+                custom_openai_model_env_keys(provider_number),
+                config_parser_object,
+                'API',
+                custom_openai_config_option_names(provider_number, 'model'),
+                fallback=None,
+            )
+            if not any(value for value in (api_ip, api_key, model)):
+                return None
+
+            return {
+                'api_ip': api_ip,
+                'api_key': api_key,
+                'streaming': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'streaming'),
+                    fallback=custom_openai_api_streaming,
+                ),
+                'model': model,
+                'temperature': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'temperature'),
+                    fallback=custom_openai_api_temperature,
+                ),
+                'max_tokens': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'max_tokens'),
+                    fallback=custom_openai_api_max_tokens,
+                ),
+                'top_p': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'top_p'),
+                    fallback=custom_openai_api_top_p,
+                ),
+                'min_p': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'min_p'),
+                    fallback=custom_openai_api_min_p,
+                ),
+                'api_timeout': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'timeout'),
+                    fallback=custom_openai_api_timeout,
+                ),
+                'api_retries': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'retry'),
+                    fallback=custom_openai_api_retries,
+                ),
+                'api_retry_delay': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'retry_delay'),
+                    fallback=custom_openai_api_retry_delay,
+                ),
+            }
+
         return_dict = {
             'anthropic_api': {
                 'api_key': anthropic_api_key,
@@ -5109,6 +5428,11 @@ def load_and_log_configs():
             'Redis': dict(config_parser_object.items('Redis')) if config_parser_object.has_section('Redis') else {},
             'Web-Scraping': dict(config_parser_object.items('Web-Scraping')) if config_parser_object.has_section('Web-Scraping') else {}
         }
+        for provider_number in iter_custom_openai_provider_numbers(start=3):
+            numbered_config = _numbered_custom_openai_config(provider_number)
+            if numbered_config is not None:
+                return_dict[custom_openai_section_name(provider_number)] = numbered_config
+
         # Assemble minimal RAG config section (vector store + pgvector params)
         try:
             rag_section = {}

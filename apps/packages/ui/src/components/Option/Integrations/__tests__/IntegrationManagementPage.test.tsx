@@ -2,8 +2,9 @@
 
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -52,6 +53,17 @@ vi.mock("@/services/integrations-control-plane", () => ({
   revokeWorkspaceTelegramLinkedActor: (...args: unknown[]) => mocks.revokeWorkspaceTelegramLinkedActor(...args)
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string | { defaultValue?: string }) => {
+      if (typeof fallback === "string") {
+        return fallback
+      }
+      return fallback?.defaultValue ?? _key
+    }
+  })
+}))
+
 import {
   IntegrationManagementPage,
   buildIntegrationQueryKey
@@ -66,7 +78,9 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
   })
 
   return render(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/integrations"]}>{ui}</MemoryRouter>
+    </QueryClientProvider>
   )
 }
 
@@ -348,11 +362,44 @@ describe("IntegrationManagementPage", () => {
 
     renderWithQueryClient(<IntegrationManagementPage scope="personal" />)
 
-    expect(await screen.findByText("Personal integrations unavailable")).toBeInTheDocument()
     expect(
-      screen.getByText("This server does not expose the personal integrations control-plane yet.")
+      await screen.findByRole("heading", {
+        name: "Personal integrations are unavailable on this server"
+      })
     ).toBeInTheDocument()
+    expect(
+      screen.getByText("The connected server does not advertise personal integration management.")
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/integrations/personal"
+    )
     expect(mocks.listPersonalIntegrations).not.toHaveBeenCalled()
+  })
+
+  it("shows permission recovery copy for personal integration load failures", async () => {
+    mocks.listPersonalIntegrations.mockRejectedValue(
+      Object.assign(new Error("Request failed: 403 (GET /api/v1/integrations/personal)"), {
+        status: 403
+      })
+    )
+
+    renderWithQueryClient(<IntegrationManagementPage scope="personal" />)
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "You do not have access to personal integrations"
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("Use an account with access to personal integration management.")
+    ).toBeInTheDocument()
+
+    const diagnostics = screen.getByLabelText("Diagnostics")
+    expect(within(diagnostics).getByText("/api/v1/integrations/personal")).toBeInTheDocument()
+    expect(within(diagnostics).getByText("403")).toBeInTheDocument()
+    expect(
+      within(diagnostics).getByText("Request failed: 403 (GET /api/v1/integrations/personal)")
+    ).toBeInTheDocument()
   })
 
   it("keys workspace-scoped queries by the active org id", () => {
@@ -418,6 +465,27 @@ describe("IntegrationManagementPage", () => {
     expect(screen.getByText("Telegram bot")).toBeInTheDocument()
   })
 
+  it("shows Telegram linked-actor load failures as a degraded shared state", async () => {
+    mockWorkspaceQueries()
+    mocks.listWorkspaceTelegramLinkedActors.mockRejectedValue(
+      Object.assign(
+        new Error(
+          "Telegram actors unavailable (GET /api/v1/integrations/workspace/telegram/linked-actors)"
+        ),
+        { status: 503 }
+      )
+    )
+
+    renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
+
+    expect(await screen.findByText("Degraded")).toBeInTheDocument()
+    expect(screen.getByText("Workspace integrations are partially available")).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/integrations/workspace/telegram/linked-actors"
+    )
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("503")
+  })
+
   it("preserves hidden Slack policy fields when saving visible settings", async () => {
     const user = userEvent.setup()
 
@@ -455,13 +523,21 @@ describe("IntegrationManagementPage", () => {
     })
   })
 
-  it("surfaces Slack policy load failures and blocks saving defaults", async () => {
+  it("surfaces Slack policy load failures with diagnostics and blocks saving defaults", async () => {
     mockWorkspaceQueries()
-    mocks.getWorkspaceSlackPolicy.mockRejectedValue(new Error("Slack policy unavailable"))
+    mocks.getWorkspaceSlackPolicy.mockRejectedValue(
+      Object.assign(
+        new Error("Request failed: 404 (GET /api/v1/integrations/workspace/slack/policy)"),
+        { status: 404 }
+      )
+    )
 
     renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
 
     expect(await screen.findByText("Unable to load Slack policy")).toBeInTheDocument()
+    const diagnostics = screen.getByLabelText("Diagnostics")
+    expect(within(diagnostics).getByText("/api/v1/integrations/workspace/slack/policy")).toBeInTheDocument()
+    expect(within(diagnostics).getByText("404")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Save Slack policy" })).toBeDisabled()
   })
 

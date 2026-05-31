@@ -21,6 +21,7 @@ import {
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
 interface RagDocumentMetadata {
   filename?: string
@@ -288,7 +289,7 @@ export const documentChatMode = async (
   signal: AbortSignal,
   uploadedFiles: UploadedFile[],
   params: Omit<DocumentChatModeParams, "uploadedFiles" | "newFiles" | "allFiles">
-) => {
+): Promise<ChatSubmitResult> => {
   await getAllDefaultModelSettings()
 
   let sessionFiles: UploadedFile[] = []
@@ -329,7 +330,7 @@ export const documentChatMode = async (
     allFiles
   }
 
-  await runChatPipeline(
+  return runChatPipeline(
     documentChatModeDefinition,
     message,
     image,

@@ -86,7 +86,10 @@ describe("TldwApiClient Wave 5 boundary slices", () => {
   it("keeps presentation methods on the mixed presentations domain paths after class cleanup", async () => {
     const client = new TldwApiClient()
     client.ensureConfigForRequest = vi
-      .fn(async () => ({ serverUrl: "http://127.0.0.1:8000" })) as typeof client.ensureConfigForRequest
+      .fn(async () => ({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user" as const
+      })) as unknown as typeof client.ensureConfigForRequest
     client.request = vi
       .fn()
       .mockResolvedValueOnce({

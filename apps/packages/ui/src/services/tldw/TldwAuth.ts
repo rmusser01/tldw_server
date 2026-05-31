@@ -113,7 +113,7 @@ export class TldwAuthService {
       noAuth: true
     })
     const tokens = response as TokenResponse
-    
+
     await tldwClient.updateConfig({
       authMode: 'multi-user',
       accessToken: hostedMode ? undefined : tokens.access_token,
@@ -358,7 +358,7 @@ export class TldwAuthService {
 
     // Refresh 5 minutes before expiry
     const refreshIn = Math.max(0, (expiresIn - 300) * 1000)
-    
+
     this.refreshTimer = setTimeout(async () => {
       try {
         await this.refreshToken()

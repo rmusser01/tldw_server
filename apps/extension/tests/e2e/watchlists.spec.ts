@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from '@playwright/test'
+import { test, expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
 import { launchWithExtensionOrSkip } from "./utils/real-server"
 import path from 'path'
 
@@ -40,6 +40,81 @@ const installWatchlistsRuntimeBridge = async (context: BrowserContext) => {
                 const path = String(payload?.path || '')
                 const method = String(payload?.method || 'GET').toUpperCase()
                 const [pathname, queryString] = path.split('?')
+                const now = new Date().toISOString()
+                const defaultWatchlist = {
+                  id: 1,
+                  name: 'E2E Watchlist',
+                  description: 'Watchlists E2E default collection',
+                  objective: 'Exercise Watchlists extension flows',
+                  domain: 'news',
+                  status: 'active',
+                  priority: 'medium',
+                  tags: ['e2e'],
+                  created_at: now,
+                  updated_at: now
+                }
+
+                if (pathname === '/api/v1/watchlists' && method === 'GET') {
+                  const params = new URLSearchParams(queryString || '')
+                  const page = Number(params.get('page') || 1)
+                  const size = Number(params.get('size') || 20)
+                  return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                      items: [defaultWatchlist],
+                      total: 1,
+                      page,
+                      size,
+                      has_more: false,
+                    },
+                  }
+                }
+
+                const watchlistDetailMatch = pathname.match(/^\/api\/v1\/watchlists\/(\d+)$/)
+                if (watchlistDetailMatch && method === 'GET') {
+                  return {
+                    ok: true,
+                    status: 200,
+                    data: { ...defaultWatchlist, id: Number(watchlistDetailMatch[1]) },
+                  }
+                }
+
+                const contentAlertsMatch = pathname.match(/^\/api\/v1\/watchlists\/(\d+)\/alerts$/)
+                if (contentAlertsMatch && method === 'GET') {
+                  const params = new URLSearchParams(queryString || '')
+                  const page = Number(params.get('page') || 1)
+                  const size = Number(params.get('size') || 20)
+                  return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                      items: [],
+                      total: 0,
+                      page,
+                      size,
+                      has_more: false,
+                    },
+                  }
+                }
+
+                const contentAlertRulesMatch = pathname.match(/^\/api\/v1\/watchlists\/(\d+)\/content-alert-rules$/)
+                if (contentAlertRulesMatch && method === 'GET') {
+                  const params = new URLSearchParams(queryString || '')
+                  const page = Number(params.get('page') || 1)
+                  const size = Number(params.get('size') || 20)
+                  return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                      items: [],
+                      total: 0,
+                      page,
+                      size,
+                      has_more: false,
+                    },
+                  }
+                }
 
                 if (pathname === '/api/v1/watchlists/outputs' && method === 'GET') {
                   const params = new URLSearchParams(queryString || '')
@@ -95,19 +170,168 @@ const installWatchlistsRuntimeBridge = async (context: BrowserContext) => {
   })
 }
 
-const selectRowsAndAssertCount = async (page: Page, expectedCount: number) => {
-  const rowCheckboxes = page.locator('.ant-table-tbody tr[data-row-key] .ant-checkbox')
-  await expect(rowCheckboxes).toHaveCount(expectedCount)
+const watchlistsDestinationConfig = (name: string) => {
+  switch (name) {
+    case 'Overview':
+      return { key: 'overview', label: 'Overview' }
+    case 'Feeds':
+      return { key: 'sources', label: 'Feeds' }
+    case 'Monitors':
+      return {
+        key: 'jobs',
+        label: 'Monitors',
+        parentLabel: 'Feeds',
+        sectionTestId: 'watchlists-secondary-monitors',
+        sectionLabel: 'Monitors'
+      }
+    case 'Activity':
+      return {
+        key: 'runs',
+        label: 'Activity',
+        parentLabel: 'Updates',
+        sectionTestId: 'watchlists-secondary-activity',
+        sectionLabel: 'Recent Activity'
+      }
+    case 'Articles':
+    case 'Updates':
+      return { key: 'items', label: 'Updates' }
+    case 'Alerts':
+      return { key: 'alerts', label: 'Alerts' }
+    case 'Reports':
+      return { key: 'outputs', label: 'Reports' }
+    case 'Templates':
+      return {
+        key: 'templates',
+        label: 'Templates',
+        parentLabel: 'Reports',
+        sectionTestId: 'watchlists-secondary-templates',
+        sectionLabel: 'Templates'
+      }
+    case 'Settings':
+      return { key: 'settings', label: 'Settings' }
+    default:
+      return { key: name.toLowerCase(), label: name }
+  }
+}
 
-  for (let index = 0; index < expectedCount; index += 1) {
-    const checkbox = rowCheckboxes.nth(index)
-    await checkbox.scrollIntoViewIfNeeded()
-    const alreadyChecked = await checkbox.evaluate((node) =>
-      node.classList.contains('ant-checkbox-checked')
-    )
-    if (!alreadyChecked) {
-      await checkbox.click({ force: true })
-      await expect(checkbox).toHaveClass(/ant-checkbox-checked/)
+const isVisibleLocator = async (locator: Locator) =>
+  (await locator.count()) > 0 && await locator.first().isVisible()
+
+const watchlistsContentShell = (page: Page) =>
+  page.getByTestId('watchlists-tab-content-shell')
+
+const navigateWatchlistsDestination = async (page: Page, name: string) => {
+  await expect(page.getByRole('heading', { name: 'Watchlists' })).toBeVisible({ timeout: 15_000 })
+  const destination = watchlistsDestinationConfig(name)
+  const experimentButton = page.getByTestId(`watchlists-experimental-tab-${destination.key}`)
+  if (await isVisibleLocator(experimentButton)) {
+    await experimentButton.first().click()
+    return
+  }
+
+  const tab = page.getByRole('tab', { name: destination.label })
+  if (await isVisibleLocator(tab)) {
+    await tab.first().click()
+    return
+  }
+
+  const shortcutButton = page.getByTestId(`watchlists-task-open-${destination.key}`)
+  if (await isVisibleLocator(shortcutButton)) {
+    await shortcutButton.first().click()
+    return
+  }
+
+  const destinationButton = page.getByRole('button', { name: destination.label, exact: true })
+  if (await isVisibleLocator(destinationButton)) {
+    await destinationButton.first().click()
+    return
+  }
+
+  if (destination.parentLabel && destination.sectionTestId) {
+    const parentTab = page.getByRole('tab', { name: destination.parentLabel })
+    if (await isVisibleLocator(parentTab)) {
+      await parentTab.first().click()
+      const section = page.getByTestId(destination.sectionTestId)
+      await expect(section).toBeVisible()
+      const toggle = section.getByRole('button', { name: new RegExp(destination.sectionLabel ?? destination.label) })
+      if ((await toggle.first().getAttribute('aria-expanded')) !== 'true') {
+        await toggle.first().click()
+      }
+      return
+    }
+  }
+
+  const trigger = page.getByTestId('watchlists-constrained-nav-trigger')
+  await expect(trigger).toBeVisible()
+  await trigger.click()
+  const drawer = page.getByTestId('watchlists-constrained-nav-drawer')
+  await expect(drawer).toBeVisible()
+  await drawer.getByRole('button', { name: destination.label }).click()
+  await expect(drawer).toBeHidden()
+}
+
+const expectWatchlistsDestination = async (page: Page, name: string) => {
+  await expect(page.getByRole('heading', { name: 'Watchlists' })).toBeVisible({ timeout: 15_000 })
+  const destination = watchlistsDestinationConfig(name)
+  const experimentButton = page.getByTestId(`watchlists-experimental-tab-${destination.key}`)
+  if (await isVisibleLocator(experimentButton)) {
+    await expect(experimentButton.first()).toHaveClass(/ant-btn-primary/)
+    return
+  }
+
+  const tab = page.getByRole('tab', { name: destination.label })
+  if (await isVisibleLocator(tab)) {
+    await expect(tab.first()).toHaveAttribute('aria-selected', 'true')
+    return
+  }
+
+  const destinationButton = page.getByRole('button', { name: destination.label, exact: true })
+  if (await isVisibleLocator(destinationButton)) {
+    await expect(watchlistsContentShell(page)).toBeVisible()
+    return
+  }
+
+  if (destination.sectionTestId) {
+    const section = page.getByTestId(destination.sectionTestId)
+    if (await isVisibleLocator(section)) {
+      await expect(section.getByRole('button').first()).toHaveAttribute('aria-expanded', 'true')
+      return
+    }
+  }
+
+  if (destination.key === 'overview') {
+    await expect(watchlistsContentShell(page)).toBeVisible()
+    return
+  }
+
+  await expect(page.getByTestId('watchlists-constrained-nav-trigger')).toContainText(destination.label)
+}
+
+const selectRowsAndAssertCount = async (page: Page, expectedCount: number) => {
+  const tableCheckboxes = page.locator('.ant-table-tbody tr[data-row-key] .ant-checkbox')
+  const tableCheckboxCount = await tableCheckboxes.count()
+  if (tableCheckboxCount > 0) {
+    await expect(tableCheckboxes).toHaveCount(expectedCount)
+
+    for (let index = 0; index < expectedCount; index += 1) {
+      const checkbox = tableCheckboxes.nth(index)
+      await checkbox.scrollIntoViewIfNeeded()
+      const alreadyChecked = await checkbox.evaluate((node) =>
+        node.classList.contains('ant-checkbox-checked')
+      )
+      if (!alreadyChecked) {
+        await checkbox.click({ force: true })
+        await expect(checkbox).toHaveClass(/ant-checkbox-checked/)
+      }
+    }
+  } else {
+    const constrainedCheckboxes = page.locator('[data-testid^="watchlists-source-card-"] input[type="checkbox"]')
+    await expect(constrainedCheckboxes).toHaveCount(expectedCount)
+    for (let index = 0; index < expectedCount; index += 1) {
+      const checkbox = constrainedCheckboxes.nth(index)
+      await checkbox.scrollIntoViewIfNeeded()
+      await checkbox.check({ force: true })
+      await expect(checkbox).toBeChecked()
     }
   }
 
@@ -127,6 +351,7 @@ test.describe('Watchlists playground smoke', () => {
 
     await context.addInitScript(() => {
       ;(window as any).__watchlistsStubbed = true
+      localStorage.setItem('watchlists:quickSetup:autoshown:v1:1', '1')
 
       const now = () => new Date().toISOString()
       const sources = [
@@ -510,41 +735,46 @@ test.describe('Watchlists playground smoke', () => {
     await expect(
       page.getByText('Create scheduled monitors to automatically scrape and process content.')
     ).toBeVisible()
-    await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible()
+    await expectWatchlistsDestination(page, 'Overview')
     await expect(page.getByText('At-a-glance watchlist health')).toBeVisible()
 
-    await page.getByRole('tab', { name: 'Feeds' }).click()
+    await navigateWatchlistsDestination(page, 'Feeds')
     await expect(page.getByText('Tech Daily')).toBeVisible()
 
-    await expect(page.locator('.ant-table-row')).toHaveCount(2)
+    const constrainedSources = page.getByTestId('watchlists-sources-constrained-list')
+    if (await constrainedSources.isVisible().catch(() => false)) {
+      await expect(page.getByTestId('watchlists-sources-constrained-list')).toContainText('World News')
+    } else {
+      await expect(page.locator('.ant-table-row')).toHaveCount(2)
+    }
 
-    await page.getByRole('tab', { name: 'Monitors' }).click()
+    await navigateWatchlistsDestination(page, 'Monitors')
     await expect(
-      page.locator('.ant-tabs-tabpane-active').getByText('Morning Brief')
+      watchlistsContentShell(page).getByText('Morning Brief')
     ).toBeVisible()
 
-    await page.getByRole('tab', { name: 'Activity' }).click()
+    await navigateWatchlistsDestination(page, 'Activity')
     await expect(
-      page.locator('.ant-tabs-tabpane-active').getByText('Showing core columns. Use advanced mode for run metrics.')
+      watchlistsContentShell(page).getByText('Showing core columns. Use advanced mode for run metrics.')
     ).toBeVisible()
     await page.getByTestId('watchlists-runs-advanced-toggle').click()
     await expect(
-      page.locator('.ant-tabs-tabpane-active').getByText('Filter by monitor')
+      watchlistsContentShell(page).getByText('Filter by monitor')
     ).toBeVisible()
 
-    await page.getByRole('tab', { name: 'Reports' }).click()
+    await navigateWatchlistsDestination(page, 'Reports')
     await expect(
-      page.locator('.ant-tabs-tabpane-active').getByText('Showing core columns. Use advanced mode for format/run details.')
+      watchlistsContentShell(page).getByText('Showing core columns. Use advanced mode for format/run details.')
     ).toBeVisible()
     await expect(
-      page.locator('.ant-tabs-tabpane-active').getByText('+2 more')
+      watchlistsContentShell(page).getByText('+2 more')
     ).toBeVisible()
     await page.getByTestId('watchlists-outputs-advanced-toggle').click()
     await expect(
-      page.locator('.ant-tabs-tabpane-active').getByText('Filter by monitor')
+      watchlistsContentShell(page).getByText('Filter by monitor')
     ).toBeVisible()
     await expect(
-      page.locator('.ant-tabs-tabpane-active').getByText('chatbook Stored')
+      watchlistsContentShell(page).getByText('chatbook Stored')
     ).toBeVisible()
 
     await context.close()
@@ -678,7 +908,7 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
-    await page.getByRole('tab', { name: 'Activity' }).click()
+    await navigateWatchlistsDestination(page, 'Activity')
     await expect(page.getByText('Running')).toBeVisible()
 
     await page.getByTestId('watchlists-run-cancel-101').click()
@@ -863,7 +1093,7 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
-    await page.getByRole('tab', { name: 'Activity' }).click()
+    await navigateWatchlistsDestination(page, 'Activity')
     await expect(page.getByText('Failed', { exact: true }).first()).toBeVisible()
 
     await page.getByRole('button', { name: 'View Details' }).first().click()
@@ -882,7 +1112,7 @@ test.describe('Watchlists playground smoke', () => {
     await context.close()
   })
 
-  test('overview health and failed-run notification click-through', async () => {
+  test('overview health and failed-run click-through', async () => {
     test.setTimeout(120_000)
     const extPath = path.resolve('.output/chrome-mv3')
     const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
@@ -1042,21 +1272,17 @@ test.describe('Watchlists playground smoke', () => {
     await basePage.close().catch(() => {})
 
     await expect(page.getByRole('heading', { name: 'Watchlists' })).toBeVisible()
-    await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
+    await expectWatchlistsDestination(page, 'Overview')
     await expect(page.getByText('Setup complete')).toBeVisible()
     await expect(page.getByText('System requires attention')).toBeVisible()
     await expect(page.getByText('Recent Failed Runs')).toBeVisible()
     await expect(page.getByText('Alert Monitor')).toBeVisible()
 
-    const failureNotice = page
-      .locator('.ant-notification-notice')
-      .filter({ hasText: 'Run failed' })
-      .first()
-    await expect(failureNotice).toBeVisible({ timeout: 10_000 })
-    await expect(failureNotice).toContainText('rate-limiting requests')
-    await failureNotice.getByRole('button', { name: 'View run' }).click()
+    const failedRunCard = page.locator('.ant-card').filter({ hasText: 'Recent Failed Runs' }).first()
+    await expect(failedRunCard).toContainText('Rate limit exceeded while fetching source')
+    await failedRunCard.getByRole('button', { name: 'View run' }).click()
 
-    await expect(page.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true')
+    await expectWatchlistsDestination(page, 'Activity')
     const runDialog = page.getByRole('dialog', { name: 'Run Details' })
     await expect(runDialog).toBeVisible()
     await expect(runDialog.getByText('Rate limit exceeded while fetching source')).toBeVisible()
@@ -1129,11 +1355,21 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
+    await expect(page.getByText('Add feeds to this Watchlist')).toBeVisible()
+    await expect(page.getByText('Create a monitor')).toBeVisible()
+    await expect(page.getByText('Review results')).toBeVisible()
+
+    const autoQuickSetupDialog = page.getByRole('dialog', { name: 'Add initial collection' })
+    await autoQuickSetupDialog.waitFor({ state: 'visible', timeout: 1_000 }).catch(() => {})
+    if (await isVisibleLocator(autoQuickSetupDialog)) {
+      await autoQuickSetupDialog.getByRole('button', { name: 'Cancel' }).click()
+      await expect(autoQuickSetupDialog).toBeHidden()
+    }
+
     const addFirstFeedButton = page.getByRole('button', { name: 'Add first feed' })
     await expect(addFirstFeedButton).toBeVisible()
-    await expect(page.getByText('Add Feed -> Create Monitor -> Review Results')).toBeVisible()
     await addFirstFeedButton.click()
-    await expect(page.getByRole('tab', { name: 'Feeds' })).toHaveAttribute('aria-selected', 'true')
+    await expectWatchlistsDestination(page, 'Feeds')
 
     await context.close()
   })
@@ -1307,11 +1543,14 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
-    const guidedSetupButton = page.getByRole('button', { name: 'Guided setup' })
-    await expect(guidedSetupButton).toBeVisible()
-    await guidedSetupButton.click()
+    const dialog = page.getByRole('dialog', { name: 'Add initial collection' })
+    await dialog.waitFor({ state: 'visible', timeout: 1_000 }).catch(() => {})
+    if (!(await isVisibleLocator(dialog))) {
+      const guidedSetupButton = page.getByTestId('watchlists-overview-cta-guided-setup')
+      await expect(guidedSetupButton).toBeVisible()
+      await guidedSetupButton.click()
+    }
 
-    const dialog = page.getByRole('dialog', { name: 'Guided quick setup' })
     await expect(dialog).toBeVisible()
     await dialog.getByPlaceholder('e.g., Daily Tech Feed').fill('Guided Feed')
     await dialog.getByPlaceholder('https://example.com/feed.xml').fill('https://example.com/guided.xml')
@@ -1320,10 +1559,11 @@ test.describe('Watchlists playground smoke', () => {
     await expect(dialog.getByPlaceholder('e.g., Morning Brief')).toBeVisible()
     await dialog.getByPlaceholder('e.g., Morning Brief').fill('Guided Monitor')
     await dialog.getByRole('button', { name: 'Next' }).click()
-    await expect(dialog.getByRole('button', { name: 'Create setup' })).toBeVisible()
-    await dialog.getByRole('button', { name: 'Create setup' }).click()
+    const createCollectionButton = dialog.getByRole('button', { name: /Create collection/ })
+    await expect(createCollectionButton).toBeVisible()
+    await createCollectionButton.click()
 
-    await expect(page.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true')
+    await expectWatchlistsDestination(page, 'Activity')
 
     const quickSetupState = await page.evaluate(() => (window as any).__watchlistsQuickSetup)
     expect(quickSetupState.sourceBody?.name).toBe('Guided Feed')
@@ -1454,7 +1694,7 @@ test.describe('Watchlists playground smoke', () => {
     await basePage.close().catch(() => {})
     console.log('[E2E_STEP] monitor-create: page ready')
 
-    await page.getByRole('tab', { name: 'Monitors' }).click()
+    await navigateWatchlistsDestination(page, 'Monitors')
     console.log('[E2E_STEP] monitor-create: monitors tab opened')
     await page.getByRole('button', { name: 'Add Monitor' }).click()
     console.log('[E2E_STEP] monitor-create: add monitor clicked')
@@ -1637,9 +1877,79 @@ test.describe('Watchlists playground smoke', () => {
           return paginate([], page, size)
         }
 
+        if (pathname === '/api/v1/watchlists/items/smart-counts' && method === 'GET') {
+          if (params.get('has_alert') === 'true') {
+            return {
+              all: 0,
+              today: 0,
+              today_unread: 0,
+              unread: 0,
+              reviewed: 0,
+              queued: 0
+            }
+          }
+          const filtered = applyItemFilters(params)
+          const unread = filtered.filter((item) => !item.reviewed).length
+          const reviewed = filtered.filter((item) => item.reviewed).length
+          return {
+            all: filtered.length,
+            today: filtered.length,
+            today_unread: unread,
+            unread,
+            reviewed,
+            queued: filtered.filter((item) => Boolean(item.queued_for_briefing)).length
+          }
+        }
+
         if (pathname === '/api/v1/watchlists/items' && method === 'GET') {
           const filtered = applyItemFilters(params)
           return paginate(filtered, page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/items/batch-update' && method === 'POST') {
+          const scopeParams = new URLSearchParams()
+          if (body?.scope && typeof body.scope === 'object') {
+            Object.entries(body.scope).forEach(([key, value]) => {
+              if (value === undefined || value === null || value === '') return
+              scopeParams.set(key, String(value))
+            })
+          }
+
+          const targetIds = Array.isArray(body?.item_ids)
+            ? body.item_ids.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+            : applyItemFilters(scopeParams).map((item) => item.id)
+          const changedIds: number[] = []
+          const unchangedIds: number[] = []
+          const failedIds: number[] = []
+
+          targetIds.forEach((itemId) => {
+            const index = items.findIndex((item) => item.id === itemId)
+            if (index < 0) {
+              failedIds.push(itemId)
+              return
+            }
+            if (typeof body?.reviewed === 'boolean' && items[index].reviewed !== body.reviewed) {
+              items[index].reviewed = body.reviewed
+              changedIds.push(itemId)
+            } else {
+              unchangedIds.push(itemId)
+            }
+          })
+
+          ;(window as any).__watchlistsItemReviewUpdates += changedIds.length
+          return {
+            matched: targetIds.length,
+            changed: changedIds.length,
+            unchanged: unchangedIds.length,
+            failed: failedIds.length,
+            matched_ids: targetIds,
+            changed_ids: changedIds,
+            unchanged_ids: unchangedIds,
+            failed_ids: failedIds,
+            capped: false,
+            exhausted: true,
+            limit: targetIds.length
+          }
         }
 
         const itemPatchMatch = pathname.match(/^\/api\/v1\/watchlists\/items\/(\d+)$/)
@@ -1667,7 +1977,7 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
-    await page.getByRole('tab', { name: 'Articles' }).click()
+    await navigateWatchlistsDestination(page, 'Articles')
     await expect(page.locator('button[data-testid^="watchlists-item-row-"]')).toHaveCount(50)
 
     await page.getByTestId('watchlists-items-mark-page').click()
@@ -1868,7 +2178,7 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
-    await page.getByRole('tab', { name: 'Articles' }).click()
+    await navigateWatchlistsDestination(page, 'Articles')
     await expect(page.getByTestId('watchlists-item-reader')).toContainText('Keyboard item one')
 
     await page.keyboard.press('j')
@@ -2032,7 +2342,7 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
-    await page.getByRole('tab', { name: 'Feeds' }).click()
+    await navigateWatchlistsDestination(page, 'Feeds')
     await expect(page.getByText('Critical Feed')).toBeVisible()
 
     await selectRowsAndAssertCount(page, 1)
@@ -2162,7 +2472,7 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
-    await page.getByRole('tab', { name: 'Feeds' }).click()
+    await navigateWatchlistsDestination(page, 'Feeds')
     await expect(page.getByText('Breaking Feed')).toBeVisible()
     await expect(page.getByText('Already Paused Feed')).toBeVisible()
 
@@ -2323,7 +2633,7 @@ test.describe('Watchlists playground smoke', () => {
     })
     await basePage.close().catch(() => {})
 
-    await page.getByRole('tab', { name: 'Feeds' }).click()
+    await navigateWatchlistsDestination(page, 'Feeds')
     await page.getByRole('button', { name: 'Import OPML' }).first().click()
     const importDialog = page.getByRole('dialog', { name: 'Import OPML' })
     await expect(importDialog).toBeVisible()
@@ -2527,11 +2837,227 @@ test.describe('Watchlists playground smoke', () => {
     )
 
     await page.getByRole('button', { name: 'Skip' }).click()
-    await page.getByRole('tab', { name: 'Feeds' }).click()
+    await navigateWatchlistsDestination(page, 'Feeds')
     await expect(page.getByTestId('watchlists-context-docs-link')).toHaveAttribute(
       'href',
       'https://github.com/rmusser01/tldw_server/blob/main/Docs/API/Watchlists_Filters_OPML.md'
     )
+
+    await context.close()
+  })
+
+  test('strict demo readiness route renders Activity and Reports without crashing on output errors', async () => {
+    test.setTimeout(120_000)
+    const extPath = path.resolve('.output/chrome-mv3')
+    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+      seedConfig: seededWatchlistsConfig
+    })
+    await installWatchlistsRuntimeBridge(context)
+
+    await context.addInitScript(() => {
+      ;(window as any).__watchlistsStubbed = true
+      ;(window as any).__watchlistsOutputCreateCalls = 0
+
+      const now = () => new Date().toISOString()
+      const sources = [
+        {
+          id: 1,
+          name: 'Demo Feed',
+          url: 'https://example.com/demo.xml',
+          source_type: 'rss',
+          active: true,
+          tags: ['demo'],
+          status: 'healthy',
+          created_at: now(),
+          updated_at: now(),
+          last_scraped_at: now()
+        }
+      ]
+      const jobs = [
+        {
+          id: 11,
+          name: 'Demo Briefing',
+          description: 'Demo monitor',
+          active: true,
+          scope: { sources: [1], groups: [], tags: ['demo'] },
+          schedule_expr: '0 9 * * *',
+          timezone: 'UTC',
+          job_filters: { filters: [] },
+          output_prefs: {
+            template_name: 'briefing_markdown',
+            template: { default_name: 'briefing_markdown' },
+            generate_audio: true
+          },
+          created_at: now(),
+          updated_at: now(),
+          last_run_at: now(),
+          next_run_at: now()
+        }
+      ]
+      const runs = [
+        {
+          id: 101,
+          job_id: 11,
+          status: 'completed',
+          started_at: now(),
+          finished_at: now(),
+          error_msg: null,
+          stats: {
+            items_found: 2,
+            items_ingested: 2,
+            items_filtered: 0,
+            items_errored: 0
+          }
+        }
+      ]
+      const outputs = [
+        {
+          id: 201,
+          run_id: 101,
+          job_id: 11,
+          type: 'briefing',
+          format: 'md',
+          title: 'Demo report with failed audio',
+          version: 1,
+          expired: false,
+          metadata: {
+            template_name: 'briefing_markdown',
+            audio_briefing_requested: true,
+            audio_briefing_status: 'failed',
+            audio_briefing_error: 'TTS provider timeout'
+          },
+          created_at: now(),
+          expires_at: null
+        }
+      ]
+
+      const paginate = (list, page, size) => {
+        const current = page || 1
+        const limit = size || list.length || 1
+        const start = (current - 1) * limit
+        const end = start + limit
+        return {
+          items: list.slice(start, end),
+          total: list.length,
+          page: current,
+          size: limit,
+          has_more: end < list.length
+        }
+      }
+
+      const handleRequest = (payload) => {
+        const path = payload?.path || ''
+        const method = String(payload?.method || 'GET').toUpperCase()
+        const body = payload?.body || null
+        const [pathname, queryString] = path.split('?')
+        const params = new URLSearchParams(queryString || '')
+        const page = Number(params.get('page') || 1)
+        const size = Number(params.get('size') || 20)
+
+        if (pathname === '/api/v1/watchlists/sources' && method === 'GET') {
+          return paginate(sources, page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/jobs' && method === 'GET') {
+          return paginate(jobs, page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/runs' && method === 'GET') {
+          const q = params.get('q')
+          const filtered = q ? runs.filter((run) => run.status === q) : runs
+          return paginate(filtered, page, size)
+        }
+
+        const runDetailsMatch = pathname.match(/^\/api\/v1\/watchlists\/runs\/(\d+)\/details$/)
+        if (runDetailsMatch && method === 'GET') {
+          return {
+            ...runs[0],
+            filter_tallies: { include: 2 },
+            log_text: 'Completed successfully',
+            log_path: null,
+            truncated: false,
+            filtered_sample: null
+          }
+        }
+
+        if (pathname === '/api/v1/watchlists/items' && method === 'GET') {
+          return paginate([], page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/tags' && method === 'GET') {
+          return paginate([], page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/groups' && method === 'GET') {
+          return paginate([], page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/templates' && method === 'GET') {
+          return { items: [{ name: 'briefing_markdown', format: 'md', updated_at: now() }] }
+        }
+
+        if (pathname === '/api/v1/watchlists/settings' && method === 'GET') {
+          return {
+            default_output_ttl_seconds: 86400,
+            temporary_output_ttl_seconds: 3600
+          }
+        }
+
+        if (pathname === '/api/v1/watchlists/outputs' && method === 'GET') {
+          return paginate(outputs, page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/outputs' && method === 'POST') {
+          ;(window as any).__watchlistsOutputCreateCalls += 1
+          if (body?.template_name !== 'briefing_markdown') {
+            throw new Error('unexpected_template_name')
+          }
+          throw new Error('template_not_found: briefing_markdown')
+        }
+
+        return null
+      }
+
+      ;(window as any).__watchlistsBindBridge(handleRequest)
+    })
+
+    const pageErrors: string[] = []
+    const page = await context.newPage()
+    page.on('pageerror', (error) => {
+      pageErrors.push(error.message)
+    })
+    await page.goto(optionsUrl + '?e2e=1&view=all#/watchlists', { waitUntil: 'domcontentloaded' })
+    await page.waitForFunction(() => (window as any).__watchlistsStubbed === true, undefined, {
+      timeout: 5_000
+    })
+    await basePage.close().catch(() => {})
+
+    await expect(page.getByRole('heading', { name: 'Watchlists' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Activity' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Reports' })).toBeVisible()
+
+    await page.getByRole('tab', { name: 'Activity' }).click()
+    await expect(
+      page.locator('.ant-tabs-tabpane-active').getByText('Completed', { exact: true }).first()
+    ).toBeVisible()
+
+    await page.getByRole('tab', { name: 'Reports' }).click()
+    await expect(
+      page.locator('.ant-tabs-tabpane-active').getByText('Demo report with failed audio')
+    ).toBeVisible()
+    await page.getByRole('button', { name: 'Regenerate' }).first().click()
+    await page
+      .getByRole('dialog', { name: 'Regenerate Output' })
+      .getByRole('button', { name: 'Regenerate' })
+      .click()
+
+    await expect
+      .poll(async () => page.evaluate(() => (window as any).__watchlistsOutputCreateCalls))
+      .toBe(1)
+    await expect(page.getByTestId('watchlists-outputs-live-region')).toContainText(
+      'Failed to regenerate Demo report with failed audio.'
+    )
+    expect(pageErrors).toEqual([])
 
     await context.close()
   })

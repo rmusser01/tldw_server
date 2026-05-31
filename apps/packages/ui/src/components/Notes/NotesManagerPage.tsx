@@ -17,6 +17,7 @@ import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { useAntdMessage } from '@/hooks/useAntdMessage'
 import { useStoreMessageOption } from "@/store/option"
 import { useTutorialStore } from "@/store/tutorials"
+import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from "@/design-system"
 import { shallow } from "zustand/shallow"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
@@ -35,6 +36,7 @@ import type { NoteListItem } from "@/components/Notes/notes-manager-types"
 import { clearSetting, getSetting } from "@/services/settings/registry"
 import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
 import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
+import { buildSourcesNewPath } from "@/routes/route-paths"
 import { deriveNoteStudio, getNoteStudioState, regenerateNoteStudio } from "@/services/notes-studio"
 import { useMobile } from "@/hooks/useMediaQuery"
 import {
@@ -60,6 +62,7 @@ import {
   toConversationLabel,
   toAttachmentMarkdown,
   normalizeGraphNoteId,
+  getNotesGraphEdgeLabel,
   parseSourceNodeId,
   MIN_SIDEBAR_HEIGHT,
   NOTES_LIST_REGION_ID,
@@ -377,21 +380,32 @@ const NotesManagerPage: React.FC = () => {
     }
   })
 
+  const unavailableStateLabel =
+    getDesignSystemState('unavailable')?.label ?? UNAVAILABLE_STATE_LABEL
+
   const noteRelations = React.useMemo(() => {
     const selectedNormalized = normalizeGraphNoteId(ed.selectedId)
     const nodes = Array.isArray(noteNeighborsData?.nodes) ? noteNeighborsData.nodes : []
     const edges = Array.isArray(noteNeighborsData?.edges) ? noteNeighborsData.edges : []
 
-    const noteNodeMap = new Map<string, { id: string; title: string }>()
+    const noteNodeMap = new Map<
+      string,
+      { id: string; title: string; available: boolean; unavailableReason: string | null }
+    >()
     const sourceNodeMap = new Map<string, { id: string; label: string }>()
     for (const node of nodes) {
       const nodeType = String(node?.type || '')
       if (!nodeType || nodeType === 'note') {
         const normalizedId = normalizeGraphNoteId(node?.id)
         if (!normalizedId) continue
+        const deleted = Boolean(node?.deleted)
         noteNodeMap.set(normalizedId, {
           id: normalizedId,
-          title: String(node?.label || node?.title || `Note ${normalizedId}`)
+          title: String(node?.label || node?.title || `Note ${normalizedId}`),
+          available: !deleted,
+          unavailableReason: deleted
+            ? t('option:notesSearch.linkedNoteDeleted', { defaultValue: unavailableStateLabel })
+            : null
         })
         continue
       }
@@ -405,33 +419,66 @@ const NotesManagerPage: React.FC = () => {
       }
     }
 
-    const relatedIds = new Set<string>()
-    const backlinkIds = new Set<string>()
     const sourceIds = new Set<string>()
+    const relatedById = new Map<
+      string,
+      { id: string; title: string; relationLabel: string; available: boolean; unavailableReason: string | null }
+    >()
+    const backlinksById = new Map<
+      string,
+      { id: string; title: string; relationLabel: string; available: boolean; unavailableReason: string | null }
+    >()
     const manualLinkByEdgeId = new Map<
       string,
-      { edgeId: string; noteId: string; title: string; directed: boolean; outgoing: boolean }
+      {
+        edgeId: string
+        noteId: string
+        title: string
+        directed: boolean
+        outgoing: boolean
+        relationLabel: string
+        available: boolean
+        unavailableReason: string | null
+      }
     >()
+
+    const buildNoteRelation = (id: string, relationLabel: string) => {
+      const node = noteNodeMap.get(id)
+      return {
+        id,
+        title: node?.title || t('option:notesSearch.unavailableLinkedNoteTitle', {
+          defaultValue: 'Unavailable note'
+        }),
+        relationLabel,
+        available: node?.available ?? false,
+        unavailableReason: node?.unavailableReason || (
+          node
+            ? null
+            : t('option:notesSearch.linkedNoteUnavailable', {
+                defaultValue: unavailableStateLabel
+              })
+        )
+      }
+    }
+
+    const upsertRelation = (
+      map: Map<string, ReturnType<typeof buildNoteRelation>>,
+      id: string,
+      relationLabel: string
+    ) => {
+      if (!id || id === selectedNormalized) return
+      const existing = map.get(id)
+      if (existing) return
+      map.set(id, buildNoteRelation(id, relationLabel))
+    }
 
     for (const edge of edges) {
       const source = normalizeGraphNoteId(edge?.source)
       const target = normalizeGraphNoteId(edge?.target)
       if (!source || !target || source === target) continue
 
-      if (source === selectedNormalized) relatedIds.add(target)
-      if (target === selectedNormalized) relatedIds.add(source)
-
       const type = String(edge?.type || '').toLowerCase()
       const directed = Boolean(edge?.directed)
-      if (type === 'wikilink' && target === selectedNormalized) {
-        backlinkIds.add(source)
-      }
-      if (type === 'backlink' && source === selectedNormalized) {
-        backlinkIds.add(target)
-      }
-      if (type === 'manual' && directed && target === selectedNormalized) {
-        backlinkIds.add(source)
-      }
       if (type === 'source_membership') {
         if (source === selectedNormalized && sourceNodeMap.has(target)) {
           sourceIds.add(target)
@@ -439,41 +486,79 @@ const NotesManagerPage: React.FC = () => {
         if (target === selectedNormalized && sourceNodeMap.has(source)) {
           sourceIds.add(source)
         }
+        continue
+      }
+      if (type === 'tag_membership') {
+        continue
+      }
+
+      const touchesSelected = source === selectedNormalized || target === selectedNormalized
+      if (!touchesSelected) continue
+      const counterpartId = source === selectedNormalized ? target : source
+      const relationLabel =
+        type === 'wikilink' && target === selectedNormalized
+          ? t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })
+          : type === 'backlink'
+            ? t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })
+            : type === 'manual' && directed && target === selectedNormalized
+              ? t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })
+              : getNotesGraphEdgeLabel(type)
+
+      upsertRelation(relatedById, counterpartId, relationLabel)
+
+      if (type === 'wikilink' && target === selectedNormalized) {
+        upsertRelation(
+          backlinksById,
+          source,
+          t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })
+        )
+      }
+      if (type === 'backlink' && source === selectedNormalized) {
+        upsertRelation(
+          backlinksById,
+          target,
+          t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })
+        )
+      }
+      if (type === 'manual' && directed && target === selectedNormalized) {
+        upsertRelation(
+          backlinksById,
+          source,
+          t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })
+        )
       }
       if (type === 'manual') {
-        const touchesSelected = source === selectedNormalized || target === selectedNormalized
-        if (!touchesSelected) continue
-        const counterpartId = source === selectedNormalized ? target : source
         if (!counterpartId) continue
         const edgeId = String(edge?.id || '')
         if (!edgeId) continue
-        const node = noteNodeMap.get(counterpartId)
+        const relation = buildNoteRelation(counterpartId, getNotesGraphEdgeLabel(type))
         manualLinkByEdgeId.set(edgeId, {
           edgeId,
           noteId: counterpartId,
-          title: node?.title || `Note ${counterpartId}`,
+          title: relation.title,
           directed,
-          outgoing: source === selectedNormalized
+          outgoing: source === selectedNormalized,
+          relationLabel: relation.relationLabel,
+          available: relation.available,
+          unavailableReason: relation.unavailableReason
         })
       }
     }
 
     for (const normalizedId of noteNodeMap.keys()) {
       if (normalizedId !== selectedNormalized) {
-        relatedIds.add(normalizedId)
+        upsertRelation(
+          relatedById,
+          normalizedId,
+          t('option:notesSearch.connectionLabelGraphNeighbor', { defaultValue: 'Graph neighbor' })
+        )
       }
     }
 
-    const toItems = (ids: Set<string>) =>
-      Array.from(ids)
-        .filter((id) => id !== selectedNormalized)
-        .map((id) => {
-          const node = noteNodeMap.get(id)
-          return {
-            id,
-            title: node?.title || `Note ${id}`
-          }
-        })
+    const toItems = (
+      items: Map<string, ReturnType<typeof buildNoteRelation>>
+    ) =>
+      Array.from(items.values())
         .sort((a, b) => a.title.localeCompare(b.title))
 
     const sourceItems = Array.from(sourceIds)
@@ -491,14 +576,14 @@ const NotesManagerPage: React.FC = () => {
       .sort((a, b) => a.label.localeCompare(b.label))
 
     return {
-      related: toItems(relatedIds),
-      backlinks: toItems(backlinkIds),
+      related: toItems(relatedById),
+      backlinks: toItems(backlinksById),
       manualLinks: Array.from(manualLinkByEdgeId.values()).sort((a, b) =>
         a.title.localeCompare(b.title)
       ),
       sources: sourceItems
     }
-  }, [noteNeighborsData, ed.selectedId])
+  }, [noteNeighborsData, ed.selectedId, t, unavailableStateLabel])
 
   const manualLinkOptions = React.useMemo(() => {
     const selectedNormalized = normalizeGraphNoteId(ed.selectedId)
@@ -520,9 +605,11 @@ const NotesManagerPage: React.FC = () => {
       }
     }
     for (const item of noteRelations.related) {
+      if (item.available === false) continue
       append(item.id, item.title)
     }
     for (const item of noteRelations.backlinks) {
+      if (item.available === false) continue
       append(item.id, item.title)
     }
     return options.sort((a, b) => a.label.localeCompare(b.label))
@@ -744,6 +831,24 @@ const NotesManagerPage: React.FC = () => {
     list.listMode,
     list.setListMode,
     message,
+    startDraftSession
+  ])
+
+  const saveAndStartNew = React.useCallback(async () => {
+    const saved = await ed.saveNote()
+    if (!saved) return
+    if (list.listMode !== 'active') list.setListMode('active')
+    if (isMobileViewport) setMobileSidebarOpen(false)
+    startDraftSession()
+    window.setTimeout(() => {
+      ed.titleInputRef.current?.focus()
+    }, 0)
+  }, [
+    ed.saveNote,
+    ed.titleInputRef,
+    isMobileViewport,
+    list.listMode,
+    list.setListMode,
     startDraftSession
   ])
 
@@ -1062,6 +1167,7 @@ const NotesManagerPage: React.FC = () => {
         method: 'DELETE' as any,
         headers: { "expected-version": String(expectedVersion) }
       })
+      ed.removeRecentNotes([targetId])
       showDeleteUndoToast(targetId)
       if (ed.selectedId != null && String(ed.selectedId) === targetId) resetEditorToEmptyState()
       await list.refetch()
@@ -1147,6 +1253,7 @@ const NotesManagerPage: React.FC = () => {
 
     if (deleted > 0) {
       message.success(`Deleted ${deleted} selected note${deleted === 1 ? '' : 's'}`)
+      ed.removeRecentNotes(Array.from(deletedIds))
       if (ed.selectedId != null && deletedIds.has(String(ed.selectedId))) {
         resetEditorToEmptyState()
       }
@@ -1818,6 +1925,11 @@ const NotesManagerPage: React.FC = () => {
     if (!list.hasActiveFilters || list.listMode !== 'active') return null
     const effectiveQuery = list.query.trim() || list.queryInput.trim()
     const details: string[] = []
+    if (list.listViewMode === 'inbox') {
+      details.push(
+        `${t('option:notesSearch.summaryViewLabel', { defaultValue: 'View' })}: ${t('option:notesSearch.viewModeInbox', { defaultValue: 'Inbox' })}`
+      )
+    }
     if (effectiveQuery) details.push(`${t('option:notesSearch.summaryQueryLabel', { defaultValue: 'Query' })}: "${effectiveQuery}"`)
     if (list.selectedNotebook != null) details.push(`${t('option:notesSearch.summaryNotebookLabel', { defaultValue: 'Saved filter' })}: ${list.selectedNotebook.name}`)
     if (kw.keywordTokens.length > 0) details.push(`${t('option:notesSearch.summaryKeywordsLabel', { defaultValue: 'Tags' })}: ${kw.keywordTokens.join(', ')}`)
@@ -2070,17 +2182,19 @@ const NotesManagerPage: React.FC = () => {
       <p id={NOTES_SHORTCUTS_SUMMARY_ID} className="sr-only">
         {t('option:notesSearch.shortcutSummaryText', { defaultValue: 'Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.' })}
       </p>
-      <div className="absolute right-4 top-4 z-20">
-        <Button
-          type="primary"
-          size="small"
-          onClick={handleCreateStudyPackFromNote}
-          disabled={ed.selectedId == null || ed.isDirty || !ed.title.trim()}
-          data-testid="notes-create-study-pack-button"
-        >
-          {t('option:notesSearch.createStudyPack', { defaultValue: 'Create study pack' })}
-        </Button>
-      </div>
+      {!isMobileViewport && (
+        <div className="absolute right-4 top-4 z-20">
+          <Button
+            type="primary"
+            size="small"
+            onClick={handleCreateStudyPackFromNote}
+            disabled={ed.selectedId == null || ed.isDirty || !ed.title.trim()}
+            data-testid="notes-create-study-pack-button"
+          >
+            {t('option:notesSearch.createStudyPack', { defaultValue: 'Create study pack' })}
+          </Button>
+        </div>
+      )}
       {isMobileViewport && mobileSidebarOpen && (
         <button type="button" aria-label={t('option:notesSearch.closeMobileSidebar', { defaultValue: 'Close notes list' })} data-testid="notes-mobile-sidebar-backdrop" className="absolute inset-0 z-30 bg-black/35" onClick={() => setMobileSidebarOpen(false)} />
       )}
@@ -2124,6 +2238,8 @@ const NotesManagerPage: React.FC = () => {
         searchTipsContent={searchTipsContent}
         query={list.query}
         isFetching={list.isFetching}
+        hasListError={list.isError}
+        listErrorMessage={list.listErrorMessage}
         isOnline={isOnline}
         demoEnabled={demoEnabled}
         capsLoading={capsLoading}
@@ -2143,9 +2259,14 @@ const NotesManagerPage: React.FC = () => {
         setSelectedMoodboardId={list.setSelectedMoodboardId}
         setSelectedNotebookId={list.setSelectedNotebookId}
         setSearchTipsQuery={list.setSearchTipsQuery}
+        retryList={() => {
+          void list.refetch()
+        }}
         handleNewNote={handleNewNote}
         switchListMode={ed.switchListMode}
-        handleSelectNote={ed.handleSelectNote}
+        handleSelectNote={async (id) => {
+          await ed.handleSelectNote(id)
+        }}
         handleClearFilters={list.handleClearFilters}
         handleKeywordFilterSearch={kw.handleKeywordFilterSearch}
         handleKeywordFilterChange={kw.handleKeywordFilterChange}
@@ -2168,6 +2289,7 @@ const NotesManagerPage: React.FC = () => {
         exportAllCSV={exp.exportAllCSV}
         exportAllJSON={exp.exportAllJSON}
         openImportPicker={imp.openImportPicker}
+        onSyncFolder={() => navigate(buildSourcesNewPath({ preset: "notes-folder-sync" }))}
         resetEditor={resetEditorToEmptyState}
         renderKeywordLabelWithFrequency={kw.renderKeywordLabelWithFrequency}
         onOpenSettings={() => navigate('/settings/tldw')}
@@ -2176,7 +2298,7 @@ const NotesManagerPage: React.FC = () => {
       {!isMobileViewport && (
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="relative w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors rounded-r-lg"
+          className="relative w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg"
           style={{ minHeight: `${MIN_SIDEBAR_HEIGHT}px`, height: `${sidebarHeight}px` }}
           aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse sidebar' })}
           data-testid="notes-desktop-sidebar-toggle"
@@ -2215,6 +2337,7 @@ const NotesManagerPage: React.FC = () => {
         keywordOptions={kw.keywordOptions}
         saveIndicator={ed.saveIndicator}
         saveIndicatorText={ed.saveIndicatorText}
+        saveRecoveryNotice={ed.saveRecoveryNotice}
         selectedLastSavedAt={ed.selectedLastSavedAt}
         offlineStatusText={ed.offlineStatusText}
         currentOfflineDraft={ed.currentOfflineDraft}
@@ -2284,8 +2407,14 @@ const NotesManagerPage: React.FC = () => {
         handleOpenNotesStudio={handleOpenNotesStudio}
         exportSelected={exp.exportSelected}
         saveNote={ed.saveNote}
-        deleteNote={deleteNote}
-        handleSelectNote={ed.handleSelectNote}
+        reloadSelectedNoteAfterConflict={ed.reloadSelectedNoteAfterConflict}
+        saveAndStartNew={saveAndStartNew}
+        deleteNote={async () => {
+          await deleteNote()
+        }}
+        handleSelectNote={async (id) => {
+          await ed.handleSelectNote(id)
+        }}
         openGraphModal={openGraphModal}
         createManualLink={createManualLink}
         removeManualLink={removeManualLink}
@@ -2320,7 +2449,7 @@ const NotesManagerPage: React.FC = () => {
           void handleCreateNotesStudio()
         }}
       />
-      <input ref={imp.importInputRef} type="file" multiple accept=".json,.md,.markdown,application/json,text/markdown,text/plain" className="hidden" data-testid="notes-import-input" onChange={(event) => { void imp.handleImportInputChange(event) }} />
+      <input ref={imp.importInputRef} type="file" multiple accept=".json,.md,.markdown,.txt,application/json,text/markdown,text/plain" className="hidden" data-testid="notes-import-input" onChange={(event) => { void imp.handleImportInputChange(event) }} />
       {hasDeferredOverlayOpen && (
         <React.Suspense fallback={null}>
           <LazyNotesManagerOverlays

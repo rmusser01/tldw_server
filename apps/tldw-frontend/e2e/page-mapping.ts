@@ -262,12 +262,12 @@ export const PAGE_MAPPINGS: PageMapping[] = [
   // Session 3: Knowledge & Content
   // ═══════════════════════════════════════════════════════════════════════════
   {
-    name: "Knowledge Workspace",
+    name: "Knowledge QA Workspace",
     category: "knowledge",
     webuiPath: "/knowledge",
     extensionOptionsPath: "/knowledge",
     extensionSidepanelPath: null,
-    sharedComponent: "OptionKnowledge",
+    sharedComponent: "KnowledgeQA",
     session: 3,
     checklistItems: CHECKLIST_TEMPLATES.knowledge
   },
@@ -683,17 +683,34 @@ export const PAGE_MAPPINGS: PageMapping[] = [
     ]
   },
   {
-    name: "Moderation Playground",
+    name: "Moderation Review",
     category: "workspace",
-    webuiPath: "/moderation-playground",
-    extensionOptionsPath: "/moderation-playground",
+    webuiPath: "/moderation",
+    extensionOptionsPath: "/moderation",
     extensionSidepanelPath: null,
-    sharedComponent: "OptionModerationPlayground",
+    sharedComponent: "ModerationReviewShell",
     session: 6,
     checklistItems: [
-      "Input field accepts text",
-      "Moderation button works",
-      "Results display correctly"
+      "Review shell renders",
+      "Queue unavailable status is clear",
+      "Review item detail shows decision history and redaction state",
+      "Bulk selection reports partial failures",
+      "Saved filter presets and scoped shortcuts work",
+      "Content Rules link works"
+    ]
+  },
+  {
+    name: "Content Rules",
+    category: "workspace",
+    webuiPath: "/moderation/rules",
+    extensionOptionsPath: "/moderation/rules",
+    extensionSidepanelPath: null,
+    sharedComponent: "ModerationPlaygroundShell",
+    session: 6,
+    checklistItems: [
+      "Policy tabs render",
+      "Blocklist and override controls are reachable",
+      "Rule test sandbox works"
     ]
   },
   {
@@ -832,12 +849,12 @@ export const EXTENSION_ONLY_PAGES: PageMapping[] = [
     ]
   },
   {
-    name: "Workspace Playground",
+    name: "Research Workspace",
     category: "workspace",
     webuiPath: null,
-    extensionOptionsPath: "/workspace-playground",
+    extensionOptionsPath: "/research-workspace",
     extensionSidepanelPath: null,
-    sharedComponent: "OptionWorkspacePlayground",
+    sharedComponent: "OptionResearchWorkspace",
     session: 7,
     checklistItems: CHECKLIST_TEMPLATES.workspace
   }

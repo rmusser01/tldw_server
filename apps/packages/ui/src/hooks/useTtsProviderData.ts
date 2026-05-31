@@ -115,6 +115,7 @@ export const useTtsProviderData = ({
 
   return {
     hasAudio,
+    ffmpegAvailable: capabilities?.ffmpegAvailable ?? null,
     providersInfo,
     tldwTtsModels,
     tldwVoiceCatalog,

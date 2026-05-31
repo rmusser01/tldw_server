@@ -17,6 +17,10 @@ import { normalizeConversationState } from "@/utils/conversation-state"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { updatePageTitle } from "@/utils/update-page-title"
 import {
+  effectiveAssistantStateToSelection,
+  resolveEffectiveAssistantState
+} from "@/hooks/chat/effective-assistant-state"
+import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
   parseImageGenerationEventMirrorContent
 } from "@/utils/image-generation-chat"
@@ -24,6 +28,7 @@ import {
   characterToAssistantSelection,
   personaToAssistantSelection
 } from "@/types/assistant-selection"
+import { isTrackedCharacterChatSource } from "@/utils/character-chat-session"
 
 type NotificationApi = {
   error: (payload: { message: string; description?: string }) => void
@@ -271,6 +276,8 @@ export const resolveServerChatAssistantIdentity = (
     candidate?.assistant_kind === "character" || candidate?.assistant_kind === "persona"
       ? candidate.assistant_kind
       : null
+  const source =
+    typeof candidate?.source === "string" ? candidate.source.trim() : null
   const assistantId = resolveAssistantId(candidate?.assistant_id)
   const rawCharacterId =
     candidate?.character_id ??
@@ -292,7 +299,7 @@ export const resolveServerChatAssistantIdentity = (
     return {
       assistantKind,
       assistantId,
-      characterId: characterId ?? null,
+      characterId: null,
       personaMemoryMode
     }
   }
@@ -306,7 +313,7 @@ export const resolveServerChatAssistantIdentity = (
     }
   }
 
-  if (characterId != null) {
+  if (characterId != null && isTrackedCharacterChatSource(source)) {
     return {
       assistantKind: "character",
       assistantId: String(characterId),
@@ -550,7 +557,7 @@ export const useServerChatLoader = ({
   t,
   scope
 }: UseServerChatLoaderOptions) => {
-  const [, setSelectedAssistant] = useSelectedAssistant(null)
+  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const {
     messages,
     streaming,
@@ -562,6 +569,7 @@ export const useServerChatLoader = ({
   const messagesRef = React.useRef(messages)
   const streamingRef = React.useRef(streaming)
   const processingRef = React.useRef(isProcessing)
+  const selectedAssistantRef = React.useRef(selectedAssistant)
   const {
     serverChatId,
     serverChatTitle,
@@ -629,6 +637,7 @@ export const useServerChatLoader = ({
   messagesRef.current = messages
   streamingRef.current = streaming
   processingRef.current = isProcessing
+  selectedAssistantRef.current = selectedAssistant
 
   React.useEffect(() => {
     return () => {
@@ -772,6 +781,19 @@ export const useServerChatLoader = ({
           }
 
           const deferredAssistantPresentationPromise = (async () => {
+            let syncedSettings = null
+            if (assistantKind == null && characterId == null) {
+              try {
+                syncedSettings = await syncChatSettingsForServerChat({
+                  historyId: null,
+                  serverChatId,
+                  allowScratchFallback: false
+                })
+              } catch {
+                syncedSettings = null
+              }
+            }
+
             if (assistantKind === "persona" && assistantId) {
               try {
                 const persona = await tldwClient.getPersonaProfile(assistantId)
@@ -845,12 +867,46 @@ export const useServerChatLoader = ({
               if (!canCommitCurrentLoad()) {
                 return null
               }
+              const fallbackState = resolveEffectiveAssistantState({
+                tracked: {
+                  assistantKind,
+                  assistantId,
+                  characterId
+                },
+                draftSelection: selectedAssistantRef.current
+              })
+              const selection =
+                effectiveAssistantStateToSelection(fallbackState)
+              if (selection) {
+                await setSelectedAssistant(selection)
+                return {
+                  assistantName: selection.name,
+                  assistantAvatarUrl: selection.avatar_url ?? null
+                }
+              }
               await setSelectedAssistant(null)
               return null
             }
 
             if (!canCommitCurrentLoad()) {
               return null
+            }
+            const effectiveAssistantState = resolveEffectiveAssistantState({
+              tracked: {
+                assistantKind,
+                assistantId,
+                characterId
+              },
+              settings: syncedSettings
+            })
+            const selection =
+              effectiveAssistantStateToSelection(effectiveAssistantState)
+            if (selection) {
+              await setSelectedAssistant(selection)
+              return {
+                assistantName: selection.name,
+                assistantAvatarUrl: selection.avatar_url ?? null
+              }
             }
             await setSelectedAssistant(null)
             return null
@@ -942,7 +998,8 @@ export const useServerChatLoader = ({
                 try {
                   await syncChatSettingsForServerChat({
                     historyId: localHistoryId,
-                    serverChatId
+                    serverChatId,
+                    allowScratchFallback: false
                   })
                 } catch {
                   // Best-effort settings sync.

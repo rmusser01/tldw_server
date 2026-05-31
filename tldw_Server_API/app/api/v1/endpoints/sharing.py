@@ -9,16 +9,18 @@ creating share links (tokens), and admin management.
 """
 from __future__ import annotations
 
+import inspect
 import threading
 import time
 from collections import defaultdict
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from loguru import logger
 
-from ....core.AuthNZ.User_DB_Handling import User, get_request_user
-from ..API_Deps.auth_deps import rbac_rate_limit
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
+
 from ..schemas.sharing_schemas import (
     AdminShareListResponse,
     AuditEventResponse,
@@ -26,7 +28,10 @@ from ..schemas.sharing_schemas import (
     CloneWorkspaceRequest,
     CloneWorkspaceResponse,
     CreateTokenRequest,
+    PrototypeLinkExchangeRequest,
+    PrototypeLinkExchangeResponse,
     PublicSharePreview,
+    ResourceType,
     SharedChatRequest,
     SharedMediaResponse,
     SharedWithMeItem,
@@ -42,6 +47,10 @@ from ..schemas.sharing_schemas import (
     VerifyPasswordRequest,
     VerifyPasswordResponse,
 )
+from ..utils.prototype_error_contract import (
+    PROTOTYPE_LINK_ERROR_RESPONSES,
+    prototype_http_error,
+)
 
 router = APIRouter(prefix="/sharing", tags=["sharing"])
 _SHARED_CHAT_ERROR_MESSAGE = "Chat request failed"
@@ -50,24 +59,63 @@ _SHARED_CHAT_ERRORS_MESSAGE = "One or more internal pipeline errors were suppres
 
 # ── Lazy service construction ──
 
+
 def _get_repo():
     """Lazily construct the SharedWorkspaceRepo from the AuthNZ DB pool."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.shared_workspace_repo import SharedWorkspaceRepo
-    pool = get_db_pool()
-    return SharedWorkspaceRepo(db_pool=pool)
+
+    async def _build():
+        return SharedWorkspaceRepo(db_pool=await get_db_pool())
+
+    return _build()
 
 
 def _get_token_service():
+    """Lazily construct the share-token service from the shared workspace repo."""
     from tldw_Server_API.app.core.Sharing.share_token_service import ShareTokenService
-    return ShareTokenService(_get_repo())
+
+    async def _build():
+        return ShareTokenService(await _maybe_await(_get_repo()))
+
+    return _build()
 
 
-_cached_audit_service: "ShareAuditService | None" = None  # noqa: F821
+def _get_prototype_repo():
+    """Lazily construct the prototype workspace repo for share-token checks."""
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
+        PrototypeWorkspacesRepo,
+    )
+
+    async def _build():
+        return PrototypeWorkspacesRepo(db_pool=await get_db_pool())
+
+    return _build()
+
+
+def _get_prototype_access_service():
+    """Lazily construct the prototype private-link access service."""
+    from tldw_Server_API.app.core.Prototype_Workspaces.access import PrototypeAccessService
+
+    async def _build():
+        return PrototypeAccessService(await _maybe_await(_get_prototype_repo()))
+
+    return _build()
+
+
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+_cached_audit_service: ShareAuditService | None = None  # noqa: F821
 
 
 def _get_audit_service():
     from tldw_Server_API.app.core.Sharing.share_audit_service import ShareAuditService
+
     global _cached_audit_service
     if _cached_audit_service is None:
         _cached_audit_service = ShareAuditService()
@@ -84,6 +132,45 @@ async def shutdown_sharing_audit_service() -> None:
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
+
+
+def _request_is_secure(request: Request) -> bool:
+    """Mirror SecurityHeadersMiddleware HTTPS detection for cookie security."""
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    if forwarded_proto:
+        return forwarded_proto == "https"
+    return request.url.scheme == "https"
+
+
+def _coerce_int(value: Any) -> int | None:
+    """Return an integer value when possible without raising for malformed inputs."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _get_owned_prototype_workspace(
+    prototype_workspace_id: str,
+    owner_user_id: Any,
+    *,
+    use_prototype_error_contract: bool = False,
+) -> dict[str, Any]:
+    """Return a prototype workspace only when the expected owner matches."""
+    repo = await _maybe_await(_get_prototype_repo())
+    workspace = await repo.get_workspace(prototype_workspace_id)
+    expected_owner_id = _coerce_int(owner_user_id)
+    actual_owner_id = _coerce_int(workspace.get("owner_user_id")) if workspace else None
+    if not workspace or expected_owner_id is None or actual_owner_id != expected_owner_id:
+        if use_prototype_error_contract:
+            raise prototype_http_error(
+                status_code=status.HTTP_404_NOT_FOUND,
+                category="invalid_or_unavailable_link",
+                message="Prototype link is unavailable",
+                frontend_state="link_unavailable",
+            )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+    return workspace
 
 
 def _sanitize_shared_chat_result(value: Any) -> Any:
@@ -169,6 +256,7 @@ def _check_public_rate_limit(request: Request) -> None:
 
 # ── Scope membership validation helper ──
 
+
 async def _validate_user_has_share_access(share: dict, user: User) -> None:
     """Verify the user belongs to the team/org that a share targets."""
     if share["owner_user_id"] == user.id:
@@ -190,10 +278,12 @@ async def _validate_user_has_share_access(share: dict, user: User) -> None:
 
 # ── Workspace ownership verification helper ──
 
+
 async def _verify_workspace_ownership(workspace_id: str, user: User) -> None:
     """Verify the user owns the workspace before sharing it."""
     try:
         from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+
         db = await get_chacha_db_for_user_id(user.id)
         ws = db.get_workspace(workspace_id)
         if ws is None:
@@ -206,10 +296,11 @@ async def _verify_workspace_ownership(workspace_id: str, user: User) -> None:
     except Exception as exc:
         # In single-user mode, workspace validation may not be available
         from ....core.AuthNZ.settings import get_settings
+
         if get_settings().auth_mode == "single_user":
-            logger.warning(f"Workspace ownership check skipped in single-user mode: {exc}")
+            logger.warning("Workspace ownership check skipped in single-user mode")
             return
-        logger.error(f"Workspace ownership check failed: {exc}")
+        logger.error("Workspace ownership check failed")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not verify workspace ownership due to a database error.",
@@ -236,7 +327,7 @@ async def share_workspace(
     # [CRITICAL FIX #3] Verify the user owns this workspace
     await _verify_workspace_ownership(workspace_id, user)
 
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
     try:
         share = await repo.create_share(
@@ -254,7 +345,7 @@ async def share_workspace(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This workspace is already shared with the specified scope.",
             ) from exc
-        logger.error(f"Failed to create share for workspace {workspace_id}: {exc}")
+        logger.error("Failed to create share")
         raise HTTPException(
             status_code=500,
             detail="An internal error occurred while creating the share.",
@@ -284,10 +375,8 @@ async def list_workspace_shares(
     include_revoked: bool = Query(False),
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
-    shares = await repo.list_shares_for_workspace(
-        workspace_id, user.id, include_revoked=include_revoked
-    )
+    repo = await _maybe_await(_get_repo())
+    shares = await repo.list_shares_for_workspace(workspace_id, user.id, include_revoked=include_revoked)
     return ShareListResponse(shares=[ShareResponse(**s) for s in shares], total=len(shares))
 
 
@@ -303,7 +392,7 @@ async def update_share(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
 
     existing = await repo.get_share(share_id)
@@ -342,7 +431,7 @@ async def revoke_share(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
 
     existing = await repo.get_share(share_id)
@@ -379,7 +468,7 @@ async def revoke_share(
 async def shared_with_me(
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
 
     # Gather shares from all teams/orgs the user belongs to
     items: list[SharedWithMeItem] = []
@@ -390,14 +479,16 @@ async def shared_with_me(
         shares = await repo.list_shares_for_scope("team", tid)
         for s in shares:
             if s["owner_user_id"] != user.id:
-                items.append(SharedWithMeItem(
-                    share_id=s["id"],
-                    workspace_id=s["workspace_id"],
-                    owner_user_id=s["owner_user_id"],
-                    access_level=s["access_level"],
-                    allow_clone=s["allow_clone"],
-                    shared_at=s.get("created_at"),
-                ))
+                items.append(
+                    SharedWithMeItem(
+                        share_id=s["id"],
+                        workspace_id=s["workspace_id"],
+                        owner_user_id=s["owner_user_id"],
+                        access_level=s["access_level"],
+                        allow_clone=s["allow_clone"],
+                        shared_at=s.get("created_at"),
+                    )
+                )
 
     for oid in org_ids:
         shares = await repo.list_shares_for_scope("org", oid)
@@ -405,26 +496,29 @@ async def shared_with_me(
             if s["owner_user_id"] != user.id:
                 # Deduplicate by share_id
                 if not any(i.share_id == s["id"] for i in items):
-                    items.append(SharedWithMeItem(
-                        share_id=s["id"],
-                        workspace_id=s["workspace_id"],
-                        owner_user_id=s["owner_user_id"],
-                        access_level=s["access_level"],
-                        allow_clone=s["allow_clone"],
-                        shared_at=s.get("created_at"),
-                    ))
+                    items.append(
+                        SharedWithMeItem(
+                            share_id=s["id"],
+                            workspace_id=s["workspace_id"],
+                            owner_user_id=s["owner_user_id"],
+                            access_level=s["access_level"],
+                            allow_clone=s["allow_clone"],
+                            shared_at=s.get("created_at"),
+                        )
+                    )
 
     # Batch-populate workspace names from each owner's ChaChaNotes DB
     if items:
         try:
             from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
+
             owner_ids = {item.owner_user_id for item in items}
             owner_dbs: dict[int, Any] = {}
             for oid in owner_ids:
                 try:
                     owner_dbs[oid] = await get_chacha_db_for_owner(oid)
-                except Exception as exc:
-                    logger.debug("Skipping shared workspace name preload for owner {}: {}", oid, exc)
+                except Exception:
+                    logger.debug("Skipping shared workspace name preload")
 
             for item in items:
                 db = owner_dbs.get(item.owner_user_id)
@@ -433,15 +527,10 @@ async def shared_with_me(
                         ws = db.get_workspace(item.workspace_id)
                         if ws:
                             item.workspace_name = ws.get("name")
-                    except Exception as exc:
-                        logger.debug(
-                            "Failed to resolve shared workspace name share_id={} owner_user_id={}: {}",
-                            item.share_id,
-                            item.owner_user_id,
-                            exc,
-                        )
-        except Exception as exc:
-            logger.debug("Shared workspace name population skipped: {}", exc)
+                    except Exception:
+                        logger.debug("Failed to resolve shared workspace name")
+        except Exception:
+            logger.debug("Shared workspace name population skipped")
 
     return SharedWithMeResponse(items=items, total=len(items))
 
@@ -455,7 +544,7 @@ async def get_shared_workspace(
     share_id: int,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     share = await repo.get_share(share_id)
     if not share or share.get("is_revoked"):
         raise HTTPException(status_code=404, detail="Share not found or revoked")
@@ -479,7 +568,7 @@ async def clone_shared_workspace(
     background_tasks: BackgroundTasks,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
 
     share = await repo.get_share(share_id)
@@ -494,6 +583,7 @@ async def clone_shared_workspace(
 
     # Generate a job ID for async clone tracking
     import uuid as _uuid
+
     job_id = str(_uuid.uuid4())
 
     await audit.log(
@@ -551,8 +641,8 @@ def _run_clone_task(
                 )
                 result = svc.clone_workspace(workspace_id, new_name=new_name)
             logger.info(f"Clone job {job_id} completed: {result.get('workspace_id')}")
-        except Exception as exc:
-            logger.error(f"Clone job {job_id} failed: {exc}")
+        except Exception:
+            logger.error("Clone job failed")
 
     try:
         loop = asyncio.get_event_loop()
@@ -579,7 +669,7 @@ async def list_shared_workspace_sources(
     share_id: int,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     share = await repo.get_share(share_id)
     if not share or share.get("is_revoked"):
         raise HTTPException(status_code=404, detail="Share not found or revoked")
@@ -587,6 +677,7 @@ async def list_shared_workspace_sources(
     await _validate_user_has_share_access(share, user)
 
     from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
+
     db = await get_chacha_db_for_owner(share["owner_user_id"])
     sources = db.list_workspace_sources(share["workspace_id"])
     return [
@@ -615,7 +706,7 @@ async def get_shared_workspace_media(
     media_id: int,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     share = await repo.get_share(share_id)
     if not share or share.get("is_revoked"):
         raise HTTPException(status_code=404, detail="Share not found or revoked")
@@ -624,6 +715,7 @@ async def get_shared_workspace_media(
 
     # Verify media_id is a source in this workspace
     from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
+
     chacha_db = await get_chacha_db_for_owner(share["owner_user_id"])
     sources = chacha_db.list_workspace_sources(share["workspace_id"])
     source_media_ids = {s.get("media_id") for s in sources}
@@ -663,7 +755,7 @@ async def chat_with_shared_workspace(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
 
     share = await repo.get_share(share_id)
@@ -711,8 +803,8 @@ async def chat_with_shared_workspace(
             status_code=501,
             detail="RAG pipeline not available",
         ) from None
-    except Exception as exc:
-        logger.error(f"Shared workspace chat failed for share {share_id}: {exc}")
+    except Exception:
+        logger.error("Shared workspace chat failed")
         raise HTTPException(status_code=500, detail="Chat request failed") from None
 
 
@@ -732,8 +824,13 @@ async def create_token(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     audit = _get_audit_service()
+    if body.resource_type == ResourceType.PROTOTYPE_WORKSPACE:
+        await _get_owned_prototype_workspace(
+            prototype_workspace_id=body.resource_id,
+            owner_user_id=user.id,
+        )
 
     result = await svc.generate_token(
         resource_type=body.resource_type.value,
@@ -767,7 +864,7 @@ async def create_token(
 async def list_tokens(
     user: User = Depends(get_request_user),
 ):
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     tokens = await svc.list_tokens(user.id)
     return TokenListResponse(tokens=[TokenResponse(**t) for t in tokens], total=len(tokens))
 
@@ -782,7 +879,7 @@ async def revoke_token(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
 
     token = await repo.get_token(token_id)
@@ -791,7 +888,7 @@ async def revoke_token(
     if token["owner_user_id"] != user.id:
         raise HTTPException(status_code=403, detail="Not the token owner")
 
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     await svc.revoke_token(token_id)
 
     await audit.log(
@@ -823,7 +920,7 @@ async def public_preview(
     # [CRITICAL FIX #1] Rate limit public endpoints (10 req/min per IP)
     _check_public_rate_limit(request)
 
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     validated = await svc.validate_token(token)
     # Return identical 404 for not-found / expired / revoked to prevent enumeration
     if not validated:
@@ -849,7 +946,7 @@ async def public_verify_password(
     # [CRITICAL FIX #1] Rate limit public endpoints (10 req/min per IP)
     _check_public_rate_limit(request)
 
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     audit = _get_audit_service()
 
     validated = await svc.validate_token(token)
@@ -875,6 +972,192 @@ async def public_verify_password(
 
 
 @router.post(
+    "/public/{token}/prototype-session",
+    response_model=PrototypeLinkExchangeResponse,
+    summary="Exchange a prototype private link for an external collaborator session",
+    responses=PROTOTYPE_LINK_ERROR_RESPONSES,
+)
+async def public_prototype_session_exchange(
+    token: str,
+    body: PrototypeLinkExchangeRequest,
+    request: Request,
+    response: Response,
+):
+    _check_public_rate_limit(request)
+
+    from tldw_Server_API.app.core.Prototype_Workspaces.access import (
+        PROTOTYPE_SHARED_ACTOR_COOKIE,
+        PrototypeAccessError,
+    )
+
+    svc = await _maybe_await(_get_token_service())
+    audit = _get_audit_service()
+    validated = await svc.validate_token(token, allow_exhausted=True)
+    if not validated:
+        raise prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="invalid_or_unavailable_link",
+            message="Prototype link is unavailable",
+            frontend_state="link_unavailable",
+        )
+
+    resource_type = str(validated.get("resource_type") or "").strip().lower()
+    prototype_workspace_id = str(validated.get("resource_id") or "").strip()
+    if resource_type != ResourceType.PROTOTYPE_WORKSPACE.value or not prototype_workspace_id:
+        raise prototype_http_error(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            category="invalid_request",
+            message="Share token is not a prototype workspace link",
+            frontend_state="invalid_request",
+        )
+    await _get_owned_prototype_workspace(
+        prototype_workspace_id=prototype_workspace_id,
+        owner_user_id=validated.get("owner_user_id"),
+        use_prototype_error_contract=True,
+    )
+
+    resume_cookie_value = request.cookies.get(PROTOTYPE_SHARED_ACTOR_COOKIE)
+    access_service = await _maybe_await(_get_prototype_access_service())
+    can_resume_without_password = await access_service.can_resume_external_collaborator(
+        prototype_workspace_id=prototype_workspace_id,
+        share_link_id=int(validated["id"]),
+        resume_cookie_value=resume_cookie_value,
+    )
+    if validated.get("is_password_protected"):
+        if body.password:
+            password_ok = await svc.verify_password(validated, body.password)
+            await audit.log(
+                "token.password_verified" if password_ok else "token.password_failed",
+                resource_type=validated["resource_type"],
+                resource_id=validated["resource_id"],
+                owner_user_id=validated["owner_user_id"],
+                token_id=validated["id"],
+                ip_address=_client_ip(request),
+                user_agent=request.headers.get("user-agent"),
+            )
+            if not password_ok:
+                raise prototype_http_error(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    category="invalid_password",
+                    message="Prototype link password is invalid",
+                    frontend_state="password_rejected",
+                    retryable=True,
+                )
+        else:
+            if not can_resume_without_password:
+                raise prototype_http_error(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    category="password_required",
+                    message="Prototype link password is required",
+                    frontend_state="password_required",
+                    retryable=True,
+                )
+
+    if not can_resume_without_password and not str(body.display_name or "").strip():
+        raise prototype_http_error(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            category="invalid_request",
+            message="display_name is required for first-time sessions",
+            frontend_state="invalid_request",
+        )
+
+    claimed_new_use = False
+    if not can_resume_without_password:
+        claimed_new_use = await svc.claim_token_use(validated["id"])
+        if not claimed_new_use:
+            raise prototype_http_error(
+                status_code=status.HTTP_404_NOT_FOUND,
+                category="invalid_or_unavailable_link",
+                message="Prototype link is unavailable",
+                frontend_state="link_unavailable",
+            )
+
+    claim_released = False
+    provisioning_succeeded = False
+    try:
+        access_context = await access_service.exchange_external_collaborator(
+            prototype_workspace_id=prototype_workspace_id,
+            share_link_id=int(validated["id"]),
+            display_name=body.display_name,
+            resume_cookie_value=resume_cookie_value,
+            allow_create=claimed_new_use,
+            expires_at=validated.get("expires_at"),
+        )
+        provisioning_succeeded = bool(access_context.shared_actor_id or access_context.session_token)
+    except PrototypeAccessError as exc:
+        if claimed_new_use:
+            await svc.release_token_use(validated["id"])
+            claim_released = True
+        if exc.code == "workspace_not_found":
+            raise prototype_http_error(
+                status_code=status.HTTP_404_NOT_FOUND,
+                category="invalid_or_unavailable_link",
+                message="Prototype link is unavailable",
+                frontend_state="link_unavailable",
+            ) from exc
+        if exc.code == "workspace_archived":
+            raise prototype_http_error(
+                status_code=status.HTTP_403_FORBIDDEN,
+                category="workspace_unavailable",
+                message="Prototype workspace is archived",
+                frontend_state="workspace_unavailable",
+            ) from exc
+        if exc.code == "resume_required":
+            raise prototype_http_error(
+                status_code=status.HTTP_404_NOT_FOUND,
+                category="invalid_or_unavailable_link",
+                message="Prototype link is unavailable",
+                frontend_state="link_unavailable",
+            ) from exc
+        raise
+    except Exception:
+        if claimed_new_use and not claim_released:
+            await svc.release_token_use(validated["id"])
+            claim_released = True
+        raise
+    if access_context.is_resume and claimed_new_use:
+        await svc.release_token_use(validated["id"])
+        claim_released = True
+    try:
+        await audit.log(
+            "token.prototype_session_exchanged",
+            resource_type=validated["resource_type"],
+            resource_id=validated["resource_id"],
+            owner_user_id=validated["owner_user_id"],
+            token_id=validated["id"],
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+            metadata={
+                "shared_actor_id": access_context.shared_actor_id,
+                "actor_type": access_context.actor_type,
+                "runtime_policy_profile": access_context.runtime_policy_profile,
+                "is_resume": access_context.is_resume,
+                "resumed_without_password": can_resume_without_password,
+                "claimed_new_use": claimed_new_use,
+            },
+        )
+
+        response.set_cookie(
+            key=PROTOTYPE_SHARED_ACTOR_COOKIE,
+            value=access_context.resume_cookie_value,
+            max_age=7 * 24 * 60 * 60,
+            httponly=True,
+            samesite="lax",
+            secure=_request_is_secure(request),
+        )
+        return PrototypeLinkExchangeResponse(
+            shared_actor_id=access_context.shared_actor_id,
+            actor_type="external_collaborator",
+            session_token=access_context.session_token,
+            runtime_policy_profile=access_context.runtime_policy_profile,
+        )
+    except Exception:
+        if claimed_new_use and not claim_released and not provisioning_succeeded:
+            await svc.release_token_use(validated["id"])
+        raise
+
+
+@router.post(
     "/public/{token}/import",
     dependencies=[Depends(rbac_rate_limit("sharing.read"))],
     summary="Import resource from share token (requires auth)",
@@ -884,12 +1167,18 @@ async def public_import(
     request: Request,
     user: User = Depends(get_request_user),
 ):
-    svc = _get_token_service()
+    svc = await _maybe_await(_get_token_service())
     audit = _get_audit_service()
 
     validated = await svc.validate_token(token)
     if not validated:
         raise HTTPException(status_code=404, detail="Resource not found")
+
+    if validated.get("resource_type") == ResourceType.PROTOTYPE_WORKSPACE.value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Prototype workspace links must be exchanged via /prototype-session",
+        )
 
     # [CRITICAL FIX #4] Block import on password-protected tokens without verification
     if validated.get("is_password_protected"):
@@ -937,9 +1226,22 @@ async def admin_list_shares(
     include_revoked: bool = Query(False),
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     shares = await repo.list_all_shares(limit=limit, offset=offset, include_revoked=include_revoked)
-    return AdminShareListResponse(shares=[ShareResponse(**s) for s in shares], total=len(shares))
+    total = await repo.count_all_shares(include_revoked=include_revoked)
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=len(shares),
+    )
+    return AdminShareListResponse(
+        shares=[ShareResponse(**s) for s in shares],
+        total=total,
+        offset=offset,
+        limit=limit,
+        pagination=pagination,
+    )
 
 
 @router.patch(
@@ -951,10 +1253,11 @@ async def admin_update_config(
     body: UpdateConfigRequest,
     user: User = Depends(get_request_user),
 ):
-    repo = _get_repo()
+    repo = await _maybe_await(_get_repo())
     for key, value in body.config.items():
         await repo.set_config(
-            key, value,
+            key,
+            value,
             scope_type=body.scope_type,
             scope_id=body.scope_id,
             updated_by=user.id,
@@ -984,7 +1287,21 @@ async def admin_audit_log(
         limit=limit,
         offset=offset,
     )
+    total = await audit.count(
+        owner_user_id=owner_user_id,
+        resource_type=resource_type,
+        resource_id=resource_id,
+    )
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=len(events),
+    )
     return AuditLogResponse(
         events=[AuditEventResponse(**e) for e in events],
-        total=len(events),
+        total=total,
+        offset=offset,
+        limit=limit,
+        pagination=pagination,
     )

@@ -980,12 +980,12 @@ async def check_billing_with_rg(
         enforcer = get_billing_enforcer()
         result = await enforcer.check_limit(org_id, category, requested_units=units)
         return not result.should_block
-    except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
+    except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS:
         fail_closed = BillingEnforcer._fail_closed_on_data_error()
         if fail_closed:
-            logger.error(f"Billing RG check failed, denying (fail-closed): {exc}")
+            logger.error("Billing RG check failed, denying (fail-closed).")
             return False
-        logger.warning(f"Billing RG check failed, allowing (fail-open): {exc}")
+        logger.warning("Billing RG check failed, allowing (fail-open).")
         return True
 
 

@@ -16,6 +16,7 @@ from typing import Any, Optional, Union
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.Character_Chat.constants import MAX_CHAT_DICTIONARY_TEXT_LENGTH
 
 # Maximum length for regex patterns to prevent complexity attacks
@@ -33,6 +34,15 @@ DANGEROUS_REGEX_PATTERNS = [
     r'(.?)*',      # Many optional matches
     r'([a-zA-Z]+)*',  # Character class with nested quantifier
 ]
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
+
 
 MAX_DICTIONARY_TAGS = 20
 MAX_DICTIONARY_TAG_LENGTH = 40
@@ -92,7 +102,11 @@ def _normalize_dictionary_tags(value: Any) -> list[str]:
     return normalized_tags
 
 
-def _normalize_included_dictionary_ids(value: Any) -> list[int]:
+def _normalize_included_dictionary_ids(
+    value: Any,
+    *,
+    field_name: str = "included_dictionary_ids",
+) -> list[int]:
     if value is None:
         return []
 
@@ -112,7 +126,7 @@ def _normalize_included_dictionary_ids(value: Any) -> list[int]:
     elif isinstance(value, (list, tuple, set)):
         raw_values = list(value)
     else:
-        raise ValueError("included_dictionary_ids must be a list of integers")
+        raise ValueError(f"{field_name} must be a list of integers")
 
     normalized: list[int] = []
     seen: set[int] = set()
@@ -122,16 +136,16 @@ def _normalize_included_dictionary_ids(value: Any) -> list[int]:
         try:
             dictionary_id = int(item)
         except (TypeError, ValueError):
-            raise ValueError(f"Invalid dictionary ID '{item}' in included_dictionary_ids") from None
+            raise ValueError(f"Invalid dictionary ID '{item}' in {field_name}") from None
         if dictionary_id <= 0:
-            raise ValueError("included_dictionary_ids must contain positive integers")
+            raise ValueError(f"{field_name} must contain positive integers")
         if dictionary_id in seen:
             continue
         seen.add(dictionary_id)
         normalized.append(dictionary_id)
 
     if len(normalized) > MAX_INCLUDED_DICTIONARIES:
-        raise ValueError(f"At most {MAX_INCLUDED_DICTIONARIES} included dictionaries are allowed")
+        raise ValueError(f"At most {MAX_INCLUDED_DICTIONARIES} {field_name} are allowed")
 
     return normalized
 
@@ -463,6 +477,10 @@ class ProcessTextRequest(BaseModel):
     """Request schema for processing text through dictionaries."""
     text: str = Field(..., max_length=MAX_CHAT_DICTIONARY_TEXT_LENGTH, description="Text to process")
     dictionary_id: Optional[int] = Field(None, description="Specific dictionary to use")
+    dictionary_ids: Optional[list[int]] = Field(
+        None,
+        description="Explicit client-ordered dictionaries to apply. An empty list applies no dictionaries.",
+    )
     group: Optional[str] = Field(None, description="Specific group to filter entries")
     max_iterations: int = Field(5, ge=1, le=20, description="Maximum processing iterations")
     token_budget: Optional[int] = Field(None, ge=1, description="Optional token limit")
@@ -470,6 +488,13 @@ class ProcessTextRequest(BaseModel):
         None,
         description="Optional chat session ID for activity/audit attribution.",
     )
+
+    @field_validator("dictionary_ids", mode="before")
+    @classmethod
+    def normalize_dictionary_ids(cls, value: Any) -> Optional[list[int]]:
+        if value is None:
+            return None
+        return _normalize_included_dictionary_ids(value, field_name="dictionary_ids")
 
 
 class ProcessTextResponse(BaseModel):
@@ -509,6 +534,13 @@ class DictionaryActivityListResponse(BaseModel):
     total: int = Field(..., ge=0, description="Total number of matching events")
     limit: int = Field(..., ge=1, description="Applied page size")
     offset: int = Field(..., ge=0, description="Applied offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class DictionaryVersionSummary(BaseModel):
@@ -551,6 +583,13 @@ class DictionaryVersionListResponse(BaseModel):
     total: int = Field(..., ge=0, description="Total number of snapshots for this dictionary")
     limit: int = Field(..., ge=1, description="Applied page size")
     offset: int = Field(..., ge=0, description="Applied offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class DictionaryVersionRevertResponse(BaseModel):

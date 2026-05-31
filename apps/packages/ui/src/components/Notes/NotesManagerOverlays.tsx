@@ -1,5 +1,6 @@
 import React from "react"
 import { Button, Checkbox, Input, Modal, Select, Typography } from "antd"
+import type { TFunction } from "i18next"
 
 import KeywordPickerModal from "@/components/Notes/KeywordPickerModal"
 import NotesGraphModal from "@/components/Notes/NotesGraphModal"
@@ -19,16 +20,6 @@ import {
   notesUiStorage,
   toKeywordTestIdSegment
 } from "./notes-manager-utils"
-
-type TranslationFn = (
-  key: string,
-  defaultValueOrOptions?:
-    | string
-    | {
-        defaultValue?: string
-        [key: string]: unknown
-      },
-) => string
 
 type KeywordState = {
   keywordSuggestionOptions: string[]
@@ -95,18 +86,16 @@ type NotesManagerOverlaysProps = {
   shortcutHelpOpen: boolean
   setShortcutHelpOpen: React.Dispatch<React.SetStateAction<boolean>>
   closeGraphModal: () => void
-  handleSelectNote: (noteId: string) => Promise<void> | void
+  handleSelectNote: (noteId: string | number) => Promise<boolean> | Promise<void> | void
   handleKeywordPickerCancel: () => void
   handleKeywordPickerApply: () => void
   handleKeywordPickerSortModeChange: (value: KeywordPickerSortMode) => void
   handleToggleRecentKeyword: (keyword: string) => void
-  handleKeywordPickerQueryChange: (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => void
+  handleKeywordPickerQueryChange: (value: string) => void
   handleKeywordPickerSelectionChange: (values: string[]) => void
   handleKeywordPickerSelectAll: () => void
   handleKeywordPickerClear: () => void
-  t: TranslationFn
+  t: TFunction
 }
 
 const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
@@ -485,7 +474,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
           >
             {t("option:notesSearch.importModalHelp", {
               defaultValue:
-                "Upload JSON exports or markdown files. Choose how to handle imported IDs that already exist.",
+                "Upload JSON exports, Markdown (.md/.markdown), or plain text (.txt) files. Choose how to handle imported IDs that already exist.",
             })}
           </Typography.Text>
           <div className="space-y-1">

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react"
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react"
 import { Tabs, Typography, Input, Space, Tag, Button, message, Tooltip } from "antd"
 import { DismissibleBetaAlert } from "@/components/Common/DismissibleBetaAlert"
 import { useTranslation } from "react-i18next"
@@ -29,6 +29,7 @@ const { Title, Text } = Typography
 // Auto-save interval in milliseconds
 const AUTO_SAVE_INTERVAL = 30000 // 30 seconds
 const DEBOUNCE_SAVE_DELAY = 5000 // 5 seconds after changes
+const SAVED_JUST_NOW_WINDOW = 60000 // 1 minute
 
 export const AudiobookStudioPage: React.FC = () => {
   const { t } = useTranslation(["audiobook", "common"])
@@ -38,9 +39,11 @@ export const AudiobookStudioPage: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [hasUnsaved, setHasUnsaved] = useState(false)
+  const [saveStatusNow, setSaveStatusNow] = useState(() => Date.now())
 
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const previousProjectIdRef = useRef<string | null | undefined>(undefined)
 
   const chapters = useAudiobookStudioStore((s) => s.chapters)
   const rawContent = useAudiobookStudioStore((s) => s.rawContent)
@@ -63,14 +66,42 @@ export const AudiobookStudioPage: React.FC = () => {
   const pendingCount = chapters.filter(
     (ch) => ch.status === "pending" || ch.status === "error"
   ).length
+  const isRecentlySaved = useMemo(
+    () =>
+      lastSaved
+        ? saveStatusNow - lastSaved.getTime() < SAVED_JUST_NOW_WINDOW
+        : false,
+    [lastSaved, saveStatusNow]
+  )
+  const saveStatusLabel = useMemo(() => {
+    if (isSaving) return t("audiobook:saveStatus.saving", "Saving...")
+    if (!projectId && !lastSaved) {
+      return t("audiobook:saveStatus.draftNotSaved", "Draft not saved")
+    }
+    if (hasUnsaved) return t("audiobook:saveStatus.unsaved", "Unsaved changes")
+    if (isRecentlySaved) {
+      return t("audiobook:saveStatus.savedJustNow", "Saved just now")
+    }
+    return t("audiobook:saveStatus.saved", "Saved")
+  }, [isSaving, projectId, lastSaved, hasUnsaved, isRecentlySaved, t])
+  const saveStatusType = useMemo<"warning" | "secondary">(
+    () => (!projectId && !lastSaved) || hasUnsaved ? "warning" : "secondary",
+    [projectId, lastSaved, hasUnsaved]
+  )
 
   // Manual save
   const handleSave = useCallback(async () => {
     setIsSaving(true)
     try {
       await saveProject()
-      setLastSaved(new Date())
+      const savedAt = new Date()
+      setLastSaved(savedAt)
+      setSaveStatusNow(savedAt.getTime())
       setHasUnsaved(false)
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
+      }
       message.success(t("audiobook:saved", "Project saved"))
     } catch (err) {
       console.error("Save failed:", err)
@@ -79,6 +110,44 @@ export const AudiobookStudioPage: React.FC = () => {
       setIsSaving(false)
     }
   }, [saveProject, t])
+
+  useEffect(() => {
+    if (!lastSaved) return
+
+    const elapsed = Date.now() - lastSaved.getTime()
+    const timeoutDelay = Math.max(SAVED_JUST_NOW_WINDOW - elapsed, 0)
+
+    if (timeoutDelay === 0) {
+      setSaveStatusNow(Date.now())
+      return
+    }
+
+    const timeout = setTimeout(() => {
+      setSaveStatusNow(Date.now())
+    }, timeoutDelay)
+
+    return () => clearTimeout(timeout)
+  }, [lastSaved])
+
+  useEffect(() => {
+    if (previousProjectIdRef.current === undefined) {
+      previousProjectIdRef.current = projectId
+      return
+    }
+
+    if (previousProjectIdRef.current === projectId) return
+
+    previousProjectIdRef.current = projectId
+    setLastSaved(null)
+    setSaveStatusNow(Date.now())
+    setHasUnsaved(false)
+    setIsSaving(false)
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+      debounceTimerRef.current = null
+    }
+  }, [projectId])
 
   // Auto-save when content changes (debounced)
   useEffect(() => {
@@ -104,7 +173,9 @@ export const AudiobookStudioPage: React.FC = () => {
       debounceTimerRef.current = setTimeout(async () => {
         try {
           await saveProject()
-          setLastSaved(new Date())
+          const savedAt = new Date()
+          setLastSaved(savedAt)
+          setSaveStatusNow(savedAt.getTime())
           setHasUnsaved(false)
         } catch (err) {
           console.error("Auto-save failed:", err)
@@ -136,7 +207,9 @@ export const AudiobookStudioPage: React.FC = () => {
       if (hasUnsaved) {
         try {
           await saveProject()
-          setLastSaved(new Date())
+          const savedAt = new Date()
+          setLastSaved(savedAt)
+          setSaveStatusNow(savedAt.getTime())
           setHasUnsaved(false)
         } catch (err) {
           console.error("Periodic auto-save failed:", err)
@@ -286,7 +359,7 @@ export const AudiobookStudioPage: React.FC = () => {
             )}
           </Text>
         </div>
-        <Space>
+        <Space wrap>
           <Button
             icon={<FolderOpen className="h-4 w-4" />}
             onClick={() => setShowProjectList(true)}
@@ -305,13 +378,14 @@ export const AudiobookStudioPage: React.FC = () => {
                 ? t("audiobook:lastSaved", "Last saved: {{time}}", {
                     time: lastSaved.toLocaleTimeString()
                   })
-                : t("audiobook:notSavedYet", "Not saved yet")
+                : saveStatusLabel
             }
           >
             <Button
-              type={hasUnsaved ? "primary" : "default"}
+              type={hasUnsaved || !projectId ? "primary" : "default"}
+              aria-label={t("audiobook:saveProject", "Save project")}
               icon={
-                hasUnsaved ? (
+                hasUnsaved || !projectId ? (
                   <Save className="h-4 w-4" />
                 ) : (
                   <Check className="h-4 w-4" />
@@ -320,13 +394,24 @@ export const AudiobookStudioPage: React.FC = () => {
               onClick={handleSave}
               loading={isSaving}
             >
-              {hasUnsaved
-                ? t("audiobook:save", "Save")
-                : t("audiobook:saved", "Saved")}
+              {t("audiobook:save", "Save")}
             </Button>
           </Tooltip>
         </Space>
       </div>
+
+      <span
+        role="status"
+        aria-live="polite"
+        className={`mb-3 block text-sm ${
+          saveStatusType === "warning" ? "text-warning" : "text-text-subtle"
+        }`}
+      >
+        <span className="sr-only">
+          {t("audiobook:saveStatus.ariaLabel", "Project save status")}:{" "}
+        </span>
+        {saveStatusLabel}
+      </span>
 
       <DismissibleBetaAlert
         storageKey="beta-dismissed:audiobookStudio"

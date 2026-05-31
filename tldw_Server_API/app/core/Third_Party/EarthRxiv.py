@@ -79,8 +79,10 @@ def search_items(
         if total == 0:
             total = len(items)
         return items, total, None
-    except Exception as e:
-        return None, 0, f"EarthArXiv error: {str(e)}"
+    except TimeoutError:
+        return None, 0, "EarthArXiv request timed out."
+    except Exception:
+        return None, 0, "EarthArXiv request failed."
 
 
 def get_item_by_id(osf_id: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -90,8 +92,10 @@ def get_item_by_id(osf_id: str) -> tuple[dict[str, Any] | None, str | None]:
         if isinstance(data.get("data"), dict):
             return _normalize_item(data["data"]), None
         return None, None
-    except Exception as e:
-        return None, f"EarthArXiv error: {str(e)}"
+    except TimeoutError:
+        return None, "EarthArXiv request timed out."
+    except Exception:
+        return None, "EarthArXiv request failed."
 
 
 def get_item_by_doi(doi: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -120,5 +124,7 @@ def get_item_by_doi(doi: str) -> tuple[dict[str, Any] | None, str | None]:
         if items2:
             return _normalize_item(items2[0]), None
         return None, None
-    except Exception as e:
-        return None, f"EarthArXiv error: {str(e)}"
+    except TimeoutError:
+        return None, "EarthArXiv request timed out."
+    except Exception:
+        return None, "EarthArXiv request failed."

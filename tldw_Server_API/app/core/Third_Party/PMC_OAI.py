@@ -14,7 +14,6 @@ import contextlib
 from typing import Any
 from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
-from xml.etree import ElementTree as ET
 
 from tldw_Server_API.app.core.http_client import fetch
 
@@ -27,12 +26,12 @@ _PMC_NONCRITICAL_EXCEPTIONS = (
     TimeoutError,
     TypeError,
     ValueError,
-    ET.ParseError,
+    DET.ParseError,
     DefusedXmlException,
 )
 
 
-def _get_xml(params: dict[str, Any]) -> ET.Element:
+def _get_xml(params: dict[str, Any]) -> Any:
     """Perform a GET to PMC OAI-PMH and return parsed XML root."""
     r = fetch(method="GET", url=BASE_URL, params=params, headers={"Accept": "application/xml"}, timeout=20)
     if r.status_code >= 400:
@@ -66,15 +65,17 @@ def pmc_oai_identify() -> tuple[dict[str, Any] | None, str | None]:
             "granularity": text("granularity"),
         })
         return info, None
-    except _PMC_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"PMC OAI-PMH Identify error: {str(e)}"
+    except TimeoutError:
+        return None, "PMC OAI-PMH Identify request timed out."
+    except _PMC_NONCRITICAL_EXCEPTIONS:
+        return None, "PMC OAI-PMH Identify request failed."
 
 
-def r_text(el: ET.Element) -> str:
-    return ET.tostring(el, encoding="unicode")
+def r_text(el: Any) -> str:
+    return DET.tostring(el, encoding="unicode")
 
 
-def _parse_resumption(root: ET.Element) -> str | None:
+def _parse_resumption(root: Any) -> str | None:
     ns = {"oai": "http://www.openarchives.org/OAI/2.0/"}
     r = root.find(".//oai:resumptionToken", ns)
     return r.text.strip() if r is not None and r.text else None
@@ -96,11 +97,13 @@ def pmc_oai_list_sets(resumption_token: str | None = None) -> tuple[list[dict[st
                 "setName": name.text if name is not None else None,
             })
         return sets, _parse_resumption(root), None
-    except _PMC_NONCRITICAL_EXCEPTIONS as e:
-        return None, None, f"PMC OAI-PMH ListSets error: {str(e)}"
+    except TimeoutError:
+        return None, None, "PMC OAI-PMH ListSets request timed out."
+    except _PMC_NONCRITICAL_EXCEPTIONS:
+        return None, None, "PMC OAI-PMH ListSets request failed."
 
 
-def _parse_dc_metadata(md: ET.Element) -> dict[str, Any]:
+def _parse_dc_metadata(md: Any) -> dict[str, Any]:
     # oai_dc namespace
     ns = {
         "dc": "http://purl.org/dc/elements/1.1/",
@@ -150,7 +153,7 @@ def _parse_dc_metadata(md: ET.Element) -> dict[str, Any]:
     return out
 
 
-def _parse_records(root: ET.Element) -> list[dict[str, Any]]:
+def _parse_records(root: Any) -> list[dict[str, Any]]:
     ns = {"oai": "http://www.openarchives.org/OAI/2.0/"}
     items: list[dict[str, Any]] = []
     for rec in root.findall(".//oai:record", ns):
@@ -199,8 +202,10 @@ def pmc_oai_list_records(
         root = _get_xml(params)
         items = _parse_records(root)
         return items, _parse_resumption(root), None
-    except _PMC_NONCRITICAL_EXCEPTIONS as e:
-        return None, None, f"PMC OAI-PMH ListRecords error: {str(e)}"
+    except TimeoutError:
+        return None, None, "PMC OAI-PMH ListRecords request timed out."
+    except _PMC_NONCRITICAL_EXCEPTIONS:
+        return None, None, "PMC OAI-PMH ListRecords request failed."
 
 
 def pmc_oai_list_identifiers(
@@ -235,8 +240,10 @@ def pmc_oai_list_identifiers(
                 "setSpecs": ss if ss else None,
             })
         return items, _parse_resumption(root), None
-    except _PMC_NONCRITICAL_EXCEPTIONS as e:
-        return None, None, f"PMC OAI-PMH ListIdentifiers error: {str(e)}"
+    except TimeoutError:
+        return None, None, "PMC OAI-PMH ListIdentifiers request timed out."
+    except _PMC_NONCRITICAL_EXCEPTIONS:
+        return None, None, "PMC OAI-PMH ListIdentifiers request failed."
 
 
 def pmc_oai_get_record(
@@ -252,5 +259,7 @@ def pmc_oai_get_record(
         if not items:
             return None, None
         return items[0], None
-    except _PMC_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"PMC OAI-PMH GetRecord error: {str(e)}"
+    except TimeoutError:
+        return None, "PMC OAI-PMH GetRecord request timed out."
+    except _PMC_NONCRITICAL_EXCEPTIONS:
+        return None, "PMC OAI-PMH GetRecord request failed."

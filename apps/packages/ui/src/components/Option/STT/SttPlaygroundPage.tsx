@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { useStorage } from "@plasmohq/storage/hook"
 import { Trans, useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
-import { Alert, Button, Typography } from "antd"
+import { Button, Typography } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { PageShell } from "@/components/Common/PageShell"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useTranscriptionModelsCatalog } from "@/hooks/useTranscriptionModelsCatalog"
 import { RecordingStrip } from "./RecordingStrip"
@@ -14,6 +15,9 @@ import { ComparisonPanel } from "./ComparisonPanel"
 import { HistoryPanel } from "./HistoryPanel"
 import type { SttHistoryEntry, SttHistoryResult } from "./HistoryPanel"
 import type { ComparisonResult } from "@/hooks/useComparisonTranscribe"
+import { AudioReadinessStrip } from "@/components/Option/Audio/AudioReadinessStrip"
+import { AudioPresetControls } from "@/components/Option/Audio/AudioPresetControls"
+import { buildSttReadinessItems } from "@/components/Option/Audio/audio-readiness"
 import {
   saveSttRecording,
   getSttRecording,
@@ -25,14 +29,17 @@ const { Text, Title } = Typography
 export const SttPlaygroundPage: React.FC = () => {
   const { t } = useTranslation(["playground"])
   const notification = useAntdNotification()
+  const [globalModel] = useStorage("sttModel", "whisper-1")
 
   // ── Server models (fetched on mount) ──────────────────────────────
   const {
     serverModels,
+    modelOptions,
     serverModelsLoading,
     serverModelsError,
     retryServerModels
   } = useTranscriptionModelsCatalog({
+    defaultModel: globalModel,
     warnLabel: "STT Playground"
   })
 
@@ -100,6 +107,7 @@ export const SttPlaygroundPage: React.FC = () => {
     defaultSttSettings
   )
   const [showSettings, setShowSettings] = useState(false)
+  const [selectedSttModels, setSelectedSttModels] = useState<string[]>([])
 
   useEffect(() => {
     if (!showSettings) {
@@ -138,6 +146,102 @@ export const SttPlaygroundPage: React.FC = () => {
     return opts
   }, [sttSettings])
 
+  const sttPresetConfig = useMemo(
+    () => ({
+      models: selectedSttModels,
+      ...sttOptions
+    }),
+    [selectedSttModels, sttOptions]
+  )
+
+  const handleApplySttPreset = useCallback(
+    (config: Record<string, unknown>) => {
+      const nextSettings: SttLocalSettings = { ...sttSettings }
+      if (typeof config.language === "string") nextSettings.language = config.language
+      if (typeof config.task === "string") nextSettings.task = config.task
+      if (typeof config.response_format === "string") {
+        nextSettings.responseFormat = config.response_format
+      }
+      if (typeof config.temperature === "number") {
+        nextSettings.temperature = config.temperature
+      }
+      if (typeof config.prompt === "string") nextSettings.prompt = config.prompt
+      if (typeof config.segment === "boolean") nextSettings.useSegmentation = config.segment
+      if (typeof config.seg_K === "number") nextSettings.segK = config.seg_K
+      if (typeof config.seg_min_segment_size === "number") {
+        nextSettings.segMinSegmentSize = config.seg_min_segment_size
+      }
+      if (typeof config.seg_lambda_balance === "number") {
+        nextSettings.segLambdaBalance = config.seg_lambda_balance
+      }
+      if (typeof config.seg_utterance_expansion_width === "number") {
+        nextSettings.segUtteranceExpansionWidth = config.seg_utterance_expansion_width
+      }
+      if (typeof config.seg_embeddings_provider === "string") {
+        nextSettings.segEmbeddingsProvider = config.seg_embeddings_provider
+      }
+      if (typeof config.seg_embeddings_model === "string") {
+        nextSettings.segEmbeddingsModel = config.seg_embeddings_model
+      }
+      const rawModels = config.models
+      const hasExplicitModelList = Array.isArray(rawModels)
+      const models = hasExplicitModelList
+        ? rawModels
+            .map((model) => (typeof model === "string" ? model.trim() : ""))
+            .filter((model) => model.length > 0)
+        : typeof config.model === "string" && config.model.trim()
+          ? [config.model.trim()]
+          : []
+      if (hasExplicitModelList || models.length > 0) setSelectedSttModels(models)
+      setSttSettings(nextSettings)
+      setShowSettings(true)
+    },
+    [sttSettings]
+  )
+
+  const readinessItems = useMemo(
+    () =>
+      buildSttReadinessItems({
+        modelOptions,
+        loading: serverModelsLoading,
+        error: serverModelsError
+      }),
+    [modelOptions, serverModelsError, serverModelsLoading]
+  )
+  const recordingDisabledState = useMemo<{
+    reason: string
+    statusType: "secondary" | "warning" | "danger"
+  } | undefined>(() => {
+    if (serverModelsLoading) {
+      return {
+        reason: t(
+          "playground:stt.recordingDisabledLoading",
+          "Loading transcription model catalog."
+        ),
+        statusType: "secondary"
+      }
+    }
+    if (serverModelsError) {
+      return {
+        reason: t(
+          "playground:stt.recordingDisabledModelError",
+          "Unable to load transcription models. Retry before recording."
+        ),
+        statusType: "warning"
+      }
+    }
+    if (serverModels.length === 0) {
+      return {
+        reason: t(
+          "playground:stt.recordingDisabledNoModels",
+          "No transcription models are available. Configure STT models before recording."
+        ),
+        statusType: "danger"
+      }
+    }
+    return undefined
+  }, [serverModels.length, serverModelsError, serverModelsLoading, t])
+
   // ── History (persisted via Plasmo storage) ────────────────────────
   const [history, setHistory] = useStorage<SttHistoryEntry[]>(
     "sttComparisonHistory",
@@ -161,7 +265,9 @@ export const SttPlaygroundPage: React.FC = () => {
             model: r.model,
             text: r.text,
             latencyMs: r.latencyMs,
-            wordCount: r.wordCount
+            wordCount: r.wordCount,
+            config: r.config,
+            metadata: r.metadata
           }))
         if (historyResults.length === 0) return
         const entry: SttHistoryEntry = {
@@ -307,8 +413,13 @@ export const SttPlaygroundPage: React.FC = () => {
       ) {
         return
       }
-      e.preventDefault()
-      window.dispatchEvent(new CustomEvent("stt-toggle-record"))
+      const toggleEvent = new CustomEvent("stt-toggle-record", {
+        cancelable: true
+      })
+      window.dispatchEvent(toggleEvent)
+      if (toggleEvent.defaultPrevented) {
+        e.preventDefault()
+      }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
@@ -317,8 +428,8 @@ export const SttPlaygroundPage: React.FC = () => {
   // ── Render ────────────────────────────────────────────────────────
   return (
     <PageShell maxWidthClassName="max-w-5xl" className="py-6">
-      <Title level={3}>
-        {t("playground:stt.title", "STT Playground")}
+      <Title level={1} className="!text-2xl">
+        {t("playground:speechToText", "Speech to Text")}
       </Title>
       <Text type="secondary">
         {t("playground:stt.subtitle", "Record audio and compare transcription results across multiple models.")}
@@ -345,43 +456,56 @@ export const SttPlaygroundPage: React.FC = () => {
       </div>
 
       <div className="mt-4 space-y-4">
+        <AudioReadinessStrip items={readinessItems} label="STT readiness" />
+        <AudioPresetControls
+          kind="stt"
+          currentConfig={sttPresetConfig}
+          capabilityAssumptions={{
+            models: modelOptions
+              .filter((model) => selectedSttModels.includes(model.id))
+              .map((model) => ({
+                id: model.id,
+                availability: model.availability,
+                capabilities: model.capabilities,
+                sources: model.sources
+              }))
+          }}
+          onApply={handleApplySttPreset}
+        />
         {!currentBlob && (
           <p className="text-center text-sm text-text-muted mb-4">
             {t("playground:stt.firstUseHint", "Press the record button or upload an audio file to get started with transcription.")}
           </p>
         )}
         {serverModelsError && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             title={t("playground:stt.modelsLoadError", "Model load failed")}
-            description={serverModelsError}
-            action={
-              <Button
-                size="small"
-                onClick={() => {
-                  retryServerModels()
-                }}
-                disabled={serverModelsLoading}
-              >
-                {t("common:retry", "Retry")}
-              </Button>
-            }
-          />
+            action={{
+              label: t("common:retry", "Retry"),
+              onClick: retryServerModels,
+              disabled: serverModelsLoading
+            }}
+          >
+            {serverModelsError}
+          </DesignSystemAlert>
         )}
         {!serverModelsLoading && !serverModelsError && serverModels.length === 0 && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             className="mb-4"
-            message={t("playground:stt.noModelsTitle", "No transcription models available")}
-            description={t("playground:stt.noModelsBody", "Configure STT models in your server settings. Check the Audio Setup Guide for instructions.")}
-          />
+            title={t("playground:stt.noModelsTitle", "No transcription models available")}
+          >
+            {t("playground:stt.noModelsBody", "Configure STT models in your server settings. Check the Audio Setup Guide for instructions.")}
+          </DesignSystemAlert>
         )}
         <div data-testid="stt-record-strip">
           <RecordingStrip
             onBlobReady={handleBlobReady}
             onSettingsToggle={toggleSettings}
+            disabled={Boolean(recordingDisabledState)}
+            disabledReason={recordingDisabledState?.reason}
+            disabledStatusType={recordingDisabledState?.statusType}
           />
         </div>
         <p className="text-[11px] text-text-subtle text-center mt-1">
@@ -396,6 +520,9 @@ export const SttPlaygroundPage: React.FC = () => {
           <ComparisonPanel
             blob={currentBlob}
             availableModels={serverModels}
+            availableModelOptions={modelOptions}
+            selectedModels={selectedSttModels}
+            onSelectedModelsChange={setSelectedSttModels}
             sttOptions={sttOptions}
             onSaveToNotes={handleSaveToNotes}
             onComparisonComplete={handleComparisonComplete}

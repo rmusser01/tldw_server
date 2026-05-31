@@ -53,9 +53,9 @@ vi.mock("antd", () => {
   const Table = ({ dataSource = [] }: any) => (
     <div data-testid="outputs-table-rows">{dataSource.length}</div>
   )
-  const Alert = ({ message, description, action, ...rest }: any) => (
+  const Alert = ({ title, message, description, action, ...rest }: any) => (
     <div data-testid={rest["data-testid"] || "outputs-alert"}>
-      <div>{message}</div>
+      <div>{title ?? message}</div>
       <div>{description}</div>
       {action}
     </div>
@@ -253,7 +253,9 @@ describe("OutputsTab advanced filters disclosure", () => {
 
     render(<OutputsTab />)
 
-    expect(screen.getByTestId("watchlists-outputs-delivery-issues-banner")).toHaveTextContent(
+    const deliveryIssuesBanner = screen.getByTestId("watchlists-outputs-delivery-issues-banner")
+    expect(deliveryIssuesBanner).toHaveAttribute("data-ds-component", "Alert")
+    expect(deliveryIssuesBanner).toHaveTextContent(
       "Delivery issues detected in 1 report."
     )
     expect(screen.getByTestId("outputs-table-rows")).toHaveTextContent("2")

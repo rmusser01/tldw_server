@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react"
-import { Alert, Button, Input, Tag, Tooltip, Typography } from "antd"
+import { Button, Input, Tooltip, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 import {
   AlertTriangle,
@@ -13,14 +13,25 @@ import {
   X,
   Plus,
 } from "lucide-react"
-import type { DetectedMediaType, WizardQueueItem, QueueItemValidation } from "./types"
+import type {
+  ConferenceDuplicatePolicy,
+  DetectedMediaType,
+  WizardQueueItem,
+  QueueItemValidation,
+} from "./types"
 import { useIngestWizard } from "./IngestWizardContext"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import { Alert as DesignSystemAlert, Badge } from "@/components/ui/primitives"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import type { PlaylistPreflightResult } from "@/services/tldw/playlist-preflight"
 import { FileDropZone } from "./QueueTab/FileDropZone"
+import { PlaylistPreflightPanel } from "./PlaylistPreflightPanel"
+import { BatchMetadataPanel } from "./BatchMetadataPanel"
 import {
-  QUICK_INGEST_ACCEPT_STRING,
+  QUICK_INGEST_MAX_FILE_SIZE_LABEL,
   QUICK_INGEST_MAX_FILE_SIZE,
 } from "./constants"
+import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,10 +67,38 @@ const detectTypeFromExtension = (name: string): DetectedMediaType => {
   if (["mp3", "wav", "ogg", "flac", "m4a", "aac", "wma", "opus"].includes(ext)) return "audio"
   if (["mp4", "mkv", "avi", "mov", "webm", "wmv", "flv", "m4v"].includes(ext)) return "video"
   if (["pdf"].includes(ext)) return "pdf"
-  if (["epub", "mobi", "azw3"].includes(ext)) return "ebook"
-  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "tiff"].includes(ext)) return "image"
-  if (["doc", "docx", "txt", "rtf", "md", "markdown", "html", "htm", "xml", "json", "csv", "tsv"].includes(ext)) return "document"
+  if (["epub"].includes(ext)) return "ebook"
+  if (["doc", "docx", "txt", "rtf", "md", "markdown", "html", "htm", "xhtml", "xml", "json"].includes(ext)) return "document"
   return "unknown"
+}
+
+const detectTypeFromMime = (mimeType: string | undefined): DetectedMediaType => {
+  const normalized = String(mimeType || "").trim().toLowerCase()
+  if (!normalized) return "unknown"
+  if (normalized.startsWith("audio/")) return "audio"
+  if (normalized.startsWith("video/")) return "video"
+  if (normalized.includes("pdf")) return "pdf"
+  if (normalized.includes("epub")) return "ebook"
+  if (
+    normalized.startsWith("text/") ||
+    normalized.includes("markdown") ||
+    normalized.includes("html") ||
+    normalized.includes("xml") ||
+    normalized.includes("json") ||
+    normalized.includes("rtf") ||
+    normalized.includes("msword") ||
+    normalized.includes("officedocument.wordprocessingml.document")
+  ) {
+    return "document"
+  }
+  return "unknown"
+}
+
+const detectTypeFromFile = (file: File): DetectedMediaType => {
+  const detectedFromExtension = detectTypeFromExtension(file.name)
+  return detectedFromExtension !== "unknown"
+    ? detectedFromExtension
+    : detectTypeFromMime(file.type)
 }
 
 export const detectTypeFromUrl = (url: string): DetectedMediaType => {
@@ -84,6 +123,23 @@ export const detectTypeFromUrl = (url: string): DetectedMediaType => {
     return "web"
   }
 }
+
+export const detectPlaylistPreflightCandidate = (url: string): boolean => {
+  try {
+    const parsed = new URL(url)
+    const hostname = parsed.hostname.toLowerCase()
+    if (!hostnameMatches(hostname, "youtube.com") && !hostnameMatches(hostname, "youtu.be")) {
+      return false
+    }
+    const playlistId = parsed.searchParams.get("list")?.trim()
+    return Boolean(playlistId)
+  } catch {
+    return false
+  }
+}
+
+const isDuplicatePreflightStatus = (status: string | undefined): boolean =>
+  status === "duplicate_existing" || status === "duplicate_in_batch"
 
 const isValidUrl = (raw: string): boolean => {
   const trimmed = raw.trim()
@@ -116,17 +172,21 @@ const validateQueueItem = (
       errors.push("Invalid URL format")
     }
     // Check for duplicates
+    const dedupeKey = normalizeUrlForDedupe(item.url)
     const isDuplicate = existingItems.some(
-      (other) => other.id !== item.id && other.url && other.url === item.url
+      (other) =>
+        other.id !== item.id &&
+        other.url &&
+        normalizeUrlForDedupe(other.url) === dedupeKey
     )
     if (isDuplicate) {
-      warnings.push("Duplicate URL")
+      warnings.push("Already queued")
     }
   }
 
   if (item.file) {
     if (item.fileSize > QUICK_INGEST_MAX_FILE_SIZE) {
-      errors.push("File exceeds 500 MB limit")
+      errors.push(`File exceeds ${QUICK_INGEST_MAX_FILE_SIZE_LABEL} quick-ingest limit`)
     }
     // Check for duplicate files
     const isDuplicate = existingItems.some(
@@ -136,12 +196,14 @@ const validateQueueItem = (
         other.fileSize === item.fileSize
     )
     if (isDuplicate) {
-      warnings.push("Duplicate file")
+      warnings.push("Already queued")
     }
   }
 
   if (item.detectedType === "unknown") {
-    warnings.push("Unrecognized file type")
+    errors.push(
+      "Unsupported file type. Quick Ingest supports PDF, EPUB, DOC/DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, and video."
+    )
   }
 
   return {
@@ -156,22 +218,45 @@ const validateQueueItem = (
 // ---------------------------------------------------------------------------
 
 // Warning uses >= (show at boundary); validation uses > (allow exactly at limit)
-const LARGE_FILE_WARNING_THRESHOLD = 500 * 1024 * 1024 // 500 MB
+const LARGE_FILE_WARNING_THRESHOLD = Math.floor(QUICK_INGEST_MAX_FILE_SIZE * 0.8)
+const PASSIVE_ALERT_PROPS = {
+  role: "status",
+  "aria-live": "polite",
+} as const
 
 type AddContentStepProps = {
   isOnlineForIngest?: boolean
+  isCheckingConnection?: boolean
+  connectionRecoveryMessage?: string
+  onRetryConnection?: () => void
   onQuickProcess?: () => void
 }
 
 export const AddContentStep: React.FC<AddContentStepProps> = ({
   isOnlineForIngest = true,
+  isCheckingConnection = false,
+  connectionRecoveryMessage,
+  onRetryConnection,
   onQuickProcess,
 }) => {
   const { t } = useTranslation(["option"])
-  const { state, setQueueItems, goNext } = useIngestWizard()
-  const { queueItems } = state
+  const {
+    state,
+    setQueueItems,
+    setPlaylistPreflightSeed,
+    setConferenceBatchMetadata,
+    goNext,
+  } = useIngestWizard()
+  const { queueItems, conferenceBatchMetadata, playlistPreflightSeed } = state
 
   const [urlInput, setUrlInput] = useState("")
+  const [playlistPreflightUrl, setPlaylistPreflightUrl] = useState("")
+  const [playlistPreflight, setPlaylistPreflight] = useState<PlaylistPreflightResult | null>(null)
+  const [duplicatePolicy, setDuplicatePolicy] = useState<ConferenceDuplicatePolicy>("skip")
+  const [playlistPreflightLoading, setPlaylistPreflightLoading] = useState(false)
+  const [playlistPreflightError, setPlaylistPreflightError] = useState<string | null>(null)
+  const { capabilities } = useServerCapabilities()
+  const seededPlaylistUrlRef = React.useRef<string | null>(null)
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -186,7 +271,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     (files: File[]) => {
       const newItems: WizardQueueItem[] = []
       for (const file of files) {
-        const detectedType = detectTypeFromExtension(file.name)
+        const detectedType = detectTypeFromFile(file)
         const item: WizardQueueItem = {
           id: crypto.randomUUID(),
           fileName: file.name,
@@ -231,7 +316,184 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
 
     setQueueItems([...queueItems, ...newItems])
     setUrlInput("")
+    setPlaylistPreflight(null)
+    setPlaylistPreflightUrl("")
+    setDuplicatePolicy("skip")
+    setPlaylistPreflightError(null)
   }, [urlInput, queueItems, setQueueItems])
+
+  const playlistCandidateUrls = useMemo(
+    () =>
+      urlInput
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .filter(detectPlaylistPreflightCandidate),
+    [urlInput]
+  )
+  const primaryPlaylistCandidateUrl = playlistCandidateUrls[0] || ""
+  const shouldOfferPlaylistPreflight =
+    Boolean(capabilities?.hasMediaPlaylistPreflight) && Boolean(primaryPlaylistCandidateUrl)
+
+  const handlePreviewPlaylist = useCallback(async () => {
+    if (!primaryPlaylistCandidateUrl) return
+    setPlaylistPreflightLoading(true)
+    setPlaylistPreflightError(null)
+    try {
+      const result = await tldwClient.preflightPlaylist({
+        url: primaryPlaylistCandidateUrl,
+        max_items: 100,
+        timeoutMs: 60_000
+      })
+      setPlaylistPreflight(result)
+      setPlaylistPreflightUrl(primaryPlaylistCandidateUrl)
+      setDuplicatePolicy("skip")
+    } catch (error) {
+      setPlaylistPreflight(null)
+      setPlaylistPreflightUrl(primaryPlaylistCandidateUrl)
+      setPlaylistPreflightError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Playlist preview failed."
+      )
+    } finally {
+      setPlaylistPreflightLoading(false)
+    }
+  }, [primaryPlaylistCandidateUrl])
+
+  React.useEffect(() => {
+    if (
+      !playlistPreflightSeed ||
+      playlistPreflightSeed.action !== "playlist_preflight" ||
+      typeof playlistPreflightSeed.url !== "string"
+    ) {
+      return
+    }
+
+    const seededUrl = playlistPreflightSeed.url.trim()
+    if (!seededUrl) return
+
+    seededPlaylistUrlRef.current = seededUrl
+    setUrlInput(seededUrl)
+    setPlaylistPreflight(null)
+    setPlaylistPreflightUrl("")
+    setDuplicatePolicy("skip")
+    setPlaylistPreflightError(null)
+    setPlaylistPreflightSeed(null)
+  }, [playlistPreflightSeed, setPlaylistPreflightSeed])
+
+  React.useEffect(() => {
+    if (!seededPlaylistUrlRef.current) return
+    if (!shouldOfferPlaylistPreflight) return
+    if (primaryPlaylistCandidateUrl !== seededPlaylistUrlRef.current) return
+
+    seededPlaylistUrlRef.current = null
+    void handlePreviewPlaylist()
+  }, [handlePreviewPlaylist, primaryPlaylistCandidateUrl, shouldOfferPlaylistPreflight])
+
+  const handleAddPreflightItems = useCallback(() => {
+    if (!playlistPreflight) return
+    const newItems: WizardQueueItem[] = []
+    const selectedItems = playlistPreflight.items.filter(
+      (item) => item.selected && item.sourceUrl
+    )
+    for (const preflightItem of selectedItems) {
+      const detectedType = detectTypeFromUrl(preflightItem.sourceUrl)
+      const item: WizardQueueItem = {
+        id: crypto.randomUUID(),
+        url: preflightItem.sourceUrl,
+        detectedType,
+        icon: ICON_NAME_MAP[detectedType],
+        fileSize: 0,
+        validation: { valid: true },
+        playlist: {
+          playlistId: playlistPreflight.playlistId,
+          playlistTitle: playlistPreflight.playlistTitle,
+          ordinal: preflightItem.ordinal,
+          normalizedSourceId: preflightItem.normalizedSourceId,
+          duplicateStatus: preflightItem.duplicateStatus
+        },
+        conferenceOverride: {
+          selected: true,
+          ...(isDuplicatePreflightStatus(preflightItem.duplicateStatus)
+            ? { duplicatePolicy }
+            : {})
+        }
+      }
+      item.validation = validateQueueItem(item, [...queueItems, ...newItems])
+      newItems.push(item)
+    }
+    if (newItems.length === 0) return
+    setQueueItems([...queueItems, ...newItems])
+    setConferenceBatchMetadata({
+      collectionName:
+        conferenceBatchMetadata?.collectionName ||
+        playlistPreflight.playlistTitle ||
+        "",
+      conferenceName: conferenceBatchMetadata?.conferenceName,
+      eventDate: conferenceBatchMetadata?.eventDate,
+      eventYear: conferenceBatchMetadata?.eventYear,
+      sharedTags: conferenceBatchMetadata?.sharedTags ?? [],
+      sourcePlaylistUrl:
+        conferenceBatchMetadata?.sourcePlaylistUrl || playlistPreflightUrl,
+    })
+    setUrlInput((current) =>
+      current
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line && line !== playlistPreflightUrl)
+        .join("\n")
+    )
+    setPlaylistPreflight(null)
+    setPlaylistPreflightUrl("")
+    setDuplicatePolicy("skip")
+    setPlaylistPreflightError(null)
+  }, [
+    conferenceBatchMetadata,
+    duplicatePolicy,
+    playlistPreflight,
+    playlistPreflightUrl,
+    queueItems,
+    setConferenceBatchMetadata,
+    setQueueItems,
+  ])
+
+  const handlePreflightItemSelectionChange = useCallback(
+    (ordinal: number, selected: boolean) => {
+      setPlaylistPreflight((current) => {
+        if (!current) return current
+        const items = current.items.map((item) =>
+          item.ordinal === ordinal ? { ...item, selected } : item
+        )
+        return {
+          ...current,
+          selectedCount: items.filter((item) => item.selected && item.sourceUrl).length,
+          items
+        }
+      })
+    },
+    []
+  )
+
+  const handleDuplicatePolicyChange = useCallback(
+    (policy: ConferenceDuplicatePolicy) => {
+      setDuplicatePolicy(policy)
+      setPlaylistPreflight((current) => {
+        if (!current) return current
+        const items = current.items.map((item) => {
+          if (!item.sourceUrl) return { ...item, selected: false }
+          if (!isDuplicatePreflightStatus(item.duplicateStatus)) return item
+          return { ...item, selected: policy !== "skip" }
+        })
+        return {
+          ...current,
+          selectedCount: items.filter((item) => item.selected && item.sourceUrl).length,
+          items
+        }
+      })
+    },
+    []
+  )
 
   // Handle Enter key in URL input
   const handleUrlKeyDown = useCallback(
@@ -258,18 +520,23 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   }, [setQueueItems])
 
   const hasItems = queueItems.length > 0
-  const validItemCount = useMemo(
-    () => queueItems.filter((item) => item.validation.valid).length,
+  const selectedItems = useMemo(
+    () => queueItems.filter((item) => item.conferenceOverride?.selected !== false),
     [queueItems]
   )
+  const validItemCount = useMemo(
+    () => selectedItems.filter((item) => item.validation.valid).length,
+    [selectedItems]
+  )
+  const invalidItemCount = selectedItems.length - validItemCount
   const canProceed = validItemCount > 0
+  const canStartProcessing = canProceed && isOnlineForIngest && !isCheckingConnection
 
   const hasLargeFiles = useMemo(
     () => queueItems.some((item) => item.fileSize >= LARGE_FILE_WARNING_THRESHOLD),
     [queueItems]
   )
 
-  const { capabilities } = useServerCapabilities()
   const ffmpegMissing = capabilities?.ffmpegAvailable === false
   const hasAvMediaItems = useMemo(
     () =>
@@ -290,18 +557,26 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         <Typography.Text className="text-[11px] text-text-subtle">
           {qi(
             "fileSizeLimits",
-            "Supported: PDF, EPUB, DOCX, TXT, Markdown, audio, video. Max file size: 500 MB."
+            "Supported: PDF, EPUB, DOC/DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: {{maxSize}}.",
+            { maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL }
+          )}
+        </Typography.Text>
+        <Typography.Text className="block text-xs text-text-muted">
+          {qi(
+            "wizard.addPurpose",
+            "Add URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge."
           )}
         </Typography.Text>
 
         {hasLargeFiles && (
-          <Alert
-            type="warning"
-            showIcon
-            icon={<AlertTriangle className="h-4 w-4" />}
-            message={qi(
+          <DesignSystemAlert
+            variant="warning"
+            {...PASSIVE_ALERT_PROPS}
+            icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
+            title={qi(
               "largeFileWarning",
-              "Large file -- upload may take several minutes. Consider using a smaller file if possible."
+              "Large file -- this browser-buffered upload is close to the {{maxSize}} quick-ingest limit.",
+              { maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL }
             )}
           />
         )}
@@ -336,36 +611,95 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             </Button>
           </div>
         </div>
+
+        {shouldOfferPlaylistPreflight && (
+          <PlaylistPreflightPanel
+            candidateUrl={primaryPlaylistCandidateUrl}
+            loading={playlistPreflightLoading}
+            error={playlistPreflightError}
+            result={
+              playlistPreflightUrl === primaryPlaylistCandidateUrl
+                ? playlistPreflight
+                : null
+            }
+            onPreview={handlePreviewPlaylist}
+            onAddItems={handleAddPreflightItems}
+            onItemSelectionChange={handlePreflightItemSelectionChange}
+            duplicatePolicy={duplicatePolicy}
+            onDuplicatePolicyChange={handleDuplicatePolicyChange}
+          />
+        )}
       </div>
 
       {/* FFmpeg missing warning for audio/video items */}
       {ffmpegMissing && hasAvMediaItems && (
-        <Alert
-          type="warning"
-          showIcon
-          icon={<AlertTriangle className="h-4 w-4" />}
+        <DesignSystemAlert
+          variant="warning"
+          {...PASSIVE_ALERT_PROPS}
+          icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
           className="mt-3"
-          message={qi(
+          title={qi(
             "ffmpegMissing",
             "FFmpeg is not installed on the server. Audio and video files may fail to process. Other file types (PDF, documents, ebooks) are unaffected."
           )}
         />
       )}
 
+      {!isOnlineForIngest && (
+        <DesignSystemAlert
+          variant="warning"
+          icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
+          className="mt-3"
+          title={qi("wizard.offline.title", "Server offline")}
+          action={
+            onRetryConnection
+              ? {
+                  label: isCheckingConnection
+                    ? qi("wizard.offline.checking", "Checking...")
+                    : qi("wizard.offline.retry", "Retry connection"),
+                  onClick: onRetryConnection,
+                  loading: isCheckingConnection,
+                  disabled: isCheckingConnection,
+                }
+              : undefined
+          }
+        >
+          {connectionRecoveryMessage ||
+            qi(
+              "wizard.offline.description",
+              "Reconnect to your tldw server before processing. You can still add URLs and configure queued items."
+            )}
+        </DesignSystemAlert>
+      )}
+
       {/* Queued items list */}
       {hasItems && (
         <div className="mt-4">
           <div className="flex items-center justify-between">
-            <Typography.Text className="text-sm font-medium">
-              {qi("queueTitle", "QUEUED")}
-              <span className="ml-1.5 text-text-muted font-normal">
-                ({queueItems.length}{" "}
-                {queueItems.length === 1
-                  ? qi("wizard.item", "item")
-                  : qi("wizard.items", "items")}
-                )
-              </span>
-            </Typography.Text>
+            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
+              <Typography.Text className="text-sm font-medium">
+                {qi("queueTitle", "QUEUED")}
+                <span className="ml-1.5 text-text-muted font-normal">
+                  ({queueItems.length}{" "}
+                  {queueItems.length === 1
+                    ? qi("wizard.item", "item")
+                    : qi("wizard.items", "items")}
+                  )
+                </span>
+              </Typography.Text>
+              {invalidItemCount > 0 && (
+                <Typography.Text className="text-xs text-text-muted">
+                  {qi(
+                    "queueValiditySummary",
+                    "{{valid}} valid / {{invalid}} invalid",
+                    {
+                      valid: validItemCount,
+                      invalid: invalidItemCount,
+                    }
+                  )}
+                </Typography.Text>
+              )}
+            </div>
             <Button
               size="small"
               type="text"
@@ -412,25 +746,30 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                           "FFmpeg is not installed on the server -- this file may fail to process"
                         )}
                       >
-                        <Tag
-                          color="warning"
-                          className="!text-[10px] !leading-tight !px-1 !py-0 !m-0"
+                        <Badge
+                          variant="warning"
+                          size="sm"
+                          className="!m-0"
                         >
-                          <AlertTriangle className="mr-0.5 inline h-3 w-3" />
+                          <AlertTriangle
+                            className="mr-0.5 h-3 w-3"
+                            aria-hidden="true"
+                          />
                           {item.detectedType.charAt(0).toUpperCase() +
                             item.detectedType.slice(1)}
-                        </Tag>
+                        </Badge>
                       </Tooltip>
                     ) : (
-                      <Tag
-                        color="geekblue"
-                        className="!text-[10px] !leading-tight !px-1 !py-0 !m-0"
+                      <Badge
+                        variant="info"
+                        size="sm"
+                        className="!m-0"
                       >
                         {item.detectedType === "web"
                           ? "Web page"
                           : item.detectedType.charAt(0).toUpperCase() +
                             item.detectedType.slice(1)}
-                      </Tag>
+                      </Badge>
                     )}
                     {item.detectedType !== "unknown" && (
                       <span className="text-text-subtle">(auto)</span>
@@ -464,13 +803,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         </div>
       )}
 
+      {hasItems && <BatchMetadataPanel />}
+
       {/* Action buttons */}
       <div className="mt-4 flex items-center justify-end gap-2">
         {hasItems && onQuickProcess && (
           <Button
             type="primary"
             onClick={onQuickProcess}
-            disabled={!canProceed}
+            disabled={!canStartProcessing}
           >
             {qi("wizard.useDefaultsProcess", "Use defaults & process")}
           </Button>

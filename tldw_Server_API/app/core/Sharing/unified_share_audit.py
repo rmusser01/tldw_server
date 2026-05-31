@@ -533,7 +533,9 @@ class UnifiedShareAuditWriter:
             params.append(resource_id)
         params.extend([limit, offset])
 
-        query = f"""
+        where_clause = " AND ".join(conditions)
+        query = (
+            """
             SELECT
                 event_id,
                 timestamp,
@@ -546,10 +548,14 @@ class UnifiedShareAuditWriter:
                 resource_id,
                 metadata
             FROM audit_events
-            WHERE {' AND '.join(conditions)}
+            WHERE """
+            # Conditions are fixed SQL fragments; values stay parameterized.
+            + where_clause  # nosec B608
+            + """
             ORDER BY timestamp DESC, rowid DESC
             LIMIT ? OFFSET ?
         """
+        )
 
         db = await self._open_db()
         try:
@@ -565,6 +571,45 @@ class UnifiedShareAuditWriter:
                 projected.append(result)
         return projected
 
+    async def count_events(
+        self,
+        *,
+        owner_user_id: int | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+    ) -> int:
+        """Count sharing audit rows matching the query_events filters."""
+        await self.initialize()
+        conditions = [_SHARE_EVENT_FILTER_SQL]
+        params: list[Any] = []
+        if owner_user_id is not None:
+            conditions.append(
+                "(tenant_user_id = ? OR json_extract(metadata, '$.owner_user_id') = ?)"
+            )
+            owner_str = str(owner_user_id)
+            params.extend([owner_str, owner_user_id])
+        if resource_type is not None:
+            conditions.append("resource_type = ?")
+            params.append(resource_type)
+        if resource_id is not None:
+            conditions.append("resource_id = ?")
+            params.append(resource_id)
+
+        where_clause = " AND ".join(conditions)
+        query = (
+            "SELECT COUNT(*) AS cnt FROM audit_events WHERE "
+            + where_clause  # nosec B608
+        )
+
+        db = await self._open_db()
+        try:
+            async with db.execute(query, params) as cur:
+                row = await cur.fetchone()
+        finally:
+            await db.close()
+
+        return int(row["cnt"]) if row is not None else 0
+
     def _project_row(self, row: dict[str, Any]) -> dict[str, Any] | None:
         metadata = _load_metadata(row.get("metadata"))
         compatibility_id = _coerce_int(
@@ -572,22 +617,14 @@ class UnifiedShareAuditWriter:
             or metadata.get("legacy_share_audit_id")
         )
         if compatibility_id is None:
-            logger.warning(
-                "Skipping sharing audit row without compatibility_id: event_id={}, event_type={}",
-                row.get("event_id", "?"),
-                row.get("event_type", "?"),
-            )
+            logger.warning("Skipping sharing audit row without compatibility_id")
             return None
 
         owner_user_id = _coerce_int(row.get("tenant_user_id"))
         if owner_user_id is None:
             owner_user_id = _coerce_int(metadata.get("owner_user_id"))
         if owner_user_id is None:
-            logger.warning(
-                "Skipping sharing audit row without owner_user_id: event_id={}, event_type={}",
-                row.get("event_id", "?"),
-                row.get("event_type", "?"),
-            )
+            logger.warning("Skipping sharing audit row without owner_user_id")
             return None
 
         actor_user_id = _coerce_int(metadata.get("actor_user_id"))

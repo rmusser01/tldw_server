@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const createMessageOptionState = () => ({
   onSubmit: vi.fn(async () => null),
@@ -66,6 +66,10 @@ const createMessageOptionState = () => ({
   selectedKnowledge: null,
   ragMediaIds: []
 })
+
+const messageOptionOverrides = vi.hoisted(() => ({
+  value: {} as Record<string, unknown>
+}))
 
 let capturedModeLauncherProps: { voiceChatUnavailableReason?: string | null } | null =
   null
@@ -256,7 +260,10 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("~/hooks/useMessageOption", () => ({
-  useMessageOption: () => createMessageOptionState()
+  useMessageOption: () => ({
+    ...createMessageOptionState(),
+    ...messageOptionOverrides.value
+  })
 }))
 
 vi.mock("@/hooks/useChatSettingsRecord", () => ({
@@ -787,17 +794,27 @@ vi.mock("@/components/Common/Settings/CurrentChatModelSettings", () => ({
 vi.mock("react-router-dom", () => ({
   Link: ({
     children,
+    to,
     ...props
   }: {
     children: React.ReactNode
+    to?: string
     [key: string]: unknown
-  }) => <a {...props}>{children}</a>,
+  }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
   useNavigate: () => vi.fn()
 }))
 
 import { PlaygroundForm } from "../PlaygroundForm"
 
 describe("PlaygroundForm voice visibility", () => {
+  beforeEach(() => {
+    messageOptionOverrides.value = {}
+  })
+
   it("hides the main voice button but forwards the shared unavailable reason when voice transport is missing", () => {
     capturedModeLauncherProps = null
     render(<PlaygroundForm droppedFiles={[]} />)
@@ -806,5 +823,39 @@ describe("PlaygroundForm voice visibility", () => {
     expect(capturedModeLauncherProps?.voiceChatUnavailableReason).toBe(
       "This server does not advertise voice conversation streaming."
     )
+  })
+
+  it("shows the most recent chat error above the composer with a diagnostics link", () => {
+    messageOptionOverrides.value = {
+      messages: [
+        {
+          id: "user-1",
+          isBot: false,
+          message: "Hello"
+        },
+        {
+          id: "assistant-error-1",
+          isBot: true,
+          message:
+            "__tldw_error__:" +
+            JSON.stringify({
+              summary: "The selected model is not available.",
+              hint: "Choose a different model or refresh the model list.",
+              detail: "model_not_found"
+            })
+        }
+      ]
+    }
+
+    render(<PlaygroundForm droppedFiles={[]} />)
+
+    const banner = screen.getByTestId("playground-chat-error-banner")
+    expect(banner).toHaveTextContent("The selected model is not available.")
+    expect(banner).toHaveTextContent(
+      "Choose a different model or refresh the model list."
+    )
+    expect(
+      screen.getByRole("link", { name: "View in Health & Diagnostics" })
+    ).toHaveAttribute("href", "/settings/health")
   })
 })

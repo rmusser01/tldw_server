@@ -9,7 +9,9 @@ describe("persona shortcut defaults", () => {
   it("family persona includes safety tools", () => {
     const shortcuts = getDefaultShortcutsForPersona("family")
     expect(shortcuts).toContain("family-guardrails")
-    expect(shortcuts).toContain("moderation-playground")
+    expect(shortcuts).toContain("moderation-review")
+    expect(shortcuts).toContain("moderation-rules")
+    expect(shortcuts).not.toContain("moderation-playground")
     expect(shortcuts).toContain("chat")
     expect(shortcuts).toContain("settings")
   })
@@ -19,7 +21,7 @@ describe("persona shortcut defaults", () => {
     expect(shortcuts).toContain("deep-research")
     expect(shortcuts).toContain("knowledge-qa")
     expect(shortcuts).toContain("media")
-    expect(shortcuts).toContain("workspace-playground")
+    expect(shortcuts).toContain("research-workspace")
     expect(shortcuts).toContain("chat")
   })
 

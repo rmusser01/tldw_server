@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RouteRedirect } from '@web/components/navigation/RouteRedirect';
+import PrivilegesRedirectPage from '@web/pages/privileges';
 
 const mockReplace = vi.fn();
 const mockPrefetch = vi.fn().mockResolvedValue(undefined);
@@ -82,14 +83,14 @@ describe('RouteRedirect telemetry', () => {
     render(<RouteRedirect to="/knowledge" preserveParams={false} />);
 
     const openUpdatedPage = screen.getByTestId('route-redirect-open-updated-page');
-    const goToChat = screen.getByTestId('route-redirect-go-chat');
+    const openHome = screen.getByTestId('route-redirect-open-home');
     const openSettings = screen.getByTestId('route-redirect-open-settings');
 
     await user.tab();
     expect(openUpdatedPage).toHaveFocus();
 
     await user.tab();
-    expect(goToChat).toHaveFocus();
+    expect(openHome).toHaveFocus();
 
     await user.tab();
     expect(openSettings).toHaveFocus();
@@ -134,6 +135,28 @@ describe('RouteRedirect telemetry', () => {
 
     await waitFor(() => {
       expect(mockReplace).toHaveBeenCalledWith('/speech');
+    });
+  });
+
+  it('privileges route exposes a settings-specific redirect while preserving route context', async () => {
+    mockRouter.asPath = '/privileges?tab=roles';
+    mockRouter.pathname = '/privileges';
+
+    render(<PrivilegesRedirectPage />);
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Privileges moved to settings' })
+    ).toBeVisible();
+    expect(screen.getByText(/role and permission controls/i)).toBeVisible();
+    expect(screen.getByText('/privileges?tab=roles')).toBeVisible();
+    expect(screen.getByText('/settings?tab=roles')).toBeVisible();
+    expect(screen.getByTestId('route-redirect-open-updated-page')).toHaveAttribute(
+      'href',
+      '/settings?tab=roles'
+    );
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/settings?tab=roles');
     });
   });
 });

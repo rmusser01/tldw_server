@@ -214,10 +214,29 @@ const resolveTemplateName = (outputPrefs: JobOutputPrefs | null | undefined): st
   return null
 }
 
+const isEnabledRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" &&
+  value !== null &&
+  !Array.isArray(value) &&
+  (value as Record<string, unknown>).enabled === true
+
 export const summarizeOutputLinkage = (
   outputPrefs: JobOutputPrefs | null | undefined,
   t: Translator
 ): string => {
+  const autoOutputSummary = outputPrefs?.auto_output?.enabled
+    ? toText(
+        t(
+          "watchlists:jobs.outputLinkage.scheduledReport",
+          "Create a report after each scheduled run"
+        )
+      )
+    : toText(
+        t(
+          "watchlists:jobs.outputLinkage.manualReports",
+          "Manual/test reports only"
+        )
+      )
   const templateName = resolveTemplateName(outputPrefs)
   const templateSummary = templateName
     ? toText(
@@ -229,9 +248,28 @@ export const summarizeOutputLinkage = (
         t("watchlists:jobs.outputLinkage.templateDefault", "Template: default")
       )
 
-  const audioSummary = outputPrefs?.generate_audio
-    ? toText(t("watchlists:jobs.outputLinkage.audioEnabled", "Audio: enabled"))
-    : toText(t("watchlists:jobs.outputLinkage.audioDisabled", "Audio: text only"))
+  const deliveryParts: string[] = []
+  if (isEnabledRecord(outputPrefs?.deliveries?.email)) {
+    deliveryParts.push(
+      toText(t("watchlists:jobs.outputLinkage.email", "Deliver by email"))
+    )
+  }
+  if (isEnabledRecord(outputPrefs?.deliveries?.chatbook)) {
+    deliveryParts.push(
+      toText(t("watchlists:jobs.outputLinkage.chatbook", "Save to Chatbook"))
+    )
+  }
+  if (deliveryParts.length === 0) {
+    deliveryParts.push(
+      toText(t("watchlists:jobs.outputLinkage.reportsTabOnly", "Reports tab only"))
+    )
+  }
 
-  return `${templateSummary} • ${audioSummary}`
+  const audioSummary = outputPrefs?.generate_audio
+    ? toText(
+        t("watchlists:jobs.outputLinkage.audioRequested", "Audio briefing requested")
+      )
+    : toText(t("watchlists:jobs.outputLinkage.audioTextOnly", "Text report only"))
+
+  return [autoOutputSummary, templateSummary, ...deliveryParts, audioSummary].join(" • ")
 }

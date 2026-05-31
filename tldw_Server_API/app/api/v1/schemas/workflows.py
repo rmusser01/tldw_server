@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta, OffsetPaginationMeta
 
 
 class WorkflowInputSchema(BaseModel):
@@ -201,9 +203,29 @@ class WorkflowRunListItem(BaseModel):
 
 class WorkflowRunListResponse(BaseModel):
     runs: list[WorkflowRunListItem]
+    limit: int
+    offset: int | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    total: int | None = Field(
+        default=None,
+        ge=0,
+        description="Alias for pagination.total when the total is known",
+    )
+    pagination: OffsetPaginationMeta | CursorPaginationMeta
     next_offset: int | None = None
     next_cursor: str | None = None
 
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> "WorkflowRunListResponse":
+        if self.has_more is None:
+            self.has_more = self.pagination.has_more
+        if self.total is None and hasattr(self.pagination, "total"):
+            self.total = self.pagination.total
+        if self.next_offset is None and isinstance(self.pagination, OffsetPaginationMeta):
+            self.next_offset = self.pagination.next_offset
+        if self.next_cursor is None and isinstance(self.pagination, CursorPaginationMeta):
+            self.next_cursor = self.pagination.next_cursor
+        return self
 
 class WorkflowFailureSummary(BaseModel):
     reason_code_core: str | None = None

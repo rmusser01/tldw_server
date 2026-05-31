@@ -15,6 +15,7 @@ export { resolveCharacterSelectionId } from "@/utils/default-character-preferenc
 import { CHARACTER_TEMPLATES } from "@/data/character-templates"
 import { extractAvatarValues } from "./AvatarField"
 import { validateAndCreateImageDataUrl } from "@/utils/image-utils"
+import { buildCharacterChatPath } from "@/routes/route-paths"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -657,8 +658,10 @@ export const toCharactersSortBy = (column: string | null): import("@/services/tl
   }
 }
 
+export type CharacterTableSortOrder = "ascend" | "descend" | null
+
 export const toCharactersSortOrder = (
-  order: "ascend" | "descend" | null
+  order: CharacterTableSortOrder
 ): import("@/services/tldw/TldwApiClient").CharacterListSortOrder => (order === "descend" ? "desc" : "asc")
 
 export const withCharacterNameInLabel = (
@@ -795,20 +798,23 @@ export const buildCharacterSelectionPayload = (record: any) => {
   }
 }
 
-export const resolveChatWorkspaceUrl = (): string => {
-  if (typeof window === "undefined") return "/"
+export const resolveChatWorkspaceUrl = (
+  options: { characterId?: string | number | null } = {}
+): string => {
+  const chatPath = buildCharacterChatPath({ characterId: options.characterId })
+  if (typeof window === "undefined") return chatPath
   try {
     const currentUrl = new URL(window.location.href)
     if (currentUrl.hash.startsWith("#/")) {
-      currentUrl.hash = "#/"
+      currentUrl.hash = `#${chatPath}`
       return currentUrl.toString()
     }
     if (/options\.html$/i.test(currentUrl.pathname)) {
-      return `${currentUrl.origin}${currentUrl.pathname}#/`
+      return `${currentUrl.origin}${currentUrl.pathname}#${chatPath}`
     }
-    return `${currentUrl.origin}/`
+    return `${currentUrl.origin}${chatPath}`
   } catch {
-    return "/"
+    return chatPath
   }
 }
 

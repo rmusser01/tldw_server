@@ -27,6 +27,15 @@ describe("run notification helpers", () => {
     expect(result).toEqual({ kind: "completed" })
   })
 
+  it("returns completed notification when backend reports succeeded", () => {
+    const result = resolveRunTransitionNotification("running", {
+      status: "succeeded",
+      error_msg: null
+    })
+    expect(result).toEqual({ kind: "completed" })
+    expect(buildRunStateNotificationKey(9, "succeeded")).toBe("9:completed")
+  })
+
   it("returns failed notification and remediation hint for failed transitions", () => {
     const result = resolveRunTransitionNotification(
       "pending",
@@ -52,6 +61,15 @@ describe("run notification helpers", () => {
 
   it("notifies for newly observed terminal runs that finished after session start", () => {
     const sessionStart = Date.parse("2026-02-18T09:00:00Z")
+    expect(
+      shouldNotifyNewTerminalRun(
+        {
+          status: "succeeded",
+          finished_at: "2026-02-18T09:01:00Z"
+        },
+        sessionStart
+      )
+    ).toBe(true)
     expect(
       shouldNotifyNewTerminalRun(
         {

@@ -3,12 +3,12 @@ import {
   AutoComplete,
   Card,
   Table,
+  Descriptions,
   Button,
   InputNumber,
   Form,
   Tag,
   Space,
-  Alert,
   Select,
   Switch,
   Popconfirm,
@@ -21,7 +21,13 @@ import {
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
 import { CollapsibleSection } from "./CollapsibleSection"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { Alert } from "@/components/ui/primitives"
+import {
+  tldwClient,
+  type SandboxAdminRuntimeDiagnosticsItem,
+  type SandboxAdminRuntimeDiagnosticsResponse
+} from "@/services/tldw/TldwApiClient"
+import { getDesignSystemState } from "@/design-system"
 
 /** Format a stat value for display — handles objects, arrays, booleans, numbers */
 function formatStatValue(value: unknown): React.ReactNode {
@@ -63,6 +69,39 @@ function formatStatKey(key: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+function formatRuntimeCode(value: string | null | undefined): string {
+  if (!value) return "\u2014"
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+const RUNTIME_READINESS_TAG_COLORS: Record<string, string> = {
+  ready: "green",
+  unavailable: "red",
+  host_gated: "gold",
+  scaffold: "blue",
+  unsupported: "default",
+  not_applicable: "default"
+}
+
+const RUNTIME_WARNING_LABELS: Record<string, string> = {
+  host_local_boundary: "Host-local boundary",
+  not_untrusted_eligible: "Not untrusted eligible",
+  sandbox_exec_deprecated: "sandbox-exec deprecated",
+  weaker_than_vm_isolation: "Weaker than VM isolation"
+}
+
+const READY_STATE_LABEL = getDesignSystemState("ready")?.label ?? "ready"
+const UNAVAILABLE_STATE_LABEL =
+  getDesignSystemState("unavailable")?.label ?? "unavailable"
+
+type SandboxDiagnosticsErrorState = {
+  title: string
+  description: string
+  alertType: "warning" | "error"
+}
+
 const MonitoringDashboardPage: React.FC = () => {
   // Admin guard state
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
@@ -75,6 +114,9 @@ const MonitoringDashboardPage: React.FC = () => {
   const [statsLoading, setStatsLoading] = useState(false)
   const [securityStatus, setSecurityStatus] = useState<any>(null)
   const [securityLoading, setSecurityLoading] = useState(false)
+  const [sandboxDiagnostics, setSandboxDiagnostics] = useState<SandboxAdminRuntimeDiagnosticsResponse | null>(null)
+  const [sandboxDiagnosticsLoading, setSandboxDiagnosticsLoading] = useState(false)
+  const [sandboxDiagnosticsError, setSandboxDiagnosticsError] = useState<SandboxDiagnosticsErrorState | null>(null)
 
   // Alert rules state
   const [alertRules, setAlertRules] = useState<any[]>([])
@@ -127,6 +169,33 @@ const MonitoringDashboardPage: React.FC = () => {
       setSecurityLoading(false)
     }
   }, [markAdminGuardFromError])
+
+  const loadSandboxDiagnostics = useCallback(async () => {
+    setSandboxDiagnosticsLoading(true)
+    try {
+      const diagnostics = await tldwClient.getSandboxRuntimeDiagnostics()
+      setSandboxDiagnostics(diagnostics)
+      setSandboxDiagnosticsError(null)
+    } catch (err: any) {
+      const guardState = deriveAdminGuardFromError(err)
+      const isForbidden = guardState === "forbidden"
+      setSandboxDiagnostics(null)
+      setSandboxDiagnosticsError({
+        title: isForbidden
+          ? "Sandbox diagnostics access denied"
+          : "Sandbox diagnostics unavailable",
+        description: sanitizeAdminErrorMessage(
+          err,
+          isForbidden
+            ? "You don't have permission to view sandbox runtime diagnostics."
+            : "Sandbox runtime diagnostics are not available."
+        ),
+        alertType: isForbidden ? "error" : "warning"
+      })
+    } finally {
+      setSandboxDiagnosticsLoading(false)
+    }
+  }, [])
 
   // ── Alert Rules ──
 
@@ -237,11 +306,12 @@ const MonitoringDashboardPage: React.FC = () => {
   const refreshAll = useCallback(() => {
     void loadSystemStats()
     void loadSecurityStatus()
+    void loadSandboxDiagnostics()
     void loadAlertRules()
     void loadAlertHistory()
     void loadActivity()
     setLastRefreshedAt(new Date())
-  }, [loadSystemStats, loadSecurityStatus, loadAlertRules, loadAlertHistory, loadActivity])
+  }, [loadSystemStats, loadSecurityStatus, loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
 
   // ── Initial Load ──
 
@@ -250,6 +320,7 @@ const MonitoringDashboardPage: React.FC = () => {
     initialLoadRef.current = true
     void loadSystemStats()
     void loadSecurityStatus()
+    void loadSandboxDiagnostics()
     void loadAlertRules()
     void loadAlertHistory()
     void loadActivity()
@@ -260,7 +331,7 @@ const MonitoringDashboardPage: React.FC = () => {
       },
       () => { /* non-critical */ }
     )
-  }, [loadSystemStats, loadSecurityStatus, loadAlertRules, loadAlertHistory, loadActivity])
+  }, [loadSystemStats, loadSecurityStatus, loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
 
   // Auto-refresh timer
   useEffect(() => {
@@ -381,16 +452,95 @@ const MonitoringDashboardPage: React.FC = () => {
     }
   ]
 
+  const sandboxRuntimeColumns = [
+    {
+      title: "Runtime",
+      dataIndex: "name",
+      key: "name",
+      render: (name: string) => <code>{name}</code>
+    },
+    {
+      title: "Readiness",
+      dataIndex: "readiness",
+      key: "readiness",
+      render: (readiness: string) => (
+        <Tag color={RUNTIME_READINESS_TAG_COLORS[readiness] || "default"}>
+          {formatRuntimeCode(readiness)}
+        </Tag>
+      )
+    },
+    {
+      title: "Boundary",
+      dataIndex: "boundary_class",
+      key: "boundary_class",
+      render: (boundaryClass: string | null | undefined) => formatRuntimeCode(boundaryClass)
+    },
+    {
+      title: "VM-grade",
+      dataIndex: "vm_grade_isolation",
+      key: "vm_grade_isolation",
+      render: (vmGrade: boolean) => (
+        <Tag color={vmGrade ? "green" : "orange"}>{vmGrade ? "Yes" : "No"}</Tag>
+      )
+    },
+    {
+      title: "Untrusted",
+      dataIndex: "untrusted_eligible",
+      key: "untrusted_eligible",
+      render: (eligible: boolean) => (
+        <Tag color={eligible ? "green" : "red"}>{eligible ? "Eligible" : "Not eligible"}</Tag>
+      )
+    },
+    {
+      title: "Warnings",
+      dataIndex: "isolation_warnings",
+      key: "isolation_warnings",
+      render: (warnings: string[] | undefined) => {
+        const values = Array.isArray(warnings) ? warnings : []
+        if (values.length === 0) return <Tag color="green">None</Tag>
+        return (
+          <Space size={[4, 4]} wrap>
+            {values.map((warning) => (
+              <Tag key={warning} color="gold">
+                {RUNTIME_WARNING_LABELS[warning] || formatRuntimeCode(warning)}
+              </Tag>
+            ))}
+          </Space>
+        )
+      }
+    },
+    {
+      title: "Action",
+      dataIndex: "recommended_action",
+      key: "recommended_action",
+      render: (action: string | undefined) => formatRuntimeCode(action || "none")
+    }
+  ]
+
   // ── Render ──
 
   if (adminGuard === "forbidden") {
-    return <Alert type="error" title="Access Denied" description="You don't have permission to access the monitoring dashboard." showIcon />
+    return (
+      <Alert variant="error" title="Access Denied">
+        You don't have permission to access the monitoring dashboard.
+      </Alert>
+    )
   }
   if (adminGuard === "notFound") {
-    return <Alert type="warning" title="Not Available" description="The monitoring dashboard is not available on this server." showIcon />
+    return (
+      <Alert variant="warning" title="Not Available">
+        The monitoring dashboard is not available on this server.
+      </Alert>
+    )
   }
 
   const activityEntries = Array.isArray(activity?.entries) ? activity.entries : Array.isArray(activity) ? activity : []
+  const sandboxRuntimeRows: SandboxAdminRuntimeDiagnosticsItem[] = Array.isArray(sandboxDiagnostics?.runtimes)
+    ? sandboxDiagnostics.runtimes
+    : []
+  const hostLocalWarningRuntimes = Array.isArray(sandboxDiagnostics?.summary?.host_local_warning_runtimes)
+    ? sandboxDiagnostics.summary.host_local_warning_runtimes
+    : []
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
@@ -421,8 +571,64 @@ const MonitoringDashboardPage: React.FC = () => {
             </div>
           )}
           {!systemStats && !securityStatus && !statsLoading && !securityLoading && (
-            <Alert type="info" title="No system data available yet." showIcon />
+            <Alert title="No system data available yet." />
           )}
+        </Space>
+      </Card>
+
+      <Card title="Sandbox Runtime Isolation" loading={sandboxDiagnosticsLoading} style={{ marginBottom: 16 }} extra={<Button onClick={() => loadSandboxDiagnostics()} size="small">Refresh</Button>}>
+        <Space orientation="vertical" style={{ width: "100%" }} size="middle">
+          {sandboxDiagnosticsError && (
+            <Alert
+              variant={sandboxDiagnosticsError.alertType}
+              title={sandboxDiagnosticsError.title}
+            >
+              {sandboxDiagnosticsError.description}
+            </Alert>
+          )}
+          {sandboxDiagnostics?.summary && (
+            <Descriptions size="small" column={5}>
+              <Descriptions.Item label="Total">
+                {sandboxDiagnostics.summary.total}
+              </Descriptions.Item>
+              <Descriptions.Item label={READY_STATE_LABEL}>
+                {sandboxDiagnostics.summary.ready}
+              </Descriptions.Item>
+              <Descriptions.Item label={UNAVAILABLE_STATE_LABEL}>
+                {sandboxDiagnostics.summary.unavailable}
+              </Descriptions.Item>
+              <Descriptions.Item label="Host-gated">
+                {sandboxDiagnostics.summary.host_gated}
+              </Descriptions.Item>
+              <Descriptions.Item label="Scaffold">
+                {sandboxDiagnostics.summary.scaffold}
+              </Descriptions.Item>
+            </Descriptions>
+          )}
+          {hostLocalWarningRuntimes.length > 0 && (
+            <Alert
+              variant="warning"
+              title="Host-local sandbox runtimes require operator review"
+            >
+              {
+                <span>
+                  {hostLocalWarningRuntimes.join(", ")} run on host-local boundaries,
+                  are not VM-grade isolation, and are not eligible for untrusted code.
+                </span>
+              }
+            </Alert>
+          )}
+          {sandboxRuntimeRows.length > 0 ? (
+            <Table<SandboxAdminRuntimeDiagnosticsItem>
+              dataSource={sandboxRuntimeRows}
+              columns={sandboxRuntimeColumns as any}
+              rowKey="name"
+              pagination={false}
+              size="small"
+            />
+          ) : !sandboxDiagnosticsLoading && !sandboxDiagnosticsError ? (
+            <Alert title="No sandbox runtime diagnostics available yet." />
+          ) : null}
         </Space>
       </Card>
 
@@ -454,7 +660,7 @@ const MonitoringDashboardPage: React.FC = () => {
           </Form>
         </div>
         {alertRules.length === 0 && !rulesLoading ? (
-          <Alert type="info" showIcon message="No alert rules configured" description={
+          <Alert title="No alert rules configured" className="mb-4">
             <div>
               <p style={{ marginBottom: 8 }}>Create your first rule using the form above, or try a starter rule:</p>
               <Space wrap>
@@ -466,7 +672,7 @@ const MonitoringDashboardPage: React.FC = () => {
               </Space>
               <p style={{ marginTop: 8 }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>These are common rules &mdash; your server may use different metric names.</Typography.Text></p>
             </div>
-          } style={{ marginBottom: 16 }} />
+          </Alert>
         ) : (
           <Table dataSource={alertRules} columns={ruleColumns} rowKey="id" loading={rulesLoading} pagination={false} size="small" />
         )}
@@ -489,7 +695,7 @@ const MonitoringDashboardPage: React.FC = () => {
             { title: "Details", dataIndex: "details", key: "details", render: (val: unknown) => formatStatValue(val) }
           ]} rowKey="_key" pagination={false} size="small" />
         ) : (
-          <Alert type="info" title="No recent activity data available." showIcon />
+          <Alert title="No recent activity data available." />
         )}
       </CollapsibleSection>
     </div>

@@ -57,6 +57,7 @@ def mock_files_repo():
     repo = AsyncMock()
     repo.list_files = AsyncMock(return_value=([], 0))
     repo.get_file_by_id = AsyncMock(return_value=None)
+    repo.get_files_by_ids = AsyncMock(return_value=[])
     repo.create_file = AsyncMock()
     repo.update_file = AsyncMock()
     repo.soft_delete_file = AsyncMock(return_value=True)
@@ -77,6 +78,7 @@ def mock_files_repo():
     repo.get_old_trashed_files = AsyncMock(return_value=[])
     repo.update_accessed_at = AsyncMock()
     repo.list_least_accessed = AsyncMock(return_value=[])
+    repo.count_least_accessed = AsyncMock(return_value=0)
     return repo
 
 
@@ -136,6 +138,8 @@ def mock_storage_service(mock_files_repo, mock_quotas_repo):
     # File management
     service.register_generated_file = AsyncMock(return_value={"id": 1})
     service.unregister_generated_file = AsyncMock(return_value=True)
+    service.unregister_generated_files = AsyncMock(return_value=0)
+    service.restore_generated_file = AsyncMock(return_value=None)
     service.get_user_generated_files_usage = AsyncMock(return_value={
         "total_bytes": 100 * 1024 * 1024,
         "total_mb": 100.0,

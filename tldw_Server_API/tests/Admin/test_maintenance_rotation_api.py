@@ -154,6 +154,12 @@ async def test_maintenance_rotation_create_list_and_detail_roundtrip(monkeypatch
             assert list_resp.status_code == 200, list_resp.text
             listed = list_resp.json()
             assert listed["total"] == 1
+            assert listed["pagination"]["total"] == 1
+            assert listed["pagination"]["limit"] == 25
+            assert listed["pagination"]["offset"] == 0
+            assert listed["pagination"]["has_more"] is False
+            assert listed["has_more"] is False
+            assert listed["next_offset"] is None
             assert listed["items"][0]["id"] == "run-1"
 
             detail_resp = client.get("/api/v1/admin/maintenance/rotation-runs/run-1")
@@ -348,6 +354,10 @@ async def test_maintenance_rotation_list_applies_domain_visibility_before_pagina
             assert response.status_code == 200, response.text
             payload = response.json()
             assert payload["total"] == 1
+            assert payload["pagination"]["total"] == 1
+            assert payload["pagination"]["limit"] == 1
+            assert payload["pagination"]["offset"] == 0
+            assert payload["pagination"]["has_more"] is False
             assert [item["id"] for item in payload["items"]] == [visible["id"]]
     finally:
         app.dependency_overrides.clear()

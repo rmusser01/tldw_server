@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
-from tldw_Server_API.app.api.v1.schemas.admin_schemas import RegistrationCodeRequest
+from tldw_Server_API.app.api.v1.schemas.admin_schemas import RegistrationCodeRequest, RegistrationSettingsUpdateRequest
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services import admin_registration_service as svc
 
@@ -155,6 +157,16 @@ class _PostgresDbWithSqliteTraps:
         return "OK"
 
 
+class _ExplodingRegistrationDb:
+    _is_sqlite = True
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError(self.message)
+
+
 def _admin_principal() -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
@@ -164,6 +176,104 @@ def _admin_principal() -> AuthPrincipal:
         is_admin=True,
         org_ids=[],
         team_ids=[],
+    )
+
+
+async def _assert_registration_500_log_sanitized(
+    call: Callable[[], Awaitable[object]],
+    expected_detail: str,
+    expected_log: str,
+    raw_marker: str,
+) -> None:
+    messages: list[str] = []
+    sink_id = svc.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await call()
+    finally:
+        svc.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == expected_detail
+    assert expected_log in joined
+    assert raw_marker not in joined
+    assert "/private/" not in joined
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_update_registration_settings_sanitizes_config_validation_errors(monkeypatch) -> None:
+    def fail_update_config(_payload: dict[str, Any]) -> None:
+        raise ValueError("registration config token at /private/authnz-config.txt")
+
+    monkeypatch.setattr(svc.setup_manager, "update_config", fail_update_config)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.update_registration_settings(RegistrationSettingsUpdateRequest(enable_registration=True))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Invalid registration settings"
+    assert "registration config token" not in exc_info.value.detail
+    assert "/private/authnz-config.txt" not in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_update_registration_settings_sanitizes_generic_failure_log(monkeypatch) -> None:
+    def fail_update_config(_payload: dict[str, Any]) -> None:
+        raise RuntimeError("registration settings write failed at /private/authnz-config.txt")
+
+    monkeypatch.setattr(svc.setup_manager, "update_config", fail_update_config)
+
+    await _assert_registration_500_log_sanitized(
+        lambda: svc.update_registration_settings(RegistrationSettingsUpdateRequest(enable_registration=True)),
+        "Failed to update registration settings",
+        "Failed to update registration settings",
+        "registration settings write failed",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_create_registration_code_sanitizes_generic_failure_log() -> None:
+    await _assert_registration_500_log_sanitized(
+        lambda: svc.create_registration_code(
+            RegistrationCodeRequest(max_uses=5, expiry_days=3, role_to_grant="user", metadata={"x": 1}),
+            _admin_principal(),
+            _ExplodingRegistrationDb("registration create DB failed at /private/registration.db"),
+        ),
+        "Failed to create registration code",
+        "Failed to create registration code",
+        "registration create DB failed",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_list_registration_codes_sanitizes_generic_failure_log() -> None:
+    await _assert_registration_500_log_sanitized(
+        lambda: svc.list_registration_codes(
+            include_expired=True,
+            db=_ExplodingRegistrationDb("registration list DB failed at /private/registration.db"),
+        ),
+        "Failed to retrieve registration codes",
+        "Failed to list registration codes",
+        "registration list DB failed",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_delete_registration_code_sanitizes_generic_failure_log() -> None:
+    await _assert_registration_500_log_sanitized(
+        lambda: svc.delete_registration_code(
+            5,
+            _ExplodingRegistrationDb("registration delete DB failed at /private/registration.db"),
+        ),
+        "Failed to delete registration code",
+        "Failed to delete registration code",
+        "registration delete DB failed",
     )
 
 

@@ -12,10 +12,10 @@ describe("quick chat popout state", () => {
         modelOverride: null,
         assistantMode: "docs_rag"
       },
-      "chrome-extension://abc/options.html#/workspace-playground?tab=chat"
+      "chrome-extension://abc/options.html#/research-workspace?tab=chat"
     )
 
-    expect(state.sourceRoute).toBe("/workspace-playground")
+    expect(state.sourceRoute).toBe("/research-workspace")
   })
 
   it("parses valid popout state with route context", () => {

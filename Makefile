@@ -35,6 +35,9 @@ help:
 	@echo "  make tooling-install         Install test/smoke extras"
 	@echo "  make tooling-smoke           Run unified smoke checks"
 	@echo "  make lint-changed            Lint only changed files"
+	@echo "  make release                 Cut a patch release from main"
+	@echo "  make release-patch           Cut a patch release from main"
+	@echo "  make release-minor           Cut a minor release from main"
 	@echo ""
 	@echo "Docker:"
 	@echo "  make quickstart-docker-webui Docker API + WebUI"
@@ -48,7 +51,7 @@ help:
 # -----------------------------------------------------------------------------
 # Quickstart targets (first-time setup)
 # -----------------------------------------------------------------------------
-.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check tooling-install tooling-smoke show-api-key
+.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check tooling-install tooling-smoke show-api-key release release-patch release-minor
 
 PYTHON ?= python3
 VENV_DIR ?= .venv
@@ -77,6 +80,7 @@ MODEL_CYCLE_EXCLUDED ?=postgres,redis
 MODEL_CYCLE_FIRST_BOOT_WAIT ?=0
 MODEL_CYCLE_SECOND_BOOT_WAIT ?=0
 MODEL_CYCLE_DRY_RUN ?=false
+RELEASE_DRY_RUN ?=false
 
 quickstart-prereqs:
 	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[quickstart] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
@@ -188,6 +192,15 @@ tooling-install:
 	@echo "[tooling-install] Installing tooling extras into $(VENV_DIR)..."
 	@$(VENV_PYTHON) -m pip install --upgrade pip setuptools wheel
 	@$(VENV_PYTHON) -m pip install -e ".[tooling]"
+
+release:
+	@$(MAKE) release-patch RELEASE_DRY_RUN=$(RELEASE_DRY_RUN)
+
+release-patch:
+	@$(PYTHON) Helper_Scripts/release.py --bump patch $(if $(filter true TRUE 1 yes YES,$(RELEASE_DRY_RUN)),--dry-run,)
+
+release-minor:
+	@$(PYTHON) Helper_Scripts/release.py --bump minor $(if $(filter true TRUE 1 yes YES,$(RELEASE_DRY_RUN)),--dry-run,)
 
 quickstart-docker-bootstrap:
 	@echo "[quickstart-docker-bootstrap] Ensuring $(TLDW_ENV_FILE) has safe first-use auth defaults..."

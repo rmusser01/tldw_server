@@ -33,6 +33,7 @@ import {
   exportFlashcardsFile,
   getFlashcardsImportLimits,
   type Deck,
+  type DeckCreateInput,
   type DeckUpdate,
   type Flashcard,
   type FlashcardTemplateCreate,
@@ -59,11 +60,13 @@ export interface DueCounts {
 
 export interface UseFlashcardQueriesOptions {
   enabled?: boolean
+  refetchOnWindowFocus?: boolean
   includeWorkspaceItems?: boolean
   workspaceId?: string | null
 }
 
 export interface UseFlashcardDeckRecentCardsQueryOptions extends UseFlashcardQueriesOptions {
+  limit?: number
 }
 export interface UseGlobalFlashcardTagSuggestionsQueryOptions {
   enabled?: boolean
@@ -74,6 +77,10 @@ export interface UseRecentFlashcardReviewSessionsQueryOptions extends UseFlashca
   limit?: number
   scopeKey?: string | null
   status?: string | null
+}
+
+export interface UseCramQueueQueryOptions extends UseFlashcardQueriesOptions {
+  limit?: number
 }
 
 const invalidateFlashcardsQueries = (qc: ReturnType<typeof useQueryClient>) =>
@@ -184,7 +191,8 @@ export function useReviewQuery(deckId: number | null | undefined, options?: UseF
       const response = await getNextReviewCard(deckId ?? undefined, visibilityParams)
       return response.card ?? null
     },
-    enabled: options?.enabled ?? flashcardsEnabled
+    enabled: options?.enabled ?? flashcardsEnabled,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus
   })
 }
 
@@ -325,37 +333,55 @@ export function useEndFlashcardReviewSessionMutation() {
 export function useCramQueueQuery(
   deckId: number | null | undefined,
   tag?: string | null,
-  options?: UseFlashcardQueriesOptions
+  options?: UseCramQueueQueryOptions
 ) {
   const { flashcardsEnabled } = useFlashcardsEnabled()
   const MAX_QUEUE_SIZE = 1000
   const PAGE_SIZE = 200
   const visibilityParams = buildWorkspaceVisibilityParams(options)
+  const queueLimit =
+    typeof options?.limit === "number" && Number.isFinite(options.limit)
+      ? Math.max(1, Math.trunc(options.limit))
+      : MAX_QUEUE_SIZE
+  const pageSize = Math.min(PAGE_SIZE, queueLimit)
+  const residueFetchBuffer = queueLimit <= 5 ? 50 : 10
 
   return useQuery({
-    queryKey: ["flashcards:review:cram-queue", deckId ?? null, tag ?? null, visibilityParams],
+    queryKey: [
+      "flashcards:review:cram-queue",
+      deckId ?? null,
+      tag ?? null,
+      visibilityParams,
+      queueLimit
+    ],
     queryFn: async (): Promise<Flashcard[]> => {
       const queue: Flashcard[] = []
       let offset = 0
+      let fetchedCount = 0
+      const maxFetchedCount = Math.min(MAX_QUEUE_SIZE, queueLimit + residueFetchBuffer)
 
-      while (queue.length < MAX_QUEUE_SIZE) {
+      while (queue.length < queueLimit && fetchedCount < maxFetchedCount) {
+        const remainingQueueSlots = queueLimit - queue.length
+        const remainingFetchBudget = maxFetchedCount - fetchedCount
+        const limit = Math.min(pageSize, remainingQueueSlots, remainingFetchBudget)
         const res = await listFlashcards({
           deck_id: deckId ?? undefined,
           tag: tag || undefined,
           due_status: "all",
           order_by: "due_at",
-          limit: PAGE_SIZE,
+          limit,
           offset,
           ...visibilityParams
         })
         const items = res.items || []
         if (items.length === 0) break
+        fetchedCount += items.length
         queue.push(...items.filter((card) => !isTutorialResidueCard(card)))
-        if (items.length < PAGE_SIZE) break
-        offset += PAGE_SIZE
+        if (items.length < limit) break
+        offset += items.length
       }
 
-      return queue.slice(0, MAX_QUEUE_SIZE)
+      return queue.slice(0, queueLimit)
     },
     enabled: options?.enabled ?? flashcardsEnabled
   })
@@ -687,17 +713,32 @@ export function useCreateDeckMutation() {
     mutationFn: (params: {
       name: string
       description?: string
+      parent_deck_id?: number | null
       review_prompt_side?: Deck["review_prompt_side"]
       scheduler_type?: Deck["scheduler_type"]
       scheduler_settings?: Deck["scheduler_settings"]
-    }) =>
-      createDeck({
-        name: params.name.trim(),
-        description: params.description?.trim() || undefined,
-        review_prompt_side: params.review_prompt_side,
-        scheduler_type: params.scheduler_type,
-        scheduler_settings: params.scheduler_settings
-      }),
+    }) => {
+      const input: DeckCreateInput = {
+        name: params.name.trim()
+      }
+      const description = params.description?.trim()
+      if (description) {
+        input.description = description
+      }
+      if (params.parent_deck_id !== undefined) {
+        input.parent_deck_id = params.parent_deck_id
+      }
+      if (params.review_prompt_side !== undefined) {
+        input.review_prompt_side = params.review_prompt_side
+      }
+      if (params.scheduler_type !== undefined) {
+        input.scheduler_type = params.scheduler_type
+      }
+      if (params.scheduler_settings !== undefined) {
+        input.scheduler_settings = params.scheduler_settings
+      }
+      return createDeck(input)
+    },
     onSuccess: () => {
       invalidateFlashcardsQueries(qc)
     },

@@ -31,7 +31,7 @@ async def list_roles(db) -> list[dict[str, Any]]:
         cur = await db.execute("SELECT id, name, description, COALESCE(is_system, 0) as is_system FROM roles ORDER BY name")
         return [{"id": r[0], "name": r[1], "description": r[2], "is_system": bool(r[3])} for r in await cur.fetchall()]
     except Exception as e:
-        logger.error(f"admin_service.list_roles failed: {e}")
+        logger.error("Failed to list roles")
         raise
 
 
@@ -63,7 +63,7 @@ async def create_role(db, name: str, description: str | None = None, is_system: 
         r = await cur2.fetchone()
         return {"id": r[0], "name": r[1], "description": r[2], "is_system": bool(r[3])}
     except Exception as e:
-        logger.error(f"admin_service.create_role failed: {e}")
+        logger.error("Failed to create role")
         raise
 
 
@@ -79,7 +79,7 @@ async def delete_role(db, role_id: int) -> bool:
                 await commit()
         return True
     except Exception as e:
-        logger.error(f"admin_service.delete_role failed: {e}")
+        logger.error("Failed to delete role")
         raise
 
 
@@ -110,7 +110,7 @@ async def list_role_permissions(db, role_id: int) -> list[dict[str, Any]]:
         )
         return [{"id": r[0], "name": r[1], "description": r[2], "category": r[3]} for r in await cur.fetchall()]
     except Exception as e:
-        logger.error(f"admin_service.list_role_permissions failed: {e}")
+        logger.error("Failed to list role permissions")
         raise
 
 
@@ -123,7 +123,7 @@ async def list_tool_permissions(db) -> list[dict[str, Any]]:
         cur = await db.execute("SELECT name, description, category FROM permissions WHERE name LIKE 'tools.execute:%' ORDER BY name")
         return [{"name": r[0], "description": r[1], "category": r[2]} for r in await cur.fetchall()]
     except Exception as e:
-        logger.error(f"admin_service.list_tool_permissions failed: {e}")
+        logger.error("Failed to list tool permissions")
         raise
 
 
@@ -139,7 +139,7 @@ async def delete_tool_permission(db, full_name: str) -> bool:
                 await commit()
         return True
     except Exception as e:
-        logger.error(f"admin_service.delete_tool_permission failed: {e}")
+        logger.error("Failed to delete tool permission")
         raise
 
 
@@ -187,7 +187,7 @@ async def grant_tool_permission_to_role(db, role_id: int, permission_name: str, 
                 await commit()
         return perm
     except Exception as e:
-        logger.error(f"admin_service.grant_tool_permission_to_role failed: {e}")
+        logger.error("Failed to grant tool permission to role")
         raise
 
 
@@ -210,5 +210,5 @@ async def revoke_tool_permission_from_role(db, role_id: int, permission_name: st
             await commit()
         return True
     except Exception as e:
-        logger.error(f"admin_service.revoke_tool_permission_from_role failed: {e}")
+        logger.error("Failed to revoke tool permission from role")
         raise

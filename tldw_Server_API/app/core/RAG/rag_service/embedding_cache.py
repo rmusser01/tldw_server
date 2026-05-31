@@ -370,7 +370,7 @@ class EmbeddingCache:
                 logger.info(f"Saved cache to {self.persist_path} ({len(self._cache)} entries)")
 
         except Exception as e:
-            logger.error(f"Failed to save cache: {e}")
+            logger.error(f"Failed to save cache: {type(e).__name__}")
 
     def _load_cache(self):
         """Load cache from disk."""
@@ -406,7 +406,7 @@ class EmbeddingCache:
                 logger.info(f"Loaded cache from {self.persist_path} ({len(self._cache)} entries)")
 
         except Exception as e:
-            logger.error(f"Failed to load cache: {e}")
+            logger.error(f"Failed to load cache: {type(e).__name__}")
 
     def save(self):
         """Manually save cache to disk."""

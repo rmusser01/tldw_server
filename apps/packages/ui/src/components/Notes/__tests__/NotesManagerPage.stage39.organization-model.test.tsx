@@ -400,6 +400,36 @@ describe("NotesManagerPage stage 39 organization model", () => {
     })
   })
 
+  it("shows retryable list errors in timeline view", async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+      if (path.startsWith("/api/v1/notes/?")) {
+        throw new Error("List unavailable")
+      }
+      if (path === "/api/v1/admin/notes/title-settings" && method === "GET") {
+        return {
+          llm_enabled: false,
+          default_strategy: "heuristic",
+          effective_strategy: "heuristic",
+          strategies: ["heuristic"]
+        }
+      }
+      if (path.startsWith("/api/v1/notes/collections?") && method === "GET") {
+        return { collections: [] }
+      }
+      return {}
+    })
+
+    renderPage()
+    fireEvent.click(screen.getByTestId("notes-view-mode-timeline"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-list-error-state")).toHaveTextContent("List unavailable")
+    })
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+  })
+
   it("renders keyboard-focusable help buttons for organize and tags guidance", async () => {
     renderPage()
 

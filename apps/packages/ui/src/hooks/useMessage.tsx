@@ -65,6 +65,7 @@ import { documentChatMode } from "./chat-modes/documentChatMode";
 import { updatePageTitle } from "@/utils/update-page-title";
 import { useAntdNotification } from "./useAntdNotification";
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState";
+import { useSelectedModel } from "@/hooks/chat/useSelectedModel";
 import { normalizeConversationState } from "@/utils/conversation-state";
 import {
   resolveApiProviderForModel,
@@ -82,15 +83,22 @@ import {
   isGreetingMessageType,
 } from "@/utils/character-greetings";
 import { resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader";
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
+import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import {
+  assistantSelectionToCharacter,
   characterToAssistantSelection,
+  getAssistantSelectionMode,
   isPersonaAssistantSelection,
   personaToAssistantSelection,
+  type AssistantSelection,
 } from "@/types/assistant-selection";
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat";
 import { useChatLoopState } from "@/services/chat-loop/hooks";
 import { subscribeChatLoopEvents } from "@/services/chat-loop/bridge";
 import { extractChatLoopEvent } from "@/services/chat-loop/stream";
+import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing";
+import { syncChatSettingsForServerChat } from "@/services/chat-settings";
 
 const extractToolCalls = (generationInfo: unknown): ToolCall[] | undefined => {
   if (!generationInfo || typeof generationInfo !== "object") return undefined;
@@ -123,10 +131,7 @@ export const useMessage = () => {
   const invalidateServerChatHistory = React.useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] });
   }, [queryClient]);
-  const [selectedModel, setSelectedModel] = useStorage<string | null>(
-    "selectedModel",
-    null,
-  );
+  const { selectedModel, setSelectedModel } = useSelectedModel();
   const currentChatModelSettings = useStoreChatModelSettings();
   const {
     setIsSearchingInternet,
@@ -214,6 +219,55 @@ export const useMessage = () => {
     setServerChatExternalRef,
   } = useStoreMessageOption();
   const notification = useAntdNotification();
+  const { settings: chatSettings } = useChatSettingsRecord({
+    historyId,
+    serverChatId,
+  });
+  const effectiveAssistantState = React.useMemo(
+    () =>
+      resolveEffectiveAssistantState({
+        tracked: {
+          assistantKind: serverChatAssistantKind,
+          assistantId: serverChatAssistantId,
+          characterId: serverChatCharacterId,
+        },
+        settings: chatSettings ?? null,
+        draftSelection: selectedAssistant,
+      }),
+    [
+      chatSettings,
+      selectedAssistant,
+      serverChatAssistantId,
+      serverChatAssistantKind,
+      serverChatCharacterId,
+    ],
+  );
+  const effectiveSelectedAssistant = React.useMemo<AssistantSelection | null>(() => {
+    if (effectiveAssistantState.mode === "plain") {
+      return selectedAssistant;
+    }
+
+    const matchesDraftSelection =
+      selectedAssistant?.kind === effectiveAssistantState.kind &&
+      selectedAssistant.id === effectiveAssistantState.id;
+    const draftMetadata = matchesDraftSelection ? selectedAssistant : null;
+
+    return {
+      ...draftMetadata,
+      kind: effectiveAssistantState.kind!,
+      id: effectiveAssistantState.id!,
+      name:
+        effectiveAssistantState.displayName ??
+        draftMetadata?.name ??
+        (effectiveAssistantState.kind === "persona" ? "Persona" : "Assistant"),
+      avatar_url:
+        effectiveAssistantState.avatarUrl ?? draftMetadata?.avatar_url ?? null,
+      system_prompt:
+        effectiveAssistantState.systemPromptSnapshot ??
+        draftMetadata?.system_prompt ??
+        null,
+    };
+  }, [effectiveAssistantState, selectedAssistant]);
   const [sidepanelTemporaryChat] = useStorage("sidepanelTemporaryChat", false);
   const [speechToTextLanguage, setSpeechToTextLanguage] = useStorage(
     "speechToTextLanguage",
@@ -359,11 +413,6 @@ export const useMessage = () => {
     setServerChatVersion,
   ]);
 
-  React.useEffect(() => {
-    // Reset server chat when assistant identity changes
-    setServerChatId(null);
-  }, [selectedAssistant?.id, selectedAssistant?.kind]);
-
   // Local embedding store removed; rely on tldw_server RAG
 
   const clearChat = () => {
@@ -396,6 +445,22 @@ export const useMessage = () => {
       id: string,
       options?: { preserveServerChatId?: boolean },
     ) => void,
+    {
+      onServerConversationLinked: (conversationId) => {
+        setServerChatId(conversationId);
+        setServerChatMetaLoaded(false);
+        invalidateServerChatHistory();
+        if (!serverChatId) {
+          void syncChatSettingsForServerChat({
+            historyId,
+            serverChatId: conversationId,
+            allowScratchFallback: true,
+          }).catch(() => {
+            // Best-effort scratch-to-server settings reconciliation.
+          });
+        }
+      },
+    }
   );
   const saveMessageOnError = createSaveMessageOnError(
     temporaryChat,
@@ -1159,10 +1224,12 @@ export const useMessage = () => {
     history: ChatHistory,
     signal: AbortSignal,
     model: string,
+    characterOverride?: Character | null,
     regenerateFromMessage?: Message,
     serverChatIdOverride?: string | null,
   ) => {
     setStreaming(true);
+    const activeCharacter = characterOverride ?? selectedCharacter;
     const resolveGreetingText = (): string => {
       const fromMessages = messages.find(
         (entry) =>
@@ -1186,7 +1253,7 @@ export const useMessage = () => {
         return fromHistory.content.trim();
       }
 
-      const fromCharacter = collectGreetings(selectedCharacter as any).find(
+      const fromCharacter = collectGreetings(activeCharacter as any).find(
         (candidate) =>
           typeof candidate === "string" && candidate.trim().length > 0,
       );
@@ -1231,7 +1298,7 @@ export const useMessage = () => {
         ? normalizeMessageVariants(regenerateFromMessage)
         : [];
 
-    if (!selectedCharacter?.id) {
+    if (!activeCharacter?.id) {
       throw new Error("No character selected");
     }
 
@@ -1256,9 +1323,9 @@ export const useMessage = () => {
       // Visual placeholder
       const modelInfo = await getModelNicknameByID(model);
       const characterName =
-        selectedCharacter?.name || modelInfo?.model_name || model;
+        activeCharacter?.name || modelInfo?.model_name || model;
       const characterAvatar =
-        selectedCharacter?.avatar_url || modelInfo?.model_avatar;
+        activeCharacter?.avatar_url || modelInfo?.model_avatar;
       const createdAt = Date.now();
       const hasGreetingInMessages = messages.some((entry) => {
         if (!entry?.isBot) return false;
@@ -1352,7 +1419,7 @@ export const useMessage = () => {
           | undefined;
 
         const created = (await tldwClient.createChat({
-          character_id: selectedCharacter.id,
+          character_id: activeCharacter.id,
           state: serverChatState || "in-progress",
           topic_label: serverChatTopic || undefined,
           cluster_id: serverChatClusterId || undefined,
@@ -1406,7 +1473,7 @@ export const useMessage = () => {
         setServerChatId(normalizedId);
         setServerChatTitle(String((created as any)?.title || ""));
         setServerChatCharacterId(
-          (created as any)?.character_id ?? selectedCharacter?.id ?? null,
+          (created as any)?.character_id ?? activeCharacter?.id ?? null,
         );
         setServerChatMetaLoaded(true);
         invalidateServerChatHistory();
@@ -1614,7 +1681,7 @@ export const useMessage = () => {
         let metadataExtra: Record<string, unknown> | undefined;
         try {
           fallbackSpeakerId = Number.parseInt(
-            String(selectedCharacter.id),
+            String(activeCharacter.id),
             10,
           );
           speakerCharacterId =
@@ -2229,6 +2296,8 @@ export const useMessage = () => {
       useOCR?: boolean;
       webSearch?: boolean;
       chatMode?: "normal" | "rag" | "vision";
+      historyForModel?: ChatHistory;
+      messageForModel?: string;
     };
     serverChatIdOverride?: string | null;
   }) => {
@@ -2271,6 +2340,15 @@ export const useMessage = () => {
       requestOverrides?.chatMode === "vision"
         ? requestOverrides.chatMode
         : chatMode;
+    const conversationContextOverrides = {
+      historyForModel: Array.isArray(requestOverrides?.historyForModel)
+        ? requestOverrides.historyForModel
+        : undefined,
+      messageForModel:
+        typeof requestOverrides?.messageForModel === "string"
+          ? requestOverrides.messageForModel
+          : undefined,
+    };
     if (!hasExplicitImageBackend) {
       if (!validateBeforeSubmit(resolvedSelectedModel, t, notification)) {
         return;
@@ -2355,6 +2433,7 @@ export const useMessage = () => {
               ? trimmedImageBackendOverride
               : undefined,
             regenerateFromMessage,
+            ...conversationContextOverrides,
             ...replyOverrides,
           },
         );
@@ -2438,7 +2517,28 @@ export const useMessage = () => {
         );
       } else {
         if (resolvedChatMode === "normal") {
-          if (selectedCharacter?.id) {
+          const sendMode = resolveUseMessageSendMode({
+            effectiveMode: effectiveAssistantState.mode,
+            hasEffectiveAssistant: Boolean(effectiveSelectedAssistant),
+            draftAssistantKind: selectedAssistant?.kind ?? null,
+            draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant),
+          });
+          const trackedCharacterForSend =
+            sendMode === "tracked_character"
+              ? (() => {
+                  if (
+                    selectedCharacter?.id != null &&
+                    String(selectedCharacter.id) === effectiveAssistantState.id
+                  ) {
+                    return selectedCharacter;
+                  }
+                  return assistantSelectionToCharacter<Character & Record<string, unknown>>(
+                    effectiveSelectedAssistant,
+                  );
+                })()
+              : null;
+
+          if (sendMode === "tracked_character" && trackedCharacterForSend?.id) {
             await characterChatMode(
               message,
               image,
@@ -2447,18 +2547,20 @@ export const useMessage = () => {
               memory || history,
               signal,
               model,
+              trackedCharacterForSend,
               regenerateFromMessage,
               serverChatIdOverride,
             );
-          } else if (isPersonaAssistantSelection(selectedAssistant)) {
+          } else if (sendMode === "tracked_persona" && isPersonaAssistantSelection(effectiveSelectedAssistant)) {
             const personaServerChat = await ensurePersonaServerChat({
-              assistant: selectedAssistant,
+              assistant: effectiveSelectedAssistant,
               serverChatIdOverride,
               serverChatId,
               serverChatTitle,
               serverChatAssistantKind,
               serverChatAssistantId,
               serverChatPersonaMemoryMode,
+              serverChatMetaLoaded,
               serverChatState,
               serverChatTopic,
               serverChatClusterId,
@@ -2507,10 +2609,10 @@ export const useMessage = () => {
                   options?: { preserveServerChatId?: boolean },
                 ) => void,
                 assistantIdentity: {
-                  name: selectedAssistant.name,
+                  name: effectiveSelectedAssistant.name,
                   avatarUrl:
-                    typeof selectedAssistant.avatar_url === "string"
-                      ? selectedAssistant.avatar_url
+                    typeof effectiveSelectedAssistant.avatar_url === "string"
+                      ? effectiveSelectedAssistant.avatar_url
                       : undefined,
                 },
                 saveMessageOnSuccess: (data) =>
@@ -2522,6 +2624,48 @@ export const useMessage = () => {
                 setIsSearchingInternet,
                 uploadedFiles,
                 regenerateFromMessage,
+                ...conversationContextOverrides,
+                ...replyOverrides,
+              },
+            );
+          } else if (sendMode === "overlay" && effectiveSelectedAssistant) {
+            await normalChatMode(
+              message,
+              image,
+              isRegenerate,
+              chatHistory || messages,
+              memory || history,
+              signal,
+              {
+                selectedModel: model,
+                useOCR: resolvedUseOCR,
+                selectedSystemPrompt: resolvedSelectedSystemPrompt,
+                currentChatModelSettings,
+                setMessages,
+                saveMessageOnSuccess,
+                saveMessageOnError,
+                setHistory,
+                setIsProcessing,
+                setStreaming,
+                setAbortController,
+                historyId,
+                setHistoryId: setHistoryId as (
+                  id: string,
+                  options?: { preserveServerChatId?: boolean },
+                ) => void,
+                assistantIdentity: {
+                  name: effectiveSelectedAssistant.name,
+                  avatarUrl:
+                    typeof effectiveSelectedAssistant.avatar_url === "string"
+                      ? effectiveSelectedAssistant.avatar_url
+                      : undefined,
+                },
+                overlaySystemPrompt:
+                  effectiveAssistantState.systemPromptSnapshot ?? undefined,
+                webSearch: resolvedWebSearch,
+                setIsSearchingInternet,
+                regenerateFromMessage,
+                ...conversationContextOverrides,
                 ...replyOverrides,
               },
             );
@@ -2553,6 +2697,7 @@ export const useMessage = () => {
                 webSearch: resolvedWebSearch,
                 setIsSearchingInternet,
                 regenerateFromMessage,
+                ...conversationContextOverrides,
                 ...replyOverrides,
               },
             );
@@ -2618,6 +2763,7 @@ export const useMessage = () => {
     index: number,
     message: string,
     isHuman: boolean,
+    isSend = true,
   ) => {
     const newHistory = history;
 
@@ -2626,6 +2772,35 @@ export const useMessage = () => {
       const updatedMessages = messages.map((msg, idx) =>
         idx === index ? { ...msg, message } : msg,
       );
+      if (!isSend) {
+        setMessages(updatedMessages);
+        const updatedHistory = newHistory.map((item, idx) =>
+          idx === index ? { ...item, content: message } : item,
+        );
+        setHistory(updatedHistory);
+        await updateMessageByIndex(historyId, index, message);
+        if (
+          serverChatId &&
+          (selectedCharacter?.id || serverChatAssistantKind === "persona") &&
+          currentHumanMessage?.serverMessageId
+        ) {
+          try {
+            const srv = await tldwClient.getMessage(
+              currentHumanMessage.serverMessageId,
+            );
+            const ver = srv?.version;
+            if (ver != null) {
+              await tldwClient.editMessage(
+                currentHumanMessage.serverMessageId,
+                message,
+                Number(ver),
+                serverChatId ?? undefined,
+              );
+            }
+          } catch {}
+        }
+        return;
+      }
       const previousMessages = updatedMessages.slice(0, index + 1);
       setMessages(previousMessages);
       const previousHistory = newHistory.slice(0, index);

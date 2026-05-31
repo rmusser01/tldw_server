@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+
 # Formatter commands are fixed executable paths and run with shell=False.
 import subprocess  # nosec B404
 from collections.abc import Iterable

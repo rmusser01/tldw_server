@@ -41,6 +41,7 @@ from tldw_Server_API.app.api.v1.API_Deps.kanban_deps import (
     kanban_rate_limit,
 )
 from tldw_Server_API.app.api.v1.endpoints.kanban._kanban_utils import resolve_limit_offset
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     PaginationInfo,
     SearchRequest,
@@ -49,6 +50,7 @@ from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
 )
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     KanbanDB,
+    KanbanDBError,
 )
 from tldw_Server_API.app.core.DB_Management.kanban_vector_search import (
     KanbanVectorSearch,
@@ -280,7 +282,7 @@ def _perform_vector_search(
         return cards, total, "vector"
 
     except Exception as e:
-        logger.warning(f"Vector search failed, falling back to FTS: {e}")
+        logger.warning("Vector search failed, falling back to FTS")
         cards, total = _perform_fts_search(
             db, query, board_id, label_ids, priority, include_archived, limit, offset
         )
@@ -387,7 +389,7 @@ def _perform_hybrid_search(
                     seen_ids.add(card_id)
 
             except Exception as e:
-                logger.warning(f"Failed to fetch vector-only cards in hybrid search: {e}")
+                logger.warning("Failed to fetch vector-only cards in hybrid search")
 
         # Sort by combined relevance
         combined_cards.sort(key=lambda c: c.get("relevance_score", 0.0), reverse=True)
@@ -398,7 +400,7 @@ def _perform_hybrid_search(
         return paginated, total, "hybrid"
 
     except Exception as e:
-        logger.warning(f"Hybrid search failed, using FTS only: {e}")
+        logger.warning("Hybrid search failed, using FTS only")
         return fts_cards[offset:offset + limit], fts_total, "fts"
 
 
@@ -462,6 +464,8 @@ async def search_cards_get(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid label_ids format: {str(e)}"
         ) from e
+    except KanbanDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to search cards") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.post(
@@ -493,7 +497,8 @@ async def search_cards_post(
             limit=request.limit,
             offset=request.offset,
         )
-
+    except KanbanDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to search cards") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.get(

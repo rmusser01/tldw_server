@@ -172,7 +172,7 @@ class AuthNZRBAC:
                     return True
             return False
         except Exception as e:
-            logger.debug(f"AuthNZ RBAC check failed: {e}")
+            logger.debug("AuthNZ RBAC check failed ({})", type(e).__name__)
             # Fail safe: deny if DB unavailable
             return False
 
@@ -187,7 +187,7 @@ class AuthNZRBAC:
                     name, description, category,
                 )
         except Exception as e:
-            logger.debug(f"Ensure permission exists failed for {name}: {e}")
+            logger.debug("Ensure permission exists failed ({})", type(e).__name__)
 
 
 _authnz_rbac: AuthNZRBAC | None = None

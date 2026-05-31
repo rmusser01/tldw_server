@@ -151,7 +151,7 @@ export const PlaygroundMcpControl: React.FC<PlaygroundMcpControlProps> =
         open={mcpPopoverOpen}
         onOpenChange={onMcpPopoverChange}
       >
-        {button}
+        <span className="inline-flex">{button}</span>
       </Popover>
     )
   })

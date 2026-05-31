@@ -36,7 +36,7 @@ describe('404 recovery controls', () => {
 
     expect(screen.getByRole('heading', { name: 'We could not find that route' })).toBeVisible();
     expect(screen.getByText('/missing-route?foo=bar')).toBeVisible();
-    expect(screen.getByTestId('not-found-go-chat')).toBeVisible();
+    expect(screen.getByTestId('not-found-open-home')).toHaveTextContent('Open Home');
     expect(screen.getByTestId('not-found-open-research')).toBeVisible();
     expect(screen.getByTestId('not-found-open-media')).toBeVisible();
     expect(screen.getByTestId('not-found-open-settings')).toBeVisible();
@@ -47,14 +47,14 @@ describe('404 recovery controls', () => {
     const user = userEvent.setup();
     render(<NotFoundPage />);
 
-    const goToChat = screen.getByTestId('not-found-go-chat');
+    const openHome = screen.getByTestId('not-found-open-home');
     const openResearch = screen.getByTestId('not-found-open-research');
     const openMedia = screen.getByTestId('not-found-open-media');
     const openSettings = screen.getByTestId('not-found-open-settings');
     const goBack = screen.getByTestId('not-found-go-back');
 
     await user.tab();
-    expect(goToChat).toHaveFocus();
+    expect(openHome).toHaveFocus();
 
     await user.tab();
     expect(openResearch).toHaveFocus();
@@ -73,7 +73,7 @@ describe('404 recovery controls', () => {
     const user = userEvent.setup();
     render(<NotFoundPage />);
 
-    await user.click(screen.getByTestId('not-found-go-chat'));
+    await user.click(screen.getByTestId('not-found-open-home'));
     expect(mockPush).toHaveBeenCalledWith('/');
 
     await user.click(screen.getByTestId('not-found-go-back'));

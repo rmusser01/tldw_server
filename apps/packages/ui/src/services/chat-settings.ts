@@ -1,10 +1,13 @@
 import { createSafeStorage } from "@/utils/safe-storage"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatLinkedResearchPath } from "@/components/Option/Playground/research-run-status"
+import { normalizeConversationContextIdList } from "@/services/conversation-context/conversationContextSettings"
 import {
   CHAT_SETTINGS_SCHEMA_VERSION,
+  ChatAssistantOverlay,
   ChatSettingsRecord,
   CharacterMemoryEntry,
+  ConversationContextSettings,
   DeepResearchAttachment
 } from "@/types/chat-session-settings"
 
@@ -26,6 +29,16 @@ const DEEP_RESEARCH_ATTACHMENT_ALLOWED_KEYS = new Set([
   "attached_at",
   "updatedAt"
 ])
+const ASSISTANT_OVERLAY_ALLOWED_KEYS = new Set([
+  "kind",
+  "id",
+  "name",
+  "avatar_url",
+  "system_prompt_snapshot",
+  "updatedAt"
+])
+const ASSISTANT_OVERLAY_ALLOWED_KINDS = new Set(["character", "persona"])
+const MAX_ASSISTANT_OVERLAY_TEXT_CHARS = 20_000
 const CHAT_SETTINGS_OPTIONAL_KEYS = [
   "autoSummaryEnabled",
   "autoSummaryThresholdMessages",
@@ -45,8 +58,11 @@ const CHAT_SETTINGS_OPTIONAL_KEYS = [
   "authorNotePosition",
   "characterMemoryById",
   "chatGenerationOverride",
+  "conversationContext",
+  "chat_dictionary_ids",
   "summary",
-  "imageEventSyncMode"
+  "imageEventSyncMode",
+  "assistantOverlay"
 ] as const
 
 export const getChatSettingsStorageKey = (chatKey: string) =>
@@ -65,10 +81,22 @@ export const resolveChatSettingsKey = (params: {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
 
+const hasOwn = (record: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(record, key)
+
 const asNonEmptyString = (value: unknown): string | null => {
   if (typeof value !== "string") return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+const asBoundedNonEmptyString = (
+  value: unknown,
+  maxLength = MAX_ASSISTANT_OVERLAY_TEXT_CHARS
+): string | null => {
+  const text = asNonEmptyString(value)
+  if (!text || text.length > maxLength) return null
+  return text
 }
 
 const asIsoString = (value: unknown): string | null => {
@@ -76,6 +104,18 @@ const asIsoString = (value: unknown): string | null => {
   if (!text) return null
   const parsed = Date.parse(text)
   return Number.isNaN(parsed) ? null : text
+}
+
+const asOptionalBoundedString = (
+  value: unknown,
+  maxLength = MAX_ASSISTANT_OVERLAY_TEXT_CHARS
+): string | null | undefined => {
+  if (value === undefined) return undefined
+  if (value === null) return null
+  if (typeof value !== "string") return undefined
+  if (value.length > maxLength) return undefined
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 const asNonNegativeInteger = (value: unknown): number | null => {
@@ -95,6 +135,39 @@ const copyKnownChatSettings = (
     }
   }
   return next
+}
+
+const normalizeConversationContextMirrors = (
+  settings: ChatSettingsRecord,
+  raw: Record<string, unknown>
+): void => {
+  const rawContext = isRecord(raw.conversationContext)
+    ? raw.conversationContext
+    : null
+  const context: ConversationContextSettings =
+    isRecord(settings.conversationContext)
+      ? { ...settings.conversationContext }
+      : {}
+  const hasNestedDictionaryIds =
+    rawContext !== null && hasOwn(rawContext, "chat_dictionary_ids")
+  const hasLegacyDictionaryIds = hasOwn(raw, "chat_dictionary_ids")
+
+  if (rawContext && hasOwn(rawContext, "world_book_ids")) {
+    context.world_book_ids = normalizeConversationContextIdList(
+      rawContext.world_book_ids
+    )
+    settings.conversationContext = context
+  }
+
+  if (hasNestedDictionaryIds || hasLegacyDictionaryIds) {
+    const source = hasNestedDictionaryIds
+      ? rawContext?.chat_dictionary_ids
+      : raw.chat_dictionary_ids
+    const dictionaryIds = normalizeConversationContextIdList(source)
+    context.chat_dictionary_ids = dictionaryIds
+    settings.conversationContext = context
+    settings.chat_dictionary_ids = dictionaryIds
+  }
 }
 
 const sanitizeDeepResearchAttachment = (
@@ -168,6 +241,56 @@ const sanitizeDeepResearchAttachment = (
   }
 }
 
+const sanitizeAssistantOverlay = (
+  value: unknown
+): ChatAssistantOverlay | null => {
+  if (!isRecord(value)) return null
+  const keys = Object.keys(value)
+  if (keys.some((key) => !ASSISTANT_OVERLAY_ALLOWED_KEYS.has(key))) {
+    return null
+  }
+
+  const kind =
+    typeof value.kind === "string" ? value.kind.trim().toLowerCase() : null
+  const id = asBoundedNonEmptyString(value.id)
+  const name = asBoundedNonEmptyString(value.name)
+  const updatedAt = asIsoString(value.updatedAt)
+
+  if (
+    !kind ||
+    !ASSISTANT_OVERLAY_ALLOWED_KINDS.has(kind) ||
+    !id ||
+    !name ||
+    !updatedAt
+  ) {
+    return null
+  }
+
+  const avatarUrl = asOptionalBoundedString(value.avatar_url)
+  if (value.avatar_url !== undefined && avatarUrl === undefined) {
+    return null
+  }
+
+  const systemPromptSnapshot = asOptionalBoundedString(
+    value.system_prompt_snapshot
+  )
+  if (
+    value.system_prompt_snapshot !== undefined &&
+    systemPromptSnapshot === undefined
+  ) {
+    return null
+  }
+
+  return {
+    kind: kind as ChatAssistantOverlay["kind"],
+    id,
+    name,
+    avatar_url: avatarUrl,
+    system_prompt_snapshot: systemPromptSnapshot,
+    updatedAt
+  }
+}
+
 const sanitizeDeepResearchAttachmentHistory = (
   value: unknown,
   excludedRunIds?: Iterable<string | null | undefined>
@@ -223,6 +346,19 @@ const coerceSettings = (raw: any): ChatSettingsRecord | null => {
     ...copyKnownChatSettings(raw),
     schemaVersion,
     updatedAt
+  }
+  normalizeConversationContextMirrors(next, raw)
+  if (Object.prototype.hasOwnProperty.call(raw, "assistantOverlay")) {
+    if (raw.assistantOverlay === null) {
+      next.assistantOverlay = null
+    } else {
+      const sanitizedOverlay = sanitizeAssistantOverlay(raw.assistantOverlay)
+      if (sanitizedOverlay) {
+        next.assistantOverlay = sanitizedOverlay
+      } else {
+        delete next.assistantOverlay
+      }
+    }
   }
   const hasAttachment = Object.prototype.hasOwnProperty.call(
     raw,
@@ -392,21 +528,56 @@ export const mergeChatSettings = (
     merged.deepResearchPinnedAttachment = local.deepResearchPinnedAttachment
   }
 
-  const mergedHistory = sanitizeDeepResearchAttachmentHistory(
-    [
-      ...(local.deepResearchAttachmentHistory || []),
-      ...(remote.deepResearchAttachmentHistory || [])
-    ],
-    [
-      merged.deepResearchAttachment?.run_id ?? null,
-      merged.deepResearchPinnedAttachment?.run_id ?? null
-    ]
-  )
-  if (mergedHistory !== undefined) {
-    merged.deepResearchAttachmentHistory = mergedHistory
+  const hasAttachmentHistory =
+    Array.isArray(local.deepResearchAttachmentHistory) ||
+    Array.isArray(remote.deepResearchAttachmentHistory)
+  if (hasAttachmentHistory) {
+    const mergedHistory = sanitizeDeepResearchAttachmentHistory(
+      [
+        ...(local.deepResearchAttachmentHistory || []),
+        ...(remote.deepResearchAttachmentHistory || [])
+      ],
+      [
+        merged.deepResearchAttachment?.run_id ?? null,
+        merged.deepResearchPinnedAttachment?.run_id ?? null
+      ]
+    )
+    if (mergedHistory !== undefined) {
+      merged.deepResearchAttachmentHistory = mergedHistory
+    }
   }
 
   return merged
+}
+
+const buildPatchedChatSettingsInput = (
+  existing: ChatSettingsRecord | null,
+  patch: Partial<ChatSettingsRecord>
+): Record<string, unknown> => {
+  const next: Record<string, unknown> = {
+    ...(existing || {
+      schemaVersion: CHAT_SETTINGS_SCHEMA_VERSION,
+      updatedAt: new Date().toISOString()
+    }),
+    ...patch,
+    schemaVersion: CHAT_SETTINGS_SCHEMA_VERSION,
+    updatedAt: new Date().toISOString()
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, "assistantOverlay")) {
+    if (patch.assistantOverlay === null) {
+      next.assistantOverlay = null
+    } else if (isRecord(patch.assistantOverlay) && isRecord(existing?.assistantOverlay)) {
+      next.assistantOverlay = {
+        ...existing?.assistantOverlay,
+        ...patch.assistantOverlay
+      }
+    } else {
+      next.assistantOverlay = patch.assistantOverlay as unknown
+    }
+  }
+
+  return next
 }
 
 export const getChatSettingsForKey = async (
@@ -468,16 +639,23 @@ export const saveChatSettingsForChat = async (params: {
 export const syncChatSettingsForServerChat = async (params: {
   historyId: string | null
   serverChatId: string | null
+  allowScratchFallback?: boolean
 }): Promise<ChatSettingsRecord | null> => {
-  const { historyId, serverChatId } = params
+  const { historyId, serverChatId, allowScratchFallback = false } = params
   if (!serverChatId) return null
 
   const serverKey = resolveChatSettingsKey({ historyId: null, serverChatId })
   const localKey = resolveChatSettingsKey({ historyId, serverChatId: null })
+  const scratchKey = resolveChatSettingsKey({ historyId: null, serverChatId: null })
 
   const localForServer = await getChatSettingsForKey(serverKey)
   const localFromHistory = historyId ? await getChatSettingsForKey(localKey) : null
-  const localSettings = localForServer || localFromHistory
+  const localFromScratch =
+    allowScratchFallback && !localForServer && !localFromHistory
+      ? await getChatSettingsForKey(scratchKey)
+      : null
+  const usedScratchFallback = Boolean(localFromScratch)
+  const localSettings = localForServer || localFromHistory || localFromScratch
 
   await tldwClient.initialize().catch(() => null)
 
@@ -497,6 +675,9 @@ export const syncChatSettingsForServerChat = async (params: {
       const res = await tldwClient.updateChatSettings(serverChatId, localSettings)
       const synced = coerceSettings(res.settings) || localSettings
       await saveChatSettingsForKey(serverKey, synced)
+      if (usedScratchFallback) {
+        await storage.remove(getChatSettingsStorageKey(scratchKey))
+      }
       return synced
     } catch (error) {
       console.warn("Failed to push local chat settings", error)
@@ -529,6 +710,9 @@ export const syncChatSettingsForServerChat = async (params: {
   }
 
   await saveChatSettingsForKey(serverKey, merged)
+  if (usedScratchFallback) {
+    await storage.remove(getChatSettingsStorageKey(scratchKey))
+  }
   return merged
 }
 
@@ -540,20 +724,28 @@ export const applyChatSettingsPatch = async (params: {
   const { historyId, serverChatId, patch } = params
   const chatKey = resolveChatSettingsKey({ historyId, serverChatId })
   const existing = await getChatSettingsForKey(chatKey)
+  const patchedInput = buildPatchedChatSettingsInput(existing, patch)
+  const normalized = normalizeChatSettingsRecord(patchedInput)
+  const assistantOverlayPatched = Object.prototype.hasOwnProperty.call(
+    patch,
+    "assistantOverlay"
+  )
   const next =
-    normalizeChatSettingsRecord({
-      ...(existing || {
-        schemaVersion: CHAT_SETTINGS_SCHEMA_VERSION,
-        updatedAt: new Date().toISOString()
-      }),
-      ...patch,
-      schemaVersion: CHAT_SETTINGS_SCHEMA_VERSION,
-      updatedAt: new Date().toISOString()
-    }) ||
+    normalized ||
     ({
       schemaVersion: CHAT_SETTINGS_SCHEMA_VERSION,
       updatedAt: new Date().toISOString()
     } as ChatSettingsRecord)
+
+  if (
+    normalized &&
+    assistantOverlayPatched &&
+    patch.assistantOverlay !== null &&
+    existing?.assistantOverlay !== undefined &&
+    normalized.assistantOverlay === undefined
+  ) {
+    next.assistantOverlay = existing.assistantOverlay
+  }
 
   const saved = await saveChatSettingsForKey(chatKey, next)
   if (!saved) {

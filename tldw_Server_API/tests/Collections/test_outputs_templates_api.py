@@ -73,6 +73,11 @@ def test_templates_crud_and_preview(client_with_user):
     assert r.status_code == 200, r.text
     lst = r.json()
     assert lst["total"] >= 1
+    assert lst["pagination"]["total"] >= 1
+    assert lst["pagination"]["limit"] == 50
+    assert lst["pagination"]["offset"] == 0
+    assert lst["has_more"] == lst["pagination"]["has_more"]
+    assert lst["next_offset"] == lst["pagination"]["next_offset"]
     assert any(t["name"] == "daily-brief" for t in lst["items"])
 
     # Get

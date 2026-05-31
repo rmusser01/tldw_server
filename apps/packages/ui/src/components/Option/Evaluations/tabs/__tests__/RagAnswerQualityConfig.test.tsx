@@ -52,6 +52,11 @@ if (!(globalThis as any).ResizeObserver) {
   }
 }
 
+const expectDesignSystemAlert = (text: string | RegExp) => {
+  const node = screen.getByText(text)
+  expect(node.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+}
+
 describe("RagAnswerQualityConfig", () => {
   beforeEach(() => {
     generateSyntheticDraftsSpy.mockReset()
@@ -439,6 +444,8 @@ describe("RagAnswerQualityConfig", () => {
 
     render(<Harness />)
 
+    expectDesignSystemAlert("Current answer-quality anchor")
+
     fireEvent.change(screen.getByLabelText("Seed example 1 query"), {
       target: { value: "What changed in the rollout?" }
     })
@@ -457,6 +464,7 @@ describe("RagAnswerQualityConfig", () => {
         "Batch batch-answer-123 created 2 drafts and is ready for review."
       )
     ).toBeInTheDocument()
+    expectDesignSystemAlert("Synthetic drafts created")
 
     generateSyntheticDraftsSpy.mockRejectedValueOnce(new Error("generation failed"))
     fireEvent.click(
@@ -464,5 +472,6 @@ describe("RagAnswerQualityConfig", () => {
     )
 
     expect(await screen.findByText("generation failed")).toBeInTheDocument()
+    expectDesignSystemAlert("Failed to generate synthetic drafts")
   })
 })

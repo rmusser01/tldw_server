@@ -49,7 +49,7 @@ describe("Watchlists first-run copy contract", () => {
       "Create first monitor"
     )
     expect(getNestedValue(labels, "overview.onboarding.steps.reviewResults.description")).toBe(
-      "Open Activity for monitor health, Articles for captured content, and Reports for generated briefings."
+      "Open Activity for monitor health, Updates for captured content, and Reports for generated briefings."
     )
     expect(getNestedValue(labels, "guide.steps.outputs.title")).toBe("5. Deliver reports")
   })

@@ -1,9 +1,14 @@
 import React from "react"
-import { Alert, Button, Empty, Spin, Tag, Typography } from "antd"
+import { Button, Empty, Spin, Tag, Typography } from "antd"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 
 import { PageShell } from "@/components/Common/PageShell"
+import {
+  RecoveryCallout,
+  StatePanel,
+  buildCapabilityState
+} from "@/components/ui/state"
 import { useIngestionSourcesQuery } from "@/hooks/use-ingestion-sources"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { SourcesAvailabilityGate } from "./SourcesAvailabilityGate"
@@ -24,6 +29,27 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
       !capabilityState.loading &&
       capabilityState.capabilities?.hasIngestionSources !== false
   })
+  const loadErrorState = sourcesQuery.error
+    ? buildCapabilityState({
+        featureName: t("sources:title", "Sources"),
+        capabilityName: "ingestion source management",
+        endpoint: "/api/v1/ingestion-sources",
+        method: "GET",
+        error: sourcesQuery.error
+      })
+    : null
+  const emptyState = {
+    state: "empty" as const,
+    title: t("sources:states.empty.title", "No sources yet"),
+    message: t(
+      "sources:states.empty.message",
+      "Create a source to sync local folders or archive snapshots into tldw."
+    ),
+    primaryAction: {
+      label: t("sources:actions.new", "New source"),
+      onClick: () => navigate("/sources/new")
+    }
+  }
 
   return (
     <SourcesAvailabilityGate capabilityState={capabilityState}>
@@ -31,7 +57,7 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <Typography.Title level={2} className="!mb-0">
+              <Typography.Title level={1} className="!mb-0 !text-2xl">
                 {t("sources:title", "Sources")}
               </Typography.Title>
               {mode === "admin" && <Tag color="gold">Admin view</Tag>}
@@ -53,25 +79,49 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
         </div>
 
         {sourcesQuery.isLoading ? (
-          <div className="flex justify-center py-10">
+          <div
+            className="flex justify-center py-10"
+            data-testid="sources-loading-state"
+            role="status"
+            aria-label={t("sources:states.loading", "Loading sources")}
+          >
             <Spin />
           </div>
         ) : null}
 
         {!sourcesQuery.isLoading && sourcesQuery.error ? (
-          <Alert
-            type="error"
-            message={String(
-              (sourcesQuery.error as { message?: string } | undefined)
-                ?.message || "Failed to load sources"
-            )}
+          <RecoveryCallout
+            state={loadErrorState?.state ?? "error"}
+            title={loadErrorState?.title ?? "Unable to load sources"}
+            message={
+              loadErrorState?.message ??
+              "The ingestion source overview could not be loaded."
+            }
+            diagnostics={loadErrorState?.diagnostics}
+            primaryAction={{
+              label: t("common:actions.retry", "Try again"),
+              onClick: () => {
+                void sourcesQuery.refetch()
+              }
+            }}
+            secondaryActions={[
+              {
+                label: t("option:healthDiagnostics", "Health & diagnostics"),
+                onClick: () => navigate("/settings/health")
+              }
+            ]}
           />
         ) : null}
 
         {!sourcesQuery.isLoading &&
         !sourcesQuery.error &&
         (sourcesQuery.data?.total ?? 0) === 0 ? (
-          <Empty description={t("sources:states.empty", "No ingestion sources yet.")} />
+          <StatePanel
+            state={emptyState.state}
+            title={emptyState.title}
+            message={emptyState.message}
+            primaryAction={emptyState.primaryAction}
+          />
         ) : null}
 
         {!sourcesQuery.isLoading &&

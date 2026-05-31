@@ -170,6 +170,34 @@ def test_cross_node_delete_invalidates_cached_session_state(monkeypatch, tmp_pat
         assert source.id not in orch_b._session_roots
 
 
+def test_cross_service_destroy_removes_store_backed_workspace_root(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_sqlite_store(monkeypatch, tmp_path)
+
+    creator = SandboxService()
+    session = creator.create_session(
+        user_id="user-cross-service-cleanup",
+        spec=SessionSpec(runtime=RuntimeType.docker, base_image="python:3.11-slim"),
+        spec_version="1.0",
+        idem_key=None,
+        raw_body={"spec_version": "1.0", "runtime": "docker"},
+    )
+    workspace_path = creator._orch.get_session_workspace_path(session.id)
+    assert workspace_path is not None
+    workspace = Path(str(workspace_path))
+    session_root = workspace.parent
+    (workspace / "state.txt").write_text("cleanup me", encoding="utf-8")
+
+    destroyer = SandboxService()
+
+    assert destroyer.destroy_session(session.id) is True
+    assert destroyer._orch.get_session(session.id) is None
+    assert destroyer._orch.get_session_workspace_path(session.id) is None
+    assert not session_root.exists()
+
+
 def test_destroy_session_cancels_and_drains_when_active_runs_exist(monkeypatch, tmp_path: Path) -> None:
     _configure_sqlite_store(monkeypatch, tmp_path)
 

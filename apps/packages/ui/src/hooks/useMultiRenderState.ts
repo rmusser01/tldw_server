@@ -4,6 +4,14 @@ import {
   type TtsProviderOverrides
 } from "@/services/tts-provider"
 import type { RenderStripConfig, RenderStripState } from "@/components/Option/Speech/RenderStrip"
+import {
+  classifyAudioError,
+  type AudioErrorClassification
+} from "@/components/Option/Audio/audio-error-classification"
+import {
+  buildTtsResultMetadata,
+  type TtsResultMetadata
+} from "@/components/Option/Audio/comparison-provenance"
 
 export type RenderEntry = {
   id: string
@@ -12,11 +20,21 @@ export type RenderEntry = {
   audioUrl?: string
   audioBlob?: Blob
   errorMessage?: string
+  errorSettingsHref?: "/settings/speech"
   progress?: number
+  metadata?: TtsResultMetadata
+  disabled?: boolean
 }
 
 let nextId = 1
 const genId = () => `render-${Date.now()}-${nextId++}`
+
+const classifyRenderError = (error: unknown): AudioErrorClassification => {
+  return classifyAudioError(error)
+}
+
+const formatRenderErrorMessage = (classified: AudioErrorClassification): string =>
+  `${classified.title}. ${classified.recovery}`
 
 const configToOverrides = (config: RenderStripConfig): TtsProviderOverrides => {
   const overrides: TtsProviderOverrides = { provider: config.provider }
@@ -36,6 +54,10 @@ const configToOverrides = (config: RenderStripConfig): TtsProviderOverrides => {
   }
   return overrides
 }
+
+const cloneConfig = (config: RenderStripConfig): RenderStripConfig => ({
+  ...config
+})
 
 export const useMultiRenderState = () => {
   const [renders, setRenders] = useState<RenderEntry[]>([])
@@ -105,22 +127,41 @@ export const useMultiRenderState = () => {
     async (id: string, text: string) => {
       if (!text.trim()) return
 
-      updateRender(id, { state: "generating", progress: 0, errorMessage: undefined })
-
       const entry = renders.find((r) => r.id === id)
       if (!entry) return
 
+      const createdAt = new Date().toISOString()
+      updateRender(id, {
+        state: "generating",
+        progress: 0,
+        errorMessage: undefined,
+        errorSettingsHref: undefined,
+        metadata: buildTtsResultMetadata(text, createdAt)
+      })
+
+      const previousController = abortControllersRef.current.get(id)
+      if (previousController) {
+        try { previousController.abort() } catch {}
+      }
       const controller = new AbortController()
       abortControllersRef.current.set(id, controller)
+      const start = performance.now()
 
       try {
         const overrides = configToOverrides(entry.config)
         const context = await resolveTtsProviderContext(text, overrides)
 
         if (!context.supported || !context.synthesize) {
+          const classified = classifyRenderError(
+            new Error(`Provider "${entry.config.provider}" is not supported`)
+          )
           updateRender(id, {
             state: "error",
-            errorMessage: `Provider "${entry.config.provider}" is not supported`
+            errorMessage: formatRenderErrorMessage(classified),
+            errorSettingsHref: classified.settingsHref,
+            metadata: buildTtsResultMetadata(text, createdAt, {
+              clientLatencyMs: performance.now() - start
+            })
           })
           return
         }
@@ -128,6 +169,7 @@ export const useMultiRenderState = () => {
         if (controller.signal.aborted) return
 
         const audio = await context.synthesize(context.utterance)
+        const clientLatencyMs = performance.now() - start
 
         if (controller.signal.aborted) return
 
@@ -145,17 +187,29 @@ export const useMultiRenderState = () => {
           state: "ready",
           audioUrl: url,
           audioBlob: blob,
-          progress: 100
+          progress: 100,
+          errorMessage: undefined,
+          errorSettingsHref: undefined,
+          metadata: buildTtsResultMetadata(text, createdAt, {
+            audioSizeBytes: blob.size,
+            clientLatencyMs
+          })
         })
       } catch (error) {
         if (controller.signal.aborted) return
+        const classified = classifyRenderError(error)
         updateRender(id, {
           state: "error",
-          errorMessage:
-            error instanceof Error ? error.message : "Generation failed"
+          errorMessage: formatRenderErrorMessage(classified),
+          errorSettingsHref: classified.settingsHref,
+          metadata: buildTtsResultMetadata(text, createdAt, {
+            clientLatencyMs: performance.now() - start
+          })
         })
       } finally {
-        abortControllersRef.current.delete(id)
+        if (abortControllersRef.current.get(id) === controller) {
+          abortControllersRef.current.delete(id)
+        }
       }
     },
     [renders, updateRender]
@@ -164,7 +218,7 @@ export const useMultiRenderState = () => {
   const generateAll = useCallback(
     async (text: string) => {
       const pending = renders.filter(
-        (r) => r.state === "idle" || r.state === "error"
+        (r) => !r.disabled && (r.state === "idle" || r.state === "error")
       )
       await Promise.allSettled(
         pending.map((r) => generateRender(r.id, text))
@@ -172,6 +226,30 @@ export const useMultiRenderState = () => {
     },
     [renders, generateRender]
   )
+
+  const duplicateRender = useCallback((id: string) => {
+    setRenders((prev) => {
+      const source = prev.find((render) => render.id === id)
+      if (!source) return prev
+      return [
+        ...prev,
+        {
+          id: genId(),
+          config: cloneConfig(source.config),
+          state: "idle" as const,
+          disabled: false
+        }
+      ]
+    })
+  }, [])
+
+  const setRenderDisabled = useCallback((id: string, disabled: boolean) => {
+    setRenders((prev) =>
+      prev.map((render) =>
+        render.id === id ? { ...render, disabled } : render
+      )
+    )
+  }, [])
 
   const clearAll = useCallback(() => {
     for (const url of objectUrlsRef.current.values()) {
@@ -235,7 +313,9 @@ export const useMultiRenderState = () => {
     [advancePlayQueue]
   )
 
-  const hasIdle = renders.some((r) => r.state === "idle" || r.state === "error")
+  const hasIdle = renders.some(
+    (r) => !r.disabled && (r.state === "idle" || r.state === "error")
+  )
   const hasReady = renders.some((r) => r.state === "ready")
   const isAnyGenerating = renders.some((r) => r.state === "generating")
 
@@ -248,6 +328,8 @@ export const useMultiRenderState = () => {
     updateConfig,
     generateRender,
     generateAll,
+    duplicateRender,
+    setRenderDisabled,
     clearAll,
     startPlaying,
     stopPlaying,

@@ -7,6 +7,19 @@ Recommended default:
 - Use `Docker multi-user + Postgres` when you need JWT auth, a first admin account, and bundled Postgres.
 - Use `Local single-user` for development, debugging, or contributor workflows.
 
+Deployment mode chooser:
+
+| Goal | Start here | Use when | Follow-up docs |
+| --- | --- | --- | --- |
+| Local single-user | [Local single-user](./Profile_Local_Single_User.md) | You are developing, debugging, or running a local contributor setup. | Add audio only after the base profile verifies. |
+| Docker single-user + WebUI | [Docker single-user + WebUI](./Profile_Docker_Single_User.md) | You want the shortest self-hosted path with the bundled WebUI and API key auth. | [Minimal deployment](../Deployment/minimal-deploy.md), [reverse proxy examples](../Deployment/Reverse_Proxy_Examples.md), and [CDN/static assets](../Deployment/cdn-static-assets.md). |
+| Docker multi-user + Postgres | [Docker multi-user + Postgres](./Profile_Docker_Multi_User_Postgres.md) | You need JWT auth, a first admin account, and bundled Postgres. | [Postgres migration guide](../Deployment/Postgres_Migration_Guide.md) and [long-term admin guide](../Deployment/Long_Term_Admin_Guide.md). |
+| Production or horizontal scaling | [Docker multi-user + Postgres](./Profile_Docker_Multi_User_Postgres.md) first, then [horizontal scaling](../Deployment/horizontal-scaling.md) | You are preparing a shared or multi-node deployment. | [Resource requirements](../Deployment/resource-requirements.md), [sidecar workers](../Deployment/Sidecar_Workers.md), and monitoring/operations docs. |
+| Offline or air-gapped | [Offline and air-gapped deployment](../Deployment/offline-air-gapped.md) | You need controlled egress, preloaded models, or disconnected operation. | Validate provider, model, and package assumptions before first production use. |
+| Sidecar workers | [Sidecar workers](../Deployment/Sidecar_Workers.md) | You want background workers split from the API/WebUI process. | Use the profile guide first, then add worker compose or service units after the base stack verifies. |
+| Audio or GPU setup | [CPU audio setup](./First_Time_Audio_Setup_CPU.md) or [GPU/accelerated audio setup](./First_Time_Audio_Setup_GPU_Accelerated.md) | Speech, transcription, TTS, or diarization is part of day-one setup. | Start from a healthy base profile, then add CPU or GPU audio prerequisites. |
+| Monitoring and operations | `make monitoring-up` plus `Docs/Deployment/Monitoring/README.md` | You need Prometheus, Grafana, Alertmanager, or operator runbooks. | Monitoring published output is generated as top-level `Docs/Published/Monitoring`; do not move it by hand. |
+
 Canonical base profiles:
 
 1. [Docker single-user + WebUI](./Profile_Docker_Single_User.md)
@@ -22,6 +35,7 @@ Canonical base profiles:
    - Prepare: `make setup-local-single`
    - Start: `make start-local-single`
    - Verify: `make verify-local-single`
+   - No-`make` shortcuts: `./quick-launch.sh`, `quick-launch.command`, or `.\quick-launch.ps1`
 
 Generated multi-user admin bootstrap:
 

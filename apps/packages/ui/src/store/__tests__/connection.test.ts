@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { ConnectionPhase } from "@/types/connection"
+import {
+  ConnectionPhase,
+  deriveConnectionUxState,
+  type ConnectionState,
+  type ConnectionUxState
+} from "@/types/connection"
 
 vi.mock("@/services/tldw-server", () => ({
   getStoredTldwServerURL: vi.fn(async () => null)
@@ -42,6 +47,128 @@ const ageLastCheck = () => {
     isChecking: false
   })
 }
+
+const createBaseConnectionState = (): ConnectionState => ({
+  phase: ConnectionPhase.UNCONFIGURED,
+  serverUrl: null,
+  lastCheckedAt: null,
+  lastError: null,
+  lastStatusCode: null,
+  isConnected: false,
+  isChecking: false,
+  consecutiveFailures: 0,
+  offlineBypass: false,
+  knowledgeStatus: "unknown",
+  knowledgeLastCheckedAt: null,
+  knowledgeError: null,
+  mode: "normal",
+  configStep: "none",
+  errorKind: "none",
+  hasCompletedFirstRun: false,
+  userPersona: null,
+  lastConfigUpdatedAt: null,
+  checksSinceConfigChange: 0
+})
+
+type ConnectionUxMatrixCase = {
+  name: string
+  overrides: Partial<ConnectionState>
+  expected: ConnectionUxState
+}
+
+const connectionUxMatrix: ConnectionUxMatrixCase[] = [
+  {
+    name: "unconfigured first run",
+    overrides: {},
+    expected: "unconfigured"
+  },
+  {
+    name: "URL configuration step",
+    overrides: { configStep: "url" },
+    expected: "configuring_url"
+  },
+  {
+    name: "auth configuration step",
+    overrides: { configStep: "auth" },
+    expected: "configuring_auth"
+  },
+  {
+    name: "active health check from setup",
+    overrides: { configStep: "health", isChecking: true },
+    expected: "testing"
+  },
+  {
+    name: "searching health check",
+    overrides: {
+      phase: ConnectionPhase.SEARCHING,
+      configStep: "health",
+      isChecking: true
+    },
+    expected: "testing"
+  },
+  {
+    name: "connected ready backend",
+    overrides: {
+      phase: ConnectionPhase.CONNECTED,
+      isConnected: true,
+      serverUrl: "http://127.0.0.1:8000",
+      knowledgeStatus: "ready",
+      hasCompletedFirstRun: true
+    },
+    expected: "connected_ok"
+  },
+  {
+    name: "connected partial error",
+    overrides: {
+      phase: ConnectionPhase.CONNECTED,
+      isConnected: true,
+      serverUrl: "http://127.0.0.1:8000",
+      errorKind: "partial",
+      knowledgeStatus: "ready",
+      hasCompletedFirstRun: true
+    },
+    expected: "connected_degraded"
+  },
+  {
+    name: "connected with offline knowledge",
+    overrides: {
+      phase: ConnectionPhase.CONNECTED,
+      isConnected: true,
+      serverUrl: "http://127.0.0.1:8000",
+      knowledgeStatus: "offline",
+      hasCompletedFirstRun: true
+    },
+    expected: "connected_degraded"
+  },
+  {
+    name: "auth error",
+    overrides: {
+      phase: ConnectionPhase.ERROR,
+      errorKind: "auth",
+      serverUrl: "http://127.0.0.1:8000"
+    },
+    expected: "error_auth"
+  },
+  {
+    name: "unreachable error",
+    overrides: {
+      phase: ConnectionPhase.ERROR,
+      errorKind: "unreachable",
+      serverUrl: "http://127.0.0.1:8000"
+    },
+    expected: "error_unreachable"
+  },
+  {
+    name: "demo mode",
+    overrides: {
+      mode: "demo",
+      phase: ConnectionPhase.CONNECTED,
+      isConnected: true,
+      offlineBypass: true
+    },
+    expected: "demo_mode"
+  }
+]
 
 describe("connection store stability", () => {
   const originalChrome = (
@@ -96,6 +223,18 @@ describe("connection store stability", () => {
       configurable: true
     })
   })
+
+  it.each(connectionUxMatrix)(
+    "maps $name to $expected in the setup connection UX state matrix",
+    ({ overrides, expected }) => {
+      expect(
+        deriveConnectionUxState({
+          ...createBaseConnectionState(),
+          ...overrides
+        })
+      ).toBe(expected)
+    }
+  )
 
   it("keeps connected state through transient unreachable checks before threshold", async () => {
     mockedApiSend.mockResolvedValue({

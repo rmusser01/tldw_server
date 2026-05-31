@@ -3,7 +3,7 @@ import React, { lazy, Suspense, useContext, useState } from "react"
 import { Drawer, Tooltip } from "antd"
 import { EraserIcon, XIcon } from "lucide-react"
 import { IconButton } from "../Common/IconButton"
-import { useLocation } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { useQueryClient } from "@tanstack/react-query"
 
@@ -13,7 +13,8 @@ import { useMessageOption } from "@/hooks/useMessageOption"
 import {
   useChatShortcuts,
   useSidebarShortcuts,
-  useQuickChatShortcuts
+  useQuickChatShortcuts,
+  useModeNavigationShortcuts
 } from "@/hooks/keyboard/useKeyboardShortcuts"
 import { useQuickChatStore } from "@/store/quick-chat"
 import { useLayoutUiStore } from "@/store/layout-ui"
@@ -122,6 +123,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 }) => {
   const confirmDanger = useConfirmDanger()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [chatSidebarOpenResetKey, setChatSidebarOpenResetKey] = useState(0)
+  const signalChatSidebarOpen = React.useCallback(() => {
+    setChatSidebarOpenResetKey((value) => value + 1)
+  }, [])
   const chatSidebarCollapsed = useLayoutUiStore(
     (state) => state.chatSidebarCollapsed
   )
@@ -129,6 +134,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     (state) => state.setChatSidebarCollapsed
   )
   const { t } = useTranslation(["option", "common", "settings"])
+  const navigate = useNavigate()
   const [openModelSettings, setOpenModelSettings] = useState(false)
   const { isLoading: migrationLoading } = useMigration()
   const { demoEnabled } = useDemoMode()
@@ -140,6 +146,9 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING)
   const isChatScreen = location.pathname === "/chat"
   const isViewportConstrainedRoute = (VIEWPORT_CONSTRAINED_PATHS as readonly string[]).includes(location.pathname)
+  const mobileSidebarTitle = location.pathname.startsWith("/knowledge")
+    ? t("common:knowledgeSidebar.title", "Knowledge history")
+    : t("common:chatSidebar.title", "Chats")
   const chatScreenBackgroundStyle =
     isChatScreen && chatBackgroundImage
       ? {
@@ -169,9 +178,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     if (hideSidebar) return
     if (showChatSidebar && !hideHeader) {
       if (isMobile) {
+        if (!sidebarOpen) signalChatSidebarOpen()
         setSidebarOpen((prev) => !prev)
         return
       }
+      if (chatSidebarCollapsed) signalChatSidebarOpen()
       setChatSidebarCollapsed((prev) => !prev)
       return
     }
@@ -201,6 +212,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     const handler = () => {
       if (hideSidebar) return
       if (showChatSidebar) {
+        signalChatSidebarOpen()
         if (isMobile) {
           setSidebarOpen(true)
           return
@@ -214,7 +226,13 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     return () => {
       window.removeEventListener("tldw:open-chat-sidebar", handler)
     }
-  }, [hideSidebar, isMobile, setChatSidebarCollapsed, showChatSidebar])
+  }, [
+    hideSidebar,
+    isMobile,
+    setChatSidebarCollapsed,
+    showChatSidebar,
+    signalChatSidebarOpen
+  ])
 
   const handleIngestPage = () => {
     requestQuickIngestOpen()
@@ -242,6 +260,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   useChatShortcuts(clearChat, true)
   useSidebarShortcuts(toggleSidebar, true)
   useQuickChatShortcuts(toggleQuickChat, true)
+  useModeNavigationShortcuts(navigate, !hideHeader)
 
   // Help modal (tutorials + shortcuts)
   const { toggle: toggleHelpModal } = useHelpModal()
@@ -352,13 +371,17 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
       {showChatSidebar && !hideHeader && !hideSidebar && !isMobile && (
         <ChatSidebar
           collapsed={chatSidebarCollapsed}
-          onToggleCollapse={() => setChatSidebarCollapsed((prev) => !prev)}
+          openResetKey={chatSidebarOpenResetKey}
+          onToggleCollapse={() => {
+            if (chatSidebarCollapsed) signalChatSidebarOpen()
+            setChatSidebarCollapsed((prev) => !prev)
+          }}
           className="sticky top-0 shrink-0 border-r border-border"
         />
       )}
       <main
         className={classNames(
-          "relative flex min-h-0 flex-1 flex-col",
+          "relative flex min-h-0 min-w-0 flex-1 flex-col",
           hideHeader ? "bg-bg " : ""
         )}
         data-demo-mode={demoEnabled ? "on" : "off"}>
@@ -368,8 +391,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
             {shortcutLoading && renderShortcutOverlay()}
           </div>
         ) : isViewportConstrainedRoute ? (
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
-            <div className="relative z-20 w-full shrink-0">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+            <div className="relative z-20 w-full min-w-0 shrink-0">
               <Header
                 onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
                 sidebarCollapsed={showChatSidebar && isMobile ? !sidebarOpen : chatSidebarCollapsed}
@@ -377,14 +400,14 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 onOpenNotifications={onOpenNotifications}
               />
             </div>
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               {children}
               {shortcutLoading && renderShortcutOverlay()}
             </div>
           </div>
         ) : (
-          <div className="relative flex flex-col min-h-[135vh]">
-            <div className="relative z-20 w-full">
+          <div className="relative flex min-w-0 flex-col min-h-[135vh]">
+            <div className="relative z-20 w-full min-w-0">
               <Header
                 onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
                 sidebarCollapsed={showChatSidebar && isMobile ? !sidebarOpen : chatSidebarCollapsed}
@@ -392,7 +415,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 onOpenNotifications={onOpenNotifications}
               />
             </div>
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               {children}
               {shortcutLoading && renderShortcutOverlay()}
             </div>
@@ -403,7 +426,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           <Drawer
             title={
               <div className="flex items-center justify-between">
-                <span>{t("common:chatSidebar.title", "Chats")}</span>
+                <span>{mobileSidebarTitle}</span>
                 <IconButton
                   onClick={() => setSidebarOpen(false)}
                   ariaLabel={t("common:close", { defaultValue: "Close" }) as string}
@@ -421,6 +444,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           >
             <ChatSidebar
               collapsed={false}
+              openResetKey={chatSidebarOpenResetKey}
               onToggleCollapse={() => setSidebarOpen(false)}
             />
           </Drawer>

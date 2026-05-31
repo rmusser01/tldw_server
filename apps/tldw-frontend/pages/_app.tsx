@@ -15,6 +15,12 @@ import { ConfigurationGuard } from "@web/components/networking/ConfigurationGuar
 import { ServerReadinessGate } from "@web/components/networking/ServerReadinessGate"
 import { hasEnvApiAuth } from "@web/lib/authStorage"
 import { loadTldwAuth, loadTldwClient } from "@web/lib/configured-auth-state"
+import {
+  buildFirstRunOnboardingRoute,
+  CHARACTER_CHAT_ONBOARDING_INTENT,
+  getOnboardingReturnToFromSearch,
+  resolveOnboardingEntryIntent
+} from "@/utils/onboarding-route-intent"
 
 const OptionLayout = dynamic(
   () => import("@web/components/layout/WebLayout"),
@@ -42,6 +48,9 @@ const SECONDARY_WARM_PREFETCH_ROUTES = [
   "/document-workspace"
 ] as const
 
+const DEGRADED_READINESS_ROUTES = new Set(["/chat", "/research-workspace"])
+const FIRST_RUN_OVERLAY_BYPASS_ROUTES = new Set(["/chat"])
+
 const PREFETCH_STEP_DELAY_MS = 250
 const PREFETCH_IDLE_TIMEOUT_MS = 2000
 const PREFETCH_FALLBACK_DELAY_MS = 1200
@@ -51,6 +60,45 @@ type ConfiguredAuthState = {
   hasConfig: boolean
   authMode?: "single-user" | "multi-user"
   isAuthenticated: boolean
+}
+
+const splitRouteAsPath = (asPath: string) => {
+  const fallback = asPath || "/"
+  const hashIndex = fallback.indexOf("#")
+  const withoutHash = hashIndex >= 0 ? fallback.slice(0, hashIndex) : fallback
+  const hash = hashIndex >= 0 ? fallback.slice(hashIndex) : ""
+  const searchIndex = withoutHash.indexOf("?")
+  const pathname =
+    searchIndex >= 0 ? withoutHash.slice(0, searchIndex) || "/" : withoutHash || "/"
+  const search = searchIndex >= 0 ? withoutHash.slice(searchIndex) : ""
+
+  return {
+    pathname,
+    search,
+    hash
+  }
+}
+
+const buildFirstRunSetupRoute = (asPath: string): string => {
+  const routeParts = splitRouteAsPath(asPath)
+  const entryIntent = resolveOnboardingEntryIntent(routeParts)
+
+  if (entryIntent !== CHARACTER_CHAT_ONBOARDING_INTENT) {
+    return "/persona"
+  }
+
+  if (routeParts.pathname === "/") {
+    const returnTo = getOnboardingReturnToFromSearch(routeParts.search)
+    if (returnTo) {
+      const params = new URLSearchParams({
+        intent: CHARACTER_CHAT_ONBOARDING_INTENT
+      })
+      params.set("returnTo", returnTo)
+      return `/?${params.toString()}`
+    }
+  }
+
+  return buildFirstRunOnboardingRoute(routeParts)
 }
 
 const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
@@ -115,6 +163,7 @@ export default function App({ Component, pageProps }: AppProps) {
       ? pathname.slice(0, -1)
       : pathname
   const isPublicAuthRoute = routePath === "/login"
+  const isSetupRoute = routePath === "/setup"
   const isSettingsRoute =
     routePath === "/settings" || routePath.startsWith("/settings/")
   const [isAuthenticated, setIsAuthenticated] = React.useState(false)
@@ -249,19 +298,28 @@ export default function App({ Component, pageProps }: AppProps) {
   }, [authResolved, isAuthenticated, isPublicAuthRoute, routePath, router])
 
   const hideShellNav = !authResolved || !isAuthenticated
-  const shouldBypassGates = isPublicAuthRoute || isSettingsRoute
+  const shouldBypassGates = isPublicAuthRoute || isSettingsRoute || isSetupRoute
+  const shouldAllowDegradedReadiness = DEGRADED_READINESS_ROUTES.has(routePath)
+  const firstRunSetupRoute = React.useMemo(
+    () => buildFirstRunSetupRoute(router.asPath || routePath || "/"),
+    [routePath, router.asPath]
+  )
+  const shouldBypassFirstRunOverlay =
+    !shouldBypassGates &&
+    (firstRunSetupRoute !== "/persona" ||
+      FIRST_RUN_OVERLAY_BYPASS_ROUTES.has(routePath))
 
   const handleStartSetup = React.useCallback(() => {
-    void router.push("/persona")
-  }, [router])
+    void router.push(firstRunSetupRoute)
+  }, [firstRunSetupRoute, router])
 
   const layoutProps = React.useMemo(
     () => ({
-      hideHeader: hideShellNav,
-      hideSidebar: hideShellNav || isSettingsRoute,
+      hideHeader: hideShellNav || isSetupRoute,
+      hideSidebar: hideShellNav || isSettingsRoute || isSetupRoute,
       allowNestedHideHeader: !isSettingsRoute
     }),
-    [hideShellNav, isSettingsRoute]
+    [hideShellNav, isSettingsRoute, isSetupRoute]
   )
 
   const layoutContent = (
@@ -275,7 +333,9 @@ export default function App({ Component, pageProps }: AppProps) {
   ) : shouldBypassGates ? (
     layoutContent
   ) : (
-    <FirstRunGate onStartSetup={handleStartSetup}>
+    <FirstRunGate
+      onStartSetup={handleStartSetup}
+      bypass={shouldBypassFirstRunOverlay}>
       {layoutContent}
     </FirstRunGate>
   )
@@ -285,7 +345,9 @@ export default function App({ Component, pageProps }: AppProps) {
       <ConfigurationGuard>
         <BackendRecoveryUiProvider routeRecoveryEnabled>
           <ErrorBoundary>
-            <ServerReadinessGate bypass={shouldBypassGates}>
+            <ServerReadinessGate
+              bypass={shouldBypassGates}
+              allowDegraded={shouldAllowDegradedReadiness}>
               {gatedContent}
             </ServerReadinessGate>
           </ErrorBoundary>

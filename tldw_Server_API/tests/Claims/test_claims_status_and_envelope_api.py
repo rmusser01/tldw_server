@@ -233,6 +233,14 @@ def test_claims_envelope_pagination_absolute_link():
         body1 = r1.json()
         assert isinstance(body1.get("total"), int)
         assert isinstance(body1.get("total_pages"), int)
+        assert body1.get("pagination") == {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 0,
+            "total": body1.get("total"),
+            "has_more": body1.get("next_offset") is not None,
+            "next_offset": body1.get("next_offset"),
+        }
         next_link = body1.get("next_link")
         if body1.get("next_offset") is not None:
             assert isinstance(next_link, str) and next_link.startswith("http")

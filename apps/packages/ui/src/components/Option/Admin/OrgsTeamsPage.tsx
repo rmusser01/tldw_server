@@ -6,7 +6,6 @@ import {
   Input,
   Modal,
   Select,
-  Alert,
   Space,
   Popconfirm,
   message,
@@ -20,6 +19,7 @@ import {
   ReloadOutlined,
   TeamOutlined
 } from "@ant-design/icons"
+import { Alert } from "@/components/ui/primitives"
 import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
@@ -573,10 +573,18 @@ const OrgsTeamsPage: React.FC = () => {
   // ── Render ──
 
   if (adminGuard === "forbidden") {
-    return <Alert type="error" message="Access Denied" description="You don't have permission to manage organizations." showIcon />
+    return (
+      <Alert variant="error" title="Access Denied">
+        You don't have permission to manage organizations.
+      </Alert>
+    )
   }
   if (adminGuard === "notFound") {
-    return <Alert type="warning" message="Not Available" description="Organization management is not available on this server." showIcon />
+    return (
+      <Alert variant="warning" title="Not Available">
+        Organization management is not available on this server.
+      </Alert>
+    )
   }
 
   return (

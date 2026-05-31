@@ -17,7 +17,9 @@ from tldw_Server_API.app.api.v1.schemas.collections_feeds_schemas import (
     CollectionsFeedsListResponse,
     CollectionsFeedUpdateRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.Personalization import (
     record_watchlist_source_created,
@@ -191,8 +193,8 @@ def _register_schedule(db: WatchlistsDatabase, job_row, *, current_user: User) -
         )
         db.set_job_schedule_id(job_row.id, sid)
         return
-    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Collections feeds schedule registration failed: {exc}")
+    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Collections feeds schedule registration failed")
     try:
         if job_row.schedule_expr:
             from uuid import uuid4
@@ -217,8 +219,8 @@ def _register_schedule(db: WatchlistsDatabase, job_row, *, current_user: User) -
                 coalesce=True,
             )
             db.set_job_schedule_id(job_row.id, sid)
-    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Collections feeds schedule DB fallback failed: {exc}")
+    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Collections feeds schedule DB fallback failed")
 
 
 def _derive_health_status(source_row) -> str:
@@ -345,8 +347,8 @@ def _sync_job_schedule(db: WatchlistsDatabase, job_row, *, current_user: User) -
                 },
             )
             return
-    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Collections feeds schedule update failed: {exc}")
+    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Collections feeds schedule update failed")
     if not job_row.wf_schedule_id and job_row.schedule_expr:
         _register_schedule(db, job_row, current_user=current_user)
     try:
@@ -357,6 +359,16 @@ def _sync_job_schedule(db: WatchlistsDatabase, job_row, *, current_user: User) -
 
 def _collections_feed_event_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _feeds_pagination(*, total: int, page: int, size: int) -> PagePaginationMeta:
+    total_pages = (total + size - 1) // size if total > 0 else 0
+    return build_page_pagination_meta(
+        page=page,
+        per_page=size,
+        total=total,
+        total_pages=total_pages,
+    )
 
 
 @router.post("", response_model=CollectionsFeed, summary="Create a Collections feed subscription")
@@ -385,7 +397,7 @@ async def create_feed_subscription(
             group_ids=None,
         )
     except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"collections_feeds_create_source_failed: {exc}")
+        logger.error("collections_feeds_create_source_failed")
         raise HTTPException(status_code=400, detail="feed_create_failed") from exc
 
     try:
@@ -411,7 +423,7 @@ async def create_feed_subscription(
             job_filters_json=None,
         )
     except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"collections_feeds_create_job_failed: {exc}")
+        logger.error("collections_feeds_create_job_failed")
         with contextlib.suppress(_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS):
             db.delete_source(int(source.id))
         raise HTTPException(status_code=400, detail="feed_create_failed") from exc
@@ -447,8 +459,8 @@ async def create_feed_subscription(
                     capture_companion_activity=True,
                     companion_route="/api/v1/collections/feeds",
                 )
-            except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"collections_feeds: first run failed for job {job_id}: {exc}")
+            except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("collections_feeds_first_run_failed")
 
         background_tasks.add_task(_run_first_job, int(current_user.id), int(job.id))
 
@@ -487,7 +499,11 @@ async def list_feed_subscriptions(
     for row, settings in paged:
         job = _load_job(db, settings)
         items.append(_to_feed_response(row, job_row=job, settings=settings))
-    return CollectionsFeedsListResponse(items=items, total=total)
+    return CollectionsFeedsListResponse(
+        items=items,
+        total=total,
+        pagination=_feeds_pagination(total=total, page=page, size=size),
+    )
 
 
 @router.get("/{feed_id}", response_model=CollectionsFeed, summary="Get a Collections feed subscription")
@@ -539,14 +555,14 @@ async def update_feed_subscription(
     try:
         source = db.update_source(feed_id, patch)
     except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"collections_feeds_update_source_failed: {exc}")
+        logger.error("collections_feeds_update_source_failed")
         raise HTTPException(status_code=400, detail="feed_update_failed") from exc
     if payload.tags is not None:
         try:
             db.set_source_tags(feed_id, [t for t in payload.tags if t])
             source = db.get_source(feed_id)
-        except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"collections_feeds_update_tags_failed: {exc}")
+        except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+            logger.error("collections_feeds_update_tags_failed")
 
     job = _load_job(db, settings)
     if job and any(value is not None for value in (payload.schedule_expr, payload.timezone, payload.active)):
@@ -578,8 +594,8 @@ async def update_feed_subscription(
                 db.set_job_history(int(job.id), next_run_at=next_run)
                 job = db.get_job(int(job.id))
             _sync_job_schedule(db, job, current_user=current_user)
-        except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"collections_feeds_update_job_failed: {exc}")
+        except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+            logger.error("collections_feeds_update_job_failed")
 
     response = _to_feed_response(source, job_row=job, settings=settings)
     if activity_patch:

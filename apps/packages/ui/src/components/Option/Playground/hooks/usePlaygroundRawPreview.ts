@@ -2,7 +2,8 @@ import React from "react"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import {
   captureChatRequestDebugSnapshot,
-  type ChatRequestDebugSnapshot
+  type ChatRequestDebugSnapshot,
+  type ChatToolRequestDebugMetadata
 } from "@/services/tldw/chat-request-debug"
 import type {
   ChatCompletionRequest,
@@ -11,6 +12,15 @@ import type {
 } from "@/services/tldw/TldwApiClient"
 import { parseJsonObject } from "./utils"
 import { formatPinnedResults } from "@/utils/rag-format"
+import { resolveChatToolRequest } from "@/utils/chat-tools"
+import {
+  deriveRolePlayCompatibility,
+  type RolePlayCompatibility
+} from "../role-play-compatibility"
+import {
+  buildSidepanelHandoffMessageForModel,
+  type SidepanelChatHandoffPageContext
+} from "@/services/sidepanel-chat-handoff"
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -53,6 +63,7 @@ export interface UsePlaygroundRawPreviewDeps {
   serverChatState: string | null
   serverChatSource: string | null
   selectedCharacter: { id?: string | number; name?: string } | null
+  hasPersona?: boolean
   messageSteeringMode: string | undefined
   messageSteeringForceNarrate: boolean | undefined
   ragMediaIds: number[] | null
@@ -73,6 +84,7 @@ export interface UsePlaygroundRawPreviewDeps {
   }
   formImage: string
   formMessage: string
+  importedSidepanelContext?: SidepanelChatHandoffPageContext | null
   researchContext?: ChatResearchContext
   notificationApi: {
     error: (opts: { message: string; description?: string }) => void
@@ -85,6 +97,16 @@ export interface UsePlaygroundRawPreviewDeps {
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
+
+const omitUndefinedFields = <T extends Record<string, unknown>>(payload: T): T =>
+  Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined)
+  ) as T
+
+type PreviewChatRequestBuild = {
+  request: ChatCompletionRequest
+  metadata: ChatToolRequestDebugMetadata
+}
 
 export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
   const {
@@ -105,6 +127,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     serverChatState,
     serverChatSource,
     selectedCharacter,
+    hasPersona,
     messageSteeringMode,
     messageSteeringForceNarrate,
     ragMediaIds,
@@ -118,6 +141,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     resolveSubmissionIntent,
     formImage,
     formMessage,
+    importedSidepanelContext,
     researchContext,
     notificationApi,
     t,
@@ -222,25 +246,21 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         explicitProvider: currentChatModelSettings.apiProvider
       })
       const modelSupportsTools = supportsCapability(normalizedModel, "tools")
-      const toolsAllowed =
-        modelSupportsTools &&
-        hasMcp &&
-        mcpHealthState !== "unavailable" &&
-        mcpHealthState !== "unhealthy"
-      const executableTools = Array.isArray(mcpTools)
-        ? mcpTools.filter((tool) => {
-            if (!tool || typeof tool !== "object") return false
-            if (!("canExecute" in tool)) return true
-            return Boolean((tool as Record<string, unknown>).canExecute)
-          })
-        : []
-      const effectiveTools =
-        toolsAllowed &&
-        toolChoice !== "none" &&
-        executableTools.length > 0
-          ? executableTools
-          : undefined
-      const request: ChatCompletionRequest = {
+      const toolRequest = resolveChatToolRequest({
+        tools: mcpTools,
+        toolChoice,
+        modelSupportsTools,
+        mcpHealthState,
+        hasMcp
+      })
+      const parsedExtraHeaders = parseJsonObject(currentChatModelSettings.extraHeaders)
+      const previewExtraHeaders = {
+        ...(parsedExtraHeaders ?? {})
+      }
+      if (toolRequest.tools) {
+        previewExtraHeaders["X-TLDW-Loop-Compat"] = "1"
+      }
+      const request = omitUndefinedFields({
         messages: toPreviewHistoryMessages(normalizedModel, draftMessage, draftImage),
         model: normalizedModel,
         stream: true,
@@ -255,8 +275,14 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
           currentChatModelSettings.reasoningEffort === "high"
             ? currentChatModelSettings.reasoningEffort
             : undefined,
-        tool_choice: effectiveTools ? toolChoice : undefined,
-        tools: effectiveTools,
+        ...(toolRequest.tools
+          ? {
+              tools: toolRequest.tools,
+              ...(toolRequest.toolChoice
+                ? { tool_choice: toolRequest.toolChoice }
+                : {})
+            }
+          : {}),
         save_to_db: !temporaryChat && Boolean(serverChatId),
         conversation_id: !temporaryChat && serverChatId ? serverChatId : undefined,
         history_message_limit: currentChatModelSettings.historyMessageLimit,
@@ -264,11 +290,18 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         slash_command_injection_mode:
           currentChatModelSettings.slashCommandInjectionMode,
         api_provider: resolvedProvider || undefined,
-        extra_headers: parseJsonObject(currentChatModelSettings.extraHeaders),
+        extra_headers:
+          Object.keys(previewExtraHeaders).length > 0
+            ? previewExtraHeaders
+            : undefined,
         extra_body: parseJsonObject(currentChatModelSettings.extraBody),
         thinking_budget_tokens:
           currentChatModelSettings.llamaThinkingBudgetTokens,
-        grammar_mode: currentChatModelSettings.llamaGrammarMode,
+        grammar_mode:
+          currentChatModelSettings.llamaGrammarMode === "library" ||
+          currentChatModelSettings.llamaGrammarMode === "inline"
+            ? currentChatModelSettings.llamaGrammarMode
+            : "none",
         grammar_id: currentChatModelSettings.llamaGrammarId,
         grammar_inline: currentChatModelSettings.llamaGrammarInline,
         grammar_override: currentChatModelSettings.llamaGrammarOverride,
@@ -276,8 +309,16 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
           ? { type: "json_object" }
           : undefined,
         research_context: compareModeActive ? undefined : researchContext
-      }
-      return request
+      } satisfies Record<string, unknown>) as ChatCompletionRequest
+      return {
+        request,
+        metadata: {
+          model: normalizedModel,
+          toolChoice: toolRequest.toolChoice,
+          toolOmissionReason: toolRequest.omittedReason,
+          toolCounts: toolRequest.counts
+        }
+      } satisfies PreviewChatRequestBuild
     },
     [
       currentChatModelSettings,
@@ -292,30 +333,82 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     ]
   )
 
+  const buildRolePlayCompatibility = React.useCallback(
+    (intent: { isImageCommand: boolean }): RolePlayCompatibility => {
+      const hasScopedRagMediaIds =
+        Array.isArray(ragMediaIds) && ragMediaIds.length > 0
+      const hasContextFiles =
+        Array.isArray(contextFiles) && contextFiles.length > 0
+      const hasSelectedDocuments =
+        Array.isArray(selectedDocuments) && selectedDocuments.length > 0
+      const hasDocumentContext =
+        Array.isArray(documentContext) && documentContext.length > 0
+      const hasCustomPrompt = String(systemPrompt || "").trim().length > 0
+
+      return deriveRolePlayCompatibility({
+        hasCharacter: Boolean(selectedCharacter?.id),
+        hasPersona: Boolean(hasPersona),
+        compareModeActive,
+        isImageCommand: intent.isImageCommand,
+        hasContextFiles,
+        hasSelectedDocuments,
+        hasDocumentContext,
+        hasSelectedKnowledge: Boolean(selectedKnowledge),
+        fileRetrievalEnabled: Boolean(fileRetrievalEnabled),
+        hasScopedRagMediaIds,
+        ragPinnedResultsLength: Array.isArray(ragPinnedResults)
+          ? ragPinnedResults.length
+          : 0,
+        hasCustomPrompt
+      })
+    },
+    [
+      compareModeActive,
+      contextFiles,
+      documentContext,
+      fileRetrievalEnabled,
+      hasPersona,
+      ragMediaIds,
+      ragPinnedResults,
+      selectedCharacter?.id,
+      selectedDocuments,
+      selectedKnowledge,
+      systemPrompt
+    ]
+  )
+
+  const rolePlayCompatibility = React.useMemo(
+    () => buildRolePlayCompatibility(resolveSubmissionIntent(formMessage || "")),
+    [buildRolePlayCompatibility, formMessage, resolveSubmissionIntent]
+  )
+
   const buildCurrentRawRequestSnapshot = React.useCallback(async () => {
     const intent = resolveSubmissionIntent(formMessage || "")
+    const compatibility = buildRolePlayCompatibility(intent)
     let draftMessage = intent.message.trim()
     // Append pinned source expansion to match submitForm behavior
     if (!intent.isImageCommand && !fileRetrievalEnabled && ragPinnedResults && ragPinnedResults.length > 0) {
       const pinnedText = formatPinnedResults(ragPinnedResults, "markdown")
       draftMessage = draftMessage ? `${draftMessage}\n\n${pinnedText}` : pinnedText
     }
+    const modelDraftMessage =
+      !intent.isImageCommand && importedSidepanelContext
+        ? buildSidepanelHandoffMessageForModel(
+            draftMessage.trim().length > 0
+              ? draftMessage.trim()
+              : t(
+                  "playground:sidepanelHandoff.contextOnlyDraft",
+                  "Summarize this page."
+                ),
+            importedSidepanelContext
+          )
+        : draftMessage
     const draftImage = intent.isImageCommand ? "" : String(formImage || "")
-    const hasScopedRagMediaIds =
-      Array.isArray(ragMediaIds) && ragMediaIds.length > 0
-    const shouldUseRag =
-      Boolean(selectedKnowledge) || (fileRetrievalEnabled && hasScopedRagMediaIds)
-    const hasContextFiles = Array.isArray(contextFiles) && contextFiles.length > 0
-    const hasDocs =
-      (Array.isArray(selectedDocuments) && selectedDocuments.length > 0) ||
-      (Array.isArray(documentContext) && documentContext.length > 0)
     const isCharacterFlow =
-      !compareModeActive &&
-      !intent.isImageCommand &&
-      !hasContextFiles &&
-      !hasDocs &&
-      !shouldUseRag &&
-      Boolean(selectedCharacter?.id)
+      Boolean(selectedCharacter?.id) &&
+      compatibility.status !== "none" &&
+      compatibility.status !== "excluded" &&
+      compatibility.reasonCode !== "persona_flow"
 
     if (intent.isImageCommand) {
       const backend =
@@ -352,7 +445,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
       const chatIdHint = serverChatId || "<new-chat-id>"
       const messagePayload: Record<string, unknown> = {
         role: "user",
-        content: draftMessage
+        content: modelDraftMessage
       }
       const normalizedImage = String(formImage || "")
       if (normalizedImage.startsWith("data:")) {
@@ -436,9 +529,9 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     }
 
     if (limitedModels.length === 1) {
-      const request = await buildNormalPreviewRequest(
+      const preview = await buildNormalPreviewRequest(
         limitedModels[0],
-        draftMessage,
+        modelDraftMessage,
         draftImage
       )
       return {
@@ -446,13 +539,14 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         method: "POST",
         mode: "stream",
         sentAt: new Date().toISOString(),
-        body: request
+        body: preview.request,
+        metadata: preview.metadata
       } satisfies ChatRequestDebugSnapshot
     }
 
-    const requests = await Promise.all(
+    const previews = await Promise.all(
       limitedModels.map((modelId) =>
-        buildNormalPreviewRequest(modelId, draftMessage, draftImage)
+        buildNormalPreviewRequest(modelId, modelDraftMessage, draftImage)
       )
     )
     return {
@@ -462,34 +556,35 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
       sentAt: new Date().toISOString(),
       body: {
         compare_mode: true,
-        requests
+        requests: previews.map((preview) => preview.request)
+      },
+      metadata: {
+        toolRequests: previews.map((preview) => preview.metadata)
       }
     } satisfies ChatRequestDebugSnapshot
   }, [
     buildNormalPreviewRequest,
+    buildRolePlayCompatibility,
     compareMaxModels,
     compareModeActive,
     compareSelectedModels,
-    contextFiles,
     currentChatModelSettings.apiProvider,
-    documentContext,
     fileRetrievalEnabled,
     formImage,
     formMessage,
     imageBackendDefaultTrimmed,
+    importedSidepanelContext,
     messageSteeringForceNarrate,
     messageSteeringMode,
-    ragMediaIds,
     ragPinnedResults,
     resolveSubmissionIntent,
     selectedCharacter?.id,
-    selectedKnowledge,
     selectedModel,
-    selectedDocuments,
     researchContext,
     serverChatId,
     serverChatSource,
     serverChatState,
+    t,
     temporaryChat
   ])
 
@@ -509,7 +604,8 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         endpoint: snapshot.endpoint,
         method: snapshot.method,
         mode: snapshot.mode,
-        body: snapshot.body
+        body: snapshot.body,
+        metadata: snapshot.metadata
       })
     } catch (error) {
       console.error("Failed to build current request preview", error)
@@ -558,6 +654,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     setRawRequestModalOpen,
     rawRequestSnapshot,
     rawRequestJson,
+    rolePlayCompatibility,
     refreshRawRequestSnapshot,
     openRawRequestModal,
     copyRawRequestJson

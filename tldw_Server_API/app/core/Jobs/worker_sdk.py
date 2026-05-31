@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import random
+import secrets
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -112,7 +112,7 @@ class WorkerSDK:
         iters = 0
         while not self._stop.is_set():
             # Sleep for lease - threshold, plus small jitter
-            sleep_for = max(1, lease - threshold) + (random.randint(0, jitter) if jitter else 0)
+            sleep_for = max(1, lease - threshold) + (secrets.randbelow(jitter + 1) if jitter else 0)
             await self._sleep_chunked(float(sleep_for))
             if self._stop.is_set():
                 return
@@ -185,6 +185,7 @@ class WorkerSDK:
             def _finalize_failure(exc: Exception) -> None:
                 retryable = self.cfg.retry_on_exception and bool(getattr(exc, "retryable", True))
                 backoff_s = int(getattr(exc, "backoff_seconds", self.cfg.retry_backoff_seconds))
+                error_code = str(getattr(exc, "failure_code", "worker_exception") or "worker_exception")
                 try:
                     self.jm.fail_job(
                         job_id,
@@ -195,7 +196,7 @@ class WorkerSDK:
                         lease_id=lease_id_str,
                         completion_token=(lease_id_str if is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN")) else None),
                         enforce=enforce,
-                        error_code="worker_exception",
+                        error_code=error_code,
                         error_class=type(exc).__name__,
                     )
                 except _WORKER_SDK_NONCRITICAL_EXCEPTIONS:

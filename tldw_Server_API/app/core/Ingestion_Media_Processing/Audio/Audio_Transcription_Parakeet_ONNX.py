@@ -276,37 +276,145 @@ def _preprocess_audio(audio: np.ndarray, sample_rate: int = 16000) -> np.ndarray
     return features
 
 
-def _prepare_onnx_inputs(session: Any, features: np.ndarray) -> dict[str, np.ndarray]:
+def _onnx_input_name(input_meta: Any) -> str:
+    """Return a stable string input name from ONNX metadata or test doubles."""
+    name = getattr(input_meta, "name", "")
+    if isinstance(name, str):
+        return name
+    mock_name = getattr(input_meta, "_mock_name", "")
+    return str(mock_name or name or "")
+
+
+def _onnx_input_rank(input_meta: Any) -> int | None:
+    """Return the declared ONNX input rank when metadata exposes one."""
+    shape = getattr(input_meta, "shape", None)
+    if isinstance(shape, (list, tuple)):
+        return len(shape)
+    return None
+
+
+def _is_length_input_name(name: str) -> bool:
+    lname = str(name or "").lower()
+    if not lname:
+        return False
+    return (
+        "length" in lname
+        or "lens" in lname
+        or lname.endswith("_len")
+        or lname.endswith("_lens")
+        or lname in {"len", "lens", "lengths"}
+    )
+
+
+def _is_raw_waveform_input(input_meta: Any) -> bool:
+    name = _onnx_input_name(input_meta)
+    lname = name.lower()
+    rank = _onnx_input_rank(input_meta)
+    if _is_length_input_name(name):
+        return False
+    if "feature" in lname or "mel" in lname or "encoder" in lname or "processed_signal" in lname:
+        return False
+    if "waveform" in lname or "audio_signal" in lname or "raw_audio" in lname or lname in {"audio", "samples"}:
+        return rank is None or rank <= 2
+    return rank == 2
+
+
+def _is_feature_input(input_meta: Any) -> bool:
+    name = _onnx_input_name(input_meta)
+    lname = name.lower()
+    rank = _onnx_input_rank(input_meta)
+    if _is_length_input_name(name):
+        return False
+    return (
+        "feature" in lname
+        or "mel" in lname
+        or "encoder" in lname
+        or "processed_signal" in lname
+        or "speech" in lname
+        or rank is not None and rank >= 3
+    )
+
+
+def _prepare_waveform_input(audio_data: np.ndarray) -> np.ndarray:
+    waveform = np.asarray(audio_data, dtype=np.float32)
+    if waveform.ndim > 1:
+        waveform = waveform.reshape(-1)
+    return np.expand_dims(waveform, axis=0)
+
+
+def _prepare_onnx_inputs(
+    session: Any,
+    features: np.ndarray,
+    waveform: Optional[np.ndarray] = None,
+    signal_length: int | None = None,
+) -> dict[str, np.ndarray]:
     """
     Build a best-effort ONNX input map from runtime input names.
 
     Different exported Parakeet variants use different names for the feature
-    tensor (e.g. `input_features`, `audio`, `encoder_outputs`). This helper
-    keeps mapping resilient across those variants and test doubles.
+    or waveform tensor (e.g. `input_features`, `encoder_outputs`, `waveforms`).
+    This helper keeps mapping resilient across those variants and test doubles.
     """
     inputs_meta = list(session.get_inputs() or [])
-    input_names = [getattr(inp, "name", "") for inp in inputs_meta]
+    input_names = [_onnx_input_name(inp) for inp in inputs_meta]
     prepared: dict[str, np.ndarray] = {}
+    explicit_signal_length: int | None = None
+    if signal_length is not None:
+        try:
+            explicit_signal_length = max(0, int(signal_length))
+        except (OverflowError, TypeError, ValueError):
+            explicit_signal_length = None
 
-    feature_name: str | None = None
-    for name in input_names:
-        lname = str(name).lower()
-        if any(token in lname for token in ("audio", "input", "encoder", "feature", "speech", "mel")):
-            feature_name = name
+    signal_name: str | None = None
+    signal_tensor = features
+    signal_length = int(features.shape[1]) if features.ndim >= 2 else int(features.size)
+
+    if waveform is not None:
+        for input_meta in inputs_meta:
+            if _is_raw_waveform_input(input_meta):
+                signal_name = _onnx_input_name(input_meta)
+                signal_tensor = waveform.astype(np.float32, copy=False)
+                signal_length = (
+                    explicit_signal_length
+                    if explicit_signal_length is not None
+                    else int(signal_tensor.shape[-1])
+                )
+                break
+
+    if signal_name is None:
+        for input_meta in inputs_meta:
+            if _is_feature_input(input_meta):
+                signal_name = _onnx_input_name(input_meta)
+                signal_tensor = features
+                signal_length = int(features.shape[1]) if features.ndim >= 2 else int(features.size)
+                break
+
+    if signal_name is None:
+        for input_meta in inputs_meta:
+            name = _onnx_input_name(input_meta)
+            if _is_length_input_name(name):
+                continue
+            signal_name = name
+            if waveform is not None and _onnx_input_rank(input_meta) == 2:
+                signal_tensor = waveform.astype(np.float32, copy=False)
+                signal_length = (
+                    explicit_signal_length
+                    if explicit_signal_length is not None
+                    else int(signal_tensor.shape[-1])
+                )
             break
-    if feature_name is None and input_names:
-        feature_name = input_names[0]
-    if feature_name is not None:
-        prepared[feature_name] = features
+
+    if signal_name is not None:
+        prepared[signal_name] = signal_tensor
 
     for name in input_names:
-        if name == feature_name:
+        if name == signal_name:
             continue
         lname = str(name).lower()
-        if "length" in lname or lname.endswith("_len") or "seq_len" in lname:
-            prepared[name] = np.array([features.shape[1]], dtype=np.int64)
+        if _is_length_input_name(name) or "seq_len" in lname:
+            prepared[name] = np.array([signal_length], dtype=np.int64)
         elif "batch" in lname:
-            prepared[name] = np.array([features.shape[0]], dtype=np.int64)
+            prepared[name] = np.array([signal_tensor.shape[0]], dtype=np.int64)
 
     return prepared
 
@@ -471,7 +579,8 @@ def transcribe_with_parakeet_onnx(
     try:
         session, tokenizer = load_parakeet_onnx_model(model_path, device)
     except Exception as e:
-        return f"[Error: {str(e)}]"
+        logger.exception(f"Failed to load ONNX model: {e}")
+        return "[Error: Failed to load ONNX model]"
     if session is None or tokenizer is None:
         return "[Error: Failed to load ONNX model]"
 
@@ -489,7 +598,7 @@ def transcribe_with_parakeet_onnx(
                 )
         except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
             logger.exception(f"Failed to load audio file: {e}")
-            return f"[Error: Failed to load audio: {e}]"
+            return "[Error: Failed to load audio]"
 
     # Ensure numpy array
     if not isinstance(audio_data, np.ndarray):
@@ -526,11 +635,12 @@ def transcribe_with_parakeet_onnx(
         # Prepare input for ONNX
         # Add batch dimension
         features = np.expand_dims(features, axis=0)
+        waveform = _prepare_waveform_input(audio_data)
 
         output_names = [out.name for out in session.get_outputs()]
 
         # Prepare inputs
-        inputs = _prepare_onnx_inputs(session, features)
+        inputs = _prepare_onnx_inputs(session, features, waveform=waveform)
 
         # Run inference
         outputs = session.run(output_names, inputs)
@@ -561,7 +671,7 @@ def transcribe_with_parakeet_onnx(
 
     except Exception as e:
         logger.exception(f"Transcription error: {e}")
-        return f"[Error: Transcription failed: {e}]"
+        return "[Error: Parakeet ONNX transcription failed]"
 
 
 def transcribe_chunked_onnx(
@@ -607,7 +717,9 @@ def transcribe_chunked_onnx(
         end = min(start + chunk_samples, total_samples)
 
         # Extract chunk
-        chunk = audio_data[start:end]
+        raw_chunk = audio_data[start:end]
+        chunk_length = len(raw_chunk)
+        chunk = raw_chunk
 
         # Pad if needed
         if len(chunk) < chunk_samples:
@@ -622,9 +734,15 @@ def transcribe_chunked_onnx(
 
             # Add batch dimension
             features = np.expand_dims(features, axis=0)
+            waveform = _prepare_waveform_input(chunk)
 
             # Prepare inputs
-            inputs = _prepare_onnx_inputs(session, features)
+            inputs = _prepare_onnx_inputs(
+                session,
+                features,
+                waveform=waveform,
+                signal_length=chunk_length,
+            )
 
             # Run inference
             outputs = session.run(output_names, inputs)

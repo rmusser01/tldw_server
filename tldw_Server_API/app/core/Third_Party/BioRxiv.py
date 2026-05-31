@@ -74,6 +74,11 @@ def _media_type_for_format(fmt: str) -> str:
     return "application/octet-stream"
 
 
+def _request_failure_message(operation: str, exc: BaseException) -> str:
+    outcome = "timed out" if isinstance(exc, TimeoutError) else "failed"
+    return f"{operation} request {outcome}."
+
+
 def _raw_get(path: str, fmt: str | None = None, params: dict[str, Any] | None = None) -> tuple[bytes | None, str | None, str | None]:
     """Low-level fetch for passthrough endpoints. Returns (content, media_type, error)."""
     try:
@@ -84,7 +89,7 @@ def _raw_get(path: str, fmt: str | None = None, params: dict[str, Any] | None = 
         media_type = _media_type_for_format(fmt or "json")
         return r.content, media_type, None
     except _BIORXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, None, f"BioRxiv error: {str(e)}"
+        return None, None, _request_failure_message("BioRxiv raw", e)
 
 
 def _normalize_item(raw: dict[str, Any]) -> dict[str, Any]:
@@ -254,7 +259,7 @@ def search_biorxiv(
         page_items = collected[within_batch_offset:within_batch_offset + limit]
         return page_items, (len(collected) if query or category else total), None
     except _BIORXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, 0, f"BioRxiv error: {str(e)}"
+        return None, 0, _request_failure_message("BioRxiv", e)
 
 
 def get_biorxiv_by_doi(
@@ -281,7 +286,7 @@ def get_biorxiv_by_doi(
         item = _normalize_item(coll[0])
         return item, None
     except _BIORXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"BioRxiv error: {str(e)}"
+        return None, _request_failure_message("BioRxiv DOI", e)
 
 
 
@@ -358,7 +363,7 @@ def search_biorxiv_pubs(
         page_items = collected[within_batch_offset:within_batch_offset + limit]
         return page_items, (len(collected) if q else total_count), None
     except _BIORXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, 0, f"BioRxiv error: {str(e)}"
+        return None, 0, _request_failure_message("BioRxiv published metadata", e)
 
 
 def get_biorxiv_published_by_doi(
@@ -380,7 +385,7 @@ def get_biorxiv_published_by_doi(
             return None, None
         return _normalize_published_item(coll[0]), None
     except _BIORXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"BioRxiv error: {str(e)}"
+        return None, _request_failure_message("BioRxiv published DOI", e)
 
 
 # ---------------- Additional Reports Endpoints ----------------
@@ -450,7 +455,7 @@ def search_biorxiv_publisher(
         page_items = collected[within_batch_offset:within_batch_offset + limit]
         return page_items, total_count, None
     except _BIORXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, 0, f"BioRxiv error: {str(e)}"
+        return None, 0, _request_failure_message("BioRxiv publisher", e)
 
 
 def search_biorxiv_pub(
@@ -513,7 +518,7 @@ def search_biorxiv_pub(
         page_items = collected[within_batch_offset:within_batch_offset + limit]
         return page_items, total_count, None
     except _BIORXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, 0, f"BioRxiv error: {str(e)}"
+        return None, 0, _request_failure_message("BioRxiv published article", e)
 
 
 def _normalize_funder_item(raw: dict[str, Any]) -> dict[str, Any]:
@@ -595,7 +600,7 @@ def search_biorxiv_funder(
         page_items = collected[within_batch_offset:within_batch_offset + limit]
         return page_items, total_count, None
     except _BIORXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, 0, f"BioRxiv error: {str(e)}"
+        return None, 0, _request_failure_message("BioRxiv funder", e)
 
 
 def get_biorxiv_summary(interval: str = "m") -> tuple[list[dict[str, Any]] | None, str | None]:
@@ -614,7 +619,7 @@ def get_biorxiv_summary(interval: str = "m") -> tuple[list[dict[str, Any]] | Non
             items = data if isinstance(data, list) else []
         return items, None
     except _BIORXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"BioRxiv error: {str(e)}"
+        return None, _request_failure_message("BioRxiv summary", e)
 
 
 def get_biorxiv_usage(interval: str = "m") -> tuple[list[dict[str, Any]] | None, str | None]:
@@ -631,7 +636,7 @@ def get_biorxiv_usage(interval: str = "m") -> tuple[list[dict[str, Any]] | None,
             items = data if isinstance(data, list) else []
         return items, None
     except _BIORXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"BioRxiv error: {str(e)}"
+        return None, _request_failure_message("BioRxiv usage", e)
 
 
 # ---------------- Raw passthrough helpers ----------------

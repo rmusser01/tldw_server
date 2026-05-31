@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import configparser
 from pathlib import Path
 
 
@@ -15,3 +16,17 @@ def test_config_txt_avoids_inline_value_comments() -> None:
             offending_lines.append((line_number, line))
 
     assert offending_lines == []
+
+
+def test_config_txt_enables_ingestion_sources_route_for_sources_ui() -> None:
+    config_path = Path(__file__).resolve().parents[2] / "Config_Files" / "config.txt"
+    parser = configparser.ConfigParser()
+    parser.read(config_path, encoding="utf-8")
+
+    enabled_routes = {
+        item.strip().lower()
+        for item in parser.get("API-Routes", "enable", fallback="").split(",")
+        if item.strip()
+    }
+
+    assert "ingestion-sources" in enabled_routes

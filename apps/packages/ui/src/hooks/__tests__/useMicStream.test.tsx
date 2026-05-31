@@ -15,7 +15,7 @@ const createMockStream = () =>
   }) as unknown as MediaStream
 
 class MockAudioContext {
-  destination = { kind: "destination" } as AudioDestinationNode
+  destination = { kind: "destination" } as unknown as AudioDestinationNode
 
   createMediaStreamSource() {
     return {

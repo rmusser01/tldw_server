@@ -61,6 +61,53 @@ def _workflow_media_db(user_id: str) -> Iterator[Any]:
         yield media_db
 
 
+def _resolve_workflow_user_id(context: dict[str, Any]) -> str | None:
+    try:
+        return resolve_context_user_id(context)
+    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS:
+        return None
+
+
+def _create_workflow_claim_extractor(api_name: str) -> Any:
+    from tldw_Server_API.app.core.Claims_Extraction.claims_engine import LLMBasedClaimExtractor
+    from tldw_Server_API.app.core.Claims_Extraction.claims_service import _fva_claims_analyze_call
+
+    provider = str(api_name or "").strip()
+
+    def _analyze(
+        api_endpoint: str | None,
+        input_data: Any,
+        prompt: str | None,
+        api_key: str | None,
+        system_message: str | None,
+        temp: float | None = None,
+        streaming: bool = False,
+        recursive_summarization: bool = False,
+        chunked_summarization: bool = False,
+        chunk_options: Any = None,
+        model_override: str | None = None,
+        response_format: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        return _fva_claims_analyze_call(
+            provider or api_endpoint,
+            input_data,
+            prompt,
+            api_key,
+            system_message,
+            temp=temp,
+            streaming=streaming,
+            recursive_summarization=recursive_summarization,
+            chunked_summarization=chunked_summarization,
+            chunk_options=chunk_options,
+            model_override=model_override,
+            response_format=response_format,
+            **kwargs,
+        )
+
+    return LLMBasedClaimExtractor(_analyze)
+
+
 @registry.register(
     "notes",
     category="knowledge",
@@ -88,7 +135,7 @@ async def run_notes_adapter(config: dict[str, Any], context: dict[str, Any]) -> 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
 
-    user_id = resolve_context_user_id(context)
+    user_id = _resolve_workflow_user_id(context)
     if not user_id:
         try:
             user_id = str(DatabasePaths.get_single_user_id())
@@ -204,9 +251,9 @@ async def run_notes_adapter(config: dict[str, Any], context: dict[str, Any]) -> 
 
         return {"error": f"unknown_action:{action}"}
 
-    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Notes adapter error: {e}")
-        return {"error": f"notes_error:{e}"}
+    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Notes adapter error")
+        return {"error": "notes_error"}
 
 
 @registry.register(
@@ -363,9 +410,9 @@ async def run_prompts_adapter(config: dict[str, Any], context: dict[str, Any]) -
 
         return {"error": f"unknown_action:{action}"}
 
-    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Prompts adapter error: {e}")
-        return {"error": f"prompts_error:{e}"}
+    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Prompts adapter error")
+        return {"error": "prompts_error"}
 
 
 @registry.register(
@@ -396,7 +443,7 @@ async def run_collections_adapter(config: dict[str, Any], context: dict[str, Any
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
 
-    user_id = resolve_context_user_id(context)
+    user_id = _resolve_workflow_user_id(context)
     if not user_id:
         try:
             user_id = str(DatabasePaths.get_single_user_id())
@@ -581,9 +628,9 @@ async def run_collections_adapter(config: dict[str, Any], context: dict[str, Any
 
         return {"error": f"unknown_action:{action}"}
 
-    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Collections adapter error: {e}")
-        return {"error": f"collections_error:{e}"}
+    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS:
+        logger.error("Collections adapter error")
+        return {"error": "collections_error"}
 
 
 @registry.register(
@@ -671,9 +718,9 @@ async def run_chunking_adapter(config: dict[str, Any], context: dict[str, Any]) 
             "overlap": overlap,
         }
 
-    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Chunking adapter error: {e}")
-        return {"error": f"chunking_error:{e}"}
+    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Chunking adapter error")
+        return {"error": "chunking_error"}
 
 
 @registry.register(
@@ -702,7 +749,7 @@ async def run_claims_extract_adapter(config: dict[str, Any], context: dict[str, 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
 
-    user_id = resolve_context_user_id(context)
+    user_id = _resolve_workflow_user_id(context)
     if not user_id:
         try:
             user_id = str(DatabasePaths.get_single_user_id())
@@ -753,13 +800,10 @@ async def run_claims_extract_adapter(config: dict[str, Any], context: dict[str, 
             if not text:
                 return {"error": "missing_text_for_extraction"}
 
-            # Use ClaimsEngine to extract claims
-            from tldw_Server_API.app.core.Claims_Extraction.claims_engine import LLMClaimExtractor
-
             api_name = _render(config.get("api_name") or "openai")
             max_claims = int(config.get("max_claims") or 25)
 
-            extractor = LLMClaimExtractor(provider=api_name)
+            extractor = _create_workflow_claim_extractor(api_name)
             claims = await extractor.extract(text, max_claims=max_claims)
 
             # Format claims for output
@@ -829,9 +873,9 @@ async def run_claims_extract_adapter(config: dict[str, Any], context: dict[str, 
 
         return {"error": f"unknown_action:{action}"}
 
-    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Claims extract adapter error: {e}")
-        return {"error": f"claims_extract_error:{e}"}
+    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS:
+        logger.error("Claims extract adapter error")
+        return {"error": "claims_extract_error"}
 
 
 @registry.register(
@@ -858,7 +902,7 @@ async def run_voice_intent_adapter(config: dict[str, Any], context: dict[str, An
         return {"__status__": "cancelled"}
 
     # Resolve user_id
-    user_id = resolve_context_user_id(context)
+    user_id = _resolve_workflow_user_id(context)
     if not user_id:
         # Voice intent can work without user_id, default to 0
         user_id_int = 0
@@ -1070,10 +1114,10 @@ async def run_voice_intent_adapter(config: dict[str, Any], context: dict[str, An
             "processing_time_ms": result.processing_time_ms,
         }
 
-    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Voice intent adapter error: {e}")
+    except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS:
+        logger.error("Voice intent adapter error")
         return {
-            "error": f"voice_intent_error:{e}",
+            "error": "voice_intent_error",
             "intent": "",
             "action_type": "custom",
             "action_config": {"action": "error"},

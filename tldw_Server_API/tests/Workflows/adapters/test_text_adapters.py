@@ -307,6 +307,23 @@ class TestCSVToJSONAdapter:
 
         assert result.get("__status__") == "cancelled"
 
+    @pytest.mark.asyncio
+    async def test_csv_to_json_sanitizes_backend_errors(self, monkeypatch):
+        """Test CSV conversion hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_csv_to_json_adapter
+
+        def raise_reader(*args, **kwargs):
+            raise RuntimeError("csv backend exploded at /private/csv-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.text.conversion.csv.reader",
+            raise_reader,
+        )
+
+        result = await run_csv_to_json_adapter({"csv_data": "a,b\n1,2"}, {})
+
+        assert result == {"error": "csv_to_json_error", "records": [], "count": 0}
+
 
 class TestJSONToCSVAdapter:
     """Tests for run_json_to_csv_adapter."""
@@ -392,6 +409,24 @@ class TestJSONToCSVAdapter:
 
         assert result.get("__status__") == "cancelled"
 
+    @pytest.mark.asyncio
+    async def test_json_to_csv_sanitizes_backend_errors(self, monkeypatch):
+        """Test JSON conversion hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_json_to_csv_adapter
+
+        class ExplodingDictWriter:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("csv writer exploded at /private/json-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.text.conversion.csv.DictWriter",
+            ExplodingDictWriter,
+        )
+
+        result = await run_json_to_csv_adapter({"records": [{"a": "b"}]}, {})
+
+        assert result == {"error": "json_to_csv_error", "csv": "", "count": 0}
+
 
 # =============================================================================
 # Transform Adapters Tests
@@ -465,6 +500,27 @@ class TestJSONTransformAdapter:
 
         assert result.get("__status__") == "cancelled"
 
+    @pytest.mark.asyncio
+    async def test_json_transform_sanitizes_backend_errors(self, monkeypatch):
+        """Test JSON transform hides backend exception details."""
+        import sys
+        import types
+
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_json_transform_adapter
+
+        def raise_search(*args, **kwargs):
+            raise RuntimeError("jmespath backend exploded at /private/json-transform")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "jmespath",
+            types.SimpleNamespace(search=raise_search),
+        )
+
+        result = await run_json_transform_adapter({"data": {"a": 1}, "expression": "a"}, {})
+
+        assert result == {"error": "json_transform_error", "result": None}
+
 
 class TestJSONValidateAdapter:
     """Tests for run_json_validate_adapter."""
@@ -530,6 +586,27 @@ class TestJSONValidateAdapter:
 
         assert result.get("__status__") == "cancelled"
 
+    @pytest.mark.asyncio
+    async def test_json_validate_sanitizes_backend_errors(self, monkeypatch):
+        """Test JSON validate hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_json_validate_adapter
+
+        jsonschema = pytest.importorskip("jsonschema")
+        monkeypatch.setattr(
+            jsonschema,
+            "validate",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("jsonschema backend exploded at /private/json-schema")
+            ),
+        )
+
+        result = await run_json_validate_adapter(
+            {"data": {"a": 1}, "schema": {"type": "object"}},
+            {},
+        )
+
+        assert result == {"error": "json_validate_error", "valid": False, "errors": ["json_validate_error"]}
+
 
 class TestXMLTransformAdapter:
     """Tests for run_xml_transform_adapter."""
@@ -589,6 +666,24 @@ class TestXMLTransformAdapter:
         result = await run_xml_transform_adapter(config, context)
 
         assert result.get("__status__") == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_xml_transform_sanitizes_backend_errors(self, monkeypatch):
+        """Test XML transform hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_xml_transform_adapter
+
+        etree = pytest.importorskip("lxml.etree")
+        monkeypatch.setattr(
+            etree,
+            "fromstring",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("xml backend exploded at /private/xml-transform")
+            ),
+        )
+
+        result = await run_xml_transform_adapter({"xml": "<root/>", "xpath": "//item"}, {})
+
+        assert result == {"error": "xml_transform_error", "results": []}
 
 
 class TestTemplateRenderAdapter:
@@ -678,6 +773,38 @@ class TestTemplateRenderAdapter:
         result = await run_template_render_adapter(config, context)
 
         assert result.get("__status__") == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_template_render_sanitizes_template_file_errors(self, monkeypatch):
+        """Test template file errors hide path resolution details."""
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_template_render_adapter
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.text.transform.resolve_workflow_file_path",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                ValueError("template file denied at /private/template-path")
+            ),
+        )
+
+        result = await run_template_render_adapter({"template_file": "private-template.j2"}, {})
+
+        assert result == {"error": "template_file_error", "text": ""}
+
+    @pytest.mark.asyncio
+    async def test_template_render_sanitizes_backend_errors(self, monkeypatch):
+        """Test template rendering hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_template_render_adapter
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Chat.prompt_template_manager.apply_template_to_string",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("template backend exploded at /private/template-cache")
+            ),
+        )
+
+        result = await run_template_render_adapter({"template": "Hello {{ name }}"}, {})
+
+        assert result == {"error": "template_render_error", "text": ""}
 
 
 class TestRegexExtractAdapter:
@@ -773,8 +900,7 @@ class TestRegexExtractAdapter:
 
         result = await run_regex_extract_adapter(config, context)
 
-        assert "error" in result
-        assert "invalid_pattern" in result["error"]
+        assert result == {"error": "invalid_pattern", "matches": [], "count": 0}
 
     @pytest.mark.asyncio
     async def test_regex_extract_cancelled(self):
@@ -787,6 +913,29 @@ class TestRegexExtractAdapter:
         result = await run_regex_extract_adapter(config, context)
 
         assert result.get("__status__") == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_regex_extract_sanitizes_backend_errors(self, monkeypatch):
+        """Test regex extraction hides backend exception details."""
+        import re
+
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_regex_extract_adapter
+
+        original_compile = re.compile
+
+        def raise_for_adapter_pattern(pattern, flags=0):
+            if pattern == r"\w+":
+                raise RuntimeError("regex backend exploded at /private/regex-cache")
+            return original_compile(pattern, flags)
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.text.transform.re.compile",
+            raise_for_adapter_pattern,
+        )
+
+        result = await run_regex_extract_adapter({"text": "abc", "pattern": r"\w+"}, {})
+
+        assert result == {"error": "regex_extract_error", "matches": [], "count": 0}
 
 
 class TestTextCleanAdapter:
@@ -1225,6 +1374,20 @@ class TestKeywordExtractAdapter:
 
         assert result.get("__status__") == "cancelled"
 
+    @pytest.mark.asyncio
+    async def test_keyword_extract_sanitizes_backend_errors(self):
+        """Test keyword extraction hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_keyword_extract_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("keyword backend exploded at /private/keyword-cache"),
+        ):
+            result = await run_keyword_extract_adapter({"text": "Sample text", "method": "llm"}, {})
+
+        assert result == {"keywords": [], "scored_keywords": [], "error": "keyword_extract_error"}
+
 
 class TestSentimentAnalyzeAdapter:
     """Tests for run_sentiment_analyze_adapter."""
@@ -1338,6 +1501,25 @@ class TestSentimentAnalyzeAdapter:
 
         assert result.get("__status__") == "cancelled"
 
+    @pytest.mark.asyncio
+    async def test_sentiment_analyze_sanitizes_backend_errors(self):
+        """Test sentiment analysis hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_sentiment_analyze_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("sentiment backend exploded at /private/sentiment-cache"),
+        ):
+            result = await run_sentiment_analyze_adapter({"text": "Sample text"}, {})
+
+        assert result == {
+            "sentiment": "neutral",
+            "score": 0.0,
+            "confidence": 0.0,
+            "error": "sentiment_analyze_error",
+        }
+
 
 class TestLanguageDetectAdapter:
     """Tests for run_language_detect_adapter."""
@@ -1425,6 +1607,32 @@ class TestLanguageDetectAdapter:
         result = await run_language_detect_adapter(config, context)
 
         assert result.get("__status__") == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_language_detect_sanitizes_backend_errors(self, monkeypatch):
+        """Test language detection hides backend exception details."""
+        import sys
+        import types
+
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_language_detect_adapter
+
+        def raise_detect(*args, **kwargs):
+            raise RuntimeError("language backend exploded at /private/language-cache")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "langdetect",
+            types.SimpleNamespace(detect=raise_detect, detect_langs=lambda *args, **kwargs: []),
+        )
+
+        result = await run_language_detect_adapter({"text": "This is sample text."}, {})
+
+        assert result == {
+            "language": "unknown",
+            "language_name": "Unknown",
+            "confidence": 0.0,
+            "error": "language_detect_error",
+        }
 
 
 class TestTopicModelAdapter:
@@ -1534,6 +1742,20 @@ class TestTopicModelAdapter:
         result = await run_topic_model_adapter(config, context)
 
         assert result.get("__status__") == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_topic_model_sanitizes_backend_errors(self):
+        """Test topic modeling hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_topic_model_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("topic backend exploded at /private/topic-cache"),
+        ):
+            result = await run_topic_model_adapter({"text": "Sample text"}, {})
+
+        assert result == {"topics": [], "error": "topic_model_error"}
 
 
 class TestEntityExtractAdapter:
@@ -1654,6 +1876,20 @@ class TestEntityExtractAdapter:
         result = await run_entity_extract_adapter(config, context)
 
         assert result.get("__status__") == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_entity_extract_sanitizes_backend_errors(self):
+        """Test entity extraction hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.text import run_entity_extract_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("entity backend exploded at /private/entity-cache"),
+        ):
+            result = await run_entity_extract_adapter({"text": "Sample text"}, {})
+
+        assert result == {"error": "entity_extract_error", "entities": {}, "total_count": 0}
 
 
 class TestTokenCountAdapter:

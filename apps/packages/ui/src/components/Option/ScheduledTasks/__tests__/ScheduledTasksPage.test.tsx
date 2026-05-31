@@ -2,8 +2,9 @@
 
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -26,6 +27,17 @@ vi.mock("@/services/scheduled-tasks-control-plane", () => ({
   deleteScheduledTaskReminder: (...args: unknown[]) => mocks.deleteScheduledTaskReminder(...args)
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string | { defaultValue?: string }) => {
+      if (typeof fallback === "string") {
+        return fallback
+      }
+      return fallback?.defaultValue ?? _key
+    }
+  })
+}))
+
 import { ScheduledTasksPage } from "../ScheduledTasksPage"
 
 const fetchMock = vi.fn()
@@ -37,7 +49,9 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
   })
 
   return render(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+    <MemoryRouter initialEntries={["/scheduled-tasks"]}>
+      <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+    </MemoryRouter>
   )
 }
 
@@ -75,10 +89,65 @@ describe("ScheduledTasksPage", () => {
 
     renderWithQueryClient(<ScheduledTasksPage />)
 
+    expect(await screen.findByText("Unavailable")).toBeInTheDocument()
+    expect(await screen.findByText("Scheduled tasks are unavailable")).toBeInTheDocument()
     expect(
-      await screen.findByText("Scheduled tasks endpoints are not available on this server.")
+      await screen.findByRole("heading", {
+        name: "Scheduled tasks are unavailable on this server"
+      })
     ).toBeInTheDocument()
+    expect(
+      screen.getByText("The connected server does not advertise scheduled task management.")
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("/api/v1/scheduled-tasks")
     expect(mocks.listScheduledTasks).not.toHaveBeenCalled()
+  })
+
+  it("shows auth-required recovery copy for scheduled task load failures", async () => {
+    mocks.listScheduledTasks.mockRejectedValue(
+      Object.assign(new Error("Request failed: 401 (GET /api/v1/scheduled-tasks)"), {
+        status: 401
+      })
+    )
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    expect(
+      await screen.findByRole("heading", { name: "Sign in before using scheduled tasks" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("Connect or repair your tldw credentials, then try again.")
+    ).toBeInTheDocument()
+
+    const diagnostics = screen.getByLabelText("Diagnostics")
+    expect(within(diagnostics).getByText("/api/v1/scheduled-tasks")).toBeInTheDocument()
+    expect(within(diagnostics).getByText("401")).toBeInTheDocument()
+    expect(
+      within(diagnostics).getByText("Request failed: 401 (GET /api/v1/scheduled-tasks)")
+    ).toBeInTheDocument()
+  })
+
+  it("keeps partial scheduled task errors behind diagnostics", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: true,
+      errors: ["Watchlist jobs failed at /api/v1/watchlists/jobs"]
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Scheduled tasks are partially available"
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("Some scheduled task data loaded, but one dependency could not be reached.")
+    ).toBeInTheDocument()
+
+    const diagnostics = screen.getByLabelText("Diagnostics")
+    expect(within(diagnostics).getByText("Watchlist jobs failed at /api/v1/watchlists/jobs")).toBeInTheDocument()
   })
 
   it("renders reminder rows as native CRUD and watchlist rows as external-managed", async () => {

@@ -1,0 +1,655 @@
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { downloadBlob } from "@/utils/download-blob"
+import type {
+  PersonaVisualAsset,
+  PersonaVisualAssetRole,
+  PersonaVisualCandidate,
+  PersonaVisualCandidateListResponse,
+  PersonaVisualCandidateReviewRequest,
+  PersonaVisualDeactivateResponse,
+  PersonaVisualDuplicateTarget,
+  PersonaVisualGenerationJobResponse,
+  PersonaVisualGenerationRequest,
+  PersonaVisualGenerationReadinessResponse,
+  PersonaVisualImportCommitRequest,
+  PersonaVisualImportCommitStartResponse,
+  PersonaVisualImportPreviewResponse,
+  PersonaVisualImportPreviewStartResponse,
+  PersonaVisualLibraryDeleteResponse,
+  PersonaVisualLibraryItem,
+  PersonaVisualLibraryListResponse,
+  PersonaVisualLibrarySaveRequest,
+  PersonaVisualLibraryUpdateRequest,
+  PersonaVisualLibraryUseRequest,
+  PersonaVisualManifestUpdate,
+  PersonaVisualPack,
+  PersonaVisualPackCreate,
+  PersonaVisualPackDuplicateRequest,
+  PersonaVisualPackExportRequest,
+  PersonaVisualPackExportResponse,
+  PersonaVisualPackListResponse,
+  PersonaVisualPortabilityJobResponse,
+  PersonaVisualRendererType,
+  PersonaVisualRendererCapabilitiesResponse,
+  PersonaVisualStarterComplexityTier,
+  PersonaVisualStarterPackCopyRequest,
+  PersonaVisualStarterPackDetail,
+  PersonaVisualStarterPackListResponse,
+  PersonaVisualStarterPackSummary,
+  PersonaVisualStarterProductionStatus
+} from "@/types/persona-visuals"
+
+type PersonaVisualFetchInit = {
+  method?: string
+  body?: BodyInit | object | null
+  headers?: Record<string, string>
+}
+
+export class PersonaVisualApiError extends Error {
+  status?: number
+  detail?: unknown
+
+  constructor(
+    message: string,
+    options: { status?: number; detail?: unknown } = {}
+  ) {
+    super(message)
+    this.name = "PersonaVisualApiError"
+    this.status = options.status
+    this.detail = options.detail
+  }
+}
+
+const personaVisualPath = (
+  personaId: string,
+  suffix = ""
+): `/api/v1/persona/profiles/${string}${string}` =>
+  `/api/v1/persona/profiles/${encodeURIComponent(personaId)}${suffix}`
+
+const packPath = (
+  personaId: string,
+  packId: string,
+  suffix = ""
+): `/api/v1/persona/profiles/${string}/visual-packs/${string}${string}` =>
+  personaVisualPath(
+    personaId,
+    `/visual-packs/${encodeURIComponent(packId)}${suffix}`
+  ) as `/api/v1/persona/profiles/${string}/visual-packs/${string}${string}`
+
+const visualLibraryPath = (
+  suffix = ""
+): `/api/v1/persona/visual-library${string}` =>
+  `/api/v1/persona/visual-library${suffix}`
+
+const visualStarterPackCollectionPath =
+  (): "/api/v1/persona/visual-starter-packs" =>
+    "/api/v1/persona/visual-starter-packs"
+
+const normalizeStarterPackId = (starterPackId: string): string => {
+  const normalizedId = starterPackId.trim()
+  if (!normalizedId) {
+    throw new PersonaVisualApiError("Starter pack id is required")
+  }
+  return normalizedId
+}
+
+const visualStarterPackDetailPath = (
+  starterPackId: string,
+  suffix = ""
+): `/api/v1/persona/visual-starter-packs/${string}` =>
+  `/api/v1/persona/visual-starter-packs/${encodeURIComponent(normalizeStarterPackId(starterPackId))}${suffix}`
+
+const normalizeBody = (
+  body: PersonaVisualFetchInit["body"],
+  headers: Record<string, string>
+): BodyInit | undefined => {
+  if (body == null) return undefined
+  if (body instanceof FormData) return body
+  if (typeof body === "string") return body
+  headers["Content-Type"] = headers["Content-Type"] || "application/json"
+  return JSON.stringify(body)
+}
+
+export async function fetchPersonaVisualJson<T>(
+  path: string,
+  init: PersonaVisualFetchInit = {}
+): Promise<T> {
+  const headers = { ...(init.headers || {}) }
+  const response = await tldwClient.fetchWithAuth(path as any, {
+    method: init.method || "GET",
+    headers,
+    body: normalizeBody(init.body, headers)
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    const detail =
+      payload && typeof payload === "object" && "detail" in payload
+        ? (payload as { detail?: unknown }).detail
+        : payload
+    const message =
+      response.error ||
+      (detail && typeof detail === "object" && "message" in detail
+        ? String((detail as { message?: unknown }).message || "")
+        : "") ||
+      "Persona visual API request failed"
+    throw new PersonaVisualApiError(message, {
+      status: response.status,
+      detail
+    })
+  }
+  return payload as T
+}
+
+export const normalizePersonaVisualPackList = (
+  payload: PersonaVisualPack[] | PersonaVisualPackListResponse
+): PersonaVisualPackListResponse => {
+  if (Array.isArray(payload)) {
+    const activePack = payload.find((pack) => pack.status === "active") ?? null
+    return {
+      packs: payload,
+      active_pack: activePack
+    }
+  }
+  return {
+    packs: Array.isArray(payload?.packs) ? payload.packs : [],
+    active_pack: payload?.active_pack ?? null
+  }
+}
+
+const starterComplexityTiers = new Set<PersonaVisualStarterComplexityTier>([
+  "basic",
+  "intermediate",
+  "intricate"
+])
+
+const starterProductionStatuses = new Set<PersonaVisualStarterProductionStatus>([
+  "scaffold",
+  "art_ready"
+])
+
+const starterRendererTypes = new Set<PersonaVisualRendererType>([
+  "sprite_frames",
+  "sprite_sheet",
+  "static_image",
+  "live2d"
+])
+
+const normalizeStarterText = (value: unknown, fallback = ""): string =>
+  typeof value === "string" ? value : fallback
+
+const normalizeStarterNumber = (value: unknown, fallback = 0): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback
+
+const normalizeStarterStringList = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : []
+
+const normalizePersonaVisualStarterPackSummary = (
+  starter: PersonaVisualStarterPackSummary | Record<string, unknown>
+): PersonaVisualStarterPackSummary => {
+  const item = starter as Record<string, unknown>
+  const rendererType = normalizeStarterText(item.renderer_type, "sprite_frames")
+  const complexityTier = normalizeStarterText(item.complexity_tier, "basic")
+  const productionStatus = normalizeStarterText(item.production_status, "scaffold")
+
+  return {
+    id: normalizeStarterText(item.id),
+    title: normalizeStarterText(item.title),
+    description: normalizeStarterText(item.description),
+    renderer_type: starterRendererTypes.has(rendererType as PersonaVisualRendererType)
+      ? (rendererType as PersonaVisualRendererType)
+      : "sprite_frames",
+    manifest_version: normalizeStarterNumber(item.manifest_version, 1),
+    states_offered: normalizeStarterStringList(item.states_offered),
+    asset_count: normalizeStarterNumber(item.asset_count),
+    total_bytes: normalizeStarterNumber(item.total_bytes),
+    tags: normalizeStarterStringList(item.tags),
+    license_label: normalizeStarterText(item.license_label, "bundled"),
+    complexity_tier: starterComplexityTiers.has(
+      complexityTier as PersonaVisualStarterComplexityTier
+    )
+      ? (complexityTier as PersonaVisualStarterComplexityTier)
+      : "basic",
+    production_status: starterProductionStatuses.has(
+      productionStatus as PersonaVisualStarterProductionStatus
+    )
+      ? (productionStatus as PersonaVisualStarterProductionStatus)
+      : "scaffold",
+    neutral_anchor_required:
+      typeof item.neutral_anchor_required === "boolean"
+        ? item.neutral_anchor_required
+        : true,
+    expected_asset_groups: normalizeStarterStringList(item.expected_asset_groups),
+    animation_coverage_notes: normalizeStarterStringList(
+      item.animation_coverage_notes
+    )
+  }
+}
+
+export const normalizePersonaVisualStarterPackList = (
+  payload: PersonaVisualStarterPackSummary[] | PersonaVisualStarterPackListResponse
+): PersonaVisualStarterPackListResponse => {
+  if (Array.isArray(payload)) {
+    return {
+      starter_packs: payload.map(normalizePersonaVisualStarterPackSummary)
+    }
+  }
+  return {
+    starter_packs: Array.isArray(payload?.starter_packs)
+      ? payload.starter_packs.map(normalizePersonaVisualStarterPackSummary)
+      : []
+  }
+}
+
+export async function listPersonaVisualPacks(
+  personaId: string
+): Promise<PersonaVisualPackListResponse> {
+  const payload = await fetchPersonaVisualJson<
+    PersonaVisualPack[] | PersonaVisualPackListResponse
+  >(personaVisualPath(personaId, "/visual-packs"))
+  return normalizePersonaVisualPackList(payload)
+}
+
+export async function listPersonaVisualStarterPacks(): Promise<
+  PersonaVisualStarterPackListResponse
+> {
+  const payload = await fetchPersonaVisualJson<
+    PersonaVisualStarterPackSummary[] | PersonaVisualStarterPackListResponse
+  >(visualStarterPackCollectionPath())
+  return normalizePersonaVisualStarterPackList(payload)
+}
+
+export async function getPersonaVisualStarterPack(
+  starterPackId: string
+): Promise<PersonaVisualStarterPackDetail> {
+  return fetchPersonaVisualJson<PersonaVisualStarterPackDetail>(
+    visualStarterPackDetailPath(starterPackId)
+  )
+}
+
+export async function copyPersonaVisualStarterPack(
+  starterPackId: string,
+  payload: PersonaVisualStarterPackCopyRequest
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    visualStarterPackDetailPath(starterPackId, "/copy"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function getPersonaVisualRendererCapabilities(): Promise<
+  PersonaVisualRendererCapabilitiesResponse
+> {
+  const payload = await fetchPersonaVisualJson<PersonaVisualRendererCapabilitiesResponse>(
+    "/api/v1/persona/visual-renderers"
+  )
+  return {
+    renderers: Array.isArray(payload?.renderers) ? payload.renderers : []
+  }
+}
+
+export async function getPersonaVisualPack(
+  personaId: string,
+  packId: string
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(packPath(personaId, packId))
+}
+
+export async function createPersonaVisualPack(
+  personaId: string,
+  payload: PersonaVisualPackCreate
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    personaVisualPath(personaId, "/visual-packs"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function duplicatePersonaVisualPack(
+  sourcePersonaId: string,
+  packId: string,
+  payload: PersonaVisualPackDuplicateRequest
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    packPath(sourcePersonaId, packId, "/duplicate"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function listPersonaVisualLibraryItems(): Promise<
+  PersonaVisualLibraryListResponse
+> {
+  const payload = await fetchPersonaVisualJson<
+    PersonaVisualLibraryItem[] | PersonaVisualLibraryListResponse
+  >(visualLibraryPath())
+  return Array.isArray(payload)
+    ? { items: payload }
+    : { items: Array.isArray(payload?.items) ? payload.items : [] }
+}
+
+export async function savePersonaVisualPackToLibrary(
+  personaId: string,
+  packId: string,
+  payload: PersonaVisualLibrarySaveRequest
+): Promise<PersonaVisualLibraryItem> {
+  return fetchPersonaVisualJson<PersonaVisualLibraryItem>(
+    packPath(personaId, packId, "/library"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function updatePersonaVisualLibraryItem(
+  itemId: string,
+  payload: PersonaVisualLibraryUpdateRequest
+): Promise<PersonaVisualLibraryItem> {
+  return fetchPersonaVisualJson<PersonaVisualLibraryItem>(
+    visualLibraryPath(`/${encodeURIComponent(itemId)}`),
+    {
+      method: "PATCH",
+      body: payload
+    }
+  )
+}
+
+export async function deletePersonaVisualLibraryItem(
+  itemId: string
+): Promise<PersonaVisualLibraryDeleteResponse> {
+  return fetchPersonaVisualJson<PersonaVisualLibraryDeleteResponse>(
+    visualLibraryPath(`/${encodeURIComponent(itemId)}`),
+    {
+      method: "DELETE"
+    }
+  )
+}
+
+export async function usePersonaVisualLibraryItem(
+  itemId: string,
+  payload: PersonaVisualLibraryUseRequest
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    visualLibraryPath(`/${encodeURIComponent(itemId)}/use`),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function listPersonaVisualDuplicateTargets(): Promise<
+  PersonaVisualDuplicateTarget[]
+> {
+  const payload = await fetchPersonaVisualJson<unknown>("/api/v1/persona/catalog")
+  if (!Array.isArray(payload)) return []
+  return payload
+    .map((item): PersonaVisualDuplicateTarget | null => {
+      if (!item || typeof item !== "object") return null
+      const candidate = item as { id?: unknown; name?: unknown }
+      const id = String(candidate.id || "").trim()
+      if (!id) return null
+      return {
+        id,
+        name:
+          typeof candidate.name === "string" && candidate.name.trim()
+            ? candidate.name
+            : null
+      }
+    })
+    .filter((item): item is PersonaVisualDuplicateTarget => item !== null)
+}
+
+export async function updatePersonaVisualManifest(
+  personaId: string,
+  packId: string,
+  payload: PersonaVisualManifestUpdate
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    packPath(personaId, packId, "/manifest"),
+    {
+      method: "PATCH",
+      body: payload
+    }
+  )
+}
+
+export async function uploadPersonaVisualAsset(
+  personaId: string,
+  packId: string,
+  file: File,
+  role: PersonaVisualAssetRole
+): Promise<PersonaVisualAsset> {
+  const formData = new FormData()
+  formData.append("file", file)
+  formData.append("asset_role", role)
+  return fetchPersonaVisualJson<PersonaVisualAsset>(
+    packPath(personaId, packId, "/assets"),
+    {
+      method: "POST",
+      body: formData
+    }
+  )
+}
+
+export async function activatePersonaVisualPack(
+  personaId: string,
+  packId: string
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    packPath(personaId, packId, "/activate"),
+    {
+      method: "POST"
+    }
+  )
+}
+
+export async function deactivatePersonaVisualPack(
+  personaId: string
+): Promise<PersonaVisualDeactivateResponse> {
+  return fetchPersonaVisualJson<PersonaVisualDeactivateResponse>(
+    personaVisualPath(personaId, "/visual-packs/deactivate"),
+    {
+      method: "POST"
+    }
+  )
+}
+
+export async function listPersonaVisualCandidates(
+  personaId: string,
+  packId: string
+): Promise<PersonaVisualCandidateListResponse> {
+  const payload = await fetchPersonaVisualJson<
+    PersonaVisualCandidate[] | PersonaVisualCandidateListResponse
+  >(packPath(personaId, packId, "/generated-candidates"))
+  return Array.isArray(payload) ? { candidates: payload } : payload
+}
+
+export async function createPersonaVisualGenerationJob(
+  personaId: string,
+  packId: string,
+  payload: PersonaVisualGenerationRequest
+): Promise<PersonaVisualGenerationJobResponse> {
+  return fetchPersonaVisualJson<PersonaVisualGenerationJobResponse>(
+    packPath(personaId, packId, "/generation-jobs"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function getPersonaVisualGenerationReadiness(
+  personaId: string,
+  packId: string,
+  backend?: string | null
+): Promise<PersonaVisualGenerationReadinessResponse> {
+  const query = backend?.trim()
+    ? `?backend=${encodeURIComponent(backend.trim())}`
+    : ""
+  return fetchPersonaVisualJson<PersonaVisualGenerationReadinessResponse>(
+    packPath(personaId, packId, `/generation-readiness${query}`)
+  )
+}
+
+export async function startPersonaVisualPackExport(
+  personaId: string,
+  packId: string,
+  payload: PersonaVisualPackExportRequest = {}
+): Promise<PersonaVisualPackExportResponse> {
+  return fetchPersonaVisualJson<PersonaVisualPackExportResponse>(
+    packPath(personaId, packId, "/export"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function getPersonaVisualPackExportJob(
+  personaId: string,
+  packId: string,
+  jobId: string
+): Promise<PersonaVisualPortabilityJobResponse> {
+  return fetchPersonaVisualJson<PersonaVisualPortabilityJobResponse>(
+    packPath(personaId, packId, `/exports/${encodeURIComponent(jobId)}`)
+  )
+}
+
+export async function downloadPersonaVisualPackExportArchive(
+  personaId: string,
+  packId: string,
+  jobId: string,
+  filename = "persona-visual-pack.tldw-persona-vpack"
+): Promise<void> {
+  const response = await tldwClient.fetchWithAuth(
+    packPath(personaId, packId, `/exports/${encodeURIComponent(jobId)}/download`) as any,
+    {
+      method: "GET",
+      responseType: "arrayBuffer"
+    }
+  )
+  if (!response.ok) {
+    throw new PersonaVisualApiError(
+      response.error || "Persona visual export download failed",
+      {
+        status: response.status,
+        detail: response.data
+      }
+    )
+  }
+  const data = response.data
+  let blobPart: BlobPart | null = null
+  if (data instanceof ArrayBuffer) {
+    blobPart = data
+  } else if (ArrayBuffer.isView(data)) {
+    if (data.buffer instanceof ArrayBuffer) {
+      blobPart = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    } else {
+      const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      blobPart = Uint8Array.from(view)
+    }
+  } else if (Array.isArray(data)) {
+    blobPart = Uint8Array.from(data)
+  }
+  if (!blobPart) {
+    throw new PersonaVisualApiError("Persona visual export download was empty", {
+      status: response.status,
+      detail: data
+    })
+  }
+  downloadBlob(
+    new Blob([blobPart], {
+      type: "application/vnd.tldw.persona.visual-pack+zip"
+    }),
+    filename
+  )
+}
+
+export async function createPersonaVisualImportPreview(
+  personaId: string,
+  file: File
+): Promise<PersonaVisualImportPreviewStartResponse> {
+  const formData = new FormData()
+  formData.append("archive", file)
+  return fetchPersonaVisualJson<PersonaVisualImportPreviewStartResponse>(
+    personaVisualPath(personaId, "/visual-packs/import-previews"),
+    {
+      method: "POST",
+      body: formData
+    }
+  )
+}
+
+export async function getPersonaVisualImportPreview(
+  personaId: string,
+  previewId: string
+): Promise<PersonaVisualImportPreviewResponse> {
+  return fetchPersonaVisualJson<PersonaVisualImportPreviewResponse>(
+    personaVisualPath(
+      personaId,
+      `/visual-packs/import-previews/${encodeURIComponent(previewId)}`
+    )
+  )
+}
+
+export async function startPersonaVisualImportCommit(
+  personaId: string,
+  previewId: string,
+  payload: PersonaVisualImportCommitRequest = {}
+): Promise<PersonaVisualImportCommitStartResponse> {
+  return fetchPersonaVisualJson<PersonaVisualImportCommitStartResponse>(
+    personaVisualPath(
+      personaId,
+      `/visual-packs/import-previews/${encodeURIComponent(previewId)}/commit`
+    ),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function getPersonaVisualImportCommitStatus(
+  personaId: string,
+  jobId: string
+): Promise<PersonaVisualPortabilityJobResponse> {
+  return fetchPersonaVisualJson<PersonaVisualPortabilityJobResponse>(
+    personaVisualPath(
+      personaId,
+      `/visual-packs/imports/${encodeURIComponent(jobId)}`
+    )
+  )
+}
+
+export async function reviewPersonaVisualCandidate(
+  personaId: string,
+  packId: string,
+  candidateId: string,
+  payload: PersonaVisualCandidateReviewRequest
+): Promise<PersonaVisualCandidate> {
+  return fetchPersonaVisualJson<PersonaVisualCandidate>(
+    packPath(
+      personaId,
+      packId,
+      `/candidates/${encodeURIComponent(candidateId)}/review`
+    ),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}

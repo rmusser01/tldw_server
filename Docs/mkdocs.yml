@@ -59,13 +59,13 @@ markdown_extensions:
 
 extra:
   generator: false
-  version: v0.1.19
+  version: v0.1.31
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/rmusser01/tldw_server
       name: GitHub
 copyright: |
-  © 2024-2025 tldw_Server - v0.1.19 - <a href="https://github.com/rmusser01/tldw_server">GitHub</a>
+  © 2024-2025 tldw_Server - v0.1.31 - <a href="https://github.com/rmusser01/tldw_server">GitHub</a>
 
 nav:
   - Home: Getting_Started/README.md

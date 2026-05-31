@@ -130,8 +130,10 @@ def search_items(
                         items.append(_normalize_item(v))
                         break
         return items, total, None
-    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, 0, f"ChemRxiv error: {str(e)}"
+    except TimeoutError:
+        return None, 0, "ChemRxiv request timed out."
+    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS:
+        return None, 0, "ChemRxiv request failed."
 
 
 def get_item_by_id(item_id: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -144,8 +146,10 @@ def get_item_by_id(item_id: str) -> tuple[dict[str, Any] | None, str | None]:
             return None, f"ChemRxiv HTTP error: {r.status_code}"
         data = r.json() or {}
         return _normalize_item(data), None
-    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"ChemRxiv error: {str(e)}"
+    except TimeoutError:
+        return None, "ChemRxiv item request timed out."
+    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS:
+        return None, "ChemRxiv item request failed."
 
 
 def get_item_by_doi(doi: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -159,32 +163,40 @@ def get_item_by_doi(doi: str) -> tuple[dict[str, Any] | None, str | None]:
             return None, f"ChemRxiv HTTP error: {r.status_code}"
         data = r.json() or {}
         return _normalize_item(data), None
-    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"ChemRxiv error: {str(e)}"
+    except TimeoutError:
+        return None, "ChemRxiv DOI request timed out."
+    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS:
+        return None, "ChemRxiv DOI request failed."
 
 
 def get_categories() -> tuple[dict[str, Any] | None, str | None]:
     try:
         data = fetch_json(method="GET", url=f"{BASE_URL}/categories", timeout=20)
         return data, None
-    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"ChemRxiv error: {str(e)}"
+    except TimeoutError:
+        return None, "ChemRxiv categories request timed out."
+    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS:
+        return None, "ChemRxiv categories request failed."
 
 
 def get_licenses() -> tuple[dict[str, Any] | None, str | None]:
     try:
         data = fetch_json(method="GET", url=f"{BASE_URL}/licenses", timeout=20)
         return data, None
-    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"ChemRxiv error: {str(e)}"
+    except TimeoutError:
+        return None, "ChemRxiv licenses request timed out."
+    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS:
+        return None, "ChemRxiv licenses request failed."
 
 
 def get_version() -> tuple[dict[str, Any] | None, str | None]:
     try:
         data = fetch_json(method="GET", url=f"{BASE_URL}/version", timeout=20)
         return data, None
-    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"ChemRxiv error: {str(e)}"
+    except TimeoutError:
+        return None, "ChemRxiv version request timed out."
+    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS:
+        return None, "ChemRxiv version request failed."
 
 
 def oai_raw(params: dict[str, Any]) -> tuple[bytes | None, str | None, str | None]:
@@ -197,8 +209,10 @@ def oai_raw(params: dict[str, Any]) -> tuple[bytes | None, str | None, str | Non
             return None, None, f"ChemRxiv HTTP error: {r.status_code}"
         ct = r.headers.get("content-type") or "application/xml"
         return r.content, ct.split(";")[0], None
-    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, None, f"ChemRxiv error: {str(e)}"
+    except TimeoutError:
+        return None, None, "ChemRxiv OAI-PMH request timed out."
+    except _CHEMRXIV_NONCRITICAL_EXCEPTIONS:
+        return None, None, "ChemRxiv OAI-PMH request failed."
     finally:
         try:
             if r is not None:

@@ -63,8 +63,20 @@ class UnifiedRAGRequest(BaseModel):
     # ========== DATA SOURCES ==========
     sources: Optional[list[str]] = Field(
         default=["media_db"],
-        description="Databases to search: media_db, notes, characters, chats, kanban, sql",
-        example=["media_db", "notes", "kanban"]
+        description=(
+            "Databases to search: media_db, notes, chats, characters, kanban, "
+            "prompts, world_books, dictionaries, sql"
+        ),
+        example=[
+            "media_db",
+            "notes",
+            "chats",
+            "characters",
+            "kanban",
+            "prompts",
+            "world_books",
+            "dictionaries",
+        ],
     )
     sql_target_id: str = Field(
         default="media_db",
@@ -101,6 +113,14 @@ class UnifiedRAGRequest(BaseModel):
         default=None,
         description="Corpus/namespace identifier (enables per-corpus synonyms & indexing)",
         example="my_corpus"
+    )
+    workspace_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional workspace scope. Generated, test, and workspace-scoped artifacts "
+            "are excluded unless this is provided."
+        ),
+        example="workspace_123",
     )
 
     @field_validator("sources", mode="before")
@@ -280,6 +300,12 @@ class UnifiedRAGRequest(BaseModel):
         default=None,
         description="Restrict search to these Media DB item IDs",
         example=[1, 2, 3]
+    )
+    collection_id: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Restrict search to ready media items in this durable media collection",
+        example=7,
     )
     include_note_ids: Optional[list[str]] = Field(
         default=None,
@@ -1557,16 +1583,33 @@ class UnifiedRAGRequest(BaseModel):
     )
 
     model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "query": "What is machine learning?",
-            "sources": ["media_db", "notes"],
-            "expand_query": True,
-            "expansion_strategies": ["synonym", "acronym"],
-            "enable_citations": True,
-            "enable_generation": True,
-            "enable_reranking": True,
-            "reranking_strategy": "hybrid"
-        }
+        "examples": [
+            {
+                "query": "What has this project captured about onboarding?",
+                "sources": [
+                    "media_db",
+                    "notes",
+                    "chats",
+                    "characters",
+                    "kanban",
+                    "prompts",
+                    "world_books",
+                    "dictionaries",
+                ],
+                "expand_query": True,
+                "expansion_strategies": ["synonym", "acronym"],
+                "enable_citations": True,
+                "enable_generation": True,
+                "enable_reranking": True,
+                "reranking_strategy": "hybrid",
+            },
+            {
+                "query": "Find the reusable prompt guidance for release notes.",
+                "sources": ["notes", "prompts"],
+                "search_mode": "hybrid",
+                "top_k": 8,
+            },
+        ]
     })
 
     @field_validator('sources')
@@ -1610,6 +1653,51 @@ class UnifiedRAGRequest(BaseModel):
                     "enable_research_loop=true requires enable_query_classification=true"
                 )
             return self
+
+
+KnowledgeSourceIndexStatus = Literal[
+    "ready",
+    "indexing",
+    "stale",
+    "empty",
+    "unavailable",
+    "error",
+    "unknown",
+]
+KnowledgeSourceEmbeddingStatus = Literal[
+    "ready",
+    "indexing",
+    "missing",
+    "unavailable",
+    "not_applicable",
+    "error",
+    "unknown",
+]
+
+
+class KnowledgeSourceHealthEntry(BaseModel):
+    """Safe pre-query readiness details for a canonical Knowledge QA source."""
+
+    source_id: str
+    label: str
+    available: bool
+    searchable: bool
+    item_count: Optional[int] = None
+    indexed_count: Optional[int] = None
+    last_updated: Optional[str] = None
+    last_indexed: Optional[str] = None
+    index_status: KnowledgeSourceIndexStatus = "unknown"
+    embedding_status: KnowledgeSourceEmbeddingStatus = "unknown"
+    disabled_reason: Optional[str] = None
+    workspace_scoped: bool = False
+    hidden_by_default: bool = False
+    privacy_note: Optional[str] = None
+
+
+class KnowledgeSourceHealthResponse(BaseModel):
+    """Read-only source health response for Knowledge QA clients."""
+
+    sources: list[KnowledgeSourceHealthEntry]
 
 
 class UnifiedRAGResponse(BaseModel):
@@ -1658,7 +1746,7 @@ class UnifiedRAGResponse(BaseModel):
         description="Feedback tracking ID"
     )
 
-    generated_answer: Optional[str] = Field(
+    generated_answer: Optional[str | dict[str, Any]] = Field(
         default=None,
         description="Generated answer from context"
     )
@@ -1813,11 +1901,25 @@ class UnifiedBatchRequest(BaseModel):
     # Data Sources
     sources: Optional[list[str]] = Field(
         default=["media_db", "notes", "characters"],
-        description="Databases to search (media_db, notes, characters, chats, kanban)",
+        description=(
+            "Databases to search: media_db, notes, chats, characters, kanban, "
+            "prompts, world_books, dictionaries, sql"
+        ),
     )
     # Indexing / Namespace
     corpus: Optional[str] = Field(default=None, description="Alias for index_namespace")
     index_namespace: Optional[str] = Field(default=None, description="Corpus/namespace identifier")
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def _validate_batch_sources(cls, v: Any) -> list[str]:
+        if v is None:
+            return normalize_sources_public(None)
+        if not isinstance(v, list):
+            raise ValueError("sources must be a list of strings")
+        if any(not isinstance(source, str) for source in v):
+            raise ValueError("sources entries must be strings")
+        return normalize_sources_public(v)
 
     # Search Configuration
     search_mode: Literal["fts", "vector", "hybrid"] = Field(default="hybrid")
@@ -2032,13 +2134,30 @@ class UnifiedBatchRequest(BaseModel):
             return values
 
     model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "queries": ["What is AI?", "Explain neural networks"],
-            "max_concurrent": 5,
-            "expand_query": True,
-            "enable_citations": True,
-            "enable_reranking": True
-        }
+        "examples": [
+            {
+                "queries": ["What is AI?", "Explain neural networks"],
+                "sources": [
+                    "media_db",
+                    "notes",
+                    "chats",
+                    "characters",
+                    "kanban",
+                    "prompts",
+                    "world_books",
+                    "dictionaries",
+                ],
+                "max_concurrent": 5,
+                "expand_query": True,
+                "enable_citations": True,
+                "enable_reranking": True,
+            },
+            {
+                "queries": ["Summarize release-note prompt guidance"],
+                "sources": ["notes", "prompts"],
+                "max_concurrent": 2,
+            },
+        ]
     })
 
 

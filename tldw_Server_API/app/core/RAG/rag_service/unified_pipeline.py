@@ -44,6 +44,10 @@ from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 
+from .retrieval_executor import execute_retrieval_phase
+from .generation_executor import execute_generation_phase
+from .retrieval_plan import RetrievalPlan
+
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
 
 
@@ -321,6 +325,14 @@ def otel_span(name: str, *args, **kwargs):
 import contextlib
 
 from .metrics_collector import MetricsCollector, QueryMetrics
+from .evidence_models import RetrievedEvidence
+from .post_retrieval_coordinator import coordinate_standard_result_evidence
+from .request_resolution import (
+    ResolvedRAGRequest,
+    resolve_legacy_standard_pipeline_request,
+)
+from .result_model import RAGResult
+from .retrieval_plan import build_retrieval_plan
 from .types import DataSource, Document
 
 try:
@@ -1068,14 +1080,40 @@ class UnifiedSearchResult:
 UnifiedPipelineResult = Any
 
 
+def build_retrieval_only_result(
+    *,
+    resolved_request: ResolvedRAGRequest,
+    retrieval_plan: RetrievalPlan,
+    retrieval_result: RetrievedEvidence,
+) -> RAGResult:
+    metadata = dict(retrieval_result.metadata or {})
+    metadata.setdefault(
+        "retrieval_plan",
+        {
+            "query": retrieval_plan.query,
+            "sources": list(retrieval_plan.sources),
+            "search_mode": retrieval_plan.search_mode,
+            "top_k": retrieval_plan.top_k,
+            "index_namespace": retrieval_plan.index_namespace,
+        },
+    )
+    return RAGResult(
+        query=resolved_request.query,
+        documents=list(retrieval_result.documents),
+        metadata=metadata,
+    )
+
+
 _CANONICAL_SOURCE_TO_DATASOURCE: dict[str, DataSource] = {
     "media_db": DataSource.MEDIA_DB,
     "notes": DataSource.NOTES,
     "characters": DataSource.CHARACTER_CARDS,
-    "chats": DataSource.CHARACTER_CARDS,
+    "chats": DataSource.CHAT_HISTORY,
     "kanban": DataSource.KANBAN,
     "sql": DataSource.SQL,
     "prompts": DataSource.PROMPTS,
+    "world_books": DataSource.WORLD_BOOKS,
+    "dictionaries": DataSource.DICTIONARIES,
     "claims": DataSource.CLAIMS,
 }
 
@@ -1087,6 +1125,8 @@ _DATASOURCE_TO_CANONICAL_SOURCE: dict[DataSource, str] = {
     DataSource.KANBAN: "kanban",
     DataSource.SQL: "sql",
     DataSource.PROMPTS: "prompts",
+    DataSource.WORLD_BOOKS: "world_books",
+    DataSource.DICTIONARIES: "dictionaries",
     DataSource.CLAIMS: "claims",
 }
 
@@ -1126,6 +1166,180 @@ def _sources_to_data_sources(sources: list[str]) -> list[DataSource]:
             raise ValueError(f"Invalid source '{source}'")
         data_sources.append(mapped)
     return data_sources
+
+
+def _metadata_truthy(value: Any) -> bool:
+    """Interpret common metadata flag encodings as booleans."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+    return bool(value)
+
+
+def _document_metadata(doc: Any) -> dict[str, Any]:
+    """Return a defensive copy of a retrieved document's metadata mapping."""
+    if isinstance(doc, dict):
+        metadata = doc.get("metadata")
+        return dict(metadata) if isinstance(metadata, dict) else {}
+    metadata = getattr(doc, "metadata", None)
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _document_canonical_source(doc: Any) -> str:
+    """Resolve a document's public source id from its source field or metadata."""
+    source_value: Any = None
+    if isinstance(doc, dict):
+        source_value = doc.get("source")
+        metadata = doc.get("metadata")
+        if source_value is None and isinstance(metadata, dict):
+            source_value = metadata.get("source")
+    else:
+        source_value = getattr(doc, "source", None)
+        if source_value is None:
+            metadata = getattr(doc, "metadata", None)
+            if isinstance(metadata, dict):
+                source_value = metadata.get("source")
+
+    if isinstance(source_value, DataSource):
+        return _DATASOURCE_TO_CANONICAL_SOURCE.get(source_value, source_value.value)
+    source_text = str(source_value or "").strip().lower()
+    if not source_text:
+        return "media_db"
+    mapped = _CANONICAL_SOURCE_TO_DATASOURCE.get(source_text)
+    if mapped is not None:
+        return _DATASOURCE_TO_CANONICAL_SOURCE.get(mapped, source_text)
+    aliases = {
+        "media": "media_db",
+        "notes_db": "notes",
+        "chat_history": "chats",
+        "character_cards": "characters",
+        "character_cards_db": "characters",
+        "kanban_db": "kanban",
+        "task_boards": "kanban",
+        "prompts_db": "prompts",
+        "worldbooks": "world_books",
+        "world_book": "world_books",
+        "world_books_db": "world_books",
+        "dictionary": "dictionaries",
+        "chat_dictionary": "dictionaries",
+        "chat_dictionaries": "dictionaries",
+        "chat_dictionaries_db": "dictionaries",
+    }
+    return aliases.get(source_text, source_text)
+
+
+def _filter_workspace_artifacts(
+    documents: list[Any],
+    *,
+    workspace_id: Optional[str],
+) -> tuple[list[Any], dict[str, int]]:
+    """Exclude workspace/test/generated artifacts outside the requested workspace scope."""
+    filtered_documents: list[Any] = []
+    filtered_counts: dict[str, int] = {}
+    requested_workspace = str(workspace_id).strip() if workspace_id is not None else ""
+
+    for doc in documents:
+        metadata = _document_metadata(doc)
+        doc_workspace = str(metadata.get("workspace_id") or "").strip()
+        origin = str(metadata.get("origin") or "").strip().lower()
+        visibility = str(metadata.get("visibility") or "").strip().lower()
+        is_workspace_artifact = (
+            bool(doc_workspace)
+            or _metadata_truthy(metadata.get("is_generated"))
+            or _metadata_truthy(metadata.get("is_test_artifact"))
+            or origin in {"workspace", "generated", "test", "test_artifact", "workspace_artifact"}
+            or visibility == "workspace"
+        )
+
+        should_filter = False
+        if is_workspace_artifact and not requested_workspace:
+            should_filter = True
+        elif requested_workspace and doc_workspace and doc_workspace != requested_workspace:
+            should_filter = True
+
+        if should_filter:
+            source = _document_canonical_source(doc)
+            filtered_counts[source] = filtered_counts.get(source, 0) + 1
+            continue
+        filtered_documents.append(doc)
+
+    return filtered_documents, filtered_counts
+
+
+def _build_source_status(
+    requested_sources: list[str],
+    *,
+    retriever: Any,
+    documents: list[Any],
+    filtered_counts: dict[str, int],
+) -> dict[str, dict[str, Any]]:
+    """Build per-source availability and result-count diagnostics for UI recovery."""
+    retriever_map = getattr(retriever, "retrievers", {}) or {}
+    available_sources = set(retriever_map.keys()) if isinstance(retriever_map, dict) else set()
+    counts: dict[str, int] = {}
+    for doc in documents:
+        source = _document_canonical_source(doc)
+        counts[source] = counts.get(source, 0) + 1
+
+    status: dict[str, dict[str, Any]] = {}
+    for source in requested_sources:
+        data_source = _CANONICAL_SOURCE_TO_DATASOURCE.get(source)
+        count = counts.get(source, 0)
+        if data_source not in available_sources:
+            entry: dict[str, Any] = {
+                "status": "unavailable",
+                "count": 0,
+                "reason": "no_retriever_configured",
+            }
+        elif count == 0:
+            entry = {
+                "status": "empty",
+                "count": 0,
+                "reason": "no_matching_entries",
+            }
+        else:
+            entry = {
+                "status": "searched",
+                "count": count,
+            }
+        filtered_count = filtered_counts.get(source, 0)
+        if filtered_count:
+            entry["filtered_artifact_count"] = filtered_count
+        status[source] = entry
+    return status
+
+
+def normalize_documents_for_generation(docs: list[Any]) -> list[Document]:
+    """Normalize retrieval outputs into generation-compatible documents."""
+    normalized: list[Document] = []
+    for doc in docs or []:
+        if isinstance(doc, Document):
+            normalized.append(doc)
+            continue
+        if isinstance(doc, dict):
+            metadata = doc.get("metadata") or {}
+            source_val = metadata.get("source") if isinstance(metadata, dict) else None
+            source = DataSource.MEDIA_DB
+            if source_val is not None:
+                try:
+                    source = DataSource(str(source_val))
+                except (ValueError, TypeError):
+                    source = DataSource.MEDIA_DB
+            normalized.append(
+                Document(
+                    id=str(doc.get("id")),
+                    content=str(doc.get("content") or ""),
+                    metadata=metadata if isinstance(metadata, dict) else {},
+                    source=source,
+                    score=float(doc.get("score") or 0.0),
+                )
+            )
+    return normalized
 
 
 def _resolve_sqlite_rag_db_path(
@@ -1337,6 +1551,8 @@ async def unified_rag_pipeline(
 
     # ========== INDEXING / NAMESPACE ==========
     index_namespace: Optional[str] = None,
+    retrieval_plan: Optional[RetrievalPlan] = None,
+    resolved_request: Optional[ResolvedRAGRequest] = None,
 
     # ========== QUICK WINS ==========
     highlight_results: bool = False,
@@ -1527,6 +1743,176 @@ async def unified_rag_pipeline(
         )
     """
 
+    request_metadata: dict[str, Any] = {}
+    inbound_metadata = kwargs.get("metadata")
+    if isinstance(inbound_metadata, dict):
+        request_metadata.update(inbound_metadata)
+    if generation_prompt is not None:
+        request_metadata["generation_prompt"] = generation_prompt
+    request_metadata["max_generation_tokens"] = max_generation_tokens
+    workspace_id = kwargs.get("workspace_id")
+    if workspace_id is None:
+        workspace_id = request_metadata.get("workspace_id")
+    if workspace_id is not None:
+        workspace_id = str(workspace_id).strip() or None
+        if workspace_id is not None:
+            request_metadata["workspace_id"] = workspace_id
+    prompts_db_path = kwargs.get("prompts_db_path")
+    world_books_db_path = kwargs.get("world_books_db_path")
+    chat_dictionaries_db_path = kwargs.get("chat_dictionaries_db_path")
+
+    if resolved_request is None:
+        resolved_request = resolve_legacy_standard_pipeline_request(
+            query=query,
+            search_mode=search_mode,
+            top_k=top_k,
+            sources=sources,
+            min_score=min_score,
+            index_namespace=index_namespace,
+            rag_profile=rag_profile,
+            user_id=user_id,
+            feedback_user_id=feedback_user_id,
+            enable_generation=enable_generation,
+            include_sources=bool(kwargs.get("include_sources", True)),
+            include_metadata=bool(kwargs.get("include_metadata", True)),
+            metadata=request_metadata,
+        )
+
+    if retrieval_plan is None:
+        retrieval_plan = build_retrieval_plan(resolved_request)
+
+    def _resolve_effective_enable_generation() -> bool:
+        return bool((resolved_request.payload or {}).get("enable_generation", enable_generation))
+
+    effective_enable_generation = _resolve_effective_enable_generation()
+
+    retrieval_query = query
+    retrieval_sources = sources
+    retrieval_search_mode = search_mode
+    retrieval_top_k = top_k
+    retrieval_min_score = min_score
+    retrieval_index_namespace = index_namespace
+
+    def _planned_index_namespace(plan: RetrievalPlan) -> Optional[str]:
+        if plan.index_namespace is not None:
+            return plan.index_namespace
+        normalized_sources = {
+            getattr(source, "value", str(source)).strip()
+            for source in plan.sources
+        }
+        if "media_db" in normalized_sources:
+            return plan.collection_names.get("media_db")
+        return None
+
+    def _refresh_retrieval_snapshot_from_current_knobs(
+        *,
+        prefer_current_scalars: bool = False,
+    ) -> None:
+        nonlocal retrieval_query, retrieval_sources, retrieval_search_mode
+        nonlocal retrieval_top_k, retrieval_min_score, retrieval_index_namespace, retrieval_plan
+
+        snapshot_query = query
+        snapshot_sources = sources
+        snapshot_search_mode = search_mode
+        snapshot_top_k = top_k
+        snapshot_min_score = min_score
+        snapshot_index_namespace = index_namespace
+
+        if retrieval_plan is not None:
+            planned_query = str(retrieval_plan.query or "").strip()
+            if planned_query:
+                snapshot_query = planned_query
+            planned_sources = [
+                str(getattr(source, "value", source)).strip()
+                for source in retrieval_plan.sources
+                if str(getattr(source, "value", source)).strip()
+            ]
+            if planned_sources:
+                snapshot_sources = planned_sources
+            planned_search_mode = str(retrieval_plan.search_mode or "").strip().lower()
+            if planned_search_mode in {"fts", "vector", "hybrid"}:
+                snapshot_search_mode = cast(
+                    Literal["fts", "vector", "hybrid"],
+                    planned_search_mode,
+                )
+            if not prefer_current_scalars:
+                with contextlib.suppress(TypeError, ValueError):
+                    snapshot_top_k = max(1, int(retrieval_plan.top_k))
+                with contextlib.suppress(TypeError, ValueError):
+                    snapshot_min_score = float(retrieval_plan.min_score)
+            snapshot_index_namespace = _planned_index_namespace(retrieval_plan)
+
+        retrieval_query = snapshot_query
+        retrieval_sources = snapshot_sources
+        retrieval_search_mode = snapshot_search_mode
+        with contextlib.suppress(TypeError, ValueError):
+            retrieval_top_k = max(1, int(snapshot_top_k))
+        with contextlib.suppress(TypeError, ValueError):
+            retrieval_min_score = float(snapshot_min_score)
+        retrieval_index_namespace = snapshot_index_namespace
+
+        if retrieval_plan is not None:
+            retrieval_plan = replace(
+                retrieval_plan,
+                query=str(retrieval_query),
+                sources=tuple(str(source) for source in (retrieval_sources or [])),
+                search_mode=str(retrieval_search_mode),
+                top_k=int(retrieval_top_k),
+                min_score=float(retrieval_min_score),
+                index_namespace=retrieval_index_namespace,
+            )
+
+    if retrieval_plan is not None:
+        planned_query = str(retrieval_plan.query or "").strip()
+        if planned_query:
+            retrieval_query = planned_query
+        planned_sources = [
+            str(getattr(source, "value", source)).strip()
+            for source in retrieval_plan.sources
+            if str(getattr(source, "value", source)).strip()
+        ]
+        if planned_sources:
+            retrieval_sources = planned_sources
+        planned_search_mode = str(retrieval_plan.search_mode or "").strip().lower()
+        if planned_search_mode in {"fts", "vector", "hybrid"}:
+            retrieval_search_mode = cast(
+                Literal["fts", "vector", "hybrid"],
+                planned_search_mode,
+            )
+        with contextlib.suppress(TypeError, ValueError):
+            retrieval_top_k = max(1, int(retrieval_plan.top_k))
+        with contextlib.suppress(TypeError, ValueError):
+            retrieval_min_score = float(retrieval_plan.min_score)
+        retrieval_index_namespace = _planned_index_namespace(retrieval_plan)
+
+    query_expansion_corpus = (
+        retrieval_plan.index_namespace
+        if retrieval_plan is not None and retrieval_plan.index_namespace is not None
+        else index_namespace
+    )
+
+    def _retrieval_plan_for(query_text: str) -> Optional[RetrievalPlan]:
+        if retrieval_plan is None:
+            return None
+        if query_text == retrieval_plan.query:
+            return retrieval_plan
+        try:
+            return replace(retrieval_plan, query=query_text)
+        except TypeError:
+            return retrieval_plan
+
+    def _sync_effective_query(new_query: str) -> None:
+        nonlocal query, retrieval_query, retrieval_plan
+        query = str(new_query)
+        retrieval_query = query
+        result.query = query
+        result_payload = getattr(result, "payload", None)
+        if isinstance(result_payload, dict):
+            result_payload["query"] = query
+        resolved_request.query = query
+        resolved_request.payload["query"] = query
+        retrieval_plan = replace(retrieval_plan, query=query)
+
     # Basic input validation (short-circuit before heavier setup)
     if not isinstance(query, str) or not query.strip():
         msg = "Invalid query"
@@ -1582,6 +1968,7 @@ async def unified_rag_pipeline(
     # ========== SEARCH DEPTH MODE PRESETS ==========
     # Apply parameter presets based on search_depth_mode. Individual parameter
     # overrides (if explicitly non-default) take precedence over mode presets.
+    retrieval_scalar_overrides_applied = False
     if search_depth_mode is not None:
         _mode_presets = {
             "speed": {
@@ -1617,7 +2004,10 @@ async def unified_rag_pipeline(
         # (we check against the function defaults)
         if presets:
             if top_k == 10:
-                top_k = presets.get("top_k", top_k)
+                preset_top_k = presets.get("top_k", top_k)
+                if preset_top_k != top_k:
+                    retrieval_scalar_overrides_applied = True
+                top_k = preset_top_k
             if enable_reranking is True and "enable_reranking" in presets:
                 enable_reranking = presets["enable_reranking"]
             if reranking_strategy == "flashrank" and "reranking_strategy" in presets:
@@ -1631,6 +2021,10 @@ async def unified_rag_pipeline(
             if not enable_multi_vector_passages and presets.get("enable_multi_vector_passages"):
                 enable_multi_vector_passages = True
 
+    _refresh_retrieval_snapshot_from_current_knobs(
+        prefer_current_scalars=retrieval_scalar_overrides_applied,
+    )
+
     # Initialize result and timing
     start_time = time.time()
     result = UnifiedSearchResult(
@@ -1638,6 +2032,7 @@ async def unified_rag_pipeline(
         query=query,
         metadata={"original_query": query}
     )
+    standard_evidence_coordinated = False
     claims_payload = None
     factuality_payload = None
     # Merge inbound metadata if provided (API pattern)
@@ -1691,15 +2086,20 @@ async def unified_rag_pipeline(
         cache_max_size = int((cfg.get("cache") or {}).get("max_cache_size", cache_max_size))
     except (ImportError, TypeError, ValueError):
         pass
-    cache_namespace = index_namespace or (user_id or None)
+    cache_namespace = retrieval_index_namespace or (user_id or None)
     if cache_namespace is None:
         try:
-            parts = [media_db_path, notes_db_path, character_db_path, kanban_db_path]
+            parts = [media_db_path, notes_db_path, character_db_path, kanban_db_path, prompts_db_path]
             if any(parts):
                 joined = "|".join([str(p or "") for p in parts])
                 cache_namespace = f"db:{hashlib.sha256(joined.encode('utf-8')).hexdigest()[:12]}"
         except (TypeError, ValueError):
             cache_namespace = None
+    workspace_cache_component = workspace_id or "global"
+    if cache_namespace is not None:
+        cache_namespace = f"{cache_namespace}|workspace:{workspace_cache_component}"
+    elif workspace_id is not None:
+        cache_namespace = f"workspace:{workspace_cache_component}"
 
     def _get_cache_instance():
         nonlocal cache_instance
@@ -1802,9 +2202,9 @@ async def unified_rag_pipeline(
 
     try:
         try:
-            sources = _normalize_pipeline_sources(sources)
-            resolved_data_sources = _sources_to_data_sources(sources)
-            result.metadata["sources_requested"] = list(sources)
+            retrieval_sources = _normalize_pipeline_sources(retrieval_sources)
+            resolved_data_sources = _sources_to_data_sources(retrieval_sources)
+            result.metadata["sources_requested"] = list(retrieval_sources)
         except ValueError as exc:
             result.errors.append(f"invalid_source: {exc}")
             result.metadata["source_validation_error"] = str(exc)
@@ -1836,15 +2236,22 @@ async def unified_rag_pipeline(
             base_kwargs: dict[str, Any] = {"user_id": user_id or "0", "media_db": media_db}
             if chacha_db is not None:
                 base_kwargs["chacha_db"] = chacha_db
+            prompts_db = kwargs.get("prompts_db")
+            if prompts_db is not None:
+                base_kwargs["prompts_db"] = prompts_db
             if sql_retriever is not None:
                 base_kwargs["sql_retriever"] = sql_retriever
 
-            variants = [
-                dict(base_kwargs),
-                {k: v for k, v in base_kwargs.items() if k != "chacha_db"},
-                {k: v for k, v in base_kwargs.items() if k != "sql_retriever"},
-                {k: v for k, v in base_kwargs.items() if k not in {"chacha_db", "sql_retriever"}},
-            ]
+            optional_keys = ("chacha_db", "prompts_db", "sql_retriever")
+            variants = [dict(base_kwargs)]
+            for key in optional_keys:
+                if key in base_kwargs:
+                    variants.append({k: v for k, v in base_kwargs.items() if k != key})
+            variants.append({
+                k: v
+                for k, v in base_kwargs.items()
+                if k not in set(optional_keys)
+            })
             seen: set[tuple[str, ...]] = set()
             for variant in variants:
                 key = tuple(sorted(variant.keys()))
@@ -1859,6 +2266,54 @@ async def unified_rag_pipeline(
                 return MultiDatabaseRetriever(db_paths, user_id=user_id or "0")
             except TypeError:
                 return MultiDatabaseRetriever(db_paths)
+
+        def _build_pipeline_db_paths() -> dict[str, str]:
+            """Return the full source-to-database map for every retrieval pass."""
+            db_paths: dict[str, str] = {}
+            if media_db_path:
+                db_paths["media_db"] = str(media_db_path)
+            if notes_db_path:
+                db_paths["notes_db"] = str(notes_db_path)
+            if prompts_db_path:
+                db_paths["prompts_db"] = str(prompts_db_path)
+            if character_db_path:
+                db_paths["character_cards_db"] = str(character_db_path)
+                db_paths["world_books_db"] = str(world_books_db_path or character_db_path)
+                db_paths["chat_dictionaries_db"] = str(chat_dictionaries_db_path or character_db_path)
+            else:
+                if world_books_db_path:
+                    db_paths["world_books_db"] = str(world_books_db_path)
+                if chat_dictionaries_db_path:
+                    db_paths["chat_dictionaries_db"] = str(chat_dictionaries_db_path)
+            if kanban_db_path:
+                db_paths["kanban_db"] = str(kanban_db_path)
+            return db_paths
+
+        source_status_retriever: Any = None
+        cumulative_filtered_artifact_counts: dict[str, int] = {}
+
+        def _apply_workspace_filtering_to_result() -> None:
+            """Filter the current result documents and refresh source diagnostics."""
+            nonlocal result
+            filtered_documents, filtered_artifact_counts = _filter_workspace_artifacts(
+                list(result.documents or []),
+                workspace_id=workspace_id,
+            )
+            for source, count in filtered_artifact_counts.items():
+                cumulative_filtered_artifact_counts[source] = (
+                    cumulative_filtered_artifact_counts.get(source, 0) + count
+                )
+            result.documents = filtered_documents
+            if source_status_retriever is not None:
+                result.metadata["source_status"] = _build_source_status(
+                    _normalize_pipeline_sources(list(retrieval_sources)),
+                    retriever=source_status_retriever,
+                    documents=filtered_documents,
+                    filtered_counts=dict(cumulative_filtered_artifact_counts),
+                )
+            if workspace_id is not None:
+                result.metadata["workspace_id"] = workspace_id
+            result.metadata["documents_retrieved"] = len(filtered_documents)
 
         # ========== LEARNED FUSION / CALIBRATION HELPERS ==========
         def _decorate_calibration_metadata() -> None:
@@ -1889,7 +2344,7 @@ async def unified_rag_pipeline(
         effective_pre_clarify = (
             enable_pre_retrieval_clarification
             if enable_pre_retrieval_clarification is not None
-            else bool(enable_generation)
+            else effective_enable_generation
         )
         if effective_pre_clarify and assess_query_for_clarification is not None:
             clarification_start = time.time()
@@ -1932,7 +2387,7 @@ async def unified_rag_pipeline(
                 if corrected != query:
                     result.metadata["original_query"] = query
                     result.metadata["corrected_query"] = corrected
-                    query = corrected
+                    _sync_effective_query(corrected)
                 result.timings["spell_check"] = time.time() - spell_start
             else:
                 result.errors.append("Spell check module not available")
@@ -1952,7 +2407,7 @@ async def unified_rag_pipeline(
         ) -> list["Document"]:
             """Best-effort external prefetch when classification disables local DB search."""
             prefetched_docs: list[Document] = []
-            max_results = max(1, min(int(top_k or 10), 25))
+            max_results = max(1, min(int(retrieval_top_k or 10), 25))
             seen_ids: set[str] = set()
 
             def _append_doc(doc: Document) -> None:
@@ -2070,7 +2525,7 @@ async def unified_rag_pipeline(
                 # Apply reformulated query
                 if _classification.standalone_query and _classification.standalone_query != query:
                     result.metadata["reformulated_query"] = _classification.standalone_query
-                    query = _classification.standalone_query
+                    _sync_effective_query(_classification.standalone_query)
                     logger.debug(f"Query reformulated to: {query[:100]}")
 
                 # Route web fallback based on classification
@@ -2134,7 +2589,7 @@ async def unified_rag_pipeline(
                 )
                 if reformulated and reformulated != query:
                     result.metadata["reformulated_query"] = reformulated
-                    query = reformulated
+                    _sync_effective_query(reformulated)
                 result.timings["query_reformulation"] = time.time() - _ref_start
             except Exception as _ref_exc:
                 logger.warning(f"Query reformulation failed: {_ref_exc!r}")
@@ -2332,10 +2787,10 @@ async def unified_rag_pipeline(
         analysis_intent_val = None
         analysis_complexity_val = None
         analysis_domain = None
-        if QueryAnalyzer and query:
+        if QueryAnalyzer and retrieval_query:
             try:
                 qa = QueryAnalyzer()
-                analysis = qa.analyze_query(query)
+                analysis = qa.analyze_query(retrieval_query)
                 analysis_intent = getattr(analysis, "intent", None)
                 analysis_complexity = getattr(analysis, "complexity", None)
                 analysis_intent_val = getattr(analysis_intent, "value", str(analysis_intent)) if analysis_intent is not None else None
@@ -2348,7 +2803,7 @@ async def unified_rag_pipeline(
                 analysis_domain = None
 
         # ========== QUERY EXPANSION ==========
-        expanded_queries = [query]
+        expanded_queries = [retrieval_query]
         if expand_query:
             expansion_start = time.time()
             try:
@@ -2358,7 +2813,11 @@ async def unified_rag_pipeline(
                 if RewriteCache and user_id:
                     try:
                         rc = RewriteCache(user_id=user_id)
-                        cached = rc.get(query, intent=intent_label, corpus=index_namespace)
+                        cached = rc.get(
+                            retrieval_query,
+                            intent=intent_label,
+                            corpus=query_expansion_corpus,
+                        )
                         if cached:
                             cached_rewrites = [c for c in cached if isinstance(c, str) and c.strip()]
                     except ValueError as exc:
@@ -2368,11 +2827,18 @@ async def unified_rag_pipeline(
                 strategies = (expansion_strategies or ["acronym", "synonym"]).copy()
                 expanded_variants: list[str] = []
                 if multi_strategy_expansion:
-                    if index_namespace:
-                        expanded = await multi_strategy_expansion(query, strategies=strategies, corpus=index_namespace)
+                    if query_expansion_corpus:
+                        expanded = await multi_strategy_expansion(
+                            retrieval_query,
+                            strategies=strategies,
+                            corpus=query_expansion_corpus,
+                        )
                     else:
                         # Avoid passing None to preserve expected call signature in tests
-                        expanded = await multi_strategy_expansion(query, strategies=strategies)
+                        expanded = await multi_strategy_expansion(
+                            retrieval_query,
+                            strategies=strategies,
+                        )
                     if isinstance(expanded, list):
                         expanded_variants.extend([q for q in expanded if isinstance(q, str)])
                     elif isinstance(expanded, str) and expanded.strip():
@@ -2422,7 +2888,12 @@ async def unified_rag_pipeline(
                         rew = [q for q in expanded_queries if q != query][:5]
                         if rew:
                             rc = RewriteCache(user_id=user_id)
-                            rc.put(query, rewrites=rew, intent=intent_label, corpus=index_namespace)
+                        rc.put(
+                            retrieval_query,
+                            rewrites=rew,
+                            intent=intent_label,
+                            corpus=retrieval_index_namespace,
+                        )
                 except ValueError as exc:
                     logger.debug(f"Rewrite cache write disabled for user_id={user_id}: {exc}")
                 except (AttributeError, TypeError):
@@ -2468,6 +2939,8 @@ async def unified_rag_pipeline(
                 try:
                     tk = int(routing.get("top_k", top_k))
                     if 1 <= tk <= 100:
+                        if tk != top_k:
+                            retrieval_scalar_overrides_applied = True
                         top_k = tk
                 except (TypeError, ValueError):
                     pass
@@ -2491,6 +2964,8 @@ async def unified_rag_pipeline(
                     params = granularity_decision.retrieval_params
                     # Override top_k if not explicitly set by user
                     if "top_k" in params:
+                        if params["top_k"] != top_k:
+                            retrieval_scalar_overrides_applied = True
                         top_k = params["top_k"]
                     # Override fts_level
                     if "fts_level" in params:
@@ -2525,6 +3000,10 @@ async def unified_rag_pipeline(
             except (AttributeError, RuntimeError, TypeError, ValueError) as e:
                 result.errors.append(f"Granularity routing failed: {e}")
                 logger.warning(f"Granularity routing error: {e}")
+
+        _refresh_retrieval_snapshot_from_current_knobs(
+            prefer_current_scalars=retrieval_scalar_overrides_applied,
+        )
 
         # ========== CACHE CHECK ==========
         cached_documents = None
@@ -2766,9 +3245,9 @@ async def unified_rag_pipeline(
                         _tr = _tm.get_tracer("tldw.rag")
                         _attrs = {
                             "rag.phase": "retrieval",
-                            "rag.search_mode": str(search_mode),
-                            "rag.top_k": int(top_k or 0),
-                            "rag.index_namespace": str(index_namespace or "")
+                            "rag.search_mode": str(retrieval_search_mode),
+                            "rag.top_k": int(retrieval_top_k or 0),
+                            "rag.index_namespace": str(retrieval_index_namespace or "")
                         }
                         _otel_cm = _tr.start_as_current_span("rag.retrieval")
                         _otel_span = _otel_cm.__enter__()
@@ -2781,25 +3260,18 @@ async def unified_rag_pipeline(
                 if MultiDatabaseRetriever and RetrievalConfig:
 
                     # Set up database paths
-                    db_paths = {}
-                    if media_db_path:
-                        db_paths["media_db"] = media_db_path
-                    if notes_db_path:
-                        db_paths["notes_db"] = notes_db_path
-                    if character_db_path:
-                        db_paths["character_cards_db"] = character_db_path
-                    if kanban_db_path:
-                        db_paths["kanban_db"] = kanban_db_path
+                    db_paths = _build_pipeline_db_paths()
 
                     # Initialize retriever (tests may patch this constructor).
                     retriever = _build_multi_retriever(db_paths)
+                    source_status_retriever = retriever
 
                     # Configure retrieval
                     config = RetrievalConfig(
-                        max_results=top_k,
-                        min_score=min_score,
-                        use_fts=(search_mode in ["fts", "hybrid"]),
-                        use_vector=(search_mode in ["vector", "hybrid"]),
+                        max_results=retrieval_top_k,
+                        min_score=retrieval_min_score,
+                        use_fts=(retrieval_search_mode in ["fts", "hybrid"]),
+                        use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
                         include_metadata=True,
                         fts_level=fts_level,
                         enable_text_late_chunking=enable_text_late_chunking,
@@ -2829,43 +3301,94 @@ async def unified_rag_pipeline(
                             except (TypeError, ValueError):
                                 pass
 
-                    data_sources = list(resolved_data_sources)
+                    def _execution_collection_names() -> dict[str, str]:
+                        user_key = str(user_id or feedback_user_id or "0").strip() or "0"
+                        source_names = {
+                            str(getattr(source, "value", source)).strip().lower()
+                            for source in retrieval_sources
+                            if str(getattr(source, "value", source)).strip()
+                        }
+                        collection_names: dict[str, str] = {
+                            "media_db": f"user_{user_key}_media_embeddings",
+                            "notes": f"user_{user_key}_notes_embeddings",
+                        }
+                        if {"character_cards", "characters"} & source_names:
+                            collection_names["character_cards"] = f"user_{user_key}_character_embeddings"
+                        if {"kanban", "kanban_db"} & source_names:
+                            collection_names["kanban"] = f"user_{user_key}_kanban_embeddings"
+                        return collection_names
 
-                    # Retrieve documents
-                    rh = getattr(retriever, 'retrieve_hybrid', None)
-                    hybrid_supported = rh is not None and asyncio.iscoroutinefunction(rh)
-                    if search_mode == "hybrid" and hybrid_supported:
-                        documents = await _resilient_call(
-                            "retrieval",
-                            rh,
-                            query=query,
-                            alpha=hybrid_alpha,
-                            index_namespace=index_namespace,
-                            allowed_media_ids=include_media_ids,
-                        )
-                    else:
-                        documents = await _resilient_call(
-                            "retrieval",
-                            retriever.retrieve,
-                            query=query,
-                            sources=data_sources,
-                            config=config,
-                            index_namespace=index_namespace,
+                    def _effective_retrieval_plan_for_query(
+                        query_text: str,
+                        *,
+                        top_k_override: Optional[int] = None,
+                    ) -> RetrievalPlan:
+                        plan = _retrieval_plan_for(query_text)
+                        if plan is None:
+                            plan = RetrievalPlan(
+                                query=query_text,
+                                sources=tuple(str(source) for source in retrieval_sources),
+                                search_mode=str(retrieval_search_mode),
+                                top_k=int(retrieval_top_k),
+                                min_score=float(retrieval_min_score),
+                                index_namespace=retrieval_index_namespace,
+                                collection_names=_execution_collection_names(),
+                            )
+                        if top_k_override is not None:
+                            try:
+                                return replace(plan, top_k=max(1, int(top_k_override)))
+                            except (TypeError, ValueError):
+                                return plan
+                        return plan
+
+                    async def _execute_retrieval_variant(
+                        component: str,
+                        query_text: str,
+                        *,
+                        retrieval_cfg: Optional[Any] = None,
+                        top_k_override: Optional[int] = None,
+                    ) -> list[Document]:
+                        evidence = await _resilient_call(
+                            component,
+                            execute_retrieval_phase,
+                            resolved_request=resolved_request,
+                            retrieval_plan=_effective_retrieval_plan_for_query(
+                                query_text,
+                                top_k_override=top_k_override,
+                            ),
+                            retriever=retriever,
+                            retrieval_config=retrieval_cfg or config,
                             allowed_media_ids=include_media_ids,
                             allowed_note_ids=include_note_ids,
                         )
+                        evidence_docs = getattr(evidence, "documents", None)
+                        return list(evidence_docs or [])
+
+                    effective_retrieval_plan = _effective_retrieval_plan_for_query(retrieval_query)
+
+                    retrieved_evidence = await _resilient_call(
+                        "retrieval",
+                        execute_retrieval_phase,
+                        resolved_request=resolved_request,
+                        retrieval_plan=effective_retrieval_plan,
+                        retriever=retriever,
+                        retrieval_config=config,
+                        allowed_media_ids=include_media_ids,
+                        allowed_note_ids=include_note_ids,
+                    )
+                    documents = list(retrieved_evidence.documents)
 
                     # Fallback: if no documents were retrieved via MultiDatabaseRetriever,
                     # perform a direct Media DB FTS-only search. This guards against
                     # configuration or adapter issues that can cause hybrid retrieval
                     # to silently return an empty set even when media is present.
-                    if (not documents) and (media_db_path or media_db is not None) and search_mode in ("fts", "hybrid"):
+                    if (not documents) and (media_db_path or media_db is not None) and retrieval_search_mode in ("fts", "hybrid"):
                         try:
                             from .database_retrievers import MediaDBRetriever as _MDBR
                             from .database_retrievers import RetrievalConfig as _RCfg
                             fb_cfg = _RCfg(
-                                max_results=top_k,
-                                min_score=min_score,
+                                max_results=retrieval_top_k,
+                                min_score=retrieval_min_score,
                                 use_fts=True,
                                 use_vector=False,
                                 include_metadata=True,
@@ -2878,7 +3401,7 @@ async def unified_rag_pipeline(
                                 media_db=media_db,
                             )
                             fallback_docs = await fb_retriever.retrieve(
-                                query=query,
+                                query=retrieval_query,
                                 media_type=None,
                                 allowed_media_ids=include_media_ids,
                             )
@@ -2900,14 +3423,14 @@ async def unified_rag_pipeline(
                             result.errors.append(f"Media DB fallback retrieval failed: {str(_fb_err)}")
 
                     # Optionally run HyDE-enhanced media retrieval and merge
-                    if enable_hyde and hyde_vector and search_mode == "hybrid":
+                    if enable_hyde and hyde_vector and retrieval_search_mode == "hybrid":
                         try:
                             media_retr = retriever.retrievers.get(DataSource.MEDIA_DB)
                             if media_retr and hasattr(media_retr, "retrieve_hybrid"):
                                 hyde_docs = await media_retr.retrieve_hybrid(
-                                    query=query,
+                                    query=retrieval_query,
                                     alpha=hybrid_alpha,
-                                    index_namespace=index_namespace,
+                                    index_namespace=retrieval_index_namespace,
                                     query_vector=hyde_vector,
                                 )
                                 by_id: dict[str, Document] = {d.id: d for d in documents}
@@ -2932,34 +3455,22 @@ async def unified_rag_pipeline(
                     if expand_query and expanded_queries and len(expanded_queries) > 1:
                         exp_start = time.time()
                         try:
-                            extra_queries = [q for q in expanded_queries if q != query]
+                            extra_queries = [q for q in expanded_queries if q != retrieval_query]
                             exp_docs: list[Document] = []
                             for eq in extra_queries:
                                 try:
-                                    if search_mode == "hybrid" and hybrid_supported and rh is not None:
-                                        eq_docs = await _resilient_call(
-                                            "retrieval_expansion",
-                                            rh,
-                                            query=eq,
-                                            alpha=hybrid_alpha,
-                                            index_namespace=index_namespace,
-                                            allowed_media_ids=include_media_ids,
-                                        )
-                                    else:
-                                        try:
-                                            exp_cfg = replace(config, max_results=max(1, int(top_k or 1)))
-                                        except TypeError:
-                                            exp_cfg = config
-                                        eq_docs = await _resilient_call(
-                                            "retrieval_expansion",
-                                            retriever.retrieve,
-                                            query=eq,
-                                            sources=data_sources,
-                                            config=exp_cfg,
-                                            index_namespace=index_namespace,
-                                            allowed_media_ids=include_media_ids,
-                                            allowed_note_ids=include_note_ids,
-                                        )
+                                    try:
+                                        expansion_top_k = max(1, int(retrieval_top_k or 1))
+                                        exp_cfg = replace(config, max_results=expansion_top_k)
+                                    except (TypeError, ValueError):
+                                        expansion_top_k = None
+                                        exp_cfg = config
+                                    eq_docs = await _execute_retrieval_variant(
+                                        "retrieval_expansion",
+                                        eq,
+                                        retrieval_cfg=exp_cfg,
+                                        top_k_override=expansion_top_k,
+                                    )
                                     if eq_docs:
                                         exp_docs.extend(eq_docs)
                                 except (
@@ -3004,13 +3515,14 @@ async def unified_rag_pipeline(
                             result.errors.append(f"Query expansion retrieval failed: {str(_exp_err)}")
 
                     result.documents = documents
+                    _apply_workspace_filtering_to_result()
                     # Optional PRF second-pass retrieval to fill remaining slots
                     if (
                         enable_prf
                         and apply_prf
                         and PRFConfig
                         and result.documents
-                        and len(result.documents) < top_k
+                        and len(result.documents) < retrieval_top_k
                     ):
                         try:
                             prf_cfg = PRFConfig(
@@ -3019,35 +3531,23 @@ async def unified_rag_pipeline(
                                 alpha=float(prf_alpha or 0.0),
                                 top_n=int(prf_top_n or 0),
                             )
-                            prf_query, prf_meta = await apply_prf(query, result.documents, prf_cfg)
+                            prf_query, prf_meta = await apply_prf(
+                                retrieval_query,
+                                result.documents,
+                                prf_cfg,
+                            )
                             result.metadata.setdefault("prf", {})
                             result.metadata["prf"].update(prf_meta)
 
                             # Only perform a second pass when PRF is enabled and query changed
-                            if prf_meta.get("enabled") and prf_query and prf_query != query:
-                                remaining_slots = max(0, top_k - len(result.documents))
+                            if prf_meta.get("enabled") and prf_query and prf_query != retrieval_query:
+                                remaining_slots = max(0, retrieval_top_k - len(result.documents))
                                 if remaining_slots > 0:
-                                    # Use the same retrieval path as the primary call
-                                    if search_mode == "hybrid" and hybrid_supported and rh is not None:
-                                        prf_docs = await _resilient_call(
-                                            "retrieval_prf",
-                                            rh,
-                                            query=prf_query,
-                                            alpha=hybrid_alpha,
-                                            index_namespace=index_namespace,
-                                            allowed_media_ids=include_media_ids,
-                                        )
-                                    else:
-                                        prf_docs = await _resilient_call(
-                                            "retrieval_prf",
-                                            retriever.retrieve,
-                                            query=prf_query,
-                                            sources=data_sources,
-                                            config=config,
-                                            index_namespace=index_namespace,
-                                            allowed_media_ids=include_media_ids,
-                                            allowed_note_ids=include_note_ids,
-                                        )
+                                    prf_docs = await _execute_retrieval_variant(
+                                        "retrieval_prf",
+                                        prf_query,
+                                        top_k_override=remaining_slots,
+                                    )
                                     prf_docs = prf_docs or []
                                     existing_ids = {d.id for d in result.documents}
                                     added = 0
@@ -3056,7 +3556,7 @@ async def unified_rag_pipeline(
                                             result.documents.append(d)
                                             existing_ids.add(d.id)
                                             added += 1
-                                            if len(result.documents) >= top_k:
+                                            if len(result.documents) >= retrieval_top_k:
                                                 break
                                     result.metadata["prf"]["second_pass_performed"] = True
                                     result.metadata["prf"]["second_pass_added"] = int(added)
@@ -3155,26 +3655,22 @@ async def unified_rag_pipeline(
                             # Only run additional retrievals for secondary subqueries
                             if len(subqueries) > 1:
                                 try:
-                                    subquery_max_results = max(1, int(top_k or 1))
+                                    subquery_max_results = max(1, int(retrieval_top_k or 1))
                                     if doc_budget is not None:
                                         subquery_max_results = max(1, min(subquery_max_results, int(doc_budget)))
                                 except (TypeError, ValueError):
-                                    subquery_max_results = max(1, int(top_k or 1))
+                                    subquery_max_results = max(1, int(retrieval_top_k or 1))
 
                                 async def _fetch_subquery(sq: str) -> list[Document]:
                                     try:
                                         sq_cfg = replace(config, max_results=subquery_max_results)
                                     except TypeError:
                                         sq_cfg = config
-                                    res = await _resilient_call(
+                                    res = await _execute_retrieval_variant(
                                         "retrieval_decomposition",
-                                        retriever.retrieve,
-                                        query=sq,
-                                        sources=data_sources,
-                                        config=sq_cfg,
-                                        index_namespace=index_namespace,
-                                        allowed_media_ids=include_media_ids,
-                                        allowed_note_ids=include_note_ids,
+                                        sq,
+                                        retrieval_cfg=sq_cfg,
+                                        top_k_override=subquery_max_results,
                                     )
                                     return res if isinstance(res, list) else []
 
@@ -3244,7 +3740,7 @@ async def unified_rag_pipeline(
                                         result.documents,
                                         key=lambda d: getattr(d, "score", 0.0),
                                         reverse=True,
-                                    )[: top_k]
+                                    )[: retrieval_top_k]
                                 except (TypeError, ValueError):
                                     # Fallback: leave documents in current order
                                     pass
@@ -3264,6 +3760,8 @@ async def unified_rag_pipeline(
                             asyncio.TimeoutError,
                         ) as _dec_err:
                             result.errors.append(f"Query decomposition failed: {str(_dec_err)}")
+
+                    _apply_workspace_filtering_to_result()
 
                     # Attach retrieval guidance prompt in metadata for downstream awareness/debugging
                     try:
@@ -3556,12 +4054,8 @@ async def unified_rag_pipeline(
                 if followups:
                     # Run in parallel
                     tasks = [
-                        retriever.retrieve(
-                            query=fq,
-                            sources=data_sources,
-                            config=config,
-                            index_namespace=index_namespace,
-                        ) for fq in followups
+                        _execute_retrieval_variant("retrieval_followup", fq)
+                        for fq in followups
                     ]
                     try:
                         follow_results = await asyncio.gather(*tasks)
@@ -4031,22 +4525,14 @@ async def unified_rag_pipeline(
                         return []
                     try:
                         # Reuse the same retriever setup
-                        db_paths = {}
-                        if media_db_path:
-                            db_paths["media_db"] = media_db_path
-                        if notes_db_path:
-                            db_paths["notes_db"] = notes_db_path
-                        if character_db_path:
-                            db_paths["character_cards_db"] = character_db_path
-                        if kanban_db_path:
-                            db_paths["kanban_db"] = kanban_db_path
+                        db_paths = _build_pipeline_db_paths()
 
                         retriever = _build_multi_retriever(db_paths)
                         config = RetrievalConfig(
-                            max_results=top_k,
-                            min_score=min_score,
-                            use_fts=(search_mode in ["fts", "hybrid"]),
-                            use_vector=(search_mode in ["vector", "hybrid"]),
+                            max_results=retrieval_top_k,
+                            min_score=retrieval_min_score,
+                            use_fts=(retrieval_search_mode in ["fts", "hybrid"]),
+                            use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
                             include_metadata=True,
                             fts_level=fts_level,
                             enable_text_late_chunking=enable_text_late_chunking,
@@ -4062,7 +4548,8 @@ async def unified_rag_pipeline(
                             query=gap_query,
                             sources=data_sources,
                             config=config,
-                            index_namespace=index_namespace,
+                            index_namespace=retrieval_index_namespace,
+                            retrieval_plan=_retrieval_plan_for(gap_query),
                             allowed_media_ids=include_media_ids,
                             allowed_note_ids=include_note_ids,
                         )
@@ -4247,20 +4734,14 @@ async def unified_rag_pipeline(
                     # Re-run retrieval with rewritten query
                     if MultiDatabaseRetriever and RetrievalConfig:
                         try:
-                            db_paths = {}
-                            if media_db_path:
-                                db_paths["media_db"] = media_db_path
-                            if notes_db_path:
-                                db_paths["notes_db"] = notes_db_path
-                            if character_db_path:
-                                db_paths["character_cards_db"] = character_db_path
+                            db_paths = _build_pipeline_db_paths()
 
                             retriever = _build_multi_retriever(db_paths)
                             retrieval_config = RetrievalConfig(
-                                max_results=top_k,
-                                min_score=min_score,
-                                use_fts=(search_mode in ["fts", "hybrid"]),
-                                use_vector=(search_mode in ["vector", "hybrid"]),
+                                max_results=retrieval_top_k,
+                                min_score=retrieval_min_score,
+                                use_fts=(retrieval_search_mode in ["fts", "hybrid"]),
+                                use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
                                 include_metadata=True,
                                 fts_level=fts_level,
                                 enable_text_late_chunking=enable_text_late_chunking,
@@ -4275,7 +4756,8 @@ async def unified_rag_pipeline(
                                 query=rewritten_query,
                                 sources=data_sources,
                                 config=retrieval_config,
-                                index_namespace=index_namespace,
+                                index_namespace=retrieval_index_namespace,
+                                retrieval_plan=_retrieval_plan_for(rewritten_query),
                             )
 
                             if new_docs:
@@ -5023,7 +5505,27 @@ async def unified_rag_pipeline(
         except (AttributeError, TypeError, ValueError):
             gated_generation = False
 
-        if enable_generation and not gated_generation and not result.cache_hit:
+        effective_enable_generation = _resolve_effective_enable_generation()
+
+        if not effective_enable_generation:
+            retrieval_only_result = build_retrieval_only_result(
+                resolved_request=resolved_request,
+                retrieval_plan=retrieval_plan,
+                retrieval_result=RetrievedEvidence(
+                    documents=list(result.documents or []),
+                    metadata=dict(result.metadata or {}),
+                ),
+            )
+            retrieval_only_result = coordinate_standard_result_evidence(
+                retrieval_only_result,
+                resolved_request,
+                retrieval_plan=retrieval_plan,
+            )
+            standard_evidence_coordinated = True
+            result.documents = list(retrieval_only_result.documents)
+            result.metadata.update(dict(retrieval_only_result.metadata or {}))
+
+        if effective_enable_generation and not gated_generation and not result.cache_hit:
             generation_start = time.time()
             try:
                 # --- OTEL: generation span ---
@@ -5210,21 +5712,74 @@ async def unified_rag_pipeline(
                             result.metadata.setdefault("synthesis", {})
                             result.metadata["synthesis"].update({"enabled": True, "aborted": False, "durations": {"draft": d_dt, "critique": c_dt, "refine": r_dt}})
                     else:
-                        # Single-pass generation
-                        answer = await _resilient_call(
-                            "generation",
-                            generator.generate,
-                            query=query,
-                            context=context,
-                            prompt_template=generation_prompt,
-                            max_tokens=max_generation_tokens
-                        )
-                        # Normalize
-                        if isinstance(answer, dict) and "answer" in answer:
-                            result.generated_answer = answer.get("answer")
-                            result.metadata.update({k: v for k, v in answer.items() if k != "answer"})
+                        async def _generate_standard_answer(
+                            *,
+                            query: str,
+                            context: str,
+                            generation_prompt: Optional[str] = None,
+                            max_generation_tokens: Optional[int] = None,
+                        ) -> Any:
+                            return await _resilient_call(
+                                "generation",
+                                generator.generate,
+                                query=query,
+                                context=context,
+                                prompt_template=generation_prompt,
+                                max_tokens=max_generation_tokens,
+                            )
+
+                        resolved_request.payload["generation_prompt"] = generation_prompt
+                        resolved_request.payload["max_generation_tokens"] = max_generation_tokens
+                        generation_phase_kwargs: dict[str, Any] = {
+                            "resolved_request": resolved_request,
+                            "retrieval_plan": retrieval_plan,
+                            "derived_evidence": SimpleNamespace(
+                                documents=list(context_docs),
+                                metadata=dict(result.metadata),
+                                citations=list((result.metadata or {}).get("chunk_citations", []) or []),
+                                verification_report=(result.metadata or {}).get("verification_report"),
+                            ),
+                            "generate_answer_fn": _generate_standard_answer,
+                            "generation_context": context,
+                        }
+                        generation_result = await execute_generation_phase(**generation_phase_kwargs)
+                        if isinstance(generation_result, dict):
+                            generation_result = coordinate_standard_result_evidence(
+                                generation_result,
+                                resolved_request,
+                                retrieval_plan=retrieval_plan,
+                            )
                         else:
-                            result.generated_answer = answer
+                            generation_result = coordinate_standard_result_evidence(
+                                generation_result,
+                                resolved_request,
+                                retrieval_plan=retrieval_plan,
+                            )
+                        standard_evidence_coordinated = True
+                        if isinstance(generation_result, dict):
+                            result.generated_answer = generation_result.get(
+                                "generated_answer",
+                                generation_result.get("answer"),
+                            )
+                            generation_documents = (
+                                generation_result.get("documents")
+                                or generation_result.get("sources")
+                            )
+                            if generation_documents is not None:
+                                result.documents = list(generation_documents)
+                            result.metadata.update(dict(generation_result.get("metadata") or {}))
+                            if generation_result.get("chunk_citations") is not None:
+                                result.metadata["chunk_citations"] = list(
+                                    generation_result.get("chunk_citations") or []
+                                )
+                            if generation_result.get("verification_report") is not None:
+                                result.metadata["verification_report"] = generation_result.get("verification_report")
+                        else:
+                            result.generated_answer = generation_result.generated_answer
+                            result.metadata.update(dict(generation_result.metadata or {}))
+                            result.metadata["chunk_citations"] = list(generation_result.chunk_citations or [])
+                            if generation_result.verification_report is not None:
+                                result.metadata["verification_report"] = generation_result.verification_report
                     result.timings["answer_generation"] = time.time() - generation_start
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram
@@ -5290,7 +5845,7 @@ async def unified_rag_pipeline(
                 if _otel_cm_gen is not None:
                     with contextlib.suppress(AttributeError, RuntimeError, TypeError, ValueError):
                         _otel_cm_gen.__exit__(None, None, None)
-        elif enable_generation and gated_generation:
+        elif effective_enable_generation and gated_generation:
             # Record a metadata entry and bump a metric for observability
             result.metadata.setdefault("generation_gate", {})
             result.metadata["generation_gate"].update({
@@ -5505,15 +6060,7 @@ async def unified_rag_pipeline(
                     async def _retrieve_for_claim(c_text: str, top_k: int = 5):
                         try:
                             if MultiDatabaseRetriever and RetrievalConfig:
-                                db_paths = {}
-                                if media_db_path:
-                                    db_paths["media_db"] = media_db_path
-                                if notes_db_path:
-                                    db_paths["notes_db"] = notes_db_path
-                                if character_db_path:
-                                    db_paths["character_cards_db"] = character_db_path
-                                if kanban_db_path:
-                                    db_paths["kanban_db"] = kanban_db_path
+                                db_paths = _build_pipeline_db_paths()
                                 # Initialize multi retriever scoped to user's databases
                                 mdr = _build_multi_retriever(db_paths)
                                 ds = list(resolved_data_sources)
@@ -6288,6 +6835,8 @@ async def unified_rag_pipeline(
             except ImportError:
                 result.errors.append("Cost tracking module not available")
 
+        _apply_workspace_filtering_to_result()
+
         # ========== CACHE STORAGE ==========
         if enable_cache and not result.cache_hit and result.documents:
             try:
@@ -6510,6 +7059,13 @@ async def unified_rag_pipeline(
             logger.debug(f"Timings: {result.timings}")
             logger.debug(f"Errors: {result.errors}")
 
+    if not standard_evidence_coordinated:
+        result = coordinate_standard_result_evidence(
+            result,
+            resolved_request,
+            retrieval_plan=retrieval_plan,
+        )
+
     # Convert to Pydantic response
     try:
         from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
@@ -6676,6 +7232,25 @@ async def unified_batch_pipeline(
     # Map cluster head index -> representative query text
     heads = list(clusters.keys())
     head_queries = [rep_texts[h] for h in heads]
+    base_retrieval_plan = kwargs.get("retrieval_plan")
+    base_resolved_request = kwargs.get("resolved_request")
+
+    def _pipeline_kwargs_for_query(query_text: str) -> dict[str, Any]:
+        effective_kwargs = dict(kwargs)
+        if isinstance(base_retrieval_plan, RetrievalPlan):
+            effective_kwargs["retrieval_plan"] = replace(
+                base_retrieval_plan,
+                query=query_text,
+            )
+        if isinstance(base_resolved_request, ResolvedRAGRequest):
+            payload = dict(base_resolved_request.payload or {})
+            payload["query"] = query_text
+            effective_kwargs["resolved_request"] = replace(
+                base_resolved_request,
+                query=query_text,
+                payload=payload,
+            )
+        return effective_kwargs
 
     # Run head queries via batch_utils for concurrency control and fail-fast
     head_results: list[Any] = []
@@ -6690,7 +7265,10 @@ async def unified_batch_pipeline(
 
         async def _process_head(index: int, query: str) -> UnifiedPipelineResult:
             async with semaphore:
-                return await unified_rag_pipeline(query=query, **kwargs)
+                return await unified_rag_pipeline(
+                    query=query,
+                    **_pipeline_kwargs_for_query(query),
+                )
 
         head_results = [RuntimeError("Missing result")] * len(head_queries)
         tasks: dict[asyncio.Task[UnifiedPipelineResult], int] = {}
@@ -6758,7 +7336,10 @@ async def unified_batch_pipeline(
             from .batch_utils import run_batch as _run_batch
 
             async def _process_head(query: str) -> UnifiedPipelineResult:
-                return await unified_rag_pipeline(query=query, **kwargs)
+                return await unified_rag_pipeline(
+                    query=query,
+                    **_pipeline_kwargs_for_query(query),
+                )
 
             _batch_result = await _run_batch(
                 items=head_queries,
@@ -6774,7 +7355,10 @@ async def unified_batch_pipeline(
             # Fallback to inline semaphore if batch_utils unavailable
             async def process_with_semaphore(query: str) -> UnifiedPipelineResult:
                 async with semaphore:
-                    return await unified_rag_pipeline(query=query, **kwargs)
+                    return await unified_rag_pipeline(
+                        query=query,
+                        **_pipeline_kwargs_for_query(query),
+                    )
 
             tasks = [process_with_semaphore(q) for q in head_queries]
             head_results = await asyncio.gather(*tasks, return_exceptions=True)

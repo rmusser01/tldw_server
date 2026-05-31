@@ -99,8 +99,10 @@ def search_springer(
         records = data.get("records") or []
         items = [_normalize_record(rec) for rec in records]
         return items, total, None
-    except Exception as e:
-        return None, 0, f"Springer error: {str(e)}"
+    except TimeoutError:
+        return None, 0, "Springer request timed out."
+    except Exception:
+        return None, 0, "Springer request failed."
 
 
 def get_springer_by_doi(doi: str) -> tuple[dict | None, str | None]:
@@ -119,5 +121,7 @@ def get_springer_by_doi(doi: str) -> tuple[dict | None, str | None]:
         if not records:
             return None, None
         return _normalize_record(records[0]), None
-    except Exception as e:
-        return None, f"Springer error: {str(e)}"
+    except TimeoutError:
+        return None, "Springer request timed out."
+    except Exception:
+        return None, "Springer request failed."

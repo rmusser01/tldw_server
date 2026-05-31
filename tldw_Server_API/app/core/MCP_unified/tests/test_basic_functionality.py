@@ -201,6 +201,55 @@ class TestRBACPolicy:
         )
 
 
+class TestBaseModule:
+    """Test shared module base behavior."""
+
+    def test_module_config_preserves_positional_settings_argument(self) -> None:
+        """Test the new factory field does not shift legacy positional settings."""
+        config = ModuleConfig(
+            "positional_module",
+            "1.0.0",
+            "",
+            "general",
+            True,
+            30,
+            3,
+            5,
+            60,
+            20,
+            2.0,
+            300,
+            {"mode": "legacy"},
+        )
+
+        assert config.settings == {"mode": "legacy"}
+        assert config.circuit_breaker_factory is None
+
+    def test_module_config_accepts_circuit_breaker_factory(self) -> None:
+        """Test module construction can inject circuit breaker creation."""
+        fake_breaker = object()
+        calls: list[tuple[str, Any]] = []
+
+        def _fake_factory(*, name: str, config: Any) -> object:
+            calls.append((name, config))
+            return fake_breaker
+
+        module = TestModule(
+            ModuleConfig(
+                name="custom_breaker_module",
+                circuit_breaker_factory=_fake_factory,
+            )
+        )
+
+        assert module._circuit_breaker is fake_breaker  # noqa: SLF001
+        assert calls
+        breaker_name, breaker_config = calls[0]
+        assert breaker_name == "mcp_custom_breaker_module"
+        assert breaker_config.failure_threshold == 5
+        assert breaker_config.category == "mcp"
+        assert breaker_config.service == "custom_breaker_module"
+
+
 @pytest.mark.asyncio
 class TestModuleRegistry:
     """Test module registry"""

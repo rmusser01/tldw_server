@@ -7,6 +7,25 @@ import { useEvaluationsStore } from "@/store/evaluations"
 
 const loadSpy = vi.fn()
 const closeViewerSpy = vi.fn()
+const datasetListState = {
+  data: {
+    ok: true,
+    data: {
+      data: [
+        {
+          id: "dataset-1",
+          name: "Dataset One",
+          sample_count: 6,
+          created: 0,
+          created_by: "user_123"
+        }
+      ]
+    }
+  },
+  isLoading: false,
+  isError: false,
+  error: null as Error | null
+}
 
 vi.mock("antd", async () => {
   const actual = await vi.importActual<any>("antd")
@@ -60,24 +79,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("../../hooks/useDatasets", () => ({
-  useDatasetsList: () => ({
-    data: {
-      ok: true,
-      data: {
-        data: [
-          {
-            id: "dataset-1",
-            name: "Dataset One",
-            sample_count: 6,
-            created: 0,
-            created_by: "user_123"
-          }
-        ]
-      }
-    },
-    isLoading: false,
-    isError: false
-  }),
+  useDatasetsList: () => datasetListState,
   useCreateDataset: () => ({
     mutateAsync: vi.fn(),
     isPending: false
@@ -139,6 +141,23 @@ describe("DatasetsTab sample pagination", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    datasetListState.data = {
+      ok: true,
+      data: {
+        data: [
+          {
+            id: "dataset-1",
+            name: "Dataset One",
+            sample_count: 6,
+            created: 0,
+            created_by: "user_123"
+          }
+        ]
+      }
+    }
+    datasetListState.isLoading = false
+    datasetListState.isError = false
+    datasetListState.error = null
     useEvaluationsStore.getState().resetStore()
     useEvaluationsStore.setState({
       viewingDataset: {
@@ -175,5 +194,20 @@ describe("DatasetsTab sample pagination", () => {
 
     expect(screen.getByText(/sample-1/i)).toBeInTheDocument()
     expect(screen.queryByText(/sample-6/i)).not.toBeInTheDocument()
+  })
+
+  it("shows dataset endpoint diagnostics without replacing the create action", () => {
+    datasetListState.data = { ok: false, error: "HTTP 503" } as any
+    datasetListState.isError = true
+    datasetListState.error = new Error("HTTP 503")
+
+    render(<DatasetsTab />)
+
+    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Unable to load datasets")).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/evaluations/datasets"
+    )
+    expect(screen.getByRole("button", { name: "New dataset" })).toBeEnabled()
   })
 })

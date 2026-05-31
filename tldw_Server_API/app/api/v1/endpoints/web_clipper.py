@@ -7,9 +7,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, User
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
     WebClipperEnrichmentPayload,
     WebClipperEnrichmentResponse,
@@ -17,15 +19,16 @@ from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
     WebClipperSaveResponse,
     WebClipperStatusResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.WebClipper.service import WebClipperService
+from tldw_Server_API.app.core.Workspaces.source_jobs import enqueue_workspace_source_ingest_job
 
 router = APIRouter(tags=["web-clipper"])
 
@@ -47,7 +50,7 @@ async def _check_rate_limit(
     try:
         allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), scope)
     except Exception as exc:
-        logger.error("Web clipper rate limiter unavailable for scope {}: {}", scope, exc)
+        logger.error("Web clipper rate limiter unavailable")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Rate limiter unavailable",
@@ -65,25 +68,40 @@ async def save_web_clip(
     request: Request,
     payload: WebClipperSaveRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    jm: JobManager | None = Depends(try_get_job_manager),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
     current_user: User = Depends(get_request_user),
 ) -> WebClipperSaveResponse:
     _ = request
     await _check_rate_limit(rate_limiter=rate_limiter, current_user=current_user, scope="web_clipper.save")
-    service = WebClipperService(db=db, user_id=current_user.id)
+    service = WebClipperService(
+        db=db,
+        media_db=media_db,
+        user_id=current_user.id,
+        promote_workspace_sources=True,
+        workspace_source_job_enqueuer=lambda workspace_id, src: enqueue_workspace_source_ingest_job(
+            jm=jm,
+            owner_user_id=current_user.id,
+            workspace_id=workspace_id,
+            src=src,
+        ),
+    )
     try:
         result = await asyncio.to_thread(service.save_clip, payload)
         if result.status == "failed":
-            detail = result.warnings[0] if result.warnings else "Canonical note save failed."
-            logger.error("Web clipper canonical save failed for clip_id {}: {}", payload.clip_id, detail)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
+            logger.error("Web clipper canonical save failed")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Canonical note save failed.",
+            )
         return result
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except ConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        if isinstance(exc, CharactersRAGDBError) and not isinstance(exc, ConflictError):
+            logger.error("Web clipper save failed")
+        raise map_db_error_to_http(exc, default_detail="Internal server error") from exc
     except _WEB_CLIPPER_ENDPOINT_EXCEPTIONS as exc:
-        logger.error("Web clipper save failed for clip_id {}: {}", payload.clip_id, exc)
+        logger.error("Web clipper save failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error") from exc
 
 
@@ -101,11 +119,16 @@ async def get_web_clip_status(
     try:
         return await asyncio.to_thread(service.get_clip_status, clip_id)
     except ConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise map_db_error_to_http(
+            exc,
+            conflict_status_code=status.HTTP_404_NOT_FOUND,
+        ) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        if isinstance(exc, CharactersRAGDBError):
+            logger.error("Web clipper status failed")
+        raise map_db_error_to_http(exc, default_detail="Internal server error") from exc
     except _WEB_CLIPPER_ENDPOINT_EXCEPTIONS as exc:
-        logger.error("Web clipper status failed for clip_id {}: {}", clip_id, exc)
+        logger.error("Web clipper status failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error") from exc
 
 
@@ -128,9 +151,14 @@ async def persist_web_clip_enrichment(
     try:
         return await asyncio.to_thread(service.persist_enrichment, clip_id, payload)
     except ConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise map_db_error_to_http(
+            exc,
+            conflict_status_code=status.HTTP_404_NOT_FOUND,
+        ) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        if isinstance(exc, CharactersRAGDBError):
+            logger.error("Web clipper enrichment failed")
+        raise map_db_error_to_http(exc, default_detail="Internal server error") from exc
     except _WEB_CLIPPER_ENDPOINT_EXCEPTIONS as exc:
-        logger.error("Web clipper enrichment failed for clip_id {}: {}", clip_id, exc)
+        logger.error("Web clipper enrichment failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error") from exc

@@ -527,6 +527,7 @@ def test_list_notes(client: TestClient):
                                 expected_db_client_id)
     ]
     mock_chacha_db_instance.list_notes.return_value = mock_notes_data
+    mock_chacha_db_instance.count_notes.return_value = len(mock_notes_data)
     response = client.get("/api/v1/notes/?limit=10&offset=0")
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -845,6 +846,14 @@ def test_export_notes_route_not_shadowed(client: TestClient):
     data = response.json()
     assert data["count"] == 1
     assert data["notes"][0]["id"] == note_id_val
+    assert data["pagination"] == {
+        "mode": "offset",
+        "limit": 1000,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
     mock_chacha_db_instance.list_notes.assert_called_once_with(limit=1000, offset=0)
 
 
@@ -1131,6 +1140,7 @@ def test_list_keyword_collections_with_keywords(client: TestClient):
         expected_db_client_id,
     )
     mock_chacha_db_instance.list_keyword_collections.return_value = [collection_row]
+    mock_chacha_db_instance.count_keyword_collections.return_value = 1
     mock_chacha_db_instance.get_keywords_for_collection.return_value = [keyword_row]
 
     response = client.get("/api/v1/notes/collections?include_keywords=true")

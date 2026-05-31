@@ -108,8 +108,10 @@ def search_openalex(
         total = (data.get("meta") or {}).get("count") or 0
         items = [_normalize_openalex_work(it) for it in results]
         return items, int(total), None
-    except Exception as e:
-        return None, 0, f"OpenAlex error: {str(e)}"
+    except TimeoutError:
+        return None, 0, "OpenAlex request timed out."
+    except Exception:
+        return None, 0, "OpenAlex request failed."
 
 
 def get_openalex_by_doi(doi: str) -> tuple[dict | None, str | None]:
@@ -123,8 +125,10 @@ def get_openalex_by_doi(doi: str) -> tuple[dict | None, str | None]:
             return None, None
         data = r.json()
         return _normalize_openalex_work(data), None
-    except Exception as e:
-        return None, f"OpenAlex error: {str(e)}"
+    except TimeoutError:
+        return None, "OpenAlex request timed out."
+    except Exception:
+        return None, "OpenAlex request failed."
 
 
 # Remove duplicate stubs (implementation above)

@@ -1,7 +1,15 @@
 from __future__ import annotations
 
-import os
+import importlib
+import json
+
 import pytest
+
+
+def _capture_pricing_warnings(module):
+    messages: list[str] = []
+    sink_id = module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    return messages, sink_id
 
 
 def test_pricing_overrides_env(monkeypatch):
@@ -32,3 +40,83 @@ def test_pricing_overrides_env(monkeypatch):
     assert pytest.approx(p_in2, rel=1e-6) == 0.123
     assert pytest.approx(p_out2, rel=1e-6) == 0.456
     assert est2 is True
+
+
+def test_pricing_overrides_env_preserves_estimated_metadata(monkeypatch):
+    monkeypatch.setenv(
+        "PRICING_OVERRIDES",
+        json.dumps(
+            {
+                "Qwen": {
+                    "qwen-new-current": {
+                        "prompt": 0.001,
+                        "completion": 0.002,
+                        "estimated": True,
+                    }
+                }
+            }
+        ),
+    )
+
+    from tldw_Server_API.app.core.Usage.pricing_catalog import PricingCatalog
+
+    catalog = PricingCatalog()
+
+    p_in, p_out, est = catalog.get_rates("qwen", "qwen-new-current")
+    assert pytest.approx(p_in, rel=1e-6) == 0.001
+    assert pytest.approx(p_out, rel=1e-6) == 0.002
+    assert est is True
+    assert "qwen-new-current" in catalog._catalog["qwen"]
+
+
+def test_pricing_overrides_env_parse_warning_is_sanitized(monkeypatch):
+    mod = importlib.import_module("tldw_Server_API.app.core.Usage.pricing_catalog")
+    monkeypatch.setenv("PRICING_OVERRIDES", "{invalid")
+    messages, sink_id = _capture_pricing_warnings(mod)
+
+    try:
+        mod.PricingCatalog()
+    finally:
+        mod.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Failed to parse PRICING_OVERRIDES" in joined
+    assert "Expecting property name" not in joined
+
+
+def test_pricing_overrides_file_warning_is_sanitized(monkeypatch):
+    mod = importlib.import_module("tldw_Server_API.app.core.Usage.pricing_catalog")
+
+    class ExplodingPath:
+        def __init__(self, *_args):
+            pass
+
+        def resolve(self):
+            return self
+
+        @property
+        def parents(self):
+            return [self, self, self, self]
+
+        def __truediv__(self, _path):
+            return self
+
+        def exists(self):
+            return True
+
+        def read_text(self):
+            raise OSError("pricing file exploded at /private/model_pricing.json")
+
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    monkeypatch.setattr(mod, "Path", ExplodingPath)
+    messages, sink_id = _capture_pricing_warnings(mod)
+
+    try:
+        mod.PricingCatalog()
+    finally:
+        mod.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Failed to load pricing overrides file" in joined
+    assert "pricing file exploded" not in joined
+    assert "/private/model_pricing.json" not in joined

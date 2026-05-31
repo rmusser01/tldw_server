@@ -122,6 +122,20 @@ Reading List supports URL capture, clean text extraction, tagging, import/export
 
 See: [Reading List API](Reading_List_API.md)
 
+#### Chatbooks - `/api/v1/chatbooks`
+
+Chatbooks provide portable backup, restore, sharing, and migration workflows. The same import and preview endpoints also support OpenWebUI "Export Chats" JSON files when `source_format=openwebui_json` and uploaded OpenWebUI `webui.db` databases when `source_format=openwebui_db`. After OpenWebUI import, the dedicated hydration endpoints preview and run server-local attachment hydration to restore referenced images/files from an allowed OpenWebUI data root.
+
+- `POST /api/v1/chatbooks/export` - create a `.chatbook` archive
+- `POST /api/v1/chatbooks/import` - import a `.chatbook` archive, OpenWebUI chat export JSON, or OpenWebUI database. Database imports require `selected_openwebui_user_id`.
+- `POST /api/v1/chatbooks/preview` - inspect a chatbook, OpenWebUI JSON export, or OpenWebUI database before importing
+- `POST /api/v1/chatbooks/openwebui/hydration/preview` - preview server-local OpenWebUI attachment hydration for imported conversation references
+- `POST /api/v1/chatbooks/openwebui/hydration/jobs` and `GET /api/v1/chatbooks/openwebui/hydration/jobs/{job_id}` - create and inspect OpenWebUI attachment hydration jobs
+- `GET /api/v1/chatbooks/export/jobs` and `GET /api/v1/chatbooks/import/jobs` - list background jobs
+- `GET /api/v1/chatbooks/download/{job_id}` - download a completed export
+
+See: [Chatbook API Documentation](Chatbook_API_Documentation.md)
+
 #### Reminder Tasks and Notifications
 
 - Tasks: `POST /api/v1/tasks`, `GET /api/v1/tasks`, `PATCH /api/v1/tasks/{task_id}`, `DELETE /api/v1/tasks/{task_id}`

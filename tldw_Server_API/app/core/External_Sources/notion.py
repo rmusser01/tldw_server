@@ -36,7 +36,7 @@ class NotionConnector(BaseConnector):
         return f"https://api.notion.com/v1/oauth/authorize?{urlencode(params)}"
 
     async def exchange_code(self, code: str, redirect_uri: str) -> dict[str, Any]:
-        token_url = "https://api.notion.com/v1/oauth/token"
+        oauth_endpoint = "https://api.notion.com/v1/oauth/token"
         headers = {"Content-Type": "application/json"}
         body = {
             "grant_type": "authorization_code",
@@ -48,7 +48,7 @@ class NotionConnector(BaseConnector):
         if self.client_id and self.client_secret:
             basic = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
             headers["Authorization"] = f"Basic {basic}"
-        resp = await afetch(method="POST", url=token_url, json=body, headers=headers, timeout=30)
+        resp = await afetch(method="POST", url=oauth_endpoint, json=body, headers=headers, timeout=30)
         try:
             resp.raise_for_status()
             tok = resp.json()
@@ -104,8 +104,8 @@ class NotionConnector(BaseConnector):
                             if arr:
                                 title = arr[0].get("plain_text")
                                 break
-                except Exception as title_extract_error:
-                    logger.debug("Notion connector failed to extract page title", exc_info=title_extract_error)
+                except Exception:
+                    logger.debug("Notion connector failed to extract page title")
                 items.append({"id": pid, "name": title or pid, "type": "page", "last_edited_time": r.get("last_edited_time")})
             return items, data.get("next_cursor")
         else:
@@ -139,8 +139,8 @@ class NotionConnector(BaseConnector):
                             if arr:
                                 title = arr[0].get("plain_text")
                                 break
-                except Exception as title_extract_error:
-                    logger.debug("Notion connector failed to extract search result title", exc_info=title_extract_error)
+                except Exception:
+                    logger.debug("Notion connector failed to extract search result title")
                 items.append({"id": pid, "name": title or pid, "type": "page", "last_edited_time": r.get("last_edited_time")})
             elif obj == "database":
                 did = r.get("id")
@@ -304,7 +304,7 @@ class NotionConnector(BaseConnector):
         """Refresh Notion access token using Basic auth."""
         if not (self.client_id and self.client_secret and refresh_token):
             return None
-        token_url = "https://api.notion.com/v1/oauth/token"
+        oauth_endpoint = "https://api.notion.com/v1/oauth/token"
         headers = {"Content-Type": "application/json"}
         import base64
         basic = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
@@ -313,7 +313,7 @@ class NotionConnector(BaseConnector):
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
         }
-        resp = await afetch(method="POST", url=token_url, json=body, headers=headers, timeout=30)
+        resp = await afetch(method="POST", url=oauth_endpoint, json=body, headers=headers, timeout=30)
         try:
             resp.raise_for_status()
             tok = resp.json()

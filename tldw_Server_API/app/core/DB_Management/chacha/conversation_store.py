@@ -25,6 +25,31 @@ class ConversationStore:
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
 
+    @staticmethod
+    def _result_row_to_dict(row: Any, result: Any | None = None) -> dict[str, Any] | None:
+        """Convert mapping and tuple-style backend result rows into dictionaries."""
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return dict(row)
+        row_mapping = getattr(row, "_mapping", None)
+        if row_mapping is not None:
+            return dict(row_mapping)
+        try:
+            return dict(row)
+        except (TypeError, ValueError):
+            pass
+
+        keys_attr = getattr(result, "keys", None)
+        keys = list(keys_attr() if callable(keys_attr) else (keys_attr or []))
+        if not keys:
+            description = getattr(result, "description", None)
+            if description:
+                keys = [column[0] for column in description]
+        if not keys:
+            raise CharactersRAGDBError("Database result row did not expose column names.")
+        return dict(zip(keys, row, strict=False))
+
     def _ensure_conversation_settings_table(self) -> None:
         """Ensure the conversation_settings table exists for the active backend."""
         if self._db.backend_type == BackendType.SQLITE:
@@ -212,7 +237,7 @@ class ConversationStore:
         assistant_kind: Any,
         assistant_id: Any,
         persona_memory_mode: Any,
-    ) -> tuple[str, str, int | None, str | None]:
+    ) -> tuple[str | None, str | None, int | None, str | None]:
         normalized_kind = self._db._normalize_nullable_text(assistant_kind)
         normalized_assistant_id = self._db._normalize_nullable_text(assistant_id)
         normalized_memory_mode = self._db._normalize_nullable_text(persona_memory_mode)
@@ -221,7 +246,7 @@ class ConversationStore:
             normalized_kind = "character" if character_id is not None else None
         if normalized_kind is None:
             if character_id is None and normalized_assistant_id is None and normalized_memory_mode is None:
-                raise InputError("Required field 'character_id' is missing")  # noqa: TRY003
+                return None, None, None, None
             raise InputError(
                 "Conversation requires either 'character_id' or assistant identity fields."
             )  # noqa: TRY003
@@ -384,6 +409,313 @@ class ConversationStore:
             return dict(row) if row else None
         except CharactersRAGDBError as exc:
             logger.error(f"Database error fetching conversation ID {conversation_id}: {exc}")
+            raise
+
+    def upsert_conversation_from_sync(
+        self,
+        *,
+        conversation_id: str,
+        title: str | None,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+        root_id: str | None = None,
+        assistant_kind: str | None = None,
+        assistant_id: str | None = None,
+        character_id: int | str | None = None,
+        persona_memory_mode: str | None = None,
+        state: str | None = None,
+        topic_label: str | None = None,
+        cluster_id: str | None = None,
+        source: str | None = None,
+        external_ref: str | None = None,
+        rating: int | None = None,
+        scope_type: str | None = None,
+        workspace_id: str | None = None,
+    ) -> bool:
+        """Create or update a conversation projection from an accepted Sync v2 envelope."""
+
+        del object_hash
+        normalized_id = str(conversation_id).strip()
+        if not normalized_id:
+            raise InputError("conversation_id cannot be empty.")  # noqa: TRY003
+        if object_revision < 1:
+            raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
+        if rating is not None and not (1 <= rating <= 5):
+            raise InputError(f"Rating must be between 1 and 5. Got: {rating}")  # noqa: TRY003
+
+        assistant_kind, assistant_id, normalized_character_id, persona_memory_mode = (
+            self._normalize_conversation_assistant_identity(
+                character_id=character_id,
+                assistant_kind=assistant_kind,
+                assistant_id=assistant_id,
+                persona_memory_mode=persona_memory_mode,
+            )
+        )
+        normalized_scope_type, normalized_workspace_id = self._normalize_scope(scope_type, workspace_id)
+        normalized_state = self._normalize_sync_conversation_state(state)
+        now = self._db._get_current_utc_timestamp_iso()
+        normalized_title = None if title is None else str(title)
+        normalized_root_id = str(root_id).strip() if root_id else normalized_id
+
+        query = """
+            INSERT INTO conversations (
+                id, root_id, character_id, assistant_kind, assistant_id, persona_memory_mode,
+                title, state, topic_label, cluster_id, source, external_ref, rating,
+                created_at, last_modified, client_id, version, deleted, scope_type, workspace_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                root_id = excluded.root_id,
+                character_id = excluded.character_id,
+                assistant_kind = excluded.assistant_kind,
+                assistant_id = excluded.assistant_id,
+                persona_memory_mode = excluded.persona_memory_mode,
+                title = excluded.title,
+                state = excluded.state,
+                topic_label = excluded.topic_label,
+                cluster_id = excluded.cluster_id,
+                source = excluded.source,
+                external_ref = excluded.external_ref,
+                rating = excluded.rating,
+                last_modified = excluded.last_modified,
+                client_id = excluded.client_id,
+                version = excluded.version,
+                deleted = excluded.deleted,
+                scope_type = excluded.scope_type,
+                workspace_id = excluded.workspace_id
+        """
+        params = (
+            normalized_id,
+            normalized_root_id,
+            normalized_character_id,
+            assistant_kind,
+            assistant_id,
+            persona_memory_mode,
+            normalized_title,
+            normalized_state,
+            self._db._normalize_nullable_text(topic_label),
+            self._db._normalize_nullable_text(cluster_id),
+            self._db._normalize_nullable_text(source),
+            self._db._normalize_nullable_text(external_ref),
+            rating,
+            now,
+            now,
+            sync_client_id,
+            object_revision,
+            False,
+            normalized_scope_type,
+            normalized_workspace_id,
+        )
+        try:
+            with self._db.transaction() as conn:
+                conn.execute(query, params)
+            logger.info("Upserted conversation projection from Sync v2 for ID: {}.", normalized_id)
+            return True
+        except sqlite3.IntegrityError as exc:
+            raise CharactersRAGDBError(
+                f"Database integrity error upserting synced conversation: {exc}"
+            ) from exc  # noqa: TRY003
+        except CharactersRAGDBError:
+            logger.error("Database error upserting synced conversation ID {}.", normalized_id, exc_info=True)
+            raise
+
+    def tombstone_conversation_from_sync(
+        self,
+        *,
+        conversation_id: str,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+    ) -> bool:
+        """Soft-delete a conversation projection from an accepted Sync v2 tombstone."""
+
+        del object_hash
+        normalized_id = str(conversation_id).strip()
+        if not normalized_id:
+            raise InputError("conversation_id cannot be empty.")  # noqa: TRY003
+        if object_revision < 1:
+            raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
+
+        now = self._db._get_current_utc_timestamp_iso()
+        query = """
+            UPDATE conversations
+               SET deleted = ?,
+                   last_modified = ?,
+                   version = ?,
+                   client_id = ?
+             WHERE id = ?
+        """
+        try:
+            with self._db.transaction() as conn:
+                cursor = conn.execute(query, (True, now, object_revision, sync_client_id, normalized_id))
+                if cursor.rowcount == 0:
+                    raise ConflictError(  # noqa: TRY003
+                        "Conversation not found for Sync v2 tombstone.",
+                        entity="conversations",
+                        entity_id=normalized_id,
+                    )
+            logger.info("Soft-deleted conversation projection from Sync v2 for ID: {}.", normalized_id)
+            return True
+        except ConflictError:
+            raise
+        except CharactersRAGDBError:
+            logger.error("Database error tombstoning synced conversation ID {}.", normalized_id, exc_info=True)
+            raise
+
+    def _normalize_sync_conversation_state(self, state: str | None) -> str:
+        """Map portable Sync v2 chat states into the local conversation state enum."""
+
+        if state is None:
+            return self._normalize_conversation_state(None)
+        normalized = str(state).strip().lower()
+        state_aliases = {
+            "active": "in-progress",
+            "open": "in-progress",
+            "archived": "resolved",
+            "closed": "resolved",
+        }
+        return self._normalize_conversation_state(state_aliases.get(normalized, normalized))
+
+    def get_conversation_by_source_ref(
+        self,
+        source: str,
+        external_ref: str,
+        client_id: str | None = None,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Fetch one conversation by imported source identity scoped to a client."""
+        normalized_source = self._db._normalize_nullable_text(source)
+        normalized_ref = self._db._normalize_nullable_text(external_ref)
+        if not normalized_source or not normalized_ref:
+            return None
+
+        client_filter = self._db.client_id if client_id is None else client_id
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            if client_filter is not None and not include_deleted:
+                query = (
+                    "SELECT * FROM conversations "
+                    "WHERE source = %s AND external_ref = %s AND client_id = %s AND deleted = FALSE "
+                    "ORDER BY last_modified DESC LIMIT 1"
+                )
+                params: list[Any] = [normalized_source, normalized_ref, client_filter]
+            elif client_filter is not None:
+                query = (
+                    "SELECT * FROM conversations "
+                    "WHERE source = %s AND external_ref = %s AND client_id = %s "
+                    "ORDER BY last_modified DESC LIMIT 1"
+                )
+                params = [normalized_source, normalized_ref, client_filter]
+            elif not include_deleted:
+                query = (
+                    "SELECT * FROM conversations "
+                    "WHERE source = %s AND external_ref = %s AND deleted = FALSE "
+                    "ORDER BY last_modified DESC LIMIT 1"
+                )
+                params = [normalized_source, normalized_ref]
+            else:
+                query = (
+                    "SELECT * FROM conversations "
+                    "WHERE source = %s AND external_ref = %s "
+                    "ORDER BY last_modified DESC LIMIT 1"
+                )
+                params = [normalized_source, normalized_ref]
+            try:
+                result = self._db.backend.execute(query, tuple(params))
+                return self._result_row_to_dict(result.first, result)
+            except CharactersRAGDBError as exc:
+                logger.error(f"Database error fetching conversation source ref {normalized_source}:{normalized_ref}: {exc}")
+                raise
+
+        if client_filter is not None and not include_deleted:
+            query = (
+                "SELECT * FROM conversations "
+                "WHERE source = ? AND external_ref = ? AND client_id = ? AND deleted = 0 "
+                "ORDER BY last_modified DESC LIMIT 1"
+            )
+            params = [normalized_source, normalized_ref, client_filter]
+        elif client_filter is not None:
+            query = (
+                "SELECT * FROM conversations "
+                "WHERE source = ? AND external_ref = ? AND client_id = ? "
+                "ORDER BY last_modified DESC LIMIT 1"
+            )
+            params = [normalized_source, normalized_ref, client_filter]
+        elif not include_deleted:
+            query = (
+                "SELECT * FROM conversations "
+                "WHERE source = ? AND external_ref = ? AND deleted = 0 "
+                "ORDER BY last_modified DESC LIMIT 1"
+            )
+            params = [normalized_source, normalized_ref]
+        else:
+            query = (
+                "SELECT * FROM conversations "
+                "WHERE source = ? AND external_ref = ? "
+                "ORDER BY last_modified DESC LIMIT 1"
+            )
+            params = [normalized_source, normalized_ref]
+        try:
+            cursor = self._db.execute_query(query, tuple(params))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error fetching conversation source ref {normalized_source}:{normalized_ref}: {exc}")
+            raise
+
+    def conversation_title_exists(
+        self,
+        title: str,
+        client_id: str | None = None,
+        include_deleted: bool = False,
+    ) -> bool:
+        """Return whether an exact conversation title exists for the selected client."""
+        normalized_title = self._db._normalize_nullable_text(title)
+        if not normalized_title:
+            return False
+
+        client_filter = self._db.client_id if client_id is None else client_id
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            if client_filter is not None and not include_deleted:
+                query = (
+                    "SELECT id FROM conversations "
+                    "WHERE title = %s AND client_id = %s AND deleted = FALSE "
+                    "LIMIT 1"
+                )
+                params: list[Any] = [normalized_title, client_filter]
+            elif client_filter is not None:
+                query = "SELECT id FROM conversations WHERE title = %s AND client_id = %s LIMIT 1"
+                params = [normalized_title, client_filter]
+            elif not include_deleted:
+                query = "SELECT id FROM conversations WHERE title = %s AND deleted = FALSE LIMIT 1"
+                params = [normalized_title]
+            else:
+                query = "SELECT id FROM conversations WHERE title = %s LIMIT 1"
+                params = [normalized_title]
+            try:
+                result = self._db.backend.execute(query, tuple(params))
+                return bool(result.first)
+            except CharactersRAGDBError as exc:
+                logger.error(f"Database error checking conversation title {normalized_title}: {exc}")
+                raise
+
+        if client_filter is not None and not include_deleted:
+            query = "SELECT id FROM conversations WHERE title = ? AND client_id = ? AND deleted = 0 LIMIT 1"
+            params = [normalized_title, client_filter]
+        elif client_filter is not None:
+            query = "SELECT id FROM conversations WHERE title = ? AND client_id = ? LIMIT 1"
+            params = [normalized_title, client_filter]
+        elif not include_deleted:
+            query = "SELECT id FROM conversations WHERE title = ? AND deleted = 0 LIMIT 1"
+            params = [normalized_title]
+        else:
+            query = "SELECT id FROM conversations WHERE title = ? LIMIT 1"
+            params = [normalized_title]
+        try:
+            cursor = self._db.execute_query(query, tuple(params))
+            return cursor.fetchone() is not None
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error checking conversation title {normalized_title}: {exc}")
             raise
 
     def get_conversations_for_character(
@@ -1337,5 +1669,275 @@ class ConversationStore:
         cursor = self._db.execute_query(base_query, tuple(params))
         return [dict(row) for row in cursor.fetchall()]
 
-    def search_conversations_page(self, query: str | None, **kwargs: Any) -> tuple[list[dict[str, Any]], int, float]:
-        return self._db._search_conversations_page_impl(query, **kwargs)
+    def search_conversations_page(
+        self,
+        query: str | None,
+        *,
+        client_id: str | None = None,
+        include_deleted: bool = False,
+        deleted_only: bool = False,
+        character_id: int | None = None,
+        character_scope: str | None = None,
+        state: str | None = None,
+        topic_label: str | None = None,
+        topic_prefix: bool = False,
+        cluster_id: str | None = None,
+        keywords: list[str] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        date_field: str = "last_modified",
+        order_by: str = "recency",
+        limit: int = 50,
+        offset: int = 0,
+        as_of: datetime | None = None,
+        half_life_days: float = 14.0,
+        bm25_weight: float = 0.65,
+        recency_weight: float = 0.35,
+        scope_type: str | None = None,
+        workspace_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int, float]:
+        client_filter = self._db.client_id if client_id is None else client_id
+        safe_query = (query or "").strip() or None
+
+        if date_field not in {"last_modified", "created_at"}:
+            raise InputError("date_field must be 'last_modified' or 'created_at'")  # noqa: TRY003
+
+        normalized_order = self._normalize_conversation_search_order(order_by)
+        as_of_dt = as_of or datetime.now(timezone.utc)
+        if as_of_dt.tzinfo is None:
+            as_of_dt = as_of_dt.replace(tzinfo=timezone.utc)
+        else:
+            as_of_dt = as_of_dt.astimezone(timezone.utc)
+
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
+        bm25_weight = max(bm25_weight or 0.0, 0.0)
+        recency_weight = max(recency_weight or 0.0, 0.0)
+        total_weight = bm25_weight + recency_weight
+        if total_weight <= 0:
+            normalized_bm25_weight = 0.65
+            normalized_recency_weight = 0.35
+        else:
+            normalized_bm25_weight = bm25_weight / total_weight
+            normalized_recency_weight = recency_weight / total_weight
+
+        keyword_table = self._db._map_table_for_backend("keywords")
+        use_deleted_text_search = safe_query is not None and (include_deleted or deleted_only)
+
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(c.last_modified, c.created_at)"
+            bm25_expr = "0.0"
+            where_clauses = ["TRUE"]
+            base_params: list[Any] = []
+            count_params: list[Any] = []
+            if safe_query:
+                if use_deleted_text_search:
+                    text_clause, text_params = self._conversation_deleted_text_search_clause(
+                        alias="c",
+                        query=safe_query,
+                    )
+                    where_clauses.append(text_clause)
+                    base_params.extend(text_params)
+                    count_params.extend(text_params)
+                else:
+                    tsquery = FTSQueryTranslator.normalize_query(safe_query, "postgresql")
+                    if not tsquery:
+                        return [], 0, 0.0
+                    bm25_expr = "ts_rank(c.conversations_fts_tsv, to_tsquery('english', ?))"
+                    base_params.append(tsquery)
+                    where_clauses.append("c.conversations_fts_tsv @@ to_tsquery('english', ?)")
+                    base_params.append(tsquery)
+                    count_params.append(tsquery)
+
+            extra_filters, extra_params = self._build_conversation_search_filters(
+                alias="c",
+                client_filter=client_filter,
+                include_deleted=include_deleted or deleted_only,
+                deleted_only=deleted_only,
+                character_id=character_id,
+                character_scope=character_scope,
+                scope_type=scope_type,
+                workspace_id=workspace_id,
+                state=state,
+                topic_label=topic_label,
+                topic_prefix=topic_prefix,
+                cluster_id=cluster_id,
+                keywords=keywords,
+                start_date=start_date,
+                end_date=end_date,
+                date_expr=date_expr,
+                keyword_table=keyword_table,
+                keyword_deleted_literal="FALSE",
+                deleted_true_literal="TRUE",
+                deleted_false_literal="FALSE",
+            )
+            where_clauses.extend(extra_filters)
+            base_params.extend(extra_params)
+            count_params.extend(extra_params)
+            topic_sort_expr = "NULLIF(LOWER(BTRIM(c.topic_label)), '')"
+            recency_expr = (
+                "CASE WHEN sort_timestamp IS NULL OR ? <= 0 THEN 0.0 "
+                "ELSE EXP(-GREATEST(EXTRACT(EPOCH FROM (?::timestamptz - sort_timestamp)) / 86400.0, 0.0) / ?) END"
+            )
+            from_clause = "conversations c"
+        else:
+            date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(NULLIF(c.last_modified,''), c.created_at)"
+            bm25_expr = "0.0"
+            where_clauses = ["1 = 1"]
+            base_params = []
+            count_params = []
+            if safe_query:
+                if use_deleted_text_search:
+                    text_clause, text_params = self._conversation_deleted_text_search_clause(
+                        alias="c",
+                        query=safe_query,
+                    )
+                    where_clauses.append(text_clause)
+                    base_params.extend(text_params)
+                    count_params.extend(text_params)
+                else:
+                    bm25_expr = "(bm25(conversations_fts) * -1)"
+                    where_clauses.append("conversations_fts MATCH ?")
+                    base_params.append(safe_query)
+                    count_params.append(safe_query)
+
+            extra_filters, extra_params = self._build_conversation_search_filters(
+                alias="c",
+                client_filter=client_filter,
+                include_deleted=include_deleted or deleted_only,
+                deleted_only=deleted_only,
+                character_id=character_id,
+                character_scope=character_scope,
+                scope_type=scope_type,
+                workspace_id=workspace_id,
+                state=state,
+                topic_label=topic_label,
+                topic_prefix=topic_prefix,
+                cluster_id=cluster_id,
+                keywords=keywords,
+                start_date=start_date,
+                end_date=end_date,
+                date_expr=date_expr,
+                keyword_table=keyword_table,
+                keyword_deleted_literal="0",
+                deleted_true_literal="1",
+                deleted_false_literal="0",
+            )
+            where_clauses.extend(extra_filters)
+            base_params.extend(extra_params)
+            count_params.extend(extra_params)
+            topic_sort_expr = "NULLIF(LOWER(TRIM(c.topic_label)), '')"
+            recency_expr = (
+                "CASE WHEN sort_timestamp IS NULL OR ? <= 0 THEN 0.0 "
+                "ELSE exp(-MAX(julianday(?) - julianday(sort_timestamp), 0.0) / ?) END"
+            )
+            from_clause = (
+                "conversations_fts JOIN conversations c ON conversations_fts.rowid = c.rowid"
+                if safe_query and not use_deleted_text_search
+                else "conversations c"
+            )
+
+        base_query = (
+            "SELECT c.*, "
+            f"{date_expr} AS sort_timestamp, "
+            f"{topic_sort_expr} AS topic_sort_key, "
+            f"{bm25_expr} AS bm25_raw "
+            f"FROM {from_clause} "  # nosec B608
+            f"WHERE {' AND '.join(where_clauses)}"
+        )  # nosec B608
+        count_query = (
+            "SELECT COUNT(*) AS total "
+            f"FROM {from_clause} "  # nosec B608
+            f"WHERE {' AND '.join(where_clauses)}"
+        )  # nosec B608
+
+        needs_global_bm25 = (
+            safe_query is not None
+            and not use_deleted_text_search
+            and normalized_order in {"bm25", "hybrid", "topic"}
+        )
+        try:
+            count_cursor = self._db.execute_query(count_query, tuple(count_params))
+            count_row = count_cursor.fetchone()
+        except CharactersRAGDBError as exc:
+            logger.error("Error counting paged conversation search rows: {}", exc)
+            raise
+
+        if count_row is None:
+            return [], 0, 0.0
+
+        try:
+            total = int(count_row[0] or 0)
+        except _CHACHA_NONCRITICAL_EXCEPTIONS:
+            total = int(count_row.get("total") or count_row.get("count") or 0)
+
+        max_bm25 = 0.0
+        if total > 0 and needs_global_bm25:
+            if self._db.backend_type == BackendType.POSTGRESQL:
+                max_query = (
+                    f"WITH candidate_rows AS ({base_query}) "  # nosec B608
+                    "SELECT COALESCE(MAX(bm25_raw), 0.0) AS max_bm25 FROM candidate_rows"
+                )
+                max_params = list(base_params)
+            else:
+                max_query = (
+                    f"WITH candidate_rows AS ({base_query}) "  # nosec B608
+                    "SELECT bm25_raw FROM candidate_rows "
+                    "ORDER BY bm25_raw DESC, sort_timestamp DESC, id ASC LIMIT 1"
+                )
+                max_params = list(base_params)
+
+            try:
+                max_cursor = self._db.execute_query(max_query, tuple(max_params))
+                max_row = max_cursor.fetchone()
+            except CharactersRAGDBError as exc:
+                logger.error("Error fetching paged conversation search max bm25: {}", exc)
+                raise
+
+            if max_row is not None:
+                try:
+                    max_bm25 = float(max_row[0] or 0.0)
+                except _CHACHA_NONCRITICAL_EXCEPTIONS:
+                    max_bm25 = float(max_row.get("max_bm25") or max_row.get("bm25_raw") or 0.0)
+
+        if total == 0:
+            return [], 0, max_bm25
+
+        page_params = list(base_params)
+        page_params.extend([half_life_days, as_of_dt.isoformat(), half_life_days, max_bm25, max_bm25])
+
+        if normalized_order == "bm25" and safe_query:
+            order_clause = "bm25_norm DESC, sort_timestamp DESC, id ASC"
+        elif normalized_order == "topic":
+            if safe_query:
+                order_clause = "topic_sort_is_null ASC, topic_sort_key ASC, bm25_norm DESC, recency_score DESC, id ASC"
+            else:
+                order_clause = "topic_sort_is_null ASC, topic_sort_key ASC, recency_score DESC, id ASC"
+        elif normalized_order == "hybrid" and safe_query:
+            order_clause = "((bm25_norm * ?) + (recency_score * ?)) DESC, sort_timestamp DESC, id ASC"
+            page_params.extend([normalized_bm25_weight, normalized_recency_weight])
+        else:
+            order_clause = "recency_score DESC, sort_timestamp DESC, id ASC"
+
+        page_params.extend([normalized_limit, normalized_offset])
+        page_query = (
+            f"WITH candidate_rows AS ({base_query}), "  # nosec B608
+            "scored_rows AS ("
+            "SELECT candidate_rows.*, "
+            f"{recency_expr} AS recency_score, "
+            "CASE WHEN topic_sort_key IS NULL THEN 1 ELSE 0 END AS topic_sort_is_null, "
+            "CASE WHEN ? > 0 THEN bm25_raw / ? ELSE 0.0 END AS bm25_norm "
+            "FROM candidate_rows"
+            ") "
+            "SELECT * FROM scored_rows "
+            f"ORDER BY {order_clause} LIMIT ? OFFSET ?"
+        )  # nosec B608
+
+        try:
+            cursor = self._db.execute_query(page_query, tuple(page_params))
+            rows = [dict(row) for row in cursor.fetchall()]
+        except CharactersRAGDBError as exc:
+            logger.error("Error fetching paged conversation search rows: {}", exc)
+            raise
+
+        return rows, total, max_bm25

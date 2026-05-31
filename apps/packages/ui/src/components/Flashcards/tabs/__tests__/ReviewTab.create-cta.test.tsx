@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { ReviewTab } from "../ReviewTab"
 import { clearSetting } from "@/services/settings/registry"
@@ -33,6 +33,14 @@ const { trackErrorRecoveryTelemetryMock } = vi.hoisted(() => ({
   trackErrorRecoveryTelemetryMock: vi.fn().mockResolvedValue(undefined)
 }))
 
+const { settingsStore } = vi.hoisted(() => ({
+  settingsStore: new Map<string, unknown>()
+}))
+
+const { navigateMock } = vi.hoisted(() => ({
+  navigateMock: vi.fn()
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -60,13 +68,27 @@ vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()
   return {
     ...actual,
-    useNavigate: () => vi.fn()
+    useNavigate: () => navigateMock
   }
 })
 
 vi.mock("@/utils/flashcards-error-recovery-telemetry", () => ({
   trackFlashcardsErrorRecoveryTelemetry: trackErrorRecoveryTelemetryMock
 }))
+
+vi.mock("@/services/settings/registry", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/settings/registry")>()
+  return {
+    ...actual,
+    getSetting: vi.fn(async (key: string) => settingsStore.get(key) ?? false),
+    setSetting: vi.fn(async (key: string, value: unknown) => {
+      settingsStore.set(key, value)
+    }),
+    clearSetting: vi.fn(async (key: string) => {
+      settingsStore.delete(key)
+    })
+  }
+})
 
 const messageSpies = {
   success: vi.fn(),
@@ -107,7 +129,13 @@ vi.mock("../../hooks", () => ({
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
   useEndFlashcardReviewSessionMutation: vi.fn(),
-  useRecentFlashcardReviewSessionsQuery: vi.fn(),
+  useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn()
+  })),
   useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useFlashcardAssistantQuery: vi.fn(),
   useFlashcardAssistantRespondMutation: vi.fn(),
@@ -130,6 +158,30 @@ if (!(globalThis as any).ResizeObserver) {
     disconnect() {}
   }
 }
+
+const createReviewCard = (overrides: Record<string, unknown> = {}) => ({
+  uuid: "active-card-1",
+  deck_id: 11,
+  front: "Question",
+  back: "Answer",
+  notes: null,
+  extra: null,
+  is_cloze: false,
+  tags: [],
+  ef: 2.5,
+  interval_days: 1,
+  repetitions: 1,
+  lapses: 0,
+  due_at: null,
+  last_reviewed_at: null,
+  last_modified: null,
+  deleted: false,
+  client_id: "test",
+  version: 1,
+  model_type: "basic",
+  reverse: false,
+  ...overrides
+})
 
 describe("ReviewTab create CTA visibility", () => {
   const originalMatchMedia = window.matchMedia
@@ -162,6 +214,8 @@ describe("ReviewTab create CTA visibility", () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     trackErrorRecoveryTelemetryMock.mockClear()
+    navigateMock.mockReset()
+    settingsStore.clear()
     Object.values(messageSpies).forEach((spy) => spy.mockReset())
     await clearSetting(FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING)
     await clearSetting(FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING)
@@ -274,7 +328,15 @@ describe("ReviewTab create CTA visibility", () => {
       />
     )
 
-    expect(screen.getByTestId("flashcards-review-onboarding-guide")).toBeInTheDocument()
+    const onboardingGuide = screen.getByTestId("flashcards-review-onboarding-guide")
+    expect(onboardingGuide).toHaveAttribute(
+      "data-ds-component",
+      "Alert"
+    )
+    expect(onboardingGuide).toHaveAttribute("aria-live", "off")
+    expect(screen.getByTestId("flashcards-review-scheduler-preview")).toHaveTextContent(
+      "Scheduler"
+    )
     expect(screen.getByTestId("flashcards-review-onboarding-doc-link")).toHaveAttribute(
       "href",
       FLASHCARDS_HELP_LINKS.ratings
@@ -288,7 +350,7 @@ describe("ReviewTab create CTA visibility", () => {
     expect(onNavigateToImport).toHaveBeenCalledTimes(2)
   })
 
-  it("persists onboarding dismissal and supports reopening from help entry point", async () => {
+  it("persists onboarding dismissal across remounts", async () => {
     const { unmount } = render(
       <ReviewTab
         onNavigateToCreate={() => {}}
@@ -303,8 +365,6 @@ describe("ReviewTab create CTA visibility", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("flashcards-review-onboarding-guide")).not.toBeInTheDocument()
     })
-    expect(screen.getByTestId("flashcards-review-onboarding-reopen")).toBeInTheDocument()
-
     unmount()
 
     render(
@@ -318,13 +378,7 @@ describe("ReviewTab create CTA visibility", () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByTestId("flashcards-review-onboarding-reopen")).toBeInTheDocument()
-    })
-    expect(screen.queryByTestId("flashcards-review-onboarding-guide")).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByTestId("flashcards-review-onboarding-reopen"))
-    await waitFor(() => {
-      expect(screen.getByTestId("flashcards-review-onboarding-guide")).toBeInTheDocument()
+      expect(screen.queryByTestId("flashcards-review-onboarding-guide")).not.toBeInTheDocument()
     })
   })
 
@@ -371,6 +425,9 @@ describe("ReviewTab create CTA visibility", () => {
     )
 
     expect(screen.queryByTestId("flashcards-review-create-cta")).not.toBeInTheDocument()
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: false })
+    )
     expect(screen.getByRole("combobox")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Show answer (Space)" })).toBeInTheDocument()
     const topbarPrimaryButtons = screen
@@ -404,6 +461,274 @@ describe("ReviewTab create CTA visibility", () => {
 
     fireEvent.mouseDown(screen.getByRole("combobox"))
     expect(screen.getByText("Biology (7 due)")).toBeInTheDocument()
+  })
+
+  it("shows deck study dashboard actions from review analytics", () => {
+    const onReviewDeckChange = vi.fn()
+    const onNavigateToManageDeck = vi.fn()
+    const onNavigateToSchedulerDeck = vi.fn()
+    const onNavigateToExportDeck = vi.fn()
+
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewAnalyticsSummaryQuery).mockReturnValue({
+      data: {
+        reviewed_today: 0,
+        retention_rate_today: null,
+        lapse_rate_today: null,
+        avg_answer_time_ms_today: null,
+        study_streak_days: 0,
+        generated_at: "2026-02-18T12:00:00.000Z",
+        decks: [
+          {
+            deck_id: 11,
+            deck_name: "Biology",
+            total: 20,
+            new: 2,
+            learning: 1,
+            due: 1,
+            mature: 16
+          }
+        ]
+      },
+      isLoading: false
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={undefined}
+        onReviewDeckChange={onReviewDeckChange}
+        isActive
+        onNavigateToManageDeck={onNavigateToManageDeck}
+        onNavigateToSchedulerDeck={onNavigateToSchedulerDeck}
+        onNavigateToExportDeck={onNavigateToExportDeck}
+      />
+    )
+
+    const dashboard = screen.getByTestId("flashcards-deck-study-dashboard")
+    const row = within(dashboard).getByTestId("flashcards-deck-study-dashboard-row-11")
+    expect(within(row).getByText("Biology")).toBeInTheDocument()
+    expect(within(row).getByText("Due: 1")).toBeInTheDocument()
+    expect(within(row).getByText("New: 2")).toBeInTheDocument()
+    expect(within(row).getByText("Learning: 1")).toBeInTheDocument()
+
+    fireEvent.click(within(row).getByRole("button", { name: "Review 4 ready" }))
+    fireEvent.click(within(row).getByRole("button", { name: "Cram" }))
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }))
+    fireEvent.click(within(row).getByRole("button", { name: "Scheduler" }))
+    fireEvent.click(within(row).getByRole("button", { name: "Export" }))
+
+    expect(onReviewDeckChange).toHaveBeenCalledWith(11)
+    expect(onReviewDeckChange).toHaveBeenCalledTimes(2)
+    expect(onNavigateToManageDeck).toHaveBeenCalledWith(11)
+    expect(onNavigateToSchedulerDeck).toHaveBeenCalledWith(11)
+    expect(onNavigateToExportDeck).toHaveBeenCalledWith(11)
+  })
+
+  it("shows the all-deck dashboard before starting an all-deck due review", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: createReviewCard({ front: "Global due question" }),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 1, new: 0, learning: 0, total: 1 }
+    } as any)
+    vi.mocked(useReviewAnalyticsSummaryQuery).mockReturnValue({
+      data: {
+        reviewed_today: 0,
+        retention_rate_today: null,
+        lapse_rate_today: null,
+        avg_answer_time_ms_today: null,
+        study_streak_days: 0,
+        generated_at: "2026-02-18T12:00:00.000Z",
+        decks: [
+          {
+            deck_id: 11,
+            deck_name: "Biology",
+            total: 20,
+            new: 2,
+            learning: 1,
+            due: 1,
+            mature: 16
+          }
+        ]
+      },
+      isLoading: false
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={undefined}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-review-deck-dashboard")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-deck-study-dashboard")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Review all due" })).toBeInTheDocument()
+    expect(screen.queryByText("Global due question")).not.toBeInTheDocument()
+  })
+
+  it("starts the all-deck due review from the dashboard action", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: createReviewCard({ front: "Global due question" }),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 1, new: 0, learning: 0, total: 1 }
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={undefined}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Review all due" }))
+
+    expect(screen.getByTestId("flashcards-review-active-card")).toBeInTheDocument()
+    expect(screen.getByText("Global due question")).toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-review-deck-dashboard")).not.toBeInTheDocument()
+  })
+
+  it("keeps the selected-deck study path direct", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: createReviewCard({ front: "Selected deck question" }),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 1, new: 0, learning: 0, total: 1 }
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-review-active-card")).toBeInTheDocument()
+    expect(screen.getByText("Selected deck question")).toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-review-deck-dashboard")).not.toBeInTheDocument()
+  })
+
+  it("resets the all-deck dashboard gate after scope changes", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: createReviewCard({ front: "Global due question" }),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 1, new: 0, learning: 0, total: 1 }
+    } as any)
+
+    const { rerender } = render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={undefined}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Review all due" }))
+    expect(screen.getByText("Global due question")).toBeInTheDocument()
+
+    rerender(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+    expect(screen.getByTestId("flashcards-review-active-card")).toBeInTheDocument()
+
+    rerender(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={undefined}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-review-deck-dashboard")).toBeInTheDocument()
+    expect(screen.queryByText("Global due question")).not.toBeInTheDocument()
+  })
+
+  it("does not fetch dashboard analytics while the review card query is loading", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: null,
+      isLoading: true,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(useReviewAnalyticsSummaryQuery).toHaveBeenCalledWith(11, undefined)
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: false })
+    )
+    expect(useReviewAnalyticsSummaryQuery).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ enabled: false })
+    )
   })
 
   it("force-shows the addressed workspace deck without widening the visible deck list", () => {
@@ -488,6 +813,32 @@ describe("ReviewTab create CTA visibility", () => {
     vi.mocked(useDueCountsQuery).mockReturnValue({
       data: { due: 0, new: 0, learning: 0, total: 0 }
     } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({
+      data: [
+        {
+          uuid: "cram-card-snapshot",
+          deck_id: 11,
+          front: "Cram snapshot front",
+          back: "Cram snapshot back",
+          notes: null,
+          extra: null,
+          is_cloze: false,
+          tags: [],
+          ef: 2.5,
+          interval_days: 1,
+          repetitions: 1,
+          lapses: 0,
+          due_at: null,
+          last_reviewed_at: null,
+          last_modified: null,
+          deleted: false,
+          client_id: "test",
+          version: 1,
+          model_type: "basic",
+          reverse: false
+        }
+      ]
+    } as any)
     vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
 
     render(
@@ -502,6 +853,265 @@ describe("ReviewTab create CTA visibility", () => {
 
     expect(screen.getByTestId("flashcards-review-topbar")).toMatchSnapshot()
     expect(screen.getByTestId("flashcards-review-empty-card")).toMatchSnapshot()
+  })
+
+  it("keeps undo visible after rating into the completion state", async () => {
+    let currentCard: any = {
+      uuid: "active-card-complete",
+      deck_id: 11,
+      front: "Question complete",
+      back: "Answer complete",
+      notes: null,
+      extra: null,
+      is_cloze: false,
+      tags: [],
+      ef: 2.5,
+      interval_days: 1,
+      repetitions: 1,
+      lapses: 0,
+      due_at: null,
+      last_reviewed_at: null,
+      last_modified: null,
+      deleted: false,
+      client_id: "test",
+      version: 1,
+      model_type: "basic",
+      reverse: false
+    }
+    vi.mocked(useReviewQuery).mockImplementation(
+      () =>
+        ({
+          data: currentCard,
+          refetch: vi.fn().mockResolvedValue(undefined)
+        }) as any
+    )
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 1, new: 0, learning: 0, total: 1 },
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+    vi.mocked(useReviewFlashcardMutation).mockReturnValue({
+      mutateAsync: vi.fn().mockImplementation(async () => {
+        currentCard = null
+        return {
+          uuid: "active-card-complete",
+          ef: 2.6,
+          interval_days: 2,
+          repetitions: 2,
+          lapses: 0,
+          due_at: "2026-02-20T09:30:00.000Z",
+          version: 2
+        }
+      }),
+      isPending: false
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("flashcards-review-empty-card")).toBeInTheDocument()
+      expect(screen.getByTestId("flashcards-review-undo-rating")).toBeInTheDocument()
+    })
+  })
+
+  it("does not offer practice again when caught up without cram cards", () => {
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 0, new: 0, learning: 0, total: 0 }
+    } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({ data: [] } as any)
+    vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: true, limit: 1 })
+    )
+    expect(screen.queryByRole("button", { name: /Practice again/i })).not.toBeInTheDocument()
+  })
+
+  it("keeps practice again hidden while caught-up cram availability is loading", () => {
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 0, new: 0, learning: 0, total: 0 }
+    } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isFetching: true
+    } as any)
+    vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: true, limit: 1 })
+    )
+    expect(screen.queryByRole("button", { name: /Practice again/i })).not.toBeInTheDocument()
+  })
+
+  it("offers completion actions for practice again and selected-deck scheduling", () => {
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 0, new: 0, learning: 0, total: 0 }
+    } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({
+      data: [
+        {
+          uuid: "cram-card-completion",
+          deck_id: 11,
+          front: "Cram completion front",
+          back: "Cram completion back",
+          notes: null,
+          extra: null,
+          is_cloze: false,
+          tags: [],
+          ef: 2.5,
+          interval_days: 1,
+          repetitions: 1,
+          lapses: 0,
+          due_at: null,
+          last_reviewed_at: null,
+          last_modified: null,
+          deleted: false,
+          client_id: "test",
+          version: 1,
+          model_type: "basic",
+          reverse: false
+        }
+      ]
+    } as any)
+    vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: true, limit: 1 })
+    )
+
+    fireEvent.click(screen.getByTestId("flashcards-review-open-scheduler"))
+    const schedulerRoute = navigateMock.mock.calls.at(-1)?.[0]
+    expect(schedulerRoute).toEqual(expect.stringContaining("tab=scheduler"))
+    expect(schedulerRoute).toEqual(expect.stringContaining("deck_id=11"))
+
+    fireEvent.click(screen.getByTestId("flashcards-review-practice-again"))
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.not.objectContaining({ limit: 1 })
+    )
+    expect(screen.getByTestId("flashcards-review-cram-tag")).toBeInTheDocument()
+  })
+
+  it("does not apply a hidden cram tag to caught-up due-mode availability probes", () => {
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 0, new: 0, learning: 0, total: 0 }
+    } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({ data: [] } as any)
+    vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    fireEvent.click(screen.getByText("Cram"))
+    fireEvent.change(screen.getByTestId("flashcards-review-cram-tag"), {
+      target: { value: "biology" }
+    })
+    fireEvent.click(screen.getByText("Due only"))
+
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[1]).toBeUndefined()
+    expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
+      expect.objectContaining({ enabled: true, limit: 1 })
+    )
+  })
+
+  it("distinguishes scheduled due cards from the available study queue", () => {
+    vi.mocked(useReviewQuery).mockReturnValue({
+      data: {
+        uuid: "active-card-new",
+        deck_id: 11,
+        front: "New question",
+        back: "New answer",
+        notes: null,
+        extra: null,
+        is_cloze: false,
+        tags: [],
+        ef: 2.5,
+        interval_days: 0,
+        repetitions: 0,
+        lapses: 0,
+        due_at: null,
+        last_reviewed_at: null,
+        last_modified: null,
+        deleted: false,
+        client_id: "test",
+        version: 1,
+        model_type: "basic",
+        reverse: false
+      }
+    } as any)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 0, new: 1, learning: 0, total: 1 }
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent(
+      "Available now: 1"
+    )
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent(
+      "Scheduled due: 0"
+    )
   })
 
   it("shows explicit version-conflict guidance when review submission fails with conflict", async () => {
@@ -650,6 +1260,12 @@ describe("ReviewTab create CTA visibility", () => {
     await waitFor(() => {
       expect(screen.getByTestId("flashcards-review-retry-alert")).toBeInTheDocument()
     })
+    const retryAlert = screen.getByTestId("flashcards-review-retry-alert")
+    expect(retryAlert).toHaveAttribute(
+      "data-ds-component",
+      "Alert"
+    )
+    expect(retryAlert).toHaveClass("w-full", "text-left")
 
     const firstAttempt = mutateAsync.mock.calls[0][0]
     expect(typeof firstAttempt.answerTimeMs).toBe("number")

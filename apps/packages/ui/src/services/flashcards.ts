@@ -121,6 +121,9 @@ export type StudyAssistantContextResponse = {
   messages: StudyAssistantMessage[]
   context_snapshot: Record<string, unknown>
   available_actions: StudyAssistantAction[]
+  citations?: unknown
+  primary_citation?: unknown
+  deep_dive_target?: unknown
 }
 
 export type StudyAssistantRespondResponse = {
@@ -198,6 +201,7 @@ export type Deck = {
   name: string
   description?: string | null
   workspace_id?: string | null
+  parent_deck_id?: number | null
   review_prompt_side: DeckReviewPromptSide
   deleted: boolean
   client_id: string
@@ -306,6 +310,7 @@ export type DeckUpdate = {
   name?: string | null
   description?: string | null
   workspace_id?: string | null
+  parent_deck_id?: number | null
   review_prompt_side?: DeckReviewPromptSide
   scheduler_type?: DeckSchedulerType | null
   scheduler_settings?: DeckSchedulerSettingsEnvelopeUpdate | null
@@ -316,6 +321,7 @@ export type DeckCreateInput = {
   name: string
   description?: string | null
   workspace_id?: string | null
+  parent_deck_id?: number | null
   review_prompt_side?: DeckReviewPromptSide
   scheduler_type?: DeckSchedulerType | null
   scheduler_settings?: DeckSchedulerSettingsEnvelope | null
@@ -436,6 +442,7 @@ export type FlashcardNextReviewResponse = {
 export type FlashcardReviewSessionSummary = {
   id: number
   deck_id?: number | null
+  deck_name_snapshot?: string | null
   review_mode: string
   tag_filter?: string | null
   scope_key: string
@@ -443,6 +450,7 @@ export type FlashcardReviewSessionSummary = {
   started_at?: string | null
   last_activity_at?: string | null
   completed_at?: string | null
+  cards_reviewed?: number | null
   client_id: string
 }
 
@@ -906,8 +914,18 @@ export async function regenerateStudyPackJob(
 export const regenerateStudyPack = regenerateStudyPackJob
 
 // Import
-export async function getFlashcardsImportLimits(): Promise<any> {
-  return await bgRequest<any, AllowedPath, "GET">({
+export interface FlashcardsImportLimitsResponse {
+  max_lines: number
+  max_line_length: number
+  max_field_length: number
+  overrides?: {
+    query_params?: string[]
+    note?: string
+  }
+}
+
+export async function getFlashcardsImportLimits(): Promise<FlashcardsImportLimitsResponse> {
+  return await bgRequest<FlashcardsImportLimitsResponse, AllowedPath, "GET">({
     path: "/api/v1/config/flashcards-import-limits",
     method: "GET"
   })
@@ -1048,7 +1066,8 @@ export async function exportFlashcards(params: FlashcardsExportParams = {}): Pro
   return await bgRequest<string, AllowedPath, "GET">({
     path,
     method: "GET",
-    headers: { Accept: "text/plain, text/csv, application/octet-stream, application/json;q=0.5" }
+    headers: { Accept: "text/plain, text/csv, application/octet-stream, application/json;q=0.5" },
+    responseType: "text"
   })
 }
 

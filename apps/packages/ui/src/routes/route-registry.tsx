@@ -3,7 +3,17 @@ import type { ReactElement } from "react"
 import { ALL_TARGETS, type PlatformTarget } from "@/config/platform"
 import { createSettingsRoute } from "./settings-route"
 import { Navigate } from "react-router-dom"
-import { DOCUMENT_WORKSPACE_PATH, REPO2TXT_PATH } from "@/routes/route-paths"
+import { RouteAliasNavigate } from "./RouteAliasNavigate"
+import {
+  CHAT_WORKSPACE_PATH,
+  DOCUMENT_WORKSPACE_PATH,
+  MODERATION_PLAYGROUND_LEGACY_PATH,
+  MODERATION_REVIEW_PATH,
+  MODERATION_RULES_PATH,
+  PROTOTYPE_WORKSPACES_PATH,
+  RESEARCH_WORKSPACE_PATH,
+  REPO2TXT_PATH
+} from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { isHostedVisibleOptionPath } from "./option-route-visibility"
 
@@ -125,6 +135,8 @@ const OptionQuiz = lazy(() => import("./option-quiz"))
 const OptionWritingPlayground = lazy(() => import("./option-writing-playground"))
 const OptionDocumentWorkspace = lazy(() => import("./option-document-workspace"))
 const OptionModelPlayground = lazy(() => import("./option-model-playground"))
+const OptionModerationReview = lazy(() => import("./option-moderation-review"))
+const OptionModerationRules = lazy(() => import("./option-moderation-rules"))
 const OptionModerationPlayground = lazy(() => import("./option-moderation-playground"))
 const OptionFamilyGuardrailsWizard = lazy(
   () => import("./option-family-guardrails-wizard")
@@ -167,7 +179,9 @@ const OptionSkills = lazy(() => import("./option-skills"))
 const OptionRepo2Txt = lazy(() => import("./option-repo2txt"))
 const OptionSetup = lazy(() => import("./option-setup"))
 const OptionOnboardingTest = lazy(() => import("./option-onboarding-test"))
-const OptionWorkspacePlayground = lazy(() => import("./option-workspace-playground"))
+const OptionResearchWorkspace = lazy(() => import("./option-research-workspace"))
+const OptionChatWorkspace = lazy(() => import("./option-chat-workspace"))
+const OptionPrototypeWorkspaces = lazy(() => import("./option-prototype-workspaces"))
 const OptionSharedWithMe = lazy(() => import("./option-shared-with-me"))
 const OptionPublicShare = lazy(() => import("./option-public-share"))
 
@@ -391,6 +405,7 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   { kind: "options", path: "/prompts", element: <OptionPromptsWorkspace /> },
   // Legacy route - redirect to unified Prompts page
   { kind: "options", path: "/prompt-studio", element: <Navigate to="/prompts?tab=studio" replace /> },
+  { kind: "options", path: "/audio", element: <RouteAliasNavigate to="/speech" /> },
   { kind: "options", path: "/tts", element: <OptionTts /> },
   { kind: "options", path: "/stt", element: <OptionStt /> },
   { kind: "options", path: "/speech", element: <OptionSpeech /> },
@@ -457,8 +472,18 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
-    path: "/workspace-playground",
-    element: <OptionWorkspacePlayground />,
+    path: RESEARCH_WORKSPACE_PATH,
+    element: <OptionResearchWorkspace />,
+  },
+  {
+    kind: "options",
+    path: CHAT_WORKSPACE_PATH,
+    element: <OptionChatWorkspace />,
+  },
+  {
+    kind: "options",
+    path: PROTOTYPE_WORKSPACES_PATH,
+    element: <OptionPrototypeWorkspaces />,
   },
   {
     kind: "options",
@@ -467,7 +492,19 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
-    path: "/moderation-playground",
+    path: MODERATION_REVIEW_PATH,
+    element: <OptionModerationReview />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: MODERATION_RULES_PATH,
+    element: <OptionModerationRules />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: MODERATION_PLAYGROUND_LEGACY_PATH,
     element: <OptionModerationPlayground />,
     targets: ALL_TARGETS,
   },

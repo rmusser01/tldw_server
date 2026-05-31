@@ -9,7 +9,6 @@
 
 import os
 import tempfile
-import xml.etree.ElementTree as ET
 from typing import Optional
 
 from defusedxml import ElementTree as DET
@@ -52,8 +51,9 @@ async def process_xml_task(
         try:
             tree = DET.parse(tmp_path)
             root = tree.getroot()
-        except (ET.ParseError, DefusedXmlException) as e:
-            raise HTTPException(status_code=400, detail=f"Invalid XML: {str(e)}") from e
+        except (DET.ParseError, DefusedXmlException) as e:
+            logger.warning("Invalid XML input")
+            raise HTTPException(status_code=400, detail="Invalid XML") from e
 
         # 3) Chunk the XML. For instance:
         chunk_options = {
@@ -63,7 +63,7 @@ async def process_xml_task(
             'language': 'english'
         }
         # Convert root to string and chunk using xml method
-        xml_string = ET.tostring(root, encoding='unicode')
+        xml_string = DET.tostring(root, encoding='unicode')
         chunk_options['method'] = 'xml'
         chunks = improved_chunking_process(xml_string, chunk_options)
 
@@ -106,7 +106,7 @@ async def process_xml_task(
         raise
     except Exception as e:
         logger.error(f"Error processing XML file: {filename} -> {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to process XML file") from e
     finally:
         if tmp_path:
             try:

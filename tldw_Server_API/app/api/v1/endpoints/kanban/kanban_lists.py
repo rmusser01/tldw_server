@@ -23,6 +23,7 @@ from tldw_Server_API.app.api.v1.endpoints.kanban._kanban_utils import (
     resolve_limit_offset,
     to_db_timestamp,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     ActivitiesListResponse,
     ActivityResponse,
@@ -87,7 +88,7 @@ async def create_list(
         logger.info(f"Created list {lst['id']} in board {board_id}")
         return ListResponse(**lst)
     except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to create list") from e
 @router.get(
     "/boards/{board_id}/lists",
     response_model=ListsListResponse,
@@ -117,7 +118,7 @@ async def get_lists(
             lst["card_count"] = db.get_card_count_for_list(lst["id"])
         return ListsListResponse(lists=[ListResponse(**lst) for lst in lists])
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch lists") from e
 @router.post(
     "/boards/{board_id}/lists/reorder",
     response_model=ReorderResponse,
@@ -142,7 +143,7 @@ async def reorder_lists(
         logger.info(f"Reordered {len(ids)} lists in board {board_id}")
         return ReorderResponse(success=True, message="Lists reordered successfully")
     except (NotFoundError, InputError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to reorder lists") from e
 # =============================================================================
 # Individual List Endpoints (at /lists/{list_id})
 # =============================================================================
@@ -169,7 +170,7 @@ async def get_list(
         lst["card_count"] = db.get_card_count_for_list(list_id)
         return ListResponse(**lst)
     except KanbanDBError as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch list") from e
 @router.patch(
     "/lists/{list_id}",
     response_model=ListResponse,
@@ -200,7 +201,7 @@ async def update_list(
         logger.info(f"Updated list {list_id}")
         return ListResponse(**lst)
     except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to update list") from e
 # =============================================================================
 # Archive Operations
 # =============================================================================
@@ -223,7 +224,7 @@ async def archive_list(
         logger.info(f"Archived list {list_id}")
         return ListResponse(**lst)
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to archive list") from e
 @router.post(
     "/lists/{list_id}/unarchive",
     response_model=ListResponse,
@@ -242,7 +243,7 @@ async def unarchive_list(
         logger.info(f"Unarchived list {list_id}")
         return ListResponse(**lst)
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to unarchive list") from e
 # =============================================================================
 # Delete Operations
 # =============================================================================
@@ -273,7 +274,7 @@ async def delete_list(
         logger.info(f"Deleted list {list_id}")
         return DetailResponse(detail=f"List {list_id} deleted successfully")
     except KanbanDBError as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to delete list") from e
 @router.post(
     "/lists/{list_id}/restore",
     response_model=ListResponse,
@@ -292,7 +293,7 @@ async def restore_list(
         logger.info(f"Restored list {list_id}")
         return ListResponse(**lst)
     except (NotFoundError, InputError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to restore list") from e
 # =============================================================================
 # Activity Endpoints
 # =============================================================================
@@ -343,4 +344,4 @@ async def get_list_activities(
             )
         )
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch list activities") from e

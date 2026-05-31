@@ -60,7 +60,7 @@ if (typeof globalThis !== "undefined") {
   }
 
   if (!isRecord(globalScope.chrome)) {
-    globalScope.chrome = browser as unknown as Record<string, unknown>
+    ;(globalScope as any).chrome = browser
   } else {
     mergeMissingProperties(
       globalScope.chrome as Record<string, unknown>,
@@ -82,6 +82,12 @@ const getCurrentBrowserOrigin = (): string | null => {
   } catch {
     return null
   }
+}
+
+const isCurrentBrowserOrigin = (value?: string | null): boolean => {
+  const currentOrigin = getCurrentBrowserOrigin()
+  const normalized = normalizeBaseUrl(value)
+  return Boolean(currentOrigin && normalized && currentOrigin === normalized)
 }
 
 const getCurrentBrowserSurface = (): BrowserSurface => {
@@ -202,7 +208,7 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
       return null
     }
   })()
-  const repairedExplicitWebHost =
+  const repairedExplicitWebHostCandidate =
     deriveCurrentHostRecoveryServerUrl(explicitWebHost) || explicitWebHost
   const envDefaultServerUrl =
     normalizeBaseUrl(process.env.NEXT_PUBLIC_API_URL) || DEFAULT_TLDW_SERVER_URL
@@ -210,6 +216,11 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
     deriveCurrentHostRecoveryServerUrl(envDefaultServerUrl) ||
     envDefaultServerUrl
   const initialQuickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
+  const repairedExplicitWebHost =
+    !initialQuickstartWebUiServerUrl &&
+    isCurrentBrowserOrigin(repairedExplicitWebHostCandidate)
+      ? null
+      : repairedExplicitWebHostCandidate
   const initialServerUrl =
     initialQuickstartWebUiServerUrl ||
     repairedExplicitWebHost ||
@@ -231,9 +242,13 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
     const storedServerUrl =
       (await storage.get<string>("tldwServerUrl").catch(() => null)) || null
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
+    const effectiveExplicitWebHost =
+      !quickstartWebUiServerUrl && isCurrentBrowserOrigin(repairedExplicitWebHost)
+        ? null
+        : repairedExplicitWebHost
     const serverUrl =
       quickstartWebUiServerUrl ||
-      repairedExplicitWebHost ||
+      effectiveExplicitWebHost ||
       repairedEnvDefaultServerUrl
 
     if (!serverUrl && !apiKey && !apiBearer) return

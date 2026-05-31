@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Input, Select, Switch, Tooltip, Typography } from "antd"
+import { Button, Input, Segmented, Select, Switch, Tooltip, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 import { ArrowLeft, ArrowRight, ChevronRight } from "lucide-react"
 
@@ -11,6 +11,25 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 const DRAFT_STORAGE_CAP_BYTES = 5 * 1024 * 1024
 const CUSTOM_AUDIO_LANGUAGE_SENTINEL = "__custom__"
+
+const CHUNKING_MODE_OPTIONS = [
+  { label: "Auto", value: "auto" },
+  { label: "Manual", value: "manual" },
+]
+
+const AUTO_CHUNKING_GOAL_OPTIONS = [
+  { label: "Balanced", value: "balanced" },
+  { label: "Search/Q&A", value: "qa_search" },
+  { label: "Reading/Summary", value: "navigation_summary" },
+]
+
+const CHUNK_METHOD_OPTIONS = [
+  { label: "Semantic", value: "semantic" },
+  { label: "Tokens", value: "tokens" },
+  { label: "Paragraphs", value: "paragraphs" },
+  { label: "Sentences", value: "sentences" },
+  { label: "Words", value: "words" },
+]
 
 const formatBytes = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`
@@ -67,6 +86,25 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
   const [transcriptionModelsLoading, setTranscriptionModelsLoading] =
     React.useState(false)
   const [showAdvanced, setShowAdvanced] = React.useState(false)
+  const chunkingMode =
+    presetConfig.common.chunking_mode === "manual" ? "manual" : "auto"
+  const autoChunkingGoal =
+    presetConfig.common.auto_chunking_goal === "qa_search" ||
+    presetConfig.common.auto_chunking_goal === "navigation_summary"
+      ? presetConfig.common.auto_chunking_goal
+      : "balanced"
+  const manualChunkMethod =
+    typeof presetConfig.advancedValues?.chunk_method === "string"
+      ? presetConfig.advancedValues.chunk_method
+      : "semantic"
+  const manualChunkSize =
+    presetConfig.advancedValues?.chunk_size == null
+      ? ""
+      : String(presetConfig.advancedValues.chunk_size)
+  const manualChunkOverlap =
+    presetConfig.advancedValues?.chunk_overlap == null
+      ? ""
+      : String(presetConfig.advancedValues.chunk_overlap)
 
   const hasDocumentItems =
     detectedTypes.has("document") ||
@@ -74,8 +112,9 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
     detectedTypes.has("ebook") ||
     detectedTypes.has("image")
 
+  const rawTranscriptionModel = presetConfig.advancedValues?.transcription_model
   const normalizedTranscriptionModel =
-    presetConfig.advancedValues?.transcription_model?.trim() || ""
+    typeof rawTranscriptionModel === "string" ? rawTranscriptionModel.trim() : ""
   const shouldLoadTranscriptionModels =
     hasTranscriptionItems && isStepVisible
 
@@ -234,7 +273,54 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
 
   const handleChunkingToggle = React.useCallback(
     (checked: boolean) => {
-      setCommon((current) => ({ ...current, perform_chunking: checked }))
+      setCommon((current) => ({
+        ...current,
+        perform_chunking: checked,
+        ...(checked
+          ? {
+              chunking_mode: "auto",
+              auto_chunking_goal: current.auto_chunking_goal ?? "balanced",
+              auto_chunking_use_llm: current.auto_chunking_use_llm ?? false,
+            }
+          : {}),
+      }))
+    },
+    [setCommon]
+  )
+
+  const handleChunkingModeChange = React.useCallback(
+    (nextMode: string | number) => {
+      const mode = nextMode === "manual" ? "manual" : "auto"
+      setCommon((current) => ({
+        ...current,
+        chunking_mode: mode,
+        auto_chunking_goal: current.auto_chunking_goal ?? "balanced",
+        auto_chunking_use_llm: current.auto_chunking_use_llm ?? false,
+      }))
+    },
+    [setCommon]
+  )
+
+  const handleAutoChunkingGoalChange = React.useCallback(
+    (nextGoal: string) => {
+      const goal =
+        nextGoal === "qa_search" || nextGoal === "navigation_summary"
+          ? nextGoal
+          : "balanced"
+      setCommon((current) => ({
+        ...current,
+        auto_chunking_goal: goal,
+      }))
+    },
+    [setCommon]
+  )
+
+  const handleAutoChunkingUseLlmChange = React.useCallback(
+    (checked: boolean) => {
+      setCommon((current) => ({
+        ...current,
+        auto_chunking_use_llm: checked,
+      }))
     },
     [setCommon]
   )
@@ -369,6 +455,45 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
     })
   }, [setCustomOptions])
 
+  const setAdvancedValue = React.useCallback(
+    (name: string, value: unknown) => {
+      setCustomOptions({
+        advancedValues: {
+          [name]: value,
+        },
+      })
+    },
+    [setCustomOptions]
+  )
+
+  const handleManualChunkMethodChange = React.useCallback(
+    (nextMethod: string) => {
+      setAdvancedValue("chunk_method", nextMethod || undefined)
+    },
+    [setAdvancedValue]
+  )
+
+  const handleManualChunkNumberChange = React.useCallback(
+    (name: "chunk_size" | "chunk_overlap") =>
+      (event: React.ChangeEvent<HTMLInputElement>) => {
+        const rawValue = event.target.value.trim()
+        if (!rawValue) {
+          setAdvancedValue(name, undefined)
+          return
+        }
+        const numericValue = Number.parseInt(rawValue, 10)
+        const clampedValue =
+          name === "chunk_size"
+            ? Math.max(1, numericValue)
+            : Math.max(0, numericValue)
+        setAdvancedValue(
+          name,
+          Number.isFinite(numericValue) ? clampedValue : undefined
+        )
+      },
+    [setAdvancedValue]
+  )
+
   const storageLabel = presetConfig.reviewBeforeStorage
     ? qi("reviewModeStorageLabel", "Review drafts locally")
     : presetConfig.storeRemote
@@ -468,6 +593,86 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
               </div>
             </Tooltip>
           </div>
+
+          {presetConfig.common.perform_chunking && (
+            <div className="rounded-md border border-border bg-surface2 p-3">
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <Typography.Text strong>
+                    {qi("chunkingModeLabel", "Chunking mode")}
+                  </Typography.Text>
+                  <Segmented
+                    aria-label={qi("chunkingModeLabel", "Chunking mode")}
+                    options={CHUNKING_MODE_OPTIONS}
+                    value={chunkingMode}
+                    onChange={handleChunkingModeChange}
+                  />
+                </div>
+
+                {chunkingMode === "auto" ? (
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                    <label className="flex flex-col gap-1 text-sm text-text">
+                      <span>{qi("autoChunkingGoalLabel", "Auto chunking goal")}</span>
+                      <Select
+                        aria-label={qi("autoChunkingGoalLabel", "Auto chunking goal")}
+                        value={autoChunkingGoal}
+                        onChange={handleAutoChunkingGoalChange}
+                        options={AUTO_CHUNKING_GOAL_OPTIONS}
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm text-text">
+                      <span>
+                        {qi(
+                          "autoChunkingUseLlmLabel",
+                          "Use AI to improve chunk boundaries"
+                        )}
+                      </span>
+                      <Switch
+                        aria-label={qi(
+                          "autoChunkingUseLlmLabel",
+                          "Use AI to improve chunk boundaries"
+                        )}
+                        checked={presetConfig.common.auto_chunking_use_llm === true}
+                        onChange={handleAutoChunkingUseLlmChange}
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <label className="flex flex-col gap-1 text-sm text-text">
+                      <span>{qi("chunkMethodLabel", "Chunk method")}</span>
+                      <Select
+                        aria-label={qi("chunkMethodLabel", "Chunk method")}
+                        value={manualChunkMethod}
+                        onChange={handleManualChunkMethodChange}
+                        options={CHUNK_METHOD_OPTIONS}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-sm text-text">
+                      <span>{qi("chunkSizeLabel", "Chunk size")}</span>
+                      <Input
+                        aria-label={qi("chunkSizeLabel", "Chunk size")}
+                        type="number"
+                        min={1}
+                        value={manualChunkSize}
+                        onChange={handleManualChunkNumberChange("chunk_size")}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-sm text-text">
+                      <span>{qi("chunkOverlapLabel", "Chunk overlap")}</span>
+                      <Input
+                        aria-label={qi("chunkOverlapLabel", "Chunk overlap")}
+                        type="number"
+                        min={0}
+                        value={manualChunkOverlap}
+                        onChange={handleManualChunkNumberChange("chunk_overlap")}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Advanced options toggle */}
           <button

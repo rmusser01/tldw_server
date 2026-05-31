@@ -931,6 +931,60 @@ def test_browse_provider_sources_returns_zotero_collection_rows(connectors_clien
 
 
 @pytest.mark.integration
+def test_browse_provider_sources_includes_canonical_cursor_pagination(connectors_client, monkeypatch) -> None:
+    client, headers = connectors_client
+
+    import tldw_Server_API.app.api.v1.endpoints.connectors as ep
+
+    class _FakeConn:
+        async def list_collections(
+            self,
+            account: object,
+            *,
+            cursor: str | None = None,
+            page_size: int = 100,
+        ) -> tuple[list[dict[str, str]], str]:
+            assert cursor == "zotero-cursor"
+            assert page_size == 25
+            return ([{"provider": "zotero", "collection_key": "COLL1234"}], "next-zotero-cursor")
+
+    async def _fake_get_account_tokens(db: object, user_id: object, account_id: int) -> dict[str, str]:
+        assert account_id == 15
+        return {"access_token": "api-key", "provider_user_id": "123456"}
+
+    async def _fake_get_account_email(db: object, user_id: object, account_id: int) -> None:
+        return None
+
+    async def _fake_get_account_for_user(db: object, user_id: object, account_id: int) -> dict[str, object]:
+        return {"id": account_id, "user_id": user_id, "provider": "zotero"}
+
+    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
+    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
+    monkeypatch.setattr(ep, "get_account_tokens", _fake_get_account_tokens)
+    monkeypatch.setattr(ep, "get_account_email", _fake_get_account_email)
+
+    response = client.get(
+        "/api/v1/connectors/providers/zotero/sources/browse",
+        params={"account_id": 15, "page_size": 25, "cursor": "zotero-cursor"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["next_cursor"] == "next-zotero-cursor"
+    assert body["limit"] == 25
+    assert body["cursor"] == "zotero-cursor"
+    assert body["has_more"] is True
+    assert body["pagination"] == {
+        "mode": "cursor",
+        "limit": 25,
+        "cursor": "zotero-cursor",
+        "next_cursor": "next-zotero-cursor",
+        "has_more": True,
+    }
+
+
+@pytest.mark.integration
 def test_browse_provider_sources_backfills_blank_zotero_provider_user_id(connectors_client, monkeypatch):
     client, headers = connectors_client
 
@@ -975,7 +1029,44 @@ def test_browse_provider_sources_backfills_blank_zotero_provider_user_id(connect
         headers=headers,
     )
     assert response.status_code == 200, response.text
-    assert response.json() == {"items": [], "next_cursor": None}
+    body = response.json()
+    assert body["items"] == []
+    assert body["next_cursor"] is None
+
+
+@pytest.mark.integration
+def test_browse_provider_sources_sanitizes_connector_error(connectors_client, monkeypatch):
+    client, headers = connectors_client
+
+    import tldw_Server_API.app.api.v1.endpoints.connectors as ep
+
+    class _FailingConn:
+        async def list_collections(self, account, *, cursor=None, page_size=100):
+            raise RuntimeError("connector backend exploded")
+
+    async def _fake_get_account_tokens(db, user_id, account_id):
+        assert account_id == 15
+        return {"access_token": "api-key", "provider_user_id": "123456"}
+
+    async def _fake_get_account_email(db, user_id, account_id):
+        return None
+
+    async def _fake_get_account_for_user(db, user_id, account_id):
+        return {"id": account_id, "user_id": user_id, "provider": "zotero"}
+
+    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FailingConn())
+    monkeypatch.setattr(ep, "get_account_tokens", _fake_get_account_tokens)
+    monkeypatch.setattr(ep, "get_account_email", _fake_get_account_email)
+    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
+
+    response = client.get(
+        "/api/v1/connectors/providers/zotero/sources/browse",
+        params={"account_id": 15, "page_size": 25},
+        headers=headers,
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Browse failed"
 
 
 @pytest.mark.integration

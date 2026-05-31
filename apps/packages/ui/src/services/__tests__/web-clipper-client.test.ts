@@ -63,6 +63,7 @@ describe("web clipper client and runtime helpers", () => {
         path: "/api/v1/web-clipper/save",
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        timeoutMs: 5000,
         body: expect.objectContaining({
           clip_id: "clip-123",
           source_url: "https://example.com/story"
@@ -179,6 +180,9 @@ describe("web clipper client and runtime helpers", () => {
       clip_id: "clip-123",
       note_id: "clip-123",
       status: "saved_with_warnings",
+      note: null,
+      workspace_placement: null,
+      attachments: [],
       workspace_placement_saved: true,
       workspace_placement_count: 1,
       warnings: ["Attachment upload failed for slot page-screenshot"]

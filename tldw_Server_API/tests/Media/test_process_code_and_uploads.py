@@ -2,10 +2,51 @@ import os
 import io
 import json
 import pytest
+from dataclasses import dataclass, field
 from fastapi import UploadFile
 
 
 pytestmark = pytest.mark.unit
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debugs: list[str] = []
+        self.debug_kwargs: list[dict[str, object]] = []
+        self.warnings: list[str] = []
+
+    def info(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        self.debugs.append(message.format(*args, **kwargs) if args or kwargs else message)
+        self.debug_kwargs.append(dict(kwargs))
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        self.warnings.append(message.format(*args, **kwargs) if args or kwargs else message)
+
+
+class _WarningFailingLoggerStub(_LoggerStub):
+    def warning(self, *_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("test-mode diagnostics logger exploded at /private/logger")
+
+
+def _assert_sanitized_debug_log(logger: _LoggerStub, expected: str) -> None:
+    target_kwargs = [
+        kwargs for message, kwargs in zip(logger.debugs, logger.debug_kwargs) if message == expected
+    ]
+    assert target_kwargs, logger.debugs
+    rendered = "\n".join(message for message in logger.debugs if message == expected)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
+    assert all(not kwargs for kwargs in target_kwargs)
+
+
+def _assert_sanitized_warning_log(logger: _LoggerStub, expected: str) -> None:
+    assert expected in logger.warnings
+    rendered = "\n".join(logger.warnings)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
 
 
 def test_process_code_js_lines(client_with_single_user):
@@ -49,6 +90,59 @@ def test_process_code_js_codechunk(client_with_single_user):
     payload = r.json()
     assert payload.get("results"), payload
     assert payload["results"][0]["status"] in ("Success", "Warning")
+
+
+def test_process_code_sanitizes_read_failure(client_with_single_user, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+
+    client, _ = client_with_single_user
+
+    def fail_read_text_safe(_path):
+        raise RuntimeError("read failed at /private/source.py")
+
+    monkeypatch.setattr(process_code_mod, "read_text_safe", fail_read_text_safe)
+
+    files = [("files", ("script.py", b"print('hi')\n", "text/x-python"))]
+    response = client.post(
+        "/api/v1/media/process-code",
+        files=files,
+        data={"perform_chunking": "false"},
+    )
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Failed to read code file"
+    assert "read failed" not in response.text
+    assert "/private/source.py" not in response.text
+
+
+def test_process_code_sanitizes_url_download_failure(client_with_single_user, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+
+    client, _ = client_with_single_user
+
+    async def fail_download_url_async(*_args, **_kwargs):
+        raise RuntimeError("download failed at /private/cache/snippet.py")
+
+    monkeypatch.setattr(process_code_mod, "download_url_async", fail_download_url_async)
+
+    response = client.post(
+        "/api/v1/media/process-code",
+        data={
+            "urls": "https://example.com/snippet.py",
+            "perform_chunking": "false",
+        },
+    )
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Download/preparation failed"
+    assert "download failed" not in response.text
+    assert "/private/cache/snippet.py" not in response.text
 
 
 @pytest.mark.asyncio
@@ -111,19 +205,146 @@ def test_process_code_logs_upload_errors_when_test_mode_is_single_letter_y(
 
     client, _ = client_with_single_user
     monkeypatch.setenv("TEST_MODE", "y")
-    logged: list[str] = []
-    monkeypatch.setattr(
-        process_code_mod.logger,
-        "warning",
-        lambda message, *args, **kwargs: logged.append(str(message)),
-        raising=True,
-    )
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(process_code_mod, "logger", logger_stub)
 
     files = [("files", ("bad.exe", b"MZ\x90\x00", "application/octet-stream"))]
     response = client.post("/api/v1/media/process-code", files=files, data={})
 
     assert response.status_code in (200, 207), response.text
-    assert any("TEST_MODE: process-code upload_errors=" in msg for msg in logged)
+    _assert_sanitized_warning_log(logger_stub, "TEST_MODE: process-code upload errors")
+
+
+def test_process_code_upload_diagnostic_failure_log_is_sanitized(
+    client_with_single_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+
+    client, _ = client_with_single_user
+    monkeypatch.setenv("TEST_MODE", "y")
+    logger_stub = _WarningFailingLoggerStub()
+    monkeypatch.setattr(process_code_mod, "logger", logger_stub)
+
+    files = [("files", ("bad.exe", b"MZ\x90\x00", "application/octet-stream"))]
+    response = client.post("/api/v1/media/process-code", files=files, data={})
+
+    assert response.status_code in (200, 207), response.text
+    _assert_sanitized_debug_log(logger_stub, "Failed to emit TEST_MODE upload diagnostics")
+
+
+def test_process_code_read_error_test_mode_log_is_sanitized(
+    client_with_single_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+
+    client, _ = client_with_single_user
+    monkeypatch.setenv("TEST_MODE", "y")
+    logger_stub = _LoggerStub()
+
+    def fail_read_text_safe(_path):
+        raise RuntimeError("read failed at /private/source.py")
+
+    monkeypatch.setattr(process_code_mod, "logger", logger_stub)
+    monkeypatch.setattr(process_code_mod, "read_text_safe", fail_read_text_safe)
+
+    files = [("files", ("script.py", b"print('hi')\n", "text/x-python"))]
+    response = client.post(
+        "/api/v1/media/process-code",
+        files=files,
+        data={"perform_chunking": "false"},
+    )
+
+    assert response.status_code == 207, response.text
+    _assert_sanitized_warning_log(logger_stub, "TEST_MODE: process-code read error")
+
+
+def test_process_code_read_error_diagnostic_failure_log_is_sanitized(
+    client_with_single_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+
+    client, _ = client_with_single_user
+    monkeypatch.setenv("TEST_MODE", "y")
+    logger_stub = _WarningFailingLoggerStub()
+
+    def fail_read_text_safe(_path):
+        raise RuntimeError("read failed at /private/source.py")
+
+    monkeypatch.setattr(process_code_mod, "logger", logger_stub)
+    monkeypatch.setattr(process_code_mod, "read_text_safe", fail_read_text_safe)
+
+    files = [("files", ("script.py", b"print('hi')\n", "text/x-python"))]
+    response = client.post(
+        "/api/v1/media/process-code",
+        files=files,
+        data={"perform_chunking": "false"},
+    )
+
+    assert response.status_code == 207, response.text
+    _assert_sanitized_debug_log(logger_stub, "Failed to emit TEST_MODE read-error diagnostics")
+
+
+def test_process_code_chunk_line_bounds_failure_log_is_sanitized(
+    client_with_single_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+    import tldw_Server_API.app.core.Chunking.chunker as chunker_mod
+
+    client, _ = client_with_single_user
+    logger_stub = _LoggerStub()
+
+    class BadLineNumber(int):
+        def __new__(cls, value: int):
+            return int.__new__(cls, value)
+
+        def __lt__(self, _other):
+            raise RuntimeError("line bounds exploded at /private/source.py")
+
+    @dataclass
+    class FakeMetadata:
+        start_line: int | None = None
+        end_line: int | None = None
+        blocks: list[dict[str, object]] = field(
+            default_factory=lambda: [
+                {"start_line": BadLineNumber(1)},
+                {"start_line": BadLineNumber(2)},
+            ]
+        )
+        options: dict[str, object] = field(default_factory=dict)
+
+    @dataclass
+    class FakeChunkResult:
+        text: str
+        metadata: FakeMetadata
+
+    class FakeChunker:
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+        def chunk_text_with_metadata(self, *_args, **_kwargs):
+            return [FakeChunkResult(text="console.log('hi');", metadata=FakeMetadata())]
+
+    monkeypatch.setattr(process_code_mod, "logger", logger_stub)
+    monkeypatch.setattr(chunker_mod, "Chunker", FakeChunker)
+
+    files = [("files", ("script.js", b"console.log('hi');\n", "application/javascript"))]
+    response = client.post(
+        "/api/v1/media/process-code",
+        files=files,
+        data={
+            "perform_chunking": "true",
+            "chunk_method": "code",
+            "chunk_size": "4000",
+            "chunk_overlap": "0",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(logger_stub, "Failed to derive code chunk line bounds")
 
 
 @pytest.mark.asyncio

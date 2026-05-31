@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test"
+import type { Page } from "@playwright/test"
+import { expect, seedAuth, test } from "./smoke.setup"
 
 /**
  * Mobile-viewport smoke for {V1, V3, V5} at narrow widths. The plan
@@ -21,22 +22,15 @@ import { expect, test, type Page } from "@playwright/test"
  */
 
 const bypassOnboarding = async (page: Page) => {
+  await seedAuth(page)
   await page.addInitScript(() => {
-    try {
-      window.localStorage.setItem("assistant_setup_dismissed", "true")
-    } catch {
-      /* ignore */
-    }
+    window.localStorage.setItem("playgroundComposerOptionsExpanded", "false")
   })
 }
 
 const setVariant = (variant: "v1" | "v3" | "v5") => async (page: Page) => {
   await page.addInitScript((v: string) => {
-    try {
-      window.localStorage.setItem("tldw:composerVariant", v)
-    } catch {
-      /* ignore */
-    }
+    window.localStorage.setItem("tldw:composerVariant", v)
   }, variant)
 }
 

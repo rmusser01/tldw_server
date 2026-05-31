@@ -51,7 +51,7 @@ export interface UsePlaygroundImageGenDeps {
   selectedModel: string | null
   currentApiProvider: string | undefined
   formMessage: string
-  sendMessage: (payload: Record<string, any>) => Promise<void>
+  sendMessage: (payload: Record<string, any>) => Promise<unknown>
   textAreaFocus: () => void
   notificationApi: {
     error: (opts: { message: string; description?: string }) => void

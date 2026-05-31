@@ -186,6 +186,41 @@ def list_claims_review_extractor_metrics_daily(
     return [dict(row) for row in rows]
 
 
+def count_claims_review_extractor_metrics_daily(
+    self,
+    *,
+    user_id: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    extractor: str | None = None,
+    extractor_version: str | None = None,
+) -> int:
+    conditions: list[str] = ["user_id = ?"]
+    params: list[Any] = [str(user_id)]
+    if start_date:
+        conditions.append("report_date >= ?")
+        params.append(str(start_date))
+    if end_date:
+        conditions.append("report_date <= ?")
+        params.append(str(end_date))
+    if extractor:
+        conditions.append("extractor = ?")
+        params.append(str(extractor))
+    if extractor_version is not None:
+        conditions.append("extractor_version = ?")
+        params.append(str(extractor_version))
+
+    sql = (
+        "SELECT COUNT(*) AS total FROM claims_review_extractor_metrics_daily WHERE "  # nosec B608
+        + " AND ".join(conditions)
+    )
+    row = self.execute_query(sql, tuple(params)).fetchone()
+    if not row:
+        return 0
+    value = row.get("total") if isinstance(row, dict) else row[0]
+    return int(value or 0)
+
+
 def list_claims_review_user_ids(self) -> list[str]:
     """Return distinct user IDs with review log activity (Postgres only)."""
     if self.backend_type != BackendType.POSTGRESQL:

@@ -28,7 +28,7 @@ export const createRegenerateLastMessage = ({
   messages: Message[]
   setHistory: (history: ChatHistory) => void
   setMessages: (messages: Message[]) => void
-  onSubmit: (params: any) => Promise<void>
+  onSubmit: (params: any) => Promise<unknown>
   beforeSubmit?: (params: {
     lastAssistant: Message
     lastAssistantIndex: number
@@ -147,7 +147,7 @@ export const createEditMessage = ({
   setHistory: (history: ChatHistory) => void
   historyId: string | null
   validateBeforeSubmitFn: () => boolean
-  onSubmit: (params: any) => Promise<void>
+  onSubmit: (params: any) => Promise<unknown>
 }) => {
   return async (
     index: number,

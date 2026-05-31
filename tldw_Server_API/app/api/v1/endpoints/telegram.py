@@ -3,9 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
     check_rate_limit,
     get_auth_principal,
-    require_roles,
 )
 from tldw_Server_API.app.api.v1.endpoints.telegram_support import (
     telegram_admin_get_bot_impl,
@@ -29,7 +29,7 @@ from tldw_Server_API.app.services.telegram_execution_identity_service import (
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
 
-@router.put("/admin/bot", dependencies=[Depends(require_roles("admin"))], response_model=TelegramBotConfigResponse)
+@router.put("/admin/bot", dependencies=[Depends(RequireRole("admin"))], response_model=TelegramBotConfigResponse)
 async def telegram_admin_put_bot(
     request: Request,
     payload: TelegramBotConfigUpdate,
@@ -38,7 +38,7 @@ async def telegram_admin_put_bot(
     return await telegram_admin_put_bot_impl(principal=principal, payload=payload, request=request)
 
 
-@router.get("/admin/bot", dependencies=[Depends(require_roles("admin"))], response_model=TelegramBotConfigResponse)
+@router.get("/admin/bot", dependencies=[Depends(RequireRole("admin"))], response_model=TelegramBotConfigResponse)
 async def telegram_admin_get_bot(
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
@@ -46,7 +46,7 @@ async def telegram_admin_get_bot(
     return await telegram_admin_get_bot_impl(principal=principal, request=request)
 
 
-@router.post("/admin/link/start", dependencies=[Depends(require_roles("admin"))])
+@router.post("/admin/link/start", dependencies=[Depends(RequireRole("admin"))])
 async def telegram_admin_start_link(
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
@@ -54,7 +54,7 @@ async def telegram_admin_start_link(
     return await telegram_admin_start_link_impl(principal=principal, request=request)
 
 
-@router.get("/admin/links", dependencies=[Depends(require_roles("admin"))], response_model=TelegramLinkedActorListResponse)
+@router.get("/admin/links", dependencies=[Depends(RequireRole("admin"))], response_model=TelegramLinkedActorListResponse)
 async def telegram_admin_list_links(
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
@@ -64,7 +64,7 @@ async def telegram_admin_list_links(
 
 @router.delete(
     "/admin/links/{link_id}",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
     response_model=TelegramLinkedActorRevokeResponse,
 )
 async def telegram_admin_revoke_link(

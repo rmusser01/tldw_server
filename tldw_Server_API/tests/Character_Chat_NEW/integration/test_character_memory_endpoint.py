@@ -103,6 +103,41 @@ def test_extract_character_memories_allows_owned_chat_by_client_id(
     assert response.json() == {"extracted": 0, "skipped_duplicates": 0, "memories": []}
 
 
+def test_list_character_memories_includes_canonical_pagination(
+    test_client: TestClient,
+    auth_headers,
+) -> None:
+    """List character memories preserves total and adds canonical pagination."""
+    character_id = _create_character(test_client, auth_headers, name="Paginated Memory Character")
+    for index in range(4):
+        response = test_client.post(
+            f"/api/v1/characters/{character_id}/memories",
+            json={"content": f"Remembered fact {index}", "memory_type": "manual"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 201
+
+    response = test_client.get(
+        f"/api/v1/characters/{character_id}/memories?limit=2&offset=1",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 4
+    assert len(payload["memories"]) == 2
+    assert payload["pagination"] == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 1,
+        "total": 4,
+        "has_more": True,
+        "next_offset": 3,
+    }
+    assert payload["has_more"] is True
+    assert payload["next_offset"] == 3
+
+
 def test_extract_character_memories_allows_string_owner_client_id(
     test_client: TestClient,
     auth_headers,

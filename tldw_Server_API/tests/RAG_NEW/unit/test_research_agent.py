@@ -30,6 +30,30 @@ async def test_registry_disables_url_scrape_action_when_requested():
 
 
 @pytest.mark.asyncio
+async def test_scrape_url_action_surfaces_shared_policy_block(monkeypatch):
+    import tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib as article_lib
+
+    async def _fake_scrape_article(target_url: str):  # noqa: ANN001
+        return {
+            "extraction_successful": False,
+            "url": target_url,
+            "error": "Blocked by outbound policy",
+            "policy_reason": "robots_unreachable",
+        }
+
+    monkeypatch.setattr(article_lib, "scrape_article", _fake_scrape_article)
+
+    registry = create_default_registry(enable_url_scraping=True)
+    out = await registry.execute(
+        "scrape_url",
+        {"url": "https://example.com/blocked"},
+    )
+
+    assert out.success is False
+    assert out.error == "Blocked by outbound policy"
+
+
+@pytest.mark.asyncio
 async def test_discussion_action_uses_configured_default_platforms(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -230,30 +254,6 @@ async def test_research_loop_skips_duplicate_scrape_url_fetch(monkeypatch):
     assert output.metadata["url_dedup"]["urls_seen"] == 1
     assert output.metadata["url_dedup"]["duplicates_merged"] == 1
     assert output.metadata["url_dedup"]["duplicate_fetches_skipped"] == 1
-
-
-@pytest.mark.asyncio
-async def test_scrape_url_action_surfaces_shared_policy_block(monkeypatch):
-    import tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib as article_lib
-
-    async def _fake_scrape_article(target_url: str):  # noqa: ANN001
-        return {
-            "extraction_successful": False,
-            "url": target_url,
-            "error": "Blocked by outbound policy",
-            "policy_reason": "robots_unreachable",
-        }
-
-    monkeypatch.setattr(article_lib, "scrape_article", _fake_scrape_article)
-
-    registry = create_default_registry(enable_url_scraping=True)
-    out = await registry.execute(
-        "scrape_url",
-        {"url": "https://example.com/blocked"},
-    )
-
-    assert out.success is False
-    assert out.error == "Blocked by outbound policy"
 
 
 @pytest.mark.asyncio

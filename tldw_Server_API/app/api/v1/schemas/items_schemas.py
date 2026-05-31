@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
+
 
 class Item(BaseModel):
     id: int
@@ -25,6 +27,7 @@ class ItemsListResponse(BaseModel):
     total: int
     page: int
     size: int
+    pagination: PagePaginationMeta
 
 
 BulkAction = Literal[

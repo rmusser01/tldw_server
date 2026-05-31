@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
       | "jobs"
       | "runs"
       | "items"
+      | "alerts"
       | "outputs"
       | "templates"
       | "settings",
@@ -34,7 +35,22 @@ const mocks = vi.hoisted(() => {
     })
   }
   return {
+    watchlistContainer: {
+      id: 42,
+      name: "Healthcare ransomware",
+      description: "Track hospital impact",
+      objective: "Find new ransomware affecting hospitals",
+      domain: "cti_osint",
+      status: "active",
+      priority: "high",
+      tags: ["ransomware", "hospitals"],
+      created_at: "2026-05-15T00:00:00Z",
+      updated_at: "2026-05-15T00:00:00Z"
+    },
+    createWatchlistMock: vi.fn(),
     fetchWatchlistRunsMock: vi.fn(),
+    fetchWatchlistsMock: vi.fn(),
+    updateWatchlistMock: vi.fn(),
     recordWatchlistsIaExperimentTelemetryMock: vi.fn(),
     trackWatchlistsOnboardingTelemetryMock: vi.fn(),
     notificationDestroyMock: vi.fn(),
@@ -171,8 +187,31 @@ vi.mock("antd", async () => {
       {...rest}
     />
   )
-  return { ...actual, Alert, Tabs, Empty, Button, Modal, Drawer, Tooltip, Switch }
+  const Select = ({ value, options = [], onChange, "aria-label": ariaLabel, ...rest }: any) => (
+    <select
+      aria-label={ariaLabel}
+      value={value == null ? "" : String(value)}
+      onChange={(event) => {
+        const rawValue = event.currentTarget.value
+        const numeric = Number(rawValue)
+        onChange?.(Number.isFinite(numeric) && rawValue.trim() !== "" ? numeric : rawValue)
+      }}
+      {...rest}
+    >
+      {options.map((option: any) => (
+        <option key={String(option.value)} value={String(option.value)}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  )
+  const Tag = ({ children }: any) => <span>{children}</span>
+  return { ...actual, Alert, Tabs, Empty, Button, Modal, Drawer, Tooltip, Switch, Select, Tag }
 })
+
+vi.mock("@/components/Common/WorkspaceConnectionGate", () => ({
+  default: ({ children }: { children: React.ReactNode }) => <>{children}</>
+}))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => ({
@@ -202,7 +241,10 @@ vi.mock("react-router-dom", async () => {
 })
 
 vi.mock("@/services/watchlists", () => ({
+  createWatchlist: (...args: any[]) => mocks.createWatchlistMock(...args),
   fetchWatchlistRuns: (...args: any[]) => mocks.fetchWatchlistRunsMock(...args),
+  fetchWatchlists: (...args: any[]) => mocks.fetchWatchlistsMock(...args),
+  updateWatchlist: (...args: any[]) => mocks.updateWatchlistMock(...args),
   recordWatchlistsIaExperimentTelemetry: (...args: any[]) =>
     mocks.recordWatchlistsIaExperimentTelemetryMock(...args)
 }))
@@ -217,7 +259,17 @@ vi.mock("@/store/watchlists", () => ({
     selector({
       activeTab: mocks.state.activeTab,
       overviewHealth: mocks.state.overviewHealth,
+      watchlists: [mocks.watchlistContainer],
+      watchlistsLoading: false,
+      watchlistsError: null,
+      selectedWatchlistId: 42,
       setActiveTab: mocks.state.setActiveTab,
+      setWatchlists: vi.fn(),
+      setWatchlistsLoading: vi.fn(),
+      setWatchlistsError: vi.fn(),
+      setSelectedWatchlistId: vi.fn(),
+      addWatchlist: vi.fn(),
+      updateWatchlistInList: vi.fn(),
       openRunDetail: vi.fn(),
       resetStore: vi.fn()
     })
@@ -257,6 +309,11 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     connectionMocks.useConnectionUxState.mockReturnValue({
       uxState: "connected_ok",
       hasCompletedFirstRun: true
+    })
+    mocks.fetchWatchlistsMock.mockResolvedValue({
+      items: [mocks.watchlistContainer],
+      total: 1,
+      has_more: false
     })
     mocks.state.activeTab = "sources"
     mocks.state.overviewHealth = {
@@ -309,7 +366,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
       { tab: "sources", href: WATCHLISTS_TAB_HELP_DOCS.sources, label: "Feeds setup" },
       { tab: "jobs", href: WATCHLISTS_TAB_HELP_DOCS.jobs, label: "Monitor scheduling" },
       { tab: "runs", href: WATCHLISTS_TAB_HELP_DOCS.runs, label: "Activity guidance" },
-      { tab: "items", href: WATCHLISTS_TAB_HELP_DOCS.items, label: "Article review" },
+      { tab: "items", href: WATCHLISTS_TAB_HELP_DOCS.items, label: "Updates review" },
       { tab: "outputs", href: WATCHLISTS_TAB_HELP_DOCS.outputs, label: "Reports guidance" },
       { tab: "templates", href: WATCHLISTS_TAB_HELP_DOCS.templates, label: "Template authoring" },
       { tab: "settings", href: WATCHLISTS_TAB_HELP_DOCS.settings, label: "Workspace settings" }
@@ -333,13 +390,13 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     expect(screen.getByTestId("watchlists-tab-sources")).toHaveTextContent("Feeds")
     expect(screen.getByTestId("watchlists-tab-jobs")).toHaveTextContent("Monitors")
     expect(screen.getByTestId("watchlists-tab-runs")).toHaveTextContent("Activity")
-    expect(screen.getByTestId("watchlists-tab-items")).toHaveTextContent("Articles")
+    expect(screen.getByTestId("watchlists-tab-items")).toHaveTextContent("Updates")
     expect(screen.getByTestId("watchlists-tab-outputs")).toHaveTextContent("Reports")
 
     expect(screen.getByTestId("watchlists-task-open-sources")).toHaveTextContent("Set up feeds")
     expect(screen.getByTestId("watchlists-task-open-jobs")).toHaveTextContent("Configure monitors")
     expect(screen.getByTestId("watchlists-task-open-runs")).toHaveTextContent("Check activity")
-    expect(screen.getByTestId("watchlists-task-open-items")).toHaveTextContent("Review articles")
+    expect(screen.getByTestId("watchlists-task-open-items")).toHaveTextContent("Review updates")
     expect(screen.getByTestId("watchlists-task-open-outputs")).toHaveTextContent("View reports")
   })
 

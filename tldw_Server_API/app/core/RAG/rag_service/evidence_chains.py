@@ -273,8 +273,8 @@ class EvidenceChainBuilder:
         if self.enable_llm_extraction:
             try:
                 return await self._llm_extract_facts(doc, query)
-            except Exception as e:
-                logger.debug(f"LLM fact extraction failed, using heuristic: {e}")
+            except Exception:
+                logger.debug("LLM fact extraction failed, using heuristic")
 
         # Fall back to heuristic extraction
         return self._heuristic_extract_facts(doc, query)
@@ -389,8 +389,8 @@ class EvidenceChainBuilder:
 
             return facts[:5]
 
-        except Exception as e:
-            logger.warning(f"LLM fact extraction failed: {e}")
+        except Exception:
+            logger.warning("LLM fact extraction failed")
             raise
 
     def _find_supporting_nodes(

@@ -3,7 +3,13 @@
     "serverAndAuth": "سرور و احراز هویت",
     "knowledgeTools": "ابزارهای دانش",
     "workspace": "محیط کار",
-    "about": "درباره"
+    "about": "درباره",
+    "connect": "اتصال",
+    "aiModels": "هوش مصنوعی و مدل‌ها",
+    "experience": "تجربه",
+    "knowledgeWorkspace": "دانش و فضای کاری",
+    "safetyAdmin": "ایمنی و مدیریت",
+    "dataManagement": "مدیریت داده"
   },
   "healthNav": "سلامت",
   "worldBooksNav": "کتاب‌های جهان",
@@ -1659,5 +1665,11 @@
     "subtitle": "پیش‌فرض‌ها، پیش‌تنظیم‌ها و رفتار ورود سریع را پیکربندی کنید."
   },
   "acpPlaygroundNav": "محیط آزمایشی ACP",
-  "skillsNav": "مهارت‌ها"
+  "skillsNav": "مهارت‌ها",
+  "providerKeys": {
+    "navTitle": "کلیدهای ارائه‌دهنده"
+  },
+  "dataManagement": {
+    "navTitle": "مدیریت داده"
+  }
 }

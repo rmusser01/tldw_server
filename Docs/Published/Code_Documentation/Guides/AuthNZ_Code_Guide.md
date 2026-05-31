@@ -26,7 +26,7 @@ See also: `tldw_Server_API/app/core/AuthNZ/README.md` and `Docs/Code_Documentati
 
 ## New endpoints checklist (AuthNZ + RG)
 
-- Always authenticate via `get_auth_principal` and enforce authorization with `require_permissions(...)` / `require_roles(...)` (and `require_service_principal()` for service-only routes). `require_admin`/`require_role` API-dependency shims are removed; avoid raw `request.state.user_id` checks or ad-hoc `is_single_user_mode()` branches for access control.
+- Always authenticate via `get_auth_principal` and enforce authorization with `RequirePermission(...)` / `RequireRole(...)` (and `require_service_principal()` for service-only routes). `require_admin`/`require_role` API-dependency shims are removed; avoid raw `request.state.user_id` checks or ad-hoc `is_single_user_mode()` branches for access control.
 - For latency/cost-sensitive or user-facing endpoints (chat, audio, embeddings, evaluations, MCP, workflows, tools, media ingestion, etc.), verify whether they should be governed by Resource Governor:
   - If yes, ensure there is a policy entry (`resource_governor_policies.yaml` or DB-backed `rg_policies`) and a `route_map` entry mapping the endpoint’s path/tag to an appropriate policy id.
   - Confirm tests exercise the RG-enforced behavior where limits are important (429/Retry-After headers, tokens/streams limits, etc.).
@@ -50,7 +50,7 @@ See also: `tldw_Server_API/app/core/AuthNZ/README.md` and `Docs/Code_Documentati
 
 Admin role semantics (claims-first):
 - The `admin` role claim is interpreted consistently across profiles: a principal with `roles=["admin", ...]` is treated as having both admin- and user-level access regardless of `AUTH_MODE`/`PROFILE`.
-- Helpers such as `check_role`, `require_roles("admin")`, and `require_permissions(...)` rely on claims (`principal.roles`, `principal.permissions`, `principal.is_admin`) rather than re-reading mode, so new endpoints should always gate admin/control surfaces through these claim-first dependencies instead of adding new mode checks.
+- Helpers such as `check_role`, `RequireRole("admin")`, and `RequirePermission(...)` rely on claims (`principal.roles`, `principal.permissions`, `principal.is_admin`) rather than re-reading mode, so new endpoints should always gate admin/control surfaces through these claim-first dependencies instead of adding new mode checks.
 
 Recommended combinations (v0.1):
 - Local single-user desktop: `AUTH_MODE=single_user`, `PROFILE=local-single-user` (default SQLite users DB).
@@ -77,9 +77,9 @@ Recommended combinations (v0.1):
 - Virtual keys (JWT) are short-lived scoped tokens minted by authenticated users for automation/integrations. Validation works in both modes when JWT is configured. In single-user mode the JWT service derives a surrogate secret from `SINGLE_USER_API_KEY`, so bearer JWTs can be validated; API keys remain the simplest option when operating single-user.
 
 Note on single-user JWTs:
-- In single-user mode, `get_current_user` does not accept arbitrary JWTs; it only accepts `SINGLE_USER_API_KEY` via `X-API-KEY` or as Bearer (see `tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_current_user`). Virtual JWTs can still be verified and scoped via `require_token_scope`, but they do not authenticate a user in single-user mode.
+- In single-user mode, `get_current_user` does not accept arbitrary JWTs; it only accepts `SINGLE_USER_API_KEY` via `X-API-KEY` or as Bearer (see `tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_current_user`). Virtual JWTs can still be verified and scoped via `TokenScopeGuard`, but they do not authenticate a user in single-user mode.
 
-JWT virtual keys support additional constraints via claims (enforced with `auth_deps.require_token_scope`, not in `get_current_user`):
+JWT virtual keys support additional constraints via claims (enforced with `auth_deps.TokenScopeGuard`, not in `get_current_user`):
 - `allowed_endpoints`: list of endpoint codes (e.g., `chat.completions`)
 - `allowed_methods`: HTTP methods allowlist (e.g., `["POST"]`)
 - `allowed_paths`: path prefixes allowlist (e.g., `["/api/v1/chat/"]`)
@@ -97,13 +97,13 @@ JWT virtual keys support additional constraints via claims (enforced with `auth_
 
 - Virtual JWTs (short-lived tokens)
   - Minted with `JWTService.create_virtual_access_token(...)`; not stored server-side.
-  - Authenticate with Bearer; claim-level enforcement is applied via `auth_deps.require_token_scope` (allowed_endpoints/methods/paths, quotas via `count_as` + `max_calls`/`max_runs`, optional `schedule_id`).
+  - Authenticate with Bearer; claim-level enforcement is applied via `auth_deps.TokenScopeGuard` (allowed_endpoints/methods/paths, quotas via `count_as` + `max_calls`/`max_runs`, optional `schedule_id`).
   - Work in both modes (single-user derives a surrogate secret; multi-user uses configured JWT secrets/keys).
   - Best for ephemeral, scoped automation (e.g., scheduled workflows) where rotation and narrow scope are required.
 
 ## Using Dependencies in Endpoints
 
-Prefer the shared dependencies from `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py`.
+Prefer the shared dependencies from `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py`. Endpoint code should import the PascalCase factories (`RequirePermission`, `RequireRole`, and `TokenScopeGuard`); the lowercase names remain implementation/backcompat factories and are covered directly by AuthNZ unit tests.
 
 Typical patterns:
 
@@ -113,7 +113,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_current_user,           # Resolves single-user, API-key, or JWT
     get_current_active_user,    # Adds active status check
     check_rate_limit,           # Diagnostics-only ingress compatibility helper
-    require_permissions,        # Claim-first permission gate (preferred)
+    RequirePermission,          # Claim-first permission gate
 )
 
 router = APIRouter(prefix="/example", tags=["examples"])
@@ -124,7 +124,7 @@ async def protected_route(user=Depends(get_current_user)):
 
 @router.post(
     "/write",
-    dependencies=[Depends(require_permissions("media.update"))],
+    dependencies=[Depends(RequirePermission("media.update"))],
 )
 async def write_route(user=Depends(get_current_active_user)):
     return {"ok": True}
@@ -135,17 +135,17 @@ async def limited_route(user=Depends(get_current_user)):
 ```
 
 Scoped token/key enforcement:
-- Use `require_token_scope(scope, endpoint_id=..., count_as=...)` to enforce virtual-key constraints on a route. It validates JWT claims when a bearer is present and applies equivalent metadata-based checks when only `X-API-KEY` is provided (allowed endpoints/methods/paths and optional per-key quotas).
+- Use `TokenScopeGuard(scope, endpoint_id=..., count_as=...)` to enforce virtual-key constraints on a route. It validates JWT claims when a bearer is present and applies equivalent metadata-based checks when only `X-API-KEY` is provided (allowed endpoints/methods/paths and optional per-key quotas).
  - This dependency is additive and does not replace `get_current_user`; use both when a route must authenticate and enforce scoped constraints.
 
 Example (scoped automation endpoint):
 ```python
 from fastapi import Depends
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_current_user, require_token_scope
+    get_current_user, TokenScopeGuard
 )
 
-@router.post("/workflows/run", dependencies=[Depends(require_token_scope(
+@router.post("/workflows/run", dependencies=[Depends(TokenScopeGuard(
     scope="workflows",
     endpoint_id="workflows.run",
     count_as="run",
@@ -170,8 +170,8 @@ from fastapi import Depends
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_optional_current_user,
     get_auth_principal,
-    require_permissions,
-    require_roles,
+    RequirePermission,
+    RequireRole,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
@@ -182,11 +182,11 @@ async def maybe_auth(user=Depends(get_optional_current_user)):
     return {"hello": "anonymous"}
 
 @router.get("/admin-only")
-async def admin_only(principal: AuthPrincipal = Depends(require_roles("admin"))):
+async def admin_only(principal: AuthPrincipal = Depends(RequireRole("admin"))):
     return {"ok": True, "as": "admin", "id": principal.user_id}
 
 @router.get("/media-read")
-async def media_read(principal: AuthPrincipal = Depends(require_permissions("media.read"))):
+async def media_read(principal: AuthPrincipal = Depends(RequirePermission("media.read"))):
     return {"ok": True, "id": principal.user_id}
 ```
 
@@ -208,7 +208,7 @@ Key calls you’ll see in endpoints/services:
 - Keys support: expiry, usage counts, IP allowlists, rate limits, audit log, and optional LLM usage budgets and allowlists.
 - `auth_deps.get_current_user` can authenticate via `X-API-KEY` when no Bearer token is present.
 - Virtual keys: use `POST /api/v1/auth/virtual-key` or programmatically via `JWTService.create_virtual_access_token(...)`.
-  - Virtual keys are enforced via scoped claims (e.g., `scope`, allowed endpoints/methods/paths) with helpers in `auth_deps.require_token_scope` and budget checks in `llm_budget_guard.py`.
+  - Virtual keys are enforced via scoped claims (e.g., `scope`, allowed endpoints/methods/paths) with helpers in `auth_deps.TokenScopeGuard` and budget checks in `llm_budget_guard.py`.
 
 Example: create and validate an API key
 ```python
@@ -229,7 +229,7 @@ Notes:
 - Org/team context: DI attaches `request.state.user_id`, plus memberships from `orgs_teams.list_memberships_for_user` and a content scope token via `scope_context.set_scope` for downstream DB access.
 - **Modern pattern (preferred)**: use claim-first dependencies from `auth_deps`:
   - `get_auth_principal` → returns `AuthPrincipal` with `roles`/`permissions` claims.
-  - `require_permissions("perm")` / `require_roles("role")` → enforce claims and return the principal.
+  - `RequirePermission("perm")` / `RequireRole("role")` → enforce claims and return the principal.
   - `require_service_principal()` → enforces `principal.kind == "service"` for internal-only/service endpoints.
   - Representative usage exists on media, RAG, notes graph, evaluations CRUD endpoints, sandbox admin views, and selected workflows surfaces.
   - `get_org_policy_from_principal` → resolves an organization policy in a **principal-first** way for org-scoped features (for example, connectors/admin policy and sources):
@@ -244,20 +244,20 @@ Notes:
   - `get_current_user`:
     - Returns a user-shaped dict when credentials are valid.
     - Raises **401 Unauthorized** for missing/invalid credentials with detail containing `"Authentication required"` and `WWW-Authenticate: Bearer`.
-  - `require_permissions` / `require_roles`:
+  - `RequirePermission` / `RequireRole`:
     - Propagate **401** from `get_auth_principal` when no principal can be resolved.
     - Raise **403 Forbidden** when a principal is present but lacks required claims:
-      - `require_permissions` → `detail="Permission denied. Required: <perm-list>"`.
-      - `require_roles` → `detail="Access denied. Required role(s): <role-list>"`.
+      - `RequirePermission` → `detail="Permission denied. Required: <perm-list>"`.
+      - `RequireRole` → `detail="Access denied. Required role(s): <role-list>"`.
     - These 403 payload shapes are treated as part of the public surface for claim-first/admin routes.
   - `require_service_principal`:
     - Depends on `get_auth_principal` for authentication (401 on missing/invalid credentials).
     - Raises **403 Forbidden** with `detail="Service principal required"` when a non-service principal calls a service-only route.
     - Returns the underlying `AuthPrincipal` unchanged when `principal.kind == "service"`.
 - **Removed legacy helpers (historical only)**:
-  - Earlier versions exposed FastAPI dependencies `PermissionChecker`, `RoleChecker`, `AnyPermissionChecker`, and `AllPermissionsChecker` from `permissions.py`. These have now been removed; endpoints must use `get_auth_principal` together with `require_permissions` / `require_roles` instead.
+  - Earlier versions exposed FastAPI dependencies `PermissionChecker`, `RoleChecker`, `AnyPermissionChecker`, and `AllPermissionsChecker` from `permissions.py`. These have now been removed; endpoints must use `get_auth_principal` together with `RequirePermission` / `RequireRole` instead.
   - Existing admin and control surfaces that once used these helpers (media add, tools execute, workflows runs/events/artifacts/control/DLQ, sandbox admin) have been migrated to claim-first dependencies. Tests such as `test_media_add_permissions_claims.py`, `test_tools_permissions_claims.py`, `test_workflows_runs_permissions_claims.py`, `test_workflows_artifacts_permissions_claims.py`, `test_workflows_webhook_dlq_permissions_claims.py`, `test_workflows_control_permissions_claims.py`, and `test_sandbox_admin_permissions_claims.py` lock in the new behavior and ensure the claim-first dependencies are the true authorization gates.
-  - Heavy evaluations admin paths use claim-first checks via `enforce_heavy_evaluations_admin(AuthPrincipal)` together with `require_roles("admin")` / `require_permissions(...)` on top of `get_auth_principal`.
+  - Heavy evaluations admin paths use claim-first checks via `enforce_heavy_evaluations_admin(AuthPrincipal)` together with `RequireRole("admin")` / `RequirePermission(...)` on top of `get_auth_principal`.
   - A repository layer exists for AuthNZ and MUST be used instead of ad-hoc SQL for core tables:
     - `AuthnzUsersRepo` (`app/core/AuthNZ/repos/users_repo.py`) wraps `UsersDB` for user lookups; exercised against both SQLite and Postgres in AuthNZ tests.
     - `AuthnzApiKeysRepo` (`app/core/AuthNZ/repos/api_keys_repo.py`) centralizes `api_keys` read/write paths and is used by `APIKeyManager` and single-user bootstrap.
@@ -279,13 +279,13 @@ Tests:
     - `AuthnzRateLimitsRepo` (`app/core/AuthNZ/repos/rate_limits_repo.py`) encapsulates all DB-backed rate-limiter tables (`rate_limits`, `failed_attempts`, `account_lockouts`) and is used by `rate_limiter.RateLimiter` for counters, lockouts, and cleanup.
   - New AuthNZ code should **not** add fresh backend-specific SQL for these tables; prefer adding small, task-focused methods to the appropriate repo and calling them from business logic.
   - New code MUST NOT introduce fresh `is_single_user_mode()` branches in endpoint/business logic. Mode/profile checks are confined to a small number of coordination points (bootstrap, DB selection, and legacy compatibility helpers); authorization should flow through `AuthPrincipal` + claim-first dependencies instead.
-  - New code **must not** reintroduce FastAPI dependency helpers that bypass `get_auth_principal` or duplicate `require_permissions` / `require_roles`. Authorization for endpoints should always flow through claim-first dependencies.
+  - New code **must not** reintroduce FastAPI dependency helpers that bypass `get_auth_principal` or duplicate `RequirePermission` / `RequireRole`. Authorization for endpoints should always flow through claim-first dependencies.
   - AuthNZ-facing documentation (usage examples, API integration guides) should treat this guide as canonical and mirror its claim-first patterns. When decorator-style helpers appear in historical examples (including the removed `*Checker` classes), they should be clearly labeled as legacy and not used for new code.
 
 References:
 - `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py#get_auth_principal`
-- `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py#require_permissions`
-- `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py#require_roles`
+- `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py#RequirePermission`
+- `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py#RequireRole`
 
 ## How to Secure a New Endpoint (Checklist)
 
@@ -301,9 +301,9 @@ When adding a new FastAPI endpoint that needs AuthNZ and guardrails:
 2. **Define and apply permissions/roles**
    - Add or reuse a permission constant in `tldw_Server_API/app/core/AuthNZ/permissions.py`.
    - Gate the route with claim-first dependencies on the router or endpoint:
-     - `dependencies=[Depends(require_permissions(MY_PERMISSION))]`
-     - and/or `dependencies=[Depends(require_roles("admin"))]`.
-   - Do **not** introduce mode-based gates or legacy admin shims; always build on `get_auth_principal` + `require_permissions` / `require_roles`.
+     - `dependencies=[Depends(RequirePermission(MY_PERMISSION))]`
+     - and/or `dependencies=[Depends(RequireRole("admin"))]`.
+   - Do **not** introduce mode-based gates or legacy admin shims; always build on `get_auth_principal` + `RequirePermission` / `RequireRole`.
 
 3. **Wire ResourceGovernor / rate limits if needed**
    - For rate-limited endpoints, reuse shared helpers instead of new per-module limiters:
@@ -401,8 +401,8 @@ async def tight_user(user=Depends(get_current_user)):
 ## Expected Roles/Permissions for Resource-Governor Admin
 
 - Resource-Governor admin and diagnostics endpoints under `/api/v1/resource-governor/*` are treated as AuthNZ admin surfaces and MUST:
-  - Use claim-first dependencies: `principal: AuthPrincipal = Depends(get_auth_principal)` and `dependencies=[Depends(require_roles("admin"))]` on the route.
-  - Rely on `require_roles("admin")` (admin role or `principal.is_admin`) as the gate; do not add new `is_single_user_mode()` / mode-specific bypasses in handlers.
+  - Use claim-first dependencies: `principal: AuthPrincipal = Depends(get_auth_principal)` and `dependencies=[Depends(RequireRole("admin"))]` on the route.
+  - Rely on `RequireRole("admin")` (admin role or `principal.is_admin`) as the gate; do not add new `is_single_user_mode()` / mode-specific bypasses in handlers.
   - Keep 401/403 semantics aligned with other admin endpoints (401 for missing/invalid credentials, 403 for insufficient roles), as enforced by:
     - `tldw_Server_API/tests/AuthNZ_Unit/test_resource_governor_permissions_claims.py`
     - `tldw_Server_API/tests/Resource_Governance/test_rg_capabilities_endpoint.py`
@@ -473,9 +473,9 @@ async def secure(user=Depends(get_current_user)):
 2) Require a permission (claim-first)
 ```python
 from fastapi import Depends
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_current_user, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, get_current_user
 
-@router.post("/media/update", dependencies=[Depends(require_permissions("media.update"))])
+@router.post("/media/update", dependencies=[Depends(RequirePermission("media.update"))])
 async def update_media(user=Depends(get_current_user)):
     ...
 ```
@@ -518,7 +518,7 @@ async def mint_vk(user=Depends(get_current_user)):
 
 - Add new permissions in `permissions.py` and seed mapping in RBAC migrations/seeders.
 - New admin surfaces belong under `.../endpoints/admin/` (router + shared helpers) or a feature-specific `admin_<feature>.py` module and should be guarded using claim-first dependencies:
-  - Prefer `principal: AuthPrincipal = Depends(get_auth_principal)` together with `dependencies=[Depends(require_roles("admin"))]` (and `require_permissions(...)` where appropriate).
+  - Prefer `principal: AuthPrincipal = Depends(get_auth_principal)` together with `dependencies=[Depends(RequireRole("admin"))]` (and `RequirePermission(...)` where appropriate).
 - For new guardrails, prefer middleware with settings gating, and expose DI helpers to keep endpoints simple.
 - Keep both SQLite and Postgres code paths working; use `DatabasePool` helpers to normalize placeholders across backends when needed.
 

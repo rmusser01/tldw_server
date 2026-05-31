@@ -1,25 +1,20 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 
-:: TLDW Run Script
+:: Compatibility launcher for installs created by Windows_Install_Update.bat.
 
 set "install_dir=%~dp0tldw"
+if not "%TLDW_INSTALL_DIR%"=="" set "install_dir=%TLDW_INSTALL_DIR%"
+set "launcher=%install_dir%\quick-launch.ps1"
 
-if not exist "%install_dir%" (
-    echo TLDW installation not found. Please run the install_update_tldw.bat script first.
-    pause
+if not exist "%launcher%" (
+    echo tldw_server launcher not found at: %launcher%
+    echo Run Windows_Install_Update.bat first, or set TLDW_INSTALL_DIR to a checkout that contains quick-launch.ps1.
     exit /b 1
 )
 
-cd "%install_dir%"
+if "%TLDW_VENV_DIR%"=="" set "TLDW_VENV_DIR=venv"
+if "%TLDW_SKIP_INSTALL%"=="" set "TLDW_SKIP_INSTALL=1"
 
-:: Activate virtual environment
-call .\venv\Scripts\activate.bat
-
-:: Run TLDW
-python summarize.py -gui
-
-:: Deactivate virtual environment when done
-call .\venv\Scripts\deactivate.bat
-
-exit /b 0
+powershell -ExecutionPolicy Bypass -File "%launcher%" %*
+exit /b %errorlevel%

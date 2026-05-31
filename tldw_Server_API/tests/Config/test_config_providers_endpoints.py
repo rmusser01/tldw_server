@@ -3,10 +3,13 @@
 Tests for GET /config/providers and POST /config/validate-provider endpoints.
 """
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tldw_Server_API.app.api.v1.endpoints import config_info as config_info_mod
 from tldw_Server_API.app.api.v1.endpoints.config_info import (
     ProviderValidateRequest,
     _PROVIDER_VALIDATION_INFO,
@@ -14,7 +17,9 @@ from tldw_Server_API.app.api.v1.endpoints.config_info import (
     _key_hint,
     _resolve_provider_key,
     _validate_call_log,
+    get_quickstart_redirect,
     list_configured_providers,
+    load_safe_config,
     validate_provider_key,
 )
 
@@ -29,6 +34,21 @@ def _make_mock_request(client_host: str = "127.0.0.1") -> MagicMock:
     req.client = MagicMock()
     req.client.host = client_host
     return req
+
+
+@contextmanager
+def _capture_config_info_logs() -> Iterator[list[str]]:
+    messages: list[str] = []
+    sink_id = config_info_mod.logger.add(
+        lambda message: messages.append(str(message))
+        if message.record["name"] == config_info_mod.__name__
+        else None,
+        level="DEBUG",
+    )
+    try:
+        yield messages
+    finally:
+        config_info_mod.logger.remove(sink_id)
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +106,90 @@ class TestResolveProviderKey:
         with patch(_target, return_value={"anthropic": "ant-key-from-config"}):
             result = _resolve_provider_key("anthropic")
             assert result == "ant-key-from-config"
+
+    def test_get_api_keys_failure_log_is_sanitized(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        logger_stub = MagicMock()
+
+        def _fail_get_api_keys():
+            raise RuntimeError("provider key loader exploded at /private/config.txt")
+
+        monkeypatch.setattr(config_info_mod, "logger", logger_stub)
+        _target = "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys"
+        with patch(_target, side_effect=_fail_get_api_keys):
+            result = _resolve_provider_key("openai")
+
+        assert result is None
+        logger_stub.debug.assert_called_once_with("Failed to load API keys for provider")
+
+
+class TestConfigInfoSanitizedLogs:
+    def test_missing_config_path_log_is_sanitized(self, monkeypatch):
+        monkeypatch.setenv("TLDW_CONFIG_PATH", "/private/missing-config.txt")
+
+        with _capture_config_info_logs() as messages:
+            config = load_safe_config()
+
+        joined = "\n".join(messages)
+        assert config["configured"] is False
+        assert "Config file not found" in joined
+        assert "/private/missing-config.txt" not in joined
+
+    def test_capability_flag_failure_log_is_sanitized(self, monkeypatch, tmp_path):
+        config_path = tmp_path / "config.txt"
+        config_path.write_text(
+            "[Authentication]\nauth_mode = single_user\n\n[Server]\nhost = 127.0.0.1\nport = 8000\n",
+            encoding="utf-8",
+        )
+
+        def _failing_route_enabled(*args, **kwargs):  # noqa: ARG001
+            raise RuntimeError("capability config exploded at /private/config.txt")
+
+        monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+        monkeypatch.setattr(config_info_mod.config_mod, "route_enabled", _failing_route_enabled)
+
+        with _capture_config_info_logs() as messages:
+            config = load_safe_config()
+
+        joined = "\n".join(messages)
+        assert config["configured"] is True
+        assert "Failed to derive safe capability flags" in joined
+        assert "capability config exploded" not in joined
+        assert "/private/config.txt" not in joined
+
+    @pytest.mark.asyncio
+    async def test_quickstart_config_read_failure_log_is_sanitized(self, monkeypatch):
+        def _failing_load_config():
+            raise RuntimeError("quickstart config exploded at /private/config.txt")
+
+        monkeypatch.delenv("QUICKSTART_URL", raising=False)
+        monkeypatch.setattr(config_info_mod.config_mod, "load_comprehensive_config", _failing_load_config)
+
+        with _capture_config_info_logs() as messages:
+            response = await get_quickstart_redirect()
+
+        joined = "\n".join(messages)
+        assert response.status_code == 307
+        assert response.headers["location"] == "/docs"
+        assert "Quickstart redirect: could not read config, using default" in joined
+        assert "quickstart config exploded" not in joined
+        assert "/private/config.txt" not in joined
+
+    @pytest.mark.asyncio
+    async def test_quickstart_outer_failure_log_is_sanitized(self, monkeypatch):
+        def _failing_getenv(name: str, default=None):  # noqa: ARG001
+            raise RuntimeError("quickstart env exploded at /private/env")
+
+        monkeypatch.setattr(config_info_mod.os, "getenv", _failing_getenv)
+
+        with _capture_config_info_logs() as messages:
+            response = await get_quickstart_redirect()
+
+        joined = "\n".join(messages)
+        assert response.status_code == 200
+        assert "Quickstart redirect failed" in joined
+        assert "quickstart env exploded" not in joined
+        assert "/private/env" not in joined
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +253,24 @@ class TestListConfiguredProviders:
         assert ollama.configured is True
         assert ollama.requires_api_key is False
         assert ollama.key_hint is None
+
+    @pytest.mark.asyncio
+    async def test_custom_openai_providers_do_not_require_keys_by_default(self, monkeypatch):
+        monkeypatch.delenv("CUSTOM_OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("CUSTOM_OPENAI2_API_KEY", raising=False)
+        monkeypatch.delenv("CUSTOM_OPENAI_API_KEY_99", raising=False)
+
+        with patch(
+            "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys",
+            return_value={},
+        ):
+            response = await list_configured_providers()
+
+        for provider_name in ("custom-openai-api", "custom-openai-api-2", "custom-openai-api-99"):
+            provider = next(p for p in response.providers if p.name == provider_name)
+            assert provider.configured is True
+            assert provider.requires_api_key is False
+            assert provider.key_hint is None
 
     @pytest.mark.asyncio
     async def test_no_cloud_providers_configured(self, monkeypatch):
@@ -291,6 +413,24 @@ class TestValidateProviderKey:
 
         assert response.valid is False
         assert "timed out" in response.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_provider_validation_exception_log_is_sanitized(self):
+        """Unexpected validation exceptions should not leak backend detail to logs."""
+        with patch(_VALIDATE_HTTP_TARGET, new_callable=AsyncMock) as mock_validate:
+            mock_validate.side_effect = RuntimeError("provider backend exploded at /private/provider.key")
+            body = ProviderValidateRequest(provider="openai", api_key="sk-test-key")
+            request = _make_mock_request()
+
+            with _capture_config_info_logs() as messages:
+                response = await validate_provider_key(body, request)
+
+        joined = "\n".join(messages)
+        assert response.valid is False
+        assert response.error == "Validation failed. The provider may be unreachable or the key may be invalid."
+        assert "Provider validation failed" in joined
+        assert "provider backend exploded" not in joined
+        assert "/private/" not in joined
 
     @pytest.mark.asyncio
     async def test_no_fallback_to_configured_key(self, monkeypatch):

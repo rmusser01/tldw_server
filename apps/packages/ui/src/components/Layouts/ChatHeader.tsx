@@ -35,7 +35,6 @@ type ChatHeaderProps = {
   shareButtonDisabled?: boolean
   onToggleTheme?: () => void
   themeMode?: "system" | "dark" | "light"
-  onClearChat: () => void
   onStartSavedChat?: () => void
   onStartTemporaryChat?: () => void
   onStartCharacterChat?: () => void
@@ -73,7 +72,6 @@ export function ChatHeader({
   shareButtonDisabled = false,
   onToggleTheme,
   themeMode = "dark",
-  onClearChat,
   onStartSavedChat,
   onStartTemporaryChat,
   onStartCharacterChat,
@@ -103,12 +101,9 @@ export function ChatHeader({
   const themeToggleLabel = isDarkTheme
     ? toText(t("common:theme.switchToLight", "Switch to light theme"))
     : toText(t("common:theme.switchToDark", "Switch to dark theme"))
-  const startSavedChat =
-    onStartSavedChat ?? onClearChat
-  const startTemporaryChat =
-    onStartTemporaryChat ?? onClearChat
-  const startCharacterChat =
-    onStartCharacterChat ?? onClearChat
+  const showSavedChatAction = Boolean(onStartSavedChat)
+  const showTemporaryChatAction = Boolean(onStartTemporaryChat)
+  const showCharacterChatAction = Boolean(onStartCharacterChat)
   const shareButtonLabel = shareStatusLabel
     ? toText(
         t("playground:header.shareStatusAria", "Share conversation ({{status}})", {
@@ -125,7 +120,7 @@ export function ChatHeader({
       data-ischat-route="true"
       className="z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"
     >
-      <div className="flex w-full items-center justify-between gap-3 px-4 py-2">
+      <div className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           {showSidebarToggle && (
             <Tooltip title={sidebarLabel} placement="bottom">
@@ -170,6 +165,12 @@ export function ChatHeader({
                 <Input
                   size="small"
                   autoFocus
+                  aria-label={toText(
+                    t("option:header.renameConversation", "Rename conversation")
+                  )}
+                  placeholder={toText(
+                    t("option:header.untitledChat", "Untitled")
+                  )}
                   value={chatTitle}
                   onChange={(e) => onTitleChange(e.target.value)}
                   onPressEnter={() => {
@@ -249,7 +250,7 @@ export function ChatHeader({
             </div>
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2">
           <button
             type="button"
             onClick={onOpenCommandPalette}
@@ -262,40 +263,46 @@ export function ChatHeader({
               {commandKeyLabel}K
             </span>
           </button>
-          <Tooltip title={t("playground:header.newSavedChat", "New saved chat")}>
-            <button
-              type="button"
-              onClick={startSavedChat}
-              aria-label={t("playground:header.newSavedChat", "New saved chat") as string}
-              className={`inline-flex items-center justify-center rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`}
-              title={t("playground:header.newSavedChat", "New saved chat")}
-              data-testid="new-chat-button"
-            >
-              <SquarePen className="size-4" aria-hidden="true" />
-            </button>
-          </Tooltip>
-          <Tooltip title={t("playground:header.newTemporaryChat", "Temporary chat (not saved)")}>
-            <button
-              type="button"
-              onClick={startTemporaryChat}
-              aria-label={t("playground:header.newTemporaryChat", "Temporary chat (not saved)") as string}
-              className={`hidden items-center justify-center rounded-md px-2 py-1.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text sm:inline-flex ${focusRingClasses}`}
-              title={t("playground:header.newTemporaryChat", "Temporary chat (not saved)")}
-            >
-              {t("playground:header.temporaryShort", "Temp")}
-            </button>
-          </Tooltip>
-          <Tooltip title={t("playground:header.newCharacterChat", "Character chat")}>
-            <button
-              type="button"
-              onClick={startCharacterChat}
-              aria-label={t("playground:header.newCharacterChat", "Character chat") as string}
-              className={`hidden items-center justify-center rounded-md px-2 py-1.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text sm:inline-flex ${focusRingClasses}`}
-              title={t("playground:header.newCharacterChat", "Character chat")}
-            >
-              {t("playground:header.characterShort", "Character")}
-            </button>
-          </Tooltip>
+          {showSavedChatAction ? (
+            <Tooltip title={t("playground:header.newSavedChat", "New saved chat")}>
+              <button
+                type="button"
+                onClick={onStartSavedChat}
+                aria-label={t("playground:header.newSavedChat", "New saved chat") as string}
+                className={`inline-flex items-center justify-center rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`}
+                title={t("playground:header.newSavedChat", "New saved chat")}
+                data-testid="new-chat-button"
+              >
+                <SquarePen className="size-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
+          ) : null}
+          {showTemporaryChatAction ? (
+            <Tooltip title={t("playground:header.newTemporaryChat", "Temporary chat (not saved)")}>
+              <button
+                type="button"
+                onClick={onStartTemporaryChat}
+                aria-label={t("playground:header.newTemporaryChat", "Temporary chat (not saved)") as string}
+                className={`hidden items-center justify-center rounded-md px-2 py-1.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text sm:inline-flex ${focusRingClasses}`}
+                title={t("playground:header.newTemporaryChat", "Temporary chat (not saved)")}
+              >
+                {t("playground:header.temporaryShort", "Temp")}
+              </button>
+            </Tooltip>
+          ) : null}
+          {showCharacterChatAction ? (
+            <Tooltip title={t("playground:header.newCharacterChat", "Character chat")}>
+              <button
+                type="button"
+                onClick={onStartCharacterChat}
+                aria-label={t("playground:header.newCharacterChat", "Character chat") as string}
+                className={`hidden items-center justify-center rounded-md px-2 py-1.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text sm:inline-flex ${focusRingClasses}`}
+                title={t("playground:header.newCharacterChat", "Character chat")}
+              >
+                {t("playground:header.characterShort", "Character")}
+              </button>
+            </Tooltip>
+          ) : null}
           {onOpenShareModal && (
             <Tooltip title={shareButtonLabel}>
               <button

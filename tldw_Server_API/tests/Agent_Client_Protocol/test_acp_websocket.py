@@ -173,6 +173,34 @@ class _FakeMultiplexWebSocket:
         self.sent_text.append(raw)
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.warning_records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.exception_records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.info_records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.warning_records.append((message, args, kwargs))
+
+    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.exception_records.append((message, args, kwargs))
+
+    def info(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.info_records.append((message, args, kwargs))
+
+
+def _render_log_records(records: list[tuple[str, tuple[Any, ...], dict[str, Any]]]) -> str:
+    rendered: list[str] = []
+    for message, args, kwargs in records:
+        try:
+            rendered.append(message.format(*args, **kwargs))
+        except Exception:
+            rendered.append(message)
+        rendered.extend(repr(arg) for arg in args)
+        rendered.extend(f"{key}={value!r}" for key, value in kwargs.items())
+    return "\n".join(rendered)
+
+
 @pytest.fixture
 def mock_runner_client():
     """Create a mock runner client."""
@@ -970,10 +998,41 @@ class TestACPMultiplexWebSocket:
         monkeypatch.setattr(multiplex_endpoints, "_authenticate_ws", _fake_authenticate_ws)
         ws = _FakeMultiplexWebSocket()
 
-        await multiplex_endpoints.acp_multiplex_ws(ws, token="bad-token")
+        await multiplex_endpoints.acp_multiplex_ws(ws)
 
         assert ws.accepted is False
         assert ws.closed_codes == [4401]
+
+    @pytest.mark.asyncio
+    async def test_multiplex_sanitizes_runner_client_unavailable_log(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import tldw_Server_API.app.api.v1.endpoints.acp_multiplex as multiplex_endpoints
+
+        logger_stub = _LoggerStub()
+
+        async def _fake_authenticate_ws(*args: Any, **kwargs: Any) -> int:
+            return 7
+
+        async def _fake_get_runner_client() -> MockRunnerClient:
+            raise RuntimeError("runner leaked /private/acp.sock")
+
+        monkeypatch.setattr(multiplex_endpoints, "logger", logger_stub)
+        monkeypatch.setattr(multiplex_endpoints, "_authenticate_ws", _fake_authenticate_ws)
+        monkeypatch.setattr(multiplex_endpoints, "get_runner_client", _fake_get_runner_client)
+
+        ws = _FakeMultiplexWebSocket()
+
+        await multiplex_endpoints.acp_multiplex_ws(ws)
+
+        joined = _render_log_records(logger_stub.warning_records)
+
+        assert ws.accepted is False
+        assert ws.closed_codes == [4404]
+        assert "Multiplex WS runner client unavailable" in joined
+        assert "runner leaked" not in joined
+        assert "/private/" not in joined
 
     @pytest.mark.asyncio
     async def test_multiplex_stream_open_checks_access_and_releases_quota(
@@ -1036,7 +1095,7 @@ class TestACPMultiplexWebSocket:
             incoming=[multiplex_endpoints.MultiplexMessage.stream_open("sess-1").to_json()],
         )
 
-        await multiplex_endpoints.acp_multiplex_ws(ws, token="valid-token")
+        await multiplex_endpoints.acp_multiplex_ws(ws)
 
         assert ws.accepted is True
         assert stub_client.access_checks == [("sess-1", 7)]
@@ -1052,12 +1111,56 @@ class TestACPMultiplexWebSocket:
         ]
 
     @pytest.mark.asyncio
+    async def test_multiplex_sanitizes_access_check_failure_log(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import tldw_Server_API.app.api.v1.endpoints.acp_multiplex as multiplex_endpoints
+
+        logger_stub = _LoggerStub()
+        bus = SessionEventBus("secret-session")
+
+        async def _fake_authenticate_ws(*args: Any, **kwargs: Any) -> int:
+            return 7
+
+        async def _fake_get_runner_client() -> MockRunnerClient:
+            return MockRunnerClient()
+
+        def _fake_get_session_event_bus(session_id: str) -> SessionEventBus | None:
+            return bus if session_id == "secret-session" else None
+
+        async def _fake_require_session_access(*args: Any, **kwargs: Any) -> None:
+            raise TimeoutError("authorize leaked /private/acp-access.log")
+
+        monkeypatch.setattr(multiplex_endpoints, "logger", logger_stub)
+        monkeypatch.setattr(multiplex_endpoints, "_authenticate_ws", _fake_authenticate_ws)
+        monkeypatch.setattr(multiplex_endpoints, "get_runner_client", _fake_get_runner_client)
+        monkeypatch.setattr(multiplex_endpoints, "get_session_event_bus", _fake_get_session_event_bus)
+        monkeypatch.setattr(multiplex_endpoints, "_require_session_access", _fake_require_session_access)
+
+        ws = _FakeMultiplexWebSocket(
+            incoming=[multiplex_endpoints.MultiplexMessage.stream_open("secret-session").to_json()],
+        )
+
+        await multiplex_endpoints.acp_multiplex_ws(ws)
+
+        error_message = multiplex_endpoints.MultiplexMessage.from_json(ws.sent_text[0])
+        joined = _render_log_records(logger_stub.warning_records)
+
+        assert error_message.payload == {"error": "Unable to authorize stream"}
+        assert "Multiplex WS access check failed" in joined
+        assert "secret-session" not in joined
+        assert "authorize leaked" not in joined
+        assert "/private/" not in joined
+
+    @pytest.mark.asyncio
     async def test_multiplex_sends_error_frame_for_handler_exception(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import tldw_Server_API.app.api.v1.endpoints.acp_multiplex as multiplex_endpoints
 
+        logger_stub = _LoggerStub()
         lifecycle = {"started": 0, "stopped": 0}
 
         class _StubManager:
@@ -1079,6 +1182,7 @@ class TestACPMultiplexWebSocket:
         async def _fake_get_runner_client() -> MockRunnerClient:
             return MockRunnerClient()
 
+        monkeypatch.setattr(multiplex_endpoints, "logger", logger_stub)
         monkeypatch.setattr(multiplex_endpoints, "_authenticate_ws", _fake_authenticate_ws)
         monkeypatch.setattr(multiplex_endpoints, "get_runner_client", _fake_get_runner_client)
         monkeypatch.setattr(multiplex_endpoints, "MultiplexManager", _StubManager)
@@ -1087,9 +1191,10 @@ class TestACPMultiplexWebSocket:
             incoming=[multiplex_endpoints.MultiplexMessage.ping().to_json()],
         )
 
-        await multiplex_endpoints.acp_multiplex_ws(ws, token="valid-token")
+        await multiplex_endpoints.acp_multiplex_ws(ws)
 
         assert lifecycle == {"started": 1, "stopped": 1}
         assert len(ws.sent_text) == 1
         error_message = multiplex_endpoints.MultiplexMessage.from_json(ws.sent_text[0])
         assert error_message.type.value == "error"
+        assert logger_stub.exception_records == [("Multiplex WS handler failure", (), {})]

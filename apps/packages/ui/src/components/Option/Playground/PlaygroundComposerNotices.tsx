@@ -5,12 +5,15 @@ import {
   Button
 } from "antd"
 import { Link, useNavigate } from "react-router-dom"
+import { Alert } from "@/components/ui/primitives"
 import { FirstRunBanner } from "@/components/PersonaGarden/FirstRunBanner"
 import { useFirstRunCheck } from "@/hooks/useFirstRunCheck"
 import { ModelRecommendationsPanel } from "./ModelRecommendationsPanel"
-import type { ModelRecommendationAction } from "./model-recommendations"
+import type {
+  ModelRecommendation,
+  ModelRecommendationAction
+} from "./model-recommendations"
 import { toText } from "./hooks/utils"
-import type { TFunction } from "i18next"
 
 const CHAT_NUDGE_DISMISSED_KEY = "assistant_nudge_dismissed_chat"
 
@@ -55,7 +58,7 @@ export type PlaygroundComposerNoticesProps = {
     onAction?: () => void
     actionLabel?: string
   }>
-  visibleModelRecommendations: any[]
+  visibleModelRecommendations: ModelRecommendation[]
   sessionInsightsTotalTokens: number
   jsonMode: boolean
   isConnectionReady: boolean
@@ -63,7 +66,7 @@ export type PlaygroundComposerNoticesProps = {
   isProMode: boolean
   selectedModel: string | null | undefined
   systemPrompt: string | null | undefined
-  selectedCharacter: any
+  selectedCharacter: unknown
   ragPinnedResultsLength: number
   startupTemplateDraftName: string
   setStartupTemplateDraftName: (name: string) => void
@@ -82,8 +85,8 @@ export type PlaygroundComposerNoticesProps = {
   handleModelRecommendationAction: (action: ModelRecommendationAction) => void
   dismissModelRecommendation: (id: string) => void
   getModelRecommendationActionLabel: (action: ModelRecommendationAction) => string
-  wrapComposerProfile: (id: string, element: React.ReactElement) => React.ReactElement
-  t: TFunction
+  wrapComposerProfile: (id: string, element: React.ReactNode) => React.ReactNode
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
 }
 
 /**
@@ -128,7 +131,6 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
     modeAnnouncement,
     characterPendingApply,
     selectedCharacterGreeting,
-    selectedCharacterName,
     compareModeActive,
     compareSelectedModels,
     compareSelectedModelLabels,
@@ -243,7 +245,7 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
                   "{{count}} models",
                   {
                     count: compareSelectedModels.length
-                  } as any
+                  }
                 )
               )}
             </span>
@@ -474,59 +476,71 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
         </div>
       )}
       {!isConnectionReady && (
-        <div
+        <Alert
+          variant="info"
           role="status"
           aria-live="polite"
-          className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-md border border-text-muted/30 bg-surface2/50 px-2 py-2 text-xs text-text-muted"
+          data-testid="playground-composer-disconnected-notice"
+          className="mt-1"
         >
-          <span>
-            {t(
-              "playground:composer.disconnectedNotice",
-              "You're offline \u2014 connect to a tldw server to start chatting."
-            )}
-          </span>
-          <Link
-            to="/settings/tldw"
-            className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text"
-          >
-            {t(
-              "playground:composer.disconnectedOpenSettings",
-              "Open settings"
-            )}
-          </Link>
-        </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
+            <span>
+              {t(
+                "playground:composer.disconnectedNotice",
+                "You're offline \u2014 connect to a tldw server to start chatting."
+              )}
+            </span>
+            <Link
+              to="/settings/tldw"
+              className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text"
+            >
+              {t(
+                "playground:composer.disconnectedOpenSettings",
+                "Open settings"
+              )}
+            </Link>
+          </div>
+        </Alert>
       )}
       {isConnectionReady &&
         connectionUxState === "connected_degraded" && (
-          <div className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warn/40 bg-warn/10 px-2 py-2 text-xs text-warn">
-            <span>
-              {t(
-                "playground:composer.providerDegraded",
-                "Provider connectivity is degraded. Responses may be slower or fail intermittently."
-              )}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={openModelApiSelector}
-                className="rounded border border-warn/40 bg-surface px-2 py-0.5 text-[11px] font-medium text-warn hover:bg-warn/10"
-              >
+          <Alert
+            variant="warning"
+            role="status"
+            aria-live="polite"
+            data-testid="playground-composer-degraded-notice"
+            className="mt-1"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-warn">
+              <span>
                 {t(
-                  "playground:composer.providerDegradedSwitchModel",
-                  "Switch model"
+                  "playground:composer.providerDegraded",
+                  "Provider connectivity is degraded. Responses may be slower or fail intermittently."
                 )}
-              </button>
-              <Link
-                to="/settings/health"
-                className="text-[11px] font-medium text-warn underline hover:text-warn"
-              >
-                {t(
-                  "settings:healthSummary.diagnostics",
-                  "Health & diagnostics"
-                )}
-              </Link>
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={openModelApiSelector}
+                  className="rounded border border-warn/40 bg-surface px-2 py-0.5 text-[11px] font-medium text-warn hover:bg-warn/10"
+                >
+                  {t(
+                    "playground:composer.providerDegradedSwitchModel",
+                    "Switch model"
+                  )}
+                </button>
+                <Link
+                  to="/settings/health"
+                  className="text-[11px] font-medium text-warn underline hover:text-warn"
+                >
+                  {t(
+                    "settings:healthSummary.diagnostics",
+                    "Health & diagnostics"
+                  )}
+                </Link>
+              </div>
             </div>
-          </div>
+          </Alert>
         )}
       {isProMode && (
         <div

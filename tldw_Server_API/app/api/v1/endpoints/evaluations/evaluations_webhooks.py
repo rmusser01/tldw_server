@@ -22,7 +22,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     WebhookTestRequest,
     WebhookTestResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     get_unified_evaluation_service_for_user,
 )
@@ -64,8 +64,8 @@ def _get_webhook_manager_for_user(user_id: int | str) -> WebhookManager:
             svc = get_unified_evaluation_service_for_user(user_id)
             svc.webhook_manager = webhook_manager
             return webhook_manager
-    except _WEBHOOK_TESTMODE_EXCEPTIONS as e:
-        logger.debug(f"Test mode detection skipped: {e}")
+    except _WEBHOOK_TESTMODE_EXCEPTIONS:
+        logger.debug("Webhook test mode detection skipped")
     service = get_unified_evaluation_service_for_user(user_id)
     manager = getattr(service, "webhook_manager", None)
     if manager is None:
@@ -125,7 +125,7 @@ async def register_webhook(
             result = _res
         return WebhookRegistrationResponse(**result)
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to register webhook: {e}")
+        logger.error("Failed to register webhook")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to register webhook: {sanitize_error_message(e, 'webhook registration')}"
@@ -149,7 +149,7 @@ async def list_webhooks(
         normalized = [_normalize_webhook_status_record(w) for w in records]
         return [WebhookStatusResponse(**w) for w in normalized]
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to list webhooks: {e}")
+        logger.error("Failed to list webhooks")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list webhooks: {sanitize_error_message(e, 'listing webhooks')}"
@@ -174,7 +174,7 @@ async def unregister_webhook(
             pass
         return {"status": "unregistered", "url": url}
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to unregister webhook: {e}")
+        logger.error("Failed to unregister webhook")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to unregister webhook: {sanitize_error_message(e, 'webhook removal')}"
@@ -202,7 +202,7 @@ async def test_webhook(
             return WebhookTestResponse(**result)
         return WebhookTestResponse(success=bool(result))
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to test webhook: {e}")
+        logger.error("Failed to test webhook")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to test webhook: {sanitize_error_message(e, 'webhook testing')}"

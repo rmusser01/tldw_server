@@ -66,6 +66,15 @@ const startNewHousehold = async () => {
   })
 }
 
+const expectDesignSystemAlert = (text: string | RegExp) => {
+  const node =
+    typeof text === "string"
+      ? screen.getByText(text, { exact: false })
+      : screen.getByText(text)
+
+  expect(node.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+}
+
 const trackerItem = (overrides: Record<string, unknown> = {}) => ({
   member_draft_id: "member-dependent-1",
   display_name: "Alex",
@@ -245,6 +254,10 @@ describe("FamilyGuardrailsWizard", () => {
     expect(
       await screen.findByText("Saved household drafts unavailable")
     ).toBeInTheDocument()
+    expectDesignSystemAlert("Saved household drafts unavailable")
+    expectDesignSystemAlert(
+      "This server does not expose family wizard draft endpoints yet. Start a new household to continue."
+    )
     expect(listHouseholdDraftsMock).not.toHaveBeenCalled()
   })
 
@@ -353,6 +366,7 @@ describe("FamilyGuardrailsWizard", () => {
       expect(screen.getByLabelText("Guardian 1 display name")).toBeInTheDocument()
       expect(screen.getByLabelText("Guardian 1 user ID")).toBeInTheDocument()
       expect(screen.getByLabelText("Guardian 1 email")).toBeInTheDocument()
+      expectDesignSystemAlert("Add every guardian who can manage alerts and safety settings.")
     })
 
     fireEvent.click(screen.getByRole("button", { name: /Save & Continue/i }))
@@ -361,6 +375,9 @@ describe("FamilyGuardrailsWizard", () => {
       expect(screen.getByLabelText("Dependent 1 display name")).toBeInTheDocument()
       expect(screen.getByLabelText("Dependent 1 user ID")).toBeInTheDocument()
       expect(screen.getByLabelText("Dependent 1 email")).toBeInTheDocument()
+      expectDesignSystemAlert(
+        "Choose whether each dependent already has an account or needs a new invite."
+      )
     })
   })
 
@@ -524,9 +541,11 @@ describe("FamilyGuardrailsWizard", () => {
       expect(screen.getAllByText("Queued until acceptance").length).toBeGreaterThan(0)
       expect(screen.getAllByText("Active").length).toBeGreaterThan(0)
       expect(screen.getByText("1 dependent is waiting on invite acceptance.")).toBeInTheDocument()
+      expectDesignSystemAlert("1 dependent is waiting on invite acceptance.")
       expect(
         screen.getByText("Guardrails for pending dependents stay queued until acceptance.")
       ).toBeInTheDocument()
+      expectDesignSystemAlert("Guardrails for pending dependents stay queued until acceptance.")
       expect(screen.getByText("Waiting on acceptance")).toBeInTheDocument()
     })
   })
@@ -819,6 +838,10 @@ describe("FamilyGuardrailsWizard", () => {
       expect(
         screen.getByText("Reviewing template for Alex.")
       ).toBeInTheDocument()
+      expectDesignSystemAlert("Reviewing template for Alex.")
+      expectDesignSystemAlert(
+        "Adjust template or advanced overrides, then continue to re-check activation status."
+      )
     })
   })
 
@@ -955,9 +978,13 @@ describe("FamilyGuardrailsWizard", () => {
       expect(
         screen.getByText("Setup is saved, and 1 dependent is still waiting on acceptance.")
       ).toBeInTheDocument()
+      expectDesignSystemAlert("Setup is saved, and 1 dependent is still waiting on acceptance.")
       expect(
         screen.getByText("Pending dependents activate guardrails automatically after invite acceptance.")
       ).toBeInTheDocument()
+      expectDesignSystemAlert(
+        "Pending dependents activate guardrails automatically after invite acceptance."
+      )
       expect(
         screen.getByRole("button", { name: "Finish Setup (Invites Pending)" })
       ).toBeInTheDocument()

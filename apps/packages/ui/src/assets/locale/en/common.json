@@ -35,7 +35,15 @@
   "cancel": "Cancel",
   "saving": "Saving...",
   "retry": "Retry",
+  "requestDetails": "Request details",
+  "diagnostics": "Diagnostics",
   "close": "Close",
+  "storageQuota": {
+    "exceededTitle": "Storage nearly full",
+    "exceededDescription": "Workspace storage is {{pct}}% full ({{usedMB}}/{{budgetMB}} MB). New data may not save. Archive or delete old workspaces to free space.",
+    "warningTitle": "Storage getting full",
+    "warningDescription": "Workspace storage is {{pct}}% full ({{usedMB}}/{{budgetMB}} MB). Consider archiving old workspaces."
+  },
   "loadMore": "Load More...",
   "share": {
     "tooltip": {
@@ -440,7 +448,7 @@
   },
   "commandPalette": {
     "goToChat": "Go to Chat",
-    "goToKnowledge": "Go to Knowledge QA",
+    "goToKnowledge": "Go to Knowledge",
     "goToMedia": "Go to Media",
     "goToNotes": "Go to Notes",
     "goToPrompts": "Go to Prompts",
@@ -515,6 +523,9 @@
     },
     "noServerChats": "No server chats yet",
     "foldersRequireConnection": "Folders require a server connection"
+  },
+  "knowledgeSidebar": {
+    "title": "Knowledge history"
   },
   "extName": "tldw Assistant",
   "extDescription": "Browser extension for tldw_server - your unified AI assistant with RAG, media processing, and more.",
@@ -603,7 +614,7 @@
     "toggleSidebar": "Toggle sidebar",
     "goToPlayground": "Go to Playground",
     "goToMedia": "Go to Media",
-    "goToKnowledge": "Go to Knowledge QA",
+    "goToKnowledge": "Go to Knowledge",
     "goToNotes": "Go to Notes",
     "goToPrompts": "Go to Prompts",
     "goToFlashcards": "Go to Flashcards",

@@ -17,13 +17,31 @@ os.environ.setdefault("READING_DIGEST_JOBS_WORKER_ENABLED", "0")
 os.environ.setdefault("READING_DIGEST_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("TEST_MODE", "1")
 
+from tldw_Server_API.app.api.v1.endpoints import flashcards as flashcards_endpoint
 from tldw_Server_API.app.api.v1.endpoints.config_info import router as config_info_router
 from tldw_Server_API.app.api.v1.endpoints.flashcards import router as flashcards_router
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.api.v1.schemas.flashcards import DeckDeleteResponse, DeckShare, DeckShareDeleteResponse
+from tldw_Server_API.app.api.v1.schemas.study_packs import (
+    StudyPackJobAcceptedResponse,
+    StudyPackJobListResponse,
+    StudyPackJobStatusResponse,
+)
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
+)
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Flashcards.asset_refs import extract_flashcard_asset_uuids
 from tldw_Server_API.app.core.Flashcards.apkg_exporter import export_apkg_from_rows
 from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import SchedulerSettingsError
+from tldw_Server_API.app.core.StudyPacks.jobs import (
+    STUDY_PACKS_DOMAIN,
+    STUDY_PACKS_JOB_TYPE,
+    study_pack_jobs_queue,
+)
 from tldw_Server_API.tests.test_config import TestConfig
 
 # Explicit auth headers for single-user mode (required by get_request_user)
@@ -47,6 +65,16 @@ def _build_flashcards_test_app() -> FastAPI:
 
 
 fastapi_app = _build_flashcards_test_app()
+
+
+def test_flashcards_reviewed_endpoints_have_explicit_return_annotations() -> None:
+    assert flashcards_endpoint.delete_deck.__annotations__["return"] is DeckDeleteResponse
+    assert flashcards_endpoint.list_deck_shares.__annotations__["return"] == list[DeckShare]
+    assert flashcards_endpoint.upsert_deck_share.__annotations__["return"] is DeckShare
+    assert flashcards_endpoint.delete_deck_share.__annotations__["return"] is DeckShareDeleteResponse
+    assert flashcards_endpoint.create_study_pack_job.__annotations__["return"] is StudyPackJobAcceptedResponse
+    assert flashcards_endpoint.list_study_pack_jobs.__annotations__["return"] is StudyPackJobListResponse
+    assert flashcards_endpoint.get_study_pack_job_status.__annotations__["return"] is StudyPackJobStatusResponse
 
 
 @pytest.fixture(scope="function")
@@ -202,6 +230,26 @@ def test_upload_flashcard_asset_returns_markdown_snippet_and_content(
     assert content.content == PNG_1X1_BYTES
 
 
+def test_upload_flashcard_asset_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_add_flashcard_asset(*args, **kwargs):
+        raise CharactersRAGDBError("asset storage backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "add_flashcard_asset", fake_add_flashcard_asset)
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/assets",
+        files={"file": ("slide.png", PNG_1X1_BYTES, "image/png")},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to store flashcard asset"
+
+
 def test_deck_workspace_id_contract_and_scope_filters(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
@@ -252,6 +300,210 @@ def test_deck_workspace_id_contract_and_scope_filters(
     assert any(item["id"] == deck_id for item in general_list.json())
 
 
+def test_deck_parent_id_contract_create_list_and_patch(
+    client_with_flashcards_db: TestClient,
+):
+    parent_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Parent Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert parent_response.status_code == 200
+    parent = parent_response.json()
+
+    child_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Child Deck", "parent_deck_id": parent["id"]},
+        headers=AUTH_HEADERS,
+    )
+    assert child_response.status_code == 200
+    child = child_response.json()
+    assert child["parent_deck_id"] == parent["id"]
+
+    listed_response = client_with_flashcards_db.get("/api/v1/flashcards/decks", headers=AUTH_HEADERS)
+    assert listed_response.status_code == 200
+    listed_child = next(deck for deck in listed_response.json() if deck["id"] == child["id"])
+    assert listed_child["parent_deck_id"] == parent["id"]
+
+    clear_response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{child['id']}",
+        json={"parent_deck_id": None, "expected_version": child["version"]},
+        headers=AUTH_HEADERS,
+    )
+    assert clear_response.status_code == 200
+    assert clear_response.json()["parent_deck_id"] is None
+
+
+def test_deck_parent_id_rejects_missing_parent(client_with_flashcards_db: TestClient):
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Orphan Deck", "parent_deck_id": 999999},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Parent deck not found"
+
+
+def test_deck_parent_id_rejects_self_parent(client_with_flashcards_db: TestClient):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Self Parent Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    deck = create_response.json()
+
+    response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{deck['id']}",
+        json={"parent_deck_id": deck["id"], "expected_version": deck["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Deck cannot be its own parent"
+
+
+def test_deck_parent_id_rejects_cycles(client_with_flashcards_db: TestClient):
+    grandparent_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Grandparent Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert grandparent_response.status_code == 200
+    grandparent = grandparent_response.json()
+
+    parent_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Parent Cycle Deck", "parent_deck_id": grandparent["id"]},
+        headers=AUTH_HEADERS,
+    )
+    assert parent_response.status_code == 200
+    parent = parent_response.json()
+
+    child_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Child Cycle Deck", "parent_deck_id": parent["id"]},
+        headers=AUTH_HEADERS,
+    )
+    assert child_response.status_code == 200
+    child = child_response.json()
+
+    response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{grandparent['id']}",
+        json={"parent_deck_id": child["id"], "expected_version": grandparent["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Deck parent would create a cycle"
+
+
+def test_deck_share_endpoints_manage_user_roles(
+    client_with_flashcards_db: TestClient,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Shareable Deck", "visibility": "team"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    deck = create_response.json()
+    assert deck["visibility"] == "team"
+
+    share_response = client_with_flashcards_db.put(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares/22",
+        json={"role": "viewer"},
+        headers=AUTH_HEADERS,
+    )
+    assert share_response.status_code == 200
+    share = share_response.json()
+    assert share["deck_id"] == deck["id"]
+    assert share["user_id"] == 22
+    assert share["role"] == "viewer"
+    assert share["shared_by"] == 1
+
+    promote_response = client_with_flashcards_db.put(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares/22",
+        json={"role": "editor"},
+        headers=AUTH_HEADERS,
+    )
+    assert promote_response.status_code == 200
+    assert promote_response.json()["role"] == "editor"
+
+    owner_response = client_with_flashcards_db.put(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares/22",
+        json={"role": "owner"},
+        headers=AUTH_HEADERS,
+    )
+    assert owner_response.status_code == 200
+    assert owner_response.json()["role"] == "owner"
+
+    list_response = client_with_flashcards_db.get(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares",
+        headers=AUTH_HEADERS,
+    )
+    assert list_response.status_code == 200
+    assert [item["user_id"] for item in list_response.json()] == [22]
+
+    delete_response = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares/22",
+        headers=AUTH_HEADERS,
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"removed": True}
+    assert client_with_flashcards_db.get(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares",
+        headers=AUTH_HEADERS,
+    ).json() == []
+
+
+def test_deck_share_endpoint_rejects_self_share(client_with_flashcards_db: TestClient):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Self Share Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    deck_id = create_response.json()["id"]
+
+    share_response = client_with_flashcards_db.put(
+        f"/api/v1/flashcards/decks/{deck_id}/shares/1",
+        json={"role": "viewer"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert share_response.status_code == 400
+    assert share_response.json()["detail"] == "Cannot share a deck with its owner"
+
+
+def test_deck_share_endpoint_returns_404_for_missing_deck(client_with_flashcards_db: TestClient):
+    share_response = client_with_flashcards_db.put(
+        "/api/v1/flashcards/decks/999999/shares/22",
+        json={"role": "viewer"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert share_response.status_code == 404
+    assert share_response.json()["detail"] == "Deck not found"
+
+
+def test_list_decks_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_list_decks(*args, **kwargs):
+        raise CharactersRAGDBError("deck list backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "list_decks", fake_list_decks)
+
+    response = client_with_flashcards_db.get("/api/v1/flashcards/decks", headers=AUTH_HEADERS)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to list decks"
+
+
 def test_create_deck_returns_review_prompt_side(client_with_flashcards_db: TestClient):
     response = client_with_flashcards_db.post(
         "/api/v1/flashcards/decks",
@@ -264,6 +516,66 @@ def test_create_deck_returns_review_prompt_side(client_with_flashcards_db: TestC
 
     assert response.status_code == 200
     assert response.json()["review_prompt_side"] == "back"
+
+
+def test_create_deck_returns_400_for_input_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_add_deck(*args, **kwargs):
+        raise InputError("invalid deck payload")
+
+    monkeypatch.setattr(flashcards_db, "add_deck", fake_add_deck)
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Broken Deck"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid deck payload"
+
+
+def test_create_deck_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_add_deck(*args, **kwargs):
+        raise CharactersRAGDBError("deck create backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "add_deck", fake_add_deck)
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Broken Deck"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to create deck"
+
+
+def test_create_deck_returns_409_for_conflict_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_add_deck(*args, **kwargs):
+        raise ConflictError("deck already exists")
+
+    monkeypatch.setattr(flashcards_db, "add_deck", fake_add_deck)
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Duplicate Deck"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "deck already exists"
 
 
 def test_create_deck_rejects_null_review_prompt_side(client_with_flashcards_db: TestClient):
@@ -345,6 +657,45 @@ def test_create_deck_undelete_preserves_orientation_unless_explicit_front_overri
     assert explicit_front_response.json()["review_prompt_side"] == "front"
 
 
+def test_create_deck_undelete_preserves_visibility_unless_explicit_override(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={
+            "name": "Visibility API Deck",
+            "visibility": "team",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert create_response.status_code == 200
+    deck_id = create_response.json()["id"]
+    flashcards_db.soft_delete_deck_by_id(deck_id)
+
+    omitted_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Visibility API Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert omitted_response.status_code == 200
+    assert omitted_response.json()["visibility"] == "team"
+
+    flashcards_db.soft_delete_deck_by_id(deck_id)
+
+    explicit_public_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={
+            "name": "Visibility API Deck",
+            "visibility": "public",
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert explicit_public_response.status_code == 200
+    assert explicit_public_response.json()["visibility"] == "public"
+
+
 def test_update_deck_rejects_null_review_prompt_side(client_with_flashcards_db: TestClient):
     create_response = client_with_flashcards_db.post(
         "/api/v1/flashcards/decks",
@@ -363,6 +714,251 @@ def test_update_deck_rejects_null_review_prompt_side(client_with_flashcards_db: 
     )
 
     assert update_response.status_code == 422
+
+
+def test_update_deck_rejects_null_visibility(client_with_flashcards_db: TestClient):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Patch Null Visibility Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+
+    update_response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{create_response.json()['id']}",
+        json={
+            "visibility": None,
+            "expected_version": create_response.json()["version"],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert update_response.status_code == 422
+
+
+def test_update_deck_returns_400_for_input_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Patch Broken Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    deck = create_response.json()
+
+    def fake_update_deck(*args, **kwargs):
+        raise InputError("invalid deck update")
+
+    monkeypatch.setattr(flashcards_db, "update_deck", fake_update_deck)
+
+    response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{deck['id']}",
+        json={"name": "Broken Patch", "expected_version": deck["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid deck update"
+
+
+def test_update_deck_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Patch Backend Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    deck = create_response.json()
+
+    def fake_update_deck(*args, **kwargs):
+        raise CharactersRAGDBError("deck update backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "update_deck", fake_update_deck)
+
+    response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{deck['id']}",
+        json={"name": "Broken Patch", "expected_version": deck["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to update deck"
+
+
+def test_update_deck_returns_409_for_conflict_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Patch Conflict Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    deck = create_response.json()
+
+    def fake_update_deck(*args, **kwargs):
+        raise ConflictError("deck version mismatch")
+
+    monkeypatch.setattr(flashcards_db, "update_deck", fake_update_deck)
+
+    response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{deck['id']}",
+        json={"name": "Conflict Patch", "expected_version": deck["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "deck version mismatch"
+
+
+def test_create_template_returns_409_for_conflict_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_add_flashcard_template(*args, **kwargs):
+        raise ConflictError("template already exists")
+
+    monkeypatch.setattr(
+        flashcards_db,
+        "add_flashcard_template",
+        fake_add_flashcard_template,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/templates",
+        json={
+            "name": "Duplicate Template",
+            "front_template": "{{front}}",
+            "back_template": "{{back}}",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "template already exists"
+
+
+def test_update_template_returns_409_for_conflict_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_update_flashcard_template(*args, **kwargs):
+        raise ConflictError("template version mismatch")
+
+    monkeypatch.setattr(
+        flashcards_db,
+        "update_flashcard_template",
+        fake_update_flashcard_template,
+    )
+
+    response = client_with_flashcards_db.patch(
+        "/api/v1/flashcards/templates/123",
+        json={"name": "Updated Template", "expected_version": 1},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "template version mismatch"
+
+
+def test_delete_template_returns_409_for_conflict_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_soft_delete_flashcard_template(*args, **kwargs):
+        raise ConflictError("template delete mismatch")
+
+    monkeypatch.setattr(
+        flashcards_db,
+        "soft_delete_flashcard_template",
+        fake_soft_delete_flashcard_template,
+    )
+
+    response = client_with_flashcards_db.delete(
+        "/api/v1/flashcards/templates/123",
+        params={"expected_version": 1},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "template delete mismatch"
+
+
+def test_delete_deck_soft_deletes_with_expected_version(client_with_flashcards_db: TestClient):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Delete Me"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+
+    delete_response = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/decks/{created['id']}",
+        params={"expected_version": created["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"deleted": True}
+
+    decks_response = client_with_flashcards_db.get("/api/v1/flashcards/decks", headers=AUTH_HEADERS)
+    assert decks_response.status_code == 200
+    assert all(deck["id"] != created["id"] for deck in decks_response.json())
+
+
+def test_delete_deck_rejects_stale_version_after_concurrent_update(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Race Delete"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+    stale_deck = dict(flashcards_db.get_deck(created["id"]))
+
+    updated = flashcards_db.update_deck(
+        created["id"],
+        description="Concurrent update",
+        expected_version=created["version"],
+    )
+    assert updated is True
+
+    original_get_deck = flashcards_db.get_deck
+
+    def _stale_get_deck(deck_id: int):
+        if int(deck_id) == int(created["id"]):
+            return stale_deck
+        return original_get_deck(deck_id)
+
+    monkeypatch.setattr(flashcards_db, "get_deck", _stale_get_deck)
+
+    delete_response = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/decks/{created['id']}",
+        params={"expected_version": created["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert delete_response.status_code == 409
+    current = original_get_deck(created["id"])
+    assert current is not None
+    assert not current["deleted"]
 
 
 def test_deck_endpoints_reject_unknown_workspace_ids(
@@ -391,6 +987,91 @@ def test_deck_endpoints_reject_unknown_workspace_ids(
     )
     assert update_response.status_code == 404
     assert "missing-ws" in update_response.json()["detail"]
+
+
+def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_db: TestClient) -> None:
+    """Study-pack job listing preserves total while exposing canonical offset metadata."""
+    class StubJobManager:
+        def __init__(self):
+            self.calls = []
+            self.count_calls = []
+
+        def list_jobs(self, **kwargs):
+            self.calls.append(kwargs)
+            return [
+                {
+                    "id": 43,
+                    "status": "queued",
+                    "domain": STUDY_PACKS_DOMAIN,
+                    "queue": study_pack_jobs_queue(),
+                    "job_type": STUDY_PACKS_JOB_TYPE,
+                    "owner_user_id": "1",
+                },
+                {
+                    "id": 42,
+                    "status": "queued",
+                    "domain": STUDY_PACKS_DOMAIN,
+                    "queue": study_pack_jobs_queue(),
+                    "job_type": STUDY_PACKS_JOB_TYPE,
+                    "owner_user_id": "1",
+                }
+            ]
+
+        def count_jobs(self, **kwargs):
+            self.count_calls.append(kwargs)
+            return 3
+
+    stub = StubJobManager()
+    client_with_flashcards_db.app.dependency_overrides[get_job_manager] = lambda: stub
+
+    response = client_with_flashcards_db.get(
+        "/api/v1/flashcards/study-packs/jobs",
+        params={"status": "queued", "limit": 1, "offset": 1},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "jobs": [
+            {
+                "id": 42,
+                "status": "queued",
+                "domain": STUDY_PACKS_DOMAIN,
+                "queue": study_pack_jobs_queue(),
+                "job_type": STUDY_PACKS_JOB_TYPE,
+            }
+        ],
+        "total": 3,
+        "pagination": {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 1,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 2,
+        },
+    }
+    assert stub.calls == [
+        {
+            "domain": STUDY_PACKS_DOMAIN,
+            "queue": study_pack_jobs_queue(),
+            "status": "queued",
+            "owner_user_id": "1",
+            "job_type": STUDY_PACKS_JOB_TYPE,
+            "limit": 2,
+            "sort_by": "created_at",
+            "sort_order": "desc",
+        }
+    ]
+    assert stub.count_calls == [
+        {
+            "domain": STUDY_PACKS_DOMAIN,
+            "queue": study_pack_jobs_queue(),
+            "status": "queued",
+            "owner_user_id": "1",
+            "job_type": STUDY_PACKS_JOB_TYPE,
+        }
+    ]
 
 
 def test_flashcard_visibility_endpoints_respect_default_general_only_and_explicit_scope(
@@ -441,8 +1122,20 @@ def test_flashcard_visibility_endpoints_respect_default_general_only_and_explici
 
     default_list = client_with_flashcards_db.get("/api/v1/flashcards", headers=AUTH_HEADERS)
     assert default_list.status_code == 200
-    default_items = default_list.json()["items"]
-    assert default_list.json()["total"] == 1
+    default_payload = default_list.json()
+    default_items = default_payload["items"]
+    assert default_payload["total"] == 1
+    assert default_payload["count"] == 1
+    assert default_payload["pagination"] == {
+        "mode": "offset",
+        "total": 1,
+        "limit": 100,
+        "offset": 0,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert default_payload["has_more"] is False
+    assert default_payload["next_offset"] is None
     assert any(item["uuid"] == general_card["uuid"] for item in default_items)
     assert all(item["deck_id"] != workspace_deck_id for item in default_items)
 
@@ -457,12 +1150,49 @@ def test_flashcard_visibility_endpoints_respect_default_general_only_and_explici
 
     all_list = client_with_flashcards_db.get(
         "/api/v1/flashcards",
-        params={"include_workspace_items": True},
+        params={"include_workspace_items": True, "limit": 1, "offset": 0},
         headers=AUTH_HEADERS,
     )
     assert all_list.status_code == 200
-    assert all_list.json()["total"] == 2
-    assert {item["uuid"] for item in all_list.json()["items"]} == {general_card["uuid"], workspace_card["uuid"]}
+    all_payload = all_list.json()
+    assert all_payload["total"] == 2
+    assert all_payload["count"] == 1
+    assert len(all_payload["items"]) == 1
+    assert all_payload["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 0,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert all_payload["has_more"] is True
+    assert all_payload["next_offset"] == 1
+
+    all_list_page2 = client_with_flashcards_db.get(
+        "/api/v1/flashcards",
+        params={"include_workspace_items": True, "limit": 1, "offset": 1},
+        headers=AUTH_HEADERS,
+    )
+    assert all_list_page2.status_code == 200
+    page2_payload = all_list_page2.json()
+    assert page2_payload["total"] == 2
+    assert page2_payload["count"] == 1
+    assert len(page2_payload["items"]) == 1
+    assert page2_payload["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert page2_payload["has_more"] is False
+    assert page2_payload["next_offset"] is None
+    assert {
+        all_payload["items"][0]["uuid"],
+        page2_payload["items"][0]["uuid"],
+    } == {general_card["uuid"], workspace_card["uuid"]}
 
     deck_list = client_with_flashcards_db.get(
         "/api/v1/flashcards",
@@ -518,6 +1248,22 @@ def test_flashcard_visibility_endpoints_respect_default_general_only_and_explici
     deck_export_text = deck_export.content.decode("utf-8")
     assert "Workspace Front" in deck_export_text
     assert "General Front" not in deck_export_text
+
+
+def test_list_flashcards_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_list_flashcards(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard list backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "list_flashcards", fake_list_flashcards)
+
+    response = client_with_flashcards_db.get("/api/v1/flashcards", headers=AUTH_HEADERS)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to list flashcards"
 
 
 def test_flashcard_analytics_summary_endpoint_respects_workspace_visibility(
@@ -676,6 +1422,29 @@ def test_flashcard_analytics_summary_endpoint_excludes_deleted_deck_reviews(
     assert all(deck["deck_id"] != deck_id for deck in payload["decks"])
 
 
+def test_flashcard_analytics_summary_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_get_flashcard_analytics_summary(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard analytics backend unavailable")
+
+    monkeypatch.setattr(
+        flashcards_db,
+        "get_flashcard_analytics_summary",
+        fake_get_flashcard_analytics_summary,
+    )
+
+    response = client_with_flashcards_db.get(
+        "/api/v1/flashcards/analytics/summary",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to get flashcard analytics summary"
+
+
 def test_upload_flashcard_asset_rejects_invalid_or_oversized_upload(
     client_with_flashcards_db: TestClient,
     monkeypatch,
@@ -733,6 +1502,26 @@ def test_create_flashcard_attaches_uploaded_asset_and_rejects_missing_refs(
         headers=AUTH_HEADERS,
     )
     assert missing.status_code == 400
+
+
+def test_create_flashcard_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_add_flashcard(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard create backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "add_flashcard", fake_add_flashcard)
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "Broken create", "back": "Broken answer"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to create flashcard"
 
 
 def test_patch_and_bulk_patch_reject_invalid_asset_refs_without_rolling_back_siblings(
@@ -984,6 +1773,22 @@ def test_export_csv_shape_and_content(client_with_flashcards_db: TestClient):
     assert any("gamma" in ln and "N2" in ln for ln in lines)
 
 
+def test_export_flashcards_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_export_flashcards_csv(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard export backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "export_flashcards_csv", fake_export_flashcards_csv)
+
+    response = client_with_flashcards_db.get("/api/v1/flashcards/export", headers=AUTH_HEADERS)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to export flashcards"
+
+
 def test_set_tags_and_linkage(client_with_flashcards_db: TestClient):
     # Create deck and a card
     r = client_with_flashcards_db.post("/api/v1/flashcards/decks", json={"name": "TagDeck"}, headers=AUTH_HEADERS)
@@ -1016,6 +1821,65 @@ def test_set_tags_and_linkage(client_with_flashcards_db: TestClient):
     assert {"alpha", "beta"}.issubset(kw_texts)
 
 
+def test_set_flashcard_tags_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    r = client_with_flashcards_db.post("/api/v1/flashcards/decks", json={"name": "TagErrorDeck"}, headers=AUTH_HEADERS)
+    deck_id = r.json()["id"]
+    r = client_with_flashcards_db.post("/api/v1/flashcards", json={
+        "deck_id": deck_id,
+        "front": "Tagged Q",
+        "back": "Tagged A"
+    }, headers=AUTH_HEADERS)
+    card = r.json()
+    card_uuid = card["uuid"]
+
+    def fake_set_flashcard_tags(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard tag write backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "set_flashcard_tags", fake_set_flashcard_tags)
+
+    response = client_with_flashcards_db.put(
+        f"/api/v1/flashcards/{card_uuid}/tags",
+        json={"tags": ["alpha", "beta"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to set flashcard tags"
+
+
+def test_get_flashcard_tags_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    r = client_with_flashcards_db.post("/api/v1/flashcards/decks", json={"name": "TagReadErrorDeck"}, headers=AUTH_HEADERS)
+    deck_id = r.json()["id"]
+    r = client_with_flashcards_db.post("/api/v1/flashcards", json={
+        "deck_id": deck_id,
+        "front": "Tagged Q",
+        "back": "Tagged A"
+    }, headers=AUTH_HEADERS)
+    card = r.json()
+    card_uuid = card["uuid"]
+
+    def fake_get_keywords_for_flashcard(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard tag read backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "get_keywords_for_flashcard", fake_get_keywords_for_flashcard)
+
+    response = client_with_flashcards_db.get(
+        f"/api/v1/flashcards/{card_uuid}/tags",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to get flashcard tags"
+
+
 def test_get_flashcard_alias_path_returns_card(client_with_flashcards_db: TestClient):
     r = client_with_flashcards_db.post("/api/v1/flashcards/decks", json={"name": "AliasDeck"}, headers=AUTH_HEADERS)
     deck_id = r.json()["id"]
@@ -1033,6 +1897,44 @@ def test_get_flashcard_alias_path_returns_card(client_with_flashcards_db: TestCl
     data = r.json()
     assert data["uuid"] == uuid
     assert data.get("tags") == ["t1"]
+
+
+def test_get_flashcard_by_id_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_get_flashcard(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard lookup backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "get_flashcard", fake_get_flashcard)
+
+    response = client_with_flashcards_db.get(
+        f"/api/v1/flashcards/id/{uuid.uuid4()}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to get flashcard"
+
+
+def test_get_flashcard_alias_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_get_flashcard(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard alias lookup backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "get_flashcard", fake_get_flashcard)
+
+    response = client_with_flashcards_db.get(
+        f"/api/v1/flashcards/{uuid.uuid4()}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to get flashcard"
 
 
 def test_source_attribution_fields_present_in_flashcard_responses(client_with_flashcards_db: TestClient):
@@ -1124,12 +2026,236 @@ def test_bulk_create_rejects_invalid_cloze(client_with_flashcards_db: TestClient
     assert r.status_code == 400
 
 
+def test_bulk_create_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    deck_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "BulkErrorDeck"},
+        headers=AUTH_HEADERS,
+    )
+    assert deck_response.status_code == 200
+    deck_id = deck_response.json()["id"]
+
+    def fake_add_flashcards_bulk(*args, **kwargs):
+        raise CharactersRAGDBError("bulk create backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "add_flashcards_bulk", fake_add_flashcards_bulk)
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/bulk",
+        json=[{"deck_id": deck_id, "front": "Bulk create front", "back": "Bulk create back"}],
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to create flashcards"
+
+
 def test_review_missing_flashcard_returns_404(client_with_flashcards_db: TestClient):
     r = client_with_flashcards_db.post("/api/v1/flashcards/review", json={
         "card_uuid": str(uuid.uuid4()),
         "rating": 3
     }, headers=AUTH_HEADERS)
     assert r.status_code == 404
+
+
+def test_list_review_sessions_returns_sessions(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+):
+    deck_id = flashcards_db.add_deck("Session Deck")
+    session = flashcards_db.get_or_create_flashcard_review_session(
+        deck_id=deck_id,
+        review_mode="due",
+        tag_filter=None,
+        scope_key=f"due:deck:{deck_id}",
+    )
+
+    response = client_with_flashcards_db.get(
+        "/api/v1/flashcards/review-sessions",
+        params={"deck_id": deck_id},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["id"] for item in payload] == [session["id"]]
+    assert payload[0]["status"] == "active"
+    assert payload[0]["deck_id"] == deck_id
+    assert payload[0]["cards_reviewed"] == 0
+
+
+def test_list_review_sessions_defaults_null_cards_reviewed_to_zero(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+):
+    deck_id = flashcards_db.add_deck("Legacy Session Deck")
+    session = flashcards_db.get_or_create_flashcard_review_session(
+        deck_id=deck_id,
+        review_mode="due",
+        tag_filter=None,
+        scope_key=f"due:deck:{deck_id}",
+    )
+    flashcards_db.execute_query(
+        """
+        UPDATE flashcard_review_sessions
+           SET cards_reviewed = NULL
+         WHERE id = ?
+        """,
+        (session["id"],),
+        commit=True,
+    )
+
+    response = client_with_flashcards_db.get(
+        "/api/v1/flashcards/review-sessions",
+        params={"deck_id": deck_id},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["id"] for item in payload] == [session["id"]]
+    assert payload[0]["cards_reviewed"] == 0
+
+
+def test_list_review_sessions_returns_400_for_input_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_list_review_sessions(*args, **kwargs):
+        raise InputError("invalid review session filter")
+
+    monkeypatch.setattr(flashcards_db, "list_flashcard_review_sessions", fake_list_review_sessions)
+
+    response = client_with_flashcards_db.get("/api/v1/flashcards/review-sessions", headers=AUTH_HEADERS)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid review session filter"
+
+
+def test_list_review_sessions_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_list_review_sessions(*args, **kwargs):
+        raise CharactersRAGDBError("review sessions backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "list_flashcard_review_sessions", fake_list_review_sessions)
+
+    response = client_with_flashcards_db.get("/api/v1/flashcards/review-sessions", headers=AUTH_HEADERS)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to list flashcard review sessions"
+
+
+def test_end_review_session_marks_session_completed(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+):
+    deck_id = flashcards_db.add_deck("End Session Deck")
+    session = flashcards_db.get_or_create_flashcard_review_session(
+        deck_id=deck_id,
+        review_mode="due",
+        tag_filter=None,
+        scope_key=f"due:deck:{deck_id}",
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/review-sessions/end",
+        json={"review_session_id": session["id"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == session["id"]
+    assert payload["status"] == "completed"
+
+
+def test_end_review_session_defaults_null_cards_reviewed_to_zero(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+):
+    deck_id = flashcards_db.add_deck("Legacy End Session Deck")
+    session = flashcards_db.get_or_create_flashcard_review_session(
+        deck_id=deck_id,
+        review_mode="due",
+        tag_filter=None,
+        scope_key=f"due:deck:{deck_id}",
+    )
+    flashcards_db.execute_query(
+        """
+        UPDATE flashcard_review_sessions
+           SET cards_reviewed = NULL
+         WHERE id = ?
+        """,
+        (session["id"],),
+        commit=True,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/review-sessions/end",
+        json={"review_session_id": session["id"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == session["id"]
+    assert payload["cards_reviewed"] == 0
+
+
+def test_end_review_session_returns_404_for_conflict_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_mark_flashcard_review_session_completed(*args, **kwargs):
+        raise ConflictError("review session not found")
+
+    monkeypatch.setattr(
+        flashcards_db,
+        "mark_flashcard_review_session_completed",
+        fake_mark_flashcard_review_session_completed,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/review-sessions/end",
+        json={"review_session_id": 123},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "review session not found"
+
+
+def test_end_review_session_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_mark_flashcard_review_session_completed(*args, **kwargs):
+        raise CharactersRAGDBError("review session completion backend unavailable")
+
+    monkeypatch.setattr(
+        flashcards_db,
+        "mark_flashcard_review_session_completed",
+        fake_mark_flashcard_review_session_completed,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/review-sessions/end",
+        json={"review_session_id": 123},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to complete flashcard review session"
 
 
 def test_deck_endpoints_expose_and_patch_scheduler_settings(
@@ -1248,6 +2374,38 @@ def test_review_next_prefers_due_learning_before_due_review_and_new_cards(
     assert payload["card"]["uuid"] != new_uuid
 
 
+def test_get_next_review_card_returns_400_for_input_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_get_next_review_card(*args, **kwargs):
+        raise InputError("invalid review next request")
+
+    monkeypatch.setattr(flashcards_db, "get_next_review_card", fake_get_next_review_card)
+
+    response = client_with_flashcards_db.get("/api/v1/flashcards/review/next", headers=AUTH_HEADERS)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid review next request"
+
+
+def test_get_next_review_card_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_get_next_review_card(*args, **kwargs):
+        raise CharactersRAGDBError("review next backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "get_next_review_card", fake_get_next_review_card)
+
+    response = client_with_flashcards_db.get("/api/v1/flashcards/review/next", headers=AUTH_HEADERS)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to fetch next review card"
+
+
 def test_fsrs_review_bootstraps_scheduler_state_and_returns_scheduler_type(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
@@ -1345,6 +2503,93 @@ def test_fsrs_review_returns_400_for_invalid_deck_settings(
     assert "target_retention" in reviewed.json()["detail"]
 
 
+def test_review_flashcard_returns_400_for_input_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    deck_id = flashcards_db.add_deck("Broken review deck")
+    card_uuid = flashcards_db.add_flashcard(
+        {
+            "deck_id": deck_id,
+            "front": "Broken review card",
+            "back": "Answer",
+        }
+    )
+
+    def fake_review_flashcard(*args, **kwargs):
+        raise InputError("invalid review payload")
+
+    monkeypatch.setattr(flashcards_db, "review_flashcard", fake_review_flashcard)
+
+    reviewed = client_with_flashcards_db.post(
+        "/api/v1/flashcards/review",
+        json={"card_uuid": card_uuid, "rating": 3, "answer_time_ms": 1800},
+        headers=AUTH_HEADERS,
+    )
+
+    assert reviewed.status_code == 400
+    assert reviewed.json()["detail"] == "invalid review payload"
+
+
+def test_review_flashcard_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    deck_id = flashcards_db.add_deck("Broken backend review deck")
+    card_uuid = flashcards_db.add_flashcard(
+        {
+            "deck_id": deck_id,
+            "front": "Broken backend review card",
+            "back": "Answer",
+        }
+    )
+
+    def fake_review_flashcard(*args, **kwargs):
+        raise CharactersRAGDBError("review backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "review_flashcard", fake_review_flashcard)
+
+    reviewed = client_with_flashcards_db.post(
+        "/api/v1/flashcards/review",
+        json={"card_uuid": card_uuid, "rating": 3, "answer_time_ms": 1800},
+        headers=AUTH_HEADERS,
+    )
+
+    assert reviewed.status_code == 500
+    assert reviewed.json()["detail"] == "Failed to review flashcard"
+
+
+def test_review_flashcard_returns_404_for_conflict_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    deck_id = flashcards_db.add_deck("Conflict review deck")
+    card_uuid = flashcards_db.add_flashcard(
+        {
+            "deck_id": deck_id,
+            "front": "Conflict review card",
+            "back": "Answer",
+        }
+    )
+
+    def fake_review_flashcard(*args, **kwargs):
+        raise ConflictError("review target not found")
+
+    monkeypatch.setattr(flashcards_db, "review_flashcard", fake_review_flashcard)
+
+    reviewed = client_with_flashcards_db.post(
+        "/api/v1/flashcards/review",
+        json={"card_uuid": card_uuid, "rating": 3, "answer_time_ms": 1800},
+        headers=AUTH_HEADERS,
+    )
+
+    assert reviewed.status_code == 404
+    assert reviewed.json()["detail"] == "review target not found"
+
+
 def test_get_flashcard_assistant_returns_thread_messages_and_context(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
@@ -1382,6 +2627,93 @@ def test_get_flashcard_assistant_returns_thread_messages_and_context(
     assert payload["messages"][0]["content"] == "What does it do first?"
     assert payload["context_snapshot"]["flashcard"]["uuid"] == card_uuid
     assert "fact_check" in payload["available_actions"]
+
+
+def test_get_flashcard_assistant_returns_400_for_input_error(
+    client_with_flashcards_db: TestClient,
+    monkeypatch,
+):
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "What is the glomerulus?", "back": "It filters blood."},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card_uuid = created.json()["uuid"]
+
+    def fake_build_context(*args, **kwargs):
+        raise InputError("invalid study assistant context")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.build_flashcard_assistant_context",
+        fake_build_context,
+    )
+
+    response = client_with_flashcards_db.get(
+        f"/api/v1/flashcards/{card_uuid}/assistant",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid study assistant context"
+
+
+def test_get_flashcard_assistant_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    monkeypatch,
+):
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "What is the glomerulus?", "back": "It filters blood."},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card_uuid = created.json()["uuid"]
+
+    def fake_build_context(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard assistant context backend unavailable")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.build_flashcard_assistant_context",
+        fake_build_context,
+    )
+
+    response = client_with_flashcards_db.get(
+        f"/api/v1/flashcards/{card_uuid}/assistant",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to fetch study assistant context"
+
+
+def test_get_flashcard_assistant_returns_404_for_conflict_error(
+    client_with_flashcards_db: TestClient,
+    monkeypatch,
+):
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "What is the glomerulus?", "back": "It filters blood."},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card_uuid = created.json()["uuid"]
+
+    def fake_build_context(*args, **kwargs):
+        raise ConflictError("study assistant thread missing")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.build_flashcard_assistant_context",
+        fake_build_context,
+    )
+
+    response = client_with_flashcards_db.get(
+        f"/api/v1/flashcards/{card_uuid}/assistant",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "study assistant thread missing"
 
 
 def test_flashcard_assistant_respond_persists_user_and_assistant_messages(
@@ -1480,6 +2812,112 @@ def test_flashcard_assistant_respond_returns_409_for_stale_thread_version(
     assert response.status_code == 409
     assert response.json()["detail"] == "Study assistant thread version mismatch"
     assert call_count == 0
+
+
+def test_flashcard_assistant_respond_returns_400_for_input_error(
+    client_with_flashcards_db: TestClient,
+    monkeypatch,
+):
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "What is the glomerulus?", "back": "It filters blood."},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card_uuid = created.json()["uuid"]
+
+    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+        raise InputError("invalid study assistant action")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        fake_generate_reply,
+    )
+
+    response = client_with_flashcards_db.post(
+        f"/api/v1/flashcards/{card_uuid}/assistant/respond",
+        json={"action": "explain"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid study assistant action"
+
+
+def test_flashcard_assistant_respond_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    monkeypatch,
+):
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "What is the glomerulus?", "back": "It filters blood."},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card_uuid = created.json()["uuid"]
+
+    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+        raise CharactersRAGDBError("flashcard assistant reply backend unavailable")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        fake_generate_reply,
+    )
+
+    response = client_with_flashcards_db.post(
+        f"/api/v1/flashcards/{card_uuid}/assistant/respond",
+        json={"action": "explain"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to generate study assistant response"
+
+
+def test_flashcard_assistant_respond_returns_409_for_db_conflict(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "What is the glomerulus?", "back": "It filters blood."},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card_uuid = created.json()["uuid"]
+
+    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+        return {
+            "assistant_text": "The glomerulus is the filtration tuft in the nephron.",
+            "structured_payload": {},
+            "provider": provider or "openai",
+            "model": model or "gpt-test",
+        }
+
+    original_append = flashcards_db.append_study_assistant_message
+    call_count = {"value": 0}
+
+    def fail_second_append(*args, **kwargs):
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            return original_append(*args, **kwargs)
+        raise ConflictError("Version mismatch updating study assistant thread")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        fake_generate_reply,
+    )
+    monkeypatch.setattr(flashcards_db, "append_study_assistant_message", fail_second_append)
+
+    response = client_with_flashcards_db.post(
+        f"/api/v1/flashcards/{card_uuid}/assistant/respond",
+        json={"action": "explain"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Study assistant thread version mismatch"
 
 
 def test_flashcard_assistant_missing_card_returns_404(client_with_flashcards_db: TestClient):
@@ -1677,6 +3115,114 @@ def test_analytics_summary_honors_deck_filter(client_with_flashcards_db: TestCli
     assert payload["decks"][0]["deck_name"] == "DeckA"
 
 
+def test_delete_flashcard_returns_deleted_true(
+    client_with_flashcards_db: TestClient,
+):
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "Delete me", "back": "Gone"},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card = created.json()
+
+    response = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/{card['uuid']}",
+        params={"expected_version": card["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True}
+
+
+def test_delete_flashcard_returns_409_for_missing_card(
+    client_with_flashcards_db: TestClient,
+):
+    missing = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/{uuid.uuid4()}",
+        params={"expected_version": 1},
+        headers=AUTH_HEADERS,
+    )
+    assert missing.status_code == 409
+
+
+def test_delete_flashcard_returns_409_for_conflict_error(
+    client_with_flashcards_db: TestClient,
+):
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "Conflict delete", "back": "Versioned"},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card = created.json()
+
+    response = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/{card['uuid']}",
+        params={"expected_version": card["version"] + 1},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+
+
+def test_delete_flashcard_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "DB error delete", "back": "Backend"},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card = created.json()
+
+    def fake_soft_delete_flashcard(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard delete backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "soft_delete_flashcard", fake_soft_delete_flashcard)
+
+    response = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/{card['uuid']}",
+        params={"expected_version": card["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to delete flashcard"
+
+
+def test_delete_flashcard_returns_409_for_conflict_error_detail(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "Delete conflict detail", "back": "Backend"},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card = created.json()
+
+    def fake_soft_delete_flashcard(*args, **kwargs):
+        raise ConflictError("delete version mismatch")
+
+    monkeypatch.setattr(flashcards_db, "soft_delete_flashcard", fake_soft_delete_flashcard)
+
+    response = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/{card['uuid']}",
+        params={"expected_version": card["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "delete version mismatch"
+
+
 def test_reset_scheduling_resets_card_to_new_defaults(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
@@ -1744,6 +3290,76 @@ def test_reset_scheduling_resets_card_to_new_defaults(
     assert conflict.status_code == 409
 
 
+def test_reset_scheduling_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    r = client_with_flashcards_db.post("/api/v1/flashcards/decks", json={"name": "ResetErrorDeck"}, headers=AUTH_HEADERS)
+    deck_id = r.json()["id"]
+    r = client_with_flashcards_db.post("/api/v1/flashcards", json={
+        "deck_id": deck_id,
+        "front": "Reset Q",
+        "back": "Reset A",
+    }, headers=AUTH_HEADERS)
+    assert r.status_code == 200
+    card = r.json()
+    card_uuid = card["uuid"]
+
+    def fake_reset_flashcard_scheduling(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard reset backend unavailable")
+
+    monkeypatch.setattr(
+        flashcards_db,
+        "reset_flashcard_scheduling",
+        fake_reset_flashcard_scheduling,
+    )
+
+    response = client_with_flashcards_db.post(
+        f"/api/v1/flashcards/{card_uuid}/reset-scheduling",
+        json={"expected_version": card["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to reset flashcard scheduling"
+
+
+def test_reset_scheduling_returns_409_for_conflict_error_detail(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    r = client_with_flashcards_db.post("/api/v1/flashcards/decks", json={"name": "ResetConflictDeck"}, headers=AUTH_HEADERS)
+    deck_id = r.json()["id"]
+    r = client_with_flashcards_db.post("/api/v1/flashcards", json={
+        "deck_id": deck_id,
+        "front": "Reset conflict Q",
+        "back": "Reset conflict A",
+    }, headers=AUTH_HEADERS)
+    assert r.status_code == 200
+    card = r.json()
+    card_uuid = card["uuid"]
+
+    def fake_reset_flashcard_scheduling(*args, **kwargs):
+        raise ConflictError("reset version mismatch")
+
+    monkeypatch.setattr(
+        flashcards_db,
+        "reset_flashcard_scheduling",
+        fake_reset_flashcard_scheduling,
+    )
+
+    response = client_with_flashcards_db.post(
+        f"/api/v1/flashcards/{card_uuid}/reset-scheduling",
+        json={"expected_version": card["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "reset version mismatch"
+
+
 def test_patch_partial_update_keeps_required_fields(client_with_flashcards_db: TestClient):
     r = client_with_flashcards_db.post("/api/v1/flashcards/decks", json={"name": "PatchDeck"}, headers=AUTH_HEADERS)
     deck_id = r.json()["id"]
@@ -1762,6 +3378,78 @@ def test_patch_partial_update_keeps_required_fields(client_with_flashcards_db: T
     assert updated["front"] == "Qpatch"
     assert updated["back"] == "Apatch"
     assert updated["notes"] == "N2"
+
+
+def test_patch_flashcard_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    deck_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "PatchErrorDeck"},
+        headers=AUTH_HEADERS,
+    )
+    assert deck_response.status_code == 200
+    deck_id = deck_response.json()["id"]
+
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"deck_id": deck_id, "front": "Patch error front", "back": "Patch error back"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    card = create_response.json()
+
+    def fake_update_flashcard(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard update backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "update_flashcard", fake_update_flashcard)
+
+    response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/{card['uuid']}",
+        json={"notes": "patched", "expected_version": card["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to update flashcard"
+
+
+def test_patch_flashcard_returns_409_for_conflict_error_detail(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    deck_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "PatchConflictDeck"},
+        headers=AUTH_HEADERS,
+    )
+    assert deck_response.status_code == 200
+    deck_id = deck_response.json()["id"]
+
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"deck_id": deck_id, "front": "Patch conflict front", "back": "Patch conflict back"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    card = create_response.json()
+
+    def fake_update_flashcard(*args, **kwargs):
+        raise ConflictError("flashcard version mismatch")
+
+    monkeypatch.setattr(flashcards_db, "update_flashcard", fake_update_flashcard)
+
+    response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/{card['uuid']}",
+        json={"notes": "patched", "expected_version": card["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "flashcard version mismatch"
 
 
 def test_patch_tags_conflict_does_not_update(client_with_flashcards_db: TestClient):
@@ -1947,6 +3635,52 @@ def test_bulk_patch_reports_conflict_without_rolling_back_siblings(
     assert current.json()["back"] == "Saved sibling"
 
 
+def test_bulk_patch_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    first = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "Bulk patch first", "back": "Bulk patch back"},
+        headers=AUTH_HEADERS,
+    )
+    second = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "Bulk patch second", "back": "Bulk patch back"},
+        headers=AUTH_HEADERS,
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_card = first.json()
+    second_card = second.json()
+
+    def fake_update_flashcard(*args, **kwargs):
+        raise CharactersRAGDBError("bulk update backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "update_flashcard", fake_update_flashcard)
+
+    response = client_with_flashcards_db.patch(
+        "/api/v1/flashcards/bulk",
+        json=[
+            {
+                "uuid": first_card["uuid"],
+                "front": "Updated first",
+                "expected_version": first_card["version"],
+            },
+            {
+                "uuid": second_card["uuid"],
+                "back": "Updated second",
+                "expected_version": second_card["version"],
+            },
+        ],
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to update flashcards"
+
+
 def test_bulk_patch_classifies_deleted_deck_and_missing_card(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
@@ -2130,6 +3864,28 @@ def test_import_tsv_with_deckdescription_and_iscloze(client_with_flashcards_db: 
     card = next(it for it in items if it.get('deck_name') == 'DeckD')
     assert card.get('is_cloze') is True
     assert card.get('model_type') == 'cloze'
+
+
+def test_import_tsv_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    content = "DeckA\tFront A\tBack A\talpha\tNote A\n"
+
+    def fake_add_flashcard(*args, **kwargs):
+        raise CharactersRAGDBError("tsv import backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "add_flashcard", fake_add_flashcard)
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/import",
+        json={"content": content},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to import flashcards"
 
 
 def test_export_csv_with_header_and_custom_delimiter(client_with_flashcards_db: TestClient):
@@ -2582,6 +4338,30 @@ def test_import_json_unicode_preserved(client_with_flashcards_db: TestClient):
     assert any('😀' in (it.get('front') or '') for it in items)
 
 
+def test_import_json_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    files = {
+        "file": ("cards.json", json.dumps([{"deck": "JDeck", "front": "JF1", "back": "JB1"}]), "application/json"),
+    }
+
+    def fake_add_flashcard(*args, **kwargs):
+        raise CharactersRAGDBError("json import backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "add_flashcard", fake_add_flashcard)
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/import/json",
+        files=files,
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to import flashcards"
+
+
 def test_import_apkg_file_basic(client_with_flashcards_db: TestClient):
     payload_rows = [
         {
@@ -2688,6 +4468,39 @@ def test_import_apkg_invalid_archive_returns_400(client_with_flashcards_db: Test
     r = client_with_flashcards_db.post("/api/v1/flashcards/import/apkg", files=files, headers=AUTH_HEADERS)
     assert r.status_code == 400
     assert "Invalid APKG archive" in r.json().get("detail", "")
+
+
+def test_import_apkg_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    payload_rows = [
+        {
+            "deck_name": "APKG Error Deck",
+            "model_type": "basic",
+            "front": "APKG error front",
+            "back": "APKG error back",
+        },
+    ]
+    apkg = export_apkg_from_rows(payload_rows)
+    files = {
+        "file": ("flashcards.apkg", apkg, "application/apkg"),
+    }
+
+    def fake_add_flashcard(*args, **kwargs):
+        raise CharactersRAGDBError("apkg import backend unavailable")
+
+    monkeypatch.setattr(flashcards_db, "add_flashcard", fake_add_flashcard)
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/import/apkg",
+        files=files,
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to import flashcards"
 
 
 def test_export_apkg_packages_managed_assets_and_preserves_notes(
@@ -3170,10 +4983,16 @@ def test_flashcard_tag_suggestions_excludes_deleted_rows_and_keeps_deckless_card
     keyword_table = flashcards_db._map_table_for_backend("keywords")
     with flashcards_db.transaction() as conn:
         conn.execute("UPDATE flashcards SET deleted = 1 WHERE uuid = ?", (deleted_card_uuid,))
-        conn.execute(
-            f"UPDATE {keyword_table} SET deleted = 1 WHERE keyword = ?",
-            ("deleted-keyword-tag",),
-        )
+        if keyword_table == "chacha_keywords":
+            conn.execute(
+                "UPDATE chacha_keywords SET deleted = 1 WHERE keyword = ?",
+                ("deleted-keyword-tag",),
+            )
+        else:
+            conn.execute(
+                "UPDATE keywords SET deleted = 1 WHERE keyword = ?",
+                ("deleted-keyword-tag",),
+            )
         conn.execute("UPDATE decks SET deleted = 1 WHERE id = ?", (deleted_deck_id,))
 
     suggestions = client_with_flashcards_db.get("/api/v1/flashcards/tags", headers=AUTH_HEADERS)
@@ -3194,6 +5013,26 @@ def test_flashcard_tag_suggestions_route_precedence_over_alias_path(
     assert response.status_code == 200
     payload = response.json()
     assert set(payload.keys()) == {"items", "count"}
+
+
+def test_flashcard_tag_suggestions_returns_500_for_db_error(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def fake_list_flashcard_tag_suggestions(*args, **kwargs):
+        raise CharactersRAGDBError("flashcard tag suggestions backend unavailable")
+
+    monkeypatch.setattr(
+        flashcards_db,
+        "list_flashcard_tag_suggestions",
+        fake_list_flashcard_tag_suggestions,
+    )
+
+    response = client_with_flashcards_db.get("/api/v1/flashcards/tags", headers=AUTH_HEADERS)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to list flashcard tag suggestions"
 
 
 def test_flashcard_tag_suggestions_rejects_limit_over_max(

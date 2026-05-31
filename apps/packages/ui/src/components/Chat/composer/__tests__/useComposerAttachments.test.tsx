@@ -8,11 +8,27 @@ vi.mock("~/libs/to-base64", () => ({
 
 const makeImageFile = () =>
   new File(["fake"], "photo.png", { type: "image/png" })
+const makeImageFileWithoutMime = () =>
+  new File(["fake"], "photo.png", { type: "" })
+const makeImageFileWithGenericMime = () =>
+  new File(["fake"], "photo.jpg", { type: "application/octet-stream" })
+const makeExtensionlessFile = () =>
+  new File(["fake"], "png", { type: "" })
 const makePdfFile = () =>
   new File(["fake"], "doc.pdf", { type: "application/pdf" })
 const makeBlockedFile = () =>
   // application/zip is in otherUnsupportedTypes in the real module
   new File(["fake"], "archive.zip", { type: "application/zip" })
+const makeBlockedFileWithImageExtension = () =>
+  new File(["fake"], "photo.png", { type: "application/zip" })
+const makeBlockedFileWithFormattedMime = () => {
+  const file = makeBlockedFile()
+  Object.defineProperty(file, "type", {
+    value: " Application/ZIP ",
+    configurable: true,
+  })
+  return file
+}
 
 const makeEvent = (file: File) =>
   ({
@@ -58,6 +74,108 @@ describe("useComposerAttachments", () => {
     })
 
     expect(onImageAccepted).toHaveBeenCalledWith(file)
+  })
+
+  it("accepts image attachments when the browser omits the MIME type", async () => {
+    const setImageField = vi.fn()
+    const onNonImageRejected = vi.fn()
+    const { result } = renderHook(() =>
+      useComposerAttachments({
+        chatMode: "normal",
+        setImageField,
+        onNonImageRejected,
+      })
+    )
+
+    await act(async () => {
+      await result.current.onInputChange(makeImageFileWithoutMime())
+    })
+
+    expect(setImageField).toHaveBeenCalledWith(
+      expect.stringMatching(/^data:image\/png;base64,/)
+    )
+    expect(onNonImageRejected).not.toHaveBeenCalled()
+  })
+
+  it("does not infer images from filenames without extensions", async () => {
+    const setImageField = vi.fn()
+    const onNonImageRejected = vi.fn()
+    const { result } = renderHook(() =>
+      useComposerAttachments({
+        chatMode: "normal",
+        setImageField,
+        onNonImageRejected,
+      })
+    )
+
+    const file = makeExtensionlessFile()
+    await act(async () => {
+      await result.current.onInputChange(file)
+    })
+
+    expect(onNonImageRejected).toHaveBeenCalledWith(file)
+    expect(setImageField).not.toHaveBeenCalled()
+  })
+
+  it("accepts image attachments before rejecting generic binary MIME types", async () => {
+    const setImageField = vi.fn()
+    const onUnsupportedType = vi.fn()
+    const { result } = renderHook(() =>
+      useComposerAttachments({
+        chatMode: "normal",
+        setImageField,
+        onUnsupportedType,
+      })
+    )
+
+    await act(async () => {
+      await result.current.onInputChange(makeImageFileWithGenericMime())
+    })
+
+    expect(setImageField).toHaveBeenCalledWith(
+      expect.stringMatching(/^data:image\/jpeg;base64,/)
+    )
+    expect(onUnsupportedType).not.toHaveBeenCalled()
+  })
+
+  it("rejects blocked MIME types even when the filename has an image extension", async () => {
+    const setImageField = vi.fn()
+    const onUnsupportedType = vi.fn()
+    const { result } = renderHook(() =>
+      useComposerAttachments({
+        chatMode: "normal",
+        setImageField,
+        onUnsupportedType,
+      })
+    )
+
+    const file = makeBlockedFileWithImageExtension()
+    await act(async () => {
+      await result.current.onInputChange(file)
+    })
+
+    expect(onUnsupportedType).toHaveBeenCalledWith(file)
+    expect(setImageField).not.toHaveBeenCalled()
+  })
+
+  it("normalizes MIME type formatting before checking unsupported types", async () => {
+    const setImageField = vi.fn()
+    const onUnsupportedType = vi.fn()
+    const { result } = renderHook(() =>
+      useComposerAttachments({
+        chatMode: "normal",
+        setImageField,
+        onUnsupportedType,
+      })
+    )
+
+    const file = makeBlockedFileWithFormattedMime()
+    await act(async () => {
+      await result.current.onInputChange(file)
+    })
+
+    expect(onUnsupportedType).toHaveBeenCalledWith(file)
+    expect(setImageField).not.toHaveBeenCalled()
   })
 
   it("blocks image attachments in RAG mode when ragBlocksImages is true", async () => {

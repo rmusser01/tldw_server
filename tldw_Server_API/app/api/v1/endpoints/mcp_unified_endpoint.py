@@ -20,12 +20,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_db_transaction, RequirePermission, verify_jwt_and_fetch_user
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_auth_principal,
-    get_db_transaction,
-    require_permissions,
-)
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolCatalogResponse
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
@@ -42,7 +38,7 @@ from tldw_Server_API.app.core.AuthNZ.settings import (
     get_settings,
     is_single_user_profile_mode,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import verify_jwt_and_fetch_user
+from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement_enabled
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, get_config, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import TokenData, get_jwt_manager
@@ -50,7 +46,6 @@ from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_
 from tldw_Server_API.app.core.MCP_unified.security.request_guards import enforce_http_security
 from tldw_Server_API.app.core.MCP_unified.server import _is_authnz_access_token
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
-from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement_enabled
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from tldw_Server_API.app.services import admin_tool_catalog_service
 
@@ -83,6 +78,7 @@ def _normalize_optional_text(value: Any) -> str | None:
 # Request/Response models
 class ServerStatusResponse(BaseModel):
     """Server status response"""
+
     status: str
     version: str
     uptime_seconds: float
@@ -92,18 +88,21 @@ class ServerStatusResponse(BaseModel):
 
 class ServerMetricsResponse(BaseModel):
     """Server metrics response"""
+
     connections: dict[str, Any]
     modules: dict[str, dict[str, Any]]
 
 
 class ToolExecutionRequest(BaseModel):
     """Tool execution request"""
+
     tool_name: str = Field(..., min_length=1, max_length=100)
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolExecutionResponse(BaseModel):
     """Tool execution response"""
+
     result: Any
     execution_time_ms: float
     module: str
@@ -111,6 +110,7 @@ class ToolExecutionResponse(BaseModel):
 
 class ModuleHealthResponse(BaseModel):
     """Module health response"""
+
     module_id: str
     status: str
     message: str
@@ -120,6 +120,7 @@ class ModuleHealthResponse(BaseModel):
 
 class AuthTokenRequest(BaseModel):
     """Authentication token request"""
+
     username: str
     password: Optional[str] = None
     api_key: Optional[str] = None
@@ -127,6 +128,7 @@ class AuthTokenRequest(BaseModel):
 
 class AuthTokenResponse(BaseModel):
     """Authentication token response"""
+
     access_token: str
     token_type: str = "bearer"
     expires_in: int
@@ -135,6 +137,7 @@ class AuthTokenResponse(BaseModel):
 
 class AuthRefreshRequest(BaseModel):
     """Refresh authentication request payload."""
+
     refresh_token: str = Field(..., description="Refresh token value. Must be sent in the JSON body.")
     token_id: Optional[str] = Field(
         default=None,
@@ -200,13 +203,14 @@ def _get_client_ip(request: Optional[Request]) -> Optional[str]:
     try:
         return resolve_client_ip(request, get_settings())
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        logger.debug("Failed to extract client IP", exc_info=True)
+        logger.debug("Failed to extract client IP")
     return None
 
 
 @dataclass
 class McpAuthContext:
     """Resolved authentication context for MCP HTTP endpoints."""
+
     user: Optional[TokenData]
     principal: Optional[AuthPrincipal]
     api_key_info: Optional[dict[str, Any]]
@@ -234,6 +238,7 @@ def _principal_to_token_data(principal: AuthPrincipal) -> Optional[TokenData]:
 
 
 # Dependency functions
+
 
 async def _resolve_token_data_compat(
     request: Request,
@@ -345,12 +350,7 @@ async def _resolve_token_data_compat(
                             cfg = get_config()
                         except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
                             cfg = None
-                        env = (
-                            os.getenv("ENVIRONMENT")
-                            or os.getenv("APP_ENV")
-                            or os.getenv("ENV")
-                            or ""
-                        ).lower()
+                        env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
                         prod_flag = env_flag_enabled("tldw_production")
                         is_dev_ctx = bool(cfg and getattr(cfg, "debug_mode", False))
                         if os.getenv("PYTEST_CURRENT_TEST") is not None:
@@ -369,7 +369,11 @@ async def _resolve_token_data_compat(
                         if not is_dev_ctx:
                             logger.error(
                                 "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
-                                extra={"audit": True, "env": env, "debug_mode": bool(cfg and getattr(cfg, 'debug_mode', False))},
+                                extra={
+                                    "audit": True,
+                                    "env": env,
+                                    "debug_mode": bool(cfg and getattr(cfg, "debug_mode", False)),
+                                },
                             )
                             test_mode = False
                     allowed: set[str] = set()
@@ -552,6 +556,7 @@ async def _attach_api_key_metadata(
             metadata["team_id"] = api_key_info.get("team_id")
         try:
             from tldw_Server_API.app.core.AuthNZ.api_key_manager import normalize_scope
+
             raw_scopes = api_key_info.get("scopes")
             if raw_scopes is None:
                 raw_scopes = api_key_info.get("scope")
@@ -631,15 +636,9 @@ def _principal_has_admin_claims(principal: Optional[AuthPrincipal]) -> bool:
     if principal is None:
         return False
     try:
-        roles = {
-            str(role).strip().lower()
-            for role in (getattr(principal, "roles", []) or [])
-            if str(role).strip()
-        }
+        roles = {str(role).strip().lower() for role in (getattr(principal, "roles", []) or []) if str(role).strip()}
         permissions = {
-            str(perm).strip().lower()
-            for perm in (getattr(principal, "permissions", []) or [])
-            if str(perm).strip()
+            str(perm).strip().lower() for perm in (getattr(principal, "permissions", []) or []) if str(perm).strip()
         }
         if "admin" in roles:
             return True
@@ -674,6 +673,7 @@ def _is_catalog_admin_context(
 
 
 # WebSocket endpoint
+
 
 @router.websocket("/ws")
 async def websocket_endpoint(
@@ -733,7 +733,16 @@ async def websocket_endpoint(
 
 # HTTP endpoints
 
-@router.post("/request", response_model=MCPResponse)
+
+@router.post(
+    "/request",
+    response_model=MCPResponse,
+    responses={
+        status.HTTP_204_NO_CONTENT: {
+            "description": "MCP request acknowledged with no response body.",
+        },
+    },
+)
 async def mcp_request(
     request: MCPRequest,
     http_request: Request,
@@ -772,22 +781,24 @@ async def mcp_request(
         try:
             import base64
             import json as _json
+
             decoded = base64.b64decode(config).decode("utf-8")
             cfg = _json.loads(decoded)
             if isinstance(cfg, dict):
                 safe_config = cfg
-        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Failed to parse safe config: {e}")
+        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to parse safe config")
 
     # Session lifecycle: if initialize and no session id provided, generate one and return header
     try:
         if request.method == "initialize" and not mcp_session_id:
             import uuid as _uuid
+
             mcp_session_id = _uuid.uuid4().hex
             if response is not None:
                 response.headers["mcp-session-id"] = mcp_session_id
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        logger.debug("Failed to generate session ID for initialize request", exc_info=True)
+        logger.debug("Failed to generate session ID for initialize request")
 
     if auth.user:
         if auth.user.roles:
@@ -802,10 +813,7 @@ async def mcp_request(
         metadata["safe_config"] = safe_config
 
     resp_obj = await server.handle_http_request(
-        request,
-        client_id=client_id,
-        user_id=derived_user_id,
-        metadata=metadata or None
+        request, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
     )
     if resp_obj is None:
         return Response(status_code=204)
@@ -819,10 +827,13 @@ async def mcp_request(
                     hint = f"Permission denied. Ask an admin to grant tools.execute:{tname} or tools.execute:* to your role (Admin → Access Control)."
         except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
             hint = None
-        raise HTTPException(status_code=403, detail={
-            "message": resp_obj.error.message or "Insufficient permissions",
-            "hint": hint or "Insufficient permissions for this operation"
-        })
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": resp_obj.error.message or "Insufficient permissions",
+                "hint": hint or "Insufficient permissions for this operation",
+            },
+        )
 
     return resp_obj
 
@@ -867,22 +878,24 @@ async def mcp_request_batch(
         try:
             import base64
             import json as _json
+
             decoded = base64.b64decode(config).decode("utf-8")
             cfg = _json.loads(decoded)
             if isinstance(cfg, dict):
                 safe_config = cfg
-        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Batch failed to parse safe config: {e}")
+        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Batch failed to parse safe config")
 
     # If any initialize request is present and no session id was provided, generate one.
     try:
         if not mcp_session_id and any(req.method == "initialize" for req in requests):
             import uuid as _uuid
+
             mcp_session_id = _uuid.uuid4().hex
             if response is not None:
                 response.headers["mcp-session-id"] = mcp_session_id
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        logger.debug("Failed to generate session ID for batch initialize", exc_info=True)
+        logger.debug("Failed to generate session ID for batch initialize")
 
     # Build metadata for batch processing
     if auth.user:
@@ -897,10 +910,7 @@ async def mcp_request_batch(
         metadata["safe_config"] = safe_config
 
     resp = await server.handle_http_batch(
-        requests,
-        client_id=client_id,
-        user_id=derived_user_id,
-        metadata=metadata or None
+        requests, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
     )
     # If only notifications were sent, return empty list
     return resp or []
@@ -931,7 +941,7 @@ async def get_server_status(
 
 @router.get("/metrics", response_model=ServerMetricsResponse)
 async def get_server_metrics(
-    _principal: AuthPrincipal = Depends(require_permissions(SYSTEM_LOGS)),
+    _principal: AuthPrincipal = Depends(RequirePermission(SYSTEM_LOGS)),
     _guard: None = Depends(enforce_http_security),
 ):
     """
@@ -952,16 +962,25 @@ async def get_server_metrics(
     return ServerMetricsResponse(**metrics)
 
 
-@router.get("/metrics/prometheus")
+@router.get(
+    "/metrics/prometheus",
+    response_class=Response,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Prometheus text-format MCP metrics",
+            "content": {"text/plain; version=0.0.4; charset=utf-8": {}},
+        },
+    },
+)
 async def get_prometheus_metrics(
-    _principal: AuthPrincipal = Depends(require_permissions(SYSTEM_LOGS)),
+    _principal: AuthPrincipal = Depends(RequirePermission(SYSTEM_LOGS)),
     _guard: None = Depends(enforce_http_security),
 ):
     """
     Prometheus scrape endpoint for MCP metrics.
 
     Security: Requires an authenticated principal with the `system.logs`
-    permission (or admin-style claims via require_permissions). External
+    permission (or admin-style claims via the standard permission dependency). External
     ingress or Prometheus-side configuration should be used to handle any
     additional network-level access controls.
     """
@@ -1041,19 +1060,18 @@ async def list_tools(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(
-        request,
-        user_id=derived_user_id,
-        metadata=metadata or None
-    )
+    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
 
     if response.error:
         if response.error.code == -32001:
-            raise HTTPException(status_code=403, detail={
-                "message": response.error.message or "Insufficient permissions",
-                "hint": "Permission denied for listing tools. Contact an admin."
-            })
-        raise HTTPException(status_code=500, detail=response.error.message)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": response.error.message or "Insufficient permissions",
+                    "hint": "Permission denied for listing tools. Contact an admin.",
+                },
+            )
+        raise HTTPException(status_code=500, detail="Failed to list MCP tools")
 
     return response.result
 
@@ -1118,24 +1136,20 @@ async def list_tool_catalogs(
                         org_ids.add(org_id)
                     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
                         continue
-            except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"MCP tool catalogs: org membership lookup failed: {exc}")
+            except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+                logger.debug("MCP tool catalogs: org membership lookup failed")
 
             try:
                 memberships = await list_active_team_memberships_for_user(uid)
                 for membership in memberships:
                     try:
-                        team_id_val = (
-                            membership.get("team_id")
-                            if isinstance(membership, dict)
-                            else None
-                        )
+                        team_id_val = membership.get("team_id") if isinstance(membership, dict) else None
                         if team_id_val is not None:
                             team_ids.add(int(team_id_val))
                     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
                         continue
-            except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"MCP tool catalogs: team membership lookup failed: {exc}")
+            except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+                logger.debug("MCP tool catalogs: team membership lookup failed")
 
     scope_norm = scope.strip().lower()
     if scope_norm not in {"all", "global", "org", "team"}:
@@ -1172,15 +1186,13 @@ async def execute_tool(
     Tools are executed with user context for permission checking.
     """
     import time
+
     start_time = time.time()
 
     mcp_request = MCPRequest(
         method="tools/call",
-        params={
-            "name": request.tool_name,
-            "arguments": request.arguments
-        },
-        id=f"http-tools-execute:{request.tool_name}"
+        params={"name": request.tool_name, "arguments": request.arguments},
+        id=f"http-tools-execute:{request.tool_name}",
     )
 
     server = get_mcp_server()
@@ -1203,11 +1215,7 @@ async def execute_tool(
 
     derived_user_id = _get_derived_user_id(user)
 
-    response = await server.handle_http_request(
-        mcp_request,
-        user_id=derived_user_id,
-        metadata=metadata or None
-    )
+    response = await server.handle_http_request(mcp_request, user_id=derived_user_id, metadata=metadata or None)
 
     if response is None:
         logger.error("MCP server returned no response for tools/call", tool=request.tool_name)
@@ -1221,14 +1229,14 @@ async def execute_tool(
                 "hint": (
                     f"Permission denied. Ask an admin to grant tools.execute:{request.tool_name} "
                     f"or tools.execute:* to your role (Admin → Access Control)."
-                )
+                ),
             }
             raise HTTPException(status_code=403, detail=hint)
         # Invalid params
         if response.error.code == -32602:
             raise HTTPException(status_code=400, detail=response.error.message)
         # Other errors
-        raise HTTPException(status_code=500, detail=response.error.message)
+        raise HTTPException(status_code=500, detail="MCP tool execution failed")
 
     execution_time = (time.time() - start_time) * 1000
 
@@ -1252,11 +1260,7 @@ async def execute_tool(
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
         served_by = None
 
-    return ToolExecutionResponse(
-        result=display_result,
-        execution_time_ms=execution_time,
-        module=served_by or "unknown"
-    )
+    return ToolExecutionResponse(result=display_result, execution_time_ms=execution_time, module=served_by or "unknown")
 
 
 @router.get("/modules")
@@ -1287,19 +1291,18 @@ async def list_modules(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(
-        request,
-        user_id=derived_user_id,
-        metadata=metadata or None
-    )
+    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
 
     if response.error:
         if response.error.code == -32001:
-            raise HTTPException(status_code=403, detail={
-                "message": response.error.message or "Insufficient permissions",
-                "hint": "Permission denied for listing tools. Contact an admin."
-            })
-        raise HTTPException(status_code=500, detail=response.error.message)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": response.error.message or "Insufficient permissions",
+                    "hint": "Permission denied for listing tools. Contact an admin.",
+                },
+            )
+        raise HTTPException(status_code=500, detail="Failed to list MCP modules")
 
     return response.result
 
@@ -1307,7 +1310,7 @@ async def list_modules(
 @router.get("/modules/health")
 async def get_modules_health(
     http_request: Request,
-    principal: AuthPrincipal = Depends(require_permissions(SYSTEM_LOGS)),
+    principal: AuthPrincipal = Depends(RequirePermission(SYSTEM_LOGS)),
     _guard: None = Depends(enforce_http_security),
 ):
     """
@@ -1332,11 +1335,14 @@ async def get_modules_health(
 
     if response.error:
         if response.error.code == -32001:
-            raise HTTPException(status_code=403, detail={
-                "message": response.error.message or "Insufficient permissions",
-                "hint": "Permission denied for listing modules. Contact an admin."
-            })
-        raise HTTPException(status_code=500, detail=response.error.message)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": response.error.message or "Insufficient permissions",
+                    "hint": "Permission denied for listing modules. Contact an admin.",
+                },
+            )
+        raise HTTPException(status_code=500, detail="Failed to get MCP module health")
 
     return response.result
 
@@ -1369,19 +1375,18 @@ async def list_resources(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(
-        request,
-        user_id=derived_user_id,
-        metadata=metadata or None
-    )
+    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
 
     if response.error:
         if response.error.code == -32001:
-            raise HTTPException(status_code=403, detail={
-                "message": response.error.message or "Insufficient permissions",
-                "hint": "Permission denied for listing resources. Contact an admin."
-            })
-        raise HTTPException(status_code=500, detail=response.error.message)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": response.error.message or "Insufficient permissions",
+                    "hint": "Permission denied for listing resources. Contact an admin.",
+                },
+            )
+        raise HTTPException(status_code=500, detail="Failed to list MCP resources")
 
     return response.result
 
@@ -1414,24 +1419,24 @@ async def list_prompts(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(
-        request,
-        user_id=derived_user_id,
-        metadata=metadata or None
-    )
+    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
 
     if response.error:
         if response.error.code == -32001:
-            raise HTTPException(status_code=403, detail={
-                "message": response.error.message or "Insufficient permissions",
-                "hint": "Permission denied for listing prompts. Contact an admin."
-            })
-        raise HTTPException(status_code=500, detail=response.error.message)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": response.error.message or "Insufficient permissions",
+                    "hint": "Permission denied for listing prompts. Contact an admin.",
+                },
+            )
+        raise HTTPException(status_code=500, detail="Failed to list MCP prompts")
 
     return response.result
 
 
 # Authentication endpoints
+
 
 @router.post("/auth/token", response_model=AuthTokenResponse)
 async def create_token(
@@ -1551,7 +1556,7 @@ async def refresh_token(
     except HTTPException:
         raise
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Refresh token rotation failed: {e}")
+        logger.error("Refresh token rotation failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to refresh token") from e
 
     return AuthTokenResponse(
@@ -1562,6 +1567,7 @@ async def refresh_token(
 
 
 # Health check endpoint
+
 
 @router.get("/health")
 async def health_check(
@@ -1590,7 +1596,7 @@ async def health_check(
     if status_value != "healthy":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Server status: {status_value}",
+            detail="MCP server is not healthy",
         )
 
     return {"status": "healthy"}
@@ -1720,9 +1726,7 @@ async def check_mcp_connection(
 
     parsed = urlparse(catalog_probe_url)
     if parsed.scheme not in ("http", "https"):
-        return MCPConnectionTestResponse(
-            reachable=False, error="Only http and https URLs are allowed"
-        )
+        return MCPConnectionTestResponse(reachable=False, error="Only http and https URLs are allowed")
 
     supported_auth_types = {"none", "bearer", "api_key"}
     if req.auth_type not in supported_auth_types:
@@ -1734,9 +1738,7 @@ async def check_mcp_connection(
     # SSRF protection: reject private/reserved IP ranges.
     hostname = parsed.hostname or ""
     if not hostname or _is_private_ip(hostname):
-        return MCPConnectionTestResponse(
-            reachable=False, error="Cannot connect to private or reserved addresses"
-        )
+        return MCPConnectionTestResponse(reachable=False, error="Cannot connect to private or reserved addresses")
     assert_url_safe(catalog_probe_url)
 
     headers: dict[str, str] = {}
@@ -1751,12 +1753,13 @@ async def check_mcp_connection(
         raise
     except Exception:
         logger.opt(exception=True).warning(
-            "MCP connection test failed for {}", req.url
+            "MCP connection test failed for {}", catalog_probe_url
         )
         return MCPConnectionTestResponse(reachable=False, error="Connection failed")
 
 
 # OpenAPI documentation customization
+
 
 def customize_openapi():
     """Customize OpenAPI schema for better documentation"""
@@ -1792,11 +1795,7 @@ def customize_openapi():
 
         # Add security schemes
         openapi_schema["components"]["securitySchemes"] = {
-            "bearerAuth": {
-                "type": "http",
-                "scheme": "bearer",
-                "bearerFormat": "JWT"
-            }
+            "bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
         }
 
         router.openapi_schema = openapi_schema

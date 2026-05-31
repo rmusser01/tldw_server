@@ -111,4 +111,32 @@ describe("WorkspaceSetsTab", () => {
     expect(screen.getByDisplayValue("User-scoped reusable workspaces")).toBeTruthy()
     expect(onDrillHandled).toHaveBeenCalledWith(7)
   })
+
+  it("shows when the focused research workspace is already in a workspace set", async () => {
+    render(<WorkspaceSetsTab {...({ focusWorkspaceId: "workspace-alpha" } as any)} />)
+
+    expect(await screen.findByText("Primary Workspace Set")).toBeTruthy()
+    expect(
+      await screen.findByText(
+        /workspace-alpha is included in 1 MCP workspace set/i
+      )
+    ).toBeTruthy()
+    expect(screen.getByText(/Primary Workspace Set/)).toBeTruthy()
+  })
+
+  it("shows an MCP-owned no-binding state for the focused research workspace", async () => {
+    mocks.listWorkspaceSetMembers.mockResolvedValue([])
+
+    render(<WorkspaceSetsTab {...({ focusWorkspaceId: "workspace-gamma" } as any)} />)
+
+    expect(await screen.findByText("Primary Workspace Set")).toBeTruthy()
+    expect(
+      screen.getByText(/No MCP workspace set includes workspace-gamma yet/i)
+    ).toBeTruthy()
+    expect(
+      screen.getByText(
+        /Create or edit a workspace set here to make this workspace available to MCP policy assignments/i
+      )
+    ).toBeTruthy()
+  })
 })

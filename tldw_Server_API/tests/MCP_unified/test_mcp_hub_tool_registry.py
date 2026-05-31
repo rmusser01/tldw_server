@@ -52,6 +52,16 @@ class _RegistryProbeModule(BaseModule):
         return {"tool": tool_name, "arguments": arguments}
 
 
+class _FailingInitializeModule(_RegistryProbeModule):
+    async def on_initialize(self) -> None:
+        raise RuntimeError("module init failed at /private/mcp-init.json")
+
+
+class _FailingHealthModule(_RegistryProbeModule):
+    async def check_health(self) -> dict[str, bool]:
+        raise RuntimeError("module health failed at /private/mcp-health.json")
+
+
 @pytest.fixture(autouse=True)
 async def _reset_registry() -> None:
     await reset_module_registry()
@@ -105,3 +115,28 @@ async def test_tool_registry_derives_execution_risk_and_groups_modules() -> None
     assert groups[0]["module"] == "probe"
     assert groups[0]["tool_count"] == 3
     assert groups[0]["risk_summary"]["high"] == 1
+
+
+@pytest.mark.asyncio
+async def test_base_module_initialization_failure_sets_safe_health_message() -> None:
+    module = _FailingInitializeModule(ModuleConfig(name="probe", description="Probe module"))
+
+    with pytest.raises(RuntimeError):
+        await module.initialize()
+
+    assert module._health.status.value == "unhealthy"
+    assert module._health.message == "Initialization failed"
+    assert "module init failed" not in module._health.message
+    assert "/private/mcp-init.json" not in module._health.message
+
+
+@pytest.mark.asyncio
+async def test_base_module_health_check_sanitizes_backend_failures() -> None:
+    module = _FailingHealthModule(ModuleConfig(name="probe", description="Probe module"))
+
+    health = await module.health_check()
+
+    assert health.status.value == "unhealthy"
+    assert health.message == "Health check error"
+    assert "module health failed" not in health.message
+    assert "/private/mcp-health.json" not in health.message

@@ -29,6 +29,7 @@ import {
   Scissors,
   Server,
   ShieldCheck,
+  SquareTerminal,
   SquarePen,
   StickyNote,
   UserCircle2,
@@ -42,7 +43,14 @@ import type { HeaderShortcutId } from "@/services/settings/ui-settings"
 import { HEADER_SHORTCUT_IDS } from "@/services/settings/ui-settings"
 export { HEADER_SHORTCUT_IDS }
 import type { UserPersona } from "@/types/connection"
-import { DOCUMENT_WORKSPACE_PATH, REPO2TXT_PATH } from "@/routes/route-paths"
+import {
+  CHAT_WORKSPACE_PATH,
+  DOCUMENT_WORKSPACE_PATH,
+  MODERATION_REVIEW_PATH,
+  MODERATION_RULES_PATH,
+  REPO2TXT_PATH,
+  SOURCES_PATH
+} from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 
 export type HeaderShortcutItem = {
@@ -80,12 +88,22 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         shortcutIndex: 1
       },
       {
+        id: "chat-workspace",
+        to: CHAT_WORKSPACE_PATH,
+        icon: SquareTerminal,
+        labelKey: "option:header.chatWorkspace",
+        labelDefault: "Chat Workspace",
+        shortcutIndex: 2,
+        descriptionKey: "option:header.chatWorkspaceDesc",
+        descriptionDefault:
+          "Chat-first workspace with staged sources and runtime context"
+      },
+      {
         id: "prompts",
         to: "/prompts",
         icon: NotebookPen,
         labelKey: "option:header.modePromptsPlayground",
-        labelDefault: "Prompts",
-        shortcutIndex: 2
+        labelDefault: "Prompts"
       },
       {
         id: "characters",
@@ -151,13 +169,13 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         descriptionDefault: "Long-running research with citations and checkpoints"
       },
       {
-        id: "workspace-playground",
-        to: "/workspace-playground",
+        id: "research-workspace",
+        to: "/research-workspace",
         icon: GitCompare,
-        labelKey: "settings:researchStudioNav",
-        labelDefault: "Research Studio",
+        labelKey: "settings:researchWorkspaceNav",
+        labelDefault: "Research Workspace",
         shortcutIndex: 7,
-        descriptionKey: "settings:researchStudioDesc",
+        descriptionKey: "settings:researchWorkspaceDesc",
         descriptionDefault: "Three-pane workspace: sources, chat, and generated outputs"
       },
       {
@@ -211,6 +229,16 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         shortcutIndex: 9
       },
       {
+        id: "sources",
+        to: SOURCES_PATH,
+        icon: Layers,
+        labelKey: "option:header.sources",
+        labelDefault: "Sources",
+        descriptionKey: "option:header.sourcesDesc",
+        descriptionDefault:
+          "Manage server folders and archive snapshots that sync into notes or media"
+      },
+      {
         id: "multi-item-review",
         to: "/media-multi",
         icon: LayoutGrid,
@@ -255,13 +283,22 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         descriptionDefault: "Set up family profiles, safety templates, and invite guardians"
       },
       {
-        id: "moderation-playground",
-        to: "/moderation-playground",
+        id: "moderation-review",
+        to: MODERATION_REVIEW_PATH,
+        icon: ClipboardList,
+        labelKey: "option:moderationReview.nav",
+        labelDefault: "Moderation Review",
+        descriptionKey: "option:moderationReview.desc",
+        descriptionDefault: "Review flagged items, escalations, and decisions"
+      },
+      {
+        id: "moderation-rules",
+        to: MODERATION_RULES_PATH,
         icon: ShieldCheck,
-        labelKey: "option:moderationPlayground.nav",
-        labelDefault: "Content Controls",
-        descriptionKey: "option:moderationPlayground.desc",
-        descriptionDefault: "Content safety rules, blocklists, and testing"
+        labelKey: "option:moderationRules.nav",
+        labelDefault: "Content Rules",
+        descriptionKey: "option:moderationRules.desc",
+        descriptionDefault: "Configure moderation policies, blocklists, and testing"
       },
       {
         id: "guardian",
@@ -493,15 +530,46 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
 
 const HOSTED_VISIBLE_SHORTCUT_PATHS = new Set([
   "/chat",
+  CHAT_WORKSPACE_PATH,
   "/knowledge",
   "/media",
-  "/collections"
+  "/collections",
+  "/stt",
+  "/tts"
 ])
+
+const HOSTED_AUDIO_SHORTCUT_DESCRIPTIONS: Partial<
+  Record<
+    HeaderShortcutId,
+    Pick<HeaderShortcutItem, "descriptionKey" | "descriptionDefault">
+  >
+> = {
+  "stt-playground": {
+    descriptionKey: "option:header.modeSttHostedDesc",
+    descriptionDefault:
+      "Requires a self-hosted tldw server for speech transcription."
+  },
+  "tts-playground": {
+    descriptionKey: "option:header.modeTtsHostedDesc",
+    descriptionDefault:
+      "Requires a self-hosted tldw server for speech generation."
+  }
+}
 
 const getHostedHeaderShortcutGroups = (): HeaderShortcutGroup[] => {
   const filteredGroups = BASE_HEADER_SHORTCUT_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter((item) => HOSTED_VISIBLE_SHORTCUT_PATHS.has(item.to))
+    items: group.items
+      .filter((item) => HOSTED_VISIBLE_SHORTCUT_PATHS.has(item.to))
+      .map((item) => {
+        const hostedDescription = HOSTED_AUDIO_SHORTCUT_DESCRIPTIONS[item.id]
+        return hostedDescription
+          ? {
+              ...item,
+              ...hostedDescription
+            }
+          : item
+      })
   })).filter((group) => group.items.length > 0)
 
   filteredGroups.push({
@@ -557,7 +625,8 @@ export const PERSONA_SHORTCUT_DEFAULTS: Record<
     "chat",
     "media",
     "family-guardrails",
-    "moderation-playground",
+    "moderation-review",
+    "moderation-rules",
     "guardian",
     "settings"
   ],
@@ -567,7 +636,7 @@ export const PERSONA_SHORTCUT_DEFAULTS: Record<
     "deep-research",
     "knowledge-qa",
     "media",
-    "workspace-playground",
+    "research-workspace",
     "collections",
     "notes",
     "evaluations",

@@ -74,9 +74,9 @@
       "settingsContent": "Configure voice chat settings including the voice model, auto-send timing, and trigger phrases."
     }
   },
-  "workspacePlayground": {
+  "researchWorkspace": {
     "basics": {
-      "label": "Research Studio Basics",
+      "label": "Research Workspace Basics",
       "description": "Learn the three-pane workspace flow: sources, chat, and studio outputs",
       "headerTitle": "Workspace Header",
       "headerContent": "Use the header to rename, switch, import, and manage workspaces while tracking system status.",
@@ -206,10 +206,10 @@
   },
   "moderation": {
     "basics": {
-      "label": "Content Controls Basics",
-      "description": "Learn how to set up content safety rules, blocklists, and test moderation.",
-      "heroTitle": "Moderation Dashboard",
-      "heroContent": "This is your content safety hub. The status badge shows whether your server is connected.",
+      "label": "Content Rules Basics",
+      "description": "Learn how to set up moderation policies, blocklists, overrides, and tests.",
+      "heroTitle": "Content Rules",
+      "heroContent": "This is your rule configuration hub. The status badge shows whether your server is connected.",
       "policyTitle": "Policy & Settings",
       "policyContent": "Start here. Set your base content safety policy — what categories to filter and how strictly.",
       "blocklistTitle": "Blocklist Studio",
@@ -244,8 +244,8 @@
       "catalogContent": "Browse all registered tools here. Each tool shows its capabilities and risk level.",
       "credentialsTitle": "Servers & Credentials",
       "credentialsContent": "Connect external MCP servers here. Each server provides additional tools for your AI assistant.",
-      "profilesTitle": "Permission Profiles",
-      "profilesContent": "Create permission profiles to control which tools each user or persona can access.",
+      "profilesTitle": "Access Workflow",
+      "profilesContent": "Use Access to create profiles and assign which tools each user or persona can reach.",
       "auditTitle": "Governance Audit",
       "auditContent": "Review policy findings and configuration issues across all your MCP Hub settings."
     }

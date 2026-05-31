@@ -1,16 +1,24 @@
 import { tldwClient } from "./TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { createSafeStorage } from "@/utils/safe-storage"
 
 export type ServerCapabilities = {
   hasChat: boolean
   hasRag: boolean
   hasMedia: boolean
+  hasMediaPlaylistPreflight?: boolean
+  hasMediaIngestJobs?: boolean
+  hasMediaIngestJobEvents?: boolean
+  hasMediaIngestWorker?: boolean
+  hasDurableMediaCollections?: boolean
+  hasKnowledgeQaMediaScope?: boolean
   hasNotes: boolean
   hasSlides: boolean
   hasPresentationStudio: boolean
   hasPresentationRender: boolean
   hasIngestionSources: boolean
+  canCreateLocalDirectoryIngestionSource: boolean | null
   hasPrompts: boolean
   hasFlashcards: boolean
   hasQuizzes: boolean
@@ -38,6 +46,7 @@ export type ServerCapabilities = {
   hasFeedbackImplicit: boolean
   hasSkills: boolean
   hasPersona: boolean
+  hasPersonaLiveControl: boolean
   hasPersonalization: boolean
   hasGuardian: boolean
   hasSelfMonitoring: boolean
@@ -50,11 +59,18 @@ const defaultCapabilities: ServerCapabilities = {
   hasChat: false,
   hasRag: false,
   hasMedia: false,
+  hasMediaPlaylistPreflight: false,
+  hasMediaIngestJobs: false,
+  hasMediaIngestJobEvents: false,
+  hasMediaIngestWorker: false,
+  hasDurableMediaCollections: false,
+  hasKnowledgeQaMediaScope: false,
   hasNotes: false,
   hasSlides: false,
   hasPresentationStudio: false,
   hasPresentationRender: false,
   hasIngestionSources: false,
+  canCreateLocalDirectoryIngestionSource: false,
   hasPrompts: false,
   hasFlashcards: false,
   hasQuizzes: false,
@@ -82,6 +98,7 @@ const defaultCapabilities: ServerCapabilities = {
   hasFeedbackImplicit: false,
   hasSkills: false,
   hasPersona: false,
+  hasPersonaLiveControl: false,
   hasPersonalization: false,
   hasGuardian: false,
   hasSelfMonitoring: false,
@@ -100,7 +117,10 @@ const fallbackSpec = {
       "/api/v1/rag/health",
       "/api/v1/rag/",
       "/api/v1/rag/feedback/implicit",
+      "/api/v1/media/playlists/preflight",
       "/api/v1/media/ingest/jobs",
+      "/api/v1/media/ingest/jobs/events/stream",
+      "/api/v1/media/collections",
       "/api/v1/media/add",
       "/api/v1/media/",
       "/api/v1/media/process-videos",
@@ -171,6 +191,7 @@ const fallbackSpec = {
       "/api/v1/skills/context",
       "/api/v1/persona/catalog",
       "/api/v1/persona/session",
+      "/api/v1/persona/live/sessions",
       "/api/v1/persona/stream",
       "/api/v1/personalization/profile",
       "/api/v1/personalization/opt-in",
@@ -185,8 +206,12 @@ type DocsInfoResponse = {
   ffmpeg_available?: boolean | null
 }
 
+type IngestionSourceCapabilitiesResponse = {
+  can_create_local_directory?: unknown
+}
+
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60 * 1000
-const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV3"
+const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV5"
 
 type CapabilitiesCachePayload = {
   key: string
@@ -356,13 +381,40 @@ const applyDocsInfoFeatureGates = (
     docsInfo,
     "hasPresentationRender"
   )
+  const mediaPlaylistPreflightEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasMediaPlaylistPreflight"
+  )
+  const mediaIngestJobsEnabled = extractFeatureFlag(docsInfo, "hasMediaIngestJobs")
+  const mediaIngestJobEventsEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasMediaIngestJobEvents"
+  )
+  const mediaIngestWorkerEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasMediaIngestWorker"
+  )
+  const durableMediaCollectionsEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasDurableMediaCollections"
+  )
+  const knowledgeQaMediaScopeEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasKnowledgeQaMediaScope"
+  )
   const personaFeatureEnabled = extractFeatureFlag(docsInfo, "persona")
+  const personaLiveControlFeatureEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasPersonaLiveControl"
+  )
   const personalizationFeatureEnabled = extractFeatureFlag(
     docsInfo,
     "personalization"
   )
-  const mergeFeatureFlag = (computed: boolean, explicit: boolean | null): boolean =>
-    explicit === null ? computed : explicit
+  const mergeFeatureFlag = (
+    computed: boolean | undefined,
+    explicit: boolean | null
+  ): boolean => (explicit === null ? Boolean(computed) : explicit)
   const hasStt = mergeFeatureFlag(capabilities.hasStt, sttFeatureEnabled)
   const hasTts = mergeFeatureFlag(capabilities.hasTts, ttsFeatureEnabled)
   const hasVoiceChat = mergeFeatureFlag(
@@ -400,10 +452,38 @@ const applyDocsInfoFeatureGates = (
     hasSlides,
     hasPresentationStudio,
     hasPresentationRender,
+    hasMediaPlaylistPreflight: mergeFeatureFlag(
+      capabilities.hasMediaPlaylistPreflight,
+      mediaPlaylistPreflightEnabled
+    ),
+    hasMediaIngestJobs: mergeFeatureFlag(
+      capabilities.hasMediaIngestJobs,
+      mediaIngestJobsEnabled
+    ),
+    hasMediaIngestJobEvents: mergeFeatureFlag(
+      capabilities.hasMediaIngestJobEvents,
+      mediaIngestJobEventsEnabled
+    ),
+    hasMediaIngestWorker: mergeFeatureFlag(
+      capabilities.hasMediaIngestWorker,
+      mediaIngestWorkerEnabled
+    ),
+    hasDurableMediaCollections: mergeFeatureFlag(
+      capabilities.hasDurableMediaCollections,
+      durableMediaCollectionsEnabled
+    ),
+    hasKnowledgeQaMediaScope: mergeFeatureFlag(
+      capabilities.hasKnowledgeQaMediaScope,
+      knowledgeQaMediaScopeEnabled
+    ),
     hasPersona:
       personaFeatureEnabled === null
         ? capabilities.hasPersona
         : capabilities.hasPersona && personaFeatureEnabled,
+    hasPersonaLiveControl:
+      personaLiveControlFeatureEnabled === null
+        ? capabilities.hasPersonaLiveControl
+        : capabilities.hasPersonaLiveControl && personaLiveControlFeatureEnabled,
     hasPersonalization:
       personalizationFeatureEnabled === null
         ? capabilities.hasPersonalization
@@ -412,6 +492,22 @@ const applyDocsInfoFeatureGates = (
       docsInfo?.ffmpeg_available != null
         ? Boolean(docsInfo.ffmpeg_available)
         : capabilities.ffmpegAvailable
+  }
+}
+
+const applyIngestionSourceCapabilityGates = (
+  capabilities: ServerCapabilities,
+  sourceCapabilities: IngestionSourceCapabilitiesResponse | null | undefined
+): ServerCapabilities => {
+  const canCreateLocalDirectory = parseBooleanish(
+    sourceCapabilities?.can_create_local_directory
+  )
+  if (canCreateLocalDirectory === null) {
+    return capabilities
+  }
+  return {
+    ...capabilities,
+    canCreateLocalDirectoryIngestionSource: canCreateLocalDirectory
   }
 }
 
@@ -450,24 +546,39 @@ const computeCapabilities = (
     has("/api/v1/audio/chat/stream") || (hasStt && hasTts)
   const hasVoiceConversationTransport =
     specSource === "fallback" ? false : has("/api/v1/audio/chat/stream")
+  const hasMediaPlaylistPreflight = has("/api/v1/media/playlists/preflight")
+  const hasMediaIngestJobs = has("/api/v1/media/ingest/jobs")
+  const hasMediaIngestJobEvents = has("/api/v1/media/ingest/jobs/events/stream")
+  const hasDurableMediaCollections = has("/api/v1/media/collections")
+  const hasIngestionSources =
+    has("/api/v1/ingestion-sources") ||
+    has("/api/v1/ingestion-sources/{source_id}") ||
+    has("/api/v1/ingestion-sources/{source_id}/items")
+  const hasPersonaLiveControl = has("/api/v1/persona/live/sessions")
 
   return {
     hasChat: has("/api/v1/chat/completions"),
     hasRag: has("/api/v1/rag/search") || has("/api/v1/rag/health") || has("/api/v1/rag/"),
     hasMedia:
-      has("/api/v1/media/ingest/jobs") ||
+      hasMediaPlaylistPreflight ||
+      hasMediaIngestJobs ||
+      hasDurableMediaCollections ||
       has("/api/v1/media/add") ||
       has("/api/v1/media/") ||
       has("/api/v1/media/process-videos") ||
       has("/api/v1/media/process-documents"),
+    hasMediaPlaylistPreflight,
+    hasMediaIngestJobs,
+    hasMediaIngestJobEvents,
+    hasMediaIngestWorker: false,
+    hasDurableMediaCollections,
+    hasKnowledgeQaMediaScope: false,
     hasNotes: has("/api/v1/notes/"),
     hasSlides,
     hasPresentationStudio,
     hasPresentationRender,
-    hasIngestionSources:
-      has("/api/v1/ingestion-sources") ||
-      has("/api/v1/ingestion-sources/{source_id}") ||
-      has("/api/v1/ingestion-sources/{source_id}/items"),
+    hasIngestionSources,
+    canCreateLocalDirectoryIngestionSource: hasIngestionSources ? null : false,
     hasPrompts: has("/api/v1/prompts") || has("/api/v1/prompts/"),
     hasFlashcards:
       has("/api/v1/flashcards") ||
@@ -507,7 +618,9 @@ const computeCapabilities = (
     hasPersona:
       has("/api/v1/persona/catalog") ||
       has("/api/v1/persona/session") ||
-      has("/api/v1/persona/stream"),
+      has("/api/v1/persona/stream") ||
+      hasPersonaLiveControl,
+    hasPersonaLiveControl,
     hasPersonalization:
       has("/api/v1/personalization/profile") ||
       has("/api/v1/personalization/opt-in") ||
@@ -610,19 +723,12 @@ const isCapabilitiesCachePayload = (
   )
 }
 
-const normalizeServerUrl = (raw: unknown): string => {
-  if (typeof raw !== "string") return ""
-  return raw.trim().replace(/\/$/, "")
-}
-
 const getCapabilitiesCacheKey = async (): Promise<string> => {
   try {
     const cfg = await tldwClient.getConfig()
-    const base = normalizeServerUrl(cfg?.serverUrl)
-    const authMode = String(cfg?.authMode || "unknown")
-    return `${base || "default"}::${authMode}`
+    return buildChatSurfaceScopeKeyFromConfig(cfg)
   } catch {
-    return "default::unknown"
+    return buildChatSurfaceScopeKeyFromConfig(null)
   }
 }
 
@@ -700,7 +806,28 @@ const fetchCapabilitiesFromServer = async (): Promise<ServerCapabilities> => {
   maybeLogDiagnostics(
     diagnosticsSource === "fallback" ? "fallback-spec" : "network-fetch"
   )
-  return applyDocsInfoFeatureGates(computeCapabilities(spec, specSource), docsInfo)
+  let capabilities = applyDocsInfoFeatureGates(
+    computeCapabilities(spec, specSource),
+    docsInfo
+  )
+
+  if (capabilities.hasIngestionSources) {
+    try {
+      const sourceCapabilities =
+        await bgRequest<IngestionSourceCapabilitiesResponse, any>({
+          path: "/api/v1/ingestion-sources/capabilities" as any,
+          method: "GET" as any
+        })
+      capabilities = applyIngestionSourceCapabilityGates(
+        capabilities,
+        sourceCapabilities
+      )
+    } catch {
+      // Source entitlements are user-scoped. Failure should not hide generic source support.
+    }
+  }
+
+  return capabilities
 }
 
 export const getServerCapabilities = async (

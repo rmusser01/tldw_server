@@ -16,6 +16,9 @@ const METRICS = [
   { key: "engagement", label: "Engagement", color: "#52c41a" },
 ]
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null
+
 export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
   const activeProjectId = useWritingPlaygroundStore((state) => state.activeProjectId)
   const [analyzing, setAnalyzing] = useState<string | null>(null)
@@ -62,8 +65,13 @@ export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
     }
   }
 
-  const getAnalysisForChapter = (chapterId: string) =>
-    analyses.find((a: Record<string, unknown>) => a.scope_type === "chapter" && a.scope_id === chapterId)
+  const getAnalysisForChapter = (chapterId: string): Record<string, unknown> | undefined =>
+    analyses.find(
+      (candidate): candidate is Record<string, unknown> =>
+        isRecord(candidate) &&
+        candidate.scope_type === "chapter" &&
+        candidate.scope_id === chapterId
+    )
 
   return (
     <Modal title="Story Pulse" open={open} onCancel={onClose} footer={null} width={700}>
@@ -80,8 +88,9 @@ export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
           dataSource={allChapters}
           renderItem={(ch: { id: string; title: string }) => {
             const analysis = getAnalysisForChapter(ch.id)
-            const result = analysis?.result || {}
-            const isStale = analysis?.stale
+            const rawResult = analysis?.result
+            const result = isRecord(rawResult) ? rawResult : {}
+            const isStale = analysis?.stale === true
             return (
               <List.Item>
                 <div className="w-full">
@@ -99,25 +108,31 @@ export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
                   </div>
                   {analysis && !result.error ? (
                     <div className="flex flex-col gap-1">
-                      {METRICS.map((m) => (
-                        <div key={m.key} className="flex items-center gap-2">
-                          <Typography.Text className="w-24 text-xs">{m.label}</Typography.Text>
-                          <Progress
-                            percent={Math.round((result[m.key] || 0) * 100)}
-                            size="small"
-                            strokeColor={m.color}
-                            className="flex-1"
-                          />
-                        </div>
-                      ))}
-                      {result.assessment && (
+                      {METRICS.map((m) => {
+                        const rawScore = result[m.key]
+                        const score = typeof rawScore === "number" ? rawScore : 0
+                        return (
+                          <div key={m.key} className="flex items-center gap-2">
+                            <Typography.Text className="w-24 text-xs">{m.label}</Typography.Text>
+                            <Progress
+                              percent={Math.round(score * 100)}
+                              size="small"
+                              strokeColor={m.color}
+                              className="flex-1"
+                            />
+                          </div>
+                        )
+                      })}
+                      {typeof result.assessment === "string" && (
                         <Typography.Text type="secondary" className="text-xs mt-1">
                           {result.assessment}
                         </Typography.Text>
                       )}
                     </div>
-                  ) : analysis?.result?.error ? (
-                    <Typography.Text type="danger" className="text-xs">{result.error}</Typography.Text>
+                  ) : isRecord(rawResult) && rawResult.error ? (
+                    <Typography.Text type="danger" className="text-xs">
+                      {String(result.error)}
+                    </Typography.Text>
                   ) : null}
                 </div>
               </List.Item>

@@ -8,8 +8,10 @@ import {
   useUpdateFlashcardsBulkMutation,
   useDecksQuery,
   useFlashcardDocumentQuery,
+  useGlobalFlashcardTagSuggestionsQuery,
   useManageQuery,
   useTagSuggestionsQuery,
+  useUpdateDeckMutation,
   useUpdateFlashcardMutation,
   useResetFlashcardSchedulingMutation,
   useDeleteFlashcardMutation,
@@ -19,7 +21,7 @@ import {
 } from "../../hooks"
 import { FLASHCARDS_DRAWER_WIDTH_PX } from "../../constants"
 import { FLASHCARDS_LAYOUT_GUARDRAILS } from "../../constants/layout-guardrails"
-import { getFlashcard, updateFlashcard } from "@/services/flashcards"
+import { getFlashcard, listFlashcards, updateFlashcard } from "@/services/flashcards"
 
 const showUndoNotificationMock = vi.fn()
 const updateMutationMock = vi.fn()
@@ -92,8 +94,10 @@ vi.mock("../../hooks", () => ({
   getFlashcardDocumentQueryKey: vi.fn(() => ["flashcards:document", 1]),
   useDecksQuery: vi.fn(),
   useFlashcardDocumentQuery: vi.fn(),
+  useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useManageQuery: vi.fn(),
   useTagSuggestionsQuery: vi.fn(),
+  useUpdateDeckMutation: vi.fn(),
   useUpdateFlashcardMutation: vi.fn(),
   useUpdateFlashcardsBulkMutation: vi.fn(),
   useResetFlashcardSchedulingMutation: vi.fn(),
@@ -183,10 +187,22 @@ const sampleCard: Flashcard = {
   reverse: false
 }
 
+const buildSampleCards = (count: number): Flashcard[] =>
+  Array.from({ length: count }, (_item, index) => ({
+    ...sampleCard,
+    uuid: `card-undo-${index + 1}`,
+    front: `Front prompt ${index + 1}`,
+    back: `Back answer ${index + 1}`
+  }))
+
 describe("ManageTab stage3 undo controls", () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     trackErrorRecoveryTelemetryMock.mockClear()
+    updateMutationMock.mockReset()
+    vi.mocked(getFlashcard).mockReset()
+    vi.mocked(listFlashcards).mockReset()
+    vi.mocked(updateFlashcard).mockReset()
     Object.values(messageSpies).forEach((spy) => spy.mockReset())
     await clearSetting(FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING)
 
@@ -242,8 +258,18 @@ describe("ManageTab stage3 undo controls", () => {
       data: ["biology", "chemistry"],
       isLoading: false
     } as any)
+    vi.mocked(useGlobalFlashcardTagSuggestionsQuery).mockReturnValue({
+      data: { items: [] },
+      isLoading: false,
+      isFetching: false,
+      isError: false
+    } as any)
     vi.mocked(useUpdateFlashcardMutation).mockReturnValue({
       mutateAsync: updateMutationMock,
+      isPending: false
+    } as any)
+    vi.mocked(useUpdateDeckMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
       isPending: false
     } as any)
     vi.mocked(useUpdateFlashcardsBulkMutation).mockReturnValue({
@@ -478,5 +504,43 @@ describe("ManageTab stage3 undo controls", () => {
       tags: ["biology"],
       expected_version: 14
     })
+  }, 15000)
+
+  it("renders large bulk delete warning with the design-system Alert", async () => {
+    const cards = buildSampleCards(101)
+    vi.mocked(listFlashcards).mockResolvedValue({
+      items: cards,
+      total: cards.length,
+      page: 1,
+      page_size: cards.length
+    } as any)
+    vi.mocked(useManageQuery).mockReturnValue({
+      data: {
+        items: [sampleCard],
+        count: cards.length,
+        total: cards.length
+      },
+      isFetching: false
+    } as any)
+
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive={false}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByLabelText("Select all cards on this page")
+    )
+    fireEvent.click(screen.getByTestId("flashcards-select-all-across"))
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+
+    const warning = await screen.findByText(
+      "These cards will move to Trash for 30 seconds."
+    )
+    expect(listFlashcards).toHaveBeenCalled()
+    expect(warning.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
   }, 15000)
 })

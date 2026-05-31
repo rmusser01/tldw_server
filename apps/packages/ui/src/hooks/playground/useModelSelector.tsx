@@ -7,21 +7,23 @@ import { getProviderDisplayName } from "@/utils/provider-registry"
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
 import { tldwModels } from "@/services/tldw"
 import { useStoreChatModelSettings } from "@/store/model"
+import {
+  LOCAL_PROVIDERS,
+  filterModelsForScope,
+  getFavoriteModelKeyCandidates,
+  getCanonicalModelKey,
+  getModelId,
+  getModelProvider,
+  hasFavoriteModelKey,
+  modelMatchesSearch,
+  sortModelsForSelector,
+  type ModelListScope,
+  type ModelSelectorDescriptor,
+  type ModelSortMode,
+  type ModelUsageStats
+} from "./modelSelectorUtils"
 
-export type ModelSortMode = "favorites" | "az" | "provider" | "localFirst"
-
-const LOCAL_PROVIDERS = new Set([
-  "lmstudio",
-  "llamafile",
-  "ollama",
-  "ollama2",
-  "llamacpp",
-  "vllm",
-  "custom",
-  "local",
-  "tldw",
-  "chrome"
-])
+export type { ModelListScope, ModelSortMode } from "./modelSelectorUtils"
 
 export type UseModelSelectorParams = {
   composerModels: any[] | undefined
@@ -49,12 +51,67 @@ export function useModelSelector({
     "modelSelectSortMode",
     "provider"
   )
+  const [storedModelListScope, setModelListScope] = useStorage<ModelListScope>(
+    "modelSelectListScope",
+    "configured"
+  )
+  const [modelUsageByKey, setModelUsageByKey] = useStorage<Record<string, ModelUsageStats>>(
+    "chatModelUsageByProviderModel",
+    {}
+  )
+
+  const modelListScope: ModelListScope =
+    storedModelListScope === "catalog" ? "catalog" : "configured"
+  const selectedProviderHint =
+    typeof apiProvider === "string" && apiProvider.trim()
+      ? apiProvider.trim().toLowerCase()
+      : null
+
+  const normalizedModelUsageByKey = React.useMemo<Record<string, ModelUsageStats>>(() => {
+    if (!modelUsageByKey || typeof modelUsageByKey !== "object") return {}
+    const normalized: Record<string, ModelUsageStats> = {}
+    for (const [key, value] of Object.entries(modelUsageByKey)) {
+      if (!value || typeof value !== "object") continue
+      const selectedCount = Number((value as ModelUsageStats).selectedCount || 0)
+      const lastSelectedAt = Number((value as ModelUsageStats).lastSelectedAt || 0)
+      if (selectedCount > 0 || lastSelectedAt > 0) {
+        normalized[key] = { selectedCount, lastSelectedAt }
+      }
+    }
+    return normalized
+  }, [modelUsageByKey])
 
   const selectedModelMeta = React.useMemo(() => {
     if (!selectedModel) return null
     const models = (composerModels as any[]) || []
-    return models.find((model) => model.model === selectedModel) || null
-  }, [composerModels, selectedModel])
+    const selected = selectedModel.trim()
+    const selectedLower = selected.toLowerCase()
+    const canonicalMatch = models.find(
+      (model) => getCanonicalModelKey(model).toLowerCase() === selectedLower
+    )
+    if (canonicalMatch) return canonicalMatch
+
+    const providerMatch = selectedProviderHint
+      ? models.find((model) => {
+          const modelId = getModelId(model)
+          return modelId === selected && getModelProvider(model) === selectedProviderHint
+        })
+      : null
+    if (providerMatch) return providerMatch
+
+    return (
+      models.find((model) => {
+        const modelId = getModelId(model)
+        return modelId === selected || String(model.model || "") === selected
+      }) || null
+    )
+  }, [composerModels, selectedModel, selectedProviderHint])
+
+  const selectedModelKey = React.useMemo(() => {
+    if (selectedModelMeta) return getCanonicalModelKey(selectedModelMeta)
+    if (!selectedModel) return null
+    return getCanonicalModelKey(selectedProviderHint || "custom", selectedModel)
+  }, [selectedModel, selectedModelMeta, selectedProviderHint])
 
   const modelContextLength = React.useMemo(() => {
     const candidates = [
@@ -106,14 +163,9 @@ export function useModelSelector({
   }, [modelContextLength, requestedNumCtx])
 
   const resolvedProviderKey = React.useMemo(() => {
-    const fromOverride = typeof apiProvider === "string" ? apiProvider.trim() : ""
-    if (fromOverride) return fromOverride.toLowerCase()
-    const provider =
-      typeof selectedModelMeta?.provider === "string"
-        ? selectedModelMeta.provider
-        : "custom"
-    return provider.toLowerCase()
-  }, [apiProvider, selectedModelMeta])
+    if (selectedModelMeta) return getModelProvider(selectedModelMeta)
+    return selectedProviderHint || "custom"
+  }, [selectedModelMeta, selectedProviderHint])
 
   const providerLabel = React.useMemo(
     () => tldwModels.getProviderDisplayName(resolvedProviderKey || "custom"),
@@ -127,14 +179,12 @@ export function useModelSelector({
         "API / model"
       )
     }
-    const models = (composerModels as any[]) || []
-    const match = models.find((m) => m.model === selectedModel)
     return (
-      match?.nickname ||
-      match?.model ||
+      selectedModelMeta?.nickname ||
+      getModelId(selectedModelMeta as ModelSelectorDescriptor) ||
       selectedModel
     )
-  }, [composerModels, selectedModel, t])
+  }, [selectedModel, selectedModelMeta, t])
 
   const apiModelLabel = React.useMemo(() => {
     if (!selectedModel) {
@@ -153,15 +203,26 @@ export function useModelSelector({
     [favoriteModels]
   )
 
+  const isFavoriteModel = React.useCallback(
+    (model: ModelSelectorDescriptor) => hasFavoriteModelKey(model, favoriteModelSet),
+    [favoriteModelSet]
+  )
+
   const toggleFavoriteModel = React.useCallback(
-    (modelId: string) => {
+    (modelOrKey: ModelSelectorDescriptor | string) => {
+      const canonicalKey =
+        typeof modelOrKey === "string" ? modelOrKey : getCanonicalModelKey(modelOrKey)
+      const keyCandidates =
+        typeof modelOrKey === "string"
+          ? [modelOrKey]
+          : getFavoriteModelKeyCandidates(modelOrKey)
       void setFavoriteModels((prev) => {
         const list = Array.isArray(prev) ? prev.map(String) : []
         const next = new Set(list)
-        if (next.has(modelId)) {
-          next.delete(modelId)
+        if (keyCandidates.some((key) => next.has(key))) {
+          keyCandidates.forEach((key) => next.delete(key))
         } else {
-          next.add(modelId)
+          next.add(canonicalKey)
         }
         return Array.from(next)
       })
@@ -170,23 +231,49 @@ export function useModelSelector({
     [setFavoriteModels]
   )
 
+  const recordModelUsage = React.useCallback(
+    (model: ModelSelectorDescriptor) => {
+      const key = getCanonicalModelKey(model)
+      void setModelUsageByKey((prev) => {
+        const previous =
+          prev && typeof prev === "object" ? (prev as Record<string, ModelUsageStats>) : {}
+        const current = previous[key]
+        return {
+          ...previous,
+          [key]: {
+            selectedCount: Number(current?.selectedCount || 0) + 1,
+            lastSelectedAt: Date.now()
+          }
+        }
+      })
+    },
+    [setModelUsageByKey]
+  )
+
   const filteredModels = React.useMemo(() => {
     const list = (composerModels as any[]) || []
+    const scoped = filterModelsForScope(list, modelListScope)
     const q = modelSearchQuery.trim().toLowerCase()
-    if (!q) return list
-    return list.filter((model) => {
-      const providerRaw = String(model.provider || "").toLowerCase()
-      const pLabel = getProviderDisplayName(providerRaw).toLowerCase()
-      const name = String(model.nickname || model.model || "").toLowerCase()
-      const modelId = String(model.model || "").toLowerCase()
-      return (
-        providerRaw.includes(q) ||
-        pLabel.includes(q) ||
-        name.includes(q) ||
-        modelId.includes(q)
-      )
+    const searched = q
+      ? scoped.filter((model) => modelMatchesSearch(model, q, getProviderDisplayName))
+      : scoped
+    return sortModelsForSelector(searched, {
+      selectedModel,
+      selectedProvider: resolvedProviderKey,
+      favoriteKeys: favoriteModelSet,
+      usageByKey: normalizedModelUsageByKey,
+      sortMode: modelSortMode
     })
-  }, [composerModels, modelSearchQuery])
+  }, [
+    composerModels,
+    favoriteModelSet,
+    modelListScope,
+    modelSearchQuery,
+    modelSortMode,
+    normalizedModelUsageByKey,
+    resolvedProviderKey,
+    selectedModel
+  ])
 
   const modelDropdownMenuItems = React.useMemo(() => {
     const models = filteredModels || []
@@ -238,11 +325,6 @@ export function useModelSelector({
       ]
     }
 
-    const toProviderKey = (provider?: string) =>
-      typeof provider === "string" && provider.trim()
-        ? provider.trim().toLowerCase()
-        : "other"
-
     const toGroupKey = (providerRaw: string) =>
       providerRaw === "chrome"
         ? "default"
@@ -251,15 +333,18 @@ export function useModelSelector({
           : providerRaw
 
     const byLabel = (a: any, b: any) => {
-      const aProvider = getProviderDisplayName(toProviderKey(a.provider))
-      const bProvider = getProviderDisplayName(toProviderKey(b.provider))
-      const aLabel = `${aProvider} ${a.nickname || a.model}`.toLowerCase()
-      const bLabel = `${bProvider} ${b.nickname || b.model}`.toLowerCase()
+      const aProvider = getProviderDisplayName(getModelProvider(a))
+      const bProvider = getProviderDisplayName(getModelProvider(b))
+      const aLabel = `${aProvider} ${a.nickname || getModelId(a)}`.toLowerCase()
+      const bLabel = `${bProvider} ${b.nickname || getModelId(b)}`.toLowerCase()
       return aLabel.localeCompare(bLabel)
     }
 
-    const firstFavoriteModel = favoriteModels?.length
-      ? models.find(m => favoriteModels.includes(String(m.model)))?.model
+    const firstFavoriteKey = favoriteModels?.length
+      ? models.find(isFavoriteModel)
+      : null
+    const firstFavoriteModelKey = firstFavoriteKey
+      ? getCanonicalModelKey(firstFavoriteKey)
       : null
 
     const normalizePositiveNumber = (value: unknown): number | undefined => {
@@ -327,7 +412,7 @@ export function useModelSelector({
       priceHint: string | null
     ) => {
       const parts: string[] = []
-      const providerDisplay = getProviderDisplayName(toProviderKey(model.provider))
+      const providerDisplay = getProviderDisplayName(getModelProvider(model))
       parts.push(`${providerDisplay} model.`)
       if (capabilities.includes("vision") || model.supportsVision) {
         parts.push("Can analyze images.")
@@ -355,10 +440,12 @@ export function useModelSelector({
     }
 
     const buildItem = (model: any) => {
-      const providerRaw = toProviderKey(model.provider)
-      const modelLabel = model.nickname || model.model
-      const isFavorite = favoriteModelSet.has(String(model.model))
-      const isRecommended = firstFavoriteModel && String(model.model) === String(firstFavoriteModel)
+      const providerRaw = getModelProvider(model)
+      const modelId = getModelId(model)
+      const modelKey = getCanonicalModelKey(model)
+      const modelLabel = model.nickname || modelId
+      const isFavorite = isFavoriteModel(model)
+      const isRecommended = firstFavoriteModelKey === modelKey
       const favoriteTitle = isFavorite
         ? t("playground:composer.favoriteRemove", "Remove from favorites")
         : t("playground:composer.favoriteAdd", "Add to favorites")
@@ -404,7 +491,7 @@ export function useModelSelector({
       )
 
       return {
-        key: model.model,
+        key: modelKey,
         label: (
           <Tooltip
             title={modelDescription}
@@ -412,7 +499,13 @@ export function useModelSelector({
             mouseEnterDelay={0.5}
             styles={{ root: { maxWidth: 280 } }}
           >
-            <div className="flex items-center gap-2 text-sm">
+            <div
+              className="flex items-center gap-2 text-sm"
+              data-testid="model-selector-option"
+              data-model-key={modelKey}
+              data-model-id={modelId}
+              data-provider={providerRaw}
+            >
               <ProviderIcons provider={providerRaw} className="h-3 w-3 text-text-subtle" />
               <span className="truncate flex-1">{modelLabel}</span>
               {isRecommended && (
@@ -435,7 +528,7 @@ export function useModelSelector({
                 onClick={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
-                  toggleFavoriteModel(String(model.model))
+                  toggleFavoriteModel(model)
                 }}
                 aria-label={favoriteTitle}
                 title={favoriteTitle}
@@ -449,7 +542,10 @@ export function useModelSelector({
             </div>
           </Tooltip>
         ),
-        onClick: () => setSelectedModel(model.model)
+        onClick: () => {
+          recordModelUsage(model)
+          setSelectedModel(modelKey)
+        }
       }
     }
 
@@ -458,12 +554,8 @@ export function useModelSelector({
     }
 
     if (modelSortMode === "favorites") {
-      const favorites = models.filter((model) =>
-        favoriteModelSet.has(String(model.model))
-      )
-      const others = models.filter(
-        (model) => !favoriteModelSet.has(String(model.model))
-      )
+      const favorites = models.filter(isFavoriteModel)
+      const others = models.filter((model) => !isFavoriteModel(model))
       const items: any[] = []
       if (favorites.length > 0) {
         items.push({
@@ -477,9 +569,56 @@ export function useModelSelector({
       return items
     }
 
+    const promotedGroups: any[] = []
+    const promotedModelKeys = new Set<string>()
+    const pushPromotedGroup = (
+      key: string,
+      label: string,
+      groupModels: ModelSelectorDescriptor[]
+    ) => {
+      const uniqueModels = groupModels.filter((model) => {
+        const modelKey = getCanonicalModelKey(model)
+        if (promotedModelKeys.has(modelKey)) return false
+        promotedModelKeys.add(modelKey)
+        return true
+      })
+      if (uniqueModels.length === 0) return
+      promotedGroups.push({
+        type: "group" as const,
+        key,
+        label,
+        children: uniqueModels.map(buildItem)
+      })
+    }
+
+    if (selectedModelKey) {
+      pushPromotedGroup(
+        "current-model",
+        t("playground:composer.currentModel", "Current"),
+        models.filter((model) => getCanonicalModelKey(model) === selectedModelKey)
+      )
+    }
+
+    pushPromotedGroup(
+      "recent-models",
+      t("playground:composer.recentModels", "Recent"),
+      models.filter((model) => {
+        const usage = normalizedModelUsageByKey[getCanonicalModelKey(model)]
+        return Number(usage?.selectedCount || 0) > 0
+      })
+    )
+
+    pushPromotedGroup(
+      "favorite-models",
+      t("playground:composer.favorites", "Favorites"),
+      models.filter(isFavoriteModel)
+    )
+
     const groups = new Map<string, any[]>()
     for (const model of models) {
-      const providerRaw = toProviderKey(model.provider)
+      const modelKey = getCanonicalModelKey(model)
+      if (promotedModelKeys.has(modelKey)) continue
+      const providerRaw = getModelProvider(model)
       const groupKey = toGroupKey(providerRaw)
       if (!groups.has(groupKey)) groups.set(groupKey, [])
       groups.get(groupKey)!.push(buildItem(model))
@@ -495,25 +634,31 @@ export function useModelSelector({
       })
     }
 
-    return entries.map(([key, children]) => ({
-      type: "group" as const,
-      key: `group-${key}`,
-      label: (
-        <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-text-subtle">
-          <ProviderIcons provider={key} className="h-3 w-3" />
-          <span>{getProviderDisplayName(key)}</span>
-        </div>
-      ),
-      children
-    }))
+    return [
+      ...promotedGroups,
+      ...entries.map(([key, children]) => ({
+        type: "group" as const,
+        key: `group-${key}`,
+        label: (
+          <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-text-subtle">
+            <ProviderIcons provider={key} className="h-3 w-3" />
+            <span>{getProviderDisplayName(key)}</span>
+          </div>
+        ),
+        children
+      }))
+    ]
   }, [
     composerModels,
     favoriteModels,
     favoriteModelSet,
     filteredModels,
-    modelSearchQuery,
+    isFavoriteModel,
     modelSortMode,
     navigate,
+    normalizedModelUsageByKey,
+    recordModelUsage,
+    selectedModelKey,
     setSelectedModel,
     t,
     toggleFavoriteModel
@@ -530,7 +675,10 @@ export function useModelSelector({
     setModelSearchQuery,
     modelSortMode,
     setModelSortMode,
+    modelListScope,
+    setModelListScope,
     selectedModelMeta,
+    selectedModelKey,
     modelContextLength,
     modelCapabilities,
     resolvedMaxContext,

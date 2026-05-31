@@ -22,8 +22,8 @@ from fastapi.responses import StreamingResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
     get_auth_principal,
-    require_roles,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -57,7 +57,7 @@ _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS = (
 )
 
 router = APIRouter(
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 
 
@@ -151,7 +151,7 @@ def _enforce_domain_scope_unified(
     Unified domain-scoped RBAC enforcement for jobs admin endpoints.
 
     All jobs-admin endpoints in this module use this helper alongside the
-    router-level require_roles(\"admin\") guard. It always derives the
+    router-level RequireRole(\"admin\") guard. It always derives the
     admin_user from the AuthPrincipal so callers can reuse the same user
     mapping for downstream operations (e.g., Postgres RLS). When
     JOBS_DOMAIN_RBAC_PRINCIPAL is enabled, enforcement is driven from the
@@ -361,7 +361,7 @@ async def prune_jobs_endpoint(
         # Preserve intended HTTP errors (e.g., RBAC 403)
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Prune failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Prune failed") from e
 
 
 # --- Queue controls (pause/resume/drain) ---
@@ -978,7 +978,18 @@ async def list_job_events(
             conn.close()
 
 
-@router.get("/jobs/events/stream")
+@router.get(
+    "/jobs/events/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Server-sent events stream of job outbox events.",
+            "content": {
+                "text/event-stream": {},
+            },
+        },
+    },
+)
 async def stream_job_events(
     after_id: int = 0,
     domain: str | None = None,
@@ -1273,7 +1284,7 @@ async def ttl_sweep_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"TTL sweep failed: {e}") from e
+        raise HTTPException(status_code=500, detail="TTL sweep failed") from e
 
 
 class IntegritySweepRequest(BaseModel):
@@ -1353,7 +1364,7 @@ async def integrity_sweep_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Integrity sweep failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Integrity sweep failed") from e
 
 
 class QueueStatsResponse(BaseModel):
@@ -1399,7 +1410,7 @@ async def get_jobs_stats(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Stats failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Stats failed") from e
 
 
 class ArchiveMetaResponse(BaseModel):
@@ -1552,7 +1563,7 @@ async def list_jobs_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"List failed: {e}") from e
+        raise HTTPException(status_code=500, detail="List failed") from e
 
 
 class StaleGroup(BaseModel):
@@ -1615,7 +1626,7 @@ async def stale_processing_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Stale groups failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Stale groups failed") from e
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
@@ -1849,7 +1860,7 @@ async def batch_cancel_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Batch cancel failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Batch cancel failed") from e
 
 
 class BatchRescheduleRequest(BaseModel):
@@ -1988,7 +1999,7 @@ async def batch_reschedule_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Batch reschedule failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Batch reschedule failed") from e
 
 
 class BatchRequeueQuarantinedRequest(BaseModel):
@@ -2198,4 +2209,4 @@ async def batch_requeue_quarantined_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Batch requeue quarantined failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Batch requeue quarantined failed") from e

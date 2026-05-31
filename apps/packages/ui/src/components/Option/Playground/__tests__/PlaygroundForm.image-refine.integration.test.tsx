@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundForm } from "../PlaygroundForm"
+import type { AttachedResearchContext } from "../research-chat-context"
 import { DICTATION_DIAGNOSTICS_EVENT } from "@/utils/dictation-diagnostics"
 import { fetchChatModels } from "@/services/tldw-server"
 
@@ -1242,19 +1243,21 @@ describe("PlaygroundForm image prompt refinement modal integration", () => {
     const user = userEvent.setup()
 
     const PreviewHarness = () => {
-      const [attachedContext, setAttachedContext] = React.useState(
-        buildAttachedResearchContext()
+      const [attachedContext, setAttachedContext] = React.useState<AttachedResearchContext>(
+        buildAttachedResearchContext() as AttachedResearchContext
       )
-      const [baselineContext] = React.useState(buildAttachedResearchContext())
+      const [baselineContext] = React.useState<AttachedResearchContext>(
+        buildAttachedResearchContext() as AttachedResearchContext
+      )
 
       return (
         <PlaygroundForm
           droppedFiles={[]}
-          attachedResearchContext={attachedContext as any}
-          attachedResearchContextBaseline={baselineContext as any}
+          attachedResearchContext={attachedContext}
+          attachedResearchContextBaseline={baselineContext}
           onApplyAttachedResearchContext={(next) => setAttachedContext(next)}
           onResetAttachedResearchContext={() =>
-            setAttachedContext(baselineContext as any)
+            setAttachedContext(baselineContext)
           }
         />
       )

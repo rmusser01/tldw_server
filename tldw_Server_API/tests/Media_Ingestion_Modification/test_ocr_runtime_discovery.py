@@ -1,6 +1,23 @@
 from __future__ import annotations
 
 
+class _RecordingLogger:
+    def __init__(self):
+        self.error_calls = []
+
+    def error(self, *args, **kwargs):
+        self.error_calls.append((args, kwargs))
+
+
+def _assert_error_logs_are_sanitized(logger: _RecordingLogger):
+    assert logger.error_calls
+    for args, kwargs in logger.error_calls:
+        assert not kwargs.get("exc_info")
+        rendered = " ".join(str(arg) for arg in args)
+        assert "/tmp/source" not in rendered
+        assert "token=secret" not in rendered
+
+
 def test_list_ocr_backends_matches_response_schema(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import ocr as ocr_mod
     from tldw_Server_API.app.api.v1.schemas.ocr_schemas import OCRBackendsResponse
@@ -178,3 +195,18 @@ def test_list_ocr_backends_records_chatllm_discovery_errors(monkeypatch):
 
     assert payload["chatllm"]["available"] is False  # nosec B101
     assert payload["chatllm"]["error"] == "chatllm describe failed"  # nosec B101
+
+
+def test_record_backend_discovery_error_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import ocr as ocr_mod
+
+    logger = _RecordingLogger()
+    out = {}
+    exc = RuntimeError("ocr backend failed /tmp/source token=secret")
+
+    monkeypatch.setattr(ocr_mod, "logging", logger)
+
+    ocr_mod._record_backend_discovery_error(out, "llamacpp", exc)
+
+    assert out["llamacpp"]["error"] == "ocr backend failed /tmp/source token=secret"  # nosec B101
+    _assert_error_logs_are_sanitized(logger)

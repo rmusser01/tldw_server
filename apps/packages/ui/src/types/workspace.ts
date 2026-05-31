@@ -3,6 +3,8 @@
  * Types for the NotebookLM-style three-pane research interface
  */
 
+import type { WorkProductTemplateId } from "@/workspace-templates/types"
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Source Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -17,6 +19,52 @@ export type WorkspaceSourceType =
 
 export type WorkspaceSourceStatus = "processing" | "ready" | "error"
 
+export type WorkspaceSourceLifecycleState =
+  | "queued"
+  | "ingesting"
+  | "extracting"
+  | "chunking"
+  | "indexing"
+  | "queryable"
+  | "partially_queryable"
+  | "failed"
+  | "retrying"
+  | "missing_media"
+  | "blocked_by_permissions"
+  | "unknown"
+
+export interface WorkspaceSourceReadiness {
+  metadata_ready: boolean
+  text_extracted: boolean
+  fts_ready: boolean
+  vector_ready: boolean
+  citation_ready: boolean
+  summary_ready: boolean
+  tool_accessible: boolean
+}
+
+export interface WorkspaceSourceJobStatus {
+  id: number | null
+  uuid: string | null
+  status: string | null
+  jobType: string | null
+  progressPercent: number | null
+  progressMessage: string | null
+  errorMessage: string | null
+}
+
+export interface WorkspaceSourceStatusDetails {
+  lifecycleState?: WorkspaceSourceLifecycleState | string
+  statusReason?: string
+  sourceOfTruth?: string
+  updatedAt?: Date
+  stale?: boolean
+  retryEligible?: boolean
+  progressPercent?: number | null
+  progressMessage?: string | null
+  job?: WorkspaceSourceJobStatus | null
+}
+
 export interface WorkspaceSource {
   id: string
   mediaId: number // Server-side media ID
@@ -24,6 +72,8 @@ export interface WorkspaceSource {
   type: WorkspaceSourceType
   status?: WorkspaceSourceStatus
   statusMessage?: string
+  statusDetails?: WorkspaceSourceStatusDetails
+  readiness?: WorkspaceSourceReadiness
   thumbnailUrl?: string
   addedAt: Date
   sourceCreatedAt?: Date
@@ -115,6 +165,136 @@ export type ArtifactType =
   | "data_table"
 
 export type ArtifactStatus = "pending" | "generating" | "completed" | "failed"
+export type ArtifactReviewStatus =
+  | "draft"
+  | "reviewing"
+  | "accepted"
+  | "needs_revision"
+  | "rejected"
+  | "exported"
+  | "assigned"
+  | "archived"
+
+export type ArtifactExportTarget =
+  | "markdown"
+  | "docx"
+  | "pdf"
+  | "slides"
+  | "chatbook"
+
+export interface ArtifactSourceLineage {
+  sourceId: string
+  sourceType?: string
+  mediaId?: number
+  title?: string
+  label?: string
+  citationCount?: number
+  citationSpans?: unknown[]
+  evidenceIds?: string[]
+  coverageNotes?: string
+  [key: string]: unknown
+}
+
+export type ArtifactSourceSkipReason =
+  | "missing_text"
+  | "unready"
+  | "context_limit"
+  | "unknown"
+
+export interface ArtifactSourceCoverageEntry {
+  sourceId: string
+  mediaId?: number
+  title?: string
+}
+
+export interface ArtifactSkippedSource extends ArtifactSourceCoverageEntry {
+  reason: ArtifactSourceSkipReason
+}
+
+export interface ArtifactSourceContextLimit {
+  perSource: number
+  total: number
+}
+
+export interface ArtifactSourceCoverage {
+  selectedSourceIds: string[]
+  usableSources: ArtifactSourceCoverageEntry[]
+  skippedSources: ArtifactSkippedSource[]
+  truncatedSources: ArtifactSourceCoverageEntry[]
+  sourceContextCharLimit?: ArtifactSourceContextLimit
+  minimumUsableSourcesMet: boolean
+}
+
+export interface ArtifactReviewChecklistItem {
+  id: string
+  label: string
+  checked: boolean
+}
+
+export interface TraceableArtifactProducerLinks {
+  session?: string
+  run?: string
+  review?: string
+  diagnostics?: string
+  artifacts?: string
+  audit?: string
+  [key: string]: string | undefined
+}
+
+export interface TraceableArtifactProducerMetadata {
+  producerType?: string
+  producerId?: string
+  runId?: string
+  sessionId?: string
+  reviewId?: string
+  taskId?: string
+  promptId?: string
+  templateId?: string
+  model?: string
+  provider?: string
+  completionReason?: string
+  links?: TraceableArtifactProducerLinks
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactReviewMetadata {
+  reviewerId?: string
+  decision?: ArtifactReviewStatus | string
+  decidedAt?: string
+  reason?: string
+  checklist?: ArtifactReviewChecklistItem[]
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactVersionMetadata {
+  revisionReason?: string
+  versionLabel?: string
+  comparedToVersionId?: string
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactExportRef {
+  id?: number | string
+  format: string
+  fileId?: number | string
+  jobId?: number | string
+  artifactVersionId?: string
+  generatedAt?: string
+  expiresAt?: string
+  status?: string
+  url?: string
+  error?: string
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactRedaction {
+  supportSafe?: boolean
+  redacted?: boolean
+  retentionClass?: string
+  redactedFields?: string[]
+  visibility?: string
+  [key: string]: unknown
+}
 
 export type StudyMaterialsPolicy = "general" | "workspace"
 
@@ -130,9 +310,11 @@ export interface WorkspaceStudyArtifactData {
   sourceMediaIds?: number[]
   sourceBundle?: WorkspaceStudyArtifactSource[]
   questions?: Array<{
-    question: string
+    question?: string
+    question_text?: string
     options: string[]
-    answer: string
+    answer?: string
+    correct_answer?: string
     explanation?: string
     sourceMediaId?: number
   }>
@@ -147,7 +329,30 @@ export interface GeneratedArtifact {
   type: ArtifactType
   title: string
   status: ArtifactStatus
+  templateId?: WorkProductTemplateId
+  reviewStatus?: ArtifactReviewStatus
+  sourceLineage?: ArtifactSourceLineage[]
+  sourceCoverage?: ArtifactSourceCoverage
+  reviewChecklist?: ArtifactReviewChecklistItem[]
+  exportTargets?: ArtifactExportTarget[]
+  version?: number
   previousVersionId?: string
+  rootArtifactId?: string
+  artifactVersionId?: string
+  ownerScope?: string
+  ownerId?: string
+  projectId?: string
+  taskId?: string
+  sourceCollectionId?: string
+  contentType?: string
+  previewText?: string
+  summary?: string
+  schemaVersion?: number
+  producerMetadata?: TraceableArtifactProducerMetadata
+  reviewMetadata?: TraceableArtifactReviewMetadata
+  versionMetadata?: TraceableArtifactVersionMetadata
+  exportRefs?: TraceableArtifactExportRef[]
+  redaction?: TraceableArtifactRedaction
   estimatedTokens?: number
   estimatedCostUsd?: number
   totalTokens?: number

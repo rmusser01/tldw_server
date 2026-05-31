@@ -250,7 +250,7 @@ class ModerationService:
                 categories_enabled = {c.strip().lower() for c in cats_val.split(',') if c.strip()}
         else:
             if cats_val:
-                logger.warning(f"Invalid moderation categories_enabled type: {type(cats_val)}")
+                logger.warning("Invalid moderation categories_enabled type")
         pii_enabled = is_truthy(str(mod_cfg.get("pii_enabled", os.getenv("MODERATION_PII_ENABLED", "false"))).strip().lower())
         # Apply runtime overrides if present
         try:
@@ -399,7 +399,7 @@ class ModerationService:
             return patterns
         try:
             if not os.path.exists(path):
-                logger.warning(f"Moderation blocklist file not found: {path}")
+                logger.warning("Moderation blocklist file not found")
                 return patterns
             with open(path, encoding="utf-8") as f:
                 for line in f:
@@ -411,14 +411,14 @@ class ModerationService:
                         if expr is None:
                             continue
                         if action and not self._is_valid_action(action):
-                            logger.warning(f"Invalid moderation action '{action}' in blocklist; skipping line: {s}")
+                            logger.warning("Invalid moderation action in blocklist; skipping line")
                             continue
                         # Treat lines starting and ending with '/' (optional flags) as regex
                         regex_parts = self._parse_regex_expr(expr)
                         if regex_parts:
                             raw, flags_str = regex_parts
                             if self._is_regex_dangerous(raw):
-                                logger.warning(f"Skipped dangerous regex in blocklist: {raw}")
+                                logger.warning("Skipped dangerous regex in blocklist")
                                 continue
                             flags = re.IGNORECASE  # default remains case-insensitive
                             fs = (flags_str or "").lower()
@@ -436,10 +436,10 @@ class ModerationService:
                             literal = expr.replace("\\#", "#")
                             pat = re.compile(re.escape(literal), flags=re.IGNORECASE)
                         patterns.append(PatternRule(regex=pat, action=(action or None), replacement=(repl or None), categories=(cats or None)))
-                    except re.error as e:
-                        logger.warning(f"Invalid blocklist pattern '{s}': {e}")
-        except _MODERATION_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to load moderation blocklist: {e}")
+                    except re.error:
+                        logger.warning("Invalid blocklist pattern; skipping line")
+        except _MODERATION_NONCRITICAL_EXCEPTIONS:
+            logger.error("Failed to load moderation blocklist")
         return patterns
 
     def _build_block_patterns(self, path: str | None) -> list[PatternRule]:
@@ -450,8 +450,8 @@ class ModerationService:
                 pii_rules = self._load_builtin_pii_rules()
                 if pii_rules:
                     patterns.extend(pii_rules)
-            except _MODERATION_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(f"Failed to load builtin PII rules: {e}")
+            except _MODERATION_NONCRITICAL_EXCEPTIONS:
+                logger.warning("Failed to load builtin PII rules")
         return patterns
 
     def _load_builtin_pii_rules(self) -> list[PatternRule]:
@@ -510,7 +510,7 @@ class ModerationService:
             return overrides
         try:
             if not os.path.exists(p):
-                logger.info(f"Moderation user overrides file not found (optional): {p}")
+                logger.info("Moderation user overrides file not found (optional)")
                 return overrides
             with open(p, encoding="utf-8") as f:
                 data = json.load(f)
@@ -521,8 +521,8 @@ class ModerationService:
                             continue
                         cleaned[str(k)] = self._sanitize_user_override(v)
                     overrides = cleaned
-        except _MODERATION_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to load user overrides: {e}")
+        except _MODERATION_NONCRITICAL_EXCEPTIONS:
+            logger.error("Failed to load user overrides")
         return overrides
 
     def reload(self) -> None:
@@ -595,8 +595,8 @@ class ModerationService:
             if persist:
                 try:
                     self._persist_runtime_overrides(next_override)
-                except _MODERATION_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.warning("Failed to persist moderation overrides (continuing in-memory): {}", exc)
+                except _MODERATION_NONCRITICAL_EXCEPTIONS:
+                    logger.warning("Failed to persist moderation overrides (continuing in-memory)")
             self._runtime_override = next_override
             # Recompute policy with overrides
             self._global_policy = self._load_global_policy()
@@ -616,7 +616,7 @@ class ModerationService:
                     parsed = self._parse_bool_value(raw_val)
                     if parsed is None:
                         if raw_val is not None:
-                            logger.warning(f"Invalid pii_enabled override value: {raw_val!r}")
+                            logger.warning("Invalid pii_enabled override value")
                     else:
                         ro["pii_enabled"] = parsed
                 cats = data.get("categories_enabled")
@@ -625,8 +625,8 @@ class ModerationService:
                 elif isinstance(cats, str):
                     ro["categories_enabled"] = {c.strip().lower() for c in cats.split(',') if c.strip()}
                 self._runtime_override = ro
-        except _MODERATION_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Failed to load runtime overrides file: {e}")
+        except _MODERATION_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to load runtime overrides file")
 
     @staticmethod
     def _write_json_atomic(path: str, payload: object) -> None:
@@ -687,8 +687,8 @@ class ModerationService:
             return
         try:
             self._persist_runtime_overrides(self._runtime_override)
-        except _MODERATION_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Failed to save runtime overrides file: {e}")
+        except _MODERATION_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to save runtime overrides file")
 
     def get_effective_policy(self, user_id: str | None) -> ModerationPolicy:
         """Return policy after applying per-user overrides if enabled."""
@@ -810,7 +810,7 @@ class ModerationService:
             if key in out and out.get(key) is not None:
                 val = str(out.get(key)).strip().lower()
                 if val not in self._ALLOWED_ACTIONS:
-                    logger.warning(f"Invalid moderation override action '{out.get(key)}' for {key}; dropping value")
+                    logger.warning("Invalid moderation override action; dropping value")
                     out.pop(key, None)
         rules_raw = out.get("rules")
         if rules_raw is None:
@@ -865,7 +865,7 @@ class ModerationService:
         phase = str(raw_rule.get("phase", "both")).strip().lower()
         parsed_is_regex = self._parse_bool_value(raw_rule.get("is_regex", False))
         if parsed_is_regex is None:
-            logger.warning(f"Skipped per-user rule with invalid is_regex: {rule_id or '<unknown>'}")
+            logger.warning("Skipped per-user rule with invalid is_regex")
             return None
         is_regex = parsed_is_regex
 
@@ -877,13 +877,13 @@ class ModerationService:
         try:
             if is_regex:
                 if self._is_regex_dangerous(pattern):
-                    logger.warning(f"Skipped dangerous per-user regex rule: {rule_id or '<unknown>'}")
+                    logger.warning("Skipped dangerous per-user regex rule")
                     return None
                 compiled = re.compile(pattern, flags=re.IGNORECASE)
             else:
                 compiled = re.compile(re.escape(pattern), flags=re.IGNORECASE)
         except re.error:
-            logger.warning(f"Skipped invalid per-user regex rule: {rule_id or '<unknown>'}")
+            logger.warning("Skipped invalid per-user regex rule")
             return None
 
         return PatternRule(
@@ -1339,8 +1339,13 @@ class ModerationService:
                 logger.info(f"Saved moderation user overrides to {path}")
                 return {"ok": True, "persisted": True}
             except _MODERATION_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Failed to save user overrides: {e}")
-                return {"ok": False, "persisted": False, "error": str(e), "error_type": "persistence"}
+                logger.error("Failed to save user overrides")
+                return {
+                    "ok": False,
+                    "persisted": False,
+                    "error": "Failed to persist user override.",
+                    "error_type": "persistence",
+                }
 
     def delete_user_override(self, user_id: str) -> dict[str, object]:
         """Delete a user override and persist to file if configured.
@@ -1361,8 +1366,13 @@ class ModerationService:
                     self._user_overrides = next_overrides
                     return {"ok": True, "persisted": False}
                 except _MODERATION_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(f"Failed to persist user override deletion: {e}")
-                    return {"ok": False, "persisted": False, "error": str(e), "error_type": "persistence"}
+                    logger.error("Failed to persist user override deletion")
+                    return {
+                        "ok": False,
+                        "persisted": False,
+                        "error": "Failed to delete user override.",
+                        "error_type": "persistence",
+                    }
             return {"ok": False, "persisted": False, "error": "not found"}
 
     def get_blocklist_lines(self) -> list[str]:
@@ -1373,8 +1383,8 @@ class ModerationService:
         try:
             with self._lock, open(path, encoding="utf-8") as f:
                 return [ln.rstrip("\r\n") for ln in f.readlines()]
-        except _MODERATION_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to read blocklist: {e}")
+        except _MODERATION_NONCRITICAL_EXCEPTIONS:
+            logger.error("Failed to read blocklist")
             return []
 
     def set_blocklist_lines(self, lines: list[str]) -> bool:
@@ -1422,8 +1432,8 @@ class ModerationService:
                 if self._write_debounce_ms and self._write_debounce_ms > 0:
                     self._last_blocklist_write = time.monotonic()
                 return True
-        except _MODERATION_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to write blocklist: {e}")
+        except _MODERATION_NONCRITICAL_EXCEPTIONS:
+            logger.error("Failed to write blocklist")
             return False
 
     # --------------- Managed blocklist with versioning ---------------

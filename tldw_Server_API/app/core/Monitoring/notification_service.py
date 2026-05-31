@@ -13,6 +13,9 @@ Configuration (env or config dict under 'monitoring.notifications'):
 - MONITORING_NOTIFY_FILE: path for JSONL sink (default: 'Databases/monitoring_notifications.log')
 - MONITORING_NOTIFY_WEBHOOK_URL: URL (future use; not sent in offline mode)
 - MONITORING_NOTIFY_EMAIL_TO: comma-separated emails (future use; not sent in Phase 1)
+- MONITORING_NOTIFY_DIGEST_MODE: 'immediate'|'hourly'|'daily' (default: 'immediate').
+  'hourly'/'daily' buffer generic/guardian notifications until callers invoke
+  flush_digest(), which emits one compiled monitoring_digest payload per recipient.
 
 This scaffolding records intent locally so operators can forward to their systems.
 """
@@ -35,6 +38,10 @@ from tldw_Server_API.app.core.DB_Management.TopicMonitoring_DB import TopicAlert
 from tldw_Server_API.app.core.testing import is_truthy
 
 _SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
+
+
+def _safe_exception_label(exc: BaseException) -> str:
+    return exc.__class__.__name__
 
 
 def _find_project_root(start: Path) -> Path | None:
@@ -161,7 +168,7 @@ class NotificationService:
                 Path(resolved).parent.mkdir(parents=True, exist_ok=True)
                 self.file_path = resolved
             except (OSError, RuntimeError, TypeError, ValueError) as e:
-                logger.warning(f"Failed to update MONITORING_NOTIFY_FILE: {e}")
+                logger.warning("Failed to update MONITORING_NOTIFY_FILE ({})", _safe_exception_label(e))
         if webhook_url is not None:
             self.webhook_url = webhook_url
         if email_to is not None:
@@ -222,20 +229,20 @@ class NotificationService:
                 f.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except (OSError, RuntimeError, TypeError, ValueError) as e:
             file_written = False
-            logger.warning(f"Notification file sink failed: {e}")
+            logger.warning("Notification file sink failed ({})", _safe_exception_label(e))
         # Best-effort asynchronous sends (non-blocking)
         try:
             if self.webhook_url:
                 threading.Thread(target=self._send_webhook_safe, args=(payload,), daemon=True).start()
         except (OSError, RuntimeError) as e:
-            logger.debug(f"Webhook thread start failed: {e}")
+            logger.debug("Webhook thread start failed ({})", _safe_exception_label(e))
         try:
             # Email optional and only if SMTP configured and recipients provided
             recipients = self._parse_email_recipients(self.email_to)
             if recipients and self.smtp_host and self.email_from:
                 threading.Thread(target=self._send_email_safe, args=(alert,), daemon=True).start()
         except (OSError, RuntimeError) as e:
-            logger.debug(f"Email thread start failed: {e}")
+            logger.debug("Email thread start failed ({})", _safe_exception_label(e))
         return "logged" if file_written else "failed"
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8), reraise=False)
@@ -250,9 +257,9 @@ class NotificationService:
         try:
             self._send_webhook(payload)
         except RetryError as e:
-            logger.info(f"Webhook notify failed: {e}")
+            logger.info("Webhook notify failed ({})", _safe_exception_label(e))
         except (OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.info(f"Webhook notify failed: {e}")
+            logger.info("Webhook notify failed ({})", _safe_exception_label(e))
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8), reraise=False)
     def _send_email(self, alert: TopicAlert) -> None:
@@ -288,7 +295,7 @@ class NotificationService:
         Applies severity threshold filtering and writes to JSONL sink.
         Adds ``ts`` field if not present.
         """
-        severity = payload.get("severity")
+        severity = payload.get("severity") or payload.get("rule_severity")
         if not self._meets_threshold(severity):
             return "skipped"
         if "ts" not in payload:
@@ -299,51 +306,124 @@ class NotificationService:
                 f.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except (OSError, RuntimeError, TypeError, ValueError) as e:
             file_written = False
-            logger.warning(f"Notification file sink failed: {e}")
+            logger.warning("Notification file sink failed ({})", _safe_exception_label(e))
         try:
             if self.webhook_url:
                 threading.Thread(target=self._send_webhook_safe, args=(payload,), daemon=True).start()
         except (OSError, RuntimeError) as e:
-            logger.debug(f"Webhook thread start failed: {e}")
+            logger.debug("Webhook thread start failed ({})", _safe_exception_label(e))
         return "logged" if file_written else "failed"
+
+    @staticmethod
+    def _digest_recipient_key(recipient: Any) -> str:
+        """Normalize digest recipient keys without collapsing falsy identifiers."""
+        if recipient is None:
+            return "_default"
+        return str(recipient)
 
     def notify_or_batch(self, payload: dict[str, Any]) -> str:
         """Route to immediate send or batching depending on digest_mode."""
-        severity = payload.get("severity")
+        severity = payload.get("severity") or payload.get("rule_severity")
         if not self._meets_threshold(severity):
             return "skipped"
         if self.digest_mode in ("hourly", "daily"):
-            recipient = payload.get("user_id", "_default")
+            recipient = self._digest_recipient_key(payload.get("user_id", "_default"))
             with self._lock:
-                self._pending_digests.setdefault(recipient, []).append(payload)
+                self._pending_digests.setdefault(recipient, []).append(dict(payload))
             return "batched"
         return self.notify_generic(payload)
 
+    @staticmethod
+    def _digest_severity(items: list[dict[str, Any]]) -> str:
+        """Return the highest severity present in a digest batch."""
+        highest = "info"
+        for item in items:
+            severity = str(
+                item.get("severity") or item.get("rule_severity") or "info"
+            ).strip().lower()
+            if _SEVERITY_ORDER.get(severity, 0) > _SEVERITY_ORDER.get(highest, 0):
+                highest = severity
+        return highest
+
+    def _build_digest_payload(self, recipient: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+        item_copies = [dict(item) for item in items]
+        return {
+            "type": "monitoring_digest",
+            "severity": self._digest_severity(item_copies),
+            "recipient": recipient,
+            "digest_mode": self.digest_mode,
+            "item_count": len(item_copies),
+            "items": item_copies,
+        }
+
     def flush_digest(self, recipient: str | None = None) -> int:
-        """Flush pending digest alerts. Returns count of flushed items."""
+        """Deliver pending digest alerts and return count of processed items.
+
+        Delivery emits one compiled digest payload per recipient through the
+        generic notification path. Failed recipients are requeued for normal
+        delivery exceptions so callers can retry a later flush without losing
+        buffered items. Threshold-skipped digests are considered processed.
+        """
         with self._lock:
             if recipient is not None:
-                items = self._pending_digests.pop(recipient, [])
-                count = len(items)
+                recipient_key = self._digest_recipient_key(recipient)
+                pending = {recipient_key: self._pending_digests.pop(recipient_key, [])}
             else:
-                count = sum(len(v) for v in self._pending_digests.values())
+                pending = dict(self._pending_digests)
                 self._pending_digests.clear()
-        return count
+
+        processed_count = 0
+        failed: dict[str, list[dict[str, Any]]] = {}
+        for recipient_key, items in pending.items():
+            if not items:
+                continue
+            payload = self._build_digest_payload(recipient_key, items)
+            try:
+                result = self.notify_generic(payload)
+            except Exception as exc:
+                logger.warning(
+                    "Monitoring digest delivery failed for {} ({})",
+                    recipient_key,
+                    _safe_exception_label(exc),
+                )
+                failed[recipient_key] = items
+                continue
+            if result in ("logged", "skipped"):
+                processed_count += len(items)
+            else:
+                logger.warning(
+                    "Monitoring digest delivery for {} returned {}; requeueing {} item(s)",
+                    recipient_key,
+                    result,
+                    len(items),
+                )
+                failed[recipient_key] = items
+
+        if failed:
+            with self._lock:
+                for recipient_key, items in failed.items():
+                    if items:
+                        self._pending_digests[recipient_key] = (
+                            items + self._pending_digests.get(recipient_key, [])
+                        )
+
+        return processed_count
 
     def get_pending_digest_count(self, recipient: str | None = None) -> int:
         """Return count of pending digest items, optionally for a specific recipient."""
         with self._lock:
             if recipient is not None:
-                return len(self._pending_digests.get(recipient, []))
+                recipient_key = self._digest_recipient_key(recipient)
+                return len(self._pending_digests.get(recipient_key, []))
             return sum(len(v) for v in self._pending_digests.values())
 
     def _send_email_safe(self, alert: TopicAlert) -> None:
         try:
             self._send_email(alert)
         except RetryError as e:
-            logger.info(f"Email notify failed: {e}")
+            logger.info("Email notify failed ({})", _safe_exception_label(e))
         except (OSError, RuntimeError, TypeError, ValueError, smtplib.SMTPException) as e:
-            logger.info(f"Email notify failed: {e}")
+            logger.info("Email notify failed ({})", _safe_exception_label(e))
 
 
 _notify_singleton: NotificationService | None = None

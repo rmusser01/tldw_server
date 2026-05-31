@@ -1,9 +1,10 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { useNavigate } from "react-router-dom"
 
-import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
+import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import type { ServerCapabilities } from "@/services/tldw/server-capabilities"
 
@@ -22,8 +23,16 @@ export const SourcesAvailabilityGate: React.FC<SourcesAvailabilityGateProps> = (
   maxWidthClassName = "max-w-6xl"
 }) => {
   const { t } = useTranslation(["sources"])
+  const navigate = useNavigate()
   const defaultCapabilityState = useServerCapabilities()
   const { capabilities, loading } = capabilityState ?? defaultCapabilityState
+  const unsupportedState = buildCapabilityState({
+    featureName: t("sources:title", "Sources"),
+    capabilityName: "ingestion source management",
+    endpoint: "/api/v1/ingestion-sources",
+    method: "GET",
+    reason: "unsupported"
+  })
 
   return (
     <WorkspaceConnectionGate
@@ -36,12 +45,11 @@ export const SourcesAvailabilityGate: React.FC<SourcesAvailabilityGateProps> = (
     >
       {!loading && capabilities && !capabilities.hasIngestionSources ? (
         <PageShell className="py-6" maxWidthClassName={maxWidthClassName}>
-          <FeatureEmptyState
-            title={t("sources:title", "Sources")}
-            description={t(
-              "sources:states.unsupported",
-              "This server does not advertise ingestion source support."
-            )}
+          <RecoveryCallout
+            state={unsupportedState.state}
+            title={unsupportedState.title}
+            message={unsupportedState.message}
+            diagnostics={unsupportedState.diagnostics}
           />
         </PageShell>
       ) : (

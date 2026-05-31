@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import sqlite3
 
 import pytest
 
@@ -89,6 +90,22 @@ def test_configure_sqlite_connection_skips_wal_for_in_memory_by_default():
         "PRAGMA busy_timeout=5000",
         "PRAGMA temp_store=MEMORY",
     ]
+
+
+def test_run_sqlite_quick_check_reads_existing_database(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.sqlite_policy import run_sqlite_quick_check
+
+    db_path = tmp_path / "healthy.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY)")
+
+    assert run_sqlite_quick_check(db_path) == ["ok"]
+
+
+def test_run_sqlite_quick_check_skips_missing_database(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.sqlite_policy import run_sqlite_quick_check
+
+    assert run_sqlite_quick_check(tmp_path / "missing.db") == []
 
 
 def test_begin_immediate_if_needed_only_starts_outermost_transaction():

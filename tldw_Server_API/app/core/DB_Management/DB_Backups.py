@@ -643,9 +643,9 @@ def create_postgres_backup(
         msg = "pg_dump executable not found; ensure PostgreSQL client tools are installed"
         logger.error(msg)
         return msg
-    except Exception as exc:  # noqa: BLE001
-        logger.error(f"pg_dump error: {exc}")
-        return f"pg_dump error: {exc}"
+    except Exception:  # noqa: BLE001
+        logger.error("pg_dump error")
+        return "pg_dump error"
 
 
 def _get_postgres_backup_base_dir(config) -> str:
@@ -775,6 +775,6 @@ def restore_postgres_backup(
         msg = "pg_restore executable not found; ensure PostgreSQL client tools are installed"
         logger.error(msg)
         return msg
-    except Exception as exc:  # noqa: BLE001
-        logger.error(f"pg_restore error: {exc}")
-        return f"pg_restore error: {exc}"
+    except Exception:  # noqa: BLE001
+        logger.error("pg_restore error")
+        return "pg_restore error"

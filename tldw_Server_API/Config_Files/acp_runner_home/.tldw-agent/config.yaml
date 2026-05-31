@@ -1,3 +1,44 @@
+agents:
+  default: custom
+  agents:
+    - type: custom
+      name: Custom Agent
+      description: Configure a custom downstream ACP agent.
+      command: ""
+      args: []
+      env: []
+
+    - type: goose
+      name: Goose
+      description: Block's autonomous coding agent.
+      command: goose
+      args:
+        - acp
+      env:
+        - TERM=xterm-256color
+        - HOME=${TLDW_ACP_HOST_HOME}
+
+    - type: hermes
+      name: Hermes
+      description: Nous Research Hermes agent.
+      command: hermes
+      args:
+        - acp
+        - --accept-hooks
+      env:
+        - HOME=${TLDW_ACP_HOST_HOME}
+
+    - type: opencode
+      name: OpenCode
+      description: Terminal-based AI coding assistant.
+      command: opencode
+      args:
+        - acp
+      env:
+        - TERM=xterm-256color
+        - HOME=${TLDW_ACP_HOST_HOME}
+
 agent:
-  command: "codex"
+  command: ""
   args: []
+  env: []

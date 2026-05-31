@@ -1,18 +1,12 @@
 import type { Page } from "@playwright/test"
 import { test, expect, AUTH_CONFIG, getCriticalIssues } from "./smoke.setup"
 import { waitForAppShell } from "../utils/helpers"
+import {
+  hasRuntimeOverlayBodySignal,
+  hasRuntimeOverlayConsoleSignal
+} from "./runtime-overlay"
 
 const LOAD_TIMEOUT = 30_000
-const RUNTIME_OVERLAY_PATTERNS = [
-  /Runtime(?:\s+\w+)?\s+Error/i,
-  /Runtime SyntaxError/i,
-  /Invalid or unexpected token/i,
-  /Objects are not valid as a React child/i,
-  /message\.error is not a function/i
-]
-
-const hasRuntimeOverlaySignal = (input: string): boolean =>
-  RUNTIME_OVERLAY_PATTERNS.some((pattern) => pattern.test(input))
 
 async function assertNoRuntimeOverlay(
   page: Page,
@@ -21,12 +15,12 @@ async function assertNoRuntimeOverlay(
 ): Promise<void> {
   const runtimeConsoleErrors = issues.consoleErrors
     .map((entry) => entry.text)
-    .filter(hasRuntimeOverlaySignal)
+    .filter(hasRuntimeOverlayConsoleSignal)
 
   const overlaySnapshot = await page.evaluate(() => ({
     bodyText: document.body?.innerText ?? ""
   }))
-  const bodyHasRuntimeSignal = hasRuntimeOverlaySignal(overlaySnapshot.bodyText)
+  const bodyHasRuntimeSignal = hasRuntimeOverlayBodySignal(overlaySnapshot.bodyText)
   const bodySnippet = bodyHasRuntimeSignal
     ? overlaySnapshot.bodyText.replace(/\s+/g, " ").trim().slice(0, 220)
     : ""

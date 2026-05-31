@@ -5,6 +5,11 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    default_offset_pagination_aliases,
+    validate_offset_pagination_aliases,
+)
 
 ReminderScheduleKind = Literal["one_time", "recurring"]
 
@@ -125,7 +130,20 @@ class NotificationsListResponse(BaseModel):
     """List response for user notifications."""
 
     items: list[NotificationResponse]
-    total: int
+    total: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = None
+    next_offset: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> "NotificationsListResponse":
+        return default_offset_pagination_aliases(self)
+
+    @model_validator(mode="after")
+    def _validate_pagination_aliases(self) -> "NotificationsListResponse":
+        return validate_offset_pagination_aliases(self)
 
 
 class NotificationsUnreadCountResponse(BaseModel):

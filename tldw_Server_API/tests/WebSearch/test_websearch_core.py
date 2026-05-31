@@ -254,6 +254,26 @@ def test_perform_websearch_duckduckgo_surfaces_policy_denial(monkeypatch: pytest
     assert result["processing_error"] == "Error performing web search: Blocked by outbound policy: deny_test"
 
 
+def test_perform_websearch_sanitizes_provider_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_search(*_args: Any, **_kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("provider failed at /private/websearch/token")
+
+    monkeypatch.setattr(web_search, "search_web_tavily", fail_search)
+
+    result = web_search.perform_websearch(
+        "tavily",
+        "capital of france",
+        "US",
+        "en",
+        "en",
+        5,
+    )
+
+    assert result["processing_error"] == "Error performing web search"
+    assert "provider failed" not in result["processing_error"]
+    assert "/private/websearch/token" not in result["processing_error"]
+
+
 def test_generate_and_search_propagates_searx_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: Dict[str, Any] = {}
 
@@ -419,6 +439,33 @@ def test_perform_websearch_tavily_forwards_site_whitelist(monkeypatch: pytest.Mo
     assert captured.get("site_whitelist") == ["allowed.example"]
     assert captured.get("site_blacklist") == ["blocked.example"]
     assert result.get("search_engine") == "tavily"
+
+
+def test_search_web_tavily_sanitizes_fetch_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tavily fetch errors should not expose backend exception details."""
+    from tldw_Server_API.app.core import http_client
+
+    monkeypatch.setattr(
+        web_search,
+        "get_loaded_config",
+        lambda: {"search_engines": {"tavily_search_api_key": "test-key"}},
+    )
+    monkeypatch.setattr(
+        web_search,
+        "_enforce_provider_outbound_policy",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def fail_fetch_json(*_args: Any, **_kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("tavily backend failed at /private/tavily.key")
+
+    monkeypatch.setattr(http_client, "fetch_json", fail_fetch_json)
+
+    result = web_search.search_web_tavily("test query")
+
+    assert result == {"error": "There was an error searching for content."}
+    assert "tavily backend failed" not in result["error"]
+    assert "/private/tavily.key" not in result["error"]
 
 
 def test_perform_websearch_google_forwards_google_domain(monkeypatch: pytest.MonkeyPatch) -> None:

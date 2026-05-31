@@ -6,10 +6,15 @@ import { ChatHeader } from "../ChatHeader"
 
 vi.mock("antd", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  Input: ({ value, onChange, ...rest }: any) => (
+  Input: ({ value, onChange, onPressEnter, ...rest }: any) => (
     <input
       value={value}
       onChange={onChange}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          onPressEnter?.(event)
+        }
+      }}
       {...rest}
     />
   )
@@ -53,7 +58,6 @@ const createProps = (overrides: Partial<React.ComponentProps<typeof ChatHeader>>
   onOpenSettings: vi.fn(),
   onToggleTheme: vi.fn(),
   themeMode: "dark" as const,
-  onClearChat: vi.fn(),
   onStartSavedChat: vi.fn(),
   onStartTemporaryChat: vi.fn(),
   onStartCharacterChat: vi.fn(),
@@ -149,6 +153,28 @@ describe("ChatHeader shortcut toggle", () => {
     expect(props.onStartCharacterChat).toHaveBeenCalledTimes(1)
   })
 
+  it("hides chat session actions when callbacks are omitted", () => {
+    render(
+      <ChatHeader
+        {...createProps({
+          onStartSavedChat: undefined,
+          onStartTemporaryChat: undefined,
+          onStartCharacterChat: undefined
+        })}
+      />
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "New saved chat" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Temporary chat (not saved)" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Character chat" })
+    ).not.toBeInTheDocument()
+  })
+
   it("hides temporary and character quick actions below the small breakpoint", () => {
     const props = createProps()
     render(<ChatHeader {...props} />)
@@ -165,6 +191,21 @@ describe("ChatHeader shortcut toggle", () => {
     expect(screen.getByRole("button", { name: "Character chat" }).className).toContain(
       "sm:inline-flex"
     )
+  })
+
+  it("allows the chat header control row to wrap on narrow screens", () => {
+    const props = createProps()
+    render(<ChatHeader {...props} />)
+
+    const headerRow = screen
+      .getByRole("button", { name: "New saved chat" })
+      .closest("header > div")
+    const actionsRow = screen
+      .getByRole("button", { name: "New saved chat" })
+      .parentElement
+
+    expect(headerRow?.className).toContain("flex-wrap")
+    expect(actionsRow?.className).toContain("flex-wrap")
   })
 
   it("shows mode badges for temporary and active character", () => {
@@ -198,6 +239,20 @@ describe("ChatHeader shortcut toggle", () => {
     render(<ChatHeader {...props} />)
 
     expect(screen.queryByText("Chat title")).not.toBeInTheDocument()
+  })
+
+  it("labels the title editor and keeps an untitled placeholder visible", () => {
+    const props = createProps({
+      chatTitle: "",
+      isEditingTitle: true
+    })
+
+    render(<ChatHeader {...props} />)
+
+    const titleInput = screen.getByRole("textbox", {
+      name: "Rename conversation"
+    })
+    expect(titleInput).toHaveAttribute("placeholder", "Untitled")
   })
 
   it("shows share controls and status when provided", () => {

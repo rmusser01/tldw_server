@@ -54,7 +54,7 @@ const createExtensionDriver: CreateWorkflowDriver = async ({
     "tldw-tutorials": JSON.stringify({
       state: {
         completedTutorials: ["playground", "chat", "notes", "media", "settings"],
-        seenPromptPages: ["/", "/chat", "/notes", "/media", "/settings", "/playground", "/workspace-playground"]
+        seenPromptPages: ["/", "/chat", "/notes", "/media", "/settings", "/playground", "/research-workspace"]
       },
       version: 0
     })

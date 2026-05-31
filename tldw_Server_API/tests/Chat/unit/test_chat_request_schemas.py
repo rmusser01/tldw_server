@@ -16,7 +16,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ToolChoiceOption,
     ToolChoiceFunction,
     ResponseFormat,
-    # SUPPORTED_API_ENDPOINTS # Not directly testable other than through ChatCompletionRequest
+    SUPPORTED_API_ENDPOINTS,
 )
 
 
@@ -104,6 +104,22 @@ def test_chat_completion_request_valid_api_provider():
         api_provider="openai"
     )
     assert req.api_provider == "openai"
+
+
+@pytest.mark.unit
+def test_supported_api_endpoints_uses_python310_safe_runtime_validation():
+    assert SUPPORTED_API_ENDPOINTS is str
+
+
+@pytest.mark.unit
+def test_chat_completion_request_accepts_numbered_custom_openai_provider():
+    req = ChatCompletionRequest(
+        model="test-m",
+        messages=[ChatCompletionUserMessageParam(role="user", content="hi")],
+        api_provider="custom-openai-api-99",
+    )
+
+    assert req.api_provider == "custom-openai-api-99"
 
 
 @pytest.mark.unit

@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect } from "react"
+import React, { Suspense } from "react"
 import {
   Button,
   Card,
@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next"
 import { useDataTablesStore } from "@/store/data-tables"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { DataTableSummary } from "@/types/data-tables"
+import { StatePanel } from "@/components/ui/state"
 import { ExportMenu } from "./ExportMenu"
 const TableDetailModal = React.lazy(() =>
   import("./TableDetailModal").then((module) => ({
@@ -81,12 +82,6 @@ export const DataTablesList: React.FC = () => {
   const tablesTotal = data?.total ?? 0
   const tablesError =
     error instanceof Error ? error.message : error ? "Failed to load tables" : null
-
-  useEffect(() => {
-    if (tablesError) {
-      message.error(tablesError)
-    }
-  }, [tablesError])
 
   // Handle delete
   const handleDelete = async () => {
@@ -215,9 +210,27 @@ export const DataTablesList: React.FC = () => {
 
       {/* Error state */}
       {tablesError && (
-        <Card className="bg-danger/10 border-danger/30">
-          <p className="text-danger">{tablesError}</p>
-        </Card>
+        <StatePanel
+          state="unavailable"
+          title={t("dataTables:loadErrorTitle", "Data tables could not load")}
+          message={t(
+            "dataTables:loadErrorBody",
+            "Check diagnostics or try again after confirming the server is reachable."
+          )}
+          diagnostics={[
+            {
+              label: t("dataTables:loadErrorDetailsLabel", "Details"),
+              value: tablesError
+            }
+          ]}
+          primaryAction={{
+            label: t("common:tryAgain", "Try again"),
+            onClick: () => {
+              void refetch()
+            },
+            loading: isFetching
+          }}
+        />
       )}
 
       {/* Loading state */}

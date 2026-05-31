@@ -8,12 +8,13 @@ export type OptionalPanelId =
   | "mcp-tools"
   | "audio-health"
   | "model-catalog"
+export type OptionalPanelVisibility = Partial<Record<OptionalPanelId, boolean>>
 
 export type ChatSurfaceCoordinatorState = {
   routeId: string | null
   surface: ChatSurfaceId | null
-  visiblePanels: Record<OptionalPanelId, boolean>
-  engagedPanels: Record<OptionalPanelId, boolean>
+  visiblePanels: OptionalPanelVisibility
+  engagedPanels: OptionalPanelVisibility
   setRouteContext: (value: {
     routeId: string
     surface: ChatSurfaceId

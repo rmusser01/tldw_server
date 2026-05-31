@@ -10,6 +10,7 @@ import {
   saveHistory,
   saveMessage
 } from "@/db/dexie/helpers"
+import { getDesignSystemState } from "@/design-system"
 import useBackgroundMessage from "@/hooks/useBackgroundMessage"
 import { useMigration } from "@/hooks/useMigration"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
@@ -31,7 +32,7 @@ import { createSafeStorage } from "@/utils/safe-storage"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings"
 import { useStorage } from "@plasmohq/storage/hook"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, ExternalLink } from "lucide-react"
 import React, { lazy, Suspense } from "react"
 import { useTranslation } from "react-i18next"
 import { SidePanelBody } from "~/components/Sidepanel/Chat/body"
@@ -40,6 +41,7 @@ import { SidepanelHeaderSimple } from "~/components/Sidepanel/Chat/SidepanelHead
 import { ConnectionBanner } from "~/components/Sidepanel/Chat/ConnectionBanner"
 import { useMessage } from "~/hooks/useMessage"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
+import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { useSidepanelChatTabsStore } from "@/store/sidepanel-chat-tabs"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import type { Character } from "@/types/character"
@@ -68,7 +70,9 @@ import {
   WEB_CLIPPER_ANALYZE_MESSAGE_TYPE
 } from "@/services/web-clipper/analyze-handoff"
 import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
+import type { CommandItem } from "@/components/Common/CommandPalette"
 import type { ServerChatHistoryItem } from "@/hooks/useServerChatHistory"
+import { buildSidepanelFullAppChatPath } from "@/utils/sidepanel-full-app-route"
 import {
   OPEN_HISTORY_EVENT,
   TIMELINE_ACTION_EVENT,
@@ -81,6 +85,7 @@ import {
   type LegacySidepanelChatSnapshot,
   readSidepanelRuntimeTabId
 } from "./sidepanel-chat-resume"
+import { buildSidepanelCapturedNotePayload } from "./sidepanel-note-capture"
 
 // Lazy-load Timeline to reduce initial bundle size (~1.2MB cytoscape)
 const TimelineModal = lazy(() =>
@@ -536,6 +541,7 @@ const SidepanelChat = () => {
   } = useMessage()
   const [selectedCharacter, setSelectedCharacter] =
     useSelectedCharacter<Character | null>(null)
+  const [selectedAssistant] = useSelectedAssistant(null)
   const setRagMediaIds = useStoreMessageOption((state) => state.setRagMediaIds)
   const tabs = useSidepanelChatTabsStore((state) => state.tabs)
   const activeTabId = useSidepanelChatTabsStore((state) => state.activeTabId)
@@ -574,6 +580,7 @@ const SidepanelChat = () => {
   useCharacterGreeting({
     playgroundReady: !isRestoringChat,
     selectedCharacter,
+    selectedCharacterMode: null,
     serverChatId,
     historyId,
     messagesLength: messages.length,
@@ -612,7 +619,7 @@ const SidepanelChat = () => {
     const path = `/options.html#${normalizedRoute}` as const
 
     try {
-      if (browser?.runtime?.getURL) {
+      if (browser?.runtime?.id && browser.runtime.getURL) {
         const url = browser.runtime.getURL(path)
         if (browser.tabs?.create) {
           void browser.tabs.create({ url })
@@ -626,7 +633,11 @@ const SidepanelChat = () => {
     }
 
     try {
-      if (typeof chrome !== "undefined" && chrome.runtime?.getURL) {
+      if (
+        typeof chrome !== "undefined" &&
+        chrome.runtime?.id &&
+        chrome.runtime.getURL
+      ) {
         const url = chrome.runtime.getURL(path)
         window.open(url, "_blank")
         return
@@ -635,7 +646,7 @@ const SidepanelChat = () => {
       console.debug("[sidepanel] openOptionsHashRoute chrome API unavailable:", error)
     }
 
-    window.open(path, "_blank")
+    window.open(normalizedRoute, "_blank")
   }, [])
 
   const handleGenerateFlashcardsFromSelection = React.useCallback(() => {
@@ -707,19 +718,26 @@ const SidepanelChat = () => {
     setNoteError(null)
     setNoteSaving(true)
     try {
-      await tldwClient.createNote(content, {
+      const payload = buildSidepanelCapturedNotePayload({
+        content,
         title,
-        metadata: {
-          source_url: noteSourceUrl,
-          origin: "context-menu"
-        }
+        sourceUrl: noteSourceUrl
       })
+      await tldwClient.createNote(payload.content, payload.noteFields)
       notification.success({
         message: t("sidepanel:notification.savedToNotes", "Saved to Notes")
       })
       resetNoteModal()
     } catch (e: any) {
-      const msg = e?.message || "Failed to save note"
+      const msg = e?.message
+        ? t("sidepanel:notes.createFailedWithReason", "Note creation failed: {{reason}}").replace(
+            "{{reason}}",
+            e.message
+          )
+        : t(
+            "sidepanel:notes.createFailed",
+            "Note creation failed. The captured selection was not saved."
+          )
       setNoteError(msg)
       notification.error({ message: msg })
     } finally {
@@ -2189,6 +2207,39 @@ const SidepanelChat = () => {
         })),
     [tabs, t]
   )
+  const selectedCharacterIdForHandoff =
+    selectedCharacter?.id == null ? null : String(selectedCharacter.id)
+  const characterChatFullAppPath = React.useMemo(
+    () =>
+      buildSidepanelFullAppChatPath({
+        selectedAssistant,
+        selectedCharacterId: selectedCharacterIdForHandoff
+      }),
+    [selectedAssistant, selectedCharacterIdForHandoff]
+  )
+  const openCharacterChatInFullAppCommand = React.useMemo<CommandItem[]>(
+    () => {
+      if (characterChatFullAppPath === "/chat") return []
+      return [
+        {
+          id: "action-open-character-chat-full-app",
+          label: t(
+            "common:commandPalette.openCharacterChatFullApp",
+            "Open Character Chat in full app"
+          ),
+          description: t(
+            "common:commandPalette.openCharacterChatFullAppDesc",
+            "Continue the active Character, Persona, or role-play setup in /chat."
+          ),
+          icon: <ExternalLink className="size-4" />,
+          action: () => openOptionsHashRoute(characterChatFullAppPath),
+          category: "action",
+          keywords: ["character", "role-play", "persona", "full app", "chat"]
+        }
+      ]
+    },
+    [characterChatFullAppPath, openOptionsHashRoute, t]
+  )
   const ingestStatusLabel = React.useMemo(() => {
     const status = ingestCard?.status
     switch (status) {
@@ -2197,7 +2248,10 @@ const SidepanelChat = () => {
       case "running":
         return t("sidepanel:ingest.running", "Processing")
       case "completed":
-        return t("sidepanel:ingest.completed", "Ready")
+        return t(
+          "sidepanel:ingest.completed",
+          getDesignSystemState("ready")?.label ?? ""
+        )
       case "failed":
         return t("sidepanel:ingest.failed", "Failed")
       case "cancelled":
@@ -2224,7 +2278,10 @@ const SidepanelChat = () => {
   const closeArtifacts = useArtifactsStore((state) => state.closeArtifact)
 
   return (
-    <div className="flex h-dvh w-full" data-testid="chat-workspace">
+    <div
+      className="flex h-dvh w-full min-w-0 overflow-x-hidden"
+      data-testid="chat-workspace"
+    >
       {isSidebarVisible && (
         <Suspense fallback={null}>
           <LazySidepanelChatSidebar
@@ -2252,7 +2309,10 @@ const SidepanelChat = () => {
           aria-hidden="true"
         />
       )}
-      <main className="relative flex h-dvh flex-1 flex-col bg-bg" data-testid="chat-main">
+      <main
+        className="relative flex h-dvh min-w-0 flex-1 flex-col overflow-x-hidden bg-bg"
+        data-testid="chat-main"
+      >
         <div className="relative z-20 w-full">
           <SidepanelHeaderSimple
             sidebarOpen={sidebarOpen}
@@ -2265,7 +2325,7 @@ const SidepanelChat = () => {
         <div
           ref={drop}
           data-testid="chat-dropzone"
-          className={`relative flex min-h-0 flex-1 flex-col items-center bg-bg ${
+          className={`relative flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-x-hidden bg-bg ${
             dropState === "dragging" ? "bg-surface2" : ""
           }`}
           style={
@@ -2320,7 +2380,7 @@ const SidepanelChat = () => {
             aria-relevant="additions"
             aria-label={t("playground:aria.chatTranscript", "Chat messages")}
             data-testid="chat-messages"
-            className={`custom-scrollbar relative z-10 flex flex-1 w-full flex-col items-center overflow-x-hidden overflow-y-auto ${messagePadding}`}
+            className={`custom-scrollbar relative z-10 flex min-w-0 flex-1 w-full flex-col items-center overflow-x-hidden overflow-y-auto ${messagePadding}`}
             style={
               {
                 "--composer-padding": composerPadding,
@@ -2472,7 +2532,7 @@ const SidepanelChat = () => {
               />
             )}
             {!stickyChatInput && (
-              <div className="w-full pt-4 pb-6">
+              <div className="w-full min-w-0 pt-4 pb-6">
                 <SidepanelForm
                   key={activeTabId || "sidepanel-chat"}
                   dropedFile={dropedFile}
@@ -2501,7 +2561,7 @@ const SidepanelChat = () => {
           )}
           {stickyChatInput && (
             <div
-              className="absolute bottom-0 w-full z-10"
+              className="absolute bottom-0 left-0 right-0 z-10 w-full min-w-0"
               style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
             >
               <SidepanelForm
@@ -2589,7 +2649,8 @@ const SidepanelChat = () => {
           onToggleSidebar: toggleSidebar,
           onSearchHistory: requestSidebarSearchFocus,
           onSwitchChat: handleSelectTab,
-          sidepanelChats: commandPaletteChats
+          sidepanelChats: commandPaletteChats,
+          additionalCommands: openCharacterChatInFullAppCommand
         }}
       />
       <Suspense fallback={null}>

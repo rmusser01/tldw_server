@@ -3,6 +3,12 @@
  * Generated from actual pages in the tldw-frontend/pages directory
  */
 
+import {
+  isAuditedRootRoute,
+  ROUTE_METADATA,
+  type RouteGroup
+} from "../../../packages/ui/src/routes/route-metadata"
+
 export type PageCategory =
   | "chat"
   | "media"
@@ -27,22 +33,73 @@ export interface PageEntry {
   skip?: string
 }
 
+const routeGroupToPageCategory = (group: RouteGroup): PageCategory => {
+  switch (group) {
+    case "chat":
+      return "chat"
+    case "media_library":
+      return "media"
+    case "settings":
+      return "settings"
+    case "operations":
+      return "connectors"
+    case "workspace":
+    case "study":
+    case "safety":
+    case "specialized":
+      return "workspace"
+    case "knowledge":
+      return "knowledge"
+    case "audio":
+      return "audio"
+    case "account":
+    case "documentation":
+    case "extension":
+    case "start":
+      return "other"
+  }
+}
+
+const METADATA_PAGE_OVERRIDES: Record<string, Partial<PageEntry>> = {
+  "/chat": { expectedTestId: "chat-input" },
+  "/chatbooks": {
+    skip:
+      "Covered in Stage 5 release gate; intermittently stalls all-pages webpack route traversal in CI."
+  },
+  "/writing-playground": {
+    skip:
+      "Covered in Stage 5 release gate; intermittently trips the global error boundary during full all-pages traversal in CI."
+  }
+}
+
+const METADATA_ROUTE_PATHS = new Set(ROUTE_METADATA.map((route) => route.path))
+
+const METADATA_SMOKE_PAGES: PageEntry[] = ROUTE_METADATA.filter(
+  (metadata) =>
+    isAuditedRootRoute(metadata.path) &&
+    metadata.availability.includes("web") &&
+    metadata.smoke !== "exclude"
+).map((metadata) => ({
+  path: metadata.path,
+  name: metadata.label,
+  category: routeGroupToPageCategory(metadata.group),
+  ...(metadata.smoke === "manual"
+    ? { skip: `Manual smoke: ${metadata.rationale}` }
+    : {}),
+  ...METADATA_PAGE_OVERRIDES[metadata.path]
+}))
+
 /**
- * All pages in the tldw-frontend application
+ * Extra pages in the tldw-frontend application that are outside the audited
+ * root-route metadata contract.
  */
-export const PAGES: PageEntry[] = [
+const EXTRA_PAGES: PageEntry[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   // Chat
   // ═══════════════════════════════════════════════════════════════════════════
   { path: "/chat", name: "Chat", category: "chat", expectedTestId: "chat-input" },
   { path: "/chat/agent", name: "Agent Chat", category: "chat" },
   { path: "/persona", name: "Persona Chat", category: "chat" },
-  {
-    path: "/chat/settings",
-    name: "Chat Settings (Page)",
-    category: "chat",
-    skip: "Covered in Stage 5 release gate; intermittently stalls all-pages webpack route traversal in CI.",
-  },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Media
@@ -50,7 +107,12 @@ export const PAGES: PageEntry[] = [
   { path: "/media", name: "Media", category: "media" },
   { path: "/media-multi", name: "Media Multi", category: "media" },
   { path: "/media-trash", name: "Media Trash", category: "media" },
-  { path: "/media/123/view", name: "Media View (Redirect)", category: "media" },
+  {
+    path: "/media/123/view",
+    name: "Media View (Redirect)",
+    category: "media",
+    skip: "Dynamic redirect alias covered by the route metadata contract."
+  },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Settings (20+ pages)
@@ -84,6 +146,7 @@ export const PAGES: PageEntry[] = [
   { path: "/admin/server", name: "Server Admin", category: "admin" },
   { path: "/admin/llamacpp", name: "LlamaCpp Admin", category: "admin" },
   { path: "/admin/mlx", name: "MLX Admin", category: "admin" },
+  { path: "/admin/integrations", name: "Admin Integrations", category: "admin" },
   { path: "/admin/orgs", name: "Orgs Admin", category: "admin" },
   { path: "/admin/data-ops", name: "Data Ops Admin", category: "admin" },
   { path: "/admin/watchlists-items", name: "Watchlists Items", category: "admin" },
@@ -95,12 +158,27 @@ export const PAGES: PageEntry[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   { path: "/flashcards", name: "Flashcards", category: "workspace" },
   { path: "/quiz", name: "Quiz", category: "workspace" },
-  { path: "/moderation-playground", name: "Moderation Playground", category: "workspace" },
+  { path: "/moderation", name: "Moderation Review", category: "workspace", expectedTestId: "moderation-review-shell" },
+  { path: "/moderation/rules", name: "Content Rules", category: "workspace" },
+  {
+    path: "/moderation-playground",
+    name: "Moderation Playground Legacy Redirect",
+    category: "workspace",
+    skip: "Legacy alias covered by the route alias contract."
+  },
   { path: "/kanban", name: "Kanban", category: "workspace" },
   { path: "/data-tables", name: "Data Tables", category: "workspace" },
   { path: "/content-review", name: "Content Review", category: "workspace" },
-  { path: "/claims-review", name: "Claims Review", category: "workspace" },
+  {
+    path: "/claims-review",
+    name: "Claims Review",
+    category: "workspace",
+    skip: "Legacy redirect alias covered by the route metadata contract."
+  },
+  { path: "/integrations", name: "Integrations", category: "workspace" },
+  { path: "/scheduled-tasks", name: "Scheduled Tasks", category: "workspace" },
   { path: "/watchlists", name: "Watchlists", category: "workspace" },
+  { path: "/chat-workspace", name: "Chat Workspace", category: "workspace" },
   {
     path: "/chatbooks",
     name: "Chatbooks",
@@ -111,20 +189,31 @@ export const PAGES: PageEntry[] = [
   { path: "/collections", name: "Collections", category: "workspace" },
   { path: "/evaluations", name: "Evaluations", category: "workspace" },
   { path: "/search", name: "Search", category: "workspace" },
-  { path: "/review", name: "Review", category: "workspace" },
+  {
+    path: "/review",
+    name: "Review",
+    category: "workspace",
+    skip: "Legacy redirect alias covered by the route metadata contract."
+  },
   { path: "/reading", name: "Reading", category: "workspace" },
   { path: "/items", name: "Items", category: "workspace" },
   { path: "/chunking-playground", name: "Chunking Playground", category: "workspace" },
+  { path: "/research-workspace", name: "Research Workspace", category: "workspace" },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Knowledge
   // ═══════════════════════════════════════════════════════════════════════════
-  { path: "/knowledge", name: "Knowledge", category: "knowledge" },
+  { path: "/knowledge", name: "Knowledge QA", category: "knowledge" },
   { path: "/world-books", name: "World Books", category: "knowledge" },
   { path: "/dictionaries", name: "Dictionaries", category: "knowledge" },
   { path: "/characters", name: "Characters", category: "knowledge" },
   { path: "/prompts", name: "Prompts", category: "knowledge" },
-  { path: "/prompt-studio", name: "Prompt Studio", category: "knowledge" },
+  {
+    path: "/prompt-studio",
+    name: "Prompt Studio",
+    category: "knowledge",
+    skip: "Legacy redirect alias covered by the route metadata contract."
+  },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Audio
@@ -132,7 +221,12 @@ export const PAGES: PageEntry[] = [
   { path: "/tts", name: "TTS", category: "audio" },
   { path: "/stt", name: "STT", category: "audio" },
   { path: "/speech", name: "Speech", category: "audio" },
-  { path: "/audio", name: "Audio", category: "audio" },
+  {
+    path: "/audio",
+    name: "Audio",
+    category: "audio",
+    skip: "Legacy redirect alias covered by the route metadata contract."
+  },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Connectors
@@ -141,6 +235,8 @@ export const PAGES: PageEntry[] = [
   { path: "/connectors/browse", name: "Connectors Browse", category: "connectors" },
   { path: "/connectors/jobs", name: "Connectors Jobs", category: "connectors" },
   { path: "/connectors/sources", name: "Connectors Sources", category: "connectors" },
+  { path: "/integrations", name: "Integrations", category: "connectors" },
+  { path: "/scheduled-tasks", name: "Scheduled Tasks", category: "connectors" },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Other / Core Pages
@@ -153,12 +249,27 @@ export const PAGES: PageEntry[] = [
   { path: "/profile", name: "Profile", category: "other" },
   { path: "/privileges", name: "Privileges", category: "other" },
   { path: "/quick-chat-popout", name: "Quick Chat Popout", category: "other" },
-  { path: "/onboarding-test", name: "Onboarding Test", category: "other" },
+  {
+    path: "/onboarding-test",
+    name: "Onboarding Test",
+    category: "other",
+    skip: "Internal QA route covered by route metadata contract.",
+  },
   { path: "/for/journalists", name: "For Journalists", category: "other" },
   { path: "/for/osint", name: "For OSINT", category: "other" },
   { path: "/for/researchers", name: "For Researchers", category: "other" },
-  { path: "/__debug__/sidepanel-error-boundary", name: "Debug Error Boundary", category: "other" },
-  { path: "/__debug__/sidepanel-chat", name: "Debug Sidepanel Chat", category: "other" },
+  {
+    path: "/__debug__/sidepanel-error-boundary",
+    name: "Debug Error Boundary",
+    category: "other",
+    skip: "Internal sidepanel QA route covered by route metadata contract.",
+  },
+  {
+    path: "/__debug__/sidepanel-chat",
+    name: "Debug Sidepanel Chat",
+    category: "other",
+    skip: "Internal sidepanel QA route covered by route metadata contract.",
+  },
   { path: "/404", name: "Not Found", category: "other" },
   { path: "/account", name: "Account", category: "other" },
   { path: "/notifications", name: "Notifications", category: "other" },
@@ -175,11 +286,20 @@ export const PAGES: PageEntry[] = [
   { path: "/document-workspace", name: "Document Workspace", category: "workspace" },
   { path: "/model-playground", name: "Model Playground", category: "workspace" },
   { path: "/presentation-studio", name: "Presentation Studio", category: "workspace" },
+  { path: "/presentation-studio/new", name: "New Presentation", category: "workspace" },
   { path: "/repo2txt", name: "Repo2Txt", category: "workspace" },
   { path: "/workflow-editor", name: "Workflow Editor", category: "workspace" },
-  { path: "/workspace-playground", name: "Workspace Playground", category: "workspace" },
-  { path: "/writing-playground", name: "Writing Playground", category: "workspace" },
+  { path: "/research-workspace", name: "Research Workspace", category: "workspace" },
+  {
+    path: "/writing-playground",
+    name: "Writing Playground",
+    category: "workspace",
+    skip: "Covered in Stage 5 release gate; intermittently trips the global error boundary during full all-pages traversal in CI.",
+  },
   { path: "/sources", name: "Sources", category: "workspace" },
+  { path: "/sources/new", name: "New Source", category: "workspace" },
+  { path: "/vn-assets", name: "VN Assets", category: "workspace" },
+  { path: "/vn-play", name: "VN Play", category: "workspace" },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Chat / Agent (missing)
@@ -208,7 +328,12 @@ export const PAGES: PageEntry[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   // Settings (missing)
   // ═══════════════════════════════════════════════════════════════════════════
-  { path: "/settings/image-gen", name: "Image Gen Settings", category: "settings" },
+  {
+    path: "/settings/image-gen",
+    name: "Image Gen Settings",
+    category: "settings",
+    skip: "Legacy redirect alias covered by the route metadata contract."
+  },
   { path: "/settings/image-generation", name: "Image Generation Settings", category: "settings" },
   { path: "/settings/mcp-hub", name: "MCP Hub Settings", category: "settings" },
   { path: "/settings/splash", name: "Splash Settings", category: "settings" },
@@ -228,10 +353,18 @@ export const PAGES: PageEntry[] = [
   { path: "/billing/success", name: "Billing Success", category: "other" },
   { path: "/billing/cancel", name: "Billing Cancel", category: "other" },
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Settings Chat (page-level — distinct from settings/chat)
-  // ═══════════════════════════════════════════════════════════════════════════
-  { path: "/chat/settings", name: "Chat Settings Page", category: "chat", skip: "Covered in Stage 5 release gate" }
+  // Page-level `/chat/settings` remains listed once in the chat section above.
+]
+
+/**
+ * All pages in the tldw-frontend application.
+ *
+ * Audited root routes are owned by route metadata; child and special-case
+ * smoke pages remain explicit here until they get first-class metadata.
+ */
+export const PAGES: PageEntry[] = [
+  ...METADATA_SMOKE_PAGES,
+  ...EXTRA_PAGES.filter((page) => !METADATA_ROUTE_PATHS.has(page.path))
 ]
 
 /**

@@ -86,8 +86,7 @@ def sanitize_error_message(error: Exception, context: str = "") -> str:
     Returns:
         A safe error message that doesn't expose sensitive information
     """
-    # Log the full error details for debugging
-    logger.error(f"Error in {context}: {type(error).__name__}: {str(error)}")
+    logger.error("Error in {}: {}", context, type(error).__name__)
 
     # Map specific exception types to safe messages
     error_type = type(error).__name__
@@ -195,7 +194,7 @@ class ConnectionManager:
         try:
             await websocket.send_text(message)
         except _WS_SEND_EXCEPTIONS as e:
-            logger.error(f"Failed to send message to WebSocket: {e}")
+            logger.error("Failed to send message to WebSocket")
             self.disconnect(websocket)
 
     async def broadcast_to_client(self, client_id: str, message: str):
@@ -217,7 +216,7 @@ class ConnectionManager:
             try:
                 await websocket.send_text(message)
             except _WS_SEND_EXCEPTIONS as e:
-                logger.error(f"Failed to send to WebSocket: {e}")
+                logger.error("Failed to send to WebSocket")
                 disconnected.append(websocket)
 
         # Clean up disconnected sockets
@@ -374,7 +373,7 @@ async def sse_endpoint(
             logger.info(f"SSE connection closed for client {client_id}")
             raise
         except _SSE_STREAM_EXCEPTIONS as e:
-            logger.error(f"SSE error: {e}")
+            logger.error("SSE error")
             safe_error_msg = sanitize_error_message(e, "SSE streaming")
             yield f"data: {json.dumps({'type': 'error', 'message': safe_error_msg})}\n\n"
 

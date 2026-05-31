@@ -35,6 +35,7 @@ import {
 } from "@/utils/message-steering"
 import { useClearChat } from "@/hooks/chat/useClearChat"
 import { useStoreMessageOption } from "@/store/option"
+import { preserveAssistantSelectionMode } from "@/types/assistant-selection"
 import type { MessageSteeringPromptTemplates } from "@/types/message-steering"
 import { getBrowserRuntime, isExtensionRuntime } from "@/utils/browser-runtime"
 import {
@@ -215,6 +216,12 @@ export const CharacterSelect: React.FC<Props> = ({
       messageSteeringPrompts
     )
   }, [messageSteeringPrompts])
+
+  const preserveSelectionMode = React.useCallback(
+    (next: CharacterSelection | null): CharacterSelection | null =>
+      preserveAssistantSelectionMode(next, selectedCharacter),
+    [selectedCharacter]
+  )
 
   const { data, refetch, isFetching, isLoading, error } = useQuery<CharacterSummary[]>({
     queryKey: ["tldw:listCharacters"],
@@ -662,7 +669,7 @@ export const CharacterSelect: React.FC<Props> = ({
           }
         )
         if (normalized) {
-          await setSelectedCharacter(normalized)
+          await setSelectedCharacter(preserveSelectionMode(normalized))
         }
         await setShowCharacterPortraits(true)
         await refetch({ cancelRefetch: true })
@@ -691,7 +698,15 @@ export const CharacterSelect: React.FC<Props> = ({
         event.target.value = ""
       }
     },
-    [notification, refetch, selectedCharacter, setSelectedCharacter, setShowCharacterPortraits, t]
+    [
+      notification,
+      preserveSelectionMode,
+      refetch,
+      selectedCharacter,
+      setSelectedCharacter,
+      setShowCharacterPortraits,
+      t
+    ]
   )
 
   const clearMoodImage = React.useCallback(
@@ -740,7 +755,7 @@ export const CharacterSelect: React.FC<Props> = ({
           }
         )
         if (normalized) {
-          await setSelectedCharacter(normalized)
+          await setSelectedCharacter(preserveSelectionMode(normalized))
         }
         await refetch({ cancelRefetch: true })
         notification.success({
@@ -764,7 +779,14 @@ export const CharacterSelect: React.FC<Props> = ({
         })
       }
     },
-    [notification, refetch, selectedCharacter, setSelectedCharacter, t]
+    [
+      notification,
+      preserveSelectionMode,
+      refetch,
+      selectedCharacter,
+      setSelectedCharacter,
+      t
+    ]
   )
 
   const confirmCharacterSwitch = React.useCallback(
@@ -829,7 +851,7 @@ export const CharacterSelect: React.FC<Props> = ({
             if (latestSelectionIdRef.current !== targetId) return
             const hydrated = normalizeCharacter(full || {})
             if (hydrated && hydrated.id === targetId && hydrated.greeting) {
-              void setSelectedCharacter(hydrated)
+              void setSelectedCharacter(preserveSelectionMode(hydrated))
             }
           })
           .catch((error) => {
@@ -850,6 +872,7 @@ export const CharacterSelect: React.FC<Props> = ({
       confirmCharacterSwitch,
       hasActiveChat,
       notification,
+      preserveSelectionMode,
       selectedCharacter?.id,
       setSelectedCharacter,
       t
@@ -1534,7 +1557,7 @@ export const CharacterSelect: React.FC<Props> = ({
       >
         {t(
           "playground:composer.actorTitle",
-          "Scene Director (Actor)"
+          "Optional scene context"
         ) as string}
       </button>
     ),

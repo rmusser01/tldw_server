@@ -200,6 +200,33 @@ async def test_resolve_org_id_fails_closed_on_repo_errors(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_org_id_failure_log_omits_backend_details(monkeypatch) -> None:
+    """Unexpected resolver errors should not log raw backend details."""
+    leaked_secret = "sk-billing-secret"
+    leaked_path = "/private/billing/users.db"
+    messages: list[str] = []
+
+    async def _fake_get_db_pool():
+        raise RuntimeError(f"db unavailable token={leaked_secret} path={leaked_path}")
+
+    monkeypatch.setattr(billing_deps, "get_db_pool", _fake_get_db_pool, raising=False)
+    monkeypatch.setattr(billing_deps.logger, "error", messages.append)
+
+    principal = AuthPrincipal(kind="user", user_id=13, is_admin=False)
+    with pytest.raises(HTTPException) as exc_info:
+        await billing_deps._resolve_org_id(principal)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Unable to resolve organization for billing enforcement"
+    assert messages == ["Failed to resolve org_id for billing enforcement"]
+    joined = "\n".join(messages)
+    assert leaked_secret not in joined
+    assert leaked_path not in joined
+    assert "db unavailable" not in joined
+    assert "13" not in joined
+
+
+@pytest.mark.asyncio
 async def test_resolve_org_id_returns_none_when_user_has_no_memberships(monkeypatch) -> None:
     """Single-user/no-org contexts should still resolve to None."""
 

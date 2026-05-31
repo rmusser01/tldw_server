@@ -3,10 +3,15 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from starlette.requests import Request
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.exceptions import (
     ByokValidationActiveRunError,
@@ -21,7 +26,43 @@ def _setup_env(monkeypatch, *, user_db_base: str) -> None:
     auth_db_path = Path(user_db_base).parent / "users_test_byok_validation_api.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{auth_db_path}")
     monkeypatch.setenv("TEST_MODE", "true")
-    monkeypatch.setenv("ADMIN_BYOK_VALIDATION_JOBS_WORKER_ENABLED", "true")
+    monkeypatch.delenv("ADMIN_BYOK_VALIDATION_JOBS_WORKER_ENABLED", raising=False)
+
+
+def _validation_worker_enabled():
+    return patch(
+        "tldw_Server_API.app.services.admin_byok_validation_jobs_worker.byok_validation_worker_enabled",
+        return_value=True,
+    )
+
+
+async def _admin_principal_override(request: Request) -> AuthPrincipal:
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=1,
+        api_key_id=None,
+        subject="ops-admin@example.com",
+        token_type="access",  # nosec B106
+        jti=None,
+        roles=["admin"],
+        permissions=["system.configure"],
+        is_admin=True,
+        org_ids=[],
+        team_ids=[],
+        email="ops-admin@example.com",
+    )
+    request.state.auth = AuthContext(
+        principal=principal,
+        ip=None,
+        user_agent=None,
+        request_id=None,
+    )
+    return principal
+
+
+def _reset_byok_api_overrides() -> None:
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_auth_principal] = _admin_principal_override
 
 
 @dataclass
@@ -113,48 +154,65 @@ async def _noop_enqueue_run(item):
     return "job-1"
 
 
-@pytest.mark.asyncio
-async def test_admin_byok_validation_create_list_and_detail_roundtrip(monkeypatch, tmp_path) -> None:
+@pytest_asyncio.fixture
+async def byok_api_client(tmp_path):
+    monkeypatch = pytest.MonkeyPatch()
     _setup_env(monkeypatch, user_db_base=str(tmp_path / "user_dbs"))
+    headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
+    _reset_byok_api_overrides()
+    from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
 
+    reset_lifecycle_state(app)
+
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver", headers=headers) as client:
+            yield client
+    finally:
+        app.dependency_overrides.clear()
+        monkeypatch.undo()
+
+
+@pytest.mark.asyncio
+async def test_admin_byok_validation_create_list_and_detail_roundtrip(byok_api_client) -> None:
     from tldw_Server_API.app.api.v1.endpoints.admin import admin_byok
 
     service = _FakeByokValidationService()
     app.dependency_overrides[admin_byok.get_admin_byok_validation_service] = lambda: service
     app.dependency_overrides[admin_byok.get_byok_validation_job_enqueuer] = lambda: _noop_enqueue_run
 
-    headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
+    with _validation_worker_enabled():
+        create_resp = await byok_api_client.post(
+            "/api/v1/admin/byok/validation-runs",
+            json={"org_id": 42, "provider": "openai"},
+        )
+    assert create_resp.status_code == 200, create_resp.text
+    created = create_resp.json()
+    assert created["id"] == "run-1"
+    assert service.created_calls[0]["org_id"] == 42
+    assert service.created_calls[0]["provider"] == "openai"
 
-    try:
-        with TestClient(app, headers=headers) as client:
-            create_resp = client.post(
-                "/api/v1/admin/byok/validation-runs",
-                json={"org_id": 42, "provider": "openai"},
-            )
-            assert create_resp.status_code == 200, create_resp.text
-            created = create_resp.json()
-            assert created["id"] == "run-1"
-            assert service.created_calls[0]["org_id"] == 42
-            assert service.created_calls[0]["provider"] == "openai"
+    list_resp = await byok_api_client.get("/api/v1/admin/byok/validation-runs?limit=25&offset=0")
+    assert list_resp.status_code == 200, list_resp.text
+    listed = list_resp.json()
+    assert listed["total"] == 1
+    assert listed["pagination"]["total"] == 1
+    assert listed["pagination"]["limit"] == 25
+    assert listed["pagination"]["offset"] == 0
+    assert listed["pagination"]["has_more"] is False
+    assert listed["pagination"]["next_offset"] is None
+    assert listed["has_more"] is False
+    assert listed["next_offset"] is None
+    assert listed["items"][0]["id"] == "run-1"
 
-            list_resp = client.get("/api/v1/admin/byok/validation-runs?limit=25&offset=0")
-            assert list_resp.status_code == 200, list_resp.text
-            listed = list_resp.json()
-            assert listed["total"] == 1
-            assert listed["items"][0]["id"] == "run-1"
-
-            detail_resp = client.get("/api/v1/admin/byok/validation-runs/run-1")
-            assert detail_resp.status_code == 200, detail_resp.text
-            assert detail_resp.json()["id"] == "run-1"
-            assert detail_resp.json()["keys_checked"] == 5
-    finally:
-        app.dependency_overrides.clear()
+    detail_resp = await byok_api_client.get("/api/v1/admin/byok/validation-runs/run-1")
+    assert detail_resp.status_code == 200, detail_resp.text
+    assert detail_resp.json()["id"] == "run-1"
+    assert detail_resp.json()["keys_checked"] == 5
 
 
 @pytest.mark.asyncio
-async def test_admin_byok_validation_create_maps_active_run_conflict(monkeypatch, tmp_path) -> None:
-    _setup_env(monkeypatch, user_db_base=str(tmp_path / "user_dbs"))
-
+async def test_admin_byok_validation_create_maps_active_run_conflict(byok_api_client) -> None:
     from tldw_Server_API.app.api.v1.endpoints.admin import admin_byok
 
     app.dependency_overrides[admin_byok.get_admin_byok_validation_service] = (
@@ -162,24 +220,17 @@ async def test_admin_byok_validation_create_maps_active_run_conflict(monkeypatch
     )
     app.dependency_overrides[admin_byok.get_byok_validation_job_enqueuer] = lambda: _noop_enqueue_run
 
-    headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
-
-    try:
-        with TestClient(app, headers=headers) as client:
-            response = client.post(
-                "/api/v1/admin/byok/validation-runs",
-                json={"org_id": 42, "provider": "openai"},
-            )
-            assert response.status_code == 409, response.text
-            assert response.json()["detail"] == "active_validation_run_exists"
-    finally:
-        app.dependency_overrides.clear()
+    with _validation_worker_enabled():
+        response = await byok_api_client.post(
+            "/api/v1/admin/byok/validation-runs",
+            json={"org_id": 42, "provider": "openai"},
+        )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "active_validation_run_exists"
 
 
 @pytest.mark.asyncio
-async def test_admin_byok_validation_detail_returns_not_found(monkeypatch, tmp_path) -> None:
-    _setup_env(monkeypatch, user_db_base=str(tmp_path / "user_dbs"))
-
+async def test_admin_byok_validation_detail_returns_not_found(byok_api_client) -> None:
     from tldw_Server_API.app.api.v1.endpoints.admin import admin_byok
 
     app.dependency_overrides[admin_byok.get_admin_byok_validation_service] = (
@@ -187,38 +238,23 @@ async def test_admin_byok_validation_detail_returns_not_found(monkeypatch, tmp_p
     )
     app.dependency_overrides[admin_byok.get_byok_validation_job_enqueuer] = lambda: _noop_enqueue_run
 
-    headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
-
-    try:
-        with TestClient(app, headers=headers) as client:
-            response = client.get("/api/v1/admin/byok/validation-runs/missing")
-            assert response.status_code == 404, response.text
-            assert response.json()["detail"] == "byok_validation_run_not_found"
-    finally:
-        app.dependency_overrides.clear()
+    response = await byok_api_client.get("/api/v1/admin/byok/validation-runs/missing")
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"] == "byok_validation_run_not_found"
 
 
 @pytest.mark.asyncio
-async def test_admin_byok_validation_create_fails_closed_when_worker_is_disabled(monkeypatch, tmp_path) -> None:
-    _setup_env(monkeypatch, user_db_base=str(tmp_path / "user_dbs"))
-    monkeypatch.delenv("ADMIN_BYOK_VALIDATION_JOBS_WORKER_ENABLED", raising=False)
-
+async def test_admin_byok_validation_create_fails_closed_when_worker_is_disabled(byok_api_client) -> None:
     from tldw_Server_API.app.api.v1.endpoints.admin import admin_byok
 
     service = _FakeByokValidationService()
     app.dependency_overrides[admin_byok.get_admin_byok_validation_service] = lambda: service
     app.dependency_overrides[admin_byok.get_byok_validation_job_enqueuer] = lambda: _noop_enqueue_run
 
-    headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
-
-    try:
-        with TestClient(app, headers=headers) as client:
-            response = client.post(
-                "/api/v1/admin/byok/validation-runs",
-                json={"org_id": 42, "provider": "openai"},
-            )
-            assert response.status_code == 503, response.text
-            assert response.json()["detail"] == "byok_validation_worker_unavailable"
-            assert service.created_calls == []
-    finally:
-        app.dependency_overrides.clear()
+    response = await byok_api_client.post(
+        "/api/v1/admin/byok/validation-runs",
+        json={"org_id": 42, "provider": "openai"},
+    )
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "byok_validation_worker_unavailable"
+    assert service.created_calls == []

@@ -1,6 +1,5 @@
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Empty,
@@ -14,10 +13,9 @@ import {
   Typography
 } from "antd"
 import { X, Minus, Check, Star, Calendar, Undo2 } from "lucide-react"
-import dayjs from "dayjs"
-import relativeTime from "dayjs/plugin/relativeTime"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
+import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import type { DeckReviewPromptSide, Flashcard, FlashcardUpdate } from "@/services/flashcards"
 import { getSetting, setSetting } from "@/services/settings/registry"
@@ -43,6 +41,7 @@ import {
   useNextDueQuery
 } from "../hooks"
 import {
+  DeckStudyDashboard,
   MarkdownWithBoundary,
   ReviewProgress,
   ReviewAnalyticsSummary,
@@ -51,6 +50,10 @@ import {
 } from "../components"
 import { RecentStudySessions } from "../components/RecentStudySessions"
 import { calculateIntervals } from "../utils/calculateIntervals"
+import {
+  formatFlashcardLongDateTime,
+  formatFlashcardRelativeTime
+} from "../utils/date-display"
 import { formatCardType } from "../utils/model-type-labels"
 import { FlashcardQueueStateBadge } from "../utils/queue-state-badges"
 import { buildReviewUndoState } from "../utils/review-undo"
@@ -72,9 +75,8 @@ import {
 import { buildQuizAssessmentRouteFromFlashcards } from "@/services/tldw/quiz-flashcards-handoff"
 import { useFlashcardsShortcutHintDensity } from "../hooks/useFlashcardsShortcutHintDensity"
 
-dayjs.extend(relativeTime)
-
 const { Text, Title } = Typography
+const CRAM_AVAILABILITY_LIMIT = 1
 
 interface ReviewTabProps {
   onNavigateToCreate: () => void
@@ -85,6 +87,9 @@ interface ReviewTabProps {
   onClearOverride?: () => void
   isActive: boolean
   forceShowWorkspaceItems?: boolean
+  onNavigateToManageDeck?: (deckId: number) => void
+  onNavigateToSchedulerDeck?: (deckId: number) => void
+  onNavigateToExportDeck?: (deckId: number) => void
 }
 
 interface ReviewFailureState {
@@ -109,7 +114,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   reviewOverrideCard,
   onClearOverride,
   isActive,
-  forceShowWorkspaceItems = false
+  forceShowWorkspaceItems = false,
+  onNavigateToManageDeck,
+  onNavigateToSchedulerDeck,
+  onNavigateToExportDeck
 }) => {
   const { t } = useTranslation(["option", "common"])
   const navigate = useNavigate()
@@ -157,6 +165,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const [isReviewOnboardingDismissed, setIsReviewOnboardingDismissed] = React.useState(false)
   const [activeReviewSessionId, setActiveReviewSessionId] = React.useState<number | null>(null)
   const [selectedStudySessionId, setSelectedStudySessionId] = React.useState<number | null>(null)
+  const [allDeckReviewStarted, setAllDeckReviewStarted] = React.useState(false)
   const [shortcutHintDensity, setShortcutHintDensity] = useFlashcardsShortcutHintDensity()
   const [sessionReviewPromptSide, setSessionReviewPromptSide] = React.useState<DeckReviewPromptSide | null>(null)
 
@@ -198,10 +207,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     ...(directPathVisibilityOptions ?? {})
   })
   const cramTagFilter = cramTag.trim() || undefined
-  const cramQueueQuery = useCramQueueQuery(reviewDeckId, cramTagFilter, {
-    enabled: reviewMode === "cram",
-    ...(directPathVisibilityOptions ?? {})
-  })
   const reviewMutation = useReviewFlashcardMutation()
   const updateMutation = useUpdateFlashcardMutation()
   const resetSchedulingMutation = useResetFlashcardSchedulingMutation()
@@ -212,31 +217,110 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const hasCardsQuery = useHasCardsQuery(directPathVisibilityOptions)
   const nextDueQuery = useNextDueQuery(reviewDeckId, directPathVisibilityOptions)
   const endReviewSessionMutation = useEndFlashcardReviewSessionMutation()
+  const activeCramTagFilter = reviewMode === "cram" ? cramTagFilter : undefined
+  const rawDueModeActiveCard = localOverrideCard ?? reviewOverrideCard ?? reviewQuery.data
+  const isAllDeckDueReview = reviewMode === "due" && reviewDeckId == null
+  const canShowAllDeckDashboard =
+    isAllDeckDueReview &&
+    hasCardsQuery.data !== false &&
+    rawDueModeActiveCard != null &&
+    !allDeckReviewStarted &&
+    !reviewOverrideCard &&
+    !localOverrideCard
+  const dueModeActiveCard = canShowAllDeckDashboard ? null : rawDueModeActiveCard
+  const isReviewCardLoading =
+    reviewMode === "due" && (reviewQuery.isLoading || reviewQuery.isFetching)
+  const isDueModeCaughtUp =
+    reviewMode === "due" &&
+    !dueModeActiveCard &&
+    !isReviewCardLoading &&
+    hasCardsQuery.data === true &&
+    dueCountsQuery.data != null &&
+    (dueCountsQuery.data.due ?? 0) === 0 &&
+    (dueCountsQuery.data.new ?? 0) === 0 &&
+    (dueCountsQuery.data.learning ?? 0) === 0
+  const shouldLoadCramQueue =
+    reviewMode === "cram" || (isActive && isDueModeCaughtUp)
+  const cramQueueQuery = useCramQueueQuery(reviewDeckId, activeCramTagFilter, {
+    enabled: shouldLoadCramQueue,
+    ...(reviewMode === "cram" ? {} : { limit: CRAM_AVAILABILITY_LIMIT }),
+    ...(directPathVisibilityOptions ?? {})
+  })
   const nextDueInfo = nextDueQuery.data
+  const nextDueRelativeLabel = nextDueInfo?.nextDueAt
+    ? formatFlashcardRelativeTime(nextDueInfo.nextDueAt)
+    : null
+  const nextDueAbsoluteLabel = nextDueInfo?.nextDueAt
+    ? formatFlashcardLongDateTime(nextDueInfo.nextDueAt)
+    : null
   const cramQueue = cramQueueQuery.data || []
+  const hasCramPracticeCards = cramQueue.length > 0
   const cramQueueCard =
     reviewMode === "cram" && cramQueueIndex < cramQueue.length
       ? cramQueue[cramQueueIndex]
       : null
   const activeCard =
-    localOverrideCard ??
-    reviewOverrideCard ??
-    (reviewMode === "cram" ? cramQueueCard : reviewQuery.data)
+    reviewMode === "cram"
+      ? localOverrideCard ?? reviewOverrideCard ?? cramQueueCard
+      : dueModeActiveCard
+  const isCramQueueLoading =
+    reviewMode === "cram" && (cramQueueQuery.isLoading || cramQueueQuery.isFetching)
+  const deckDashboardAnalyticsQuery = useReviewAnalyticsSummaryQuery(null, {
+    enabled: isActive && !activeCard && !isReviewCardLoading && !isCramQueueLoading,
+    ...(directPathVisibilityOptions ?? {})
+  })
   const assistantQuery = useFlashcardAssistantQuery(activeCard?.uuid, {
     enabled: isActive && !!activeCard
   })
   const assistantRespondMutation = useFlashcardAssistantRespondMutation()
   const reviewProgressTotal =
     reviewMode === "cram" ? cramQueue.length : dueCountsQuery.data?.total ?? 0
+  const scheduledDueCount = reviewMode === "cram" ? undefined : dueCountsQuery.data?.due
+  const availableNowCount =
+    reviewMode === "cram"
+      ? cramQueue.length
+      : dueCountsQuery.data
+        ? (dueCountsQuery.data.due ?? 0) +
+          (dueCountsQuery.data.new ?? 0) +
+          (dueCountsQuery.data.learning ?? 0)
+        : undefined
   const isCramMode = reviewMode === "cram"
-  const showTopBarCreateCta = !activeCard
+  const showTopBarCreateCta = !activeCard && !canShowAllDeckDashboard
+  const handleDashboardReviewDeck = React.useCallback(
+    (deckId: number) => {
+      onReviewDeckChange(deckId)
+      setReviewMode("due")
+      setCramQueueIndex(0)
+      setSelectedStudySessionId(null)
+      if (reviewOverrideCard) {
+        onClearOverride?.()
+      }
+    },
+    [onClearOverride, onReviewDeckChange, reviewOverrideCard]
+  )
+  const handleDashboardCramDeck = React.useCallback(
+    (deckId: number) => {
+      onReviewDeckChange(deckId)
+      setReviewMode("cram")
+      setCramQueueIndex(0)
+      setSelectedStudySessionId(null)
+      if (reviewOverrideCard) {
+        onClearOverride?.()
+      }
+    },
+    [onClearOverride, onReviewDeckChange, reviewOverrideCard]
+  )
+  const handleStartAllDeckReview = React.useCallback(() => {
+    setAllDeckReviewStarted(true)
+    setSelectedStudySessionId(null)
+  }, [])
   const reviewScopeKey = React.useMemo(
     () => [
       reviewMode,
       reviewDeckId != null ? `deck:${reviewDeckId}` : "global",
-      cramTagFilter ? `tag:${cramTagFilter}` : "untagged"
+      activeCramTagFilter ? `tag:${activeCramTagFilter}` : "untagged"
     ].join(":"),
-    [cramTagFilter, reviewDeckId, reviewMode]
+    [activeCramTagFilter, reviewDeckId, reviewMode]
   )
   const activeCardSource = React.useMemo(
     () => (activeCard ? getFlashcardSourceMeta(activeCard) : null),
@@ -543,11 +627,13 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           }
         }, 10000) // 10 second undo window
 
-        const dueLabel = reviewResult.due_at
-          ? dayjs(reviewResult.due_at).fromNow()
-          : t("option:flashcards.nextReviewUnknown", {
-              defaultValue: "soon"
-            })
+        const dueLabel =
+          (reviewResult.due_at
+            ? formatFlashcardRelativeTime(reviewResult.due_at)
+            : null) ??
+          t("option:flashcards.nextReviewUnknown", {
+            defaultValue: "soon"
+          })
         const intervalLabel =
           reviewResult.interval_days === 1
             ? t("option:flashcards.intervalOneDay", { defaultValue: "1 day" })
@@ -768,6 +854,38 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     )
   }, [activeCard?.uuid, lastReviewedCard, reviewedCount, message, t])
 
+  const renderUndoRatingAction = () => {
+    if (!showUndoButton || !lastReviewedCard) return null
+    return (
+      <div className="mt-3 pt-3 border-t border-border">
+        <Button
+          type="text"
+          icon={<Undo2 className="size-4" />}
+          onClick={handleUndoReview}
+          className="text-text-muted hover:text-text min-h-11 focus:ring-2 focus:ring-primary focus:ring-offset-2"
+          aria-label={t("option:flashcards.undoRatingAria", {
+            defaultValue: "Re-rate last card, {{seconds}} seconds remaining",
+            seconds: undoCountdown
+          })}
+          data-testid="flashcards-review-undo-rating"
+        >
+          <span className="flex items-center gap-2">
+            {t("option:flashcards.undoRating", {
+              defaultValue: "Re-rate last card"
+            })}
+            <span
+              className="inline-flex items-center justify-center min-w-6 h-6 px-1.5 rounded-full bg-surface2 text-xs font-medium tabular-nums"
+              role="timer"
+              aria-live="polite"
+            >
+              {undoCountdown}s
+            </span>
+          </span>
+        </Button>
+      </div>
+    )
+  }
+
   // Cleanup timeout and interval on unmount
   React.useEffect(() => {
     return () => {
@@ -939,6 +1057,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     setLastReviewedCard(null)
     setUndoCountdown(0)
     setSelectedStudySessionId(null)
+    setAllDeckReviewStarted(false)
     setSessionReviewPromptSide(null)
     autoEndSessionAttemptedRef.current = null
     autoRevealAnswerRef.current = false
@@ -1092,6 +1211,56 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         )}
       </div>
 
+      {canShowAllDeckDashboard && (
+        <div
+          className="mb-3 rounded border border-border bg-surface2 p-3"
+          data-testid="flashcards-review-deck-dashboard"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <Text strong className="block">
+                {t("option:flashcards.allDeckReviewDashboardTitle", {
+                  defaultValue: "Choose a study path"
+                })}
+              </Text>
+              <Text type="secondary" className="text-sm">
+                {t("option:flashcards.allDeckReviewDashboardDescription", {
+                  defaultValue:
+                    "Start with all due cards, or pick a specific deck below."
+                })}
+              </Text>
+            </div>
+            <Button
+              type="primary"
+              onClick={handleStartAllDeckReview}
+              loading={isReviewCardLoading}
+              disabled={!rawDueModeActiveCard}
+              data-testid="flashcards-review-all-due"
+            >
+              {t("option:flashcards.reviewAllDue", {
+                defaultValue: "Review all due"
+              })}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {!activeCard && (
+        <DeckStudyDashboard
+          decks={availableDecks}
+          deckProgress={deckDashboardAnalyticsQuery.data?.decks}
+          selectedDeckId={reviewDeckId ?? null}
+          isLoading={deckDashboardAnalyticsQuery.isLoading}
+          onReviewDeck={handleDashboardReviewDeck}
+          onCramDeck={handleDashboardCramDeck}
+          onManageDeck={(deckId) => {
+            onNavigateToManageDeck?.(deckId)
+          }}
+          onOpenScheduler={onNavigateToSchedulerDeck}
+          onExportDeck={onNavigateToExportDeck}
+        />
+      )}
+
       <ReviewAnalyticsSummary
         summary={analyticsSummaryQuery.data}
         isLoading={analyticsSummaryQuery.isLoading}
@@ -1103,6 +1272,8 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           dueCount={reviewProgressTotal}
           reviewedCount={reviewedCount}
           deckName={currentDeckName}
+          availableNowCount={availableNowCount}
+          scheduledDueCount={scheduledDueCount}
         />
       )}
 
@@ -1203,6 +1374,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
 
             <div className="relative">
               <FlashcardStudyAssistantPanel
+                key={activeCard.uuid}
                 cardUuid={activeCard.uuid}
                 threadVersion={assistantQuery.data?.thread.version ?? null}
                 messages={assistantQuery.data?.messages ?? []}
@@ -1214,6 +1386,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                 isResponding={assistantRespondMutation.isPending}
                 onReloadContext={() => assistantQuery.refetch()}
                 onRespond={handleAssistantRespond}
+                defaultExpanded={showAnswer}
               />
               <FeatureHint
                 featureKey="flashcards_study_assistant_discovery"
@@ -1343,18 +1516,21 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                     </div>
                     {reviewFailure && (
                       <Alert
-                        showIcon
-                        type={
+                        variant={
                           reviewFailure.code === "FLASHCARDS_VERSION_CONFLICT"
                             ? "warning"
                             : "error"
                         }
+                        className="w-full text-left"
                         title={t("option:flashcards.reviewRetryTitle", {
                           defaultValue: "Review not saved"
                         })}
-                        description={reviewFailure.message}
                         data-testid="flashcards-review-retry-alert"
-                        action={
+                      >
+                        <div className="space-y-2">
+                          <Text type="secondary" className="block">
+                            {reviewFailure.message}
+                          </Text>
                           <Space orientation="vertical" size={8}>
                             <Button
                               size="small"
@@ -1380,8 +1556,8 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                               </Button>
                             )}
                           </Space>
-                        }
-                      />
+                        </div>
+                      </Alert>
                     )}
                     <Text type="secondary" className="text-xs text-center">
                       {t("option:flashcards.ratingIntervalsMeaning", {
@@ -1472,37 +1648,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                       </Button>
                     </div>
 
-                    {/* Re-rate button - appears briefly after rating with countdown */}
-                    {showUndoButton && lastReviewedCard && (
-                      <div className="mt-3 pt-3 border-t border-border">
-                        <Button
-                          type="text"
-                          icon={<Undo2 className="size-4" />}
-                          onClick={handleUndoReview}
-                          className="text-text-muted hover:text-text min-h-11 focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                          aria-label={t("option:flashcards.undoRatingAria", {
-                            defaultValue: "Re-rate last card, {{seconds}} seconds remaining",
-                            seconds: undoCountdown
-                          })}
-                        >
-                          <span className="flex items-center gap-2">
-                            {t("option:flashcards.undoRating", {
-                              defaultValue: "Re-rate last card"
-                            })}
-                            <span
-                              className="inline-flex items-center justify-center min-w-6 h-6 px-1.5 rounded-full bg-surface2 text-xs font-medium tabular-nums"
-                              role="timer"
-                              aria-live="polite"
-                            >
-                              {undoCountdown}s
-                            </span>
-                          </span>
-                        </Button>
-                      </div>
-                    )}
                   </div>
                 </>
               )}
+              {renderUndoRatingAction()}
             </div>
           </div>
         </Card>
@@ -1532,72 +1681,81 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                 <>
                   {showReviewOnboardingGuide ? (
                     <Alert
-                      type="info"
-                      showIcon
+                      variant="info"
+                      aria-live="off"
                       className="w-full max-w-2xl text-left"
                       data-testid="flashcards-review-onboarding-guide"
                       title={t("option:flashcards.onboardingTitle", {
                         defaultValue: "How flashcard study works"
                       })}
-                      description={
-                        <div className="space-y-2">
-                          <Text type="secondary" className="block">
-                            {t("option:flashcards.onboardingDescription", {
-                              defaultValue:
-                                "Spaced repetition focuses on cards right before you forget them, so short daily sessions are enough."
-                            })}
-                          </Text>
-                          <ol className="mb-0 list-decimal pl-5 text-xs text-text-muted">
-                            <li>
-                              {t("option:flashcards.onboardingStepCreate", {
-                                defaultValue:
-                                  "Add cards manually, import a deck, or generate cards from text."
-                              })}
-                            </li>
-                            <li>
-                              {t("option:flashcards.onboardingStepReview", {
-                                defaultValue:
-                                  "Review due cards each day and reveal answers with Space."
-                              })}
-                            </li>
-                            <li>
-                              {t("option:flashcards.onboardingStepRate", {
-                                defaultValue:
-                                  "Rate recall with Again/Hard/Good/Easy so the next review is scheduled automatically."
-                              })}
-                            </li>
-                            <li className="text-text-muted">
-                              {t("option:flashcards.onboardingStepLlmNote", {
-                                defaultValue:
-                                  "Card generation and the study assistant require an LLM provider (configure in Settings)."
-                              })}
-                            </li>
-                          </ol>
-                          <a
-                            href={FLASHCARDS_HELP_LINKS.ratings}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-primary hover:underline"
-                            data-testid="flashcards-review-onboarding-doc-link"
-                          >
-                            {t("option:flashcards.onboardingDocLink", {
-                              defaultValue: "Open the full Flashcards study guide"
-                            })}
-                          </a>
-                        </div>
-                      }
-                      action={
-                        <Button
-                          size="small"
-                          onClick={() => setReviewOnboardingDismissed(true)}
-                          data-testid="flashcards-review-onboarding-dismiss"
-                        >
-                          {t("option:flashcards.onboardingDismiss", {
-                            defaultValue: "Hide guide"
+                    >
+                      <div className="space-y-2">
+                        <Text type="secondary" className="block">
+                          {t("option:flashcards.onboardingDescription", {
+                            defaultValue:
+                              "Spaced repetition focuses on cards right before you forget them, so short daily sessions are enough."
                           })}
-                        </Button>
-                      }
-                    />
+                        </Text>
+                        <ol className="mb-0 list-decimal pl-5 text-xs text-text-muted">
+                          <li>
+                            {t("option:flashcards.onboardingStepCreate", {
+                              defaultValue:
+                                "Add cards manually, import a deck, or generate cards from text."
+                            })}
+                          </li>
+                          <li>
+                            {t("option:flashcards.onboardingStepReview", {
+                              defaultValue:
+                                "Review due cards each day and reveal answers with Space."
+                            })}
+                          </li>
+                          <li>
+                            {t("option:flashcards.onboardingStepRate", {
+                              defaultValue:
+                                "Rate recall with Again/Hard/Good/Easy so the next review is scheduled automatically."
+                            })}
+                          </li>
+                          <li className="text-text-muted">
+                            {t("option:flashcards.onboardingStepLlmNote", {
+                              defaultValue:
+                                "Card generation and the study assistant require an LLM provider (configure in Settings)."
+                            })}
+                          </li>
+                        </ol>
+                        <Text
+                          type="secondary"
+                          className="block text-xs"
+                          data-testid="flashcards-review-scheduler-preview"
+                        >
+                          {t("option:flashcards.onboardingSchedulerPreview", {
+                            defaultValue:
+                              "Scheduler defaults become available after you create a deck. Use Scheduler to tune daily limits and review algorithm settings before future sessions."
+                          })}
+                        </Text>
+                        <a
+                          href={FLASHCARDS_HELP_LINKS.ratings}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary hover:underline"
+                          data-testid="flashcards-review-onboarding-doc-link"
+                        >
+                          {t("option:flashcards.onboardingDocLink", {
+                            defaultValue: "Open the full Flashcards study guide"
+                          })}
+                        </a>
+                        <div>
+                          <Button
+                            size="small"
+                            onClick={() => setReviewOnboardingDismissed(true)}
+                            data-testid="flashcards-review-onboarding-dismiss"
+                          >
+                            {t("option:flashcards.onboardingDismiss", {
+                              defaultValue: "Hide guide"
+                            })}
+                          </Button>
+                        </div>
+                      </div>
+                    </Alert>
                   ) : (
                     <Button
                       type="link"
@@ -1689,12 +1847,12 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                             <Text strong>
                               {t("option:flashcards.nextDueAt", {
                                 defaultValue: "Next review: {{time}}",
-                                time: dayjs(nextDueInfo.nextDueAt).fromNow()
+                                time: nextDueRelativeLabel ?? nextDueInfo.nextDueAt
                               })}
                             </Text>
                           </div>
                           <Text type="secondary" className="text-xs mt-1 block">
-                            {dayjs(nextDueInfo.nextDueAt).format("dddd, MMMM D [at] h:mm A")}
+                            {nextDueAbsoluteLabel ?? nextDueInfo.nextDueAt}
                             {" · "}
                             {t("option:flashcards.nextDueCardCount", {
                               defaultValue: "{{count}} cards due",
@@ -1721,11 +1879,48 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                     </div>
                   )}
 
-                  <Button type="link" onClick={onNavigateToCreate}>
-                    {t("option:flashcards.createMoreCards", {
-                      defaultValue: "Create card"
-                    })}
-                  </Button>
+                  {renderUndoRatingAction()}
+                  <Space wrap>
+                    {hasCramPracticeCards && (
+                      <Button
+                        type="primary"
+                        onClick={() => {
+                          setReviewMode("cram")
+                          setCramQueueIndex(0)
+                          setSelectedStudySessionId(null)
+                        }}
+                        data-testid="flashcards-review-practice-again"
+                      >
+                        {t("option:flashcards.practiceAgain", {
+                          defaultValue: "Practice again"
+                        })}
+                      </Button>
+                    )}
+                    <Button onClick={onNavigateToCreate}>
+                      {t("option:flashcards.createMoreCards", {
+                        defaultValue: "Create card"
+                      })}
+                    </Button>
+                    {reviewDeckId != null && (
+                      <Button
+                        onClick={() => {
+                          const schedulerParams = new URLSearchParams({
+                            tab: "scheduler",
+                            deck_id: String(reviewDeckId)
+                          })
+                          if (forceShowWorkspaceItems) {
+                            schedulerParams.set("include_workspace_items", "1")
+                          }
+                          navigate(`/flashcards?${schedulerParams.toString()}`)
+                        }}
+                        data-testid="flashcards-review-open-scheduler"
+                      >
+                        {t("option:flashcards.openScheduler", {
+                          defaultValue: "Open scheduler"
+                        })}
+                      </Button>
+                    )}
+                  </Space>
                   {activeReviewSessionId != null && (
                     <Button
                       type="default"
@@ -1758,6 +1953,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
       <div className="mt-4">
         <RecentStudySessions
           deckId={reviewDeckId ?? null}
+          decks={availableDecks}
           selectedSessionId={selectedStudySessionId}
           onOpenSession={(sessionId) => {
             setSelectedStudySessionId(sessionId)

@@ -30,6 +30,8 @@ const LazyExportDialog = React.lazy(() =>
   import("./ExportDialog").then((module) => ({ default: module.ExportDialog })),
 )
 
+export { buildConferenceCollectionKnowledgeQaOptions } from "./conference-scope"
+
 const ROUTE_HYDRATION_RETRY_DELAY_MS = 1500
 const ROUTE_HYDRATION_MAX_RETRIES = 2
 
@@ -290,7 +292,7 @@ function KnowledgeQAContent() {
           <div className="text-center max-w-md">
             <WifiOff className="w-16 h-16 mx-auto mb-4 text-text-muted" />
             <h2 className="text-xl font-semibold mb-2">
-              Setup Required
+              Finish setup to use Knowledge QA
             </h2>
             <p className="text-text-muted mb-4">
               Complete the server setup to start searching your documents.

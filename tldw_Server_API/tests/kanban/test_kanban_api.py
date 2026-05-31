@@ -12,7 +12,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.Kanban_DB import KanbanDB
+from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
+    InputError,
+    KanbanDB,
+    KanbanDBError,
+    NotFoundError,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 
@@ -164,6 +169,132 @@ def test_board_list_pagination_legacy_page_params(client_with_kanban_db):
     assert len(payload["boards"]) <= 2
 
 
+def test_board_create_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while creating board")
+
+    monkeypatch.setattr(db, "create_board", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Broken Board", "client_id": "board-db-create-1"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create board"
+
+
+def test_board_list_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while listing boards")
+
+    monkeypatch.setattr(db, "list_boards", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/boards")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch boards"
+
+
+def test_board_get_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while loading board")
+
+    monkeypatch.setattr(db, "get_board_with_lists_and_cards", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/boards/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch board"
+
+
+def test_board_update_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while updating board")
+
+    monkeypatch.setattr(db, "update_board", _raise_db_error)
+
+    response = client.patch(
+        "/api/v1/kanban/boards/999",
+        json={"name": "Broken Update"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update board"
+
+
+def test_board_archive_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while archiving board")
+
+    monkeypatch.setattr(db, "archive_board", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/boards/999/archive")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to archive board"
+
+
+def test_board_unarchive_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while unarchiving board")
+
+    monkeypatch.setattr(db, "archive_board", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/boards/999/unarchive")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to unarchive board"
+
+
+def test_board_delete_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while deleting board")
+
+    monkeypatch.setattr(db, "delete_board", _raise_db_error)
+
+    response = client.delete("/api/v1/kanban/boards/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete board"
+
+
+def test_board_restore_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while restoring board")
+
+    monkeypatch.setattr(db, "restore_board", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/boards/999/restore")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to restore board"
+
+
 # =============================================================================
 # List CRUD Tests
 # =============================================================================
@@ -214,12 +345,18 @@ def test_list_crud(client_with_kanban_db):
     assert reorder_resp.status_code == 200
 
     # Archive and unarchive
-    client.post(f"/api/v1/kanban/lists/{list_id}/archive")
-    client.post(f"/api/v1/kanban/lists/{list_id}/unarchive")
+    archive_resp = client.post(f"/api/v1/kanban/lists/{list_id}/archive")
+    assert archive_resp.status_code == 200
+
+    unarchive_resp = client.post(f"/api/v1/kanban/lists/{list_id}/unarchive")
+    assert unarchive_resp.status_code == 200
 
     # Delete and restore
-    client.delete(f"/api/v1/kanban/lists/{list_id}")
-    client.post(f"/api/v1/kanban/lists/{list_id}/restore")
+    delete_resp = client.delete(f"/api/v1/kanban/lists/{list_id}")
+    assert delete_resp.status_code == 200
+
+    restore_resp = client.post(f"/api/v1/kanban/lists/{list_id}/restore")
+    assert restore_resp.status_code == 200
 
 
 def test_list_update_position_and_reorder_legacy_payload(client_with_kanban_db):
@@ -267,6 +404,210 @@ def test_list_update_position_and_reorder_legacy_payload(client_with_kanban_db):
 
     reordered = client.get(f"/api/v1/kanban/boards/{board['id']}/lists").json()["lists"]
     assert [l["id"] for l in reordered] == [list_b["id"], list_c["id"], list_a["id"]]
+
+
+def test_get_single_list(client_with_kanban_db):
+
+    client, _db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Single List Board", "client_id": "board-single-list-1"},
+    ).json()
+    lst = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/lists",
+        json={"name": "Single List", "client_id": "list-single-1"},
+    ).json()
+
+    response = client.get(f"/api/v1/kanban/lists/{lst['id']}")
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["id"] == lst["id"]
+    assert data["name"] == "Single List"
+
+
+def test_list_create_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "List Error Board", "client_id": "board-list-db-create-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while creating list")
+
+    monkeypatch.setattr(db, "create_list", _raise_db_error)
+
+    response = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/lists",
+        json={"name": "Broken List", "client_id": "list-db-create-1"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create list"
+
+
+def test_list_list_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "List Error Board", "client_id": "board-list-db-list-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while listing lists")
+
+    monkeypatch.setattr(db, "list_lists", _raise_db_error)
+
+    response = client.get(f"/api/v1/kanban/boards/{board['id']}/lists")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch lists"
+
+
+def test_get_single_list_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while loading list")
+
+    monkeypatch.setattr(db, "get_list", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/lists/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch list"
+
+
+def test_list_update_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while updating list")
+
+    monkeypatch.setattr(db, "update_list", _raise_db_error)
+
+    response = client.patch(
+        "/api/v1/kanban/lists/999",
+        json={"name": "Broken Update"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update list"
+
+
+def test_list_reorder_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "List Error Board", "client_id": "board-list-db-reorder-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while reordering lists")
+
+    monkeypatch.setattr(db, "reorder_lists", _raise_db_error)
+
+    response = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/lists/reorder",
+        json={"ids": [1]},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to reorder lists"
+
+
+def test_list_activities_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "List Error Board", "client_id": "board-list-db-activities-1"},
+    ).json()
+    lst = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/lists",
+        json={"name": "Activity List", "client_id": "list-db-activities-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while loading list activities")
+
+    monkeypatch.setattr(db, "get_list_activities", _raise_db_error)
+
+    response = client.get(f"/api/v1/kanban/lists/{lst['id']}/activities")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch list activities"
+
+
+def test_list_archive_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while archiving list")
+
+    monkeypatch.setattr(db, "archive_list", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/lists/999/archive")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to archive list"
+
+
+def test_list_unarchive_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while unarchiving list")
+
+    monkeypatch.setattr(db, "archive_list", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/lists/999/unarchive")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to unarchive list"
+
+
+def test_list_delete_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while deleting list")
+
+    monkeypatch.setattr(db, "delete_list", _raise_db_error)
+
+    response = client.delete("/api/v1/kanban/lists/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete list"
+
+
+def test_list_restore_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while restoring list")
+
+    monkeypatch.setattr(db, "restore_list", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/lists/999/restore")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to restore list"
 
 
 # =============================================================================
@@ -353,6 +694,158 @@ def test_card_crud(client_with_kanban_db):
     client.post(f"/api/v1/kanban/cards/{card_id}/restore")
 
 
+def test_card_create_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while creating card")
+
+    monkeypatch.setattr(db, "create_card", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/lists/999/cards",
+        json={"title": "Broken Card", "client_id": "card-db-create-1"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create card"
+
+
+def test_card_list_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while listing cards")
+
+    monkeypatch.setattr(db, "list_cards", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/lists/999/cards")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch cards"
+
+
+def test_card_get_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while fetching card")
+
+    monkeypatch.setattr(db, "get_card_with_details", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/cards/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch card"
+
+
+def test_card_update_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while updating card")
+
+    monkeypatch.setattr(db, "update_card", _raise_db_error)
+
+    response = client.patch(
+        "/api/v1/kanban/cards/999",
+        json={"title": "Still Broken"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update card"
+
+
+def test_card_move_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while moving card")
+
+    monkeypatch.setattr(db, "move_card", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/999/move",
+        json={"target_list_id": 1000},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to move card"
+
+
+def test_card_copy_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while copying card")
+
+    monkeypatch.setattr(db, "copy_card_with_checklists", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/999/copy",
+        json={"target_list_id": 1000, "new_client_id": "card-copy-db-1"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to copy card"
+
+
+def test_card_archive_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while archiving card")
+
+    monkeypatch.setattr(db, "archive_card", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/cards/999/archive")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to archive card"
+
+
+def test_card_unarchive_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while unarchiving card")
+
+    monkeypatch.setattr(db, "archive_card", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/cards/999/unarchive")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to unarchive card"
+
+
+def test_card_delete_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while deleting card")
+
+    monkeypatch.setattr(db, "delete_card", _raise_db_error)
+
+    response = client.delete("/api/v1/kanban/cards/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete card"
+
+
+def test_card_restore_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while restoring card")
+
+    monkeypatch.setattr(db, "restore_card", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/cards/999/restore")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to restore card"
+
+
 def test_card_create_accepts_label_ids_and_reorder_legacy_payload(client_with_kanban_db):
     """Card create label_ids + card_positions reorder payload should work."""
     client, _db = client_with_kanban_db
@@ -407,6 +900,23 @@ def test_card_create_accepts_label_ids_and_reorder_legacy_payload(client_with_ka
 
     cards = client.get(f"/api/v1/kanban/lists/{lst['id']}/cards").json()["cards"]
     assert [c["id"] for c in cards] == [card2["id"], card1["id"]]
+
+
+def test_reorder_cards_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while reordering cards")
+
+    monkeypatch.setattr(db, "reorder_cards", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/lists/999/cards/reorder",
+        json={"ids": [1, 2]},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to reorder cards"
 
 
 def test_search_supports_legacy_page_params(client_with_kanban_db):
@@ -501,6 +1011,20 @@ def test_activity_endpoints_filters(client_with_kanban_db):
     assert any(a["action_type"] == "card_created" for a in card_resp.json()["activities"])
 
 
+def test_card_activities_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while fetching card activities")
+
+    monkeypatch.setattr(db, "get_card_activities", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/cards/999/activities")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch card activities"
+
+
 # =============================================================================
 # Label CRUD Tests
 # =============================================================================
@@ -567,6 +1091,189 @@ def test_label_crud(client_with_kanban_db):
     assert del_resp.status_code == 204
 
 
+def test_label_create_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Label Error Board", "client_id": "board-label-db-create-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while creating label")
+
+    monkeypatch.setattr(db, "create_label", _raise_db_error)
+
+    response = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/labels",
+        json={"name": "Bug", "color": "red"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create label"
+
+
+def test_label_list_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Label Error Board", "client_id": "board-label-db-list-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while listing labels")
+
+    monkeypatch.setattr(db, "list_labels", _raise_db_error)
+
+    response = client.get(f"/api/v1/kanban/boards/{board['id']}/labels")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch labels"
+
+
+def test_label_get_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while loading label")
+
+    monkeypatch.setattr(db, "get_label", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/labels/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch label"
+
+
+def test_label_update_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while updating label")
+
+    monkeypatch.setattr(db, "update_label", _raise_db_error)
+
+    response = client.patch(
+        "/api/v1/kanban/labels/999",
+        json={"name": "Updated Label"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update label"
+
+
+def test_label_delete_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while deleting label")
+
+    monkeypatch.setattr(db, "delete_label", _raise_db_error)
+
+    response = client.delete("/api/v1/kanban/labels/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete label"
+
+
+def test_label_assign_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Label Assign Error Board", "client_id": "board-label-assign-db-1"},
+    ).json()
+    label = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/labels",
+        json={"name": "Bug", "color": "red"},
+    ).json()
+    lst = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/lists",
+        json={"name": "Label Assign Error List", "client_id": "list-label-assign-db-1"},
+    ).json()
+    card = client.post(
+        f"/api/v1/kanban/lists/{lst['id']}/cards",
+        json={"title": "Label Assign Error Card", "client_id": "card-label-assign-db-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while assigning label to card")
+
+    monkeypatch.setattr(db, "assign_label_to_card", _raise_db_error)
+
+    response = client.post(f"/api/v1/kanban/cards/{card['id']}/labels/{label['id']}")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to assign label to card"
+
+
+def test_card_label_list_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Card Labels Error Board", "client_id": "board-card-labels-db-1"},
+    ).json()
+    lst = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/lists",
+        json={"name": "Card Labels Error List", "client_id": "list-card-labels-db-1"},
+    ).json()
+    card = client.post(
+        f"/api/v1/kanban/lists/{lst['id']}/cards",
+        json={"title": "Card Labels Error Card", "client_id": "card-card-labels-db-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while listing card labels")
+
+    monkeypatch.setattr(db, "get_card_labels", _raise_db_error)
+
+    response = client.get(f"/api/v1/kanban/cards/{card['id']}/labels")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch card labels"
+
+
+def test_label_remove_from_card_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Label Remove Error Board", "client_id": "board-label-remove-db-1"},
+    ).json()
+    label = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/labels",
+        json={"name": "Bug", "color": "red"},
+    ).json()
+    lst = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/lists",
+        json={"name": "Label Remove Error List", "client_id": "list-label-remove-db-1"},
+    ).json()
+    card = client.post(
+        f"/api/v1/kanban/lists/{lst['id']}/cards",
+        json={"title": "Label Remove Error Card", "client_id": "card-label-remove-db-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while removing label from card")
+
+    monkeypatch.setattr(db, "remove_label_from_card", _raise_db_error)
+
+    response = client.delete(f"/api/v1/kanban/cards/{card['id']}/labels/{label['id']}")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to remove label from card"
+
+
 # =============================================================================
 # Checklist CRUD Tests
 # =============================================================================
@@ -622,6 +1329,137 @@ def test_checklist_crud(client_with_kanban_db):
     assert del_resp.status_code == 204
 
 
+def test_checklist_create_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while creating checklist")
+
+    monkeypatch.setattr(db, "create_checklist", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/cards/999/checklists", json={"name": "Checklist"})
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create checklist"
+
+
+def test_checklist_list_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while listing checklists")
+
+    monkeypatch.setattr(db, "list_checklists", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/cards/999/checklists")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch checklists"
+
+
+def test_checklist_get_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while loading checklist")
+
+    monkeypatch.setattr(db, "get_checklist_with_items", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/checklists/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch checklist"
+
+
+def test_checklist_update_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while updating checklist")
+
+    monkeypatch.setattr(db, "update_checklist", _raise_db_error)
+
+    response = client.patch("/api/v1/kanban/checklists/999", json={"name": "Updated Checklist"})
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update checklist"
+
+
+def test_checklist_delete_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while deleting checklist")
+
+    monkeypatch.setattr(db, "delete_checklist", _raise_db_error)
+
+    response = client.delete("/api/v1/kanban/checklists/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete checklist"
+
+
+def test_checklist_reorder(client_with_kanban_db):
+
+    client, _db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Checklist Reorder Board", "client_id": "board-checklist-reorder-1"},
+    ).json()
+    lst = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/lists",
+        json={"name": "Checklist Reorder List", "client_id": "list-checklist-reorder-1"},
+    ).json()
+    card = client.post(
+        f"/api/v1/kanban/lists/{lst['id']}/cards",
+        json={"title": "Checklist Reorder Card", "client_id": "card-checklist-reorder-1"},
+    ).json()
+
+    checklist_a = client.post(
+        f"/api/v1/kanban/cards/{card['id']}/checklists",
+        json={"name": "Checklist A"},
+    ).json()
+    checklist_b = client.post(
+        f"/api/v1/kanban/cards/{card['id']}/checklists",
+        json={"name": "Checklist B"},
+    ).json()
+
+    reorder_resp = client.post(
+        f"/api/v1/kanban/cards/{card['id']}/checklists/reorder",
+        json={"checklist_ids": [checklist_b["id"], checklist_a["id"]]},
+    )
+
+    assert reorder_resp.status_code == 200, reorder_resp.text
+    assert [entry["id"] for entry in reorder_resp.json()["checklists"]] == [
+        checklist_b["id"],
+        checklist_a["id"],
+    ]
+
+
+def test_checklist_reorder_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while reordering checklists")
+
+    monkeypatch.setattr(db, "reorder_checklists", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/999/checklists/reorder",
+        json={"checklist_ids": [1]},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to reorder checklists"
+
+
 def test_checklist_item_crud(client_with_kanban_db):
 
 
@@ -656,6 +1494,16 @@ def test_checklist_item_crud(client_with_kanban_db):
     assert item["name"] == "First Task"
     assert item["checked"] is False
 
+    # List items
+    list_resp = client.get(f"/api/v1/kanban/checklists/{checklist['id']}/items")
+    assert list_resp.status_code == 200
+    assert any(entry["id"] == item_id for entry in list_resp.json()["items"])
+
+    # Get item
+    get_resp = client.get(f"/api/v1/kanban/checklist-items/{item_id}")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["id"] == item_id
+
     # Check item
     check_resp = client.post(f"/api/v1/kanban/checklist-items/{item_id}/check")
     assert check_resp.status_code == 200
@@ -677,6 +1525,141 @@ def test_checklist_item_crud(client_with_kanban_db):
     # Delete item
     del_resp = client.delete(f"/api/v1/kanban/checklist-items/{item_id}")
     assert del_resp.status_code == 204
+
+
+def test_checklist_item_reorder(client_with_kanban_db):
+
+    client, _db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Checklist Item Reorder Board", "client_id": "board-checklist-item-reorder-1"},
+    ).json()
+    lst = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/lists",
+        json={"name": "Checklist Item Reorder List", "client_id": "list-checklist-item-reorder-1"},
+    ).json()
+    card = client.post(
+        f"/api/v1/kanban/lists/{lst['id']}/cards",
+        json={"title": "Checklist Item Reorder Card", "client_id": "card-checklist-item-reorder-1"},
+    ).json()
+    checklist = client.post(
+        f"/api/v1/kanban/cards/{card['id']}/checklists",
+        json={"name": "Checklist Reorder"},
+    ).json()
+
+    item_a = client.post(
+        f"/api/v1/kanban/checklists/{checklist['id']}/items",
+        json={"name": "Item A"},
+    ).json()
+    item_b = client.post(
+        f"/api/v1/kanban/checklists/{checklist['id']}/items",
+        json={"name": "Item B"},
+    ).json()
+
+    reorder_resp = client.post(
+        f"/api/v1/kanban/checklists/{checklist['id']}/items/reorder",
+        json={"item_ids": [item_b["id"], item_a["id"]]},
+    )
+
+    assert reorder_resp.status_code == 200, reorder_resp.text
+    assert [entry["id"] for entry in reorder_resp.json()["items"]] == [
+        item_b["id"],
+        item_a["id"],
+    ]
+
+
+def test_checklist_item_create_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while creating checklist item")
+
+    monkeypatch.setattr(db, "create_checklist_item", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/checklists/999/items", json={"name": "Item"})
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create checklist item"
+
+
+def test_checklist_item_list_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while listing checklist items")
+
+    monkeypatch.setattr(db, "list_checklist_items", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/checklists/999/items")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch checklist items"
+
+
+def test_checklist_item_get_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while loading checklist item")
+
+    monkeypatch.setattr(db, "get_checklist_item", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/checklist-items/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch checklist item"
+
+
+def test_checklist_item_update_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while updating checklist item")
+
+    monkeypatch.setattr(db, "update_checklist_item", _raise_db_error)
+
+    response = client.patch("/api/v1/kanban/checklist-items/999", json={"name": "Updated Item"})
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update checklist item"
+
+
+def test_checklist_item_delete_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while deleting checklist item")
+
+    monkeypatch.setattr(db, "delete_checklist_item", _raise_db_error)
+
+    response = client.delete("/api/v1/kanban/checklist-items/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete checklist item"
+
+
+def test_checklist_item_reorder_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while reordering checklist items")
+
+    monkeypatch.setattr(db, "reorder_checklist_items", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/checklists/999/items/reorder",
+        json={"item_ids": [1]},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to reorder checklist items"
 
 
 def test_toggle_all_checklist_items(client_with_kanban_db):
@@ -724,6 +1707,51 @@ def test_toggle_all_checklist_items(client_with_kanban_db):
     assert toggle_resp2.status_code == 200
     result2 = toggle_resp2.json()
     assert not any(item["checked"] for item in result2["items"])
+
+
+def test_checklist_item_check_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while checking checklist item")
+
+    monkeypatch.setattr(db, "update_checklist_item", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/checklist-items/999/check")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to check checklist item"
+
+
+def test_checklist_item_uncheck_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while unchecking checklist item")
+
+    monkeypatch.setattr(db, "update_checklist_item", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/checklist-items/999/uncheck")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to uncheck checklist item"
+
+
+def test_toggle_all_checklist_items_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while toggling checklist items")
+
+    monkeypatch.setattr(db, "toggle_all_checklist_items", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/checklists/999/toggle-all", json={"checked": True})
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to toggle checklist items"
 
 
 # =============================================================================
@@ -776,6 +1804,113 @@ def test_comment_crud(client_with_kanban_db):
     assert del_resp.status_code == 204
 
 
+def test_comment_create_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Comment Error Board", "client_id": "board-comment-db-create-1"},
+    ).json()
+    lst = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/lists",
+        json={"name": "Comment Error List", "client_id": "list-comment-db-create-1"},
+    ).json()
+    card = client.post(
+        f"/api/v1/kanban/lists/{lst['id']}/cards",
+        json={"title": "Comment Error Card", "client_id": "card-comment-db-create-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while creating comment")
+
+    monkeypatch.setattr(db, "create_comment", _raise_db_error)
+
+    response = client.post(
+        f"/api/v1/kanban/cards/{card['id']}/comments",
+        json={"content": "This should fail", "author_name": "Tester"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create comment"
+
+
+def test_comment_list_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Comment Error Board", "client_id": "board-comment-db-list-1"},
+    ).json()
+    lst = client.post(
+        f"/api/v1/kanban/boards/{board['id']}/lists",
+        json={"name": "Comment Error List", "client_id": "list-comment-db-list-1"},
+    ).json()
+    card = client.post(
+        f"/api/v1/kanban/lists/{lst['id']}/cards",
+        json={"title": "Comment Error Card", "client_id": "card-comment-db-list-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while listing comments")
+
+    monkeypatch.setattr(db, "list_comments", _raise_db_error)
+
+    response = client.get(f"/api/v1/kanban/cards/{card['id']}/comments")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch comments"
+
+
+def test_comment_get_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while loading comment")
+
+    monkeypatch.setattr(db, "get_comment", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/comments/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch comment"
+
+
+def test_comment_update_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while updating comment")
+
+    monkeypatch.setattr(db, "update_comment", _raise_db_error)
+
+    response = client.patch(
+        "/api/v1/kanban/comments/999",
+        json={"content": "This should fail"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update comment"
+
+
+def test_comment_delete_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while deleting comment")
+
+    monkeypatch.setattr(db, "delete_comment", _raise_db_error)
+
+    response = client.delete("/api/v1/kanban/comments/999")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete comment"
+
+
 # =============================================================================
 # Bulk Operations Tests
 # =============================================================================
@@ -825,6 +1960,23 @@ def test_bulk_move_cards(client_with_kanban_db):
     assert card2["id"] in card_ids
 
 
+def test_bulk_move_cards_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while bulk moving cards")
+
+    monkeypatch.setattr(db, "bulk_move_cards", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/bulk-move",
+        json={"card_ids": [1, 2], "target_list_id": 999},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to bulk move cards"
+
+
 def test_bulk_archive_cards(client_with_kanban_db):
 
 
@@ -866,6 +2018,40 @@ def test_bulk_archive_cards(client_with_kanban_db):
     assert unarchive_resp.json()["unarchived_count"] == 2
 
 
+def test_bulk_archive_cards_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while bulk archiving cards")
+
+    monkeypatch.setattr(db, "bulk_archive_cards", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/bulk-archive",
+        json={"card_ids": [1, 2]},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to bulk archive cards"
+
+
+def test_bulk_unarchive_cards_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while bulk unarchiving cards")
+
+    monkeypatch.setattr(db, "bulk_archive_cards", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/bulk-unarchive",
+        json={"card_ids": [1, 2]},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to bulk unarchive cards"
+
+
 def test_bulk_delete_cards(client_with_kanban_db):
 
 
@@ -897,6 +2083,23 @@ def test_bulk_delete_cards(client_with_kanban_db):
     )
     assert delete_resp.status_code == 200
     assert delete_resp.json()["deleted_count"] == 2
+
+
+def test_bulk_delete_cards_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while bulk deleting cards")
+
+    monkeypatch.setattr(db, "bulk_delete_cards", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/bulk-delete",
+        json={"card_ids": [1, 2]},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to bulk delete cards"
 
 
 def test_bulk_label_cards(client_with_kanban_db):
@@ -952,6 +2155,23 @@ def test_bulk_label_cards(client_with_kanban_db):
         }
     )
     assert remove_resp.status_code == 200
+
+
+def test_bulk_label_cards_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while bulk labeling cards")
+
+    monkeypatch.setattr(db, "bulk_label_cards", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/bulk-label",
+        json={"card_ids": [1, 2], "add_label_ids": [10]},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to bulk label cards"
 
 
 # =============================================================================
@@ -1040,6 +2260,20 @@ def test_filter_cards_by_label(client_with_kanban_db):
     assert result["cards"][0]["id"] == card1["id"]
 
 
+def test_filtered_cards_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while filtering cards")
+
+    monkeypatch.setattr(db, "get_board_cards_filtered", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/boards/999/cards")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch filtered cards"
+
+
 # =============================================================================
 # Card Copy with Checklists Tests
 # =============================================================================
@@ -1098,6 +2332,23 @@ def test_copy_card_with_checklists(client_with_kanban_db):
     assert copied_checklist["name"] == "Tasks"
 
 
+def test_copy_card_with_checklists_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while copying card with checklists")
+
+    monkeypatch.setattr(db, "copy_card_with_checklists", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/999/copy-with-checklists",
+        json={"target_list_id": 1000, "new_client_id": "copy-db-error-1"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to copy card"
+
+
 # =============================================================================
 # Export/Import Tests
 # =============================================================================
@@ -1141,6 +2392,98 @@ def test_export_import_board(client_with_kanban_db):
     assert imported["board"]["id"] != board["id"]
 
 
+def test_export_board_get(client_with_kanban_db):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Export Get Board", "client_id": "board-export-get-1"}
+    ).json()
+
+    response = client.get(f"/api/v1/kanban/boards/{board['id']}/export")
+
+    assert response.status_code == 200, response.text
+    exported = response.json()
+    assert exported["format"] == "tldw_kanban_v1"
+    assert exported["board"]["name"] == "Export Get Board"
+
+
+def test_export_board_get_not_found_is_preserved(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_not_found(*args, **kwargs):
+        raise NotFoundError("Board 999 not found")
+
+    monkeypatch.setattr(db, "export_board", _raise_not_found)
+
+    response = client.get("/api/v1/kanban/boards/999/export")
+
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"] == "Board 999 not found"
+
+
+def test_export_board_get_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while exporting board")
+
+    monkeypatch.setattr(db, "export_board", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/boards/999/export")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to export board"
+
+
+def test_export_board_post_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while exporting board")
+
+    monkeypatch.setattr(db, "export_board", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/boards/999/export", json={})
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to export board"
+
+
+def test_import_board_input_error_is_preserved(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_input_error(*args, **kwargs):
+        raise InputError("Import data is invalid")
+
+    monkeypatch.setattr(db, "import_board", _raise_input_error)
+
+    response = client.post("/api/v1/kanban/boards/import", json={"data": {"format": "tldw_kanban_v1"}})
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "Import data is invalid"
+
+
+def test_import_board_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while importing board")
+
+    monkeypatch.setattr(db, "import_board", _raise_db_error)
+
+    response = client.post("/api/v1/kanban/boards/import", json={"data": {"format": "tldw_kanban_v1"}})
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to import board"
+
+
 # =============================================================================
 # Activity Log Tests
 # =============================================================================
@@ -1170,6 +2513,26 @@ def test_activity_log(client_with_kanban_db):
     assert "activities" in activities
     # Should have activities for board creation, list creation, card creation
     assert len(activities["activities"]) >= 3
+
+
+def test_board_activities_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    board = client.post(
+        "/api/v1/kanban/boards",
+        json={"name": "Board Activity Error", "client_id": "board-activity-db-1"},
+    ).json()
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while loading board activities")
+
+    monkeypatch.setattr(db, "get_board_activities", _raise_db_error)
+
+    response = client.get(f"/api/v1/kanban/boards/{board['id']}/activities")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch board activities"
 
 
 # =============================================================================
@@ -1253,6 +2616,56 @@ def test_search_cards_post(client_with_kanban_db):
     assert result["query"] == "database"
     assert len(result["results"]) == 1
     assert result["results"][0]["title"] == "Database migration task"
+
+
+def test_search_cards_get_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while searching cards")
+
+    monkeypatch.setattr(db, "search_cards", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/search", params={"q": "database"})
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to search cards"
+
+
+def test_search_cards_post_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while searching cards")
+
+    monkeypatch.setattr(db, "search_cards", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/search",
+        json={"query": "database", "limit": 10},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to search cards"
+
+
+def test_cards_search_post_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while searching cards")
+
+    monkeypatch.setattr(db, "search_cards", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/search",
+        json={"query": "database", "limit": 10},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to search cards"
 
 
 def test_search_with_board_filter(client_with_kanban_db):
@@ -1959,6 +3372,99 @@ def test_card_link_invalid_type_rejected(client_with_kanban_db):
     assert invalid_resp.status_code == 422
 
 
+def test_card_link_create_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    """Create-link DB failures should not leak raw KanbanDBError details."""
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while creating link")
+
+    monkeypatch.setattr(db, "add_card_link", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/999/links",
+        json={"linked_type": "media", "linked_id": "media-db-error"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to add card link"
+
+
+def test_card_link_list_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    """List-link DB failures should return a stable endpoint detail."""
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while listing links")
+
+    monkeypatch.setattr(db, "get_card_links", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/cards/999/links")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch card links"
+
+
+def test_card_link_counts_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    """Count-link DB failures should return a stable endpoint detail."""
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while counting links")
+
+    monkeypatch.setattr(db, "get_linked_content_counts", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/cards/999/links/counts")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch card link counts"
+
+
+def test_remove_card_link_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    """Delete-by-type/id DB failures should not leak raw KanbanDBError details."""
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while removing card link")
+
+    monkeypatch.setattr(db, "remove_card_link", _raise_db_error)
+
+    response = client.delete("/api/v1/kanban/cards/999/links/media/media-db-error")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to remove card link"
+
+
+def test_remove_card_link_by_id_for_card_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    """Card-scoped delete-by-id DB failures should not leak raw KanbanDBError details."""
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while removing card link by id for card")
+
+    monkeypatch.setattr(db, "remove_card_link_by_id_for_card", _raise_db_error)
+
+    response = client.delete("/api/v1/kanban/cards/999/links/123")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to remove card link"
+
+
+def test_remove_card_link_by_id_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    """Global delete-by-id DB failures should not leak raw KanbanDBError details."""
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while removing card link by id")
+
+    monkeypatch.setattr(db, "remove_card_link_by_id", _raise_db_error)
+
+    response = client.delete("/api/v1/kanban/links/123")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to remove card link"
+
+
 def test_bulk_card_links(client_with_kanban_db):
 
 
@@ -2035,6 +3541,42 @@ def test_bulk_card_links(client_with_kanban_db):
     assert len(final_links.json()["links"]) == 2
 
 
+def test_bulk_add_card_links_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    """Bulk-add DB failures should not leak raw KanbanDBError details."""
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while bulk adding links")
+
+    monkeypatch.setattr(db, "bulk_add_card_links", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/999/links/bulk-add",
+        json={"links": [{"linked_type": "media", "linked_id": "media-db-error"}]},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to bulk add card links"
+
+
+def test_bulk_remove_card_links_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    """Bulk-remove DB failures should not leak raw KanbanDBError details."""
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while bulk removing links")
+
+    monkeypatch.setattr(db, "bulk_remove_card_links", _raise_db_error)
+
+    response = client.post(
+        "/api/v1/kanban/cards/999/links/bulk-remove",
+        json={"links": [{"linked_type": "media", "linked_id": "media-db-error"}]},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to bulk remove card links"
+
+
 def test_bidirectional_lookup(client_with_kanban_db):
 
 
@@ -2102,6 +3644,21 @@ def test_bidirectional_lookup(client_with_kanban_db):
         assert "list_name" in card_data
         assert "link_id" in card_data
         assert "linked_at" in card_data
+
+
+def test_bidirectional_lookup_db_error_is_sanitized(client_with_kanban_db, monkeypatch):
+    """Lookup DB failures should not expose raw storage errors."""
+    client, db = client_with_kanban_db
+
+    def _raise_db_error(*args, **kwargs):
+        raise KanbanDBError("sqlite driver exploded while loading linked cards")
+
+    monkeypatch.setattr(db, "get_cards_by_linked_content", _raise_db_error)
+
+    response = client.get("/api/v1/kanban/linked/media/media-db-error/cards")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch linked cards"
 
 
 def test_bidirectional_lookup_respects_archived(client_with_kanban_db):

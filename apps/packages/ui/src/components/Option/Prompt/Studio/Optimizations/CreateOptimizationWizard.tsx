@@ -9,9 +9,7 @@ import {
   Table,
   notification,
   Checkbox,
-  Alert,
-  Card,
-  Radio
+  Card
 } from "antd"
 import {
   Sparkles,
@@ -37,6 +35,7 @@ import {
   type StrategyInfo
 } from "@/services/prompt-studio"
 import { Button } from "@/components/Common/Button"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { CompareStrategiesModal } from "./CompareStrategiesModal"
 import { defaultOptimizationStrategies } from "./strategyMetadata"
 
@@ -215,9 +214,8 @@ export const CreateOptimizationWizard: React.FC<
       case "selectPrompt":
         return (
           <div className="space-y-4">
-            <Alert
-              type="info"
-              showIcon
+            <DsAlert
+              variant="info"
               title={t(
                 "managePrompts.studio.optimizations.wizard.selectPromptInfo",
                 {
@@ -259,9 +257,8 @@ export const CreateOptimizationWizard: React.FC<
       case "selectTestCases":
         return (
           <div className="space-y-4">
-            <Alert
-              type="info"
-              showIcon
+            <DsAlert
+              variant="info"
               title={t(
                 "managePrompts.studio.optimizations.wizard.selectTestCasesInfo",
                 {
@@ -463,9 +460,8 @@ export const CreateOptimizationWizard: React.FC<
       case "review":
         return (
           <div className="space-y-4">
-            <Alert
-              type="success"
-              showIcon
+            <DsAlert
+              variant="success"
               title={t(
                 "managePrompts.studio.optimizations.wizard.reviewInfo",
                 {

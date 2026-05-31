@@ -273,16 +273,24 @@ describe("watchlists-onboarding-telemetry", () => {
       mode: "test",
       runNow: true
     })
+    await telemetry.trackWatchlistsOnboardingTelemetry({
+      type: "pipeline_setup_failed",
+      stage: "source_create",
+      mode: "create",
+      runNow: false
+    })
 
     const state = await telemetry.getWatchlistsOnboardingTelemetryState()
     expect(state.uc2_pipeline.preview_by_status.no_run_context).toBe(1)
     expect(state.uc2_pipeline.failed_by_stage.run_trigger).toBe(1)
+    expect(state.uc2_pipeline.failed_by_stage.source_create).toBe(1)
 
     const snapshot = telemetry.buildWatchlistsUc2PipelineDashboardSnapshot(state)
     expect(snapshot.funnel.opened).toBe(1)
     expect(snapshot.funnel.completed).toBe(0)
     expect(snapshot.rates.completionPerOpened).toBe(0)
     expect(snapshot.failures.run_trigger).toBe(1)
+    expect(snapshot.failures.source_create).toBe(1)
     expect(snapshot.preview.no_run_context).toBe(1)
   })
 })

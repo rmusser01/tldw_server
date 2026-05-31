@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
-import { Alert, Button, Card, Empty, List, Space, Tag, Typography } from "antd"
+import { Button, Card, Empty, List, Space, Tag, Typography } from "antd"
 
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 import { createAcpProfile, listAcpProfiles, type McpHubProfile } from "@/services/tldw/mcp-hub"
 
 export const AcpProfilesTab = () => {

@@ -46,6 +46,22 @@ const toFiniteNumber = (value: unknown, fallback = 0): number => {
   return fallback
 }
 
+const extractOffsetPaginationTotal = (value: unknown): number | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+  const record = value as Record<string, unknown>
+  if (typeof record.total_count === "number" && Number.isFinite(record.total_count)) {
+    return record.total_count
+  }
+  const pagination = record.pagination
+  if (!pagination || typeof pagination !== "object" || Array.isArray(pagination)) {
+    return null
+  }
+  const total = (pagination as Record<string, unknown>).total
+  return typeof total === "number" && Number.isFinite(total) ? total : null
+}
+
 const normalizeVisualStyleSnapshot = (
   value: unknown
 ): PresentationVisualStyleSnapshot | null => {
@@ -210,10 +226,7 @@ export const presentationsMethods = {
       const styles = Array.isArray(payload?.styles) ? payload.styles : []
       allStyles.push(...styles.map((style: unknown) => normalizeVisualStyleRecord(style)))
 
-      const totalCount =
-        typeof payload?.total_count === "number" && Number.isFinite(payload.total_count)
-          ? payload.total_count
-          : allStyles.length
+      const totalCount = extractOffsetPaginationTotal(payload) ?? allStyles.length
       if (allStyles.length >= totalCount || styles.length === 0) {
         return allStyles
       }

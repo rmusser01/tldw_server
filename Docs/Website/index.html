@@ -172,7 +172,7 @@
     <div class="container">
       <div class="reveal">
         <h2 id="cta-title" style="margin:0 0 6px 0;font-size:28px">Quick Start</h2>
-        <p class="muted" style="max-width:60ch;margin-bottom:24px">Clone the repo, pick one public setup profile, and follow prepare, start, then verify. The default Docker single-user + WebUI path uses same-origin browser API requests through the WebUI proxy. Docker multi-user + Postgres and local single-user are peer profiles for different deployment needs.</p>
+        <p class="muted" style="max-width:60ch;margin-bottom:24px">Clone the repo, pick one public setup profile, and follow prepare, start, then verify. The default Docker single-user + WebUI path uses same-origin browser API requests through the WebUI proxy. API-only Docker and local dev remain supported alternative setup profiles.</p>
       </div>
       <div class="reveal">
         <div class="code-block">
@@ -230,7 +230,7 @@ make start-local-single
 make verify-local-single</code></pre>
         </div>
         <p class="muted" style="font-size:14px;margin-bottom:12px">PyPI installation is not generally available yet. Use this repository checkout and the quickstart targets above.</p>
-        <p class="muted" style="font-size:14px;margin-bottom:12px">Default Docker startup brings up the API at <a href="http://127.0.0.1:8000/docs" style="color:var(--brand-2)">localhost:8000/docs</a> and the WebUI at <span style="color:var(--brand-2)">localhost:8080</span>. Browsers stay on same-origin browser API requests through the WebUI proxy unless you intentionally move to LAN/custom-host access as an advanced configuration path. The local single-user path starts the API at <a href="http://127.0.0.1:8000/api/v1/config/quickstart" style="color:var(--brand-2)">localhost:8000/api/v1/config/quickstart</a>.</p>
+        <p class="muted" style="font-size:14px;margin-bottom:12px">Default Docker startup brings up the API at <a href="http://127.0.0.1:8000/docs" style="color:var(--brand-2)">localhost:8000/docs</a> and the WebUI at <span style="color:var(--brand-2)">localhost:8080</span>. Browsers stay on same-origin browser API requests through the WebUI proxy. LAN/custom-host browser access is the advanced configuration path. The local single-user path starts the API at <a href="http://127.0.0.1:8000/api/v1/config/quickstart" style="color:var(--brand-2)">localhost:8000/api/v1/config/quickstart</a>.</p>
         <p class="muted" style="font-size:14px">Need a team or public deployment instead of the default single-user path? Start with the <a href="https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md" style="color:var(--brand-2)" target="_blank" rel="noreferrer">Docker Multi-User + Postgres guide</a>.</p>
       </div>
     </div>

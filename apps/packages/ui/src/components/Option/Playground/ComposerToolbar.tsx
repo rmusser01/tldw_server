@@ -3,7 +3,7 @@ import { Button as TldwButton } from "@/components/Common/Button"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import { ConnectionStatus } from "@/components/Layouts/ConnectionStatus"
 import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY } from "@/utils/output-formatting-guide"
-import { Tooltip } from "antd"
+import { Modal, Tooltip } from "antd"
 import {
   ChevronDown,
   FileIcon,
@@ -11,18 +11,24 @@ import {
   Gauge,
   Globe,
   MicIcon,
-  Search
+  Search,
+  Users
 } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 
 import { useStorage } from "@plasmohq/storage/hook"
 
-import { ComposerToolbarOverflow } from "./ComposerToolbarOverflow"
+import {
+  ComposerToolbarOverflow,
+  type ComposerToolbarRolePlayActions
+} from "./ComposerToolbarOverflow"
 import {
   ParameterPresets,
+  ParameterPresetsDropdown,
   type PromptTemplate,
   SessionCostEstimation,
+  SystemPromptTemplatesModal,
   SystemPromptTemplatesButton
 } from "./playground-features"
 
@@ -92,6 +98,7 @@ export type ComposerToolbarProps = {
   onDismissServerPersistenceHint: () => void
   onFocusConnectionCard: () => void
   contextItems?: ComposerContextItem[]
+  rolePlayActions?: ComposerToolbarRolePlayActions
 }
 
 export type ComposerContextItem = {
@@ -169,7 +176,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     showServerPersistenceHint,
     onDismissServerPersistenceHint,
     onFocusConnectionCard,
-    contextItems = []
+    contextItems = [],
+    rolePlayActions: providedRolePlayActions
   } = props
   const toolbarSendControl =
     sendControlPlacement === "toolbar" ? sendControl : null
@@ -183,6 +191,35 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     useStorage("playgroundComposerCasualAdvancedControlsOpen", false)
   const [appendFormattingGuidePrompt, setAppendFormattingGuidePrompt] =
     useStorage(PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY, false)
+  const [systemPromptsOpen, setSystemPromptsOpen] = React.useState(false)
+  const [generationStyleOpen, setGenerationStyleOpen] = React.useState(false)
+
+  const mobileRolePlayActions = React.useMemo<ComposerToolbarRolePlayActions>(
+    () => ({
+      onOpenSystemPrompts:
+        providedRolePlayActions?.onOpenSystemPrompts ??
+        (() => setSystemPromptsOpen(true)),
+      onOpenGenerationStyle:
+        providedRolePlayActions?.onOpenGenerationStyle ??
+        (() => setGenerationStyleOpen(true)),
+      ...(providedRolePlayActions?.onOpenRolePlaySetup
+        ? { onOpenRolePlaySetup: providedRolePlayActions.onOpenRolePlaySetup }
+        : {})
+    }),
+    [
+      providedRolePlayActions?.onOpenGenerationStyle,
+      providedRolePlayActions?.onOpenRolePlaySetup,
+      providedRolePlayActions?.onOpenSystemPrompts
+    ]
+  )
+
+  const handleMobileTemplateSelect = React.useCallback(
+    (template: PromptTemplate) => {
+      onTemplateSelect(template)
+      setSystemPromptsOpen(false)
+    },
+    [onTemplateSelect]
+  )
 
   // --- Shared sub-elements ---
   const ephemeralToggle = React.useMemo(
@@ -494,6 +531,29 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     [isProMode]
   )
 
+  const rolePlaySetupButton = React.useMemo(() => {
+    if (!providedRolePlayActions?.onOpenRolePlaySetup) return null
+
+    const label = t(
+      "playground:composer.rolePlaySetup",
+      "Role-play setup"
+    ) as string
+
+    return (
+      <Tooltip title={label}>
+        <button
+          type="button"
+          onClick={providedRolePlayActions.onOpenRolePlaySetup}
+          aria-label={label}
+          data-testid="composer-role-play-setup"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-muted transition hover:bg-surface2 hover:text-text">
+          <Users className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{label}</span>
+        </button>
+      </Tooltip>
+    )
+  }, [providedRolePlayActions?.onOpenRolePlaySetup, t])
+
   const hiddenContextItemIds = React.useMemo(
     () =>
       new Set([
@@ -594,6 +654,42 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   const formattingGuideToggleClass = appendFormattingGuidePrompt
     ? "bg-primary/10 text-primaryStrong"
     : "text-text-muted"
+  const casualModeContextGroupLabel = t(
+    "playground:composer.groups.modeAndContext",
+    "Mode and context controls"
+  ) as string
+  const runInputGroupLabel = t(
+    "playground:composer.groups.runInput",
+    "Run input controls"
+  ) as string
+  const mobileModeModelGroupLabel = t(
+    "playground:composer.groups.mobileModeAndModel",
+    "Mobile mode and model controls"
+  ) as string
+  const mobileContextGroupLabel = t(
+    "playground:composer.groups.mobileContext",
+    "Mobile context controls"
+  ) as string
+  const mobileRunInputGroupLabel = t(
+    "playground:composer.groups.mobileRunInput",
+    "Mobile run input controls"
+  ) as string
+  const proContextPanelHeading = t(
+    "playground:composer.groups.contextSetup",
+    "Context setup"
+  ) as string
+  const proGenerationPanelHeading = t(
+    "playground:composer.groups.modelToolsRun",
+    "Model, tools, and run"
+  ) as string
+  const advancedControlsGroupLabel = t(
+    "playground:composer.groups.advancedComposerControls",
+    "Advanced composer controls"
+  ) as string
+  const casualAdvancedControlsId = "composer-casual-advanced-controls-row"
+  const proAdvancedControlsId = "composer-pro-advanced-controls-row"
+  const proContextHeadingId = "composer-pro-context-heading"
+  const proGenerationHeadingId = "composer-pro-generation-heading"
   const formattingGuideControl = (
     <button
       type="button"
@@ -623,6 +719,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       }
       aria-expanded={casualAdvancedControlsOpen}
       aria-pressed={casualAdvancedControlsOpen}
+      aria-controls={casualAdvancedControlsOpen ? casualAdvancedControlsId : undefined}
       data-testid="composer-casual-advanced-chip"
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition hover:bg-surface2 ${advancedChipClass}`}>
       <span>{t("playground:composer.advancedControls", "Advanced controls")}</span>
@@ -707,6 +804,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           type="button"
           onClick={() => setAdvancedControlsOpen(!advancedControlsOpen)}
           aria-expanded={advancedControlsOpen}
+          aria-controls={advancedControlsOpen ? proAdvancedControlsId : undefined}
           data-testid="composer-advanced-toggle"
           className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-medium text-text-muted transition hover:bg-surface2 hover:text-text">
           <span>
@@ -721,6 +819,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         </button>
         {advancedControlsOpen && (
           <div
+            id={proAdvancedControlsId}
+            role="group"
+            aria-label={advancedControlsGroupLabel}
             data-playground-toolbar-row="advanced"
             className="mt-2 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -745,6 +846,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   const mobileToolbarLayout = (
     <div className="flex flex-col gap-2">
       <div
+        role="group"
+        aria-label={mobileModeModelGroupLabel}
         data-playground-toolbar-row="primary"
         className="flex flex-wrap items-center gap-2">
         {modeLauncherButton}
@@ -756,13 +859,19 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       </div>
       <div
         data-playground-toolbar-row="actions"
-        className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        className="flex flex-wrap items-center justify-between gap-2">
+        <div
+          role="group"
+          aria-label={mobileContextGroupLabel}
+          className="flex min-w-0 flex-wrap items-center gap-2">
           {ephemeralToggle}
           {searchContextButton}
           {webSearchButton}
         </div>
-        <div className="flex items-center gap-2">
+        <div
+          role="group"
+          aria-label={mobileRunInputGroupLabel}
+          className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {modelUsageBadge}
           <ComposerToolbarOverflow
             isProMode={isProMode}
@@ -782,6 +891,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             onDictationToggle={onDictationToggle}
             temporaryChat={temporaryChat}
             onFocusConnectionCard={onFocusConnectionCard}
+            rolePlayActions={mobileRolePlayActions}
           />
           {researchLaunchButton}
           {voiceChatButton}
@@ -799,15 +909,22 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       className="flex flex-col gap-2">
       <div
         data-playground-toolbar-row="actions"
-        className="flex flex-nowrap items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="flex flex-nowrap items-center gap-2 text-text-muted">
+        className="flex flex-wrap items-center gap-2 lg:flex-nowrap lg:overflow-x-auto lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden">
+        <div
+          role="group"
+          aria-label={casualModeContextGroupLabel}
+          className="flex min-w-0 flex-wrap items-center gap-2 text-text-muted lg:flex-nowrap">
           {modeLauncherButton}
           {mcpControl}
           {searchContextButton}
           {promptSelectControl}
           {characterSelectControl}
+          {rolePlaySetupButton}
         </div>
-        <div className="ml-auto flex flex-nowrap items-center gap-2">
+        <div
+          role="group"
+          aria-label={runInputGroupLabel}
+          className="flex min-w-0 flex-wrap items-center gap-2 lg:ml-auto lg:flex-nowrap">
           {compareControl}
           {dictationButton}
           {researchLaunchButton}
@@ -823,6 +940,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   const casualAdvancedControlsPanel =
     casualAdvancedControlsOpen && !isMobile && !isProMode ? (
       <div
+        id={casualAdvancedControlsId}
+        role="group"
+        aria-label={advancedControlsGroupLabel}
         data-playground-toolbar-row="advanced"
         className="rounded-md border border-border/60 bg-surface2/60 p-2">
         <div
@@ -844,8 +964,15 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       className="flex flex-col gap-2">
       <div className="grid gap-2 lg:grid-cols-2">
         <section
+          role="group"
+          aria-labelledby={proContextHeadingId}
           data-testid="composer-pro-context-panel"
           className="rounded-md border border-border/60 bg-surface2/60 p-2">
+          <h3
+            id={proContextHeadingId}
+            className="mb-2 text-[11px] font-semibold text-text-muted">
+            {proContextPanelHeading}
+          </h3>
           <div
             data-playground-toolbar-row="primary"
             className="flex flex-wrap items-center gap-2">
@@ -862,11 +989,19 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {promptSelectControl}
             {characterSelectControl}
+            {rolePlaySetupButton}
           </div>
         </section>
         <section
+          role="group"
+          aria-labelledby={proGenerationHeadingId}
           data-testid="composer-pro-generation-panel"
           className="rounded-md border border-border/60 bg-surface2/60 p-2">
+          <h3
+            id={proGenerationHeadingId}
+            className="mb-2 text-[11px] font-semibold text-text-muted">
+            {proGenerationPanelHeading}
+          </h3>
           <div className="flex flex-wrap items-center gap-2">
             <ConnectionStatus showLabel={false} className="px-1 py-0.5" />
             {mcpControl}
@@ -894,10 +1029,36 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     </div>
   )
 
+  const collapsedMobileToolbarLayout = isMobile ? (
+    <div
+      role="group"
+      aria-label={
+        t("playground:composer.quickActions", "Composer quick actions") as string
+      }
+      data-playground-toolbar-row="collapsed-actions"
+      className="flex items-center justify-end gap-2">
+      {attachmentButton}
+    </div>
+  ) : null
+
   return (
     <div
       data-testid="composer-options-panel"
       className="mt-2 flex flex-col gap-1">
+      <SystemPromptTemplatesModal
+        open={systemPromptsOpen}
+        onClose={() => setSystemPromptsOpen(false)}
+        onSelect={handleMobileTemplateSelect}
+      />
+      <Modal
+        title={t("playground:presets.title", "Generation style") as string}
+        open={generationStyleOpen}
+        onCancel={() => setGenerationStyleOpen(false)}
+        footer={null}
+        width={420}
+        className="generation-style-modal">
+        <ParameterPresetsDropdown onChange={() => setGenerationStyleOpen(false)} />
+      </Modal>
       {optionsExpanded ? (
         <>
           {isMobile
@@ -952,7 +1113,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           {!isMobile && !isProMode ? casualContextStrip : contextStrip}
           {!isMobile && !isProMode ? casualAdvancedControlsPanel : null}
         </>
-      ) : null}
+      ) : (
+        collapsedMobileToolbarLayout
+      )}
     </div>
   )
 })

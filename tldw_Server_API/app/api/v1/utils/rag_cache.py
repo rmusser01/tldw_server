@@ -5,6 +5,12 @@ from collections.abc import Iterable
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.RAG.rag_service.cache_invalidation import (
+    collect_cache_namespaces as _collect_cache_namespaces,
+)
+from tldw_Server_API.app.core.RAG.rag_service.cache_invalidation import (
+    invalidate_rag_caches as _core_invalidate_rag_caches,
+)
 
 _RAG_CACHE_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -15,21 +21,6 @@ _RAG_CACHE_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
-
-
-def _collect_cache_namespaces(
-    current_user: User | None,
-    namespaces: Iterable[str] | None = None,
-) -> set[str]:
-    collected: set[str] = {str(ns) for ns in (namespaces or []) if ns}
-    if current_user:
-        username = getattr(current_user, "username", None)
-        if username:
-            collected.add(str(username))
-        user_id = getattr(current_user, "id", None)
-        if user_id is not None and user_id != "":
-            collected.add(str(user_id))
-    return collected
 
 
 async def delete_media_vectors(
@@ -87,30 +78,10 @@ def invalidate_rag_caches(
     namespaces: Iterable[str] | None = None,
     media_id: int | None = None,
 ) -> None:
-    """Best-effort RAG cache invalidation for content updates."""
-    cache_namespaces = _collect_cache_namespaces(current_user, namespaces)
+    """Compatibility wrapper around the core cache invalidation helper."""
 
-    try:
-        from tldw_Server_API.app.core.RAG.rag_service.semantic_cache import (
-            clear_shared_caches,
-        )
-
-        if cache_namespaces:
-            for namespace in cache_namespaces:
-                clear_shared_caches(namespace=namespace)
-        else:
-            clear_shared_caches(namespace=None)
-    except (ImportError, *_RAG_CACHE_NONCRITICAL_EXCEPTIONS) as exc:
-        logger.debug("RAG cache invalidation skipped: {}", exc)
-
-    if media_id is None:
-        return
-
-    try:
-        from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
-            invalidate_intra_doc_vectors,
-        )
-
-        invalidate_intra_doc_vectors(str(media_id))
-    except (ImportError, *_RAG_CACHE_NONCRITICAL_EXCEPTIONS) as exc:
-        logger.debug("Agentic cache invalidation skipped: {}", exc)
+    _core_invalidate_rag_caches(
+        current_user,
+        namespaces=namespaces,
+        media_id=media_id,
+    )

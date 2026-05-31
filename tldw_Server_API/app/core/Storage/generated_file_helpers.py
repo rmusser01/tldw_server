@@ -48,6 +48,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
     SOURCE_FEATURE_IMAGE_GEN,
     SOURCE_FEATURE_MINDMAP,
     SOURCE_FEATURE_TTS,
+    SOURCE_FEATURE_VN_ASSETS,
     SOURCE_FEATURE_VOICE_STUDIO,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -202,8 +203,8 @@ async def save_and_register_tts_audio(
     mime_type = AUDIO_MIME_TYPES.get(audio_format.lower(), "audio/mpeg")
 
     # Register with storage service
-    service = await get_storage_service()
     try:
+        service = await get_storage_service()
         file_record = await service.register_generated_file(
             user_id=user_id,
             filename=filename,
@@ -285,8 +286,8 @@ async def save_and_register_image(
 
     mime_type = IMAGE_MIME_TYPES.get(image_format.lower(), "image/png")
 
-    service = await get_storage_service()
     try:
+        service = await get_storage_service()
         file_record = await service.register_generated_file(
             user_id=user_id,
             filename=filename,
@@ -308,6 +309,79 @@ async def save_and_register_image(
         )
 
         logger.info(f"Registered image: {filename} ({len(image_bytes)} bytes) for user {user_id}")
+        return file_record
+
+    except Exception:
+        with contextlib.suppress(Exception):
+            file_path.unlink()
+        raise
+
+
+async def save_and_register_vn_asset_image(
+    *,
+    user_id: int,
+    image_bytes: bytes,
+    image_format: str = "png",
+    pack_id: int,
+    item_id: int,
+    asset_type: str,
+    labels: dict[str, Any] | None = None,
+    org_id: int | None = None,
+    team_id: int | None = None,
+    tags: list[str] | None = None,
+    is_transient: bool = False,
+    expires_at: datetime | None = None,
+    check_quota: bool = True,
+) -> dict[str, Any]:
+    """
+    Save a generated VN asset image and register it as durable AuthNZ storage.
+
+    VN asset metadata remains in the user's ChaChaNotes database; the image bytes
+    and quota accounting are tracked through generated-file storage.
+    """
+    filename = _generate_filename(f"vn_asset_{item_id}", image_format)
+    category_folder = "vn_assets"
+
+    file_path = await _save_file(user_id, image_bytes, category_folder, filename)
+    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    relative_path = str(file_path.relative_to(outputs_dir))
+
+    file_tags = list(tags) if tags else []
+    file_tags.extend(
+        [
+            f"vn_pack:{pack_id}",
+            f"vn_item:{item_id}",
+            f"asset_type:{asset_type}",
+        ]
+    )
+    for key, value in (labels or {}).items():
+        file_tags.append(f"label:{key}:{value}")
+
+    mime_type = IMAGE_MIME_TYPES.get(image_format.lower(), "image/png")
+
+    try:
+        service = await get_storage_service()
+        file_record = await service.register_generated_file(
+            user_id=user_id,
+            filename=filename,
+            storage_path=relative_path,
+            file_category=FILE_CATEGORY_IMAGE,
+            source_feature=SOURCE_FEATURE_VN_ASSETS,
+            file_size_bytes=len(image_bytes),
+            org_id=org_id,
+            team_id=team_id,
+            original_filename=f"vn_asset_{item_id}.{image_format}",
+            mime_type=mime_type,
+            checksum=_compute_checksum(image_bytes),
+            source_ref=f"vn_asset_item:{item_id}",
+            folder_tag=f"vn-assets/{pack_id}",
+            tags=file_tags,
+            is_transient=is_transient,
+            expires_at=expires_at,
+            check_quota=check_quota,
+        )
+
+        logger.info(f"Registered VN asset image: {filename} ({len(image_bytes)} bytes) for user {user_id}")
         return file_record
 
     except Exception:

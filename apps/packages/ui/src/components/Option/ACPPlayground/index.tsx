@@ -29,6 +29,27 @@ const ACPPermissionModal = React.lazy(() =>
 
 const ACP_LEFT_PANE_KEY = "acp-playground-left-pane"
 const ACP_RIGHT_PANE_KEY = "acp-playground-right-pane"
+const ACP_SESSION_DETAIL_VIEWS = new Set([
+  "session",
+  "diagnostics",
+  "artifacts",
+  "audit",
+  "events"
+])
+
+const readACPPlaygroundSearch = (): string => {
+  if (typeof window === "undefined") return ""
+  if (window.location.search) return window.location.search
+
+  const hash = window.location.hash || ""
+  const queryIndex = hash.indexOf("?")
+  return queryIndex >= 0 ? hash.slice(queryIndex) : ""
+}
+
+const normalizeQueryValue = (value: string | null): string | null => {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
 
 /**
  * ACPPlayground - Agent Client Protocol interface
@@ -80,6 +101,7 @@ export const ACPPlayground: React.FC = () => {
   const upsertSessionsFromServerList = useACPSessionsStore((s) => s.upsertSessionsFromServerList)
   const applySessionDetail = useACPSessionsStore((s) => s.applySessionDetail)
   const applySessionUsage = useACPSessionsStore((s) => s.applySessionUsage)
+  const setActiveSession = useACPSessionsStore((s) => s.setActiveSession)
   const globalError = useACPSessionsStore((s) => s.globalError)
   const setGlobalError = useACPSessionsStore((s) => s.setGlobalError)
   const cleanupExpiredSessions = useACPSessionsStore((s) => s.cleanupExpiredSessions)
@@ -195,6 +217,45 @@ export const ACPPlayground: React.FC = () => {
   useEffect(() => {
     cleanupExpiredSessions()
   }, [cleanupExpiredSessions])
+
+  // Honor deep links from Agent Tasks and workspace run history.
+  useEffect(() => {
+    const params = new URLSearchParams(readACPPlaygroundSearch())
+    const requestedSessionId = normalizeQueryValue(params.get("session"))
+    const requestedView = normalizeQueryValue(params.get("view"))?.toLowerCase()
+
+    if (requestedSessionId) {
+      setActiveSession(requestedSessionId)
+    }
+
+    if (!requestedView) {
+      return
+    }
+
+    if (requestedView === "workspace") {
+      setActiveTab("workspace")
+      setRightTab("workspace")
+      setRightPaneOpen(true)
+      return
+    }
+
+    if (requestedView === "tools") {
+      setActiveTab("tools")
+      setRightTab("tools")
+      setRightPaneOpen(true)
+      return
+    }
+
+    if (requestedView === "chat") {
+      setActiveTab("chat")
+      return
+    }
+
+    if (requestedView === "sessions" || ACP_SESSION_DETAIL_VIEWS.has(requestedView)) {
+      setActiveTab("sessions")
+      setLeftPaneOpen(true)
+    }
+  }, [setActiveSession, setLeftPaneOpen, setRightPaneOpen])
 
   // Hydrate persisted ACP sessions from backend when the page loads.
   useEffect(() => {

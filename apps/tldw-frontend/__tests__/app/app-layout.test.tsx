@@ -1,5 +1,5 @@
 import React from "react"
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@web/lib/i18n-web", () => ({}))
@@ -57,14 +57,41 @@ vi.mock("@web/components/AppProviders", () => ({
 }))
 
 vi.mock("@web/components/networking/ServerReadinessGate", () => ({
-  ServerReadinessGate: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="server-readiness-gate">{children}</div>
+  ServerReadinessGate: ({
+    children,
+    allowDegraded
+  }: {
+    children: React.ReactNode
+    allowDegraded?: boolean
+  }) => (
+    <div
+      data-testid="server-readiness-gate"
+      data-allow-degraded={String(Boolean(allowDegraded))}
+    >
+      {children}
+    </div>
   )
 }))
 
 vi.mock("@/components/PersonaGarden/FirstRunGate", () => ({
-  FirstRunGate: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="first-run-gate">{children}</div>
+  FirstRunGate: ({
+    children,
+    bypass,
+    onStartSetup
+  }: {
+    children: React.ReactNode
+    bypass?: boolean
+    onStartSetup: () => void
+  }) => (
+    <div data-testid="first-run-gate" data-bypass={String(Boolean(bypass))}>
+      <button
+        type="button"
+        data-testid="first-run-gate-start"
+        onClick={onStartSetup}>
+        Start setup
+      </button>
+      {children}
+    </div>
   )
 }))
 
@@ -79,9 +106,9 @@ vi.mock("@web/lib/configured-auth-state", () => ({
 
 const DummyPage = () => <div data-testid="page-content">Page</div>
 
-const renderApp = (pathname: string) => {
+const renderApp = (pathname: string, asPath = pathname) => {
   mockRouter.pathname = pathname
-  mockRouter.asPath = pathname
+  mockRouter.asPath = asPath
   return render(<App Component={DummyPage} pageProps={{}} />)
 }
 
@@ -113,9 +140,94 @@ describe("App layout routing", () => {
   it("wraps non-login routes with OptionLayout", async () => {
     renderApp("/media")
     expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
+    expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
+      "data-allow-degraded",
+      "false"
+    )
     expect(screen.getByTestId("first-run-gate")).toBeInTheDocument()
+    expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
+      "data-bypass",
+      "false"
+    )
     expect(await screen.findByTestId("option-layout")).toBeInTheDocument()
     expect(screen.getByTestId("page-content")).toBeInTheDocument()
+  })
+
+  it("allows degraded server readiness on chat and research workspace routes", () => {
+    const { rerender } = renderApp("/chat")
+    expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
+      "data-allow-degraded",
+      "true"
+    )
+
+    mockRouter.pathname = "/research-workspace"
+    mockRouter.asPath = "/research-workspace"
+    rerender(<App Component={DummyPage} pageProps={{}} />)
+
+    expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
+      "data-allow-degraded",
+      "true"
+    )
+
+    mockRouter.pathname = "/media"
+    mockRouter.asPath = "/media"
+    rerender(<App Component={DummyPage} pageProps={{}} />)
+
+    expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
+      "data-allow-degraded",
+      "false"
+    )
+  })
+
+  it("lets /chat bypass the global assistant setup overlay", () => {
+    renderApp("/chat")
+
+    expect(screen.getByTestId("server-readiness-gate")).toHaveAttribute(
+      "data-allow-degraded",
+      "true"
+    )
+    expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
+      "data-bypass",
+      "true"
+    )
+
+    fireEvent.click(screen.getByTestId("first-run-gate-start"))
+
+    expect(mockRouter.push).toHaveBeenCalledWith("/persona")
+  })
+
+  it("bypasses the generic first-run splash for character-chat route intent", async () => {
+    renderApp("/characters")
+
+    expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
+    expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
+      "data-bypass",
+      "true"
+    )
+
+    fireEvent.click(screen.getByTestId("first-run-gate-start"))
+
+    expect(mockRouter.push).toHaveBeenCalledWith(
+      "/?intent=character-chat&returnTo=%2Fcharacters"
+    )
+  })
+
+  it("preserves explicit character-chat onboarding routes through first-run setup", async () => {
+    renderApp(
+      "/",
+      "/?intent=character-chat&returnTo=%2Fcharacters%3Ffrom%3Dheader-select%26create%3Dtrue"
+    )
+
+    expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
+      "data-bypass",
+      "true"
+    )
+
+    fireEvent.click(screen.getByTestId("first-run-gate-start"))
+
+    expect(mockRouter.push).toHaveBeenCalledWith(
+      "/?intent=character-chat&returnTo=%2Fcharacters%3Ffrom%3Dheader-select%26create%3Dtrue"
+    )
   })
 
   it("skips OptionLayout for /login but keeps ServerReadinessGate mounted", () => {
@@ -144,6 +256,19 @@ describe("App layout routing", () => {
     expect(screen.queryByTestId("first-run-gate")).toBeNull()
     await waitFor(() => {
       expect(layout).toHaveAttribute("data-hide-header", "false")
+    })
+    expect(layout).toHaveAttribute("data-hide-sidebar", "true")
+  })
+
+  it("keeps setup in a setup-only shell even when authenticated", async () => {
+    process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
+
+    renderApp("/setup")
+    const layout = await screen.findByTestId("option-layout")
+    expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
+    expect(screen.queryByTestId("first-run-gate")).toBeNull()
+    await waitFor(() => {
+      expect(layout).toHaveAttribute("data-hide-header", "true")
     })
     expect(layout).toHaveAttribute("data-hide-sidebar", "true")
   })

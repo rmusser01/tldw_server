@@ -6,6 +6,7 @@ import {
   IngestWizardProvider,
   useIngestWizard,
 } from "../IngestWizardContext"
+import { configMatchesPreset } from "../presets"
 import type { WizardQueueItem } from "../types"
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,7 @@ function TestHarness() {
     setQueueItems,
     setPreset,
     setCustomOptions,
+    startProcessing,
     skipToProcessing,
     cancelProcessing,
     cancelItem,
@@ -50,9 +52,21 @@ function TestHarness() {
       <span data-testid="preset">{state.selectedPreset}</span>
       <span data-testid="queueLen">{state.queueItems.length}</span>
       <span data-testid="status">{state.processingState.status}</span>
+      <span data-testid="progressIds">
+        {state.processingState.perItemProgress.map((item) => item.id).join(",")}
+      </span>
       <span data-testid="isMinimized">{String(state.isMinimized)}</span>
       <span data-testid="presetAnalysis">
         {String(state.presetConfig.common.perform_analysis)}
+      </span>
+      <span data-testid="presetChunkingMode">
+        {state.presetConfig.common.chunking_mode || ""}
+      </span>
+      <span data-testid="presetAutoChunkingGoal">
+        {state.presetConfig.common.auto_chunking_goal || ""}
+      </span>
+      <span data-testid="presetAutoChunkingUseLlm">
+        {String(Boolean(state.presetConfig.common.auto_chunking_use_llm))}
       </span>
       <span data-testid="presetAudioLanguage">
         {state.presetConfig.typeDefaults.audio?.language || ""}
@@ -85,6 +99,43 @@ function TestHarness() {
       >
         setQueue
       </button>
+      <button
+        onClick={() =>
+          setQueueItems([
+            {
+              id: "valid-a",
+              detectedType: "audio",
+              fileSize: 100,
+              icon: "mic",
+              validation: { valid: true },
+            },
+            {
+              id: "invalid-b",
+              detectedType: "unknown",
+              fileSize: 0,
+              icon: "file",
+              validation: { valid: false, errors: ["Invalid URL format"] },
+            },
+          ] as WizardQueueItem[])
+        }
+      >
+        setMixedQueue
+      </button>
+      <button
+        onClick={() =>
+          setQueueItems([
+            {
+              id: "invalid-only",
+              detectedType: "unknown",
+              fileSize: 0,
+              icon: "file",
+              validation: { valid: false, errors: ["Unsupported file type"] },
+            },
+          ] as WizardQueueItem[])
+        }
+      >
+        setInvalidQueue
+      </button>
       <button onClick={() => setPreset("deep")}>setDeep</button>
       <button onClick={() => setPreset("custom")}>setCustomPreset</button>
       <button
@@ -114,6 +165,7 @@ function TestHarness() {
         setAudioLanguage
       </button>
       <button onClick={skipToProcessing}>skipToProcessing</button>
+      <button onClick={startProcessing}>startProcessing</button>
       <button onClick={cancelProcessing}>cancelProcessing</button>
       <button onClick={() => cancelItem("a")}>cancelItemA</button>
       <button onClick={minimize}>minimize</button>
@@ -319,6 +371,47 @@ describe("IngestWizardContext", () => {
       expect(screen.getByTestId("preset").textContent).toBe("deep")
     })
 
+    it("defaults chunking-enabled presets to auto chunking", () => {
+      renderWithProvider()
+
+      expect(screen.getByTestId("preset").textContent).toBe("standard")
+      expect(screen.getByTestId("presetChunkingMode").textContent).toBe("auto")
+      expect(screen.getByTestId("presetAutoChunkingGoal").textContent).toBe("balanced")
+      expect(screen.getByTestId("presetAutoChunkingUseLlm").textContent).toBe("false")
+    })
+
+    it("ignores inactive manual chunking fields when matching auto presets", () => {
+      const matchesStandard = configMatchesPreset(
+        {
+          common: {
+            perform_analysis: true,
+            perform_chunking: true,
+            overwrite_existing: false,
+            chunking_mode: "auto",
+            auto_chunking_goal: "balanced",
+            auto_chunking_use_llm: false,
+          },
+          storeRemote: true,
+          reviewBeforeStorage: false,
+          typeDefaults: {
+            audio: { diarize: false },
+            document: { ocr: true },
+            video: { captions: true },
+          },
+          advancedValues: {
+            chunk_method: "tokens",
+            chunk_size: 0,
+            chunk_overlap: -5,
+            hierarchical_chunking: true,
+            hierarchical_template: { boundaries: [{ kind: "heading" }] },
+          },
+        },
+        "standard"
+      )
+
+      expect(matchesStandard).toBe(true)
+    })
+
     it("setCustomOptions merges custom options into presetConfig", async () => {
       renderWithProvider()
       // Default standard has perform_analysis = true
@@ -379,6 +472,67 @@ describe("IngestWizardContext", () => {
       })
       expect(screen.getByTestId("currentStep").textContent).toBe("4")
       expect(screen.getByTestId("status").textContent).toBe("running")
+    })
+
+    it("initializes processing progress only for valid queue items", async () => {
+      renderWithProvider()
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("setMixedQueue"))
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("startProcessing"))
+      })
+
+      expect(screen.getByTestId("status").textContent).toBe("running")
+      expect(screen.getByTestId("progressIds").textContent).toBe("valid-a")
+    })
+
+    it("initializes quick processing progress only for valid queue items", async () => {
+      renderWithProvider()
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("setMixedQueue"))
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("skipToProcessing"))
+      })
+
+      expect(screen.getByTestId("currentStep").textContent).toBe("4")
+      expect(screen.getByTestId("progressIds").textContent).toBe("valid-a")
+    })
+
+    it("does not start processing an invalid-only queue", async () => {
+      renderWithProvider()
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("setInvalidQueue"))
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("startProcessing"))
+      })
+
+      expect(screen.getByTestId("status").textContent).toBe("idle")
+      expect(screen.getByTestId("progressIds").textContent).toBe("")
+    })
+
+    it("does not quick-process an invalid-only queue", async () => {
+      renderWithProvider()
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("setInvalidQueue"))
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("skipToProcessing"))
+      })
+
+      expect(screen.getByTestId("currentStep").textContent).toBe("1")
+      expect(screen.getByTestId("status").textContent).toBe("idle")
+      expect(screen.getByTestId("progressIds").textContent).toBe("")
     })
 
     it("cancelProcessing sets status to cancelled", async () => {

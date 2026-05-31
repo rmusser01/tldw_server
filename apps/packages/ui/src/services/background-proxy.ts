@@ -27,6 +27,9 @@ const STREAM_RUNTIME_PING_TIMEOUT_MS = 400
 const STREAM_RUNTIME_HEALTH_TTL_MS = 30_000
 const STREAM_QUEUE_DRAIN_BATCH_LIMIT = 32
 const STREAM_QUEUE_DRAIN_SLICE_MS = 12
+const SAFE_RUNTIME_MESSAGE_TIMEOUT_MS = 3_000
+const UNSAFE_RUNTIME_MESSAGE_TIMEOUT_FLOOR_MS = 5_000
+const DEFAULT_UNSAFE_RUNTIME_MESSAGE_TIMEOUT_MS = 10_000
 const ABSOLUTE_URL_BLOCK_ERROR =
   "Direct stream fallback is allowed only for allowlisted absolute URLs."
 const BACKEND_UNREACHABLE_PATTERN =
@@ -250,6 +253,33 @@ const isSafeFallbackMethod = (method: unknown): boolean => {
   return methodUpper === "GET" || methodUpper === "HEAD" || methodUpper === "OPTIONS"
 }
 
+const resolveRuntimeMessageTimeoutMs = (
+  method: unknown,
+  override?: number
+): number => {
+  if (isSafeFallbackMethod(method)) return SAFE_RUNTIME_MESSAGE_TIMEOUT_MS
+  const configured = Number(override)
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.max(UNSAFE_RUNTIME_MESSAGE_TIMEOUT_FLOOR_MS, configured)
+  }
+  return DEFAULT_UNSAFE_RUNTIME_MESSAGE_TIMEOUT_MS
+}
+
+const isIdempotentWriteFallbackAllowed = (
+  method: unknown,
+  path: unknown,
+  body: unknown
+): boolean => {
+  if (isSafeFallbackMethod(method)) return false
+  if (String(method || "GET").toUpperCase() !== "POST") return false
+  const normalizedPath = String(path || "")
+    .split("?")[0]
+    .replace(/\/+$/, "")
+  if (normalizedPath !== "/api/v1/web-clipper/save") return false
+  const clipId = (body as { clip_id?: unknown } | null)?.clip_id
+  return typeof clipId === "string" && clipId.trim().length > 0
+}
+
 const isExtensionTransportFailure = (error: unknown): boolean => {
   if (isNoFallbackError(error)) return false
   const message =
@@ -448,6 +478,15 @@ export async function bgRequest<
     !preferDirect &&
     Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
   const methodIsSafeFallback = isSafeFallbackMethod(method)
+  const allowIdempotentWriteFallback = isIdempotentWriteFallbackAllowed(
+    method,
+    path,
+    body
+  )
+  const runtimeMessageTimeoutMs = resolveRuntimeMessageTimeoutMs(
+    method,
+    Number(timeoutMs)
+  )
 
   // Some binary responses do not survive extension message serialization.
   if (shouldBypassBackground) {
@@ -513,10 +552,9 @@ export async function bgRequest<
 
       if (!abortSignal) {
         // Add timeout to extension messaging - if service worker doesn't respond, fall back to direct request
-        const extensionTimeout = 3000 // 3 second timeout for extension messaging
         const messagePromiseNoSignal = browser.runtime.sendMessage(payload)
         const timeoutPromiseNoSignal = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), extensionTimeout)
+          setTimeout(() => resolve(null), runtimeMessageTimeoutMs)
         )
         const resp = await Promise.race([messagePromiseNoSignal, timeoutPromiseNoSignal]) as { ok: boolean; error?: string; status?: number; data: T } | undefined | null
         if (resp === null) {
@@ -595,7 +633,6 @@ export async function bgRequest<
       >
 
       // Add timeout to extension messaging with abort signal support
-      const extensionTimeoutWithSignal = 3000 // 3 second timeout
       const resp = await new Promise<
         { ok: boolean; error?: string; status?: number; data: T } | undefined | null
       >((resolve, reject) => {
@@ -605,7 +642,7 @@ export async function bgRequest<
         const timeoutId = setTimeout(() => {
           abortSignal.removeEventListener('abort', onAbort)
           resolve(null) // timeout - fall through to direct request
-        }, extensionTimeoutWithSignal)
+        }, runtimeMessageTimeoutMs)
         abortSignal.addEventListener('abort', onAbort, { once: true })
         messagePromise
           .then((r) => {
@@ -688,8 +725,12 @@ export async function bgRequest<
     }
   } catch (e) {
     if (isNoFallbackError(e)) {
-      if (isExtensionTimeoutError(e) && methodIsSafeFallback) {
-        // Safe methods can fall through on timeout because duplicate side-effects are not expected.
+      if (
+        isExtensionTimeoutError(e) &&
+        (methodIsSafeFallback || allowIdempotentWriteFallback)
+      ) {
+        // Safe methods and explicitly idempotent write endpoints can fall
+        // through when extension messaging itself times out.
       } else {
         throw e
       }

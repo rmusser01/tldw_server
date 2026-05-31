@@ -3,7 +3,12 @@
 from datetime import datetime
 from typing import Any, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    default_offset_pagination_aliases,
+)
 
 VALID_SCOPES = {"read", "write", "admin", "service"}
 
@@ -81,4 +86,13 @@ class APIKeyAuditEntry(BaseModel):
 class APIKeyAuditListResponse(BaseModel):
     key_id: int
     items: list[APIKeyAuditEntry]
-    total: Optional[int] = None
+    total: int
+    limit: int
+    offset: int
+    pagination: OffsetPaginationMeta
+    has_more: Optional[bool] = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: Optional[int] = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return default_offset_pagination_aliases(self)

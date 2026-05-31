@@ -1,5 +1,6 @@
 import { bgRequest } from "@/services/background-proxy"
 import { appendPathQuery, toAllowedPath } from "@/services/tldw/path-utils"
+import type { AllowedPath } from "@/services/tldw/openapi-guard"
 
 export type HouseholdMode = "family" | "institutional"
 export type WizardActivationStatus =
@@ -241,7 +242,7 @@ export interface HouseholdDraftSnapshot {
   plans: GuardrailPlanDraft[]
 }
 
-const getInvitePreviewPath = (token: string): string => {
+const getInvitePreviewPath = (token: string): AllowedPath => {
   const query = new URLSearchParams({ token }).toString()
   return appendPathQuery(toAllowedPath("/api/v1/guardian/wizard/invites/preview"), `?${query}`)
 }

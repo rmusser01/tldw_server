@@ -29,7 +29,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_da
 from tldw_Server_API.app.core.testing import is_truthy
 
 _CLAIMS_ALERTS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AttributeError,
     KeyError,
     OSError,
@@ -43,7 +42,9 @@ def _enumerate_sqlite_user_ids() -> list[int]:
     try:
         base = DatabasePaths.get_user_db_base_dir()
     except _CLAIMS_ALERTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"claims_alerts: failed to resolve user db base dir: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "claims_alerts: failed to resolve user db base dir"
+        )
         return []
     user_ids: list[int] = []
     for entry in base.iterdir():
@@ -61,7 +62,9 @@ def _enumerate_sqlite_user_ids() -> list[int]:
         try:
             user_ids = [DatabasePaths.get_single_user_id()]
         except _CLAIMS_ALERTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"claims_alerts: failed to derive single_user_id: {exc}")
+            logger.bind(error_type=type(exc).__name__).debug(
+                "claims_alerts: failed to derive single_user_id"
+            )
             user_ids = []
     return sorted(set(user_ids))
 
@@ -99,9 +102,13 @@ async def run_claims_alerts_once(
                         )
                         processed += 1
                     except _CLAIMS_ALERTS_NONCRITICAL_EXCEPTIONS as exc:
-                        logger.warning(f"claims_alerts: evaluation failed for user {user_id}: {exc}")
+                        logger.bind(error_type=type(exc).__name__).warning(
+                            f"claims_alerts: evaluation failed for user {user_id}"
+                        )
         except _CLAIMS_ALERTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"claims_alerts: failed to create media db: {exc}")
+            logger.bind(error_type=type(exc).__name__).warning(
+                "claims_alerts: failed to create media db"
+            )
             return 0
     else:
         user_ids = _enumerate_sqlite_user_ids()
@@ -126,7 +133,9 @@ async def run_claims_alerts_once(
                     )
                     processed += 1
             except _CLAIMS_ALERTS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.warning(f"claims_alerts: evaluation failed for user {user_id}: {exc}")
+                logger.bind(error_type=type(exc).__name__).warning(
+                    f"claims_alerts: evaluation failed for user {user_id}"
+                )
     return processed
 
 
@@ -148,7 +157,9 @@ async def start_claims_alerts_scheduler() -> asyncio.Task | None:
             try:
                 await run_claims_alerts_once()
             except _CLAIMS_ALERTS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.warning(f"Claims alerts scheduler loop error: {exc}")
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Claims alerts scheduler loop error"
+                )
             await asyncio.sleep(interval)
 
     task = asyncio.create_task(_runner(), name="claims_alerts_scheduler")

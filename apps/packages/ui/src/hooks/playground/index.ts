@@ -1,5 +1,5 @@
 export { useModelSelector } from "./useModelSelector"
-export type { ModelSortMode } from "./useModelSelector"
+export type { ModelListScope, ModelSortMode } from "./useModelSelector"
 export { useComposerTokens } from "./useComposerTokens"
 export { useImageBackend } from "./useImageBackend"
 export { useActionBarVisibility } from "./useActionBarVisibility"

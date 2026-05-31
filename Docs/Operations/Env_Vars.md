@@ -529,6 +529,21 @@ Quick start (local dev):
 - Additional provider-specific variables as required by their APIs.
 - `OPENROUTER_MODEL_DISCOVERY_TTL_SECONDS`: TTL for cached OpenRouter `/models` discovery results used by `/api/v1/llm/models/metadata` (default `600`, minimum `30`). Use `refresh_openrouter=true` on the metadata endpoint to force an immediate refresh.
 
+### Custom OpenAI-Compatible Endpoints
+- `CUSTOM_OPENAI_API_IP`: Canonical base URL override for `custom-openai-api` (for example `http://127.0.0.1:8000/v1`). Overrides `[API] custom_openai_api_ip`.
+- `CUSTOM_OPENAI_API_BASE`: Alias for `CUSTOM_OPENAI_API_IP`, accepted for OpenAI-compatible naming compatibility.
+- `CUSTOM_OPENAI_API_URL`: Alias for `CUSTOM_OPENAI_API_IP`, accepted for OpenAI-compatible naming compatibility.
+- `CUSTOM_OPENAI_API_IP_1`: Backward-compatible alias for the first custom OpenAI-compatible endpoint.
+- `CUSTOM_OPENAI2_API_IP`: Canonical base URL override for `custom-openai-api-2`. Overrides `[API] custom_openai2_api_ip`.
+- `CUSTOM_OPENAI_API_IP_2`: Backward-compatible alias for the second custom OpenAI-compatible endpoint.
+- Additional accepted aliases: `CUSTOM_OPENAI_API_BASE_URL`, `CUSTOM_OPENAI_BASE_URL`, `CUSTOM_OPENAI2_API_BASE`, `CUSTOM_OPENAI2_API_URL`, `CUSTOM_OPENAI2_API_BASE_URL`, `CUSTOM_OPENAI2_BASE_URL`, `CUSTOM_OPENAI_API_2_IP`, `CUSTOM_OPENAI_API_2_BASE`, `CUSTOM_OPENAI_API_2_URL`, `CUSTOM_OPENAI_API_2_BASE_URL`, `CUSTOM_OPENAI_API_BASE_2`, `CUSTOM_OPENAI_API_URL_2`, `CUSTOM_OPENAI_API_BASE_URL_2`.
+- Provider-specific endpoint env vars only apply to their matching endpoint slot; provider-1 env vars do not override provider-2 `config.txt` settings.
+- Additional named endpoints are supported as `custom-openai-api-3` through `custom-openai-api-99`.
+  - Endpoint env aliases for endpoint `N`: `CUSTOM_OPENAI_API_IP_{N}`, `CUSTOM_OPENAI_API_BASE_{N}`, `CUSTOM_OPENAI_API_URL_{N}`, `CUSTOM_OPENAI_API_BASE_URL_{N}`, `CUSTOM_OPENAI{N}_API_IP`, `CUSTOM_OPENAI{N}_API_BASE`, `CUSTOM_OPENAI{N}_API_URL`, `CUSTOM_OPENAI{N}_API_BASE_URL`, `CUSTOM_OPENAI_API_{N}_IP`, `CUSTOM_OPENAI_API_{N}_BASE`, `CUSTOM_OPENAI_API_{N}_URL`, `CUSTOM_OPENAI_API_{N}_BASE_URL`.
+  - API key env aliases for endpoint `N`: `CUSTOM_OPENAI_API_KEY_{N}`, `CUSTOM_OPENAI{N}_API_KEY`, `CUSTOM_OPENAI_API_{N}_API_KEY`.
+  - Model env aliases for endpoint `N`: `CUSTOM_OPENAI_API_MODEL_{N}`, `CUSTOM_OPENAI{N}_API_MODEL`, `CUSTOM_OPENAI_API_{N}_MODEL`.
+  - Equivalent `config.txt` fields use either `custom_openaiN_api_*` or `custom_openai_api_N_*`; for example `custom_openai37_api_ip`, `custom_openai37_api_key`, `custom_openai37_api_model`.
+
 ### Qwen / Model Studio Routing
 - `QWEN_BASE_URL`: Overrides Qwen chat base URL directly (highest non-request precedence).
 - `QWEN_REGION`: Region preset for Qwen chat when `QWEN_BASE_URL` and `qwen_api.api_base_url` are unset (`sg|cn|us`).

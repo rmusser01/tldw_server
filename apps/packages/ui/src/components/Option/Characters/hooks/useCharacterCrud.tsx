@@ -36,14 +36,27 @@ import {
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route"
 import { createAvatarValue } from "../AvatarField"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
+import {
+  buildCharacterChatReadiness,
+  type CharacterChatReadiness
+} from "@/utils/chat-model-availability"
+import { buildCharacterChatPath } from "@/routes/route-paths"
+
+export type CharacterChatIntentBlocker = {
+  record: any
+  characterSelection: any
+  readiness: CharacterChatReadiness
+  selectedModel: string | null
+  availableChatModels: Array<{ model?: unknown; name?: unknown }>
+}
 
 export interface UseCharacterCrudDeps {
   t: (key: string, opts?: Record<string, any>) => string
   notification: {
-    error: (args: { message: string; description?: any }) => void
-    warning: (args: { message: string; description?: any }) => void
-    success: (args: { message: string; description?: any }) => void
-    info: (args: { message: string; description?: any }) => void
+    error: (args: { message: string; description?: any; duration?: number }) => void
+    warning: (args: { message: string; description?: any; duration?: number }) => void
+    success: (args: { message: string; description?: any; duration?: number }) => void
+    info: (args: { message: string; description?: any; duration?: number }) => void
   }
   qc: QueryClient
   createForm: any
@@ -75,6 +88,9 @@ export interface UseCharacterCrudDeps {
   effectiveDefaultCharacterId: string | undefined
   defaultCharacterSelection: any
   setDefaultCharacterSelection: (value: any) => Promise<void> | void
+  activeChatModel: string | null
+  availableChatModels: Array<{ model?: unknown; name?: unknown }> | null | undefined
+  setChatIntentBlocker: (value: CharacterChatIntentBlocker | null) => void
 }
 
 export function useCharacterCrud(deps: UseCharacterCrudDeps) {
@@ -108,7 +124,10 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
     clearEditDraft,
     data,
     effectiveDefaultCharacterId,
-    setDefaultCharacterSelection
+    setDefaultCharacterSelection,
+    activeChatModel,
+    availableChatModels,
+    setChatIntentBlocker
   } = deps
 
   const navigate = useNavigate()
@@ -481,13 +500,38 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
   }, [notification, setExporting, t])
 
   // --- Chat handler ---
-  const handleChat = React.useCallback((record: any) => {
-    setSelectedCharacter(buildCharacterSelectionPayload(record))
-    navigate("/")
+  const handleChat = React.useCallback(async (record: any) => {
+    const characterSelection = buildCharacterSelectionPayload(record)
+    await setSelectedCharacter(characterSelection)
+
+    const readiness = buildCharacterChatReadiness({
+      selectedCharacter: characterSelection,
+      selectedModel: activeChatModel,
+      availableModels: availableChatModels
+    })
+    if (!readiness.canStart && readiness.missingRequirement === "chat-model") {
+      setChatIntentBlocker({
+        record,
+        characterSelection,
+        readiness,
+        selectedModel: activeChatModel,
+        availableChatModels: availableChatModels ?? []
+      })
+      return
+    }
+
+    setChatIntentBlocker(null)
+    navigate(buildCharacterChatPath({ characterId: characterSelection.id }))
     setTimeout(() => {
       focusComposer()
     }, 0)
-  }, [setSelectedCharacter, navigate])
+  }, [
+    activeChatModel,
+    availableChatModels,
+    navigate,
+    setChatIntentBlocker,
+    setSelectedCharacter
+  ])
 
   // --- Chat in new tab ---
   const handleChatInNewTab = React.useCallback(
@@ -495,7 +539,7 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       const characterSelection = buildCharacterSelectionPayload(record)
       await setSelectedCharacter(characterSelection)
       const opened = window.open(
-        resolveChatWorkspaceUrl(),
+        resolveChatWorkspaceUrl({ characterId: characterSelection.id }),
         "_blank",
         "noopener,noreferrer"
       )

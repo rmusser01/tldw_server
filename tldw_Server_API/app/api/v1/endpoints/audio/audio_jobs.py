@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import os
 import tempfile
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlparse
@@ -22,15 +25,12 @@ except ImportError:  # pragma: no cover - fallback for older environments
 import contextlib
 
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, RequirePermission, RequireRole, User
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_cursor_pagination_meta
+from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_auth_principal,
-    require_permissions,
-    require_roles,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_MAINTENANCE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
@@ -58,8 +58,8 @@ _job_manager_lock = threading.Lock()
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
 
 _ADMIN_DEPS = [
-    Depends(require_roles("admin")),
-    Depends(require_permissions(SYSTEM_MAINTENANCE)),
+    Depends(RequireRole("admin")),
+    Depends(RequirePermission(SYSTEM_MAINTENANCE)),
 ]
 
 _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS = (
@@ -83,6 +83,7 @@ _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     ValueError,
 )
+_AUDIO_JOBS_CURSOR_VERSION = 1
 
 
 def _principal_has_admin_claims(principal: AuthPrincipal) -> bool:
@@ -126,6 +127,42 @@ def _validate_audio_job_local_path(local_path: str) -> str:
         allowed_str = ", ".join(str(root) for root in allowed_roots) or "<none configured>"
         raise ValueError(f"local_path must resolve under one of the allowed base directories: {allowed_str}")
     return str(resolved)
+
+
+def _encode_audio_jobs_cursor(created_at: str, job_id: int) -> str:
+    datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    payload = {
+        "v": _AUDIO_JOBS_CURSOR_VERSION,
+        "created_at": created_at,
+        "id": int(job_id),
+    }
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_audio_jobs_cursor(cursor: str) -> tuple[datetime, int]:
+    if not cursor:
+        raise ValueError("empty cursor")
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        raw = base64.urlsafe_b64decode((cursor + padding).encode("ascii")).decode("utf-8")
+        payload = json.loads(raw)
+        if int(payload.get("v", 0)) != _AUDIO_JOBS_CURSOR_VERSION:
+            raise ValueError("unsupported cursor version")
+        created_at = str(payload["created_at"])
+        job_id = int(payload["id"])
+        return datetime.fromisoformat(created_at.replace("Z", "+00:00")), job_id
+    except (
+        AttributeError,
+        binascii.Error,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        UnicodeEncodeError,
+        UnicodeDecodeError,
+        ValueError,
+    ) as exc:
+        raise ValueError("invalid cursor") from exc
 
 
 def get_job_manager() -> JobManager:
@@ -329,7 +366,17 @@ async def get_audio_job(
         raise HTTPException(status_code=500, detail="Failed to fetch job") from None
 
 
-@router.get("/jobs/{job_id}/progress/stream", summary="Stream audio job progress (SSE)")
+@router.get(
+    "/jobs/{job_id}/progress/stream",
+    summary="Stream audio job progress (SSE)",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Server-sent events stream of audio job progress",
+            "content": {"text/event-stream": {}},
+        },
+    },
+)
 async def stream_audio_job_progress(
     job_id: int,
     current_user: Annotated[User, Depends(get_request_user)],
@@ -433,6 +480,11 @@ async def stream_audio_job_progress(
 
 class ListAudioJobsResponse(BaseModel):
     jobs: list[AudioJob]
+    limit: int
+    cursor: str | None = None
+    next_cursor: str | None = None
+    has_more: bool
+    pagination: CursorPaginationMeta
 
 
 @router.get(
@@ -443,32 +495,68 @@ class ListAudioJobsResponse(BaseModel):
 )
 async def list_audio_jobs_admin(
     jm: Annotated[JobManager, Depends(get_job_manager)],
-    status_filter: str | None = Query(None, description="Filter by status: queued|processing|completed|failed|cancelled"),
-    owner_user_id: str | None = Query(None, description="Filter by owner user id"),
-    limit: int = Query(50, ge=1, le=200),
+    status_filter: Annotated[
+        str | None,
+        Query(description="Filter by status: queued|processing|completed|failed|cancelled"),
+    ] = None,
+    owner_user_id: Annotated[str | None, Query(description="Filter by owner user id")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query(description="Opaque cursor from the previous page")] = None,
 ):
     try:
+        created_before: datetime | None = None
+        before_id: int | None = None
+        if cursor is not None:
+            try:
+                created_before, before_id = _decode_audio_jobs_cursor(cursor)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+
+        requested_limit = int(limit)
         logger.info(
-            'Admin list audio jobs: status_filter={}, owner_user_id={}, limit={}',
+            'Admin list audio jobs: status_filter={}, owner_user_id={}, limit={}, cursor={}',
             status_filter,
             owner_user_id,
-            limit,
+            requested_limit,
+            bool(cursor),
         )
         jobs = jm.list_jobs(
             domain="audio",
             status=status_filter,
             owner_user_id=str(owner_user_id) if owner_user_id is not None else None,
-            limit=int(limit),
+            limit=requested_limit + 1,
+            created_before=created_before,
+            before_id=before_id,
             sort_by="created_at",
             sort_order="desc",
         )
+        has_more = len(jobs) > requested_limit
+        visible_jobs = jobs[:requested_limit]
+        next_cursor = None
+        if has_more and visible_jobs:
+            last_job = visible_jobs[-1]
+            next_cursor = _encode_audio_jobs_cursor(
+                str(last_job.get("created_at")),
+                int(last_job.get("id")),
+            )
         # Project to model
-        out = [AudioJob(**{k: j.get(k) for k in _AUDIO_JOB_FIELD_MAP}) for j in jobs]
-        return ListAudioJobsResponse(jobs=out)
+        out = [AudioJob(**{k: j.get(k) for k in _AUDIO_JOB_FIELD_MAP}) for j in visible_jobs]
+        return ListAudioJobsResponse(
+            jobs=out,
+            limit=requested_limit,
+            cursor=cursor,
+            next_cursor=next_cursor,
+            has_more=bool(next_cursor),
+            pagination=build_cursor_pagination_meta(
+                limit=requested_limit,
+                cursor=cursor,
+                next_cursor=next_cursor,
+            ),
+        )
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to list jobs: {e}")
+        logger.error("Failed to list jobs")
         raise HTTPException(status_code=500, detail="Failed to list jobs") from e
 
 
@@ -502,7 +590,7 @@ async def summarize_audio_jobs_admin(
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to summarize jobs: {e}")
+        logger.error("Failed to summarize jobs")
         raise HTTPException(status_code=500, detail="Failed to summarize jobs") from e
 
 
@@ -541,7 +629,7 @@ async def summary_by_owner_admin(
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to summarize by owner: {e}")
+        logger.error("Failed to summarize by owner")
         raise HTTPException(status_code=500, detail="Failed to summarize by owner") from e
 
 
@@ -609,7 +697,7 @@ async def owner_processing_summary(
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to get owner processing summary: {e}")
+        logger.error("Failed to get owner processing summary")
         raise HTTPException(status_code=500, detail="Failed to get owner processing summary") from e
 
 
@@ -637,7 +725,7 @@ async def get_user_tier_admin(user_id: int):
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to get user tier: {e}")
+        logger.error("Failed to get user tier")
         raise HTTPException(status_code=500, detail="Failed to get user tier") from e
 
 
@@ -658,5 +746,5 @@ async def set_user_tier_admin(user_id: int, req: SetUserTierRequest):
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to set user tier: {e}")
+        logger.error("Failed to set user tier")
         raise HTTPException(status_code=500, detail="Failed to set user tier") from e

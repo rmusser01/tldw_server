@@ -3352,5 +3352,29 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "Couleur d’arrière-plan de citation"
+  },
+  "navigation_connect": {
+    "message": "Connexion"
+  },
+  "navigation_aiModels": {
+    "message": "IA et modèles"
+  },
+  "navigation_experience": {
+    "message": "Expérience"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "Connaissances et espace de travail"
+  },
+  "navigation_safetyAdmin": {
+    "message": "Sécurité et administration"
+  },
+  "providerKeys_navTitle": {
+    "message": "Clés des fournisseurs"
+  },
+  "navigation_dataManagement": {
+    "message": "Gestion des données"
+  },
+  "dataManagement_navTitle": {
+    "message": "Gestion des données"
   }
 }

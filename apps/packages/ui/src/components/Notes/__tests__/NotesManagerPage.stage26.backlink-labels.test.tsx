@@ -234,7 +234,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     fireEvent.mouseEnter(listLabel)
     expect(await screen.findByText("Conversation ID: conv-1234")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: /backlink note/i }))
+    fireEvent.click(screen.getByTestId("notes-open-button-note-backlink-1"))
     await waitFor(() => {
       const labels = screen.getAllByText("Research session")
       expect(labels.length).toBeGreaterThan(1)
@@ -296,7 +296,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     renderPage()
     expect(await screen.findByText("conv-unavailable")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: /backlink note/i }))
+    fireEvent.click(screen.getByTestId("notes-open-button-note-backlink-1"))
     await waitFor(() => {
       expect(mockGetChat).toHaveBeenCalledTimes(1)
     })
@@ -318,7 +318,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
       expect(mockGetChat).not.toHaveBeenCalled()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /backlink note/i }))
+    fireEvent.click(screen.getByTestId("notes-open-button-note-backlink-1"))
 
     await waitFor(() => {
       expect(mockGetChat).toHaveBeenCalledTimes(1)

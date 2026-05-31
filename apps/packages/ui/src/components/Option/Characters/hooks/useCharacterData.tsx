@@ -28,6 +28,7 @@ import {
   buildCharacterSelectionPayload,
   EMPTY_CHARACTER_WORLD_BOOK_DATA,
   SERVER_QUERY_ROLLOUT_FLAG_KEY,
+  type CharacterTableSortOrder,
   type CharacterWorldBookOption,
   type CharacterFolderOption,
   type DefaultCharacterPreferenceQueryResult
@@ -58,7 +59,7 @@ export interface UseCharacterDataDeps {
   favoritesOnly: boolean
   characterListScope: "active" | "deleted"
   sortColumn: string | null
-  sortOrder: string | null
+  sortOrder: CharacterTableSortOrder
   currentPage: number
   pageSize: number
   setCurrentPage: (page: number) => void

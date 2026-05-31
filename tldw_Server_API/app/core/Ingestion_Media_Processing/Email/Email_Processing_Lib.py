@@ -402,8 +402,8 @@ def process_email_task(
                         "app_exception_events_total",
                         labels={"component": "email_ingest", "event": "chunking_failed"},
                     )
-                result["warnings"].append(f"Chunking failed: {e}")
-                result["chunks"] = [{"text": content_text, "metadata": {"chunk_num": 0, "error": str(e)}}]
+                result["warnings"].append("Chunking failed")
+                result["chunks"] = [{"text": content_text, "metadata": {"chunk_num": 0, "error": "Email chunking failed"}}]
         elif content_text:
             result["chunks"] = [{"text": content_text, "metadata": {"chunk_num": 0}}]
 
@@ -469,7 +469,7 @@ def process_email_task(
     except _EMAIL_NONCRITICAL_EXCEPTIONS as e:
         logging.error(f"Failed processing email '{filename}': {e}", exc_info=True)
         result["status"] = "Error"
-        result["error"] = str(e)
+        result["error"] = "Email processing failed"
         return result
 
 

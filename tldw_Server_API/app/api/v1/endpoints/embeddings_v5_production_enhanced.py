@@ -46,11 +46,7 @@ from prometheus_client import REGISTRY, Counter, Gauge, Histogram
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    rbac_rate_limit,
-    require_permissions,
-    require_roles,
-)
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, RequireRole, resolve_user_id_for_request, User
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 
@@ -73,11 +69,6 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPri
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
 
 # Authentication
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
 
 # Configuration
 from tldw_Server_API.app.core.config import settings
@@ -377,6 +368,9 @@ DEFAULT_CACHE_CLEANUP_INTERVAL = 300
 DEFAULT_CONNECTION_POOL_SIZE = 20
 DEFAULT_REQUEST_TIMEOUT = 30
 DEFAULT_MAX_RETRIES = 3
+EMBEDDING_SERVICE_FAILED_DETAIL = "Embedding service error"
+EMBEDDING_MODEL_WARMUP_FAILED_DETAIL = "Warmup failed"
+EMBEDDING_MODEL_DOWNLOAD_FAILED_DETAIL = "Download failed"
 
 # Allow overriding via settings/env
 def _cfg_int(name: str, default_val: int) -> int:
@@ -474,6 +468,25 @@ async def _orchestrator_depth_and_age(client: aioredis.Redis) -> tuple[int, floa
     return (max(depths) if depths else 0, max(ages) if ages else 0.0)
 
 
+def _is_embeddings_backpressure_redis_enabled() -> bool:
+    """Return whether Redis-backed embeddings backpressure should inspect streams."""
+
+    redis_enabled_env = os.getenv("REDIS_ENABLED")
+    if redis_enabled_env is not None:
+        return is_truthy(redis_enabled_env)
+
+    try:
+        configured = settings.get("REDIS_ENABLED", None)
+        if configured is not None:
+            if isinstance(configured, str):
+                return is_truthy(configured)
+            return bool(configured)
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+        pass
+
+    return bool(os.getenv("EMBEDDINGS_REDIS_URL") or os.getenv("REDIS_URL"))
+
+
 def _should_enforce_tenant_rps(request: Request) -> bool:
     """
     Decide whether to enforce per-tenant RPS quotas for this request.
@@ -524,27 +537,29 @@ def _should_enforce_tenant_rps(request: Request) -> bool:
 async def _check_backpressure_and_quotas(request: Request, user: User) -> HTTPException | None:
     """Return HTTPException(429) if backpressure or tenant quota exceeded; else None."""
     # Orchestrator-based backpressure
-    try:
-        client = await _get_redis_client()
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        client = None
-    try:
-        if client is not None:
-            depth, age = await _orchestrator_depth_and_age(client)
-            if depth >= BP_MAX_DEPTH or age >= BP_MAX_AGE_S:
-                retry_after = 5
-                if age >= BP_MAX_AGE_S:
-                    retry_after = min(60, int(max(5, age / 2)))
-                headers = {"Retry-After": str(retry_after)}
-                return HTTPException(status_code=429, detail="Backpressure: queue overload", headers=headers)
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        pass
-    finally:
+    client = None
+    if _is_embeddings_backpressure_redis_enabled():
+        try:
+            client = await _get_redis_client()
+        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            client = None
         try:
             if client is not None:
-                    await ensure_async_client_closed(client)
+                depth, age = await _orchestrator_depth_and_age(client)
+                if depth >= BP_MAX_DEPTH or age >= BP_MAX_AGE_S:
+                    retry_after = 5
+                    if age >= BP_MAX_AGE_S:
+                        retry_after = min(60, int(max(5, age / 2)))
+                    headers = {"Retry-After": str(retry_after)}
+                    return HTTPException(status_code=429, detail="Backpressure: queue overload", headers=headers)
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             pass
+        finally:
+            try:
+                if client is not None:
+                    await ensure_async_client_closed(client)
+            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug("Failed to close embeddings backpressure Redis client: {}", exc)
 
     # Per-tenant quotas in multi-user mode
     try:
@@ -1301,7 +1316,7 @@ class CompactorRunResponse(BaseModel):
     "/embeddings/compactor/run",
     response_model=CompactorRunResponse,
     summary="Run a one-shot vector compaction for a user (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def run_compactor_once(
     req: CompactorRunRequest,
@@ -1913,11 +1928,7 @@ async def create_embeddings_with_circuit_breaker(
                 try:
                     status_code = int(getattr(resp, "status_code", 0))
                     if status_code >= 400:
-                        try:
-                            detail = resp.text
-                        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-                            detail = ""
-                        raise HTTPException(status_code=status_code, detail=f"Cohere error: {detail}")
+                        raise HTTPException(status_code=status_code, detail="Cohere embeddings error")
                     data = resp.json()
                 finally:
                     close = getattr(resp, "aclose", None)
@@ -1961,11 +1972,7 @@ async def create_embeddings_with_circuit_breaker(
                 try:
                     status_code = int(getattr(resp, "status_code", 0))
                     if status_code >= 400:
-                        try:
-                            detail = resp.text
-                        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-                            detail = ""
-                        raise HTTPException(status_code=status_code, detail=f"Google Embeddings error: {detail}")
+                        raise HTTPException(status_code=status_code, detail="Google embeddings error")
                     data = resp.json()
                 finally:
                     close = getattr(resp, "aclose", None)
@@ -2009,7 +2016,7 @@ async def create_embeddings_with_circuit_breaker(
                 except HTTPException:
                     raise
                 except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
-                    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MLX embeddings error: {exc}") from exc
+                    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="MLX embeddings error") from exc
             else:
                 raise ValueError(f"Unknown provider: {provider}")
 
@@ -2183,7 +2190,7 @@ async def create_embeddings_batch_async(
 
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail=f"Embedding service error: {str(e)}"
+                        detail=EMBEDDING_SERVICE_FAILED_DETAIL,
                     ) from e
 
         if len(all_new_embeddings) != len(uncached_texts):
@@ -3231,8 +3238,8 @@ class PriorityBumpRequest(BaseModel):
     "/embeddings/job/priority/bump",
     summary="Override/bump job priority for routing into priority queues (best-effort)",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(EMBEDDINGS_ADMIN)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(EMBEDDINGS_ADMIN)),
     ],
 )
 async def bump_job_priority(
@@ -3268,7 +3275,7 @@ async def bump_job_priority(
             "ttl_seconds": int(req.ttl_seconds or 600),
         }
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Failed to set priority override: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to set priority override") from e
     finally:
         try:
             if client is not None:
@@ -3305,7 +3312,7 @@ class CollectionStatsResponse(BaseModel):
 @router.post(
     "/embeddings/models/warmup",
     summary="Warmup (preload) an embedding model (admin)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def warmup_model(
     payload: ModelActionRequest,
@@ -3328,13 +3335,16 @@ async def warmup_model(
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Warmup failed for {provider}:{payload.model}: {e}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Warmup failed: {e}") from e
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=EMBEDDING_MODEL_WARMUP_FAILED_DETAIL,
+        ) from e
 
 
 @router.post(
     "/embeddings/models/download",
     summary="Download/prepare a model (admin)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def download_model(
     payload: ModelActionRequest,
@@ -3358,12 +3368,15 @@ async def download_model(
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Download failed for {provider}:{payload.model}: {e}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Download failed: {e}") from e
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=EMBEDDING_MODEL_DOWNLOAD_FAILED_DETAIL,
+        ) from e
 
 @router.delete(
     "/embeddings/cache",
     summary="Clear embedding cache (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def clear_cache(
     current_user: User = Depends(get_request_user),
@@ -3598,7 +3611,7 @@ async def health_check():
 @router.get(
     "/embeddings/circuit-breakers",
     summary="Get circuit breaker status (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def get_circuit_breakers(
     _current_user: User = Depends(get_request_user),
@@ -3610,7 +3623,7 @@ async def get_circuit_breakers(
 @router.post(
     "/embeddings/circuit-breakers/{provider}/reset",
     summary="Reset circuit breaker (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def reset_circuit_breaker(
     provider: str,
@@ -3644,7 +3657,7 @@ async def reset_circuit_breaker(
 @router.get(
     "/embeddings/metrics",
     summary="Get service metrics (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def get_metrics(
     request: Request,
@@ -3757,7 +3770,7 @@ def _redact_obj(obj: Any, depth: int = 0) -> Any:
 @router.get(
     "/embeddings/dlq",
     summary="List DLQ items for a stage (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def list_dlq_items(
     stage: str = Query("embedding", description="Stage: chunking|embedding|storage|content"),
@@ -3820,7 +3833,7 @@ async def list_dlq_items(
     except HTTPException:
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list DLQ items: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to list DLQ items") from e
     finally:
         try:
             if client is not None:
@@ -3840,7 +3853,7 @@ class DLQRequeueRequest(BaseModel):
 @router.post(
     "/embeddings/dlq/requeue",
     summary="Requeue a DLQ item to its live stream (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def requeue_dlq_item(
     req: DLQRequeueRequest,
@@ -3923,7 +3936,7 @@ async def requeue_dlq_item(
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
         dlq_requeue_errors_total.labels(queue_name=dlq_stream, error_type=type(e).__name__).inc()
-        raise HTTPException(status_code=500, detail=f"Failed to requeue DLQ item: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to requeue DLQ item") from e
     finally:
         await ensure_async_client_closed(client)
 
@@ -3938,7 +3951,7 @@ class DLQRequeueBulkRequest(BaseModel):
 @router.post(
     "/embeddings/dlq/requeue/bulk",
     summary="Bulk requeue DLQ items to live stream (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def requeue_dlq_bulk(
     req: DLQRequeueBulkRequest,
@@ -4037,7 +4050,7 @@ async def requeue_dlq_bulk(
 @router.get(
     "/embeddings/dlq/stats",
     summary="DLQ and queue depths (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_dlq_stats(
     current_user: User = Depends(get_request_user),
@@ -4114,7 +4127,7 @@ def _dlq_state_key(stream: str, entry_id: str) -> str:
 @router.post(
     "/embeddings/dlq/state",
     summary="Set DLQ quarantine state (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def set_dlq_state(req: DLQStateSetRequest, current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4179,7 +4192,7 @@ def _stage_key(stage: str, suffix: str) -> str:
 @router.get(
     "/embeddings/stage/status",
     summary="Get per-stage pause/drain flags (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_stage_status(current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4200,7 +4213,7 @@ async def get_stage_status(current_user: User = Depends(get_request_user)):
 @router.post(
     "/embeddings/stage/control",
     summary="Pause/Resume/Drain a stage (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def control_stage(req: StageControlRequest, current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4258,7 +4271,7 @@ def _skip_key(job_id: str) -> str:
 @router.post(
     "/embeddings/job/skip",
     summary="Mark a job_id as skipped (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def mark_job_skipped(req: JobSkipRequest, current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4291,7 +4304,7 @@ async def mark_job_skipped(req: JobSkipRequest, current_user: User = Depends(get
 @router.get(
     "/embeddings/job/skip/status",
     summary="Check if a job_id is marked as skipped (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_job_skip_status(job_id: str = Query(..., description="Job ID to check"), current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4318,7 +4331,7 @@ class LedgerEntry(BaseModel):
 @router.get(
     "/embeddings/ledger/status",
     summary="Inspect ledger entries by idempotency_key/dedupe_key (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_ledger_status(
     idempotency_key: str | None = Query(default=None),
@@ -4405,7 +4418,7 @@ class ReembedScheduleResponse(BaseModel):
     "/embeddings/reembed/schedule",
     response_model=ReembedScheduleResponse,
     summary="Schedule a re-embed expansion job (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def schedule_reembed(
     req: ReembedScheduleRequest,
@@ -4500,7 +4513,7 @@ async def schedule_reembed(
             job_type=str(root_row.get("job_type")),
         )
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Failed to schedule re-embed: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to schedule re-embed") from e
 
 
 # ---------------------------------------------------------------------------
@@ -4636,7 +4649,14 @@ async def _sse_orchestrator_stream(client: aioredis.Redis):
 @router.get(
     "/embeddings/orchestrator/events",
     summary="SSE: embeddings orchestrator live summary (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Embeddings orchestrator event stream.",
+            "content": {"text/event-stream": {}},
+        },
+    },
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def orchestrator_events(_current_user: User = Depends(get_request_user)):
     # Admin/embeddings-admin gate is enforced via AuthNZ permissions; _current_user is used for audit context.
@@ -4704,8 +4724,10 @@ async def orchestrator_events(_current_user: User = Depends(get_request_user)):
                         await asyncio.gather(producer, return_exceptions=True)
                 raise
             else:
-                # Normal shutdown: ensure producer completes without forced cancel
+                # Normal shutdown: the producer loop is long-running, so cancel before awaiting it.
                 if not producer.done():
+                    with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
+                        producer.cancel()
                     with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                         await asyncio.gather(producer, return_exceptions=True)
         finally:
@@ -4726,7 +4748,7 @@ async def orchestrator_events(_current_user: User = Depends(get_request_user)):
 @router.get(
     "/embeddings/orchestrator/summary",
     summary="Orchestrator summary for polling (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def orchestrator_summary(current_user: User = Depends(get_request_user)):
     """Return a snapshot identical to the SSE payload.

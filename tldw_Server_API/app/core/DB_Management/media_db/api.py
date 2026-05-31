@@ -177,6 +177,33 @@ def get_media_by_id(
     )
 
 
+def get_media_status_by_id(
+    db: MediaDbLike | MediaDbReadLike,
+    media_id: int,
+    *,
+    include_deleted: bool = False,
+    include_trash: bool = False,
+) -> dict[str, Any] | None:
+    """Return lightweight media readiness fields without loading document content."""
+    db_instance = unwrap_media_database_like(db)
+    if is_media_database_like(db_instance):
+        return MediaLookupRepository.from_legacy_db(db_instance).status_by_id(
+            media_id,
+            include_deleted=include_deleted,
+            include_trash=include_trash,
+        )
+    reader = _require_read_method(
+        db,
+        "get_media_status_by_id",
+        error_message="db must expose the lightweight Media DB status read contract.",
+    )
+    return reader.get_media_status_by_id(
+        media_id,
+        include_deleted=include_deleted,
+        include_trash=include_trash,
+    )
+
+
 def has_unvectorized_chunks(
     db: MediaDbLike | MediaDbReadLike,
     media_id: int,
@@ -1108,6 +1135,7 @@ __all__ = [
     "check_media_exists",
     "permanently_delete_item",
     "get_media_by_id",
+    "get_media_status_by_id",
     "get_media_by_uuid",
     "managed_media_database",
     "get_media_repository",

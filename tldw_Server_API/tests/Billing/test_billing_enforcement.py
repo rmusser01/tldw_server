@@ -593,6 +593,49 @@ class TestModuleFunctions:
         assert allowed is True
 
     @pytest.mark.asyncio
+    async def test_check_billing_with_rg_fail_open_log_omits_backend_details(self, monkeypatch):
+        """Fail-open RG fallback should not log raw backend exception details."""
+        leaked_secret = "sk-rg-secret"
+        leaked_path = "/private/billing/resource-governor.db"
+        messages: list[str] = []
+
+        def _record_log_message(message, *args):
+            messages.append(" ".join([str(message), *(str(arg) for arg in args)]))
+
+        class _ExplodingEnforcer:
+            async def check_limit(self, org_id, category, requested_units=1):  # noqa: ARG002
+                raise RuntimeError(f"rg failed token={leaked_secret} path={leaked_path}")
+
+        monkeypatch.setenv("BILLING_ENFORCEMENT_FAILURE_MODE", "open")
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Billing.enforcement.importlib.import_module",
+            lambda _: object(),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Billing.enforcement.get_billing_enforcer",
+            lambda: _ExplodingEnforcer(),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Billing.enforcement.logger.warning",
+            _record_log_message,
+        )
+
+        allowed = await check_billing_with_rg(
+            org_id=1,
+            category=LimitCategory.API_CALLS_DAY,
+            units=1,
+        )
+
+        joined = "\n".join(messages)
+        assert allowed is True
+        assert "Billing RG check failed, allowing (fail-open)" in joined
+        assert leaked_secret not in joined
+        assert leaked_path not in joined
+        assert "rg failed" not in joined
+
+    @pytest.mark.asyncio
     async def test_check_billing_with_rg_denies_on_error_in_fail_closed_mode(self, monkeypatch):
         """Fail-closed mode should deny requests when billing checks error."""
 
@@ -619,3 +662,46 @@ class TestModuleFunctions:
         )
 
         assert allowed is False
+
+    @pytest.mark.asyncio
+    async def test_check_billing_with_rg_fail_closed_log_omits_backend_details(self, monkeypatch):
+        """Fail-closed RG fallback should not log raw backend exception details."""
+        leaked_secret = "sk-rg-secret"
+        leaked_path = "/private/billing/resource-governor.db"
+        messages: list[str] = []
+
+        def _record_log_message(message, *args):
+            messages.append(" ".join([str(message), *(str(arg) for arg in args)]))
+
+        class _ExplodingEnforcer:
+            async def check_limit(self, org_id, category, requested_units=1):  # noqa: ARG002
+                raise RuntimeError(f"rg failed token={leaked_secret} path={leaked_path}")
+
+        monkeypatch.setenv("BILLING_ENFORCEMENT_FAILURE_MODE", "closed")
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Billing.enforcement.importlib.import_module",
+            lambda _: object(),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Billing.enforcement.get_billing_enforcer",
+            lambda: _ExplodingEnforcer(),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Billing.enforcement.logger.error",
+            _record_log_message,
+        )
+
+        allowed = await check_billing_with_rg(
+            org_id=1,
+            category=LimitCategory.API_CALLS_DAY,
+            units=1,
+        )
+
+        joined = "\n".join(messages)
+        assert allowed is False
+        assert "Billing RG check failed, denying (fail-closed)" in joined
+        assert leaked_secret not in joined
+        assert leaked_path not in joined
+        assert "rg failed" not in joined

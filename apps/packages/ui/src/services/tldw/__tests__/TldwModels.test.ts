@@ -51,28 +51,31 @@ describe("TldwModelsService caching", () => {
 
   it("dedupes concurrent in-flight model fetches", async () => {
     vi.useFakeTimers()
-    mocks.getModels.mockImplementation(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25))
-      return [
-        { id: "model-a", name: "Model A", provider: "openai", type: "chat" }
-      ]
-    })
+    try {
+      mocks.getModels.mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+        return [
+          { id: "model-a", name: "Model A", provider: "openai", type: "chat" }
+        ]
+      })
 
-    const { TldwModelsService } = await importService()
-    const service = new TldwModelsService()
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
 
-    const first = service.getModels(true)
-    const second = service.getModels(true)
+      const first = service.getModels(true)
+      const second = service.getModels(true)
 
-    await vi.advanceTimersByTimeAsync(26)
+      await vi.advanceTimersByTimeAsync(26)
 
-    const [a, b] = await Promise.all([first, second])
+      const [a, b] = await Promise.all([first, second])
 
-    expect(a).toHaveLength(1)
-    expect(b).toHaveLength(1)
-    expect(mocks.getModels).toHaveBeenCalledTimes(1)
-    vi.useRealTimers()
-  })
+      expect(a).toHaveLength(1)
+      expect(b).toHaveLength(1)
+      expect(mocks.getModels).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 10_000)
 
   it("resets cached models when server scope changes", async () => {
     mocks.getModels
@@ -112,6 +115,49 @@ describe("TldwModelsService caching", () => {
 
     expect(mocks.getModels).toHaveBeenCalledTimes(1)
     expect(mocks.getModels).toHaveBeenCalledWith({ refreshOpenRouter: true })
+  })
+
+  it("resolves in-flight model metadata failures through the fallback path", async () => {
+    mocks.getModels.mockRejectedValueOnce(
+      new Error("Failed to fetch (GET /api/v1/llm/models/metadata)")
+    )
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const first = service.getModels(true)
+    const second = service.getModels(true)
+
+    await expect(Promise.all([first, second])).resolves.toEqual([[], []])
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries aborted model metadata requests before returning an empty model list", async () => {
+    const abortError = Object.assign(
+      new Error("signal is aborted without reason"),
+      {
+        name: "AbortError",
+        code: "REQUEST_ABORTED",
+        status: 0
+      }
+    )
+    mocks.getModels
+      .mockRejectedValueOnce(abortError)
+      .mockResolvedValueOnce([
+        { id: "gpt-4o", name: "gpt-4o", provider: "openai", type: "chat" }
+      ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    await expect(service.getModels(true)).resolves.toEqual([
+      expect.objectContaining({
+        id: "gpt-4o",
+        provider: "openai",
+        type: "chat"
+      })
+    ])
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
   })
 
   it("reuses cached models during the forced refresh cooldown", async () => {
@@ -178,9 +224,134 @@ describe("TldwModelsService caching", () => {
     expect(chatIds).not.toContain("black-forest-labs/flux.1-schnell")
   })
 
+  it("keeps chat-model filtering bound when the method is used as a callback", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "openai/gpt-4o-mini",
+        name: "openai/gpt-4o-mini",
+        provider: "openai",
+        type: "chat"
+      },
+      {
+        id: "black-forest-labs/flux.1-schnell",
+        name: "black-forest-labs/flux.1-schnell",
+        provider: "openrouter",
+        type: "image"
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    const loadChatModels = service.getChatModels
+
+    const chatModels = await loadChatModels(true)
+
+    expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
+  })
+
+  it("filters chat models from explicitly unconfigured providers", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "openai/gpt-4o-mini",
+        name: "openai/gpt-4o-mini",
+        provider: "openai",
+        type: "chat",
+        is_configured: true
+      },
+      {
+        id: "anthropic/claude-sonnet-4",
+        name: "anthropic/claude-sonnet-4",
+        provider: "anthropic",
+        type: "chat",
+        is_configured: false
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
+  })
+
+  it("filters chat models from explicitly disabled providers", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "openai/gpt-4o-mini",
+        name: "openai/gpt-4o-mini",
+        provider: "openai",
+        type: "chat",
+        is_configured: true,
+        provider_enabled: true
+      },
+      {
+        id: "openrouter/meta-llama/llama-3.1-8b-instruct",
+        name: "openrouter/meta-llama/llama-3.1-8b-instruct",
+        provider: "openrouter",
+        type: "chat",
+        is_configured: true,
+        provider_enabled: false
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
+  })
+
+  it("filters chat models from providers with failed availability", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "openai/gpt-4o-mini",
+        name: "openai/gpt-4o-mini",
+        provider: "openai",
+        type: "chat",
+        is_configured: true,
+        availability: "enabled"
+      },
+      {
+        id: "vllm/local-model",
+        name: "vllm/local-model",
+        provider: "vllm",
+        type: "chat",
+        is_configured: true,
+        availability: "failed"
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
+  })
+
+  it("keeps legacy chat models when provider availability metadata is absent", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "legacy/model-a",
+        name: "legacy/model-a",
+        provider: "custom",
+        type: "chat"
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels.map((model) => model.id)).toEqual(["legacy/model-a"])
+  })
+
   it("returns cached chat models without fetching provider metadata again", async () => {
     mocks.storageGet.mockResolvedValue({
-      version: 2,
+      version: 3,
       timestamp: Date.now(),
       scope: "http://127.0.0.1:8000|single-user|key|none",
       models: [
@@ -189,6 +360,13 @@ describe("TldwModelsService caching", () => {
           name: "openai/gpt-4o-mini",
           provider: "openai",
           type: "chat"
+        },
+        {
+          id: "anthropic/claude-sonnet-4",
+          name: "anthropic/claude-sonnet-4",
+          provider: "anthropic",
+          type: "chat",
+          isConfigured: false
         },
         {
           id: "black-forest-labs/flux.1-schnell",

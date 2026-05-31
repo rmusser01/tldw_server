@@ -3352,5 +3352,29 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "引用背景の色"
+  },
+  "navigation_connect": {
+    "message": "接続"
+  },
+  "navigation_aiModels": {
+    "message": "AI とモデル"
+  },
+  "navigation_experience": {
+    "message": "体験"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "ナレッジとワークスペース"
+  },
+  "navigation_safetyAdmin": {
+    "message": "安全性と管理"
+  },
+  "providerKeys_navTitle": {
+    "message": "プロバイダーキー"
+  },
+  "navigation_dataManagement": {
+    "message": "データ管理"
+  },
+  "dataManagement_navTitle": {
+    "message": "データ管理"
   }
 }

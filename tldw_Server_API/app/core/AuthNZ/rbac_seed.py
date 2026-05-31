@@ -36,6 +36,10 @@ _BASELINE_PERMISSIONS: Sequence[PermissionDef] = (
     ("users.manage_roles", "Manage user roles", "users"),
     ("claims.review", "Review claims", "claims"),
     ("claims.admin", "Administer claims", "claims"),
+    ("moderation.review.read", "Read moderation review items", "moderation"),
+    ("moderation.review.decide", "Decide moderation review items", "moderation"),
+    ("moderation.review.bulk_decide", "Bulk decide moderation review items", "moderation"),
+    ("moderation.audit.read", "Read moderation review audit events", "moderation"),
 )
 
 _MCP_PERMISSIONS: Sequence[PermissionDef] = (
@@ -54,7 +58,18 @@ def _build_role_grants(permission_names: Iterable[str], *, include_mcp_permissio
     grants: dict[str, list[str]] = {
         "user": [p for p in ("media.read", "media.create", "sql.read", "sql.target:media_db") if p in base],
         "viewer": [p for p in ("media.read",) if p in base],
-        "reviewer": [p for p in ("media.read", "claims.review") if p in base],
+        "reviewer": [
+            p
+            for p in (
+                "media.read",
+                "claims.review",
+                "moderation.review.read",
+                "moderation.review.decide",
+                "moderation.review.bulk_decide",
+                "moderation.audit.read",
+            )
+            if p in base
+        ],
         "admin": sorted(base),
     }
 

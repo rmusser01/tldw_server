@@ -20,4 +20,14 @@ describe("MCPHub tutorial registration", () => {
       expect(step.target).toMatch(/\[data-testid=/)
     }
   })
+
+  it("targets persistent workflow controls for sections outside the default Setup view", () => {
+    const tutorial = getTutorialById("mcp-hub-basics")!
+    const targets = tutorial.steps.map((step) => step.target)
+
+    expect(targets).toContain('[data-testid="mcp-hub-workflow-access"]')
+    expect(targets).toContain('[data-testid="mcp-hub-workflow-audit"]')
+    expect(targets).not.toContain('[data-testid="mcp-hub-tab-profiles"]')
+    expect(targets).not.toContain('[data-testid="mcp-hub-tab-audit"]')
+  })
 })

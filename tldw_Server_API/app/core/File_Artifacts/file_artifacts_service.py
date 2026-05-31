@@ -282,10 +282,8 @@ class FileArtifactsService:
                 )
             except Exception as exc:
                 logger.error(
-                    'file_artifacts: failed to enqueue export job file_id={} request_id={} error={}',
-                    file_id,
-                    request_id or "",
-                    exc,
+                    "file_artifacts: failed to enqueue export job error_type={}",
+                    type(exc).__name__,
                 )
                 raise FileArtifactsError("export_job_enqueue_failed") from exc
             export_info = FileExportInfo(status="pending", format=export_req.format, job_id=job_id or None)
@@ -419,7 +417,10 @@ class FileArtifactsService:
                         export_consumed_at=None,
                     )
                 except Exception as reset_exc:
-                    logger.warning("file_artifacts: failed to reset export state for {}: {}", file_id, reset_exc)
+                    logger.warning(
+                        "file_artifacts: failed to reset export state error_type={}",
+                        type(reset_exc).__name__,
+                    )
             raise
         return FileExportInfo(
             status="ready" if export_req.mode == "url" or not inline_ready else "none",
@@ -482,7 +483,7 @@ class FileArtifactsService:
             if file_path.exists():
                 file_path.unlink()
         except Exception as exc:
-            logger.warning("file_artifacts: failed to delete export file {}: {}", storage_path, exc)
+            logger.warning("file_artifacts: failed to delete export file error_type={}", type(exc).__name__)
 
     @staticmethod
     def _default_title(file_type: str) -> str:
@@ -503,20 +504,18 @@ class FileArtifactsService:
     @staticmethod
     def _log_validation_failure(request_id: str | None, file_type: str, detail: Any) -> None:
         logger.warning(
-            "file_artifacts.create validation failed file_type={} request_id={} detail={}",
+            "file_artifacts.create validation failed file_type={} detail_type={}",
             file_type,
-            request_id or "",
-            detail,
+            type(detail).__name__,
         )
 
     @staticmethod
     def _log_export_failure(request_id: str | None, file_type: str, export_format: str, detail: Any) -> None:
         logger.warning(
-            "file_artifacts.export failed file_type={} format={} request_id={} detail={}",
+            "file_artifacts.export failed file_type={} format={} detail_type={}",
             file_type,
             export_format,
-            request_id or "",
-            detail,
+            type(detail).__name__,
         )
 
     @staticmethod
@@ -550,7 +549,7 @@ class FileArtifactsService:
         try:
             self._cdb.delete_file_artifact(file_id, hard=True)
         except Exception as exc:
-            logger.warning("file_artifacts: failed to rollback file artifact {}: {}", file_id, exc)
+            logger.warning("file_artifacts: failed to rollback file artifact error_type={}", type(exc).__name__)
 
     @staticmethod
     def _validate_export_request(*, adapter: FileAdapter, export_req: FileExportRequest) -> None:

@@ -4,7 +4,10 @@ import fs from 'fs'
 
 import { resolveExtensionHeadlessMode } from './extension-common'
 import { resolveExtensionId } from './extension-id'
-import { prioritizeExtensionBuildCandidates } from './extension-paths'
+import {
+  prepareExtensionLaunchPath,
+  prioritizeExtensionBuildCandidates
+} from './extension-paths'
 
 async function waitForStorageSeed(page: Page) {
   await page.waitForFunction(
@@ -204,6 +207,9 @@ export async function launchWithExtension(
   )
   const channel = resolvePlaywrightChannel()
   const headless = resolveExtensionHeadlessMode()
+  const launchExtPath = prepareExtensionLaunchPath(extPath, {
+    rootDir: path.join(userDataDir, 'extension-launch')
+  })
   const context = await chromium.launchPersistentContext(userDataDir, {
     timeout: effectiveLaunchTimeoutMs,
     headless,
@@ -216,8 +222,8 @@ export async function launchWithExtension(
     },
     executablePath: executablePath || undefined,
     args: [
-      `--disable-extensions-except=${extPath}`,
-      `--load-extension=${extPath}`,
+      `--disable-extensions-except=${launchExtPath}`,
+      `--load-extension=${launchExtPath}`,
       '--no-crashpad',
       '--disable-crash-reporter',
       '--crash-dumps-dir=/tmp'

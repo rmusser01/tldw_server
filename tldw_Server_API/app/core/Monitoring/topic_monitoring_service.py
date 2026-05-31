@@ -823,8 +823,11 @@ class TopicMonitoringService:
                 try:
                     notifier = get_notification_service()
                     notifier.notify(alert)
-                except _TOPIC_MONITOR_NONCRITICAL_EXCEPTIONS as _ne:
-                    logger.debug(f"Topic monitoring notify skipped: {_ne}")
+                except _TOPIC_MONITOR_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.debug(
+                        "Topic monitoring notify skipped after {}",
+                        type(exc).__name__,
+                    )
                 total_created += 1
         return total_created
 
@@ -867,7 +870,10 @@ class TopicMonitoringService:
                     metadata=metadata,
                 )
             except _TOPIC_MONITOR_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Topic monitoring background evaluation failed: {exc}")
+                logger.debug(
+                    "Topic monitoring background evaluation failed after {}",
+                    type(exc).__name__,
+                )
 
         try:
             loop = asyncio.get_running_loop()
@@ -879,7 +885,10 @@ class TopicMonitoringService:
             try:
                 await asyncio.to_thread(_run_sync)
             except _TOPIC_MONITOR_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Topic monitoring background evaluation failed: {exc}")
+                logger.debug(
+                    "Topic monitoring background evaluation failed after {}",
+                    type(exc).__name__,
+                )
 
         loop.create_task(_runner())
 

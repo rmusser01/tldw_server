@@ -117,6 +117,21 @@ async def test_use_token_increments(token_service, repo):
 
 
 @pytest.mark.asyncio
+async def test_claim_token_use_honors_max_uses(token_service, repo):
+    result = await token_service.generate_token(
+        resource_type="workspace",
+        resource_id="ws-1",
+        owner_user_id=1,
+        max_uses=1,
+    )
+    assert await token_service.claim_token_use(result["id"]) is True
+    assert await token_service.claim_token_use(result["id"]) is False
+
+    fetched = await repo.get_token(result["id"])
+    assert fetched["use_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_revoke_token(token_service):
     result = await token_service.generate_token(
         resource_type="workspace",

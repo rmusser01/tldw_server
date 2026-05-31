@@ -7,6 +7,7 @@ Implements minimal CRUD and semantics per PRD:
 
 Scraping and scheduling are stubbed; runs are created on trigger.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,12 +42,19 @@ from fastapi import (
 )
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from loguru import logger
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import FileResponse
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    get_request_user,
+    rbac_rate_limit,
+    resolve_user_id_for_request,
+    User,
+)
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import get_watchlists_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool as _get_db_pool
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
@@ -54,12 +62,8 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     resolve_client_ip,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope as _get_scope
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.exceptions import TemplateValidationError
@@ -72,16 +76,25 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_watchlist_source_restored,
     record_watchlist_source_updated,
 )
+from tldw_Server_API.app.core.Scheduler import get_existing_global_scheduler, SchedulerError
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 from tldw_Server_API.app.core.Watchlists import template_store
-from tldw_Server_API.app.core.Watchlists.fetchers import fetch_rss_feed, fetch_site_items_with_rules
+from tldw_Server_API.app.core.Watchlists.fetchers import (
+    fetch_rss_feed,
+    fetch_site_items_with_rules,
+    validate_selector_rules,
+)
 from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters as _evaluate_filters
 from tldw_Server_API.app.core.Watchlists.filters import normalize_filters as _normalize_job_filters
 from tldw_Server_API.app.core.Watchlists.opml import generate_opml, parse_opml
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
+from tldw_Server_API.app.core.Watchlists.report_evidence import (
+    build_legacy_live_only_readiness,
+    build_report_evidence_snapshot,
+)
 from tldw_Server_API.app.core.Watchlists.watchlists_telemetry_metrics import (
     record_onboarding_ingest_result,
     record_summary_request,
@@ -105,6 +118,7 @@ from tldw_Server_API.app.services.outputs_service import (
 try:
     from tldw_Server_API.app.core.Notifications import NotificationsService  # type: ignore
 except (ImportError, OSError):
+
     class NotificationsService:  # type: ignore
         def __init__(self, *, user_id: int, user_email: str | None = None) -> None:
             self.user_id = user_id
@@ -121,7 +135,11 @@ except (ImportError, OSError):
             fallback_to_user_email: bool = True,
         ) -> Any:
             # Minimal shim for tests; report skipped
-            return type("_Result", (), {"channel": "email", "status": "skipped", "details": {"reason": "notifications_unavailable"}})()
+            return type(
+                "_Result",
+                (),
+                {"channel": "email", "status": "skipped", "details": {"reason": "notifications_unavailable"}},
+            )()
 
         def deliver_chatbook(
             self,
@@ -135,7 +153,12 @@ except (ImportError, OSError):
             model: str = "watchlists",
             conversation_id: int | None = None,
         ) -> Any:
-            return type("_Result", (), {"channel": "chatbook", "status": "skipped", "details": {"reason": "notifications_unavailable"}})()
+            return type(
+                "_Result",
+                (),
+                {"channel": "chatbook", "status": "skipped", "details": {"reason": "notifications_unavailable"}},
+            )()
+
 
 from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E402
     Group,
@@ -151,9 +174,14 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     PreviewResponse,
     Run,
     RunCancelResponse,
+    RunDiagnosticsResponse,
     RunDetail,
+    RunStageRetryResponse,
     RunsListResponse,
     ScrapedItem,
+    ScrapedItemBatchUpdateRequest,
+    ScrapedItemBatchUpdateResponse,
+    ScrapedItemSortMode,
     ScrapedItemSmartCountsResponse,
     ScrapedItemsListResponse,
     ScrapedItemUpdateRequest,
@@ -161,6 +189,7 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     SourceCheckNowItem,
     SourceCreateRequest,
     SourceDeleteResponse,
+    SourcePreviewDiagnostics,
     SourcesCheckNowRequest,
     SourcesCheckNowResponse,
     SourcesBulkCreateItem,
@@ -175,8 +204,30 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     SourceUpdateRequest,
     Tag,
     TagsListResponse,
+    WatchlistContentAlert,
+    WatchlistContentAlertList,
+    WatchlistContentAlertRule,
+    WatchlistContentAlertRuleCreate,
+    WatchlistContentAlertRuleList,
+    WatchlistContentAlertRuleUpdate,
+    WatchlistContentAlertSeverity,
+    WatchlistContentAlertStatus,
+    WatchlistContentAlertUpdate,
+    WatchlistContainer,
+    WatchlistCreateRequest,
+    WatchlistDeleteResponse,
     WatchlistFilter,
     WatchlistFiltersPayload,
+    WatchlistItemSavedView,
+    WatchlistItemSavedViewCreate,
+    WatchlistItemSavedViewsList,
+    WatchlistItemSavedViewUpdate,
+    WatchlistOutputPreset,
+    WatchlistOutputPresetApplyRequest,
+    WatchlistOutputPresetApplyResponse,
+    WatchlistOutputPresetCreate,
+    WatchlistOutputPresetsList,
+    WatchlistOutputPresetUpdate,
     WatchlistOnboardingTelemetryIngestRequest,
     WatchlistOnboardingTelemetryIngestResponse,
     WatchlistOnboardingTelemetrySummaryResponse,
@@ -187,7 +238,12 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     WatchlistTelemetryThresholdSummary,
     WatchlistOutput,
     WatchlistOutputCreateRequest,
+    WatchlistOutputEvidenceResponse,
     WatchlistOutputsListResponse,
+    WatchlistRunAudioResponse,
+    WatchlistReportReadiness,
+    WatchlistsListResponse,
+    WatchlistUpdateRequest,
     WatchlistTemplateCreateRequest,
     WatchlistTemplateDetail,
     WatchlistTemplateListResponse,
@@ -235,6 +291,7 @@ router = APIRouter(prefix="/watchlists", tags=["watchlists"])
 DEFAULT_OUTPUT_TTL_SECONDS = int(os.getenv("WATCHLIST_OUTPUT_DEFAULT_TTL_SECONDS", "0") or 0)
 TEMP_OUTPUT_TTL_SECONDS = int(os.getenv("WATCHLIST_OUTPUT_TEMP_TTL_SECONDS", "86400") or 86400)
 DEFAULT_TTS_BRIEF_MAX_ITEMS = int(os.getenv("WATCHLIST_OUTPUT_TTS_BRIEF_MAX_ITEMS", "10") or 10)
+REPORT_EXCLUDED_ITEMS_MAX = int(os.getenv("WATCHLIST_REPORT_EXCLUDED_ITEMS_MAX", "200") or 200)
 TEMPLATE_COMPOSER_FLOW_MAX_DIFF_CHARS = max(
     1024, int(os.getenv("WATCHLIST_TEMPLATE_FLOW_CHECK_MAX_DIFF_CHARS", "50000") or 50000)
 )
@@ -243,9 +300,7 @@ WATCHLISTS_DELETE_RESTORE_WINDOW_SECONDS = max(
 )
 
 _TEMPLATE_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
-_WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES = max(
-    1, int(os.getenv("WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES", "5") or 5)
-)
+_WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES = max(1, int(os.getenv("WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES", "5") or 5))
 _EMAIL_RECIPIENT_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 _WATCHLISTS_UX_BASELINE = {
@@ -328,18 +383,14 @@ def _build_thresholds(
         setup_completion_percent,
         float(_WATCHLISTS_UX_BASELINE["uc1_f1_first_source_setup_percent"]),
     )
-    setup_status: Literal["ok", "potential_breach"] = (
-        "potential_breach" if setup_delta <= -10.0 else "ok"
-    )
+    setup_status: Literal["ok", "potential_breach"] = "potential_breach" if setup_delta <= -10.0 else "ok"
 
     backend_first_output_percent = _to_percent(float(uc2_backend.get("first_output_success_rate") or 0.0))
     first_output_delta = _percent_delta(
         backend_first_output_percent,
         float(_WATCHLISTS_UX_BASELINE["uc2_f2_text_output_success_percent"]),
     )
-    first_output_status: Literal["ok", "potential_breach"] = (
-        "potential_breach" if first_output_delta <= -10.0 else "ok"
-    )
+    first_output_status: Literal["ok", "potential_breach"] = "potential_breach" if first_output_delta <= -10.0 else "ok"
 
     onboarding_first_output_median = float(timings.get("median_seconds_to_first_output_success") or 0.0)
     baseline_seconds = float(_WATCHLISTS_UX_BASELINE["uc1_f2_time_to_first_review_seconds"])
@@ -348,9 +399,7 @@ def _build_thresholds(
         if baseline_seconds > 0 and onboarding_first_output_median > 0
         else 0.0
     )
-    timing_status: Literal["ok", "potential_breach"] = (
-        "potential_breach" if timing_ratio >= 1.25 else "ok"
-    )
+    timing_status: Literal["ok", "potential_breach"] = "potential_breach" if timing_ratio >= 1.25 else "ok"
 
     return [
         WatchlistTelemetryThresholdSummary(
@@ -480,6 +529,114 @@ def _get_group_ids(db, source_id: int) -> list[int]:
         return []
 
 
+def _watchlist_response_from_row(row: Any) -> WatchlistContainer:
+    tags: list[str] = []
+    try:
+        parsed = json.loads(row.tags_json or "[]") if getattr(row, "tags_json", None) else []
+        if isinstance(parsed, list):
+            tags = [str(tag) for tag in parsed if isinstance(tag, str)]
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        tags = []
+    return WatchlistContainer(
+        id=int(row.id),
+        name=row.name,
+        description=getattr(row, "description", None),
+        objective=getattr(row, "objective", None),
+        domain=getattr(row, "domain", "general"),
+        status=getattr(row, "status", "active"),
+        priority=getattr(row, "priority", "medium"),
+        tags=tags,
+        archived_at=getattr(row, "archived_at", None),
+        deleted_at=getattr(row, "deleted_at", None),
+        restore_expires_at=getattr(row, "restore_expires_at", None),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _json_object_from_text(raw: str | None) -> dict[str, Any] | None:
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        return None
+
+
+def _content_alert_rule_response_from_row(row: Any) -> WatchlistContentAlertRule:
+    return WatchlistContentAlertRule(
+        id=int(row.id),
+        watchlist_id=int(row.watchlist_id),
+        name=row.name,
+        enabled=bool(row.enabled),
+        rule_kind=row.rule_kind,
+        match_mode=row.match_mode,
+        pattern=row.pattern,
+        severity=row.severity,
+        classification=getattr(row, "classification", None),
+        descriptor=getattr(row, "descriptor", None),
+        entity_type=getattr(row, "entity_type", None),
+        source_constraints=_json_object_from_text(getattr(row, "source_constraints_json", None)),
+        metadata=_json_object_from_text(getattr(row, "metadata_json", None)),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _content_alert_response_from_row(row: Any) -> WatchlistContentAlert:
+    return WatchlistContentAlert(
+        id=int(row.id),
+        watchlist_id=int(row.watchlist_id),
+        rule_id=int(row.rule_id),
+        item_id=int(row.item_id),
+        run_id=int(row.run_id),
+        job_id=int(row.job_id),
+        source_id=int(row.source_id),
+        severity=row.severity,
+        status=row.status,
+        title=getattr(row, "title", None),
+        snippet=getattr(row, "snippet", None),
+        matched_text=getattr(row, "matched_text", None),
+        evidence=_json_object_from_text(getattr(row, "evidence_json", None)) or {},
+        dedupe_key=row.dedupe_key,
+        created_at=row.created_at,
+        read_at=getattr(row, "read_at", None),
+        dismissed_at=getattr(row, "dismissed_at", None),
+    )
+
+
+def _get_source_watchlist_ids(db: WatchlistsDatabase, source_id: int) -> list[int]:
+    try:
+        return db.list_source_watchlist_ids(source_id)
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        return []
+
+
+def _ensure_watchlist_exists(db: WatchlistsDatabase, watchlist_id: int | None) -> None:
+    if watchlist_id is None:
+        return
+    try:
+        db.get_watchlist(int(watchlist_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+
+
+def _list_watchlist_job_ids(db: WatchlistsDatabase, watchlist_id: int) -> list[int]:
+    job_ids: list[int] = []
+    page_size = 500
+    offset = 0
+    while True:
+        rows, total = db.list_jobs(q=None, limit=page_size, offset=offset, watchlist_id=watchlist_id)
+        if not rows:
+            break
+        job_ids.extend(int(row.id) for row in rows)
+        offset += len(rows)
+        if offset >= total:
+            break
+    return job_ids
+
+
 def _source_response_from_row(db: WatchlistsDatabase, row: Any) -> Source:
     settings = None
     try:
@@ -494,12 +651,80 @@ def _source_response_from_row(db: WatchlistsDatabase, row: Any) -> Source:
         active=bool(row.active),
         tags=list(getattr(row, "tags", []) or []),
         group_ids=_get_group_ids(db, row.id),
+        watchlist_ids=_get_source_watchlist_ids(db, row.id),
         settings=settings,
         last_scraped_at=row.last_scraped_at,
         status=row.status,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+@router.get(
+    "",
+    response_model=WatchlistsListResponse,
+    summary="List Watchlists",
+    dependencies=[Depends(rbac_rate_limit("watchlists.read"))],
+)
+async def list_watchlists(
+    status_filter: str | None = Query(None, alias="status"),
+    include_deleted: bool = Query(False),
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_request_user),
+    db: WatchlistsDatabase = Depends(get_watchlists_db_for_user),
+) -> WatchlistsListResponse:
+    _ = current_user
+    try:
+        db.ensure_default_watchlist()
+        limit = size
+        offset = (page - 1) * limit
+        rows, total = db.list_watchlists(
+            status=status_filter,
+            include_deleted=include_deleted,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return WatchlistsListResponse(
+        items=[_watchlist_response_from_row(row) for row in rows],
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(rows),
+        ),
+    )
+
+
+@router.post(
+    "",
+    response_model=WatchlistContainer,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Watchlist",
+    dependencies=[Depends(rbac_rate_limit("watchlists.create"))],
+)
+async def create_watchlist(
+    payload: WatchlistCreateRequest = Body(...),
+    current_user: User = Depends(get_request_user),
+    db: WatchlistsDatabase = Depends(get_watchlists_db_for_user),
+) -> WatchlistContainer:
+    _ = current_user
+    try:
+        row = db.create_watchlist(
+            name=payload.name,
+            description=payload.description,
+            objective=payload.objective,
+            domain=payload.domain,
+            status=payload.status,
+            priority=payload.priority,
+            tags=payload.tags,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _watchlist_response_from_row(row)
 
 
 def _watchlists_event_timestamp() -> str:
@@ -637,6 +862,33 @@ def _resolve_watchlists_db_for_target_user(
         raise HTTPException(status_code=500, detail="watchlists_db_unavailable") from exc
 
 
+def _resolve_collections_db_for_target_user(
+    current_user: User,
+    current_db: CollectionsDatabase,
+    target_user_id: int,
+) -> CollectionsDatabase:
+    """Return a Collections DB bound to the already-authorized target user."""
+    current_user_id = _safe_int(getattr(current_user, "id", None), -1)
+    if target_user_id == current_user_id:
+        return current_db
+    try:
+        return CollectionsDatabase.for_user(user_id=target_user_id)
+    except _DatabaseError as exc:
+        logger.error(
+            "watchlists.resolve_target_collections_db failed for user={}: error_type={}",
+            target_user_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=500, detail="collections_db_unavailable") from exc
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error(
+            "watchlists.resolve_target_collections_db failed for user={}: error_type={}",
+            target_user_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=500, detail="collections_db_unavailable") from exc
+
+
 async def _resolve_target_watchlists_context(
     *,
     current_user: User,
@@ -646,6 +898,38 @@ async def _resolve_target_watchlists_context(
     resolved_user_id = await _resolve_target_watchlists_user_id(current_user, target_user_id)
     target_db = _resolve_watchlists_db_for_target_user(current_user, current_db, resolved_user_id)
     return resolved_user_id, target_db
+
+
+def _normalize_workflow_tenant_id(value: Any) -> str | None:
+    """Coerce a tenant identifier to a non-empty string when it is safe to use."""
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return str(value)
+    return None
+
+
+async def _resolve_watchlist_workflow_tenant_id(*, current_user: User, resolved_user_id: int) -> str:
+    """Resolve the tenant scope used by the target user's workflow database."""
+    current_user_id = _safe_int(getattr(current_user, "id", None), -1)
+    if current_user_id == int(resolved_user_id):
+        return _normalize_workflow_tenant_id(getattr(current_user, "tenant_id", None)) or "default"
+
+    try:
+        from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+
+        users_repo = await AuthnzUsersRepo.from_pool()
+        target_user = await users_repo.get_user_by_id(int(resolved_user_id))
+    except (*_WATCHLISTS_NONCRITICAL_EXCEPTIONS, _DatabaseError) as exc:
+        logger.debug(f"watchlists.resolve_workflow_tenant failed for user={resolved_user_id}: {exc}")
+        return "default"
+
+    if isinstance(target_user, dict):
+        return _normalize_workflow_tenant_id(target_user.get("tenant_id")) or "default"
+    return "default"
 
 
 def _build_email_bodies(content: str | None, fmt: str, title: str, preferred: str = "auto") -> tuple[str, str]:
@@ -685,9 +969,11 @@ def _compute_next_run(cron: str | None, timezone: str | None) -> str | None:
         return None
     try:
         from apscheduler.triggers.cron import CronTrigger
+
         tz = _normalize_tz(timezone) or "UTC"
         trigger = CronTrigger.from_crontab(cron, timezone=tz)
         from datetime import datetime
+
         now = datetime.now(trigger.timezone)
         nxt = trigger.get_next_fire_time(None, now)
         return nxt.isoformat() if nxt else None
@@ -787,9 +1073,7 @@ def _find_invalid_email_recipients(recipients: list[str]) -> list[str]:
     return invalid
 
 
-def _detect_schedule_interval_minutes(
-    schedule_expr: str | None, timezone: str | None
-) -> float | None:
+def _detect_schedule_interval_minutes(schedule_expr: str | None, timezone: str | None) -> float | None:
     expr = str(schedule_expr or "").strip()
     if not expr:
         return None
@@ -834,10 +1118,7 @@ def _validate_job_request(
 
     if enforce_schedule:
         detected_interval = _detect_schedule_interval_minutes(schedule_expr, timezone)
-        if (
-            detected_interval is not None
-            and detected_interval < _WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES
-        ):
+        if detected_interval is not None and detected_interval < _WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES:
             _raise_watchlists_validation_error(
                 rule="schedule_too_frequent",
                 message_key="watchlists:jobs.form.scheduleTooFrequent",
@@ -846,9 +1127,7 @@ def _validate_job_request(
                     f"Minimum interval is every {_WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES} minutes."
                 ),
                 remediation_key="watchlists:schedule.tooFrequentRemediation",
-                remediation=(
-                    "Increase schedule interval to meet the minimum cadence."
-                ),
+                remediation=("Increase schedule interval to meet the minimum cadence."),
                 meta={
                     "minimum_minutes": _WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES,
                     "detected_interval_minutes": round(detected_interval, 3),
@@ -904,6 +1183,55 @@ def _row_to_scraped_item(row) -> ScrapedItem:
         reviewed=reviewed_flag,
         queued_for_briefing=queued_for_briefing,
         created_at=row.created_at,
+        alert_summary=getattr(row, "alert_summary", None),
+    )
+
+
+def _row_to_item_saved_view(row) -> WatchlistItemSavedView:
+    filters: dict[str, Any] = {}
+    try:
+        parsed = json.loads(row.filters_json or "{}")
+        if isinstance(parsed, dict):
+            filters = parsed
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        filters = {}
+    return WatchlistItemSavedView(
+        id=int(row.id),
+        watchlist_id=int(row.watchlist_id),
+        name=row.name,
+        filters=filters,
+        sort=row.sort,
+        is_default=bool(getattr(row, "is_default", 0)),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _row_to_output_preset(row) -> WatchlistOutputPreset:
+    output_prefs: dict[str, Any] = {}
+    try:
+        parsed = json.loads(row.output_prefs_json or "{}")
+    except json.JSONDecodeError:
+        logger.opt(exception=True).warning(
+            "Invalid output_prefs_json for watchlist output preset id={}",
+            getattr(row, "id", "unknown"),
+        )
+        raise
+    if not isinstance(parsed, dict):
+        logger.warning(
+            "Invalid non-object output_prefs_json for watchlist output preset id={}",
+            getattr(row, "id", "unknown"),
+        )
+        raise ValueError("output_preset_prefs_invalid")
+    output_prefs = parsed
+    return WatchlistOutputPreset(
+        id=int(row.id),
+        name=row.name,
+        description=getattr(row, "description", None),
+        output_prefs=output_prefs,
+        is_default=bool(getattr(row, "is_default", 0)),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
     )
 
 
@@ -926,7 +1254,7 @@ def _parse_output_metadata(row) -> dict[str, Any]:
     return metadata if isinstance(metadata, dict) else {}
 
 
-def _load_output_content(user_id: int, row) -> str | None:
+async def _load_output_content(user_id: int, row) -> str | None:
     storage_path = getattr(row, "storage_path", None)
     if not storage_path:
         return None
@@ -937,12 +1265,86 @@ def _load_output_content(user_id: int, row) -> str | None:
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         return None
     try:
-        return path.read_text(encoding="utf-8")
+        return await run_in_threadpool(path.read_text, encoding="utf-8")
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         return None
 
 
-def _row_to_output(row, *, user_id: int | None = None, content_override: str | None = None) -> WatchlistOutput:
+def _build_report_snapshot_filename(output_title: str, ts: str) -> str:
+    filename = _build_output_filename(output_title, "evidence", ts, "md")
+    stem = filename.rsplit(".", 1)[0]
+    return f"{stem}.json"
+
+
+async def _write_report_snapshot_for_user(user_id: int, filename: str, snapshot: dict[str, Any]) -> None:
+    path = _resolve_output_path_for_user(user_id, filename)
+    payload = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, indent=2)
+    await run_in_threadpool(path.write_text, payload, encoding="utf-8")
+
+
+async def _load_report_snapshot_for_user(user_id: int, storage_name: str) -> dict[str, Any]:
+    path = _resolve_output_path_for_user(user_id, storage_name)
+    raw_payload = await run_in_threadpool(path.read_text, encoding="utf-8")
+    payload = json.loads(raw_payload)
+    if not isinstance(payload, dict):
+        raise ValueError("report_snapshot_invalid")
+    return payload
+
+
+def _resolve_report_preset(requested: str | None, watchlist_row: Any | None) -> str:
+    normalized = str(requested or "auto").strip().lower()
+    if normalized in {"cti_osint", "news_briefing", "general_research"}:
+        return normalized
+    domain = str(getattr(watchlist_row, "domain", "") or "").strip().lower()
+    if domain in {"cti", "cti_osint", "osint", "threat_intel", "threat_intelligence"}:
+        return "cti_osint"
+    if domain in {"news", "news_briefing", "journalism"}:
+        return "news_briefing"
+    return "general_research"
+
+
+def _source_rows_for_report(db: WatchlistsDatabase, items: list[Any]) -> dict[int, Any]:
+    source_ids = sorted(
+        {int(getattr(item, "source_id")) for item in items if getattr(item, "source_id", None) is not None}
+    )
+    sources: dict[int, Any] = {}
+    for source_id in source_ids:
+        try:
+            sources[source_id] = db.get_source(source_id)
+        except KeyError:
+            continue
+    return sources
+
+
+def _report_metadata_from_snapshot(
+    *,
+    snapshot: dict[str, Any],
+    snapshot_path: str,
+    preset: str,
+) -> dict[str, Any]:
+    readiness = snapshot.get("readiness") if isinstance(snapshot.get("readiness"), dict) else {}
+    source_summary = snapshot.get("source_summary") if isinstance(snapshot.get("source_summary"), dict) else {}
+    warnings = readiness.get("warnings") if isinstance(readiness.get("warnings"), list) else []
+    weak_warning_count = sum(
+        1 for warning in warnings if isinstance(warning, dict) and str(warning.get("severity") or "warning") != "info"
+    )
+    return {
+        "report_preset": preset,
+        "report_schema_version": int(snapshot.get("schema_version") or 1),
+        "report_snapshot_path": snapshot_path,
+        "report_readiness": readiness,
+        "included_item_count": int(snapshot.get("included_count") or 0),
+        "excluded_item_count": int(snapshot.get("excluded_count") or 0),
+        "excluded_item_total_count": int(snapshot.get("excluded_total_count") or snapshot.get("excluded_count") or 0),
+        "excluded_items_truncated": bool(snapshot.get("excluded_items_truncated", False)),
+        "source_count": int(source_summary.get("unique_source_count") or 0),
+        "alert_count": int(snapshot.get("alert_count") or 0),
+        "critical_alert_count": int(snapshot.get("critical_alert_count") or 0),
+        "weak_evidence_warning_count": weak_warning_count,
+    }
+
+
+async def _row_to_output(row, *, user_id: int | None = None, content_override: str | None = None) -> WatchlistOutput:
     metadata = _parse_output_metadata(row)
     version = metadata.get("version")
     try:
@@ -952,7 +1354,7 @@ def _row_to_output(row, *, user_id: int | None = None, content_override: str | N
     expires_at = metadata.get("expires_at") if isinstance(metadata, dict) else None
     content = content_override
     if content is None and user_id is not None:
-        content = _load_output_content(user_id, row)
+        content = await _load_output_content(user_id, row)
     return WatchlistOutput(
         id=row.id,
         run_id=int(row.run_id or 0),
@@ -1046,6 +1448,7 @@ def _job_payload(job_row: Any) -> dict[str, Any]:
         "id": job_row.id,
         "name": job_row.name,
         "description": getattr(job_row, "description", None),
+        "watchlist_id": getattr(job_row, "watchlist_id", None),
         "scope": scope,
         "schedule_expr": getattr(job_row, "schedule_expr", None),
         "schedule_timezone": getattr(job_row, "schedule_timezone", None),
@@ -1171,6 +1574,7 @@ _YT_HOST_RE = re.compile(r"(^|\.)youtube\.com$|(^|\.)youtu\.be$", re.IGNORECASE)
 def _is_youtube_url(url: str) -> bool:
     try:
         from urllib.parse import urlparse
+
         host = (urlparse(url).hostname or "").lower()
         # Strip leading 'www.'
         if host.startswith("www."):
@@ -1190,6 +1594,7 @@ def _is_youtube_feed_url(url: str) -> bool:
     """
     try:
         from urllib.parse import parse_qs, urlparse
+
         u = urlparse(url)
         path_ok = u.path.lower().startswith("/feeds/videos.xml")
         if not path_ok:
@@ -1209,6 +1614,7 @@ def _normalize_youtube_feed_url(url: str) -> str | None:
     """
     try:
         from urllib.parse import parse_qs, urlparse
+
         u = urlparse(url)
         raw_qs = parse_qs(u.query or "")
         # Normalize query keys to lowercase for case-insensitive lookup
@@ -1449,11 +1855,12 @@ def _read_log_tail(
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         return None, 0, None, False
 
+
 @router.post("/sources", response_model=Source, summary="Create a source")
 async def create_source(
     payload: SourceCreateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     try:
@@ -1461,6 +1868,7 @@ async def create_source(
         group_ids: list[int] | None = payload.group_ids
         if group_ids is not None:
             group_ids = _validate_group_ids(db, group_ids)
+        _ensure_watchlist_exists(db, payload.watchlist_id)
         # Backend normalization/validation for YouTube-as-RSS
         url_str = str(payload.url)
         orig_url_for_log = url_str
@@ -1486,6 +1894,7 @@ async def create_source(
             settings_json=(json.dumps(payload.settings) if payload.settings else None),
             tags=payload.tags or [],
             group_ids=group_ids or [],
+            watchlist_id=payload.watchlist_id,
         )
         # Ensure tags reflect payload even when source pre-exists (idempotent create)
         if payload.tags is not None:
@@ -1513,6 +1922,7 @@ async def list_sources(
     q: str | None = Query(None),
     tags: list[str] | None = Query(None, description="Filter by tag names (AND semantics)"),
     groups: list[int] | None = Query(None, description="Filter by group IDs (OR semantics)"),
+    watchlist_id: int | None = Query(None, ge=1),
     target_user_id: int | None = Query(
         None,
         ge=1,
@@ -1521,7 +1931,7 @@ async def list_sources(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -1530,7 +1940,15 @@ async def list_sources(
     )
     limit = size
     offset = (page - 1) * limit
-    rows, total = target_db.list_sources(q=q, tag_names=tags, limit=limit, offset=offset, group_ids=groups)
+    _ensure_watchlist_exists(target_db, watchlist_id)
+    rows, total = target_db.list_sources(
+        q=q,
+        tag_names=tags,
+        limit=limit,
+        offset=offset,
+        group_ids=groups,
+        watchlist_id=watchlist_id,
+    )
     # Batch-fetch group IDs to avoid N+1
     source_ids = [int(r.id) for r in rows]
     try:
@@ -1548,6 +1966,7 @@ async def list_sources(
                 active=bool(r.active),
                 tags=r.tags,
                 group_ids=groups_map.get(int(r.id), []),
+                watchlist_ids=_get_source_watchlist_ids(target_db, int(r.id)),
                 settings=(json.loads(r.settings_json) if r.settings_json else None),
                 last_scraped_at=r.last_scraped_at,
                 status=r.status,
@@ -1555,11 +1974,32 @@ async def list_sources(
                 updated_at=r.updated_at,
             )
         )
-    return SourcesListResponse(items=items, total=total)
+    return SourcesListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 # OPML import/export placed before /sources/{source_id} to avoid route conflicts
-@router.get("/sources/export", summary="Export sources to OPML")
+@router.get(
+    "/sources/export",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Watchlist sources exported as OPML XML.",
+            "content": {
+                "application/xml": {},
+            },
+        },
+    },
+    summary="Export sources to OPML",
+)
 async def export_sources_opml(
     tag: list[str] | None = Query(None, description="Filter by tag(s)"),
     group: list[int] | None = Query(None, description="Filter by group id(s) (OR semantics)"),
@@ -1570,7 +2010,7 @@ async def export_sources_opml(
         description="Admin-only: export sources for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -1586,9 +2026,11 @@ async def export_sources_opml(
         # Apply tag filter manually (AND semantics)
         if tag:
             needed = [t.strip().lower() for t in tag if t and str(t).strip()]
+
             def _has_all_tags(src) -> bool:
                 src_tags = [str(t).strip().lower() for t in (getattr(src, "tags", []) or [])]
                 return all(n in src_tags for n in needed)
+
             rows = [r for r in rows if _has_all_tags(r)]
     else:
         rows, _ = target_db.list_sources(q=None, tag_names=tag, limit=10000, offset=0)
@@ -1611,14 +2053,16 @@ async def import_sources_opml(
     active: bool = Form(True),
     tags: list[str] | None = Form(None),
     group_id: int | None = Form(None),
+    watchlist_id: int | None = Form(None),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     content = await file.read()
     entries = parse_opml(content)
     if group_id is not None:
         _validate_group_ids(db, [group_id])
+    _ensure_watchlist_exists(db, watchlist_id)
     items: list[SourcesImportItem] = []
     companion_events: list[dict[str, Any]] = []
     created = skipped = errors = 0
@@ -1644,8 +2088,12 @@ async def import_sources_opml(
             except (*_WATCHLISTS_NONCRITICAL_EXCEPTIONS, _DatabaseError):
                 existing = None
             if existing is not None:
+                if watchlist_id is not None:
+                    db.add_source_to_watchlist(int(watchlist_id), int(existing.id))
                 items.append(
-                    SourcesImportItem(url=url_str, name=existing.name, id=existing.id, status="skipped", error="duplicate_source")
+                    SourcesImportItem(
+                        url=url_str, name=existing.name, id=existing.id, status="skipped", error="duplicate_source"
+                    )
                 )
                 skipped += 1
                 continue
@@ -1657,6 +2105,7 @@ async def import_sources_opml(
                 settings_json=None,
                 tags=default_tags,
                 group_ids=([group_id] if group_id else []),
+                watchlist_id=watchlist_id,
             )
             companion_events.append(
                 build_watchlist_source_bulk_import_activity(
@@ -1676,7 +2125,9 @@ async def import_sources_opml(
         user_id=current_user.id,
         events=companion_events,
     )
-    return SourcesImportResponse(items=items, total=(created + skipped + errors), created=created, skipped=skipped, errors=errors)
+    return SourcesImportResponse(
+        items=items, total=(created + skipped + errors), created=created, skipped=skipped, errors=errors
+    )
 
 
 @router.post(
@@ -1688,7 +2139,7 @@ async def import_sources_opml(
 async def check_sources_now(
     payload: SourcesCheckNowRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     source_ids: list[int] = []
     seen_ids: set[int] = set()
@@ -1844,7 +2295,7 @@ async def get_source(
         description="Admin-only: fetch a source from another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -1855,20 +2306,7 @@ async def get_source(
         r = target_db.get_source(source_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="source_not_found") from None
-    return Source(
-        id=r.id,
-        name=r.name,
-        url=r.url,
-        source_type=r.source_type,  # type: ignore[assignment]
-        active=bool(r.active),
-        tags=r.tags,
-        group_ids=_get_group_ids(target_db, r.id),
-        settings=(json.loads(r.settings_json) if r.settings_json else None),
-        last_scraped_at=r.last_scraped_at,
-        status=r.status,
-        created_at=r.created_at,
-        updated_at=r.updated_at,
-    )
+    return _source_response_from_row(target_db, r)
 
 
 @router.get(
@@ -1890,7 +2328,7 @@ async def get_source_seen_stats(
         description="Include up to N recent seen keys (0 disables key list).",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     resolved_user_id = await _resolve_target_watchlists_user_id(current_user, target_user_id)
     target_db = _resolve_watchlists_db_for_target_user(current_user, db, resolved_user_id)
@@ -1930,7 +2368,7 @@ async def clear_source_seen_state(
         description="Also clear source defer/backoff state when true.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     resolved_user_id = await _resolve_target_watchlists_user_id(current_user, target_user_id)
     target_db = _resolve_watchlists_db_for_target_user(current_user, db, resolved_user_id)
@@ -1962,6 +2400,138 @@ def _normalize_source_test_url(source_url: str, source_type: str) -> str:
     return target_url
 
 
+def _format_selector_diagnostic(issue: Any) -> str:
+    """Format selector validation output into one concise preview diagnostic."""
+    if not isinstance(issue, dict):
+        return str(issue)
+    key = str(issue.get("key") or "selector").strip() or "selector"
+    label = str(issue.get("error") or issue.get("warning") or issue.get("detail") or "issue")
+    detail = str(issue.get("detail") or "").strip()
+    if detail and detail != label:
+        label = f"{label}: {detail}"
+    selector = str(issue.get("selector") or "").strip()
+    count = issue.get("count")
+    summary = f"{key}: {label}"
+    if selector:
+        summary = f"{summary} ({selector})"
+    if isinstance(count, int):
+        summary = f"{summary}; count={count}"
+    return summary
+
+
+def _format_fetch_diagnostic_error(error: Any) -> str | None:
+    """Format a fetch failure for user-visible source-test diagnostics."""
+    if error is None:
+        return None
+    raw = str(error).strip() or error.__class__.__name__
+    normalized = re.sub(r"\s+", " ", raw).strip()
+    if not normalized:
+        return None
+    return normalized[:240]
+
+
+def _apply_fetch_diagnostic_events(
+    diagnostics: SourcePreviewDiagnostics,
+    events: list[dict[str, Any]],
+) -> None:
+    """Copy the first meaningful fetch status/error observation onto diagnostics."""
+    selected_status: int | None = None
+    selected_error: str | None = None
+    for event in events:
+        status = event.get("status")
+        if isinstance(status, int):
+            if selected_status is None:
+                selected_status = status
+            status_is_failure = status // 100 != 2 and status != 304
+        else:
+            status_is_failure = False
+        formatted_error = _format_fetch_diagnostic_error(event.get("error"))
+        if selected_error is None and (formatted_error or status_is_failure):
+            if isinstance(status, int):
+                selected_status = status
+            selected_error = formatted_error or f"HTTP {status}"
+            break
+    diagnostics.fetch_status = selected_status
+    diagnostics.fetch_error = selected_error
+
+
+def _first_present_rule_key(rules: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    """Return the first configured scrape-rule key from a preferred key list."""
+    for key in keys:
+        value = rules.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return key
+    return None
+
+
+_SOURCE_DEDUPE_IDENTITY_KEYS = (
+    "guid_xpath",
+    "guid_selector",
+    "id_xpath",
+    "id_selector",
+    "link_xpath",
+    "link_selector",
+    "url_xpath",
+    "url_selector",
+)
+
+
+def _infer_source_dedupe_preview_key(rules: dict[str, Any]) -> str:
+    """Infer which scrape-rule field will likely provide item identity."""
+    identity_key = _first_present_rule_key(
+        rules,
+        _SOURCE_DEDUPE_IDENTITY_KEYS,
+    )
+    if identity_key:
+        return identity_key
+    alternates = rules.get("alternates")
+    if isinstance(alternates, list):
+        for alt in alternates:
+            if not isinstance(alt, dict):
+                continue
+            identity_key = _first_present_rule_key(
+                alt,
+                _SOURCE_DEDUPE_IDENTITY_KEYS,
+            )
+            if identity_key:
+                return f"alternates.{identity_key}"
+    return "url"
+
+
+def _build_source_preview_diagnostics(
+    *,
+    fetch_mode: str,
+    scrape_rules: dict[str, Any] | None = None,
+    fetch_status: int | None = None,
+    fetch_error: Any = None,
+) -> SourcePreviewDiagnostics:
+    """Build optional source-test diagnostics without changing preview item behavior."""
+    diagnostics = SourcePreviewDiagnostics(fetch_mode=fetch_mode)
+    diagnostics.fetch_status = fetch_status
+    diagnostics.fetch_error = _format_fetch_diagnostic_error(fetch_error)
+    if not scrape_rules:
+        return diagnostics
+
+    validation = validate_selector_rules(scrape_rules)
+    diagnostics.selector_errors = [_format_selector_diagnostic(issue) for issue in (validation.get("errors") or [])]
+    for issue in validation.get("warnings") or []:
+        warning = issue.get("warning") if isinstance(issue, dict) else None
+        formatted = _format_selector_diagnostic(issue)
+        if warning == "no_matches":
+            diagnostics.no_match_warnings.append(formatted)
+        elif warning == "non_unique_selector":
+            diagnostics.non_unique_warnings.append(formatted)
+        elif warning == "fragile_selector":
+            diagnostics.fragile_selector_warnings.append(formatted)
+        else:
+            diagnostics.selector_warnings.append(formatted)
+    diagnostics.dedupe_preview_key = _infer_source_dedupe_preview_key(scrape_rules)
+    return diagnostics
+
+
 async def _build_source_preview_response(
     *,
     source_id: int,
@@ -1978,8 +2548,10 @@ async def _build_source_preview_response(
 
     items: list[dict[str, Any]] = []
     test_mode = _is_test_mode()
+    diagnostics: SourcePreviewDiagnostics | None = None
 
     if source_type.lower() == "rss":
+        diagnostics = _build_source_preview_diagnostics(fetch_mode="rss")
         try:
             res = await fetch_rss_feed(
                 normalized_url,
@@ -1987,27 +2559,43 @@ async def _build_source_preview_response(
                 last_modified=last_modified,
                 tenant_id="default",
             )
+            if isinstance(res, dict):
+                status = res.get("status")
+                if isinstance(status, int):
+                    diagnostics.fetch_status = status
+                    if status // 100 != 2 and status != 304:
+                        diagnostics.fetch_error = f"HTTP {status}"
             items = res.get("items", []) if isinstance(res, dict) else []
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"watchlists.test_source: rss fetch failed: {exc}")
+            diagnostics.fetch_error = _format_fetch_diagnostic_error(exc)
             items = []
     elif source_type.lower() in {"site", "forum"}:
         scrape_rules = (
-            safe_settings.get("scrape_rules")
-            if isinstance(safe_settings.get("scrape_rules"), dict)
-            else None
+            safe_settings.get("scrape_rules") if isinstance(safe_settings.get("scrape_rules"), dict) else None
         )
         if scrape_rules:
+            diagnostics = _build_source_preview_diagnostics(
+                fetch_mode="scrape_rules",
+                scrape_rules=scrape_rules,
+            )
+            fetch_events: list[dict[str, Any]] = []
             try:
                 items = await fetch_site_items_with_rules(
                     base_url=str(scrape_rules.get("list_url") or normalized_url),
                     rules=scrape_rules,
                     tenant_id="default",
+                    fetch_diagnostics=fetch_events.append,
                 )
             except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"watchlists.test_source: scrape rules fetch failed: {exc}")
+                _apply_fetch_diagnostic_events(diagnostics, fetch_events)
+                diagnostics.fetch_error = diagnostics.fetch_error or _format_fetch_diagnostic_error(exc)
                 items = []
+            else:
+                _apply_fetch_diagnostic_events(diagnostics, fetch_events)
         elif test_mode:
+            diagnostics = _build_source_preview_diagnostics(fetch_mode="test_mode")
             items = [
                 {
                     "title": "Test scraped item 1",
@@ -2016,6 +2604,7 @@ async def _build_source_preview_response(
                 }
             ]
         else:
+            diagnostics = _build_source_preview_diagnostics(fetch_mode="discovery")
             try:
                 from tldw_Server_API.app.core.Watchlists.fetchers import fetch_site_top_links
 
@@ -2050,7 +2639,20 @@ async def _build_source_preview_response(
         )
 
     total = len(preview_items)
-    return PreviewResponse(items=preview_items, total=total, ingestable=total, filtered=0)
+    return PreviewResponse(
+        items=preview_items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=0,
+            total=total,
+            count=total,
+            has_more=False,
+        ),
+        ingestable=total,
+        filtered=0,
+        diagnostics=diagnostics,
+    )
 
 
 @router.post("/sources/test", response_model=PreviewResponse, summary="Test draft source and preview items")
@@ -2058,7 +2660,7 @@ async def test_source_draft(
     payload: SourceTestRequest = Body(...),
     limit: int = Query(20, ge=1, le=200),
     _current_user: User = Depends(get_request_user),
-    _db = Depends(get_watchlists_db_for_user),
+    _db=Depends(get_watchlists_db_for_user),
 ):
     return await _build_source_preview_response(
         source_id=0,
@@ -2074,7 +2676,7 @@ async def test_source(
     source_id: int = Path(..., ge=1),
     limit: int = Query(20, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:
@@ -2104,7 +2706,7 @@ async def update_source(
     source_id: int = Path(..., ge=1),
     payload: SourceUpdateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     # Determine target source_type/url for validation
@@ -2112,7 +2714,9 @@ async def update_source(
         existing = db.get_source(source_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="source_not_found") from None
-    target_type = str(payload.source_type) if (getattr(payload, "source_type", None) is not None) else str(existing.source_type)
+    target_type = (
+        str(payload.source_type) if (getattr(payload, "source_type", None) is not None) else str(existing.source_type)
+    )
     target_url = str(payload.url) if (getattr(payload, "url", None) is not None) else str(existing.url)
     _raise_if_forum_disabled(target_type)
     # Normalize/validate when target_type is rss and URL is YouTube
@@ -2182,7 +2786,7 @@ async def update_source(
 async def delete_source(
     source_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     existing_source = None
     try:
@@ -2214,7 +2818,7 @@ async def delete_source(
 async def restore_source(
     source_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         row = db.restore_source(source_id)
@@ -2235,33 +2839,13 @@ async def restore_source(
 
 
 @router.post(
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     "/sources/bulk",
     response_model=SourcesBulkCreateResponse,
     summary="Bulk create sources with per-entry status",
     description=(
         "Creates multiple sources and returns per-entry status. "
         "Each item is either created or returns an error with reason.\n\n"
-        "Validation: When `source_type=\"rss\"` and the URL is a YouTube link, only canonical RSS feeds "
+        'Validation: When `source_type="rss"` and the URL is a YouTube link, only canonical RSS feeds '
         "are accepted (e.g., https://www.youtube.com/feeds/videos.xml?channel_id=..., playlist_id=..., user=...). "
         "Non-feed YouTube URLs are rejected per-entry with error `invalid_youtube_rss_url`. "
         "Tags must be non-empty strings; invalid tags are rejected per-entry with `invalid_tag_names`."
@@ -2270,7 +2854,7 @@ async def restore_source(
 async def bulk_create_sources(
     payload: SourcesBulkCreateRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     items: list[SourcesBulkCreateItem] = []
     companion_events: list[dict[str, Any]] = []
@@ -2349,6 +2933,7 @@ async def bulk_create_sources(
         try:
             if s.group_ids is not None:
                 _validate_group_ids(db, s.group_ids)
+            _ensure_watchlist_exists(db, s.watchlist_id)
         except HTTPException as ve:
             items.append(
                 SourcesBulkCreateItem(
@@ -2384,6 +2969,7 @@ async def bulk_create_sources(
                 settings_json=(json.dumps(s.settings) if s.settings else None),
                 tags=s.tags or [],
                 group_ids=s.group_ids or [],
+                watchlist_id=s.watchlist_id,
             )
             if getattr(row, "was_created", False):
                 companion_events.append(
@@ -2440,12 +3026,22 @@ async def list_tags(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     limit = size
     offset = (page - 1) * limit
     rows, total = db.list_tags(q=q, limit=limit, offset=offset)
-    return TagsListResponse(items=[Tag(id=r.id, name=r.name) for r in rows], total=total)
+    items = [Tag(id=r.id, name=r.name) for r in rows]
+    return TagsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 # --------------------
@@ -2455,10 +3051,12 @@ async def list_tags(
 async def create_group(
     payload: GroupCreateRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
-        row = db.create_group(name=payload.name, description=payload.description, parent_group_id=payload.parent_group_id)
+        row = db.create_group(
+            name=payload.name, description=payload.description, parent_group_id=payload.parent_group_id
+        )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         raise HTTPException(status_code=400, detail="group_create_failed") from None
     return Group(id=row.id, name=row.name, description=row.description, parent_group_id=row.parent_group_id)
@@ -2470,12 +3068,22 @@ async def list_groups(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     limit = size
     offset = (page - 1) * limit
     rows, total = db.list_groups(q=q, limit=limit, offset=offset)
-    return GroupsListResponse(items=[Group(id=r.id, name=r.name, description=r.description, parent_group_id=r.parent_group_id) for r in rows], total=total)
+    items = [Group(id=r.id, name=r.name, description=r.description, parent_group_id=r.parent_group_id) for r in rows]
+    return GroupsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.patch("/groups/{group_id}", response_model=Group, summary="Update group")
@@ -2483,7 +3091,7 @@ async def update_group(
     group_id: int = Path(..., ge=1),
     payload: GroupUpdateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         row = db.update_group(group_id, payload.model_dump(exclude_unset=True))
@@ -2496,7 +3104,7 @@ async def update_group(
 async def delete_group(
     group_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     ok = db.delete_group(group_id)
     if not ok:
@@ -2510,7 +3118,7 @@ async def delete_group(
 @router.get("/settings", summary="Get watchlists defaults")
 async def get_watchlist_settings(
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ) -> dict[str, Any]:
     """Return watchlists runtime defaults and active backend type for the current user."""
     backend_label = "sqlite"
@@ -2536,7 +3144,7 @@ async def get_watchlist_settings(
 async def record_watchlists_onboarding_telemetry(
     payload: WatchlistOnboardingTelemetryIngestRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ) -> WatchlistOnboardingTelemetryIngestResponse:
     """Record a single onboarding telemetry event and return accept/reject outcome."""
     _ = current_user
@@ -2551,8 +3159,8 @@ async def record_watchlists_onboarding_telemetry(
         code = result.get("code")
         record_onboarding_ingest_result("accepted" if accepted else "rejected")
         return WatchlistOnboardingTelemetryIngestResponse(accepted=accepted, code=code)
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("watchlists onboarding telemetry ingest failed for user {}: {}", current_user.id, exc)
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("watchlists onboarding telemetry ingest failed")
         record_onboarding_ingest_result("error")
         return WatchlistOnboardingTelemetryIngestResponse(
             accepted=False,
@@ -2569,7 +3177,7 @@ async def get_watchlists_onboarding_telemetry_summary(
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ) -> WatchlistOnboardingTelemetrySummaryResponse:
     """Summarize onboarding telemetry counters/rates/timings for an optional time window."""
     started = time.perf_counter()
@@ -2585,7 +3193,7 @@ async def get_watchlists_onboarding_telemetry_summary(
         )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         status_label = "error"
-        logger.error("watchlists onboarding telemetry summary failed for user {}: {}", current_user.id, exc)
+        logger.error("watchlists onboarding telemetry summary failed")
         raise HTTPException(
             status_code=500,
             detail="watchlists_onboarding_telemetry_summary_failed",
@@ -2607,8 +3215,8 @@ async def get_watchlists_rc_telemetry_summary(
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
-    collections_db = Depends(get_collections_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ) -> WatchlistRcTelemetrySummaryResponse:
     """Return combined onboarding, IA, and UC2 backend telemetry for RC reporting."""
     started = time.perf_counter()
@@ -2673,7 +3281,7 @@ async def get_watchlists_rc_telemetry_summary(
         )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         status_label = "error"
-        logger.error("watchlists RC telemetry summary failed for user {}: {}", current_user.id, exc)
+        logger.error("watchlists RC telemetry summary failed")
         raise HTTPException(status_code=500, detail="watchlists_rc_telemetry_summary_failed") from exc
     finally:
         record_summary_request(
@@ -2691,7 +3299,7 @@ async def get_watchlists_rc_telemetry_summary(
 async def record_watchlists_ia_experiment_telemetry(
     payload: WatchlistIaExperimentTelemetryIngestRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     accepted = False
     try:
@@ -2705,8 +3313,8 @@ async def record_watchlists_ia_experiment_telemetry(
             first_seen_at=payload.first_seen_at,
             last_seen_at=payload.last_seen_at,
         )
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("watchlists IA telemetry ingest failed for user {}: {}", current_user.id, exc)
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("watchlists IA telemetry ingest failed")
         accepted = False
     return WatchlistIaExperimentTelemetryIngestResponse(accepted=bool(accepted))
 
@@ -2720,12 +3328,12 @@ async def get_watchlists_ia_experiment_telemetry_summary(
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         items = db.summarize_ia_experiment_events(since=since, until=until)
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("watchlists IA telemetry summary failed for user {}: {}", current_user.id, exc)
+        logger.error("watchlists IA telemetry summary failed")
         raise HTTPException(status_code=500, detail="watchlists_ia_telemetry_summary_failed") from exc
     return WatchlistIaExperimentTelemetrySummaryResponse(items=items, since=since, until=until)
 
@@ -2734,7 +3342,7 @@ async def get_watchlists_ia_experiment_telemetry_summary(
 async def create_job(
     payload: JobCreateRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     ingest_prefs = payload.ingest_prefs.model_dump(exclude_none=True) if payload.ingest_prefs else None
     output_prefs = _merge_output_prefs(payload.output_prefs or {}, ingest_prefs)
@@ -2744,6 +3352,7 @@ async def create_job(
         timezone=payload.timezone,
         output_prefs=output_prefs,
     )
+    _ensure_watchlist_exists(db, payload.watchlist_id)
     try:
         jf_json = None
         try:
@@ -2763,6 +3372,7 @@ async def create_job(
             retry_policy_json=json.dumps(payload.retry_policy or {}),
             output_prefs_json=json.dumps(output_prefs),
             job_filters_json=jf_json,
+            watchlist_id=payload.watchlist_id,
         )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"create_job failed: {e}")
@@ -2779,6 +3389,7 @@ async def create_job(
     try:
         if row.schedule_expr:
             from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
+
             svc = get_workflows_scheduler()
             sid = svc.create(
                 tenant_id=str(getattr(current_user, "tenant_id", "default")),
@@ -2803,8 +3414,10 @@ async def create_job(
         try:
             if row.schedule_expr:
                 from uuid import uuid4
+
                 sid = uuid4().hex
                 from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import WorkflowsSchedulerDB
+
                 wfdb = WorkflowsSchedulerDB(user_id=int(current_user.id))
                 wfdb.create_schedule(
                     id=sid,
@@ -2833,6 +3446,7 @@ async def create_job(
         id=row.id,
         name=row.name,
         description=row.description,
+        watchlist_id=getattr(row, "watchlist_id", None),
         scope=(json.loads(row.scope_json or "{}")),
         schedule_expr=row.schedule_expr,
         timezone=row.schedule_timezone,
@@ -2850,14 +3464,18 @@ async def create_job(
     )
 
 
-@router.post("/jobs/{job_id}/preview", response_model=PreviewResponse, summary="Preview candidates and filter decisions without ingestion")
+@router.post(
+    "/jobs/{job_id}/preview",
+    response_model=PreviewResponse,
+    summary="Preview candidates and filter decisions without ingestion",
+)
 async def preview_job(
     job_id: int = Path(..., ge=1),
     limit: int = Query(20, ge=1, le=200, description="Max candidates to return across all sources"),
     per_source: int = Query(10, ge=1, le=100, description="Max candidates per source"),
     include_content: bool = Query(False, description="Reserved; previews return summary only for now"),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         job = db.get_job(job_id)
@@ -2953,25 +3571,31 @@ async def preview_job(
         try:
             if str(src.source_type).lower() == "rss":
                 if test_mode:
-                    per_items = [{
-                        "title": "Test Item",
-                        "url": "https://example.com/test",
-                        "summary": "Preview sample",
-                        "published": datetime.now(timezone.utc).isoformat(),
-                        "author": None,
-                    }]
+                    per_items = [
+                        {
+                            "title": "Test Item",
+                            "url": "https://example.com/test",
+                            "summary": "Preview sample",
+                            "published": datetime.now(timezone.utc).isoformat(),
+                            "author": None,
+                        }
+                    ]
                 else:
-                    feed = await fetch_rss_feed(str(src.url), etag=None, last_modified=None, tenant_id=str(current_user.id))
+                    feed = await fetch_rss_feed(
+                        str(src.url), etag=None, last_modified=None, tenant_id=str(current_user.id)
+                    )
                     per_items = feed.get("items") or []
             else:
                 if test_mode:
-                    per_items = [{
-                        "title": "Site Item",
-                        "url": getattr(src, "url", None) or "https://example.com/",
-                        "summary": "Preview sample",
-                        "content": "",
-                        "author": None,
-                    }]
+                    per_items = [
+                        {
+                            "title": "Site Item",
+                            "url": getattr(src, "url", None) or "https://example.com/",
+                            "summary": "Preview sample",
+                            "content": "",
+                            "author": None,
+                        }
+                    ]
                 else:
                     cfg = {}
                     try:
@@ -3004,7 +3628,7 @@ async def preview_job(
             action, meta = _evaluate_filters(job_filters, candidate)
             # Determine final decision with include-only gating
             decision = "filtered" if action == "exclude" or include_gating_active and action != "include" else "ingest"
-            flagged = (action == "flag")
+            flagged = action == "flag"
             if decision == "ingest":
                 total_ingestable += 1
             else:
@@ -3021,25 +3645,35 @@ async def preview_job(
                     matched_action=action,  # type: ignore[arg-type]
                     matched_filter_key=(meta.get("key") if isinstance(meta, dict) else None),
                     matched_filter_id=(
-                        int(meta["id"])
-                        if isinstance(meta, dict) and meta.get("id") is not None
-                        else None
+                        int(meta["id"]) if isinstance(meta, dict) and meta.get("id") is not None else None
                     ),
                     matched_filter_type=(
-                        meta.get("type")
-                        if isinstance(meta, dict) and isinstance(meta.get("type"), str)
-                        else None
+                        meta.get("type") if isinstance(meta, dict) and isinstance(meta.get("type"), str) else None
                     ),  # type: ignore[arg-type]
                     flagged=flagged,
                 )
             )
 
-    return PreviewResponse(items=items, total=len(items), ingestable=total_ingestable, filtered=total_filtered)
+    total = len(items)
+    return PreviewResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=0,
+            total=total,
+            count=total,
+            has_more=False,
+        ),
+        ingestable=total_ingestable,
+        filtered=total_filtered,
+    )
 
 
 @router.get("/jobs", response_model=JobsListResponse, summary="List jobs")
 async def list_jobs(
     q: str | None = Query(None),
+    watchlist_id: int | None = Query(None, ge=1),
     target_user_id: int | None = Query(
         None,
         ge=1,
@@ -3048,7 +3682,7 @@ async def list_jobs(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -3057,7 +3691,8 @@ async def list_jobs(
     )
     limit = size
     offset = (page - 1) * limit
-    rows, total = target_db.list_jobs(q=q, limit=limit, offset=offset)
+    _ensure_watchlist_exists(target_db, watchlist_id)
+    rows, total = target_db.list_jobs(q=q, limit=limit, offset=offset, watchlist_id=watchlist_id)
     items: list[Job] = []
     for r in rows:
         output_prefs = _normalize_output_prefs(getattr(r, "output_prefs_json", None))
@@ -3067,6 +3702,7 @@ async def list_jobs(
                 id=r.id,
                 name=r.name,
                 description=r.description,
+                watchlist_id=getattr(r, "watchlist_id", None),
                 scope=(json.loads(r.scope_json or "{}")),
                 schedule_expr=r.schedule_expr,
                 timezone=r.schedule_timezone,
@@ -3083,7 +3719,16 @@ async def list_jobs(
                 next_run_at=r.next_run_at,
             )
         )
-    return JobsListResponse(items=items, total=total)
+    return JobsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=Job, summary="Get job")
@@ -3096,7 +3741,7 @@ async def get_job(
         description="Admin-only: fetch a job from another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -3114,6 +3759,7 @@ async def get_job(
         id=r.id,
         name=r.name,
         description=r.description,
+        watchlist_id=getattr(r, "watchlist_id", None),
         scope=(json.loads(r.scope_json or "{}")),
         schedule_expr=r.schedule_expr,
         timezone=r.schedule_timezone,
@@ -3137,7 +3783,7 @@ async def update_job(
     job_id: int = Path(..., ge=1),
     payload: JobUpdateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     patch = payload.model_dump(exclude_unset=True)
     try:
@@ -3154,6 +3800,7 @@ async def update_job(
         patch["retry_policy_json"] = json.dumps(patch.pop("retry_policy") or {})
     if "job_filters" in patch:
         patch["job_filters_json"] = json.dumps(patch.pop("job_filters") or {})
+    _ensure_watchlist_exists(db, patch.get("watchlist_id"))
     current_output_prefs = _normalize_output_prefs(getattr(current, "output_prefs_json", None))
     if ingest_prefs is not None:
         if output_prefs is None:
@@ -3208,6 +3855,7 @@ async def update_job(
     # Sync with workflows scheduler (create/update/enable/disable)
     try:
         from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
+
         svc = get_workflows_scheduler()
         if r.wf_schedule_id:
             upd: dict[str, Any] = {}
@@ -3243,8 +3891,10 @@ async def update_job(
                     logger.debug(f"Watchlists: schedule create during update failed, fallback: {_e}")
                     try:
                         from uuid import uuid4
+
                         sid = uuid4().hex
                         from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import WorkflowsSchedulerDB
+
                         wfdb = WorkflowsSchedulerDB(user_id=int(current_user.id))
                         wfdb.create_schedule(
                             id=sid,
@@ -3274,6 +3924,7 @@ async def update_job(
         id=r.id,
         name=r.name,
         description=r.description,
+        watchlist_id=getattr(r, "watchlist_id", None),
         scope=(json.loads(r.scope_json or "{}")),
         schedule_expr=r.schedule_expr,
         timezone=r.schedule_timezone,
@@ -3295,7 +3946,7 @@ async def update_job(
 async def list_watchlist_clusters(
     watchlist_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         db.get_job(watchlist_id)
@@ -3310,7 +3961,7 @@ async def add_watchlist_cluster(
     watchlist_id: int = Path(..., ge=1),
     cluster_id: int = Body(..., embed=True, ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         db.get_job(watchlist_id)
@@ -3325,7 +3976,7 @@ async def remove_watchlist_cluster(
     watchlist_id: int = Path(..., ge=1),
     cluster_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         db.get_job(watchlist_id)
@@ -3345,13 +3996,14 @@ async def remove_watchlist_cluster(
 async def delete_job(
     job_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     # Try to delete linked schedule if present
     try:
         r = db.get_job(job_id)
         if getattr(r, "wf_schedule_id", None):
             from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
+
             get_workflows_scheduler().delete(r.wf_schedule_id)  # type: ignore[arg-type]
             with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
                 db.set_job_schedule_id(job_id, None)
@@ -3375,7 +4027,7 @@ async def delete_job(
 async def restore_job(
     job_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         row = db.restore_job(job_id)
@@ -3452,6 +4104,7 @@ async def restore_job(
         id=row.id,
         name=row.name,
         description=row.description,
+        watchlist_id=getattr(row, "watchlist_id", None),
         scope=(json.loads(row.scope_json or "{}")),
         schedule_expr=row.schedule_expr,
         timezone=row.schedule_timezone,
@@ -3475,7 +4128,7 @@ async def replace_job_filters(
     job_id: int = Path(..., ge=1),
     payload: WatchlistFiltersPayload = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     try:
@@ -3485,7 +4138,11 @@ async def replace_job_filters(
     updated = db.set_job_filters(job_id, payload.model_dump())
     # Normalize and return
     try:
-        parsed = json.loads(updated.job_filters_json or "{}") if getattr(updated, "job_filters_json", None) else {"filters": []}
+        parsed = (
+            json.loads(updated.job_filters_json or "{}")
+            if getattr(updated, "job_filters_json", None)
+            else {"filters": []}
+        )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         parsed = {"filters": []}
     return WatchlistFiltersPayload(**parsed) if isinstance(parsed, dict) else WatchlistFiltersPayload(filters=[])
@@ -3497,7 +4154,7 @@ async def append_job_filters(
     job_id: int = Path(..., ge=1),
     payload: WatchlistFiltersPayload = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     try:
@@ -3520,7 +4177,7 @@ async def append_job_filters(
 async def trigger_run(
     job_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         # Ensure job exists before execution
@@ -3569,7 +4226,7 @@ async def list_runs_for_job(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _enforce_runs_admin_if_configured(current_user)
     _, target_db = await _resolve_target_watchlists_context(
@@ -3580,33 +4237,6 @@ async def list_runs_for_job(
     limit = size
     offset = (page - 1) * limit
     rows, total = target_db.list_runs_for_job(job_id, limit=limit, offset=offset)
-    items = [Run(id=r.id, job_id=r.job_id, status=r.status, started_at=r.started_at, finished_at=r.finished_at, stats=(json.loads(r.stats_json or "{}") if r.stats_json else None), error_msg=r.error_msg) for r in rows]
-    has_more = (offset + len(items)) < int(total or 0)
-    return RunsListResponse(items=items, total=total, has_more=has_more)
-
-
-@router.get("/runs", response_model=RunsListResponse, summary="List runs across all jobs")
-async def list_runs_global(
-    q: str | None = Query(None, description="Filter by job name/description, run status, or run id (text)"),
-    target_user_id: int | None = Query(
-        None,
-        ge=1,
-        description="Admin-only: list runs for another user ID.",
-    ),
-    page: int = Query(1, ge=1),
-    size: int = Query(50, ge=1, le=200),
-    current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
-):
-    _enforce_runs_admin_if_configured(current_user)
-    _, target_db = await _resolve_target_watchlists_context(
-        current_user=current_user,
-        current_db=db,
-        target_user_id=target_user_id,
-    )
-    limit = size
-    offset = (page - 1) * limit
-    rows, total = target_db.list_runs(q=q, limit=limit, offset=offset)
     items = [
         Run(
             id=r.id,
@@ -3620,10 +4250,84 @@ async def list_runs_global(
         for r in rows
     ]
     has_more = (offset + len(items)) < int(total or 0)
-    return RunsListResponse(items=items, total=total, has_more=has_more)
+    return RunsListResponse(
+        items=items,
+        total=total,
+        has_more=has_more,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+            has_more=has_more,
+        ),
+    )
 
 
-@router.get("/runs/export.csv", response_class=PlainTextResponse, summary="Export runs as CSV (global or by job)")
+@router.get("/runs", response_model=RunsListResponse, summary="List runs across all jobs")
+async def list_runs_global(
+    q: str | None = Query(None, description="Filter by job name/description, run status, or run id (text)"),
+    watchlist_id: int | None = Query(None, ge=1),
+    target_user_id: int | None = Query(
+        None,
+        ge=1,
+        description="Admin-only: list runs for another user ID.",
+    ),
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _enforce_runs_admin_if_configured(current_user)
+    _, target_db = await _resolve_target_watchlists_context(
+        current_user=current_user,
+        current_db=db,
+        target_user_id=target_user_id,
+    )
+    limit = size
+    offset = (page - 1) * limit
+    _ensure_watchlist_exists(target_db, watchlist_id)
+    rows, total = target_db.list_runs(q=q, limit=limit, offset=offset, watchlist_id=watchlist_id)
+    items = [
+        Run(
+            id=r.id,
+            job_id=r.job_id,
+            status=r.status,
+            started_at=r.started_at,
+            finished_at=r.finished_at,
+            stats=(json.loads(r.stats_json or "{}") if r.stats_json else None),
+            error_msg=r.error_msg,
+        )
+        for r in rows
+    ]
+    has_more = (offset + len(items)) < int(total or 0)
+    return RunsListResponse(
+        items=items,
+        total=total,
+        has_more=has_more,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+            has_more=has_more,
+        ),
+    )
+
+
+@router.get(
+    "/runs/export.csv",
+    response_class=PlainTextResponse,
+    responses={
+        200: {
+            "description": "Watchlist runs exported as CSV.",
+            "content": {
+                "text/csv; charset=utf-8": {},
+            },
+        },
+    },
+    summary="Export runs as CSV (global or by job)",
+)
 async def export_runs_csv(
     scope: str = Query("global", pattern="^(global|job)$"),
     job_id: int | None = Query(None, ge=1),
@@ -3641,7 +4345,7 @@ async def export_runs_csv(
         description="Tallies export mode when include_tallies=true. Use 'aggregate' to export global filter-key totals.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _enforce_runs_admin_if_configured(current_user)
     _, target_db = await _resolve_target_watchlists_context(
@@ -3771,6 +4475,7 @@ async def export_runs_csv(
         },
     )
 
+
 @router.get("/runs/{run_id}", response_model=Run, summary="Get a run")
 async def get_run(
     run_id: int = Path(..., ge=1),
@@ -3780,7 +4485,7 @@ async def get_run(
         description="Admin-only: fetch a run from another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _enforce_runs_admin_if_configured(current_user)
     _, target_db = await _resolve_target_watchlists_context(
@@ -3792,7 +4497,15 @@ async def get_run(
         r = target_db.get_run(run_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="run_not_found") from None
-    return Run(id=r.id, job_id=r.job_id, status=r.status, started_at=r.started_at, finished_at=r.finished_at, stats=(json.loads(r.stats_json or "{}") if r.stats_json else None), error_msg=r.error_msg)
+    return Run(
+        id=r.id,
+        job_id=r.job_id,
+        status=r.status,
+        started_at=r.started_at,
+        finished_at=r.finished_at,
+        stats=(json.loads(r.stats_json or "{}") if r.stats_json else None),
+        error_msg=r.error_msg,
+    )
 
 
 @router.post("/runs/{run_id}/cancel", response_model=RunCancelResponse, summary="Cancel a run")
@@ -3804,7 +4517,7 @@ async def cancel_run(
         description="Admin-only: cancel a run for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _enforce_runs_admin_if_configured(current_user)
     _, target_db = await _resolve_target_watchlists_context(
@@ -3859,18 +4572,64 @@ async def cancel_run(
     )
 
 
+def _build_run_detail_stats(
+    stats: dict[str, Any],
+    *,
+    items_found: int,
+    items_ingested: int,
+) -> dict[str, Any]:
+    """Build run-detail stats without dropping legacy flat filter counters."""
+    detail_stats: dict[str, Any] = {
+        key: value
+        for key, value in stats.items()
+        if key != "filter_tallies"
+    }
+    detail_stats.update({
+        "items_found": items_found,
+        "items_ingested": items_ingested,
+    })
+    for key in ("filters_include", "filters_exclude", "filters_flag"):
+        detail_stats[key] = _coerce_run_detail_filter_count(detail_stats.get(key)) or 0
+    try:
+        if isinstance(stats.get("filters_matched"), int):
+            detail_stats["filters_matched"] = int(stats.get("filters_matched") or 0)
+        fa = stats.get("filters_actions")
+        if isinstance(fa, dict):
+            for k in ("include", "exclude", "flag"):
+                count = _coerce_run_detail_filter_count(fa.get(k))
+                if count is not None:
+                    detail_stats[f"filters_{k}"] = count
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        pass
+    return detail_stats
+
+
+def _coerce_run_detail_filter_count(value: Any) -> int | None:
+    """Coerce JSON numeric filter counters while rejecting booleans and invalid values."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 @router.get("/runs/{run_id}/details", response_model=RunDetail, summary="Get run details with stats and logs")
 async def get_run_details(
     run_id: int = Path(..., ge=1),
     include_tallies: bool = Query(False, description="When true, include filter_tallies in the response"),
-    filtered_sample_max: int = Query(5, ge=0, le=50, description="Optional number of filtered items to include as a sample"),
+    filtered_sample_max: int = Query(
+        5, ge=0, le=50, description="Optional number of filtered items to include as a sample"
+    ),
     target_user_id: int | None = Query(
         None,
         ge=1,
         description="Admin-only: fetch run details for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     _enforce_runs_admin_if_configured(current_user)
@@ -3906,7 +4665,7 @@ async def get_run_details(
         try:
             p = _resolve_watchlist_log_path(user_id=int(resolved_user_id), log_path=r.log_path)
             if p and p.exists():
-                content = p.read_text(encoding="utf-8", errors="replace")
+                content = await run_in_threadpool(p.read_text, encoding="utf-8", errors="replace")
                 max_len = 65536
                 if len(content) > max_len:
                     log_text = content[-max_len:]
@@ -3916,25 +4675,12 @@ async def get_run_details(
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
             log_text = None
             truncated = False
-    # Build stats for detail view, including filter totals when present
-    detail_stats: dict[str, int] = {
-        "items_found": items_found,
-        "items_ingested": items_ingested,
-        "filters_include": 0,
-        "filters_exclude": 0,
-        "filters_flag": 0,
-    }
-    try:
-        if isinstance(stats.get("filters_matched"), int):
-            detail_stats["filters_matched"] = int(stats.get("filters_matched") or 0)
-        fa = stats.get("filters_actions")
-        if isinstance(fa, dict):
-            for k in ("include", "exclude", "flag"):
-                v = fa.get(k)
-                if isinstance(v, int):
-                    detail_stats[f"filters_{k}"] = int(v)
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-        pass
+    # Build stats for detail view, preserving raw stats while keeping opt-in tallies gated.
+    detail_stats = _build_run_detail_stats(
+        stats,
+        items_found=items_found,
+        items_ingested=items_ingested,
+    )
     # Optional tallies
     tallies_out = None
     if include_tallies:
@@ -3942,7 +4688,11 @@ async def get_run_details(
             tallies = stats.get("filter_tallies")
             if isinstance(tallies, dict):
                 # Coerce values to int
-                tallies_out = {str(k): int(v) for k, v in tallies.items() if isinstance(k, (str, int)) and isinstance(v, (int, float))}
+                tallies_out = {
+                    str(k): int(v)
+                    for k, v in tallies.items()
+                    if isinstance(k, (str, int)) and isinstance(v, (int, float))
+                }
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
             tallies_out = None
 
@@ -4043,7 +4793,8 @@ async def stream_run(
     last_status = run.status
     last_stats_raw = run.stats_json
     last_error = run.error_msg
-    log_text, log_offset, log_inode, log_truncated = _read_log_tail(
+    log_text, log_offset, log_inode, log_truncated = await run_in_threadpool(
+        _read_log_tail,
         log_path=run.log_path,
         user_id=user_id,
         max_bytes=log_tail_max,
@@ -4088,7 +4839,8 @@ async def stream_run(
                 last_stats_raw = stats_raw
                 last_error = run.error_msg
 
-            chunk, log_offset, log_inode = _read_log_chunk(
+            chunk, log_offset, log_inode = await run_in_threadpool(
+                _read_log_chunk,
                 log_path=run.log_path,
                 user_id=user_id,
                 offset=log_offset,
@@ -4114,14 +4866,767 @@ async def stream_run(
 
 
 # --------------------
+# Operator Recovery
+# --------------------
+
+
+def _parse_json_object(raw: Any) -> dict[str, Any]:
+    """Parse a JSON object payload without leaking malformed metadata errors."""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+_TEXT_DELIVERY_FORMATS = {"html", "md", "markdown", "txt", "text"}
+_AUDIO_DELIVERY_FORMATS = {"aac", "flac", "m4a", "mp3", "ogg", "opus", "wav"}
+_AUDIO_DELIVERY_TYPES = {"audio", "audio_briefing", "podcast_audio", "tts_audio"}
+
+
+def _sanitize_delivery_result(raw: Any) -> dict[str, Any]:
+    """Return delivery status fields safe for output metadata and diagnostics."""
+    if not isinstance(raw, dict):
+        return {}
+    channel = str(raw.get("channel") or "").strip()
+    delivery_status = str(raw.get("status") or "").strip()
+    safe: dict[str, Any] = {}
+    if channel:
+        safe["channel"] = channel
+    if delivery_status:
+        safe["status"] = delivery_status
+
+    reason = raw.get("reason")
+    if isinstance(reason, str) and reason:
+        safe["reason"] = reason[:120]
+
+    document_id = raw.get("document_id")
+    if document_id is not None:
+        safe["document_id"] = document_id
+
+    deliveries = raw.get("deliveries")
+    if isinstance(deliveries, list):
+        status_counts: dict[str, int] = {}
+        for entry in deliveries:
+            if not isinstance(entry, dict):
+                continue
+            entry_status = str(entry.get("status") or "unknown")
+            status_counts[entry_status] = status_counts.get(entry_status, 0) + 1
+        safe["delivery_count"] = len(deliveries)
+        if status_counts:
+            safe["delivery_status_counts"] = status_counts
+    return safe
+
+
+def _sanitize_delivery_results(raw: Any) -> list[dict[str, Any]]:
+    """Sanitize delivery result lists from current and historical metadata."""
+    if not isinstance(raw, list):
+        return []
+    return [safe for entry in raw if (safe := _sanitize_delivery_result(entry))]
+
+
+def _notification_delivery_summary(result: Any) -> dict[str, Any]:
+    """Convert a NotificationResult-like object into a sanitized result summary."""
+    details = getattr(result, "details", None)
+    raw = dict(details) if isinstance(details, dict) else {}
+    raw["channel"] = getattr(result, "channel", raw.get("channel", ""))
+    raw["status"] = getattr(result, "status", raw.get("status", ""))
+    return _sanitize_delivery_result(raw)
+
+
+def _is_audio_output_row(row: Any, metadata: dict[str, Any]) -> bool:
+    """Return whether an output row is an audio artifact or audio-derived variant."""
+    output_format = str(getattr(row, "format", None) or metadata.get("format") or "").lower()
+    output_type = str(getattr(row, "type", None) or metadata.get("type") or "").lower()
+    variant_kind = str(metadata.get("variant_kind") or "").lower()
+    return (
+        output_format in _AUDIO_DELIVERY_FORMATS
+        or output_type in _AUDIO_DELIVERY_TYPES
+        or variant_kind in {"audio", "tts"}
+    )
+
+
+def _has_delivery_plan(metadata: dict[str, Any]) -> bool:
+    """Return whether metadata includes a persisted delivery plan."""
+    return isinstance(metadata.get("delivery_plan"), dict)
+
+
+def _is_canonical_delivery_output(row: Any, metadata: dict[str, Any]) -> bool:
+    """Prefer the base text artifact for delivery retries over derived outputs."""
+    if not _has_delivery_plan(metadata) or _is_audio_output_row(row, metadata):
+        return False
+    if metadata.get("variant_of") is not None or metadata.get("variant_kind"):
+        return False
+    output_format = str(getattr(row, "format", None) or metadata.get("format") or "").lower()
+    return not output_format or output_format in _TEXT_DELIVERY_FORMATS
+
+
+def _output_row_summary(row: Any) -> dict[str, Any]:
+    """Build the diagnostics-safe subset of an output artifact row."""
+    metadata = _parse_output_metadata(row)
+    return {
+        "id": int(getattr(row, "id", 0) or 0),
+        "run_id": getattr(row, "run_id", None),
+        "job_id": getattr(row, "job_id", None),
+        "title": getattr(row, "title", None),
+        "format": getattr(row, "format", None),
+        "type": getattr(row, "type", None),
+        "created_at": getattr(row, "created_at", None),
+        "deliveries": _sanitize_delivery_results(metadata.get("deliveries")),
+        "delivery_plan_present": isinstance(metadata.get("delivery_plan"), dict),
+        "audio_briefing_status": metadata.get("audio_briefing_status"),
+        "audio_briefing_task_id": metadata.get("audio_briefing_task_id"),
+        "audio_briefing_reason": metadata.get("audio_briefing_reason"),
+    }
+
+
+async def _list_run_watchlist_outputs(collections_db: Any, run_id: int, *, limit: int = 10) -> list[Any]:
+    """List watchlist-origin output artifacts for a run without blocking the event loop."""
+    rows, _total = await run_in_threadpool(
+        collections_db.list_output_artifacts,
+        run_id=run_id,
+        limit=limit,
+        offset=0,
+        metadata_origin="watchlists",
+    )
+    return list(rows or [])
+
+
+def _output_row_id(row: Any) -> Any:
+    """Return a stable output artifact identifier across dict and row-like shapes."""
+    if isinstance(row, dict):
+        return row.get("id")
+    return getattr(row, "id", None)
+
+
+def _output_row_metadata(row: Any) -> dict[str, Any]:
+    """Parse output metadata without dropping row-provided compatibility fields."""
+    if isinstance(row, dict):
+        return _parse_json_object(row.get("metadata_json") or row.get("metadata"))
+    return _parse_output_metadata(row)
+
+
+def _retry_audio_projection(run_id: int, audio_result: Any, status: str) -> dict[str, Any]:
+    """Build the active empty audio graph used immediately after a queued retry."""
+    return {
+        "run_id": run_id,
+        "task_id": str(audio_result.task_id) if audio_result.task_id else None,
+        "status": status,
+        "audio_request_id": audio_result.audio_request_id,
+        "script_artifact": None,
+        "speaker_artifacts": [],
+        "final_artifact": None,
+        "artifact_id": None,
+        "download_url": None,
+        "size_bytes": None,
+        "mime_type": None,
+        "stale": False,
+    }
+
+
+def _mirror_audio_retry_state_to_output(
+    collections_db: Any,
+    *,
+    run_id: int,
+    active_projection: dict[str, Any],
+    superseded_by: str | None,
+) -> bool:
+    """Mirror retry stale/active audio state into the canonical Watchlists output artifact."""
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        find_canonical_watchlist_output,
+        mark_audio_projection_stale,
+        merge_audio_projection_metadata,
+    )
+
+    try:
+        output = find_canonical_watchlist_output(collections_db, run_id)
+        if output is None:
+            return False
+        output_id = _output_row_id(output)
+        if output_id is None:
+            return False
+        output_metadata = _output_row_metadata(output)
+        output_metadata = mark_audio_projection_stale(output_metadata, superseded_by=superseded_by)
+        output_metadata = merge_audio_projection_metadata(output_metadata, active_projection)
+        collections_db.update_output_artifact_metadata(
+            output_id,
+            metadata_json=json.dumps(output_metadata, sort_keys=True),
+        )
+        return True
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "watchlists.retry_audio output metadata mirror failed for run={} (error_type={})",
+            run_id,
+            type(exc).__name__,
+        )
+        return False
+
+
+@router.post(
+    "/runs/{run_id}/retry-audio",
+    response_model=RunStageRetryResponse,
+    summary="Retry only the audio briefing stage for a run",
+)
+async def retry_run_audio(
+    run_id: int = Path(..., ge=1),
+    target_user_id: int | None = Query(
+        None,
+        ge=1,
+        description="Admin-only: retry audio for another user ID.",
+    ),
+    current_user: User = Depends(get_request_user),
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
+) -> RunStageRetryResponse:
+    """Retry the audio briefing stage for a completed or failed watchlist run."""
+    _enforce_runs_admin_if_configured(current_user)
+    resolved_user_id, target_db = await _resolve_target_watchlists_context(
+        current_user=current_user,
+        current_db=db,
+        target_user_id=target_user_id,
+    )
+    target_collections_db = None
+    if _looks_like_collections_db(collections_db):
+        target_collections_db = _resolve_collections_db_for_target_user(
+            current_user=current_user,
+            current_db=collections_db,
+            target_user_id=resolved_user_id,
+        )
+    try:
+        run = target_db.get_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="run_not_found") from None
+    try:
+        job = target_db.get_job(run.job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job_not_found") from None
+
+    output_prefs = _parse_json_object(getattr(job, "output_prefs_json", None))
+    if not output_prefs.get("generate_audio"):
+        run_stats = _parse_json_object(getattr(run, "stats_json", None))
+        if not run_stats.get("audio_briefing_task_id"):
+            raise HTTPException(status_code=400, detail="audio_not_configured")
+    output_prefs["generate_audio"] = True
+
+    from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+        apply_audio_briefing_result_metadata,
+        persisted_audio_briefing_status,
+        trigger_audio_briefing,
+    )
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        mark_audio_projection_stale,
+        merge_audio_projection_metadata,
+    )
+
+    if str(getattr(run, "status", "")).lower() in {"running", "queued"}:
+        raise HTTPException(status_code=409, detail="audio_retry_run_in_progress")
+    audio_result = await trigger_audio_briefing(
+        user_id=int(resolved_user_id),
+        job_id=int(run.job_id),
+        run_id=run_id,
+        output_prefs=output_prefs,
+        db=target_db,
+    )
+    if not audio_result.submitted:
+        raise HTTPException(status_code=409, detail="audio_retry_not_queued")
+
+    run_stats = _parse_json_object(getattr(run, "stats_json", None))
+    run_stats = mark_audio_projection_stale(run_stats, superseded_by=audio_result.audio_request_id)
+    active_audio_projection = _retry_audio_projection(
+        run_id,
+        audio_result,
+        persisted_audio_briefing_status(audio_result),
+    )
+    run_stats = merge_audio_projection_metadata(run_stats, active_audio_projection)
+    apply_audio_briefing_result_metadata(run_stats, audio_result, retry=True)
+    try:
+        await run_in_threadpool(target_db.update_run, run_id, stats_json=json.dumps(run_stats))
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error("watchlists.retry_audio failed to persist retry state for run={}: {}", run_id, exc)
+        raise HTTPException(status_code=500, detail="audio_retry_state_update_failed") from exc
+    if target_collections_db is not None:
+        await run_in_threadpool(
+            _mirror_audio_retry_state_to_output,
+            target_collections_db,
+            run_id=run_id,
+            active_projection=active_audio_projection,
+            superseded_by=audio_result.audio_request_id,
+        )
+
+    return RunStageRetryResponse(
+        run_id=run_id,
+        stage="audio",
+        retried=True,
+        task_id=str(audio_result.task_id),
+    )
+
+
+@router.post(
+    "/runs/{run_id}/retry-delivery",
+    response_model=RunStageRetryResponse,
+    summary="Retry only the output delivery stage for a run",
+)
+async def retry_run_delivery(
+    run_id: int = Path(..., ge=1),
+    target_user_id: int | None = Query(
+        None,
+        ge=1,
+        description="Admin-only: retry delivery for another user ID.",
+    ),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
+) -> RunStageRetryResponse:
+    """Retry configured delivery channels for the latest watchlist output of a run."""
+    _enforce_runs_admin_if_configured(current_user)
+    resolved_user_id, target_db = await _resolve_target_watchlists_context(
+        current_user=current_user,
+        current_db=db,
+        target_user_id=target_user_id,
+    )
+    target_collections_db = _resolve_collections_db_for_target_user(
+        current_user=current_user,
+        current_db=collections_db,
+        target_user_id=resolved_user_id,
+    )
+    try:
+        run = target_db.get_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="run_not_found") from None
+
+    output_rows = await _list_run_watchlist_outputs(target_collections_db, run_id, limit=20)
+    if not output_rows:
+        raise HTTPException(status_code=404, detail="output_not_found")
+
+    selected_row = None
+    selected_metadata: dict[str, Any] = {}
+    fallback_row = None
+    fallback_metadata: dict[str, Any] = {}
+    for row in output_rows:
+        metadata = _parse_output_metadata(row)
+        if not _has_delivery_plan(metadata):
+            continue
+        if _is_canonical_delivery_output(row, metadata):
+            selected_row = row
+            selected_metadata = metadata
+            break
+        if fallback_row is None and not _is_audio_output_row(row, metadata):
+            fallback_row = row
+            fallback_metadata = metadata
+    if selected_row is None and fallback_row is not None:
+        selected_row = fallback_row
+        selected_metadata = fallback_metadata
+    if selected_row is None:
+        raise HTTPException(status_code=400, detail="delivery_plan_not_found")
+
+    output = await _row_to_output(selected_row, user_id=int(resolved_user_id))
+    title = output.title or f"watchlist-output-{output.id}"
+    output_format = output.format or getattr(selected_row, "format", None) or "md"
+    delivery_plan = selected_metadata.get("delivery_plan") or {}
+    is_delegated_retry = resolved_user_id != _safe_int(getattr(current_user, "id", None), -1)
+    notifications = NotificationsService(
+        user_id=int(resolved_user_id),
+        user_email=None if is_delegated_retry else getattr(current_user, "email", None),
+    )
+    delivery_results: list[dict[str, Any]] = []
+    chatbook_path_update: str | None = None
+
+    email_cfg = delivery_plan.get("email") if isinstance(delivery_plan.get("email"), dict) else None
+    if email_cfg and bool(email_cfg.get("enabled", True)):
+        html_body, text_body = _build_email_bodies(
+            output.content or "",
+            output_format,
+            title,
+            email_cfg.get("body_format", "auto"),
+        )
+        attachments = None
+        if email_cfg.get("attach_file", True) and output.content:
+            ext = "html" if output_format == "html" else "md"
+            safe_base = title.replace("/", "_")
+            attachments = [
+                {
+                    "filename": f"{safe_base}.{ext}",
+                    "content": (output.content or "").encode("utf-8"),
+                }
+            ]
+        email_result = await notifications.deliver_email(
+            subject=email_cfg.get("subject") or title,
+            html_body=html_body,
+            text_body=text_body or None,
+            recipients=email_cfg.get("recipients"),
+            attachments=attachments,
+            fallback_to_user_email=not is_delegated_retry,
+        )
+        delivery_results.append(_notification_delivery_summary(email_result))
+
+    chat_cfg = delivery_plan.get("chatbook") if isinstance(delivery_plan.get("chatbook"), dict) else None
+    if chat_cfg and bool(chat_cfg.get("enabled", True)):
+        chat_metadata = dict(chat_cfg.get("metadata") or {})
+        chat_metadata.update(
+            {
+                "job_id": int(getattr(run, "job_id", 0) or 0),
+                "run_id": run_id,
+                "output_id": output.id,
+            }
+        )
+        chat_result = await run_in_threadpool(
+            notifications.deliver_chatbook,
+            title=chat_cfg.get("title") or title,
+            content=output.content or "",
+            description=chat_cfg.get("description"),
+            metadata=chat_metadata,
+            provider=chat_cfg.get("provider", "watchlists"),
+            model=chat_cfg.get("model", "watchlists"),
+            conversation_id=chat_cfg.get("conversation_id"),
+        )
+        delivery_results.append(_notification_delivery_summary(chat_result))
+        doc_id = chat_result.details.get("document_id")
+        if chat_result.status == "stored" and doc_id is not None:
+            chatbook_path_update = f"generated_document:{doc_id}"
+            selected_metadata["chatbook_document_id"] = doc_id
+
+    if not delivery_results:
+        raise HTTPException(status_code=400, detail="delivery_channels_not_enabled")
+
+    selected_metadata["deliveries"] = delivery_results
+    selected_metadata.setdefault("delivery_retry_results", [])
+    if isinstance(selected_metadata["delivery_retry_results"], list):
+        selected_metadata["delivery_retry_results"].extend(delivery_results)
+    selected_metadata["delivery_retry_at"] = _utcnow_iso()
+    await run_in_threadpool(
+        target_collections_db.update_output_artifact_metadata,
+        output.id,
+        metadata_json=json.dumps({k: v for k, v in selected_metadata.items() if v is not None}),
+        chatbook_path=chatbook_path_update,
+    )
+
+    return RunStageRetryResponse(
+        run_id=run_id,
+        stage="delivery",
+        retried=True,
+        output_id=int(output.id),
+        delivery_results=delivery_results,
+    )
+
+
+@router.get(
+    "/runs/{run_id}/diagnostics",
+    response_model=RunDiagnosticsResponse,
+    summary="Download a diagnostic bundle for a watchlist run",
+)
+async def get_run_diagnostics(
+    run_id: int = Path(..., ge=1),
+    target_user_id: int | None = Query(
+        None,
+        ge=1,
+        description="Admin-only: fetch diagnostics for another user ID.",
+    ),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
+) -> RunDiagnosticsResponse:
+    """Return run diagnostics, output summaries, and safe recovery affordances."""
+    _enforce_runs_admin_if_configured(current_user)
+    resolved_user_id, target_db = await _resolve_target_watchlists_context(
+        current_user=current_user,
+        current_db=db,
+        target_user_id=target_user_id,
+    )
+    target_collections_db = _resolve_collections_db_for_target_user(
+        current_user=current_user,
+        current_db=collections_db,
+        target_user_id=resolved_user_id,
+    )
+    try:
+        run = target_db.get_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="run_not_found") from None
+
+    stats = _parse_json_object(getattr(run, "stats_json", None))
+    run_payload = {
+        "id": int(getattr(run, "id", run_id)),
+        "job_id": int(getattr(run, "job_id", 0) or 0),
+        "status": getattr(run, "status", None),
+        "started_at": getattr(run, "started_at", None),
+        "finished_at": getattr(run, "finished_at", None),
+        "stats": stats,
+        "error_msg": getattr(run, "error_msg", None),
+    }
+
+    job_payload: dict[str, Any] | None = None
+    output_prefs: dict[str, Any] = {}
+    try:
+        job = target_db.get_job(run.job_id)
+        output_prefs = _parse_json_object(getattr(job, "output_prefs_json", None))
+        job_payload = {
+            "id": int(getattr(job, "id", run.job_id)),
+            "name": getattr(job, "name", None),
+            "schedule_expr": getattr(job, "schedule_expr", None),
+            "active": getattr(job, "active", None),
+            "watchlist_id": getattr(job, "watchlist_id", None),
+            "output_auto_enabled": bool(
+                isinstance(output_prefs.get("auto_output"), dict)
+                and output_prefs.get("auto_output", {}).get("enabled")
+            ),
+            "audio_enabled": bool(output_prefs.get("generate_audio")),
+            "delivery_configured": isinstance(output_prefs.get("deliveries"), dict),
+        }
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning("watchlists.diagnostics failed to load job metadata for run={}: {}", run_id, exc)
+
+    output_rows = await _list_run_watchlist_outputs(target_collections_db, run_id, limit=25)
+    outputs = [_output_row_summary(row) for row in output_rows]
+    audio_task_id = stats.get("audio_briefing_task_id")
+    audio_status = stats.get("audio_briefing_status")
+    audio_reason = stats.get("audio_briefing_reason")
+    audio_payload = None
+    if audio_status or audio_task_id or audio_reason:
+        audio_payload = {
+            "task_id": audio_task_id,
+            "status": audio_status,
+        }
+        if audio_reason:
+            audio_payload["reason"] = audio_reason
+
+    return RunDiagnosticsResponse(
+        run_id=run_id,
+        generated_at=_utcnow_iso(),
+        run=run_payload,
+        job=job_payload,
+        outputs=outputs,
+        audio=audio_payload,
+        recovery={
+            "can_retry_full_run": bool(run_payload.get("job_id")),
+            "can_retry_delivery": any(output.get("delivery_plan_present") for output in outputs),
+            "can_retry_audio": bool(audio_task_id or output_prefs.get("generate_audio")),
+        },
+    )
+
+
+# --------------------
 # Audio Briefing
 # --------------------
+
+_SCHEDULER_AUDIO_STATUS_MAP = {
+    "queued": "queued",
+    "pending": "pending",
+    "running": "running",
+    "completed": "completed",
+    "failed": "failed",
+    "dead": "dead",
+    "cancelled": "cancelled",
+    "canceled": "cancelled",
+}
+
+
+async def _get_audio_scheduler_task_status(task_id: str) -> dict[str, Any] | None:
+    """Return a safe Scheduler status snapshot for a Watchlists audio task."""
+    try:
+        scheduler = await get_existing_global_scheduler()
+        if scheduler is None:
+            return None
+        task = await scheduler.get_task(task_id)
+    except asyncio.CancelledError:
+        raise
+    except SchedulerError as exc:
+        logger.warning(
+            "Watchlists audio: scheduler status lookup failed for task {} (error_type={})",
+            task_id,
+            type(exc).__name__,
+        )
+        return None
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Watchlists audio: scheduler status lookup failed for task {} (error_type={})",
+            task_id,
+            type(exc).__name__,
+        )
+        return None
+    if task is None:
+        return None
+
+    raw_status = getattr(getattr(task, "status", None), "value", None) or str(getattr(task, "status", "unknown"))
+    raw_status = raw_status.rsplit(".", 1)[-1].lower()
+    status_value = _SCHEDULER_AUDIO_STATUS_MAP.get(raw_status, "unknown")
+    result: dict[str, Any] = {
+        "task_id": task_id,
+        "status": status_value,
+        "queue_name": getattr(task, "queue_name", None),
+    }
+    if getattr(task, "error", None):
+        result["fallback_reason"] = "scheduler_task_error"
+    return result
+
+
+def _pending_audio_scheduler_fallback(run_id: int, task_id: Any) -> dict[str, Any]:
+    """Build the safe pending response used before workflow artifacts exist."""
+    return {
+        "run_id": run_id,
+        "task_id": task_id,
+        "status": "pending",
+        "queue_name": "workflows",
+        "audio_uri": None,
+        "download_url": None,
+        "fallback_reason": "workflow_run_not_started",
+    }
+
+
+async def _audio_scheduler_status_or_pending(run_id: int, task_id: Any) -> dict[str, Any]:
+    """Return Scheduler status for an audio task, or a safe pending fallback."""
+    scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
+    if scheduler_status:
+        return {
+            "run_id": run_id,
+            **scheduler_status,
+            "audio_uri": None,
+            "download_url": None,
+        }
+    return _pending_audio_scheduler_fallback(run_id, task_id)
+
+
+def _get_watchlists_workflow_db() -> Any:
+    """Resolve the Workflows DB through the same factory path as Scheduler/Workflows APIs."""
+    from tldw_Server_API.app.core.DB_Management.DB_Manager import (
+        create_workflows_database,
+        get_content_backend_instance,
+    )
+
+    return create_workflows_database(backend=get_content_backend_instance())
+
+
+def _workflow_run_identifier(workflow_run: Any) -> Any:
+    """Return a Workflow run id across dict, SQLite, and backend row shapes."""
+    if isinstance(workflow_run, dict):
+        return workflow_run.get("run_id") or workflow_run.get("id")
+    return getattr(workflow_run, "run_id", None) or getattr(workflow_run, "id", None)
+
+
+def _list_workflow_audio_artifacts(workflow_db: Any, workflow_run_id: Any) -> list[Any]:
+    """List Workflow artifacts using whichever artifact API the backing DB exposes."""
+    if workflow_run_id is None:
+        return []
+    try:
+        artifacts = workflow_db.list_artifacts(run_id=workflow_run_id)
+        if isinstance(artifacts, list):
+            return artifacts
+    except AttributeError:
+        pass
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        pass
+    try:
+        return list(workflow_db.list_artifacts_for_run(str(workflow_run_id)) or [])
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        return []
+
+
+def _audio_projection_response(
+    projection: dict[str, Any],
+    *,
+    run_id: int,
+    task_id: Any,
+    queue_name: str | None = None,
+) -> dict[str, Any]:
+    """Shape the public audio response without exposing raw filesystem artifact URIs."""
+    response = {
+        "run_id": run_id,
+        "task_id": projection.get("task_id") or (str(task_id) if task_id is not None else None),
+        "queue_name": queue_name,
+        "status": projection.get("status") or "unknown",
+        "audio_uri": None,
+        "download_url": projection.get("download_url"),
+        "artifact_id": projection.get("artifact_id"),
+        "size_bytes": projection.get("size_bytes"),
+        "mime_type": projection.get("mime_type"),
+        "script_artifact": projection.get("script_artifact"),
+        "speaker_artifacts": projection.get("speaker_artifacts") or [],
+        "final_artifact": projection.get("final_artifact"),
+        "fallback_reason": projection.get("fallback_reason"),
+        "audio_request_id": projection.get("audio_request_id"),
+        "workflow_run_id": projection.get("workflow_run_id"),
+        "schema_version": projection.get("schema_version", 1),
+        "synced_at": projection.get("synced_at"),
+        "stale": projection.get("stale"),
+        "superseded_by": projection.get("superseded_by"),
+        "error": projection.get("error"),
+    }
+    return response
+
+
+def _nonempty_audio_status_value(value: Any) -> str | None:
+    """Return a trimmed audio status/reason/request string when one is present."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _audio_no_task_projection_from_stats(stats: dict[str, Any]) -> dict[str, Any] | None:
+    """Build a public audio status response for requested audio that never enqueued a task."""
+    audio = stats.get("audio") if isinstance(stats.get("audio"), dict) else {}
+    requested = (
+        stats.get("audio_briefing_requested") is True
+        or stats.get("generate_audio") is True
+        or audio.get("requested") is True
+        or audio.get("enabled") is True
+    )
+    status = (
+        _nonempty_audio_status_value(stats.get("audio_briefing_status"))
+        or _nonempty_audio_status_value(stats.get("audio_status"))
+        or _nonempty_audio_status_value(audio.get("status"))
+    )
+    fallback_reason = (
+        _nonempty_audio_status_value(stats.get("audio_briefing_reason"))
+        or _nonempty_audio_status_value(stats.get("audio_briefing_error"))
+        or _nonempty_audio_status_value(audio.get("fallback_reason"))
+        or _nonempty_audio_status_value(audio.get("reason"))
+        or _nonempty_audio_status_value(audio.get("error"))
+    )
+    audio_request_id = (
+        _nonempty_audio_status_value(stats.get("audio_request_id"))
+        or _nonempty_audio_status_value(audio.get("audio_request_id"))
+    )
+    workflow_run_id = _nonempty_audio_status_value(audio.get("workflow_run_id"))
+    schema_version = audio.get("schema_version") if isinstance(audio.get("schema_version"), int) else 1
+    synced_at = _nonempty_audio_status_value(audio.get("synced_at"))
+
+    if not (requested or status or fallback_reason or audio_request_id or workflow_run_id):
+        return None
+
+    return {
+        "task_id": None,
+        "status": status or "unknown",
+        "download_url": None,
+        "artifact_id": None,
+        "size_bytes": None,
+        "mime_type": None,
+        "script_artifact": None,
+        "speaker_artifacts": [],
+        "final_artifact": None,
+        "fallback_reason": fallback_reason,
+        "audio_request_id": audio_request_id,
+        "workflow_run_id": workflow_run_id,
+        "schema_version": schema_version,
+        "synced_at": synced_at,
+        "stale": audio.get("stale") if isinstance(audio.get("stale"), bool) else None,
+        "superseded_by": _nonempty_audio_status_value(audio.get("superseded_by")),
+        "error": _nonempty_audio_status_value(stats.get("audio_briefing_error"))
+        or _nonempty_audio_status_value(audio.get("error")),
+    }
+
+
+def _looks_like_collections_db(collections_db: Any) -> bool:
+    """Return whether an injected dependency behaves like the Collections DB facade."""
+    return callable(getattr(collections_db, "list_output_artifacts", None))
 
 
 @router.get(
     "/runs/{run_id}/audio",
     summary="Get audio briefing artifact for a run",
-    response_model=None,
+    response_model=WatchlistRunAudioResponse,
 )
 async def get_run_audio(
     run_id: int = Path(..., ge=1),
@@ -4131,8 +5636,9 @@ async def get_run_audio(
         description="Admin-only: fetch run audio info for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db=Depends(get_watchlists_db_for_user),
-):
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
+) -> dict[str, Any]:
     """Return audio briefing artifact metadata for a watchlist run.
 
     Looks up the workflow run that was triggered by this watchlist run
@@ -4145,223 +5651,152 @@ async def get_run_audio(
         target_user_id=target_user_id,
     )
     try:
-        r = target_db.get_run(run_id)
+        run = target_db.get_run(run_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="run_not_found") from None
 
     # Check the run stats for audio_briefing_task_id
     stats: dict[str, Any] = {}
     try:
-        stats = json.loads(r.stats_json or "{}") if r.stats_json else {}
+        stats = json.loads(run.stats_json or "{}") if run.stats_json else {}
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         stats = {}
 
-    task_id = stats.get("audio_briefing_task_id")
+    audio_stats = stats.get("audio") if isinstance(stats.get("audio"), dict) else {}
+    task_id = (
+        stats.get("audio_briefing_task_id")
+        or stats.get("audio_task_id")
+        or audio_stats.get("task_id")
+    )
     if not task_id:
+        no_task_projection = _audio_no_task_projection_from_stats(stats)
+        if no_task_projection:
+            return _audio_projection_response(
+                no_task_projection,
+                run_id=run_id,
+                task_id=None,
+            )
         raise HTTPException(status_code=404, detail="no_audio_briefing_for_run")
 
-    # Try to find the workflow run and its artifacts
+    audio_request_id = stats.get("audio_request_id")
+    if not audio_request_id and isinstance(stats.get("audio"), dict):
+        audio_request_id = stats["audio"].get("audio_request_id")
+
+    target_collections_db = None
+    if _looks_like_collections_db(collections_db):
+        target_collections_db = _resolve_collections_db_for_target_user(
+            current_user=current_user,
+            current_db=collections_db,
+            target_user_id=resolved_user_id,
+        )
+
     try:
-        from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
+        from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+            build_audio_projection,
+            find_matching_workflow_run,
+            get_mirrored_audio_projection,
+            mirror_audio_projection,
+        )
 
-        user_dir = DatabasePaths.get_user_base_directory(int(resolved_user_id))
-        wf_db_path = os.path.join(str(user_dir), "workflows", "workflows.db")
-        if not os.path.exists(wf_db_path):
-            raise HTTPException(status_code=404, detail="no_workflow_db")
-
-        wf_db = WorkflowsDatabase(db_path=wf_db_path)
-        tenant_id = str(getattr(current_user, "tenant_id", "default"))
-        wf_user_id = str(resolved_user_id)
-        scan_page_size = 50
-        scan_max_pages = 20
-        matching_run = None
-
-        def _load_metadata(value: Any) -> dict[str, Any]:
-            if isinstance(value, dict):
-                return value
-            if isinstance(value, str):
-                try:
-                    parsed = json.loads(value)
-                except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-                    return {}
-                return parsed if isinstance(parsed, dict) else {}
-            return {}
-
-        def _run_metadata(run_obj: Any) -> dict[str, Any]:
-            if isinstance(run_obj, dict):
-                return _load_metadata(run_obj.get("metadata_json"))
-            return _load_metadata(getattr(run_obj, "metadata_json", None))
-
-        # Paginated scan to avoid false negatives when target run is beyond first page.
-        for page_idx in range(scan_max_pages):
-            offset = page_idx * scan_page_size
-            runs: list[Any] = []
-            try:
-                runs = wf_db.list_runs(
-                    tenant_id=tenant_id,
-                    user_id=wf_user_id,
-                    limit=scan_page_size,
-                    offset=offset,
-                )
-            except TypeError:
-                # Compatibility fallback for older list_runs signatures.
-                runs = wf_db.list_runs(limit=scan_page_size, offset=offset)
-
-            if not runs:
-                break
-
-            for wf_run in runs:
-                meta = _run_metadata(wf_run)
-                if str(meta.get("watchlist_run_id")) == str(run_id):
-                    matching_run = wf_run
-                    break
-
-            if matching_run:
-                break
-            if len(runs) < scan_page_size:
-                break
-
+        mirrored_projection = get_mirrored_audio_projection(run)
+        wf_db = await run_in_threadpool(_get_watchlists_workflow_db)
+        tenant_id = await _resolve_watchlist_workflow_tenant_id(
+            current_user=current_user,
+            resolved_user_id=int(resolved_user_id),
+        )
+        matching_run = await run_in_threadpool(
+            find_matching_workflow_run,
+            wf_db,
+            tenant_id=tenant_id,
+            user_id=str(resolved_user_id),
+            job_id=getattr(run, "job_id", None),
+            run_id=run_id,
+            audio_request_id=str(audio_request_id) if audio_request_id else None,
+        )
         if not matching_run:
-            return {
-                "run_id": run_id,
-                "task_id": task_id,
-                "status": "pending",
-                "audio_uri": None,
-                "download_url": None,
-            }
+            if mirrored_projection:
+                return _audio_projection_response(
+                    mirrored_projection,
+                    run_id=run_id,
+                    task_id=task_id,
+                )
+            return await _audio_scheduler_status_or_pending(run_id, task_id)
 
-        # Check for artifacts
-        matching_run_id = None
-        if isinstance(matching_run, dict):
-            matching_run_id = matching_run.get("run_id") or matching_run.get("id")
-        else:
-            matching_run_id = getattr(matching_run, "run_id", None) or getattr(matching_run, "id", None)
+        matching_run_id = _workflow_run_identifier(matching_run)
         if not matching_run_id:
-            return {
-                "run_id": run_id,
-                "task_id": task_id,
-                "status": "pending",
-                "audio_uri": None,
-                "download_url": None,
-            }
-
-        artifacts: list[Any] = []
-        used_legacy_artifacts_api = False
-        try:
-            artifacts_candidate = wf_db.list_artifacts(run_id=matching_run_id)
-            if isinstance(artifacts_candidate, list):
-                artifacts = artifacts_candidate
-                used_legacy_artifacts_api = True
-        except AttributeError:
-            used_legacy_artifacts_api = False
-        except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-            used_legacy_artifacts_api = False
-
-        if not used_legacy_artifacts_api:
-            artifacts = wf_db.list_artifacts_for_run(str(matching_run_id))
-        def _coerce_artifact_id_rank(value: Any) -> int:
-            if isinstance(value, int):
-                return value
-            if isinstance(value, str):
-                digits = "".join(ch for ch in value if ch.isdigit())
-                if digits:
-                    with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
-                        return int(digits)
-            return 0
-
-        def _coerce_created_at_rank(value: Any) -> float:
-            if value is None:
-                return 0.0
-            if isinstance(value, (int, float)):
-                return float(value)
-            if isinstance(value, str):
-                raw = value.strip()
-                if not raw:
-                    return 0.0
-                normalized = raw
-                if raw.endswith("Z"):
-                    normalized = raw[:-1] + "+00:00"
-                with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
-                    return datetime.fromisoformat(normalized).timestamp()
-                with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
-                    return float(raw)
-            return 0.0
-
-        audio_candidates: list[dict[str, Any]] = []
-        for idx, art in enumerate(artifacts or []):
-            if isinstance(art, dict):
-                art_meta = _load_metadata(art.get("metadata_json"))
-                art_type = art.get("type")
-                art_id = art.get("artifact_id") or art.get("id")
-                art_uri = art.get("uri")
-                size_bytes = art.get("size_bytes")
-                mime_type = art.get("mime_type")
-                created_at = art.get("created_at")
-            else:
-                art_meta = _load_metadata(getattr(art, "metadata_json", None))
-                art_type = getattr(art, "type", None)
-                art_id = getattr(art, "artifact_id", None) or getattr(art, "id", None)
-                art_uri = getattr(art, "uri", None)
-                size_bytes = getattr(art, "size_bytes", None)
-                mime_type = getattr(art, "mime_type", None)
-                created_at = getattr(art, "created_at", None)
-            if art_type == "tts_audio" or art_meta.get("multi_voice"):
-                final_hint = bool(
-                    art_meta.get("final_artifact")
-                    or art_meta.get("is_final")
-                    or art_meta.get("final")
-                    or art_meta.get("background_mixed")
-                    or art_meta.get("mixed")
+            if mirrored_projection:
+                return _audio_projection_response(
+                    mirrored_projection,
+                    run_id=run_id,
+                    task_id=task_id,
                 )
-                audio_candidates.append(
-                    {
-                        "artifact_id": art_id,
-                        "uri": art_uri,
-                        "size_bytes": size_bytes,
-                        "mime_type": mime_type or "audio/mpeg",
-                        "_rank": (
-                            1 if final_hint else 0,
-                            _coerce_created_at_rank(created_at),
-                            idx,
-                            _coerce_artifact_id_rank(art_id),
-                        ),
-                    }
-                )
+            return await _audio_scheduler_status_or_pending(run_id, task_id)
 
-        audio_artifact = max(audio_candidates, key=lambda candidate: candidate["_rank"]) if audio_candidates else None
+        artifacts = await run_in_threadpool(_list_workflow_audio_artifacts, wf_db, matching_run_id)
+        projection = build_audio_projection(
+            run_id=run_id,
+            task_id=task_id,
+            audio_request_id=str(audio_request_id) if audio_request_id else None,
+            workflow_run=matching_run,
+            artifacts=artifacts,
+        )
 
-        matching_run_status = matching_run.get("status") if isinstance(matching_run, dict) else getattr(matching_run, "status", "pending")
-        if audio_artifact:
-            return {
-                "run_id": run_id,
-                "task_id": task_id,
-                "status": matching_run_status,
-                "audio_uri": audio_artifact["uri"],
-                "artifact_id": audio_artifact["artifact_id"],
-                "download_url": f"/api/v1/workflows/artifacts/{audio_artifact['artifact_id']}/download",
-                "size_bytes": audio_artifact["size_bytes"],
-                "mime_type": audio_artifact["mime_type"],
-            }
+        response_status = projection.get("status") or "unknown"
+        queue_name = None
+        fallback_reason = projection.get("fallback_reason")
+        if not projection.get("final_artifact"):
+            scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
+            if scheduler_status:
+                response_status = scheduler_status.get("status") or response_status
+                queue_name = scheduler_status.get("queue_name")
+                fallback_reason = scheduler_status.get("fallback_reason") or fallback_reason
+                projection = {**projection, "status": response_status, "fallback_reason": fallback_reason}
 
-        return {
-            "run_id": run_id,
-            "task_id": task_id,
-            "status": matching_run_status,
-            "audio_uri": None,
-            "download_url": None,
-        }
+        if target_collections_db is not None:
+            mirror_ok = await run_in_threadpool(
+                mirror_audio_projection,
+                target_db,
+                target_collections_db,
+                run,
+                projection,
+                user_id=int(resolved_user_id),
+            )
+            if not mirror_ok:
+                logger.warning("Watchlists audio projection mirror failed for run={}", run_id)
+
+        return _audio_projection_response(
+            projection,
+            run_id=run_id,
+            task_id=task_id,
+            queue_name=queue_name,
+        )
 
     except HTTPException:
         raise
+    except asyncio.CancelledError:
+        raise
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"Failed to look up audio artifact for run {run_id}: {exc}")
+        from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import get_mirrored_audio_projection
+
+        mirrored_projection = get_mirrored_audio_projection(run)
+        if mirrored_projection:
+            return _audio_projection_response(
+                mirrored_projection,
+                run_id=run_id,
+                task_id=task_id,
+            )
+        logger.opt(exception=exc).warning(f"Failed to look up audio artifact for run {run_id}")
         return {
             "run_id": run_id,
             "task_id": task_id,
             "status": "unknown",
             "audio_uri": None,
             "download_url": None,
-            "error": str(exc),
+            "script_artifact": None,
+            "speaker_artifacts": [],
+            "final_artifact": None,
+            "fallback_reason": "artifact_lookup_failed",
+            "error": "artifact_lookup_failed",
         }
 
 
@@ -4370,7 +5805,19 @@ async def get_run_audio(
 # --------------------
 
 
-@router.get("/runs/{run_id}/tallies.csv", response_class=PlainTextResponse, summary="Export filter tallies for a run as CSV")
+@router.get(
+    "/runs/{run_id}/tallies.csv",
+    response_class=PlainTextResponse,
+    responses={
+        200: {
+            "description": "Watchlist run filter tallies exported as CSV.",
+            "content": {
+                "text/csv; charset=utf-8": {},
+            },
+        },
+    },
+    summary="Export filter tallies for a run as CSV",
+)
 async def export_run_tallies_csv(
     run_id: int = Path(..., ge=1),
     target_user_id: int | None = Query(
@@ -4379,7 +5826,7 @@ async def export_run_tallies_csv(
         description="Admin-only: export run tallies for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _enforce_runs_admin_if_configured(current_user)
     _, target_db = await _resolve_target_watchlists_context(
@@ -4405,7 +5852,11 @@ async def export_run_tallies_csv(
             except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
                 continue
     filename = f"watchlists_run_{run_id}_tallies_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.csv"
-    return PlainTextResponse("\n".join(out_lines), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f"attachment; filename={filename}"})
+    return PlainTextResponse(
+        "\n".join(out_lines),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 # --------------------
@@ -4416,6 +5867,7 @@ async def get_scraped_item_smart_counts(
     run_id: int | None = Query(None),
     job_id: int | None = Query(None),
     source_id: int | None = Query(None),
+    watchlist_id: int | None = Query(None, ge=1),
     status: str | None = Query(None),
     target_user_id: int | None = Query(
         None,
@@ -4425,29 +5877,45 @@ async def get_scraped_item_smart_counts(
     q: str | None = Query(None, description="Search by title/summary/content substring"),
     since: str | None = Query(None, description="ISO date filter (created_at >= since)"),
     until: str | None = Query(None, description="ISO date filter (created_at <= until)"),
+    has_alert: bool | None = Query(None, description="Filter counts by whether items have content alerts"),
+    alert_status: WatchlistContentAlertStatus | None = Query(
+        None, description="Filter counts by linked content alert status"
+    ),
+    alert_severity: WatchlistContentAlertSeverity | None = Query(
+        None, description="Filter counts by linked content alert severity"
+    ),
+    alert_rule_id: int | None = Query(None, ge=1, description="Filter counts by linked content alert rule ID"),
     queue_run_id: int | None = Query(None, description="Optional queued-count run filter"),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
         current_db=db,
         target_user_id=target_user_id,
     )
+    _ensure_watchlist_exists(target_db, watchlist_id)
     today_since = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    return ScrapedItemSmartCountsResponse(
-        **target_db.get_item_smart_counts(
+    try:
+        counts = target_db.get_item_smart_counts(
             run_id=run_id,
             job_id=job_id,
             source_id=source_id,
+            watchlist_id=watchlist_id,
             status=status,
             search=q,
             since=since,
             until=until,
+            has_alert=has_alert,
+            alert_status=alert_status,
+            alert_severity=alert_severity,
+            alert_rule_id=alert_rule_id,
             queue_run_id=queue_run_id,
             today_since=today_since,
         )
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ScrapedItemSmartCountsResponse(**counts)
 
 
 @router.get("/items", response_model=ScrapedItemsListResponse, summary="List scraped items across runs")
@@ -4455,9 +5923,20 @@ async def list_scraped_items(
     run_id: int | None = Query(None),
     job_id: int | None = Query(None),
     source_id: int | None = Query(None),
+    watchlist_id: int | None = Query(None, ge=1),
     status: str | None = Query(None),
     reviewed: bool | None = Query(None),
     queued_for_briefing: bool | None = Query(None),
+    sort: ScrapedItemSortMode | None = Query(None, description="Server-side item sort mode"),
+    has_alert: bool | None = Query(None, description="Filter items by whether they have content alerts"),
+    alert_status: WatchlistContentAlertStatus | None = Query(
+        None, description="Filter items by linked content alert status"
+    ),
+    alert_severity: WatchlistContentAlertSeverity | None = Query(
+        None, description="Filter items by linked content alert severity"
+    ),
+    alert_rule_id: int | None = Query(None, ge=1, description="Filter items by linked content alert rule ID"),
+    include_alert_summary: bool = Query(False, description="Include compact content-alert summary per item"),
     target_user_id: int | None = Query(
         None,
         ge=1,
@@ -4469,7 +5948,7 @@ async def list_scraped_items(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -4478,20 +5957,85 @@ async def list_scraped_items(
     )
     limit = size
     offset = (page - 1) * limit
-    rows, total = target_db.list_items(
-        run_id=run_id,
-        job_id=job_id,
-        source_id=source_id,
-        status=status,
-        reviewed=reviewed,
-        queued_for_briefing=queued_for_briefing,
-        search=q,
-        since=since,
-        until=until,
-        limit=limit,
-        offset=offset,
+    _ensure_watchlist_exists(target_db, watchlist_id)
+    try:
+        rows, total = target_db.list_items(
+            run_id=run_id,
+            job_id=job_id,
+            source_id=source_id,
+            watchlist_id=watchlist_id,
+            status=status,
+            reviewed=reviewed,
+            queued_for_briefing=queued_for_briefing,
+            search=q,
+            since=since,
+            until=until,
+            sort=sort,
+            has_alert=has_alert,
+            alert_status=alert_status,
+            alert_severity=alert_severity,
+            alert_rule_id=alert_rule_id,
+            include_alert_summary=include_alert_summary,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    items = [_row_to_scraped_item(r) for r in rows]
+    return ScrapedItemsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
     )
-    return ScrapedItemsListResponse(items=[_row_to_scraped_item(r) for r in rows], total=total)
+
+
+@router.post(
+    "/items/batch-update", response_model=ScrapedItemBatchUpdateResponse, summary="Batch update item triage flags"
+)
+async def batch_update_scraped_items(
+    payload: ScrapedItemBatchUpdateRequest = Body(...),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ensure_watchlist_exists(db, payload.watchlist_id)
+    scope = payload.scope.model_dump(exclude_none=True) if payload.scope is not None else None
+    try:
+        result = db.batch_update_items(
+            watchlist_id=payload.watchlist_id,
+            item_ids=payload.item_ids,
+            scope=scope,
+            reviewed=payload.reviewed,
+            status=payload.status,
+            queued_for_briefing=payload.queued_for_briefing,
+            limit=payload.limit,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    changed_patch: dict[str, Any] = {}
+    if payload.reviewed is not None:
+        changed_patch["reviewed"] = payload.reviewed
+    if payload.status is not None:
+        changed_patch["status"] = payload.status
+    if payload.queued_for_briefing is not None:
+        changed_patch["queued_for_briefing"] = payload.queued_for_briefing
+    if changed_patch and result.get("changed_ids"):
+        now = _utcnow_iso()
+        for row in db.get_items_by_ids(list(result.get("changed_ids", []))[:25]):
+            record_watchlist_item_updated(
+                user_id=current_user.id,
+                item=row,
+                patch=changed_patch,
+                event_timestamp=now,
+            )
+    return ScrapedItemBatchUpdateResponse(**result)
 
 
 @router.get("/items/{item_id}", response_model=ScrapedItem, summary="Get a scraped item")
@@ -4503,7 +6047,7 @@ async def get_scraped_item(
         description="Admin-only: fetch an item from another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -4522,7 +6066,7 @@ async def update_scraped_item(
     item_id: int = Path(..., ge=1),
     payload: ScrapedItemUpdateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         before = db.get_item(item_id)
@@ -4544,9 +6088,8 @@ async def update_scraped_item(
         changed_patch["reviewed"] = bool(getattr(row, "reviewed", 0))
     if payload.status is not None and getattr(before, "status", None) != getattr(row, "status", None):
         changed_patch["status"] = getattr(row, "status", None)
-    if (
-        payload.queued_for_briefing is not None
-        and bool(getattr(before, "queued_for_briefing", 0)) != bool(getattr(row, "queued_for_briefing", 0))
+    if payload.queued_for_briefing is not None and bool(getattr(before, "queued_for_briefing", 0)) != bool(
+        getattr(row, "queued_for_briefing", 0)
     ):
         changed_patch["queued_for_briefing"] = bool(getattr(row, "queued_for_briefing", 0))
 
@@ -4560,6 +6103,210 @@ async def update_scraped_item(
     return _row_to_scraped_item(row)
 
 
+@router.get(
+    "/{watchlist_id}/item-views", response_model=WatchlistItemSavedViewsList, summary="List saved item review views"
+)
+async def list_item_saved_views(
+    watchlist_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ensure_watchlist_exists(db, watchlist_id)
+    rows = db.list_item_saved_views(watchlist_id=watchlist_id)
+    return WatchlistItemSavedViewsList(items=[_row_to_item_saved_view(row) for row in rows])
+
+
+@router.post(
+    "/{watchlist_id}/item-views",
+    response_model=WatchlistItemSavedView,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a saved item review view",
+)
+async def create_item_saved_view(
+    payload: WatchlistItemSavedViewCreate,
+    watchlist_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ensure_watchlist_exists(db, watchlist_id)
+    try:
+        row = db.create_item_saved_view(
+            watchlist_id=watchlist_id,
+            name=payload.name,
+            filters=payload.filters,
+            sort=payload.sort,
+            is_default=payload.is_default,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _row_to_item_saved_view(row)
+
+
+@router.patch(
+    "/{watchlist_id}/item-views/{view_id}",
+    response_model=WatchlistItemSavedView,
+    summary="Update a saved item review view",
+)
+async def update_item_saved_view(
+    payload: WatchlistItemSavedViewUpdate,
+    watchlist_id: int = Path(..., ge=1),
+    view_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ensure_watchlist_exists(db, watchlist_id)
+    fields = payload.model_dump(exclude_unset=True)
+    try:
+        row = db.update_item_saved_view(
+            view_id=view_id,
+            watchlist_id=watchlist_id,
+            fields=fields,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="item_saved_view_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _row_to_item_saved_view(row)
+
+
+@router.delete(
+    "/{watchlist_id}/item-views/{view_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a saved item review view",
+)
+async def delete_item_saved_view(
+    watchlist_id: int = Path(..., ge=1),
+    view_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ensure_watchlist_exists(db, watchlist_id)
+    deleted = db.delete_item_saved_view(view_id=view_id, watchlist_id=watchlist_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="item_saved_view_not_found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _output_preset_error_status(exc: ValueError) -> int:
+    detail = str(exc)
+    if detail == "output_preset_name_exists":
+        return status.HTTP_409_CONFLICT
+    return status.HTTP_400_BAD_REQUEST
+
+
+@router.get(
+    "/job-output-presets",
+    response_model=WatchlistOutputPresetsList,
+    summary="List saved monitor output presets",
+)
+async def list_output_presets(
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    rows = db.list_output_presets()
+    return WatchlistOutputPresetsList(items=[_row_to_output_preset(row) for row in rows])
+
+
+@router.post(
+    "/job-output-presets",
+    response_model=WatchlistOutputPreset,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a saved monitor output preset",
+)
+async def create_output_preset(
+    payload: WatchlistOutputPresetCreate,
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    try:
+        row = db.create_output_preset(
+            name=payload.name,
+            description=payload.description,
+            output_prefs=payload.output_prefs,
+            is_default=payload.is_default,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=_output_preset_error_status(exc), detail=str(exc)) from exc
+    return _row_to_output_preset(row)
+
+
+@router.get(
+    "/job-output-presets/{preset_id}",
+    response_model=WatchlistOutputPreset,
+    summary="Get a saved monitor output preset",
+)
+async def get_output_preset(
+    preset_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    try:
+        row = db.get_output_preset(preset_id=preset_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="output_preset_not_found") from None
+    return _row_to_output_preset(row)
+
+
+@router.patch(
+    "/job-output-presets/{preset_id}",
+    response_model=WatchlistOutputPreset,
+    summary="Update a saved monitor output preset",
+)
+async def update_output_preset(
+    payload: WatchlistOutputPresetUpdate,
+    preset_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    fields = payload.model_dump(exclude_unset=True)
+    try:
+        row = db.update_output_preset(preset_id=preset_id, fields=fields)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="output_preset_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=_output_preset_error_status(exc), detail=str(exc)) from exc
+    return _row_to_output_preset(row)
+
+
+@router.post(
+    "/job-output-presets/{preset_id}/apply",
+    response_model=WatchlistOutputPresetApplyResponse,
+    summary="Apply a saved monitor output preset to output preferences",
+)
+async def apply_output_preset(
+    payload: WatchlistOutputPresetApplyRequest,
+    preset_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    try:
+        output_prefs = db.apply_output_preset(
+            preset_id=preset_id,
+            base_output_prefs=payload.base_output_prefs,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="output_preset_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=_output_preset_error_status(exc), detail=str(exc)) from exc
+    return WatchlistOutputPresetApplyResponse(output_prefs=output_prefs)
+
+
+@router.delete(
+    "/job-output-presets/{preset_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a saved monitor output preset",
+)
+async def delete_output_preset(
+    preset_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    deleted = db.delete_output_preset(preset_id=preset_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="output_preset_not_found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 # --------------------
 # Outputs
 # --------------------
@@ -4567,9 +6314,9 @@ async def update_scraped_item(
 async def create_output(
     payload: WatchlistOutputCreateRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
-    collections_db = Depends(get_collections_db_for_user),
-    media_db = Depends(get_media_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
+    media_db=Depends(get_media_db_for_user),
 ):
     collections_db.purge_expired_outputs()
     try:
@@ -4580,12 +6327,26 @@ async def create_output(
         job = db.get_job(run.job_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="job_not_found") from None
+    job_id = int(run.job_id)
+    watchlist_id = getattr(job, "watchlist_id", None)
+    if watchlist_id is None:
+        default_watchlist = db.ensure_default_watchlist()
+        db.backfill_default_watchlist_scope(int(default_watchlist.id))
+        try:
+            job = db.get_job(job_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="job_not_found") from None
+        watchlist_id = getattr(job, "watchlist_id", None)
+    watchlist_row = None
+    if watchlist_id is not None:
+        try:
+            watchlist_row = db.get_watchlist(int(watchlist_id))
+        except KeyError:
+            raise HTTPException(status_code=404, detail="watchlist_not_found") from None
 
     job_prefs: dict[str, Any] = {}
     try:
-        job_prefs = (
-            json.loads(job.output_prefs_json or "{}") if getattr(job, "output_prefs_json", None) else {}
-        )
+        job_prefs = json.loads(job.output_prefs_json or "{}") if getattr(job, "output_prefs_json", None) else {}
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         job_prefs = {}
     retention_spec = job_prefs.get("retention") or {}
@@ -4599,7 +6360,6 @@ async def create_output(
     elif isinstance(job_prefs.get("audio_brief"), dict):
         tts_brief_defaults = job_prefs.get("audio_brief") or {}
 
-    job_id = run.job_id
     items: list[Any]
     if payload.item_ids:
         items = db.get_items_by_ids(payload.item_ids)
@@ -4614,6 +6374,43 @@ async def create_output(
         raise HTTPException(status_code=400, detail="no_items_available")
 
     item_models = [_row_to_scraped_item(it) for it in items]
+    effective_report_preset = _resolve_report_preset(payload.report_preset, watchlist_row)
+    included_item_ids = [int(getattr(item, "id")) for item in items]
+    included_item_id_set = set(included_item_ids)
+    all_run_items, _ = db.list_items(run_id=payload.run_id, limit=1000, offset=0)
+    excluded_candidates = [
+        item
+        for item in all_run_items
+        if int(getattr(item, "id", 0) or 0) not in included_item_id_set
+        and (payload.item_ids or str(getattr(item, "status", "")) != "ingested")
+    ]
+    excluded_total_count = len(excluded_candidates)
+    excluded_limit = max(0, REPORT_EXCLUDED_ITEMS_MAX)
+    excluded_items = excluded_candidates[:excluded_limit] if excluded_limit else []
+    excluded_items_truncated = excluded_total_count > len(excluded_items)
+    source_rows = _source_rows_for_report(db, [*items, *excluded_items])
+    alerts_by_item: dict[int, list[Any]] = {}
+    if watchlist_id is not None:
+        alerts_by_item = db.list_content_alerts_for_items(
+            int(watchlist_id),
+            included_item_ids,
+            limit=max(1000, len(included_item_ids) * 10),
+        )
+    report_snapshot = build_report_evidence_snapshot(
+        watchlist_id=int(watchlist_id) if watchlist_id is not None else None,
+        job=job,
+        run=run,
+        included_items=items,
+        excluded_items=excluded_items if payload.include_excluded_items else [],
+        sources=source_rows,
+        alerts=alerts_by_item,
+        preset=effective_report_preset,
+        generated_at=_utcnow_iso(),
+    )
+    report_snapshot["excluded_total_count"] = excluded_total_count if payload.include_excluded_items else 0
+    report_snapshot["excluded_items_truncated"] = bool(excluded_items_truncated and payload.include_excluded_items)
+    if not payload.allow_weak_evidence and report_snapshot.get("readiness", {}).get("state") == "warning":
+        raise HTTPException(status_code=422, detail="report_readiness_warning")
     tts_generate_explicit = "generate_tts" in payload.model_fields_set
     tts_brief_enabled = bool(tts_brief_defaults.get("enabled", False))
     tts_brief_max_items = _safe_int(tts_brief_defaults.get("max_items"), DEFAULT_TTS_BRIEF_MAX_ITEMS)
@@ -4766,6 +6563,10 @@ async def create_output(
     if effective_voice_map is None and isinstance(job_prefs.get("voice_map"), dict):
         effective_voice_map = job_prefs.get("voice_map")
 
+    effective_audio_cast = payload.audio_cast.model_dump(exclude_none=True) if payload.audio_cast else None
+    if effective_audio_cast is None and isinstance(job_prefs.get("audio_cast"), dict):
+        effective_audio_cast = job_prefs.get("audio_cast")
+
     version = _next_output_version_for_run(collections_db, payload.run_id)
     job_name = getattr(job, "name", None) or f"Job-{job.id}"
     default_title = f"{job_name}-Output-{version}"
@@ -4875,7 +6676,9 @@ async def create_output(
             if hasattr(itm, "model_dump"):
                 items_as_dicts.append(itm.model_dump())
             else:
-                items_as_dicts.append({"id": itm.id, "title": itm.title, "tags": itm.tags, "source_id": itm.source_id, "url": itm.url})
+                items_as_dicts.append(
+                    {"id": itm.id, "title": itm.title, "tags": itm.tags, "source_id": itm.source_id, "url": itm.url}
+                )
         output_groups = _group_items(
             items_as_dicts,
             group_by=payload.grouping.group_by,
@@ -4887,6 +6690,16 @@ async def create_output(
         )
 
     context = _build_output_context(title, job, run, item_models, groups=output_groups)
+    context["report"] = {
+        "preset": effective_report_preset,
+        "readiness": report_snapshot.get("readiness", {}),
+        "source_summary": report_snapshot.get("source_summary", {}),
+        "included_items": report_snapshot.get("included_items", []) if payload.include_evidence_table else [],
+        "excluded_items": report_snapshot.get("excluded_items", []) if payload.include_excluded_items else [],
+        "included_count": report_snapshot.get("included_count", 0),
+        "excluded_count": report_snapshot.get("excluded_count", 0),
+        "alert_count": report_snapshot.get("alert_count", 0),
+    }
 
     # Inject LLM summaries into context
     if llm_summaries:
@@ -4929,6 +6742,9 @@ async def create_output(
             "item_ids": [itm.id for itm in item_models],
             "format": output_format,
             "type": payload.type,
+            "job_id": job_id,
+            "run_id": int(payload.run_id),
+            "watchlist_id": int(watchlist_id) if watchlist_id is not None else None,
         }
     )
     if output_template:
@@ -4970,13 +6786,9 @@ async def create_output(
         if payload.briefing_summary:
             metadata["_enrichment_summary_config"] = payload.briefing_summary.model_dump()
 
-    delivery_override = (
-        payload.deliveries.model_dump(exclude_none=True) if payload.deliveries else {}
-    )
+    delivery_override = payload.deliveries.model_dump(exclude_none=True) if payload.deliveries else {}
     delivery_plan = (
-        _deep_merge_dict(delivery_defaults, delivery_override)
-        if (delivery_defaults or delivery_override)
-        else {}
+        _deep_merge_dict(delivery_defaults, delivery_override) if (delivery_defaults or delivery_override) else {}
     )
     if delivery_plan:
         metadata["delivery_plan"] = delivery_plan
@@ -5009,6 +6821,7 @@ async def create_output(
     base_metadata = dict(metadata)
     tags = sorted({t for itm in item_models for t in (itm.tags or []) if isinstance(t, str)})
     created_outputs: list[tuple[int, Any]] = []
+    created_snapshot_paths: list[Any] = []
     template_id = output_template.id if output_template else None
 
     def _variant_metadata(
@@ -5062,7 +6875,7 @@ async def create_output(
             )
         else:
             try:
-                path.write_text(output_content or "", encoding="utf-8")
+                await run_in_threadpool(path.write_text, output_content or "", encoding="utf-8")
             except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.error(f"watchlists outputs: failed to write output file: {exc}")
                 raise HTTPException(status_code=500, detail="write_failed") from exc
@@ -5107,6 +6920,12 @@ async def create_output(
         return row
 
     def _cleanup_outputs() -> None:
+        for path in created_snapshot_paths:
+            try:
+                if path and hasattr(path, "exists") and path.exists():
+                    path.unlink()
+            except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"watchlists: cleanup failed to remove report snapshot {path}: {exc}")
         for oid, path in created_outputs:
             try:
                 if path and hasattr(path, "exists") and path.exists():
@@ -5129,6 +6948,22 @@ async def create_output(
             tpl=output_template,
             variant_of=None,
             template_id_override=template_id,
+        )
+        report_snapshot["output_id"] = int(row.id)
+        report_snapshot_filename = _build_report_snapshot_filename(title, ts)
+        report_snapshot_path = _resolve_output_path_for_user(user_id, report_snapshot_filename)
+        await _write_report_snapshot_for_user(user_id, report_snapshot_filename, report_snapshot)
+        created_snapshot_paths.append(report_snapshot_path)
+        metadata.update(
+            _report_metadata_from_snapshot(
+                snapshot=report_snapshot,
+                snapshot_path=report_snapshot_filename,
+                preset=effective_report_preset,
+            )
+        )
+        row = collections_db.update_output_artifact_metadata(
+            row.id,
+            metadata_json=json.dumps({k: v for k, v in metadata.items() if v is not None}),
         )
 
         if payload.generate_mece and payload.type != "mece_markdown":
@@ -5212,7 +7047,7 @@ async def create_output(
         _cleanup_outputs()
         raise HTTPException(status_code=500, detail="output_create_failed") from exc
 
-    output = _row_to_output(row, user_id=user_id, content_override=content)
+    output = await _row_to_output(row, user_id=user_id, content_override=content)
 
     notifications = NotificationsService(
         user_id=resolve_user_id_for_request(
@@ -5228,13 +7063,13 @@ async def create_output(
     metadata_update_needed = False
 
     if effective_generate_audio:
-        metadata["audio_briefing_requested"] = True
         try:
             from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+                apply_audio_briefing_result_metadata,
                 trigger_audio_briefing,
             )
 
-            audio_task_id = await trigger_audio_briefing(
+            audio_result = await trigger_audio_briefing(
                 user_id=user_id,
                 job_id=job_id,
                 run_id=payload.run_id,
@@ -5256,24 +7091,37 @@ async def create_output(
                     "persona_provider": effective_persona_provider,
                     "persona_model": effective_persona_model,
                     "voice_map": effective_voice_map,
+                    "audio_cast": effective_audio_cast,
                 },
                 db=db,
             )
-            if audio_task_id:
-                metadata["audio_briefing_task_id"] = audio_task_id
-                metadata["audio_briefing_status"] = "pending"
-                with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
-                    run_stats = json.loads(run.stats_json or "{}") if getattr(run, "stats_json", None) else {}
-                    if not isinstance(run_stats, dict):
-                        run_stats = {}
-                    run_stats["audio_briefing_task_id"] = audio_task_id
-                    db.update_run(run.id, stats_json=json.dumps(run_stats))
-            else:
-                metadata["audio_briefing_status"] = "skipped"
+            apply_audio_briefing_result_metadata(metadata, audio_result, requested=True)
+            with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
+                run_stats = json.loads(run.stats_json or "{}") if getattr(run, "stats_json", None) else {}
+                if not isinstance(run_stats, dict):
+                    run_stats = {}
+                apply_audio_briefing_result_metadata(run_stats, audio_result)
+                await run_in_threadpool(db.update_run, run.id, stats_json=json.dumps(run_stats))
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Watchlists output audio briefing enqueue failed for run {payload.run_id}: {exc}")
+            logger.warning(
+                "Watchlists output audio briefing enqueue failed for run {} (error_type={})",
+                payload.run_id,
+                type(exc).__name__,
+            )
+            metadata["audio_briefing_requested"] = True
             metadata["audio_briefing_status"] = "enqueue_failed"
-            metadata["audio_briefing_error"] = str(exc)
+            metadata.pop("audio_briefing_task_id", None)
+            metadata.pop("audio_briefing_reason", None)
+            metadata["audio_briefing_error"] = type(exc).__name__
+            with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
+                run_stats = json.loads(run.stats_json or "{}") if getattr(run, "stats_json", None) else {}
+                if not isinstance(run_stats, dict):
+                    run_stats = {}
+                run_stats["audio_briefing_status"] = "enqueue_failed"
+                run_stats.pop("audio_briefing_task_id", None)
+                run_stats.pop("audio_briefing_reason", None)
+                run_stats["audio_briefing_error"] = type(exc).__name__
+                await run_in_threadpool(db.update_run, run.id, stats_json=json.dumps(run_stats))
         metadata_update_needed = True
 
     if isinstance(delivery_plan, dict):
@@ -5303,13 +7151,7 @@ async def create_output(
                 attachments=attachments,
                 fallback_to_user_email=True,
             )
-            delivery_results.append(
-                {
-                    "channel": email_result.channel,
-                    "status": email_result.status,
-                    **email_result.details,
-                }
-            )
+            delivery_results.append(_notification_delivery_summary(email_result))
             metadata_update_needed = True
 
         chat_cfg = delivery_plan.get("chatbook") if isinstance(delivery_plan.get("chatbook"), dict) else None
@@ -5332,13 +7174,7 @@ async def create_output(
                 model=chat_cfg.get("model", "watchlists"),
                 conversation_id=chat_cfg.get("conversation_id"),
             )
-            delivery_results.append(
-                {
-                    "channel": chat_result.channel,
-                    "status": chat_result.status,
-                    **chat_result.details,
-                }
-            )
+            delivery_results.append(_notification_delivery_summary(chat_result))
             doc_id = chat_result.details.get("document_id")
             if chat_result.status == "stored" and doc_id is not None:
                 chatbook_path_update = f"generated_document:{doc_id}"
@@ -5362,7 +7198,7 @@ async def create_output(
             metadata_json=json.dumps(metadata_for_update) if metadata_for_update is not None else None,
             chatbook_path=chatbook_path_update,
         )
-        output = _row_to_output(updated_row, user_id=user_id)
+        output = await _row_to_output(updated_row, user_id=user_id)
 
     return output
 
@@ -5371,17 +7207,24 @@ async def create_output(
 async def list_outputs(
     run_id: int | None = Query(None),
     job_id: int | None = Query(None),
+    watchlist_id: int | None = Query(None, ge=1),
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    collections_db = Depends(get_collections_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ):
     limit = size
     offset = (page - 1) * limit
     collections_db.purge_expired_outputs()
+    scoped_job_ids: list[int] | None = None
+    if watchlist_id is not None:
+        _ensure_watchlist_exists(db, watchlist_id)
+        scoped_job_ids = _list_watchlist_job_ids(db, watchlist_id)
     rows, total = collections_db.list_output_artifacts(
         run_id=run_id,
         job_id=job_id,
+        job_ids=scoped_job_ids,
         limit=limit,
         offset=offset,
         metadata_origin="watchlists",
@@ -5397,15 +7240,24 @@ async def list_outputs(
         metadata = _parse_output_metadata(row)
         if metadata.get("origin") != "watchlists":
             continue
-        items.append(_row_to_output(row, user_id=user_id))
-    return WatchlistOutputsListResponse(items=items, total=total)
+        items.append(await _row_to_output(row, user_id=user_id))
+    return WatchlistOutputsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.get("/outputs/{output_id}", response_model=WatchlistOutput, summary="Get output metadata")
 async def get_output(
     output_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    collections_db = Depends(get_collections_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ):
     collections_db.purge_expired_outputs()
     try:
@@ -5421,18 +7273,32 @@ async def get_output(
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    output = _row_to_output(row, user_id=user_id)
+    output = await _row_to_output(row, user_id=user_id)
     if output.expired:
         collections_db.purge_expired_outputs()
         raise HTTPException(status_code=404, detail="output_not_found")
     return output
 
 
-@router.get("/outputs/{output_id}/download", summary="Download rendered output")
+@router.get(
+    "/outputs/{output_id}/download",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Rendered watchlist output download.",
+            "content": {
+                "audio/mpeg": {},
+                "text/html": {},
+                "text/markdown": {},
+            },
+        },
+    },
+    summary="Download rendered output",
+)
 async def download_output(
     output_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    collections_db = Depends(get_collections_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ):
     collections_db.purge_expired_outputs()
     try:
@@ -5448,7 +7314,7 @@ async def download_output(
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    output = _row_to_output(row, user_id=user_id)
+    output = await _row_to_output(row, user_id=user_id)
     if output.expired:
         collections_db.purge_expired_outputs()
         raise HTTPException(status_code=404, detail="output_not_found")
@@ -5467,7 +7333,7 @@ async def download_output(
         headers = {"Content-Disposition": f'attachment; filename="{filename}.mp3"'}
         return FileResponse(path=output_path, media_type="audio/mpeg", headers=headers)
     try:
-        content = output_path.read_text(encoding="utf-8")
+        content = await run_in_threadpool(output_path.read_text, encoding="utf-8")
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         raise HTTPException(status_code=404, detail="output_file_missing") from exc
     if fmt == "html":
@@ -5475,6 +7341,105 @@ async def download_output(
         return HTMLResponse(content=content, headers=headers)
     headers = {"Content-Disposition": f'attachment; filename="{filename}.md"'}
     return PlainTextResponse(content=content, media_type="text/markdown", headers=headers)
+
+
+def _get_watchlist_output_row_or_404(collections_db: Any, output_id: int) -> tuple[Any, dict[str, Any]]:
+    try:
+        row = collections_db.get_output_artifact(output_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="output_not_found") from exc
+    metadata = _parse_output_metadata(row)
+    if metadata.get("origin") != "watchlists":
+        raise HTTPException(status_code=404, detail="output_not_found")
+    return row, metadata
+
+
+async def _load_output_report_evidence_payload(
+    *,
+    user_id: int,
+    output_id: int,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    snapshot_path = metadata.get("report_snapshot_path")
+    if not snapshot_path:
+        return {
+            "output_id": output_id,
+            "immutable_snapshot": False,
+            "snapshot": None,
+            "readiness": build_legacy_live_only_readiness(),
+        }
+    try:
+        snapshot = await _load_report_snapshot_for_user(user_id, str(snapshot_path))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="report_snapshot_missing") from exc
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(f"watchlists report snapshot load failed for output {output_id}: {exc}")
+        raise HTTPException(status_code=404, detail="report_snapshot_missing") from exc
+    snapshot["output_id"] = int(snapshot.get("output_id") or output_id)
+    readiness = snapshot.get("readiness")
+    if not isinstance(readiness, dict):
+        readiness = metadata.get("report_readiness") if isinstance(metadata.get("report_readiness"), dict) else None
+    if not isinstance(readiness, dict):
+        readiness = build_legacy_live_only_readiness()
+    return {
+        "output_id": output_id,
+        "immutable_snapshot": True,
+        "snapshot": snapshot,
+        "readiness": readiness,
+    }
+
+
+@router.get(
+    "/outputs/{output_id}/evidence",
+    response_model=WatchlistOutputEvidenceResponse,
+    summary="Get immutable report evidence for a Watchlists output",
+    dependencies=[Depends(rbac_rate_limit("watchlists.outputs"))],
+)
+async def get_output_evidence(
+    output_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> dict[str, Any]:
+    collections_db.purge_expired_outputs()
+    row, metadata = _get_watchlist_output_row_or_404(collections_db, output_id)
+    output = await _row_to_output(row)
+    if output.expired:
+        collections_db.purge_expired_outputs()
+        raise HTTPException(status_code=404, detail="output_not_found")
+    user_id = resolve_user_id_for_request(
+        current_user,
+        as_int=True,
+        error_status=500,
+        invalid_detail="invalid user_id",
+    )
+    return await _load_output_report_evidence_payload(user_id=user_id, output_id=output_id, metadata=metadata)
+
+
+@router.get(
+    "/outputs/{output_id}/readiness",
+    response_model=WatchlistReportReadiness,
+    summary="Get report readiness for a Watchlists output",
+    dependencies=[Depends(rbac_rate_limit("watchlists.outputs"))],
+)
+async def get_output_readiness(
+    output_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> dict[str, Any]:
+    collections_db.purge_expired_outputs()
+    row, metadata = _get_watchlist_output_row_or_404(collections_db, output_id)
+    output = await _row_to_output(row)
+    if output.expired:
+        collections_db.purge_expired_outputs()
+        raise HTTPException(status_code=404, detail="output_not_found")
+    user_id = resolve_user_id_for_request(
+        current_user,
+        as_int=True,
+        error_status=500,
+        invalid_detail="invalid user_id",
+    )
+    payload = await _load_output_report_evidence_payload(user_id=user_id, output_id=output_id, metadata=metadata)
+    return payload["readiness"]
 
 
 # --------------------
@@ -5523,18 +7488,22 @@ async def validate_template(
         normalized = _normalize_template_syntax(payload.content)
         env.parse(normalized)
     except TemplateSyntaxError as exc:
-        errors.append({
-            "line": exc.lineno,
-            "column": None,
-            "message": str(exc.message) if hasattr(exc, "message") else str(exc),
-        })
+        errors.append(
+            {
+                "line": exc.lineno,
+                "column": None,
+                "message": str(exc.message) if hasattr(exc, "message") else str(exc),
+            }
+        )
     except Exception as exc:
         logger.warning(f"Template validation unexpected error: {exc}")
-        errors.append({
-            "line": None,
-            "column": None,
-            "message": "Template validation failed due to an internal error",
-        })
+        errors.append(
+            {
+                "line": None,
+                "column": None,
+                "message": "Template validation failed due to an internal error",
+            }
+        )
 
     return TemplateValidationResult(
         valid=len(errors) == 0,
@@ -5752,8 +7721,7 @@ async def compose_template_flow_check(
     )
     if len(diff) > TEMPLATE_COMPOSER_FLOW_MAX_DIFF_CHARS:
         diff = (
-            f"{diff[:TEMPLATE_COMPOSER_FLOW_MAX_DIFF_CHARS].rstrip()}\n"
-            "... [flow-check diff truncated due to size]"
+            f"{diff[:TEMPLATE_COMPOSER_FLOW_MAX_DIFF_CHARS].rstrip()}\n" "... [flow-check diff truncated due to size]"
         )
         issues.append(
             TemplateComposerFlowIssue(
@@ -5887,3 +7855,290 @@ async def delete_template(
     except template_store.TemplateNotFoundError:
         raise HTTPException(status_code=404, detail="template_not_found") from None
     return {"deleted": True}
+
+
+@router.get(
+    "/{watchlist_id}/content-alert-rules",
+    response_model=WatchlistContentAlertRuleList,
+    summary="List content alert rules for a Watchlist",
+)
+async def list_content_alert_rules(
+    watchlist_id: int = Path(..., ge=1),
+    enabled: bool | None = Query(None),
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        limit = size
+        offset = (page - 1) * limit
+        rows, total = db.list_content_alert_rules(
+            watchlist_id,
+            enabled=enabled,
+            limit=limit,
+            offset=offset,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return WatchlistContentAlertRuleList(
+        items=[_content_alert_rule_response_from_row(row) for row in rows],
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(rows),
+        ),
+    )
+
+
+@router.post(
+    "/{watchlist_id}/content-alert-rules",
+    response_model=WatchlistContentAlertRule,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a content alert rule for a Watchlist",
+)
+async def create_content_alert_rule(
+    watchlist_id: int = Path(..., ge=1),
+    payload: WatchlistContentAlertRuleCreate = Body(...),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.create_content_alert_rule(
+            watchlist_id=watchlist_id,
+            name=payload.name,
+            rule_kind=payload.rule_kind,
+            match_mode=payload.match_mode,
+            pattern=payload.pattern,
+            severity=payload.severity,
+            enabled=payload.enabled,
+            classification=payload.classification,
+            descriptor=payload.descriptor,
+            entity_type=payload.entity_type,
+            source_constraints=payload.source_constraints,
+            metadata=payload.metadata,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _content_alert_rule_response_from_row(row)
+
+
+@router.patch(
+    "/{watchlist_id}/content-alert-rules/{rule_id}",
+    response_model=WatchlistContentAlertRule,
+    summary="Update a Watchlist content alert rule",
+)
+async def update_content_alert_rule(
+    watchlist_id: int = Path(..., ge=1),
+    rule_id: int = Path(..., ge=1),
+    payload: WatchlistContentAlertRuleUpdate = Body(...),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.update_content_alert_rule(
+            rule_id,
+            watchlist_id=watchlist_id,
+            fields=payload.model_dump(exclude_unset=True),
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="content_alert_rule_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _content_alert_rule_response_from_row(row)
+
+
+@router.delete(
+    "/{watchlist_id}/content-alert-rules/{rule_id}",
+    summary="Delete a Watchlist content alert rule",
+)
+async def delete_content_alert_rule(
+    watchlist_id: int = Path(..., ge=1),
+    rule_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        db.get_watchlist(watchlist_id)
+        deleted = db.delete_content_alert_rule(rule_id, watchlist_id=watchlist_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    if not deleted:
+        raise HTTPException(status_code=404, detail="content_alert_rule_not_found")
+    return {"deleted": True}
+
+
+@router.get(
+    "/{watchlist_id}/alerts",
+    response_model=WatchlistContentAlertList,
+    summary="List content alerts for a Watchlist",
+)
+async def list_content_alerts(
+    watchlist_id: int = Path(..., ge=1),
+    status_filter: str | None = Query(None, alias="status"),
+    severity: str | None = Query(None),
+    rule_id: int | None = Query(None, ge=1),
+    source_id: int | None = Query(None, ge=1),
+    q: str | None = Query(
+        None,
+        min_length=1,
+        max_length=200,
+        description="Search alert title, snippet, matched text, or evidence",
+    ),
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        limit = size
+        offset = (page - 1) * limit
+        rows, total = db.list_content_alerts(
+            watchlist_id,
+            status=status_filter,
+            severity=severity,
+            rule_id=rule_id,
+            source_id=source_id,
+            q=q,
+            limit=limit,
+            offset=offset,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return WatchlistContentAlertList(
+        items=[_content_alert_response_from_row(row) for row in rows],
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(rows),
+        ),
+    )
+
+
+@router.get(
+    "/{watchlist_id}/alerts/{alert_id}",
+    response_model=WatchlistContentAlert,
+    summary="Get a Watchlist content alert",
+)
+async def get_content_alert(
+    watchlist_id: int = Path(..., ge=1),
+    alert_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.get_content_alert(alert_id, watchlist_id=watchlist_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="content_alert_not_found") from None
+    return _content_alert_response_from_row(row)
+
+
+@router.patch(
+    "/{watchlist_id}/alerts/{alert_id}",
+    response_model=WatchlistContentAlert,
+    summary="Update a Watchlist content alert review state",
+)
+async def update_content_alert(
+    watchlist_id: int = Path(..., ge=1),
+    alert_id: int = Path(..., ge=1),
+    payload: WatchlistContentAlertUpdate = Body(...),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.update_content_alert(
+            alert_id,
+            watchlist_id=watchlist_id,
+            fields=payload.model_dump(exclude_unset=True),
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="content_alert_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _content_alert_response_from_row(row)
+
+
+@router.get("/{watchlist_id}", response_model=WatchlistContainer, summary="Get Watchlist")
+async def get_watchlist(
+    watchlist_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.get_watchlist(watchlist_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    return _watchlist_response_from_row(row)
+
+
+@router.patch("/{watchlist_id}", response_model=WatchlistContainer, summary="Update Watchlist")
+async def update_watchlist(
+    watchlist_id: int = Path(..., ge=1),
+    payload: WatchlistUpdateRequest = Body(...),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.update_watchlist(watchlist_id, payload.model_dump(exclude_unset=True))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _watchlist_response_from_row(row)
+
+
+@router.delete("/{watchlist_id}", response_model=WatchlistDeleteResponse, summary="Delete Watchlist")
+async def delete_watchlist(
+    watchlist_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    ok, restore_expires_at = db.delete_watchlist(
+        watchlist_id,
+        restore_window_seconds=WATCHLISTS_DELETE_RESTORE_WINDOW_SECONDS,
+    )
+    if not ok or not restore_expires_at:
+        raise HTTPException(status_code=404, detail="watchlist_not_found")
+    return WatchlistDeleteResponse(
+        success=True,
+        watchlist_id=int(watchlist_id),
+        restore_window_seconds=WATCHLISTS_DELETE_RESTORE_WINDOW_SECONDS,
+        restore_expires_at=restore_expires_at,
+    )
+
+
+@router.post("/{watchlist_id}/restore", response_model=WatchlistContainer, summary="Restore deleted Watchlist")
+async def restore_watchlist(
+    watchlist_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.restore_watchlist(watchlist_id)
+    except KeyError as exc:
+        code = str(exc.args[0]) if exc.args else "watchlist_not_found"
+        if code == "watchlist_restore_expired":
+            raise HTTPException(status_code=410, detail=code) from None
+        raise HTTPException(status_code=404, detail=code) from None
+    return _watchlist_response_from_row(row)

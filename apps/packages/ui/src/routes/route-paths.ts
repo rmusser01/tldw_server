@@ -4,9 +4,14 @@ import {
 } from "@/utils/settings-return"
 
 export const CHAT_PATH = "/chat"
+export const CHAT_WORKSPACE_PATH = "/chat-workspace"
 export const RESEARCH_PATH = "/research"
-export const WORKSPACE_PLAYGROUND_PATH = "/workspace-playground"
+export const PROTOTYPE_WORKSPACES_PATH = "/prototype-workspaces"
+export const RESEARCH_WORKSPACE_PATH = "/research-workspace"
 export const DOCUMENT_WORKSPACE_PATH = "/document-workspace"
+export const MODERATION_REVIEW_PATH = "/moderation"
+export const MODERATION_RULES_PATH = "/moderation/rules"
+export const MODERATION_PLAYGROUND_LEGACY_PATH = "/moderation-playground"
 export const PRESENTATION_STUDIO_PATH = "/presentation-studio"
 export const PRESENTATION_STUDIO_NEW_PATH = "/presentation-studio/new"
 export const PRESENTATION_STUDIO_DETAIL_PATH = "/presentation-studio/:projectId"
@@ -16,10 +21,20 @@ export const SOURCES_PATH = "/sources"
 export const SOURCES_NEW_PATH = "/sources/new"
 export const SOURCES_DETAIL_PATH = "/sources/:sourceId"
 export const ADMIN_SOURCES_PATH = "/admin/sources"
+export const MEDIA_COLLECTIONS_PATH = "/media-collections"
+export const MEDIA_COLLECTION_REVIEW_PATH = `${MEDIA_COLLECTIONS_PATH}/:collectionId`
+
+export type SourcesNewPreset = "notes-folder-sync"
+
+type BuildSourcesNewPathOptions = {
+  preset?: SourcesNewPreset
+}
 
 export const VIEWPORT_CONSTRAINED_PATHS = [
+  CHAT_PATH,
+  CHAT_WORKSPACE_PATH,
   DOCUMENT_WORKSPACE_PATH,
-  WORKSPACE_PLAYGROUND_PATH,
+  RESEARCH_WORKSPACE_PATH,
   "/media-multi",
 ] as const
 
@@ -51,12 +66,33 @@ type BuildResearchLaunchPathOptions = {
   run?: string | null
   chatId?: string | null
   launchMessageId?: string | null
+  sourceWorkspaceId?: string | null
+  sourceArtifactId?: string | null
+  sourceArtifactTemplate?: string | null
+  sourceArtifactTitle?: string | null
+  followUp?: Record<string, unknown> | null
+}
+
+type BuildResearchWorkspaceReturnPathOptions = {
+  sourceWorkspaceId?: string | null
+  sourceArtifactId?: string | null
+  sourceArtifactTemplate?: string | null
+  sourceArtifactTitle?: string | null
+  researchRunId?: string | null
 }
 
 type BuildChatThreadPathOptions = {
   serverChatId?: string | null
   researchReturnRunId?: string | null
 }
+
+type BuildCharacterChatPathOptions = {
+  characterId?: string | number | null
+}
+
+const MAX_RESEARCH_FOLLOW_UP_SEARCH_PARAM_LENGTH = 4096
+const MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH = 128
+const MAX_RESEARCH_SOURCE_TITLE_SEARCH_PARAM_LENGTH = 240
 
 const setTrimmedSearchParam = (
   params: URLSearchParams,
@@ -67,6 +103,58 @@ const setTrimmedSearchParam = (
   if (trimmed) {
     params.set(key, trimmed)
   }
+}
+
+const setBoundedTrimmedSearchParam = (
+  params: URLSearchParams,
+  key: string,
+  value: string | null | undefined,
+  maxLength: number
+) => {
+  if (maxLength <= 0) {
+    return
+  }
+  const trimmed = value?.trim()
+  if (trimmed) {
+    const bounded = trimmed.slice(0, maxLength).trim()
+    if (bounded) {
+      params.set(key, bounded)
+    }
+  }
+}
+
+const setJsonSearchParam = (
+  params: URLSearchParams,
+  key: string,
+  value: Record<string, unknown> | null | undefined,
+  options: { maxEncodedLength?: number } = {}
+) => {
+  if (!value) {
+    return
+  }
+  const serialized = JSON.stringify(value)
+  if (serialized === "{}") {
+    return
+  }
+  const encodedLength = new URLSearchParams({ [key]: serialized }).toString().length
+  if (
+    options.maxEncodedLength !== undefined &&
+    encodedLength > options.maxEncodedLength
+  ) {
+    return
+  }
+  params.set(key, serialized)
+}
+
+export const buildSourcesNewPath = (
+  options: BuildSourcesNewPathOptions = {}
+): string => {
+  const params = new URLSearchParams()
+  if (options.preset) {
+    params.set("preset", options.preset)
+  }
+  const encoded = params.toString()
+  return encoded ? `${SOURCES_NEW_PATH}?${encoded}` : SOURCES_NEW_PATH
 }
 
 export const buildResearchLaunchPath = (
@@ -80,11 +168,76 @@ export const buildResearchLaunchPath = (
   setTrimmedSearchParam(params, "run", options.run)
   setTrimmedSearchParam(params, "chat_id", options.chatId)
   setTrimmedSearchParam(params, "launch_message_id", options.launchMessageId)
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_workspace_id",
+    options.sourceWorkspaceId,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_id",
+    options.sourceArtifactId,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_template",
+    options.sourceArtifactTemplate,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_title",
+    options.sourceArtifactTitle,
+    MAX_RESEARCH_SOURCE_TITLE_SEARCH_PARAM_LENGTH
+  )
+  setJsonSearchParam(params, "follow_up", options.followUp, {
+    maxEncodedLength: MAX_RESEARCH_FOLLOW_UP_SEARCH_PARAM_LENGTH
+  })
   if (options.autorun) {
     params.set("autorun", "1")
   }
   const encoded = params.toString()
   return encoded ? `${RESEARCH_PATH}?${encoded}` : RESEARCH_PATH
+}
+
+export const buildResearchWorkspaceReturnPath = (
+  options: BuildResearchWorkspaceReturnPathOptions = {}
+): string => {
+  const params = new URLSearchParams()
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_workspace_id",
+    options.sourceWorkspaceId,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_id",
+    options.sourceArtifactId,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_template",
+    options.sourceArtifactTemplate,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "source_artifact_title",
+    options.sourceArtifactTitle,
+    MAX_RESEARCH_SOURCE_TITLE_SEARCH_PARAM_LENGTH
+  )
+  setBoundedTrimmedSearchParam(
+    params,
+    "research_run_id",
+    options.researchRunId,
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  )
+  const encoded = params.toString()
+  return encoded ? `${RESEARCH_WORKSPACE_PATH}?${encoded}` : RESEARCH_WORKSPACE_PATH
 }
 
 export const buildChatThreadPath = (
@@ -104,3 +257,19 @@ export const buildChatThreadPath = (
   const encoded = params.toString()
   return encoded ? `${CHAT_PATH}?${encoded}` : CHAT_PATH
 }
+
+export const buildCharacterChatPath = (
+  options: BuildCharacterChatPathOptions = {}
+): string => {
+  const params = new URLSearchParams({ mode: "character" })
+  const characterId =
+    options.characterId == null ? "" : String(options.characterId).trim()
+  if (characterId) {
+    params.set("characterId", characterId)
+  }
+  return `${CHAT_PATH}?${params.toString()}`
+}
+
+export const buildMediaCollectionReviewPath = (
+  collectionId: string | number
+): string => `${MEDIA_COLLECTIONS_PATH}/${encodeURIComponent(String(collectionId))}`

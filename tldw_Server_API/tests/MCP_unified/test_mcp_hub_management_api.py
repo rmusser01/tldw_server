@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -12,12 +13,19 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import mcp_hub_management
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.exceptions import BadRequestError, ResourceNotFoundError
+from tldw_Server_API.app.services import mcp_hub_service
+
+
+class _NeverDisconnectedRequest:
+    async def is_disconnected(self) -> bool:
+        return False
 
 
 def _make_principal(
     *,
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
+    team_ids: list[int] | None = None,
 ) -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
@@ -30,7 +38,7 @@ def _make_principal(
         permissions=permissions or [],
         is_admin=False,
         org_ids=[],
-        team_ids=[],
+        team_ids=team_ids or [],
     )
 
 
@@ -444,6 +452,20 @@ class _FakeService:
         return True
 
 
+class _ScopeAuditRepo:
+    async def create_permission_profile(self, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "id": 44,
+            "name": "Team Profile",
+            "owner_scope_type": "team",
+            "owner_scope_id": 7,
+            "mode": "custom",
+            "path_scope_object_id": None,
+            "policy_document": {},
+            "is_active": True,
+        }
+
+
 class _FakeBrokerService:
     async def get_slot_status(
         self,
@@ -469,6 +491,72 @@ class _FakeBrokerService:
         }
 
 
+class _FakeExternalFederationManager:
+    def __init__(self, result: dict[str, Any]) -> None:
+        self.result = result
+        self.calls: list[str | None] = []
+
+    async def reconcile_servers(self, server_id: str | None = None) -> dict[str, Any]:
+        self.calls.append(server_id)
+        return dict(self.result)
+
+
+class _FakeExternalFederationModule:
+    def __init__(self, manager: _FakeExternalFederationManager) -> None:
+        self._manager = manager
+        self.invalidated = 0
+
+    def invalidate_capability_caches(self) -> None:
+        self.invalidated += 1
+
+
+class _FakeModuleRegistry:
+    def __init__(
+        self,
+        module: Any | None,
+        *,
+        raise_lookup: bool = False,
+        refresh_ok: bool = True,
+    ) -> None:
+        self.module = module
+        self.raise_lookup = raise_lookup
+        self.refresh_ok = refresh_ok
+        self.refresh_calls: list[str] = []
+
+    async def get_module(self, module_id: str) -> Any | None:
+        if self.raise_lookup:
+            raise RuntimeError("registry unavailable")
+        if module_id == "external_federation":
+            return self.module
+        return None
+
+    async def get_all_modules(self) -> dict[str, Any]:
+        if self.raise_lookup:
+            raise RuntimeError("registry unavailable")
+        return {"fallback": self.module} if self.module is not None else {}
+
+    async def refresh_module_registries(self, module_id: str) -> bool:
+        self.refresh_calls.append(module_id)
+        return self.refresh_ok
+
+
+class _FakeMcpServer:
+    def __init__(
+        self,
+        module: Any | None,
+        *,
+        initialized: bool = True,
+        registry: _FakeModuleRegistry | None = None,
+    ) -> None:
+        self.initialized = initialized
+        self.initialize_calls = 0
+        self.module_registry = registry or _FakeModuleRegistry(module)
+
+    async def initialize(self) -> None:
+        self.initialize_calls += 1
+        self.initialized = True
+
+
 def _build_app(
     *,
     principal: AuthPrincipal | None,
@@ -491,6 +579,594 @@ def _build_app(
     app.dependency_overrides[mcp_hub_management.get_mcp_hub_service] = lambda: _FakeService()
     app.dependency_overrides[mcp_hub_management.get_mcp_credential_broker_service] = lambda: _FakeBrokerService()
     return app
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_requires_mutation_permission(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_hub_management,
+        "get_mcp_server",
+        lambda: _FakeMcpServer(module=None),
+        raising=False,
+    )
+    app = _build_app(
+        principal=_make_principal(permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/mcp/hub/external-servers/refresh-discovery")
+
+    assert resp.status_code == 403
+    assert "system.configure" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_reconciles_live_runtime(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": "docs",
+            "reconciled_servers": 1,
+            "refreshed_servers": 1,
+            "total_servers": 1,
+            "virtual_tools": 2,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    server = _FakeMcpServer(module=module, initialized=False)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery",
+            json={"server_id": "docs"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["ok"] is True
+    assert payload["server_id"] == "docs"
+    assert payload["refreshed_servers"] == 1
+    assert payload["virtual_tools"] == 2
+    assert payload["requires_restart"] is False
+    assert manager.calls == ["docs"]
+    assert server.initialize_calls == 1
+    assert module.invalidated == 1
+    assert server.module_registry.refresh_calls == ["external_federation"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_accepts_query_server_id(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": "docs",
+            "reconciled_servers": 1,
+            "refreshed_servers": 1,
+            "total_servers": 1,
+            "virtual_tools": 2,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/mcp/hub/external-servers/refresh-discovery?server_id=docs")
+
+    assert resp.status_code == 200
+    assert manager.calls == ["docs"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_normalizes_body_server_id_before_conflict_check(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": "docs",
+            "reconciled_servers": 1,
+            "refreshed_servers": 1,
+            "total_servers": 1,
+            "virtual_tools": 2,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery?server_id=docs",
+            json={"server_id": " docs "},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["server_id"] == "docs"
+    assert manager.calls == ["docs"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_rejects_unknown_body_fields(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": None,
+            "reconciled_servers": 0,
+            "refreshed_servers": 0,
+            "total_servers": 0,
+            "virtual_tools": 0,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery",
+            json={"server_id": "docs", "unexpected": True},
+        )
+
+    assert resp.status_code == 422
+    assert manager.calls == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_rejects_conflicting_query_and_body_server_id(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": None,
+            "reconciled_servers": 0,
+            "refreshed_servers": 0,
+            "total_servers": 0,
+            "virtual_tools": 0,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery?server_id=query-docs",
+            json={"server_id": "body-docs"},
+        )
+
+    assert resp.status_code == 422
+    assert manager.calls == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_rejects_blank_body_server_id(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": None,
+            "reconciled_servers": 0,
+            "refreshed_servers": 0,
+            "total_servers": 0,
+            "virtual_tools": 0,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: _FakeMcpServer(module=module), raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery",
+            json={"server_id": "   "},
+        )
+
+    assert resp.status_code == 422
+    assert manager.calls == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_returns_503_when_runtime_module_unavailable(monkeypatch) -> None:
+    server = _FakeMcpServer(module=None, initialized=True)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/mcp/hub/external-servers/refresh-discovery")
+
+    assert resp.status_code == 503
+    payload = resp.json()
+    assert payload["detail"]["requires_restart"] is True
+    assert "external federation" in payload["detail"]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_returns_503_when_module_registry_lookup_fails(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": None,
+            "reconciled_servers": 0,
+            "refreshed_servers": 0,
+            "total_servers": 0,
+            "virtual_tools": 0,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    registry = _FakeModuleRegistry(module, raise_lookup=True)
+    server = _FakeMcpServer(module=module, registry=registry)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/mcp/hub/external-servers/refresh-discovery")
+
+    assert resp.status_code == 503
+    payload = resp.json()
+    assert payload["detail"]["requires_restart"] is True
+    assert "external federation" in payload["detail"]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_refresh_external_server_discovery_surfaces_module_registry_refresh_failure(monkeypatch) -> None:
+    manager = _FakeExternalFederationManager(
+        {
+            "server_id": "docs",
+            "reconciled_servers": 1,
+            "refreshed_servers": 1,
+            "total_servers": 1,
+            "virtual_tools": 2,
+            "errors": {},
+        }
+    )
+    module = _FakeExternalFederationModule(manager)
+    registry = _FakeModuleRegistry(module, refresh_ok=False)
+    server = _FakeMcpServer(module=module, registry=registry)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/external-servers/refresh-discovery",
+            json={"server_id": "docs"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["ok"] is False
+    assert payload["errors"] == {"module_registry": "module_registry_refresh_failed"}
+    assert registry.refresh_calls == ["external_federation"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_events_stream_replays_governance_audit_events(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AUDIT_STORAGE_MODE", "shared")
+    monkeypatch.setenv("AUDIT_SHARED_DB_PATH", str(tmp_path / "audit_shared.db"))
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+    monkeypatch.setattr(
+        mcp_hub_service,
+        "_mcp_hub_event_bus",
+        mcp_hub_service.McpHubEventBus(max_events=32),
+        raising=False,
+    )
+
+    from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import shutdown_all_audit_services
+
+    await shutdown_all_audit_services()
+    try:
+        event_id = await mcp_hub_service.publish_mcp_hub_event(
+            event_type="mcp_hub.external_server.created",
+            action="external_server.created",
+            actor_id=1,
+            resource_type="mcp_external_server",
+            resource_id="docs",
+            metadata={"owner_scope_type": "team", "owner_scope_id": 7},
+        )
+        app = _build_app(
+            principal=_make_principal(roles=["admin"], permissions=[]),
+            fail_with_401=False,
+        )
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/v1/mcp/hub/events/stream",
+                params={"replay": "true", "limit": "1", "event_type": "mcp_hub.external_server.created"},
+            )
+    finally:
+        await shutdown_all_audit_services()
+        monkeypatch.setattr(mcp_hub_service, "_mcp_hub_event_bus", None, raising=False)
+
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+    assert f"id: {event_id}" in resp.text
+    assert "event: mcp_hub.external_server.created" in resp.text
+    assert '"resource_type": "mcp_external_server"' in resp.text
+    assert '"resource_id": "docs"' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_event_stream_permission_replay_is_tenant_scoped(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_replay(**kwargs: Any) -> list[dict[str, Any]]:
+        captured.update(kwargs)
+        return [
+            {
+                "event_id": "evt_scoped",
+                "event_type": "mcp_hub.external_server.created",
+                "action": "external_server.created",
+                "actor_id": 1,
+                "resource_type": "mcp_external_server",
+                "resource_id": "docs",
+                "metadata": {"owner_scope_type": "global", "owner_scope_id": None},
+            }
+        ]
+
+    async def _fake_bus() -> mcp_hub_service.McpHubEventBus:
+        return mcp_hub_service.McpHubEventBus(max_events=4)
+
+    monkeypatch.setattr(mcp_hub_management, "replay_mcp_hub_audit_events", _fake_replay)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_hub_event_bus", _fake_bus)
+
+    response = await mcp_hub_management.stream_mcp_hub_events(
+        request=_NeverDisconnectedRequest(),  # type: ignore[arg-type]
+        after_event_id=None,
+        event_type=None,
+        owner_scope_type=None,
+        owner_scope_id=None,
+        replay=True,
+        limit=1,
+        principal=_make_principal(permissions=["system.configure"]),
+    )
+    chunk = await asyncio.wait_for(anext(response.body_iterator), timeout=0.5)
+    text = chunk.decode() if isinstance(chunk, bytes) else str(chunk)
+
+    assert "evt_scoped" in text
+    assert captured["principal_user_id"] == 1
+    assert captured["user_id"] == "1"
+    assert captured["allow_cross_tenant"] is False
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_event_stream_subscribes_before_replay(monkeypatch) -> None:
+    live_event = {
+        "event_id": "evt_live_race",
+        "event_type": "mcp_hub.external_server.updated",
+        "action": "external_server.updated",
+        "actor_id": 1,
+        "resource_type": "mcp_external_server",
+        "resource_id": "docs-race",
+        "metadata": {"owner_scope_type": "global", "owner_scope_id": None},
+    }
+
+    class _RaceBus(mcp_hub_service.McpHubEventBus):
+        async def replay(self, **_kwargs: Any) -> list[dict[str, Any]]:
+            await self.publish(live_event)
+            return []
+
+    race_bus = _RaceBus(max_events=4)
+
+    async def _fake_bus() -> _RaceBus:
+        return race_bus
+
+    async def _fake_replay(**_kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_hub_event_bus", _fake_bus)
+    monkeypatch.setattr(mcp_hub_management, "replay_mcp_hub_audit_events", _fake_replay)
+
+    response = await mcp_hub_management.stream_mcp_hub_events(
+        request=_NeverDisconnectedRequest(),  # type: ignore[arg-type]
+        after_event_id=None,
+        event_type=["mcp_hub.external_server.updated"],
+        owner_scope_type=None,
+        owner_scope_id=None,
+        replay=True,
+        limit=1,
+        principal=_make_principal(roles=["admin"], permissions=[]),
+    )
+    chunk = await asyncio.wait_for(anext(response.body_iterator), timeout=0.5)
+    text = chunk.decode() if isinstance(chunk, bytes) else str(chunk)
+
+    assert "evt_live_race" in text
+    assert "docs-race" in text
+
+
+def test_mcp_hub_audit_row_normalizes_prefixed_actions() -> None:
+    event = mcp_hub_service._audit_row_to_mcp_hub_event(
+        {
+            "event_id": "evt_1",
+            "timestamp": "2026-04-30T00:00:00Z",
+            "metadata": json.dumps(
+                {
+                    "action": "mcp_hub.permission_profile.create",
+                    "actor_id": 1,
+                    "resource_type": "mcp_permission_profile",
+                    "resource_id": "44",
+                }
+            ),
+        }
+    )
+
+    assert event is not None
+    assert event["event_type"] == "mcp_hub.permission_profile.create"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_scoped_audit_metadata_includes_scope_id(monkeypatch) -> None:
+    captured: list[dict[str, Any] | None] = []
+
+    async def _capture_emit(**kwargs: Any) -> None:
+        captured.append(kwargs.get("metadata"))
+
+    monkeypatch.setattr(mcp_hub_service, "emit_mcp_hub_audit", _capture_emit)
+    service = mcp_hub_service.McpHubService(repo=_ScopeAuditRepo())  # type: ignore[arg-type]
+
+    await service.create_permission_profile(
+        name="Team Profile",
+        owner_scope_type="team",
+        owner_scope_id=7,
+        mode="custom",
+        path_scope_object_id=None,
+        policy_document={},
+        actor_id=1,
+    )
+
+    assert captured == [{"name": "Team Profile", "owner_scope_type": "team", "owner_scope_id": 7}]
+    assert mcp_hub_management._event_matches_visible_scope(
+        {"metadata": captured[0]},
+        [("team", 7)],
+    )
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_durable_audit_replay_survives_event_ring_eviction(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AUDIT_STORAGE_MODE", "shared")
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+    monkeypatch.setattr(
+        mcp_hub_service,
+        "_mcp_hub_event_bus",
+        mcp_hub_service.McpHubEventBus(max_events=1),
+        raising=False,
+    )
+
+    from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import shutdown_all_audit_services
+
+    await shutdown_all_audit_services()
+    try:
+        await mcp_hub_service.emit_mcp_hub_audit(
+            action="external_server.created",
+            actor_id=1,
+            resource_type="mcp_external_server",
+            resource_id="docs-old",
+            metadata={"owner_scope_type": "global", "owner_scope_id": None},
+        )
+        first_event = (await (await mcp_hub_service.get_mcp_hub_event_bus()).replay(limit=1))[0]
+
+        await mcp_hub_service.emit_mcp_hub_audit(
+            action="external_server.updated",
+            actor_id=1,
+            resource_type="mcp_external_server",
+            resource_id="docs-new",
+            metadata={"owner_scope_type": "global", "owner_scope_id": None},
+        )
+
+        ring_events = await (await mcp_hub_service.get_mcp_hub_event_bus()).replay()
+        assert [event["resource_id"] for event in ring_events] == ["docs-new"]
+
+        replayed = await mcp_hub_service.replay_mcp_hub_audit_events(
+            principal_user_id=1,
+            after_event_id=str(first_event["event_id"]),
+            event_types={"mcp_hub.external_server.updated"},
+            limit=10,
+            allow_cross_tenant=True,
+        )
+    finally:
+        await shutdown_all_audit_services()
+        monkeypatch.setattr(mcp_hub_service, "_mcp_hub_event_bus", None, raising=False)
+
+    assert [event["resource_id"] for event in replayed] == ["docs-new"]
+    assert replayed[0]["event_type"] == "mcp_hub.external_server.updated"
+    assert replayed[0]["source"] == "mcp_hub.audit"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_durable_replay_scopes_non_admin_queries(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _AuditService:
+        async def query_events(self, **kwargs: Any) -> list[dict[str, Any]]:
+            captured.update(kwargs)
+            return [
+                {
+                    "event_id": "evt_user_1",
+                    "timestamp": "2026-04-30T00:00:00Z",
+                    "metadata": json.dumps(
+                        {
+                            "action": "external_server.updated",
+                            "actor_id": 1,
+                            "resource_type": "mcp_external_server",
+                            "resource_id": "docs",
+                            "owner_scope_type": "user",
+                            "owner_scope_id": 1,
+                        }
+                    ),
+                }
+            ]
+
+    async def _fake_audit_service(principal_user_id: int | None) -> _AuditService:
+        assert principal_user_id == 1
+        return _AuditService()
+
+    monkeypatch.setattr(
+        mcp_hub_service,
+        "get_or_create_audit_service_for_user_id_optional",
+        _fake_audit_service,
+    )
+
+    replayed = await mcp_hub_service.replay_mcp_hub_audit_events(principal_user_id=1, limit=10)
+
+    assert captured["user_id"] == "1"
+    assert captured["allow_cross_tenant"] is False
+    assert replayed[0]["resource_id"] == "docs"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_durable_replay_allows_admin_cross_tenant_queries(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _AuditService:
+        async def query_events(self, **kwargs: Any) -> list[dict[str, Any]]:
+            captured.update(kwargs)
+            return []
+
+    async def _fake_audit_service(principal_user_id: int | None) -> _AuditService:
+        assert principal_user_id == 1
+        return _AuditService()
+
+    monkeypatch.setattr(
+        mcp_hub_service,
+        "get_or_create_audit_service_for_user_id_optional",
+        _fake_audit_service,
+    )
+
+    replayed = await mcp_hub_service.replay_mcp_hub_audit_events(
+        principal_user_id=1,
+        limit=10,
+        allow_cross_tenant=True,
+    )
+
+    assert replayed == []
+    assert captured["user_id"] is None
+    assert captured["allow_cross_tenant"] is True
 
 
 @pytest.mark.asyncio

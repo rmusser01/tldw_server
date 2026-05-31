@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.RAG.rag_service import regression as regression_mod
 from tldw_Server_API.app.core.RAG.rag_service.regression import (
     _SAFE_ID_RE,
     MetricBaseline,
@@ -34,6 +35,23 @@ from tldw_Server_API.app.core.RAG.rag_service.quality_gating import MetricCatego
 def _make_detector(tmp_path: Path, **kwargs) -> RegressionDetector:
     """Create a RegressionDetector rooted in a temporary directory."""
     return RegressionDetector(baseline_dir=tmp_path / "baselines", **kwargs)
+
+
+class _RecordingLogger:
+    def __init__(self):
+        self.warning_calls = []
+
+    def warning(self, *args, **kwargs):
+        self.warning_calls.append((args, kwargs))
+
+
+def _assert_warning_logs_are_sanitized(logger: _RecordingLogger):
+    assert logger.warning_calls
+    for args, kwargs in logger.warning_calls:
+        assert not kwargs.get("exc_info")
+        rendered = " ".join(str(arg) for arg in args)
+        assert "/tmp/source" not in rendered
+        assert "token=secret" not in rendered
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +273,25 @@ class TestRegressionDetectorSaveLoad:
         """Loading a non-existent baseline should return None."""
         detector = _make_detector(tmp_path)
         assert detector.load_baseline("nonexistent") is None
+
+    def test_load_invalid_baseline_log_is_sanitized(self, tmp_path: Path, monkeypatch):
+        """Malformed baseline payloads return None without logging raw payload details."""
+        detector = _make_detector(tmp_path)
+        detector.baseline_dir.mkdir(parents=True)
+        (detector.baseline_dir / "latest.json").write_text(
+            json.dumps(
+                {
+                    "baseline_id": "latest",
+                    "created_at": "2025-01-01T00:00:00+00:00",
+                    "metrics": "invalid metrics /tmp/source token=secret",
+                }
+            )
+        )
+        recording_logger = _RecordingLogger()
+        monkeypatch.setattr(regression_mod, "logger", recording_logger)
+
+        assert detector.load_baseline("latest") is None
+        _assert_warning_logs_are_sanitized(recording_logger)
 
 
 @pytest.mark.unit

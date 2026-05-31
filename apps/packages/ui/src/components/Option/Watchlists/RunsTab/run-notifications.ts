@@ -1,4 +1,9 @@
 import type { WatchlistRun } from "@/types/watchlists"
+import {
+  isWatchlistRunActive,
+  isWatchlistRunTerminal,
+  normalizeWatchlistRunStatus
+} from "../shared/runStatus"
 
 type NotificationKind = "completed" | "failed"
 export type RunNotificationKind = NotificationKind | "stalled"
@@ -35,8 +40,6 @@ export interface RunNotificationGroup {
 
 type Translator = (...args: any[]) => unknown
 
-const ACTIVE_RUN_STATUSES = new Set(["pending", "running", "queued"])
-const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled"])
 const RUN_NOTIFICATION_PRIORITY: Record<RunNotificationKind, number> = {
   failed: 0,
   stalled: 1,
@@ -68,7 +71,7 @@ export interface RunNotificationsPollPlan {
 }
 
 const normalizeStatus = (status: string | null | undefined): string =>
-  String(status || "").trim().toLowerCase()
+  normalizeWatchlistRunStatus(status)
 
 const normalizePositiveInt = (value: number, fallback: number): number => {
   if (!Number.isFinite(value)) return fallback
@@ -204,11 +207,11 @@ export const resolveRunTransitionNotification = (
   const current = normalizeStatus(run.status)
   if (!previous || !current || previous === current) return null
 
-  if (current === "completed" && ACTIVE_RUN_STATUSES.has(previous)) {
+  if (current === "completed" && isWatchlistRunActive(previous)) {
     return { kind: "completed" }
   }
 
-  if (current === "failed" && (ACTIVE_RUN_STATUSES.has(previous) || previous === "completed")) {
+  if (current === "failed" && (isWatchlistRunActive(previous) || previous === "completed")) {
     return {
       kind: "failed",
       hint: getRunFailureHint(run.error_msg, t)
@@ -244,7 +247,7 @@ export const resolveStalledRunNotification = (
   t?: Translator
 ): RunNotificationEvent | null => {
   const status = normalizeStatus(run.status)
-  if (!ACTIVE_RUN_STATUSES.has(status)) return null
+  if (!isWatchlistRunActive(status)) return null
   if (run.finished_at) return null
   const startedAtMs = parseEpochMs(run.started_at)
   if (startedAtMs == null) return null
@@ -313,7 +316,7 @@ export const shouldNotifyNewTerminalRun = (
   sessionStartedAtMs: number
 ): boolean => {
   const current = normalizeStatus(run.status)
-  if (!TERMINAL_RUN_STATUSES.has(current) || current === "cancelled") {
+  if (!isWatchlistRunTerminal(current) || current === "cancelled") {
     return false
   }
   const finishedAtMs = parseEpochMs(run.finished_at)

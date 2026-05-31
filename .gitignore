@@ -276,6 +276,7 @@ errors.log
 # Data files
 *.csv
 *.json
+!.impeccable/design.json
 !tldw_Server_API/app/core/Evaluations/data/bullshit_benchmark/questions_v2.json
 !tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json
 !apps/package.json
@@ -289,6 +290,7 @@ errors.log
 !Docs/Product/WebUI/M1_4_Alias_Rollup_Week3_Natural_2026_02_13.json
 !Docs/Deployment/sidecar_workers_manifest.json
 !Docs/Monitoring/claims_grafana_dashboard.json
+!tools/macos-vz-helper/Tests/TemplateFixtures/**/*.json
 !Docs/Development/schema/embeddings_v1.schema.json
 !Docs/Development/schema/embeddings_registry.json
 !Docs/Monitoring/http_client_grafana_dashboard.json

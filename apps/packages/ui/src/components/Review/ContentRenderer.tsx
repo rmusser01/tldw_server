@@ -1,5 +1,5 @@
 import React from "react"
-import Markdown from "@/components/Common/Markdown"
+import { Markdown } from "@/components/Common/Markdown"
 import { parseSections } from "@/components/Review/SectionNavigator"
 import {
   hasLeadingTranscriptTimings,

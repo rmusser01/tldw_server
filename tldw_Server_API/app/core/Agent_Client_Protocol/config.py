@@ -16,6 +16,8 @@ from tldw_Server_API.app.core.testing import is_truthy
 
 @dataclass
 class ACPRunnerConfig:
+    """Configuration used to launch the local ACP runner process."""
+
     command: str
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
@@ -26,6 +28,8 @@ class ACPRunnerConfig:
 
 @dataclass
 class ACPSandboxConfig:
+    """Configuration for optional sandboxed ACP agent execution."""
+
     enabled: bool = False
     runtime: str = "docker"
     base_image: str = "tldw/acp-agent:latest"
@@ -48,6 +52,7 @@ class ACPSandboxConfig:
     max_concurrent_sessions_per_user: int = 5
     max_tokens_per_session: int = 1_000_000
     max_session_duration_seconds: int = 14400  # 4h default
+    session_retention_days: int = 30
     audit_retention_days: int = 30
 
 
@@ -118,6 +123,7 @@ def validate_acp_config(config: ACPRunnerConfig) -> list[str]:
 
 
 def _parse_args(raw: str | None) -> list[str]:
+    """Parse runner argument config from shell-like text or a JSON array."""
     if not raw:
         return []
     text = raw.strip()
@@ -135,6 +141,7 @@ def _parse_args(raw: str | None) -> list[str]:
 
 
 def _parse_env(raw: str | None) -> dict[str, str]:
+    """Parse runner environment config from JSON object or comma-separated pairs."""
     if not raw:
         return {}
     text = raw.strip()
@@ -171,6 +178,10 @@ def _resolve_runner_env_paths(
         return {}
 
     env = dict(raw_env)
+    host_home = os.getenv("TLDW_ACP_HOST_HOME") or os.path.expanduser("~")
+    if host_home and os.path.isabs(host_home):
+        env.setdefault("TLDW_ACP_HOST_HOME", host_home)
+
     home = env.get("HOME")
     if not resolve_relative_home or not home:
         return env
@@ -192,6 +203,7 @@ def _resolve_runner_env_paths(
 
 
 def load_acp_runner_config() -> ACPRunnerConfig:
+    """Load ACP runner configuration from config.txt with env overrides."""
     section = get_config_section("ACP")
     binary_path = os.getenv("ACP_RUNNER_BINARY_PATH") or section.get("runner_binary_path")
     command = os.getenv("ACP_RUNNER_COMMAND") or section.get("runner_command", "")
@@ -234,12 +246,14 @@ def load_acp_runner_config() -> ACPRunnerConfig:
 
 
 def _parse_bool(raw: str | None, default: bool = False) -> bool:
+    """Parse a boolean-ish config value, returning ``default`` for unset input."""
     if raw is None:
         return default
     return is_truthy(raw)
 
 
 def _parse_int(raw: str | None, default: int) -> int:
+    """Parse an integer config value, returning ``default`` when invalid."""
     if raw is None:
         return default
     try:
@@ -323,6 +337,7 @@ PERMISSION_POLICY_TEMPLATES: dict[str, dict] = {
 
 
 def load_acp_sandbox_config() -> ACPSandboxConfig:
+    """Load optional ACP sandbox configuration from config.txt and env overrides."""
     section = get_config_section("ACP-SANDBOX")
     enabled = _parse_bool(os.getenv("ACP_SANDBOX_ENABLED") or section.get("enabled"), False)
     runtime = os.getenv("ACP_SANDBOX_RUNTIME") or section.get("runtime", "docker")
@@ -357,6 +372,9 @@ def load_acp_sandbox_config() -> ACPSandboxConfig:
     max_duration = _parse_int(
         os.getenv("ACP_MAX_SESSION_DURATION_SECONDS") or section.get("max_session_duration_seconds"), 14400
     )
+    session_retention = _parse_int(
+        os.getenv("ACP_SESSION_RETENTION_DAYS") or section.get("session_retention_days"), 30
+    )
     audit_retention = _parse_int(
         os.getenv("ACP_AUDIT_RETENTION_DAYS") or section.get("audit_retention_days"), 30
     )
@@ -382,5 +400,6 @@ def load_acp_sandbox_config() -> ACPSandboxConfig:
         max_concurrent_sessions_per_user=max_concurrent,
         max_tokens_per_session=max_tokens,
         max_session_duration_seconds=max_duration,
+        session_retention_days=session_retention,
         audit_retention_days=audit_retention,
     )

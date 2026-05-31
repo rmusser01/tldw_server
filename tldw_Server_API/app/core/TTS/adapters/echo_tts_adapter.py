@@ -50,6 +50,11 @@ from .base import (
 # Echo-TTS Adapter
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 class EchoTTSAdapter(TTSAdapter):
     """Adapter for Echo-TTS (CUDA-only, speaker reference required)."""
 
@@ -158,7 +163,11 @@ class EchoTTSAdapter(TTSAdapter):
             self._status = ProviderStatus.AVAILABLE
             return True
         except Exception as exc:
-            logger.error(f"{self.provider_name}: initialization failed: {exc}")
+            logger.error(
+                "{}: initialization failed; exception_type={}",
+                self.provider_name,
+                _safe_exception_label(exc),
+            )
             self._status = ProviderStatus.ERROR
             if isinstance(exc, TTSProviderInitializationError):
                 raise
@@ -369,7 +378,10 @@ class EchoTTSAdapter(TTSAdapter):
                 model=request.model or self.model_repo,
             )
         except Exception as exc:
-            logger.error("Echo-TTS generation failed: {}", exc, exc_info=True)
+            logger.error(
+                "Echo-TTS generation failed; exception_type={}",
+                _safe_exception_label(exc),
+            )
             raise TTSGenerationError(
                 "Echo-TTS generation failed",
                 provider=self.PROVIDER_KEY,

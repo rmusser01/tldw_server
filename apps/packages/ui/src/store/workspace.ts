@@ -30,6 +30,7 @@ import {
   extractWorkspaceIdFromChatSessionKey,
   isWorkspaceChatSessionKeyForWorkspace
 } from "@/store/workspace-chat-session-key"
+import { buildResearchWorkspaceMigrationTombstoneKey } from "@/store/workspace-migration"
 import type {
   AddSourceModalState,
   AddSourceTab,
@@ -47,6 +48,8 @@ import type {
   WorkspaceConfig,
   WorkspaceNote,
   WorkspaceSource,
+  WorkspaceSourceReadiness,
+  WorkspaceSourceStatusDetails,
   WorkspaceSourceTransferConflictResolution,
   WorkspaceSourceTransferEmptyFolderPolicy,
   WorkspaceSourceTransferMode,
@@ -66,7 +69,7 @@ import {
   createWorkspaceOrganizationIndex,
   deriveEffectiveSelectedSourceIds
 } from "@/store/workspace-organization"
-import { trackWorkspacePlaygroundTelemetry } from "@/utils/workspace-playground-telemetry"
+import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
 import { createSourcesSlice } from "./workspace-slices/sources-slice"
 import { createStudioSlice } from "./workspace-slices/studio-slice"
 import { createUISlice } from "./workspace-slices/ui-slice"
@@ -852,6 +855,31 @@ const safeParseJson = (raw: string | null | undefined): unknown => {
   }
 }
 
+const hasResearchWorkspaceMigrationTombstone = (workspaceId: string): boolean => {
+  const trimmedWorkspaceId = workspaceId.trim()
+  if (!trimmedWorkspaceId || typeof localStorage === "undefined") return false
+
+  let tombstoneRaw: string | null
+  try {
+    tombstoneRaw = localStorage.getItem(
+      buildResearchWorkspaceMigrationTombstoneKey(trimmedWorkspaceId)
+    )
+  } catch {
+    return false
+  }
+
+  const tombstone = safeParseJson(tombstoneRaw)
+  if (!isRecord(tombstone)) return false
+  return (
+    tombstone.contentRetained === false &&
+    tombstone.legacyWorkspaceId === trimmedWorkspaceId &&
+    typeof tombstone.migrationId === "string" &&
+    tombstone.migrationId.trim().length > 0
+  )
+}
+
+const cleanedUpMigrationTombstoneWorkspaceIds = new Set<string>()
+
 const parseWorkspaceFeatureFlagCandidate = (
   candidate: unknown
 ): boolean | null => {
@@ -1125,6 +1153,74 @@ const cleanupWorkspaceIndexedDbRecords = async (
   )
 }
 
+const removeWorkspaceLocalPersistenceForId = async (
+  workspaceId: string,
+  indexedDbAdapter: WorkspaceIndexedDbAdapter
+): Promise<void> => {
+  const snapshot = readWorkspaceSnapshotFromStorage(workspaceId)
+  const chatKey = buildWorkspaceChatStorageKey(workspaceId)
+  const chatCandidate = safeParseJson(localStorage.getItem(chatKey))
+  const chatPointerKey = isWorkspaceIndexedDbChatPointer(chatCandidate)
+    ? chatCandidate.key
+    : null
+
+  localStorage.removeItem(buildWorkspaceSnapshotStorageKey(workspaceId))
+  localStorage.removeItem(chatKey)
+
+  if (!indexedDbAdapter.isAvailable()) return
+
+  await cleanupWorkspaceIndexedDbRecords(workspaceId, snapshot, indexedDbAdapter)
+  if (chatPointerKey) {
+    await indexedDbAdapter.deleteChatRecord(chatPointerKey)
+  }
+}
+
+const omitTombstonedWorkspaceRecords = <T>(
+  records: Record<string, T>,
+  tombstonedWorkspaceIds: Set<string>
+): Record<string, T> => {
+  if (tombstonedWorkspaceIds.size === 0) return records
+
+  const filtered: Record<string, T> = {}
+  for (const [workspaceId, value] of Object.entries(records)) {
+    if (!tombstonedWorkspaceIds.has(workspaceId)) {
+      filtered[workspaceId] = value
+    }
+  }
+  return filtered
+}
+
+const omitTombstonedSavedWorkspaces = (
+  workspaces: SavedWorkspace[],
+  tombstonedWorkspaceIds: Set<string>
+): SavedWorkspace[] => {
+  if (tombstonedWorkspaceIds.size === 0) return workspaces
+  return workspaces.filter(
+    (workspace) => !tombstonedWorkspaceIds.has(workspace.id)
+  )
+}
+
+const collectTombstonedSavedWorkspaceIds = (workspaces: unknown[]): Set<string> =>
+  new Set(
+    workspaces
+      .map((workspace) => (isRecord(workspace) ? workspace.id : null))
+      .filter(
+        (workspaceId): workspaceId is string =>
+          typeof workspaceId === "string" &&
+          hasResearchWorkspaceMigrationTombstone(workspaceId)
+      )
+  )
+
+const hasPersistableWorkspaceIndexState = (
+  state: PersistedWorkspaceState
+): boolean =>
+  Boolean(state.workspaceId) ||
+  state.savedWorkspaces.length > 0 ||
+  state.archivedWorkspaces.length > 0 ||
+  state.workspaceCollections.length > 0 ||
+  Object.keys(state.workspaceSnapshots).length > 0 ||
+  Object.keys(state.workspaceChatSessions).length > 0
+
 const parsePersistedWorkspaceEnvelope = (
   serializedValue: string
 ): { state: Record<string, unknown>; version: number } | null => {
@@ -1246,15 +1342,26 @@ const reconstructPersistedWorkspaceStateFromSplitIndex = (
   indexedDbAdapter: WorkspaceIndexedDbAdapter
 ): PersistedWorkspaceState | Promise<PersistedWorkspaceState> => {
   const stateCandidate = envelope.state
-  const workspaceId =
+  const candidateWorkspaceId =
     typeof stateCandidate.workspaceId === "string"
       ? stateCandidate.workspaceId
       : ""
+  const workspaceId =
+    candidateWorkspaceId &&
+    !hasResearchWorkspaceMigrationTombstone(candidateWorkspaceId)
+      ? candidateWorkspaceId
+      : ""
   const savedWorkspaces = Array.isArray(stateCandidate.savedWorkspaces)
-    ? stateCandidate.savedWorkspaces
+    ? omitTombstonedSavedWorkspaces(
+        stateCandidate.savedWorkspaces as SavedWorkspace[],
+        collectTombstonedSavedWorkspaceIds(stateCandidate.savedWorkspaces)
+      )
     : []
   const archivedWorkspaces = Array.isArray(stateCandidate.archivedWorkspaces)
-    ? stateCandidate.archivedWorkspaces
+    ? omitTombstonedSavedWorkspaces(
+        stateCandidate.archivedWorkspaces as SavedWorkspace[],
+        collectTombstonedSavedWorkspaceIds(stateCandidate.archivedWorkspaces)
+      )
     : []
   const workspaceCollections = Array.isArray(stateCandidate.workspaceCollections)
     ? (stateCandidate.workspaceCollections as WorkspaceCollection[])
@@ -1262,7 +1369,8 @@ const reconstructPersistedWorkspaceStateFromSplitIndex = (
   const workspaceIds = Array.isArray(stateCandidate.workspaceIds)
     ? stateCandidate.workspaceIds.filter(
         (workspaceStorageId): workspaceStorageId is string =>
-          typeof workspaceStorageId === "string"
+          typeof workspaceStorageId === "string" &&
+          !hasResearchWorkspaceMigrationTombstone(workspaceStorageId)
       )
     : []
 
@@ -1403,6 +1511,42 @@ const writeSplitWorkspacePersistence = async (
     ...Object.keys(migrated.workspaceChatSessions || {}),
     migrated.workspaceId
   )
+  const candidateWorkspaceIds = normalizeWorkspaceStorageIds(
+    ...nextWorkspaceIds,
+    ...migrated.savedWorkspaces.map((workspace) => workspace.id),
+    ...migrated.archivedWorkspaces.map((workspace) => workspace.id)
+  )
+  const tombstonedWorkspaceIds = new Set(
+    candidateWorkspaceIds.filter(hasResearchWorkspaceMigrationTombstone)
+  )
+  const migratedForIndex: PersistedWorkspaceState =
+    tombstonedWorkspaceIds.size === 0
+      ? migrated
+      : {
+          ...migrated,
+          workspaceId: tombstonedWorkspaceIds.has(migrated.workspaceId)
+            ? ""
+            : migrated.workspaceId,
+          savedWorkspaces: omitTombstonedSavedWorkspaces(
+            migrated.savedWorkspaces,
+            tombstonedWorkspaceIds
+          ),
+          archivedWorkspaces: omitTombstonedSavedWorkspaces(
+            migrated.archivedWorkspaces,
+            tombstonedWorkspaceIds
+          ),
+          workspaceSnapshots: omitTombstonedWorkspaceRecords(
+            migrated.workspaceSnapshots,
+            tombstonedWorkspaceIds
+          ),
+          workspaceChatSessions: omitTombstonedWorkspaceRecords(
+            migrated.workspaceChatSessions,
+            tombstonedWorkspaceIds
+          )
+        }
+  const persistedWorkspaceIds = nextWorkspaceIds.filter(
+    (workspaceId) => !tombstonedWorkspaceIds.has(workspaceId)
+  )
   const existingWorkspaceIds = getWorkspaceIdsFromStoredValue(
     localStorage.getItem(name)
   )
@@ -1413,6 +1557,17 @@ const writeSplitWorkspacePersistence = async (
   > = {}
 
   for (const workspaceStorageId of nextWorkspaceIds) {
+    if (tombstonedWorkspaceIds.has(workspaceStorageId)) {
+      if (!cleanedUpMigrationTombstoneWorkspaceIds.has(workspaceStorageId)) {
+        await removeWorkspaceLocalPersistenceForId(
+          workspaceStorageId,
+          indexedDbAdapter
+        )
+        cleanedUpMigrationTombstoneWorkspaceIds.add(workspaceStorageId)
+      }
+      continue
+    }
+
     const snapshotKey = buildWorkspaceSnapshotStorageKey(workspaceStorageId)
     const previousSnapshot = readWorkspaceSnapshotFromStorage(workspaceStorageId)
     const previousArtifactIds = collectWorkspaceArtifactIdsFromSnapshot(
@@ -1543,7 +1698,7 @@ const writeSplitWorkspacePersistence = async (
   }
 
   for (const staleWorkspaceId of existingWorkspaceIds) {
-    if (nextWorkspaceIds.includes(staleWorkspaceId)) continue
+    if (persistedWorkspaceIds.includes(staleWorkspaceId)) continue
 
     const staleSnapshot = readWorkspaceSnapshotFromStorage(staleWorkspaceId)
     const staleChatRaw = safeParseJson(
@@ -1568,13 +1723,21 @@ const writeSplitWorkspacePersistence = async (
     }
   }
 
-  const splitIndex = buildWorkspaceSplitIndexEnvelope(migrated, version, {
+  if (
+    tombstonedWorkspaceIds.size > 0 &&
+    !hasPersistableWorkspaceIndexState(migratedForIndex)
+  ) {
+    localStorage.removeItem(name)
+    return true
+  }
+
+  const splitIndex = buildWorkspaceSplitIndexEnvelope(migratedForIndex, version, {
     workspaceSnapshots: {
-      ...migrated.workspaceSnapshots,
+      ...migratedForIndex.workspaceSnapshots,
       ...persistedSnapshotsForIndex
     },
     workspaceChatSessions: {
-      ...migrated.workspaceChatSessions,
+      ...migratedForIndex.workspaceChatSessions,
       ...persistedChatReferencesForIndex
     }
   })
@@ -2035,12 +2198,16 @@ interface SourcesActions {
   setSourceStatusById: (
     sourceId: string,
     status: WorkspaceSourceStatus,
-    statusMessage?: string
+    statusMessage?: string,
+    readiness?: WorkspaceSourceReadiness,
+    statusDetails?: WorkspaceSourceStatusDetails
   ) => void
   setSourceStatusByMediaId: (
     mediaId: number,
     status: WorkspaceSourceStatus,
-    statusMessage?: string
+    statusMessage?: string,
+    readiness?: WorkspaceSourceReadiness,
+    statusDetails?: WorkspaceSourceStatusDetails
   ) => void
   focusSourceById: (id: string) => boolean
   focusSourceByMediaId: (mediaId: number) => boolean
@@ -2587,11 +2754,24 @@ export const reviveDateOrUndefined = (
   return revived ?? undefined
 }
 
+const reviveSourceStatusDetails = (
+  details: WorkspaceSourceStatusDetails | undefined
+): WorkspaceSourceStatusDetails | undefined =>
+  details
+    ? {
+        ...details,
+        updatedAt: reviveDateOrUndefined(
+          details.updatedAt as Date | string | null | undefined
+        )
+      }
+    : undefined
+
 export const reviveSources = (sources: WorkspaceSource[]): WorkspaceSource[] =>
   sources.map((source) => ({
     ...source,
     status: source.status || "ready",
     statusMessage: source.statusMessage || undefined,
+    statusDetails: reviveSourceStatusDetails(source.statusDetails),
     addedAt: reviveDateOrNull(source.addedAt) || new Date(),
     sourceCreatedAt: reviveDateOrUndefined(source.sourceCreatedAt)
   }))
@@ -3710,7 +3890,7 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
           ).length
           state.generatedArtifacts = reviveArtifacts(persistedArtifacts)
           if (interruptedArtifactCount > 0) {
-            void trackWorkspacePlaygroundTelemetry({
+            void trackResearchWorkspaceTelemetry({
               type: "artifact_rehydrated_failed",
               workspace_id: state.workspaceId || null,
               interrupted_count: interruptedArtifactCount

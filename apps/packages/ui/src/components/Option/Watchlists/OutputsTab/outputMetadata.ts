@@ -1,4 +1,40 @@
-import type { WatchlistOutput, WatchlistOutputCreate } from "@/types/watchlists"
+import type {
+  WatchlistOutput,
+  WatchlistOutputCreate,
+  WatchlistReportPreset,
+  WatchlistReportReadiness,
+  WatchlistReportReadinessState,
+  WatchlistReportReadinessWarning,
+  WatchlistReportReadinessWarningSeverity,
+  WatchlistRunAudioStatus
+} from "@/types/watchlists"
+import {
+  BLOCKED_STATE_LABEL,
+  READY_STATE_LABEL
+} from "@/design-system"
+
+export type OutputMetadataTranslator = (key: string, defaultValue: string) => string
+
+export type AudioStatusLabelKey =
+  | "completed"
+  | "ready"
+  | "fallback"
+  | "partial"
+  | "queued"
+  | "pending"
+  | "running"
+  | "in_progress"
+  | "failed"
+  | "disabled"
+  | "skipped"
+  | "skipped_no_items"
+  | "configuration_required"
+  | "queue_unavailable"
+  | "dead"
+  | "cancelled"
+  | "enqueue_failed"
+  | "error"
+  | "unknown"
 
 export interface DeliveryStatusSummary {
   channel: string
@@ -11,7 +47,59 @@ export interface DeliveryDisclosureSummary {
   hidden: DeliveryStatusSummary[]
 }
 
+export interface AudioArtifactSummary {
+  label: string
+  uri?: string
+  displayName?: string
+  downloadUrl?: string
+  mimeType?: string
+  speakerId?: string
+}
+
+export interface AudioStatusSummary {
+  requested: boolean
+  status: string
+  statusLabel: string
+  statusColor: string
+  fallbackReason?: string
+  error?: string
+  taskId?: string
+  queueName?: string
+  downloadUrl?: string
+  scriptArtifact?: AudioArtifactSummary
+  speakerArtifacts: AudioArtifactSummary[]
+  finalArtifact?: AudioArtifactSummary
+  audioRequestId?: string
+  workflowRunId?: string
+  schemaVersion?: number
+  syncedAt?: string
+  stale?: boolean
+  supersededBy?: string
+}
+
+export interface OutputMetadataLabels {
+  readiness?: Partial<Record<WatchlistReportReadinessState, string>>
+  audioStatus?: Partial<Record<AudioStatusLabelKey, string>>
+}
+
 const AUDIO_OUTPUT_FORMATS = new Set(["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus"])
+const REPORT_PRESETS = new Set<WatchlistReportPreset>([
+  "auto",
+  "cti_osint",
+  "news_briefing",
+  "general_research"
+])
+const READINESS_STATES = new Set<WatchlistReportReadinessState>([
+  "ready",
+  "warning",
+  "blocked",
+  "legacy_live_only"
+])
+const READINESS_WARNING_SEVERITIES = new Set<WatchlistReportReadinessWarningSeverity>([
+  "info",
+  "warning",
+  "blocking"
+])
 const OUTPUT_MIME_TYPES: Record<string, string> = {
   md: "text/markdown",
   html: "text/html",
@@ -23,6 +111,83 @@ const OUTPUT_MIME_TYPES: Record<string, string> = {
   flac: "audio/flac",
   opus: "audio/ogg"
 }
+const DEFAULT_READINESS_LABELS: Record<WatchlistReportReadinessState, string> = {
+  ready: READY_STATE_LABEL,
+  warning: "Needs review",
+  blocked: BLOCKED_STATE_LABEL,
+  legacy_live_only: "Live provenance only"
+}
+const DEFAULT_AUDIO_STATUS_LABELS: Record<AudioStatusLabelKey, string> = {
+  completed: "Completed",
+  ready: READY_STATE_LABEL,
+  fallback: "Fallback",
+  partial: "Partial",
+  queued: "Queued",
+  pending: "Pending",
+  running: "Running",
+  in_progress: "In progress",
+  failed: "Failed",
+  disabled: "Disabled",
+  skipped: "Skipped",
+  skipped_no_items: "Skipped: no items",
+  configuration_required: "Configuration required",
+  queue_unavailable: "Queue unavailable",
+  dead: "Dead",
+  cancelled: "Cancelled",
+  enqueue_failed: "Enqueue failed",
+  error: "Error",
+  unknown: "Unknown"
+}
+
+export const createOutputMetadataLabels = (
+  t: OutputMetadataTranslator
+): OutputMetadataLabels => ({
+  readiness: {
+    ready: t("watchlists:reports.readiness.ready", READY_STATE_LABEL),
+    warning: t("watchlists:reports.readiness.needsReview", DEFAULT_READINESS_LABELS.warning),
+    blocked: t("watchlists:reports.readiness.blocked", BLOCKED_STATE_LABEL),
+    legacy_live_only: t(
+      "watchlists:reports.readiness.legacyLiveOnly",
+      DEFAULT_READINESS_LABELS.legacy_live_only
+    )
+  },
+  audioStatus: {
+    completed: t("watchlists:outputs.audioStatus.completed", DEFAULT_AUDIO_STATUS_LABELS.completed),
+    ready: t("watchlists:outputs.audioStatus.ready", READY_STATE_LABEL),
+    fallback: t("watchlists:outputs.audioStatus.fallback", DEFAULT_AUDIO_STATUS_LABELS.fallback),
+    partial: t("watchlists:outputs.audioStatus.partial", DEFAULT_AUDIO_STATUS_LABELS.partial),
+    queued: t("watchlists:outputs.audioStatus.queued", DEFAULT_AUDIO_STATUS_LABELS.queued),
+    pending: t("watchlists:outputs.audioStatus.pending", DEFAULT_AUDIO_STATUS_LABELS.pending),
+    running: t("watchlists:outputs.audioStatus.running", DEFAULT_AUDIO_STATUS_LABELS.running),
+    in_progress: t(
+      "watchlists:outputs.audioStatus.inProgress",
+      DEFAULT_AUDIO_STATUS_LABELS.in_progress
+    ),
+    failed: t("watchlists:outputs.audioStatus.failed", DEFAULT_AUDIO_STATUS_LABELS.failed),
+    disabled: t("watchlists:outputs.audioStatus.disabled", DEFAULT_AUDIO_STATUS_LABELS.disabled),
+    skipped: t("watchlists:outputs.audioStatus.skipped", DEFAULT_AUDIO_STATUS_LABELS.skipped),
+    skipped_no_items: t(
+      "watchlists:outputs.audioStatus.skippedNoItems",
+      DEFAULT_AUDIO_STATUS_LABELS.skipped_no_items
+    ),
+    configuration_required: t(
+      "watchlists:outputs.audioStatus.configurationRequired",
+      DEFAULT_AUDIO_STATUS_LABELS.configuration_required
+    ),
+    queue_unavailable: t(
+      "watchlists:outputs.audioStatus.queueUnavailable",
+      DEFAULT_AUDIO_STATUS_LABELS.queue_unavailable
+    ),
+    dead: t("watchlists:outputs.audioStatus.dead", DEFAULT_AUDIO_STATUS_LABELS.dead),
+    cancelled: t("watchlists:outputs.audioStatus.cancelled", DEFAULT_AUDIO_STATUS_LABELS.cancelled),
+    enqueue_failed: t(
+      "watchlists:outputs.audioStatus.enqueueFailed",
+      DEFAULT_AUDIO_STATUS_LABELS.enqueue_failed
+    ),
+    error: t("watchlists:outputs.audioStatus.error", DEFAULT_AUDIO_STATUS_LABELS.error),
+    unknown: t("watchlists:outputs.audioStatus.unknown", DEFAULT_AUDIO_STATUS_LABELS.unknown)
+  }
+})
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -33,9 +198,53 @@ const asNonEmptyString = (value: unknown): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined
 }
 
+const asIdentifierString = (value: unknown): string | undefined => {
+  const fromString = asNonEmptyString(value)
+  if (fromString) return fromString
+  if (typeof value === "number" && Number.isFinite(value)) return String(value)
+  return undefined
+}
+
+const asKnownAudioStatus = (value: unknown): string | undefined => {
+  const status = asNonEmptyString(value)
+  const normalized = status?.toLowerCase()
+  if (!normalized || normalized === "unknown") return undefined
+  return normalized
+}
+
+const asSafeDownloadUrl = (value: unknown): string | undefined => {
+  const url = asNonEmptyString(value)
+  if (!url) return undefined
+  const lower = url.toLowerCase()
+  if (url.startsWith("/api/") || lower.startsWith("https://") || lower.startsWith("http://")) {
+    return url
+  }
+  return undefined
+}
+
+const getArtifactLocationDisplayName = (value: unknown): string | undefined => {
+  const location = asNonEmptyString(value)
+  if (!location) return undefined
+  const withoutFragment = location.split("#", 1)[0]
+  const withoutQuery = withoutFragment.split("?", 1)[0]
+  const withoutScheme = withoutQuery.replace(/^file:\/+/i, "")
+  const segments = withoutScheme.split(/[\\/]+/).filter(Boolean)
+  return segments.length > 0 ? segments[segments.length - 1] : undefined
+}
+
 const asPositiveInteger = (value: unknown): number | undefined => {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) return undefined
   return value
+}
+
+const asNonNegativeInteger = (value: unknown): number | undefined => {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value >= 0 ? value : undefined
+  }
+  const fromString = asNonEmptyString(value)
+  if (!fromString || !/^\d+$/.test(fromString)) return undefined
+  const parsed = Number.parseInt(fromString, 10)
+  return Number.isSafeInteger(parsed) ? parsed : undefined
 }
 
 const getMetadataRecord = (metadata: unknown): Record<string, unknown> | null =>
@@ -111,6 +320,119 @@ export const getOutputTemplateVersion = (metadata: unknown): number | undefined 
   const parsed = Number.parseInt(fromString, 10)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
 }
+
+const asReportPreset = (value: unknown): WatchlistReportPreset | undefined => {
+  const preset = asNonEmptyString(value)?.toLowerCase()
+  if (!preset) return undefined
+  return REPORT_PRESETS.has(preset as WatchlistReportPreset)
+    ? (preset as WatchlistReportPreset)
+    : undefined
+}
+
+const asReadinessState = (value: unknown): WatchlistReportReadinessState | undefined => {
+  const state = asNonEmptyString(value)?.toLowerCase()
+  if (!state) return undefined
+  return READINESS_STATES.has(state as WatchlistReportReadinessState)
+    ? (state as WatchlistReportReadinessState)
+    : undefined
+}
+
+const asReadinessWarningSeverity = (
+  value: unknown
+): WatchlistReportReadinessWarningSeverity => {
+  const severity = asNonEmptyString(value)?.toLowerCase()
+  if (severity && READINESS_WARNING_SEVERITIES.has(severity as WatchlistReportReadinessWarningSeverity)) {
+    return severity as WatchlistReportReadinessWarningSeverity
+  }
+  return "warning"
+}
+
+const normalizeAffectedItemIds = (value: unknown): number[] => {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => asNonNegativeInteger(item))
+    .filter((item): item is number => item != null)
+}
+
+const normalizeReadinessWarnings = (value: unknown): WatchlistReportReadinessWarning[] => {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry) => {
+      const record = getMetadataRecord(entry)
+      if (!record) return null
+      const code = asNonEmptyString(record.code)
+      const message = asNonEmptyString(record.message)
+      if (!code || !message) return null
+      return {
+        code,
+        severity: asReadinessWarningSeverity(record.severity),
+        message,
+        affected_item_ids: normalizeAffectedItemIds(record.affected_item_ids)
+      }
+    })
+    .filter((entry): entry is WatchlistReportReadinessWarning => entry !== null)
+}
+
+export const getOutputReportPreset = (metadata: unknown): WatchlistReportPreset => {
+  const record = getMetadataRecord(metadata)
+  return asReportPreset(record?.report_preset) || "general_research"
+}
+
+export const getOutputReportSnapshotAvailable = (metadata: unknown): boolean => {
+  const record = getMetadataRecord(metadata)
+  return Boolean(asNonEmptyString(record?.report_snapshot_path))
+}
+
+export const getOutputReportReadiness = (metadata: unknown): WatchlistReportReadiness => {
+  const record = getMetadataRecord(metadata)
+  const readiness = getMetadataRecord(record?.report_readiness)
+  const state = asReadinessState(readiness?.state)
+  if (!readiness || !state) {
+    return {
+      state: "legacy_live_only",
+      score: 0,
+      warnings: []
+    }
+  }
+  const score = asNonNegativeInteger(readiness.score)
+  return {
+    state,
+    score: Math.min(score ?? 0, 100),
+    warnings: normalizeReadinessWarnings(readiness.warnings)
+  }
+}
+
+const getOutputReportCount = (metadata: unknown, key: string): number => {
+  const record = getMetadataRecord(metadata)
+  return asNonNegativeInteger(record?.[key]) ?? 0
+}
+
+export const getIncludedItemCount = (metadata: unknown): number =>
+  getOutputReportCount(metadata, "included_item_count")
+
+export const getExcludedItemCount = (metadata: unknown): number =>
+  getOutputReportCount(metadata, "excluded_item_count")
+
+export const getSourceCount = (metadata: unknown): number =>
+  getOutputReportCount(metadata, "source_count")
+
+export const getAlertCount = (metadata: unknown): number =>
+  getOutputReportCount(metadata, "alert_count")
+
+export const getWeakEvidenceWarningCount = (metadata: unknown): number =>
+  getOutputReportCount(metadata, "weak_evidence_warning_count")
+
+export const getReadinessTagColor = (state: WatchlistReportReadinessState): string => {
+  if (state === "ready") return "green"
+  if (state === "warning") return "gold"
+  if (state === "blocked") return "red"
+  return "default"
+}
+
+export const getReadinessLabel = (
+  state: WatchlistReportReadinessState,
+  labels?: OutputMetadataLabels
+): string => labels?.readiness?.[state] ?? DEFAULT_READINESS_LABELS[state]
 
 const normalizeDelivery = (
   value: unknown,
@@ -198,9 +520,290 @@ export const getDeliveryStatusLabel = (status: string): string => {
   if (normalized === "queued") return "Queued"
   if (normalized === "pending") return "Pending"
   if (normalized === "in_progress") return "In progress"
+  if (normalized === "skipped") return "Skipped"
   if (normalized === "failed") return "Failed"
   if (normalized === "error") return "Error"
   return status
+}
+
+export const getAudioStatusColor = (status: string): string => {
+  const normalized = status.trim().toLowerCase()
+  if (normalized === "completed" || normalized === "ready") return "green"
+  if (normalized === "fallback" || normalized === "partial") return "gold"
+  if (
+    normalized === "queued" ||
+    normalized === "pending" ||
+    normalized === "running" ||
+    normalized === "in_progress"
+  ) {
+    return "blue"
+  }
+  if (
+    normalized === "skipped" ||
+    normalized === "disabled" ||
+    normalized === "skipped_no_items" ||
+    normalized === "cancelled"
+  ) {
+    return "default"
+  }
+  if (normalized === "configuration_required" || normalized === "queue_unavailable") return "gold"
+  if (normalized === "enqueue_failed") return "red"
+  if (normalized === "failed" || normalized === "error" || normalized === "dead") return "red"
+  return "default"
+}
+
+export const getAudioStatusLabel = (
+  status: string,
+  labels?: OutputMetadataLabels
+): string => {
+  const normalized = status.trim().toLowerCase()
+  if (normalized in DEFAULT_AUDIO_STATUS_LABELS) {
+    const labelKey = normalized as AudioStatusLabelKey
+    return labels?.audioStatus?.[labelKey] ?? DEFAULT_AUDIO_STATUS_LABELS[labelKey]
+  }
+  return status
+}
+
+const normalizeAudioArtifact = (
+  value: unknown,
+  fallbackLabel: string
+): AudioArtifactSummary | undefined => {
+  if (typeof value === "string") {
+    const rawLocation = asNonEmptyString(value)
+    if (!rawLocation) return undefined
+    const safeUri = asSafeDownloadUrl(rawLocation)
+    return {
+      label: fallbackLabel,
+      uri: safeUri,
+      displayName: getArtifactLocationDisplayName(rawLocation),
+      downloadUrl: safeUri
+    }
+  }
+
+  if (!isRecord(value)) return undefined
+
+  const label =
+    asNonEmptyString(value.title) ||
+    asNonEmptyString(value.label) ||
+    asNonEmptyString(value.name) ||
+    fallbackLabel
+  const uri =
+    asNonEmptyString(value.uri) ||
+    asNonEmptyString(value.audio_uri) ||
+    asNonEmptyString(value.storage_path) ||
+    asNonEmptyString(value.path)
+  const downloadUrl =
+    asSafeDownloadUrl(value.download_url) ||
+    asSafeDownloadUrl(value.downloadUrl) ||
+    asSafeDownloadUrl(uri)
+  const mimeType =
+    asNonEmptyString(value.mime_type) ||
+    asNonEmptyString(value.mimeType)
+  const speakerId =
+    asNonEmptyString(value.speaker_id) ||
+    asNonEmptyString(value.speakerId) ||
+    asNonEmptyString(value.id)
+
+  if (!uri && !downloadUrl && label === fallbackLabel) return undefined
+
+  return {
+    label,
+    uri: asSafeDownloadUrl(uri),
+    displayName: getArtifactLocationDisplayName(uri),
+    downloadUrl,
+    mimeType,
+    speakerId
+  }
+}
+
+const getAudioMetadataRecord = (metadata: unknown): Record<string, unknown> | null => {
+  const record = getMetadataRecord(metadata)
+  if (!record) return null
+  const nestedAudio = getMetadataRecord(record.audio)
+  if (nestedAudio) return nestedAudio
+  const nestedBriefing = getMetadataRecord(record.audio_briefing)
+  if (nestedBriefing) return nestedBriefing
+  const flatStatus = asNonEmptyString(record.audio_briefing_status)
+  const flatTaskId = asNonEmptyString(record.audio_briefing_task_id)
+  const flatError = asNonEmptyString(record.audio_briefing_error)
+  const flatReason = asNonEmptyString(record.audio_briefing_reason)
+  const flatRequestId = asIdentifierString(record.audio_request_id)
+  if (
+    record.audio_briefing_requested === true ||
+    flatStatus ||
+    flatTaskId ||
+    flatError ||
+    flatReason ||
+    flatRequestId
+  ) {
+    return {
+      status: flatStatus,
+      requested: record.audio_briefing_requested === true,
+      task_id: flatTaskId,
+      error: flatError,
+      fallback_reason: flatReason,
+      audio_request_id: flatRequestId
+    }
+  }
+  return record
+}
+
+export const getAudioStatusSummary = (
+  value: WatchlistRunAudioStatus | unknown,
+  labels?: OutputMetadataLabels
+): AudioStatusSummary => {
+  const record = getMetadataRecord(value)
+  const taskId =
+    asNonEmptyString(record?.task_id) ||
+    asNonEmptyString(record?.taskId) ||
+    asNonEmptyString(record?.audio_briefing_task_id)
+  const rawStatus =
+    asKnownAudioStatus(record?.audio_briefing_status) ||
+    asKnownAudioStatus(record?.audio_status) ||
+    asKnownAudioStatus(record?.status) ||
+    "unknown"
+  const status = rawStatus === "pending" && taskId ? "queued" : rawStatus
+  const scriptArtifact = normalizeAudioArtifact(
+    record?.script_artifact,
+    "Script"
+  )
+  const finalArtifact = normalizeAudioArtifact(
+    record?.final_artifact ?? record?.final_audio,
+    "Final audio"
+  )
+  const speakerArtifacts = Array.isArray(record?.speaker_artifacts)
+    ? record.speaker_artifacts
+        .map((entry, index) => normalizeAudioArtifact(entry, `Speaker ${index + 1}`))
+        .filter((entry): entry is AudioArtifactSummary => entry !== undefined)
+    : []
+  const downloadUrl =
+    asSafeDownloadUrl(record?.download_url) ||
+    finalArtifact?.downloadUrl ||
+    asSafeDownloadUrl(record?.audio_uri)
+  const fallbackReason =
+    asNonEmptyString(record?.fallback_reason) ||
+    asNonEmptyString(record?.fallbackReason) ||
+    asNonEmptyString(record?.reason) ||
+    asNonEmptyString(record?.audio_briefing_reason)
+  const error = asNonEmptyString(record?.error)
+  const queueName =
+    asNonEmptyString(record?.queue_name) ||
+    asNonEmptyString(record?.queueName)
+  const audioRequestId =
+    asIdentifierString(record?.audio_request_id) ||
+    asIdentifierString(record?.audioRequestId)
+  const workflowRunId =
+    asIdentifierString(record?.workflow_run_id) ||
+    asIdentifierString(record?.workflowRunId)
+  const schemaVersion =
+    asPositiveInteger(record?.schema_version) ||
+    asPositiveInteger(record?.schemaVersion)
+  const syncedAt =
+    asNonEmptyString(record?.synced_at) ||
+    asNonEmptyString(record?.syncedAt)
+  const stale = record?.stale === true
+  const supersededBy =
+    asIdentifierString(record?.superseded_by) ||
+    asIdentifierString(record?.supersededBy)
+  const explicitlyRequested = record?.requested === true || record?.audio_briefing_requested === true
+  const requested =
+    record !== null &&
+    (
+      explicitlyRequested ||
+      status !== "unknown" ||
+      Boolean(taskId) ||
+      Boolean(downloadUrl) ||
+      Boolean(scriptArtifact) ||
+      Boolean(finalArtifact) ||
+      speakerArtifacts.length > 0 ||
+      Boolean(fallbackReason) ||
+      Boolean(error) ||
+      Boolean(audioRequestId) ||
+      stale
+    )
+
+  return {
+    requested,
+    status,
+    statusLabel: getAudioStatusLabel(status, labels),
+    statusColor: getAudioStatusColor(status),
+    fallbackReason,
+    error,
+    taskId,
+    queueName,
+    downloadUrl,
+    scriptArtifact,
+    speakerArtifacts,
+    finalArtifact,
+    audioRequestId,
+    workflowRunId,
+    schemaVersion,
+    syncedAt,
+    stale,
+    supersededBy
+  }
+}
+
+export const getOutputAudioStatusSummary = (
+  metadata: unknown,
+  labels?: OutputMetadataLabels
+): AudioStatusSummary => {
+  return getAudioStatusSummary(getAudioMetadataRecord(metadata), labels)
+}
+
+export const getMergedOutputAudioStatusSummary = (
+  metadata: unknown,
+  liveStatus: WatchlistRunAudioStatus | null | undefined,
+  labels?: OutputMetadataLabels
+): AudioStatusSummary => {
+  const metadataSummary = getOutputAudioStatusSummary(metadata, labels)
+  const liveSummary = liveStatus ? getAudioStatusSummary(liveStatus, labels) : null
+  if (!liveSummary?.requested) return metadataSummary
+
+  const status = liveSummary.status !== "unknown" ? liveSummary.status : metadataSummary.status
+  const requestDiffers = Boolean(
+    liveSummary.audioRequestId &&
+      metadataSummary.audioRequestId &&
+      liveSummary.audioRequestId !== metadataSummary.audioRequestId
+  )
+  const liveHasArtifacts = Boolean(
+    liveSummary.downloadUrl ||
+      liveSummary.scriptArtifact ||
+      liveSummary.finalArtifact ||
+      liveSummary.speakerArtifacts.length > 0
+  )
+  const preferLiveArtifactState = requestDiffers || liveHasArtifacts
+  return {
+    requested: true,
+    status,
+    statusLabel: getAudioStatusLabel(status, labels),
+    statusColor: getAudioStatusColor(status),
+    fallbackReason: liveSummary.fallbackReason ?? metadataSummary.fallbackReason,
+    error: liveSummary.error ?? metadataSummary.error,
+    taskId: liveSummary.taskId ?? metadataSummary.taskId,
+    queueName: liveSummary.queueName ?? metadataSummary.queueName,
+    downloadUrl: preferLiveArtifactState
+      ? liveSummary.downloadUrl
+      : liveSummary.downloadUrl ?? metadataSummary.downloadUrl,
+    scriptArtifact: preferLiveArtifactState
+      ? liveSummary.scriptArtifact
+      : liveSummary.scriptArtifact ?? metadataSummary.scriptArtifact,
+    speakerArtifacts:
+      preferLiveArtifactState || liveSummary.speakerArtifacts.length > 0
+        ? liveSummary.speakerArtifacts
+        : metadataSummary.speakerArtifacts,
+    finalArtifact: preferLiveArtifactState
+      ? liveSummary.finalArtifact
+      : liveSummary.finalArtifact ?? metadataSummary.finalArtifact,
+    audioRequestId: liveSummary.audioRequestId ?? metadataSummary.audioRequestId,
+    workflowRunId: liveSummary.workflowRunId ?? metadataSummary.workflowRunId,
+    schemaVersion: liveSummary.schemaVersion ?? metadataSummary.schemaVersion,
+    syncedAt: liveSummary.syncedAt ?? metadataSummary.syncedAt,
+    stale: requestDiffers ? liveSummary.stale ?? false : liveSummary.stale ?? metadataSummary.stale,
+    supersededBy: requestDiffers
+      ? liveSummary.supersededBy
+      : liveSummary.supersededBy ?? metadataSummary.supersededBy
+  }
 }
 
 interface BuildRegenerateOptions {

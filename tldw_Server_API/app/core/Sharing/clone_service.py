@@ -16,6 +16,14 @@ from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 
+def _safe_exception_type(exc: BaseException) -> str:
+    """Return a log-safe exception type label without exception details."""
+    exc_type = exc.__class__.__name__
+    if exc_type and all(char.isalnum() or char == "_" for char in exc_type):
+        return exc_type
+    return "Exception"
+
+
 class CloneService:
     """
     Deep-copies a workspace from the owner's DBs into the cloner's DBs.
@@ -90,9 +98,7 @@ class CloneService:
                     media_id_map[old_media_id] = new_media_id
                 else:
                     # Media copy failed — skip this source to avoid dangling references
-                    logger.warning(
-                        f"Skipping source {source.get('id')}: media {old_media_id} could not be copied"
-                    )
+                    logger.warning("Skipping workspace source because media copy failed")
                     if total_sources > 0:
                         _progress("copying_sources", 0.1 + 0.5 * ((i + 1) / total_sources))
                     continue
@@ -108,7 +114,9 @@ class CloneService:
             try:
                 self._tgt_chacha.add_workspace_source(new_ws_id, source_data)
             except Exception as exc:
-                logger.warning(f"Failed to copy source {source.get('id')}: {exc}")
+                logger.warning(
+                    f"Failed to copy workspace source; exception_type={_safe_exception_type(exc)}"
+                )
 
             if total_sources > 0:
                 _progress("copying_sources", 0.1 + 0.5 * ((i + 1) / total_sources))
@@ -123,7 +131,9 @@ class CloneService:
             try:
                 self._tgt_chacha.add_workspace_note(new_ws_id, note_data)
             except Exception as exc:
-                logger.warning(f"Failed to copy note: {exc}")
+                logger.warning(
+                    f"Failed to copy workspace note; exception_type={_safe_exception_type(exc)}"
+                )
         _progress("notes_copied", 0.8)
 
         # 5. Copy artifacts
@@ -138,7 +148,9 @@ class CloneService:
             try:
                 self._tgt_chacha.add_workspace_artifact(new_ws_id, artifact_data)
             except Exception as exc:
-                logger.warning(f"Failed to copy artifact: {exc}")
+                logger.warning(
+                    f"Failed to copy workspace artifact; exception_type={_safe_exception_type(exc)}"
+                )
         _progress("artifacts_copied", 0.9)
 
         _progress("complete", 1.0)
@@ -190,7 +202,7 @@ class CloneService:
             # result is (media_id: int|None, media_uuid: str|None, status_message: str)
             new_media_id = result[0]
             if new_media_id is None:
-                logger.warning(f"add_media_with_keywords returned None id for source {media_id}")
+                logger.warning("Target media insert returned no media id during clone")
                 return None
 
             # Deep copy transcripts
@@ -202,7 +214,9 @@ class CloneService:
                         int(source_latest_run_id) if source_latest_run_id is not None else None
                     )
                 except (TypeError, ValueError):
-                    logger.debug(f"Malformed latest_transcription_run_id={source_latest_run_id!r}, treating as None")
+                    logger.debug(
+                        "Malformed latest_transcription_run_id while cloning media; treating as None"
+                    )
                     source_latest_run_id_int = None
                 def _safe_int(val: object, default: int = 0) -> int:
                     try:
@@ -255,10 +269,12 @@ class CloneService:
                         idempotency_key=t.get("idempotency_key"),
                         set_as_latest=is_latest_run,
                     )
-            except Exception as exc:
-                logger.warning(f"Failed to copy transcripts for media {media_id}: {exc}")
+            except Exception:
+                logger.warning("Failed to copy transcripts for cloned media")
 
             return str(new_media_id)
         except Exception as exc:
-            logger.warning(f"Failed to copy media {media_id}: {exc}")
+            logger.warning(
+                f"Failed to copy media item; exception_type={_safe_exception_type(exc)}"
+            )
             return None

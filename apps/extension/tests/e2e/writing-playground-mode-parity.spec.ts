@@ -214,6 +214,10 @@ test.describe("Writing Playground mode parity", () => {
     try {
       await createUniqueSessionForTest(page, "E2E Writing Mode")
 
+      await expect(page.getByTestId("writing-revision-action-bar")).toBeVisible()
+      await expect(page.getByTestId("writing-revision-queue")).toBeVisible()
+      await expect(page.getByTestId("writing-status-word-count")).toBeVisible()
+
       const modeSwitch = page.getByTestId("writing-workspace-mode-switch")
       const draftRadio = modeSwitch.getByRole("radio", { name: /^Draft$/i })
       const manageRadio = modeSwitch.getByRole("radio", { name: /^Manage$/i })

@@ -189,7 +189,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Publishe
 - Audiobooks: parse + chapter detection, per-chapter voice settings, optional TTS provider overrides (alignment/subtitles Kokoro-only), and M4B packaging (API-only).
 - Search & retrieval (RAG): hybrid BM25 + vector (ChromaDB/pgvector), re-ranking, contextual retrieval, OpenAI-compatible embeddings, vector stores API, and media embeddings ingestion. 50+ optional parameters available for tuning.
 - Chat & providers: `/api/v1/chat/completions` (OpenAI-compatible), 16+ providers (commercial + self-hosted), character chat, budgets/allowlists, moderation endpoint.
-- Knowledge management: notes, prompt library, character cards, soft-delete with recovery, Chatbooks import/export, flashcards (.apkg), reading items/highlights.
+- Knowledge management: notes, prompt library, character cards, soft-delete with recovery, Chatbooks import/export including OpenWebUI chat JSON migration, OpenWebUI webui.db migration, and post-import attachment hydration, flashcards (.apkg), reading items/highlights.
 - Prompt Studio & evaluations: projects, prompt testing/optimization, unified evaluation APIs (G-Eval, RAG, OCR, embeddings A/B tests, batch metrics). Full evaluations and prompt management.
 - Research & web scraping: multi-provider web search, academic paper search (arXiv/PubMed/etc.), scraping jobs with cookies/progress, aggregation/final answers.
 - Connectors: Google Drive + Notion OAuth import; connector policies/quotas.
@@ -318,12 +318,21 @@ make verify-local-single
 Use these paths when `make` is not available.
 
 Local single-user:
-- Follow [Manual Setup](#manual-setup) below, then start with `python -m uvicorn tldw_Server_API.app.main:app --reload`.
+- Shortcut scripts from the repository root:
+  - macOS/Linux terminal: `./quick-launch.sh [api|webui|all]`
+  - macOS Finder: double-click `quick-launch.command` for the default `all` mode.
+  - Windows PowerShell: `.\quick-launch.ps1 [api|webui|all]`
+- These scripts create or update `.venv`, run the `local-single` setup wizard when the API is started, and default to `all`: API at `http://127.0.0.1:8000` plus WebUI at `http://127.0.0.1:8080`.
+- Use `api` for backend-only startup or `webui` when the API is already running.
+- For manual control, follow [Manual Setup](#manual-setup) below, then start with `python -m uvicorn tldw_Server_API.app.main:app --reload`.
 
 Docker single-user + WebUI:
 ```powershell
 # from repo root
 if (!(Test-Path "tldw_Server_API/Config_Files/.env")) { Copy-Item "tldw_Server_API/Config_Files/.env.example" "tldw_Server_API/Config_Files/.env" }
+# For non-localhost browser access, uncomment both advanced/custom-host overrides:
+# $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="advanced"
+# $env:NEXT_PUBLIC_API_URL="http://YOUR_HOST_OR_DOMAIN:8000"
 docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --build
 curl http://localhost:8000/health
 ```
@@ -461,6 +470,16 @@ See [MCP System Admin Guide](Docs/MCP/Unified/System_Admin_Guide.md) for details
 | Develop the WebUI or browser extension | [Extension & Web UI Development Guide](apps/DEVELOPMENT.md) |
 
 ### Local Profile: Add the WebUI
+
+The repo-root quick-launch scripts start the local API and WebUI together by default:
+
+```bash
+./quick-launch.sh all
+```
+
+```powershell
+.\quick-launch.ps1 all
+```
 
 If you already completed the [Local Single-User Profile](Docs/Getting_Started/Profile_Local_Single_User.md) and your API is running at `http://127.0.0.1:8000`, this is the shortest add-on path:
 
@@ -639,6 +658,9 @@ docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --bui
 docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.dev.yml up -d --build
 
 # WebUI overlay with single-user profile (Next.js container on :8080)
+# PowerShell advanced/custom-host browser access:
+# $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="advanced"
+# $env:NEXT_PUBLIC_API_URL="http://YOUR_HOST_OR_DOMAIN:8000"
 docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --build
 
 # Check status
@@ -889,7 +911,8 @@ Examples
 │   ├── cli/                      # CLI entry points
 │   ├── Config_Files/             # config.txt, example YAMLs, migration helpers
 │   ├── Databases/                # Default DBs (runtime data; some are gitignored)
-│   └── tests/                    # Pytest suite
+│   ├── tests/                    # Pytest suite
+│   └── requirements.txt          # Legacy pin set (prefer pyproject extras)
 ├── admin-ui/                     # Admin dashboard
 ├── apps/tldw-frontend/                # Next.js WebUI (primary web client)
 ├── Docs/                         # Documentation (API, Development, RAG, AuthNZ, TTS, etc.)
@@ -1136,8 +1159,10 @@ Some self-hosted OpenAI-compatible servers reject unknown fields (like `top_k`).
 
 ### Chatbook Tools Guide
 
+- User guide: `Docs/User_Guides/WebUI_Extension/Chatbook_User_Guide.md` covers Chatbook backup/restore, OpenWebUI "Export Chats" JSON import, OpenWebUI `webui.db` database import, and post-import OpenWebUI attachment hydration for restoring referenced images/files from a server-local data root.
 - Getting started: `Docs/User_Guides/WebUI_Extension/Chatbook_Tools_Getting_Started.md`
 - Product spec (PRD): `Docs/Product/Completed/Chatbook-Tools-PRD.md`
+- API reference: `Docs/API-related/Chatbook_API_Documentation.md`
 - Related endpoints (also listed above under Key Endpoints):
   - `GET /api/v1/chat/commands` — list slash commands (RBAC-filtered when enabled; returns empty list when disabled)
   - `POST /api/v1/chat/dictionaries/validate` — validate chat dictionaries (schema, regex, templates)

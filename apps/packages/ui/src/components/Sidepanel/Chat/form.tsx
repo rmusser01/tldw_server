@@ -31,7 +31,8 @@ import {
   FileText,
   Globe,
   Headphones,
-  Settings2
+  Settings2,
+  UserCircle2
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { getVariable } from "@/utils/select-variable"
@@ -103,6 +104,10 @@ import { useSetting } from "@/hooks/useSetting"
 import { useFocusComposerOnConnect } from "@/hooks/useComposerFocus"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+import {
+  createQuickIngestSessionSeedFromOpenDetail,
+  type QuickIngestOpenDetail
+} from "@/utils/quick-ingest-open"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import { shallow } from "zustand/shallow"
@@ -114,11 +119,15 @@ import { formatFileSize } from "@/utils/format"
 import { formatPinnedResults } from "@/utils/rag-format"
 import { createRenderPerfTracker } from "@/utils/perf/render-profiler"
 import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
+import { useConversationContextComposition } from "@/hooks/chat/useConversationContextComposition"
+import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import {
   buildAvailableChatModelIds,
   findUnavailableChatModel,
   normalizeChatModelId
 } from "@/utils/chat-model-availability"
+import { createSafeStorage } from "@/utils/safe-storage"
 import {
   DEFAULT_CHARACTER_STORAGE_KEY,
   defaultCharacterStorage,
@@ -137,6 +146,10 @@ import { browser } from "wxt/browser"
 import type { Character } from "@/types/character"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
 import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker"
+import { CharacterControlsSheet } from "@/components/Sidepanel/Chat/CharacterControlsSheet"
+import { getSidepanelOverlayResumeMarkerKey } from "@/utils/sidepanel-overlay-resume"
+import type { SidepanelChatHandoffPageContext } from "@/services/sidepanel-chat-handoff"
+import { buildVisibleDocumentHandoffSnippetText } from "./sidepanel-chat-handoff-context"
 
 type Props = {
   dropedFile: File | undefined
@@ -176,6 +189,8 @@ export const SidepanelForm = ({
     shouldEnableOptionalResource(state, "audio-health")
   )
   const [typing, setTyping] = React.useState<boolean>(false)
+  const [characterControlsOpen, setCharacterControlsOpen] =
+    React.useState(false)
   const { t } = useTranslation(["playground", "common", "option", "sidepanel"])
   const notification = useAntdNotification()
   const [chatWithWebsiteEmbedding] = useStorage(
@@ -485,12 +500,14 @@ export const SidepanelForm = ({
   const {
     quickIngestSession,
     createDraftQuickIngestSession,
+    upsertQuickIngestSession,
     showQuickIngestSession,
     hideQuickIngestSession
   } = useQuickIngestSessionStore(
     (state) => ({
       quickIngestSession: state.session,
       createDraftQuickIngestSession: state.createDraftSession,
+      upsertQuickIngestSession: state.upsertSession,
       showQuickIngestSession: state.showSession,
       hideQuickIngestSession: state.hideSession
     }),
@@ -668,6 +685,7 @@ export const SidepanelForm = ({
     toolChoice,
     setToolChoice,
     historyId,
+    history,
     chatLoopState = {
       status: "idle",
       pendingApprovals: [],
@@ -679,9 +697,76 @@ export const SidepanelForm = ({
     setQueuedMessages,
     serverChatId
   } = useMessage()
+  const serverChatAssistantKind = useStoreMessageOption(
+    (state) => state.serverChatAssistantKind
+  )
+  const serverChatAssistantId = useStoreMessageOption(
+    (state) => state.serverChatAssistantId
+  )
+  const serverChatCharacterId = useStoreMessageOption(
+    (state) => state.serverChatCharacterId
+  )
+  const { settings: conversationContextSettings, updateSettings } =
+    useChatSettingsRecord({
+      historyId,
+      serverChatId
+    })
+  const effectiveAssistantState = React.useMemo(
+    () =>
+      resolveEffectiveAssistantState({
+        tracked: {
+          assistantKind: serverChatAssistantKind,
+          assistantId: serverChatAssistantId,
+          characterId: serverChatCharacterId
+        },
+        settings: conversationContextSettings ?? null
+      }),
+    [
+      conversationContextSettings,
+      serverChatAssistantId,
+      serverChatAssistantKind,
+      serverChatCharacterId
+    ]
+  )
+  const sidepanelOverlayResumeStorageRef = React.useRef(
+    createSafeStorage({ area: "local" })
+  )
+  const overlayResumeMarkerKey = React.useMemo(
+    () => getSidepanelOverlayResumeMarkerKey(storageKey),
+    [storageKey]
+  )
+  const handlePrepareTrackedStart = React.useCallback(async () => {
+    if (!overlayResumeMarkerKey) return
+    try {
+      await sidepanelOverlayResumeStorageRef.current.remove(overlayResumeMarkerKey)
+    } catch {
+      // no-op
+    }
+  }, [overlayResumeMarkerKey])
   const previousServerChatIdRef = React.useRef<string | null | undefined>(
     serverChatId
   )
+
+  React.useEffect(() => {
+    if (!overlayResumeMarkerKey) return
+
+    const storage = sidepanelOverlayResumeStorageRef.current
+    const syncOverlayResumeMarker = async () => {
+      try {
+        if (effectiveAssistantState.mode === "overlay") {
+          await storage.set(overlayResumeMarkerKey, {
+            updatedAt: new Date().toISOString()
+          })
+          return
+        }
+        await storage.remove(overlayResumeMarkerKey)
+      } catch {
+        // no-op
+      }
+    }
+
+    void syncOverlayResumeMarker()
+  }, [effectiveAssistantState.mode, overlayResumeMarkerKey])
 
   React.useEffect(() => {
     const previous = previousServerChatIdRef.current
@@ -715,6 +800,55 @@ export const SidepanelForm = ({
         .join(" ")
     : ""
   const pageContextActive = chatMode === "rag" && chatWithWebsiteEmbedding
+  const getVisiblePageContextForHandoff = React.useCallback(async (): Promise<
+    SidepanelChatHandoffPageContext | undefined
+  > => {
+    const snippets = selectedDocuments.map((doc) => ({
+      kind: "visible-context" as const,
+      label: doc.title,
+      text: buildVisibleDocumentHandoffSnippetText(doc)
+    }))
+
+    let activePage:
+      | {
+          title?: string
+          url?: string
+        }
+      | undefined
+
+    if (pageContextActive) {
+      try {
+        const tabs = await browser.tabs.query({
+          active: true,
+          currentWindow: true
+        })
+        const activeTab = tabs.find((tab) => tab.title || tab.url)
+        activePage = {
+          title:
+            typeof activeTab?.title === "string" &&
+            activeTab.title.trim().length > 0
+              ? activeTab.title
+              : undefined,
+          url:
+            typeof activeTab?.url === "string" && activeTab.url.trim().length > 0
+              ? activeTab.url
+              : undefined
+        }
+      } catch {
+        activePage = undefined
+      }
+    }
+
+    if (!activePage?.title && !activePage?.url && snippets.length === 0) {
+      return undefined
+    }
+
+    return {
+      ...(activePage?.title ? { title: activePage.title } : {}),
+      ...(activePage?.url ? { url: activePage.url } : {}),
+      snippets
+    }
+  }, [pageContextActive, selectedDocuments])
   const contextChips = [
     ...(replyTarget && isProMode
       ? [
@@ -880,12 +1014,16 @@ export const SidepanelForm = ({
     browserSupportsSpeechRecognition || hasServerStt || hasServerVoiceChat
 
   // Composer window events hook
-  const handleOpenQuickIngest = React.useCallback(() => {
+  const handleOpenQuickIngest = React.useCallback((detail?: QuickIngestOpenDetail) => {
+    const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
     setAutoProcessQueuedIngest(false)
     if (quickIngestSession) {
+      if (seed) {
+        upsertQuickIngestSession(seed)
+      }
       showQuickIngestSession()
     } else {
-      createDraftQuickIngestSession()
+      createDraftQuickIngestSession(seed ?? undefined)
     }
     setIngestOpen(true)
     requestAnimationFrame(() => {
@@ -894,7 +1032,8 @@ export const SidepanelForm = ({
   }, [
     createDraftQuickIngestSession,
     quickIngestSession,
-    showQuickIngestSession
+    showQuickIngestSession,
+    upsertQuickIngestSession
   ])
 
   const {
@@ -1065,6 +1204,19 @@ export const SidepanelForm = ({
     setStoredCharacter,
     storedCharacterId
   ])
+
+  const conversationContextComposition = useConversationContextComposition({
+    draftMessage: form.values.message,
+    selection: {
+      chatId: serverChatId ?? undefined,
+      characterId: selectedCharacterId,
+      worldBookIds: [],
+      dictionaryIds: []
+    },
+    settings: conversationContextSettings,
+    debounceMs: 250,
+    updateSettings
+  })
 
   const {
     filteredSlashCommands,
@@ -1546,6 +1698,12 @@ export const SidepanelForm = ({
         return
       }
     }
+    const contextSend = intent.isImageCommand
+      ? null
+      : await conversationContextComposition.composeForSend({
+          message: trimmed,
+          history
+        })
     await submitDispatch(
       {
         image: intent.isImageCommand ? "" : image,
@@ -1562,7 +1720,8 @@ export const SidepanelForm = ({
         uploadedFiles: intent.isImageCommand ? [] : contextFiles,
         imageBackendOverride: intent.isImageCommand
           ? intent.imageBackendOverride
-          : undefined
+          : undefined,
+        requestOverrides: contextSend?.requestOverrides
       },
       {
         beforeSend: () => {
@@ -1964,18 +2123,23 @@ export const SidepanelForm = ({
     window.dispatchEvent(new CustomEvent("tldw:toggle-rag"))
   }, [])
 
-  const handleQuickIngestOpen = React.useCallback(() => {
+  const handleQuickIngestOpen = React.useCallback((detail?: QuickIngestOpenDetail) => {
+    const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
     setAutoProcessQueuedIngest(false)
     if (quickIngestSession) {
+      if (seed) {
+        upsertQuickIngestSession(seed)
+      }
       showQuickIngestSession()
     } else {
-      createDraftQuickIngestSession()
+      createDraftQuickIngestSession(seed ?? undefined)
     }
     setIngestOpen(true)
   }, [
     createDraftQuickIngestSession,
     quickIngestSession,
-    showQuickIngestSession
+    showQuickIngestSession,
+    upsertQuickIngestSession
   ])
 
   const handleProcessQueuedIngest = React.useCallback(() => {
@@ -2584,13 +2748,13 @@ export const SidepanelForm = ({
     <React.Profiler id="sidepanel-form-root" onRender={onComposerRenderProfile}>
       <div
         ref={formContainerRef}
-        className={`flex w-full flex-col items-center ${composerPadding}`}>
+        className={`flex w-full min-w-0 flex-col items-center ${composerPadding}`}>
       <div
-        className={`relative z-10 flex w-full flex-col items-center justify-center ${composerGap} text-body`}>
-        <div className="relative flex w-full flex-row justify-center gap-2">
+        className={`relative z-10 flex w-full min-w-0 flex-col items-center justify-center ${composerGap} text-body`}>
+        <div className="relative flex w-full min-w-0 flex-row justify-center gap-2">
           <div
             aria-disabled={!isConnectionReady}
-            className={`relative w-full max-w-[64rem] rounded-3xl border border-border/80 bg-surface/95 shadow-card backdrop-blur-lg duration-100 ${cardPadding}`}>
+            className={`relative w-full min-w-0 max-w-[64rem] rounded-3xl border border-border/80 bg-surface/95 shadow-card backdrop-blur-lg duration-100 ${cardPadding}`}>
             <div>
               {/* Inline Model Parameters Panel (Pro mode only) */}
               {wrapComposerProfile(
@@ -2606,7 +2770,8 @@ export const SidepanelForm = ({
                     event.preventDefault()
                     void submitForm()
                   }}
-                  className="shrink-0 flex-grow  flex flex-col items-center ">
+                  className="min-w-0 flex-1 flex flex-col items-center"
+                >
                   <input
                     id="file-upload"
                     name="file-upload"
@@ -2633,7 +2798,7 @@ export const SidepanelForm = ({
                     onChange={handleContextFileChange}
                   />
                   <div
-                    className={`w-full flex flex-col px-1 ${
+                    className={`flex w-full min-w-0 flex-col px-1 ${
                       !isConnectionReady
                         ? "rounded-md border border-dashed border-warn bg-warn/10"
                         : ""
@@ -2705,10 +2870,10 @@ export const SidepanelForm = ({
                     )}
                     {(() => {
                       const composerTextareaShellNode = (
-                        <div className="relative">
+                        <div className="relative min-w-0">
                       {wrapComposerProfile(
                         "sidepanel-textarea-shell",
-                        <div className="relative rounded-2xl border border-border/70 bg-surface/80 px-1 py-1.5 transition focus-within:border-focus/60 focus-within:ring-2 focus-within:ring-focus/30">
+                        <div className="relative min-w-0 rounded-2xl border border-border/70 bg-surface/80 px-1 py-1.5 transition focus-within:border-focus/60 focus-within:ring-2 focus-within:ring-focus/30">
                           <SlashCommandMenu
                             open={showSlashMenu}
                             commands={filteredSlashCommands}
@@ -2851,7 +3016,7 @@ export const SidepanelForm = ({
                       )
 
                       const composerControlAreaNode = (
-                        <div className="mt-2 flex flex-col gap-2">
+                        <div className="mt-2 flex min-w-0 flex-col gap-2">
                       <Tooltip title={persistenceTooltip}>
                         <div className="flex items-center gap-2">
                           <Switch
@@ -2868,7 +3033,7 @@ export const SidepanelForm = ({
                           </span>
                         </div>
                       </Tooltip>
-                      <div className="flex w-full flex-row items-center justify-between gap-1.5">
+                      <div className="flex w-full min-w-0 flex-row flex-wrap items-center justify-between gap-1.5">
                       {isProMode ? (
                         <>
                           {/* Control Row - contains Prompt, Model, RAG, and More tools */}
@@ -2880,6 +3045,16 @@ export const SidepanelForm = ({
                               setSelectedQuickPrompt={setSelectedQuickPrompt}
                               selectedCharacterId={selectedCharacterId}
                               setSelectedCharacterId={setSelectedCharacterId}
+                              serverChatId={serverChatId}
+                              conversationContextComposition={
+                                conversationContextComposition.composition
+                              }
+                              conversationContextStatus={
+                                conversationContextComposition.status
+                              }
+                              conversationContextSaveSelection={
+                                conversationContextComposition.saveSelection
+                              }
                               webSearch={webSearch}
                               setWebSearch={setWebSearch}
                               chatMode={chatMode}
@@ -2892,20 +3067,47 @@ export const SidepanelForm = ({
                               chatLoopStatus={chatLoopState.status}
                               pendingApprovalsCount={chatLoopState.pendingApprovals.length}
                               runningToolCount={chatLoopState.inflightToolCallIds.length}
+                              draftMessage={form.values.message}
+                              hasVisiblePageContextForHandoff={
+                                pageContextActive || selectedDocuments.length > 0
+                              }
+                              getVisiblePageContextForHandoff={
+                                getVisiblePageContextForHandoff
+                              }
                             />
                           )}
-                          <div className="flex flex-wrap items-center justify-end gap-2">
+                          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
                             <div
                               role="group"
                               aria-label={t(
                                 "playground:composer.actions",
                                 "Send options"
                               )}
-                              className="flex items-center gap-2">
+                              className="flex min-w-0 flex-wrap items-center gap-2">
                               {/* L15: gap-2 provides visual separation */}
                               <>
                                 {!streaming ? (
                                   <>
+                                    <Tooltip
+                                      title={t("playground:actions.upload", "Attach image")}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={openUploadDialog}
+                                        data-testid="chat-upload-image-inline"
+                                        className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                                        aria-label={t(
+                                          "playground:actions.upload",
+                                          "Attach image"
+                                        )}
+                                        title={t(
+                                          "playground:actions.upload",
+                                          "Attach image"
+                                        )}
+                                      >
+                                        <ImageIcon className="h-4 w-4" />
+                                      </button>
+                                    </Tooltip>
                                     <div className="flex items-center gap-1">
                                       <Tooltip
                                         title={
@@ -3000,6 +3202,27 @@ export const SidepanelForm = ({
                                         </button>
                                       </Tooltip>
                                     )}
+                                    <Tooltip
+                                      title={t(
+                                        "playground:characterRail.title",
+                                        "Character controls"
+                                      )}
+                                    >
+                                      <button
+                                        type="button"
+                                        data-testid="chat-character-controls-trigger"
+                                        onClick={() =>
+                                          setCharacterControlsOpen(true)
+                                        }
+                                        className="inline-flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                                        aria-label={t(
+                                          "playground:characterRail.title",
+                                          "Character controls"
+                                        )}
+                                      >
+                                        <UserCircle2 className="h-4 w-4" />
+                                      </button>
+                                    </Tooltip>
                                   </>
                                 ) : (
                                   <Tooltip title={t("tooltip.stopStreaming")}>
@@ -3131,13 +3354,13 @@ export const SidepanelForm = ({
                                       aria-label={
                                         t(
                                           "playground:composer.sendOptions",
-                                          "Open send options"
+                                          "Open message delivery options"
                                         ) as string
                                       }
                                       title={
                                         t(
                                           "playground:composer.sendOptions",
-                                          "Open send options"
+                                          "Open message delivery options"
                                         ) as string
                                       }
                                       className="inline-flex min-h-[44px] items-center rounded-r-md border border-l-0 border-border bg-surface px-2 text-text transition-colors hover:bg-surface2"
@@ -3319,6 +3542,32 @@ export const SidepanelForm = ({
                                   </Tooltip>
                                   <span className="text-[10px] font-medium leading-none text-text-subtle">
                                     {t("playground:actions.speechShort", "Dictate")}
+                                  </span>
+                                </div>
+                                <div className="flex flex-col items-center gap-1">
+                                  <Tooltip
+                                    title={t(
+                                      "playground:characterRail.title",
+                                      "Character controls"
+                                    )}
+                                  >
+                                    <button
+                                      type="button"
+                                      data-testid="chat-character-controls-trigger"
+                                      onClick={() =>
+                                        setCharacterControlsOpen(true)
+                                      }
+                                      className="h-11 w-11 min-h-[44px] min-w-[44px] rounded-full border border-border p-0 text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                                      aria-label={t(
+                                        "playground:characterRail.title",
+                                        "Character controls"
+                                      )}
+                                    >
+                                      <UserCircle2 className="h-4 w-4" />
+                                    </button>
+                                  </Tooltip>
+                                  <span className="text-[10px] font-medium leading-none text-text-subtle">
+                                    {t("playground:characterRail.shortLabel", "Character")}
                                   </span>
                                 </div>
                               </div>
@@ -3515,6 +3764,18 @@ export const SidepanelForm = ({
       {openActorSettings && (
         <ActorPopout open={openActorSettings} setOpen={setOpenActorSettings} />
       )}
+      <Modal
+        open={characterControlsOpen}
+        onCancel={() => setCharacterControlsOpen(false)}
+        footer={null}
+        title={t("playground:characterRail.title", "Character controls")}
+        centered
+      >
+        <CharacterControlsSheet
+          beforeTrackedStart={handlePrepareTrackedStart}
+          onRequestClose={() => setCharacterControlsOpen(false)}
+        />
+      </Modal>
       {documentGeneratorOpen && (
         <DocumentGeneratorDrawer
           open={documentGeneratorOpen}

@@ -52,6 +52,7 @@ const decks: Deck[] = [
     client_id: "test",
     version: 1,
     scheduler_type: "sm2_plus",
+    review_prompt_side: "front",
     scheduler_settings: DEFAULT_SCHEDULER_SETTINGS_ENVELOPE
   }
 ]
@@ -59,6 +60,54 @@ const decks: Deck[] = [
 describe("FlashcardDocumentRow", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it("renders row metadata chips with design-system badges", () => {
+    render(
+      <FlashcardDocumentRow
+        card={makeFlashcard({
+          reverse: true,
+          tags: ["bio", "exam"],
+          source_ref_type: "media",
+          source_ref_id: "42"
+        })}
+        decks={decks}
+        selected={false}
+        selectAllAcross={false}
+        filterContext={{
+          deckId: 1,
+          tags: ["bio"],
+          sortBy: "due",
+          dueStatus: "all"
+        }}
+        queryKey={["flashcards:document", 1]}
+        onToggleSelect={() => {}}
+        bulkUpdate={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByText("Reversible").closest('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("New").closest('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
+    expect(
+      screen
+        .getAllByText("Biology")
+        .some((node) => node.closest('[data-ds-component="Badge"]'))
+    ).toBe(true)
+    expect(
+      screen
+        .getAllByText("bio")
+        .some((node) => node.closest('[data-ds-component="Badge"]'))
+    ).toBe(true)
+    expect(
+      screen.getByText("exam").closest('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("Media #42").closest('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
   })
 
   it("queues overlapping row edits and sends the second patch after the first succeeds", async () => {
@@ -209,7 +258,8 @@ describe("FlashcardDocumentRow", () => {
     fireEvent.change(notesInput, { target: { value: "" } })
     fireEvent.blur(notesInput)
 
-    await screen.findByTestId("flashcards-document-row-conflict-row-1")
+    const conflictAlert = await screen.findByTestId("flashcards-document-row-conflict-row-1")
+    expect(conflictAlert).toHaveAttribute("data-ds-component", "Alert")
     fireEvent.click(screen.getByRole("button", { name: /reapply my edit/i }))
 
     await waitFor(() => {
@@ -272,7 +322,8 @@ describe("FlashcardDocumentRow", () => {
     fireEvent.change(frontInput, { target: { value: "Edited front" } })
     fireEvent.blur(frontInput)
 
-    await screen.findByTestId("flashcards-document-row-conflict-row-1")
+    const conflictAlert = await screen.findByTestId("flashcards-document-row-conflict-row-1")
+    expect(conflictAlert).toHaveAttribute("data-ds-component", "Alert")
     fireEvent.click(screen.getByRole("button", { name: /reload row/i }))
 
     await waitFor(() => {

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from loguru import logger
 
@@ -102,6 +103,7 @@ CREATE TABLE IF NOT EXISTS workflows (
         idempotency_key TEXT,
         session_id TEXT,
         validation_mode TEXT DEFAULT 'block',
+        metadata_json TEXT,
         tokens_input INTEGER,
         tokens_output INTEGER,
         cost_usd DOUBLE PRECISION,
@@ -138,6 +140,26 @@ CREATE TABLE IF NOT EXISTS workflow_step_runs (
     stdout_path TEXT,
     stderr_path TEXT,
     FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS workflow_step_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    step_run_id TEXT NOT NULL,
+    step_id TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    reason_code_core TEXT,
+    reason_code_detail TEXT,
+    retryable BOOLEAN,
+    error_summary TEXT,
+    metadata_json JSONB,
+    started_at TIMESTAMPTZ NOT NULL,
+    ended_at TIMESTAMPTZ,
+    UNIQUE (step_run_id, attempt_number),
+    FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE,
+    FOREIGN KEY (step_run_id) REFERENCES workflow_step_runs(step_run_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS workflow_events (
@@ -189,6 +211,9 @@ CREATE TABLE IF NOT EXISTS workflow_research_waits (
 CREATE INDEX IF NOT EXISTS idx_workflows_owner ON workflows(owner_id);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status);
 CREATE INDEX IF NOT EXISTS idx_runs_idempotency_lookup ON workflow_runs(tenant_id, user_id, idempotency_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_step_attempts_run_attempts ON workflow_step_attempts(run_id, attempt_number, started_at);
+CREATE INDEX IF NOT EXISTS idx_step_attempts_run_step_attempts ON workflow_step_attempts(run_id, step_id, attempt_number, started_at);
+CREATE INDEX IF NOT EXISTS idx_step_attempts_step_run_attempts ON workflow_step_attempts(step_run_id, attempt_number, started_at);
     CREATE INDEX IF NOT EXISTS idx_events_run_seq ON workflow_events(run_id, event_seq);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_research_wait_run_step ON workflow_research_waits(workflow_run_id, step_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_research_wait_lookup ON workflow_research_waits(research_run_id, checkpoint_id, wait_status);
@@ -471,6 +496,7 @@ class WorkflowRun:
     definition_snapshot_json: str | None
     idempotency_key: str | None
     session_id: str | None
+    metadata_json: str | None = None
     cancel_requested: int | None = 0
     # Accounting fields (nullable)
     tokens_input: int | None = None
@@ -480,7 +506,7 @@ class WorkflowRun:
 
 
 class WorkflowsDatabase:
-    _CURRENT_SCHEMA_VERSION = 7
+    _CURRENT_SCHEMA_VERSION = 9
     """Workflow persistence adapter supporting SQLite and DatabaseBackend instances."""
 
     def __init__(
@@ -713,6 +739,50 @@ class WorkflowsDatabase:
 
         return applied_version
 
+    @staticmethod
+    def _step_attempt_migration_score(row: dict[str, Any]) -> tuple[bool, str, str, str]:
+        return (
+            row.get("ended_at") is not None,
+            str(row.get("ended_at") or row.get("started_at") or ""),
+            str(row.get("started_at") or ""),
+            str(row.get("attempt_id") or ""),
+        )
+
+    def _normalize_step_attempt_migration_rows(
+        self,
+        rows: Sequence[Any],
+        *,
+        valid_run_ids: set[str] | None = None,
+        valid_step_run_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        canonical_rows: dict[tuple[str, int], dict[str, Any]] = {}
+        for row in rows:
+            data = self._row_to_dict(row)
+            run_id = str(data.get("run_id") or "").strip()
+            if not run_id:
+                continue
+            if valid_run_ids is not None and run_id not in valid_run_ids:
+                continue
+            step_run_id = str(data.get("step_run_id") or "").strip()
+            if not step_run_id:
+                continue
+            if valid_step_run_ids is not None and step_run_id not in valid_step_run_ids:
+                continue
+            try:
+                attempt_number = int(data.get("attempt_number") or 0)
+            except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS:
+                continue
+            if attempt_number <= 0:
+                continue
+            logical_key = (step_run_id, attempt_number)
+            existing = canonical_rows.get(logical_key)
+            if existing is None or self._step_attempt_migration_score(data) > self._step_attempt_migration_score(existing):
+                canonical_rows[logical_key] = data
+        return [
+            canonical_rows[key]
+            for key in sorted(canonical_rows.keys(), key=lambda item: (item[0], item[1]))
+        ]
+
     def _get_backend_migrations(self):
         return {
             1: self._backend_migrate_to_v1,
@@ -722,6 +792,8 @@ class WorkflowsDatabase:
             5: self._backend_migrate_to_v5,
             6: self._backend_migrate_to_v6,
             7: self._backend_migrate_to_v7,
+            8: self._backend_migrate_to_v8,
+            9: self._backend_migrate_to_v9,
         }
 
     def _backend_migrate_to_v1(self, conn) -> None:
@@ -972,6 +1044,137 @@ class WorkflowsDatabase:
             connection=conn,
         )
 
+    def _backend_migrate_to_v8(self, conn) -> None:
+        if not self.backend:
+            return
+        backend = self.backend
+        ident = backend.escape_identifier
+        legacy_rows: list[Any] = []
+        valid_run_ids: set[str] = set()
+        valid_step_run_ids: set[str] = set()
+
+        run_result = backend.execute(
+            f"SELECT {ident('run_id')} FROM {ident('workflow_runs')}",  # nosec B608
+            connection=conn,
+        )
+        for row in self._rows_from_result(run_result):
+            data = self._row_to_dict(row)
+            run_id = str(data.get("run_id") or "").strip()
+            if run_id:
+                valid_run_ids.add(run_id)
+
+        step_run_result = backend.execute(
+            f"SELECT {ident('step_run_id')} FROM {ident('workflow_step_runs')}",  # nosec B608
+            connection=conn,
+        )
+        for row in self._rows_from_result(step_run_result):
+            data = self._row_to_dict(row)
+            step_run_id = str(data.get("step_run_id") or "").strip()
+            if step_run_id:
+                valid_step_run_ids.add(step_run_id)
+
+        if backend.table_exists("workflow_step_attempts", connection=conn):
+            backend.execute(
+                f"ALTER TABLE {ident('workflow_step_attempts')} RENAME TO {ident('workflow_step_attempts_legacy_v8')}",
+                connection=conn,
+            )
+            result = backend.execute(
+                f"SELECT * FROM {ident('workflow_step_attempts_legacy_v8')}",  # nosec B608
+                connection=conn,
+            )
+            legacy_rows = self._rows_from_result(result)
+
+        backend.execute(
+            f"DROP TABLE IF EXISTS {ident('workflow_step_attempts')}",
+            connection=conn,
+        )
+        backend.execute(
+            f"CREATE TABLE {ident('workflow_step_attempts')} ("
+            f"{ident('attempt_id')} TEXT PRIMARY KEY,"
+            f"{ident('tenant_id')} TEXT NOT NULL,"
+            f"{ident('run_id')} TEXT NOT NULL,"
+            f"{ident('step_run_id')} TEXT NOT NULL,"
+            f"{ident('step_id')} TEXT NOT NULL,"
+            f"{ident('attempt_number')} INTEGER NOT NULL,"
+            f"{ident('status')} TEXT NOT NULL,"
+            f"{ident('reason_code_core')} TEXT,"
+            f"{ident('reason_code_detail')} TEXT,"
+            f"{ident('retryable')} BOOLEAN,"
+            f"{ident('error_summary')} TEXT,"
+            f"{ident('metadata_json')} JSONB,"
+            f"{ident('started_at')} TIMESTAMPTZ NOT NULL,"
+            f"{ident('ended_at')} TIMESTAMPTZ,"
+            f"UNIQUE ({ident('step_run_id')}, {ident('attempt_number')}),"
+            f"FOREIGN KEY ({ident('run_id')}) REFERENCES {ident('workflow_runs')}({ident('run_id')}) ON DELETE CASCADE,"
+            f"FOREIGN KEY ({ident('step_run_id')}) REFERENCES {ident('workflow_step_runs')}({ident('step_run_id')}) ON DELETE CASCADE"
+            ")",
+            connection=conn,
+        )
+        for row in self._normalize_step_attempt_migration_rows(
+            legacy_rows,
+            valid_run_ids=valid_run_ids,
+            valid_step_run_ids=valid_step_run_ids,
+        ):
+            metadata_raw = row.get("metadata_json")
+            if isinstance(metadata_raw, (dict, list)):
+                metadata_value = json.dumps(metadata_raw)
+            else:
+                metadata_value = metadata_raw
+            backend.execute(
+                f"INSERT INTO {ident('workflow_step_attempts')} ("  # nosec B608
+                f"{ident('attempt_id')}, {ident('tenant_id')}, {ident('run_id')}, {ident('step_run_id')}, "
+                f"{ident('step_id')}, {ident('attempt_number')}, {ident('status')}, {ident('reason_code_core')}, "
+                f"{ident('reason_code_detail')}, {ident('retryable')}, {ident('error_summary')}, "
+                f"{ident('metadata_json')}, {ident('started_at')}, {ident('ended_at')}"
+                f") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    str(row.get("attempt_id") or uuid4()),
+                    str(row.get("tenant_id") or ""),
+                    str(row.get("run_id") or ""),
+                    str(row.get("step_run_id") or ""),
+                    str(row.get("step_id") or ""),
+                    int(row.get("attempt_number") or 0),
+                    str(row.get("status") or "running"),
+                    row.get("reason_code_core"),
+                    row.get("reason_code_detail"),
+                    row.get("retryable"),
+                    row.get("error_summary"),
+                    metadata_value,
+                    str(row.get("started_at") or _utcnow_iso()),
+                    row.get("ended_at"),
+                ),
+                connection=conn,
+            )
+        backend.execute(
+            f"DROP TABLE IF EXISTS {ident('workflow_step_attempts_legacy_v8')}",
+            connection=conn,
+        )
+        backend.execute(
+            f"CREATE INDEX IF NOT EXISTS {ident('idx_step_attempts_run_attempts')} "
+            f"ON {ident('workflow_step_attempts')} ({ident('run_id')}, {ident('attempt_number')}, {ident('started_at')})",
+            connection=conn,
+        )
+        backend.execute(
+            f"CREATE INDEX IF NOT EXISTS {ident('idx_step_attempts_run_step_attempts')} "
+            f"ON {ident('workflow_step_attempts')} ({ident('run_id')}, {ident('step_id')}, {ident('attempt_number')}, {ident('started_at')})",
+            connection=conn,
+        )
+        backend.execute(
+            f"CREATE INDEX IF NOT EXISTS {ident('idx_step_attempts_step_run_attempts')} "
+            f"ON {ident('workflow_step_attempts')} ({ident('step_run_id')}, {ident('attempt_number')}, {ident('started_at')})",
+            connection=conn,
+        )
+
+    def _backend_migrate_to_v9(self, conn) -> None:
+        if not self.backend:
+            return
+        backend = self.backend
+        ident = backend.escape_identifier
+        backend.execute(
+            f"ALTER TABLE {ident('workflow_runs')} ADD COLUMN IF NOT EXISTS {ident('metadata_json')} TEXT",
+            connection=conn,
+        )
+
     def _initialize_schema_backend(self) -> None:
         if not self.backend:
             return
@@ -1005,7 +1208,166 @@ class WorkflowsDatabase:
             logger.error("Unexpected error while initialising workflows schema: {}", exc)
             raise
 
+    def _get_sqlite_schema_version(self) -> int:
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS workflow_schema_version (version INTEGER NOT NULL)"
+        )
+        row = self._conn.execute(
+            "SELECT version FROM workflow_schema_version LIMIT 1"
+        ).fetchone()
+        if not row:
+            self._conn.execute(
+                "INSERT INTO workflow_schema_version (version) VALUES (0)"
+            )
+            self._conn.commit()
+            return 0
+        return int(row[0] or 0)
+
+    def _set_sqlite_schema_version(self, version: int) -> None:
+        cur = self._conn.execute(
+            "UPDATE workflow_schema_version SET version = ?",
+            (int(version),),
+        )
+        if cur.rowcount == 0:
+            self._conn.execute(
+                "INSERT INTO workflow_schema_version (version) VALUES (?)",
+                (int(version),),
+            )
+        self._conn.commit()
+
+    def _sqlite_migrate_to_v8(self) -> None:
+        cur = self._conn.cursor()
+        legacy_rows: list[Any] = []
+        valid_run_ids = {
+            str(row[0]).strip()
+            for row in cur.execute("SELECT run_id FROM workflow_runs").fetchall()
+            if str(row[0]).strip()
+        }
+        valid_step_run_ids = {
+            str(row[0]).strip()
+            for row in cur.execute("SELECT step_run_id FROM workflow_step_runs").fetchall()
+            if str(row[0]).strip()
+        }
+        existing = cur.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_step_attempts'"
+        ).fetchone()
+        if existing:
+            cur.execute("ALTER TABLE workflow_step_attempts RENAME TO workflow_step_attempts_legacy_v8")
+            legacy_rows = cur.execute(
+                "SELECT * FROM workflow_step_attempts_legacy_v8"
+            ).fetchall()
+
+        cur.execute("DROP TABLE IF EXISTS workflow_step_attempts")
+        cur.execute(
+            """
+            CREATE TABLE workflow_step_attempts (
+                attempt_id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                step_run_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                attempt_number INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                reason_code_core TEXT,
+                reason_code_detail TEXT,
+                retryable INTEGER,
+                error_summary TEXT,
+                metadata_json TEXT,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                UNIQUE(step_run_id, attempt_number),
+                FOREIGN KEY(run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE,
+                FOREIGN KEY(step_run_id) REFERENCES workflow_step_runs(step_run_id) ON DELETE CASCADE
+            );
+            """
+        )
+        for row in self._normalize_step_attempt_migration_rows(
+            legacy_rows,
+            valid_run_ids=valid_run_ids,
+            valid_step_run_ids=valid_step_run_ids,
+        ):
+            metadata_raw = row.get("metadata_json")
+            if isinstance(metadata_raw, (dict, list)):
+                metadata_value = json.dumps(metadata_raw)
+            else:
+                metadata_value = metadata_raw
+            cur.execute(
+                """
+                INSERT INTO workflow_step_attempts(
+                    attempt_id, tenant_id, run_id, step_run_id, step_id, attempt_number, status, reason_code_core,
+                    reason_code_detail, retryable, error_summary, metadata_json, started_at, ended_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(row.get("attempt_id") or uuid4()),
+                    str(row.get("tenant_id") or ""),
+                    str(row.get("run_id") or ""),
+                    str(row.get("step_run_id") or ""),
+                    str(row.get("step_id") or ""),
+                    int(row.get("attempt_number") or 0),
+                    str(row.get("status") or "running"),
+                    row.get("reason_code_core"),
+                    row.get("reason_code_detail"),
+                    row.get("retryable"),
+                    row.get("error_summary"),
+                    metadata_value,
+                    str(row.get("started_at") or _utcnow_iso()),
+                    row.get("ended_at"),
+                ),
+            )
+        cur.execute("DROP TABLE IF EXISTS workflow_step_attempts_legacy_v8")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_step_attempts_run_attempts "
+            "ON workflow_step_attempts(run_id, attempt_number, started_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_step_attempts_run_step_attempts "
+            "ON workflow_step_attempts(run_id, step_id, attempt_number, started_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_step_attempts_step_run_attempts "
+            "ON workflow_step_attempts(step_run_id, attempt_number, started_at)"
+        )
+        self._conn.commit()
+
+    def _run_sqlite_migrations(self, current_version: int, target_version: int) -> int:
+        applied_version = current_version
+        if applied_version < 8 <= target_version:
+            self._sqlite_migrate_to_v8()
+            self._set_sqlite_schema_version(8)
+            applied_version = 8
+        if applied_version < 9 <= target_version:
+            self._sqlite_migrate_to_v9()
+            self._set_sqlite_schema_version(9)
+            applied_version = 9
+        return applied_version
+
+    def _sqlite_migrate_to_v9(self) -> None:
+        cur = self._conn.cursor()
+        try:
+            cur.execute("ALTER TABLE workflow_runs ADD COLUMN metadata_json TEXT")
+            self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            message = str(exc).lower()
+            if "duplicate column name" in message or "already exists" in message:
+                with contextlib.suppress(sqlite3.Error):
+                    self._conn.rollback()
+                return
+            with contextlib.suppress(sqlite3.Error):
+                self._conn.rollback()
+            raise
+        except sqlite3.Error:
+            with contextlib.suppress(sqlite3.Error):
+                self._conn.rollback()
+            raise
+
     def _create_schema(self) -> None:
+        current_version = self._get_sqlite_schema_version()
+        if current_version > self._CURRENT_SCHEMA_VERSION:
+            raise WorkflowsSchemaError(
+                "Workflows schema version is newer than supported by this release."
+            )
+
         cur = self._conn.cursor()
         # Definitions
         cur.execute(
@@ -1050,6 +1412,7 @@ class WorkflowsDatabase:
                 idempotency_key TEXT,
                 session_id TEXT,
                 validation_mode TEXT DEFAULT 'block',
+                metadata_json TEXT,
                 tokens_input INTEGER,
                 tokens_output INTEGER,
                 cost_usd REAL,
@@ -1095,6 +1458,30 @@ class WorkflowsDatabase:
             """
         )
 
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workflow_step_attempts (
+                attempt_id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                step_run_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                attempt_number INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                reason_code_core TEXT,
+                reason_code_detail TEXT,
+                retryable INTEGER,
+                error_summary TEXT,
+                metadata_json TEXT,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                UNIQUE(step_run_id, attempt_number),
+                FOREIGN KEY(run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE,
+                FOREIGN KEY(step_run_id) REFERENCES workflow_step_runs(step_run_id) ON DELETE CASCADE
+            );
+            """
+        )
+
         # Events
         cur.execute(
             """
@@ -1117,6 +1504,18 @@ class WorkflowsDatabase:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status)")
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_runs_idempotency_lookup ON workflow_runs(tenant_id, user_id, idempotency_key, created_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_step_attempts_run_attempts "
+            "ON workflow_step_attempts(run_id, attempt_number, started_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_step_attempts_run_step_attempts "
+            "ON workflow_step_attempts(run_id, step_id, attempt_number, started_at)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_step_attempts_step_run_attempts "
+            "ON workflow_step_attempts(step_run_id, attempt_number, started_at)"
         )
         # Partial indexes for frequently accessed statuses (supported on modern SQLite)
         try:
@@ -1164,6 +1563,7 @@ class WorkflowsDatabase:
             "ALTER TABLE workflow_runs ADD COLUMN tokens_input INTEGER",
             "ALTER TABLE workflow_runs ADD COLUMN tokens_output INTEGER",
             "ALTER TABLE workflow_runs ADD COLUMN cost_usd REAL",
+            "ALTER TABLE workflow_runs ADD COLUMN metadata_json TEXT",
             "ALTER TABLE workflow_step_runs ADD COLUMN tenant_id TEXT",
             "ALTER TABLE workflow_step_runs ADD COLUMN assigned_to TEXT",
             "ALTER TABLE workflow_step_runs ADD COLUMN pid INTEGER",
@@ -1245,6 +1645,13 @@ class WorkflowsDatabase:
             "ON workflow_research_waits(research_run_id, checkpoint_id, wait_status)"
         )
         self._conn.commit()
+
+        applied_version = self._run_sqlite_migrations(
+            current_version,
+            self._CURRENT_SCHEMA_VERSION,
+        )
+        if applied_version < self._CURRENT_SCHEMA_VERSION:
+            self._set_sqlite_schema_version(self._CURRENT_SCHEMA_VERSION)
 
     # ---------- Definitions ----------
 
@@ -1422,7 +1829,9 @@ class WorkflowsDatabase:
         idempotency_key: str | None = None,
         session_id: str | None = None,
         validation_mode: str = "block",
+        metadata: dict[str, Any] | None = None,
     ) -> None:
+        metadata_json = json.dumps(metadata or {})
         params = (
             run_id,
             tenant_id,
@@ -1435,14 +1844,15 @@ class WorkflowsDatabase:
             idempotency_key,
             session_id,
             validation_mode,
+            metadata_json,
         )
 
         query = """
             INSERT INTO workflow_runs(
                 run_id, tenant_id, workflow_id, status, status_reason, user_id, inputs_json, outputs_json,
                 error, duration_ms, created_at, started_at, ended_at, definition_version, definition_snapshot_json,
-                idempotency_key, session_id, validation_mode
-            ) VALUES (?, ?, ?, 'queued', NULL, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, ?, ?, ?, ?, ?)
+                idempotency_key, session_id, validation_mode, metadata_json
+            ) VALUES (?, ?, ?, 'queued', NULL, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)
         """
 
         if self._using_backend():
@@ -1781,44 +2191,65 @@ class WorkflowsDatabase:
 
         # SQLite path
         conn = self._acquire_sqlite()
-        cur = conn.cursor()
         try:
-            # Try per-run counter with a short critical section
-            row = cur.execute(
-                "SELECT next_seq FROM workflow_event_counters WHERE run_id = ?",
-                (run_id,),
-            ).fetchone()
-            if not row:
-                next_seq = 1
-                cur.execute(
-                    "INSERT OR IGNORE INTO workflow_event_counters(run_id, next_seq) VALUES (?, ?)",
-                    (run_id, next_seq),
-                )
-            else:
-                current = int(row[0] if not isinstance(row, dict) else row.get("next_seq", 0))
-                next_seq = current + 1
-                cur.execute(
-                    "UPDATE workflow_event_counters SET next_seq = ? WHERE run_id = ?",
-                    (next_seq, run_id),
-                )
-        except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS:
-            # Fallback to aggregate scan if counters table missing
-            row = cur.execute(
-                "SELECT COALESCE(MAX(event_seq), 0) as max_seq FROM workflow_events WHERE run_id = ?",
-                (run_id,),
-            ).fetchone()
-            next_seq = int(row["max_seq"] if isinstance(row, dict) else row[0]) + 1
+            tries = 0
+            while True:
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                    break
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e).lower() and tries < 4:
+                        import time as _time
 
-        params_insert = (
-            tenant_id,
-            run_id,
-            step_run_id,
-            next_seq,
-            event_type,
-            json.dumps(payload or {}),
-            _utcnow_iso(),
-        )
-        try:
+                        _time.sleep(0.05 * (2 ** tries))
+                        tries += 1
+                        continue
+                    raise
+
+            cur = conn.cursor()
+            try:
+                # Try per-run counter with an explicit write transaction so
+                # the counter increment and event insert share one serialized
+                # critical section on SQLite.
+                row = cur.execute(
+                    """
+                    INSERT INTO workflow_event_counters(run_id, next_seq)
+                    VALUES (?, 1)
+                    ON CONFLICT(run_id) DO UPDATE SET next_seq = workflow_event_counters.next_seq + 1
+                    RETURNING next_seq
+                    """,
+                    (run_id,),
+                ).fetchone()
+                next_seq = int(row["next_seq"] if isinstance(row, dict) else row[0]) if row else 1
+            except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS:
+                # Fallback for older SQLite builds or partially migrated tables.
+                row = cur.execute(
+                    "SELECT next_seq FROM workflow_event_counters WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                if not row:
+                    next_seq = 1
+                    cur.execute(
+                        "INSERT OR IGNORE INTO workflow_event_counters(run_id, next_seq) VALUES (?, ?)",
+                        (run_id, next_seq),
+                    )
+                else:
+                    current = int(row[0] if not isinstance(row, dict) else row.get("next_seq", 0))
+                    next_seq = current + 1
+                    cur.execute(
+                        "UPDATE workflow_event_counters SET next_seq = ? WHERE run_id = ?",
+                        (next_seq, run_id),
+                    )
+
+            params_insert = (
+                tenant_id,
+                run_id,
+                step_run_id,
+                next_seq,
+                event_type,
+                json.dumps(payload or {}),
+                _utcnow_iso(),
+            )
             cur.execute(
                 """
                 INSERT INTO workflow_events(tenant_id, run_id, step_run_id, event_seq, event_type, payload_json, created_at)
@@ -1827,21 +2258,13 @@ class WorkflowsDatabase:
                 params_insert,
             )
             conn.commit()
-        except sqlite3.OperationalError as e:
-            if "locked" in str(e).lower():
-                # Retry on lock contention
-                self._sqlite_retry_execute(
-                    """
-                    INSERT INTO workflow_events(tenant_id, run_id, step_run_id, event_seq, event_type, payload_json, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    params_insert,
-                )
-                self._sqlite_retry_commit()
-            else:
-                raise
-        self._release_sqlite(conn)
-        return next_seq
+            return next_seq
+        except (sqlite3.Error, TypeError, ValueError):
+            with contextlib.suppress(sqlite3.Error):
+                conn.rollback()
+            raise
+        finally:
+            self._release_sqlite(conn)
 
     def get_events(self, run_id: str, since: int | None = None, limit: int = 500, types: list[str] | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM workflow_events WHERE run_id = ?"
@@ -1981,6 +2404,22 @@ class WorkflowsDatabase:
         finally:
             self._release_sqlite(conn)
 
+    def list_step_runs(self, *, run_id: str) -> list[dict[str, Any]]:
+        """Return step runs for a workflow run ordered by creation time."""
+        query = """
+            SELECT * FROM workflow_step_runs
+            WHERE run_id = ?
+            ORDER BY started_at ASC, step_run_id ASC
+        """
+        params = (str(run_id),)
+        if self._using_backend():
+            with self.backend.transaction() as conn:  # type: ignore[union-attr]
+                result = self._execute_backend(query, params, connection=conn)
+            rows = self._rows_from_result(result)
+        else:
+            rows = self._conn.cursor().execute(query, params).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
     def update_step_attempt(self, *, step_run_id: str, attempt: int) -> None:
         """Persist the current attempt count for a step run."""
         params = (int(attempt), step_run_id)
@@ -2005,6 +2444,150 @@ class WorkflowsDatabase:
                 self._sqlite_retry_commit()
             else:
                 raise
+
+    def create_step_attempt(
+        self,
+        *,
+        tenant_id: str,
+        run_id: str,
+        step_run_id: str,
+        step_id: str,
+        attempt_number: int,
+        status: str = "running",
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        step_run_id_value = str(step_run_id or "").strip()
+        if not step_run_id_value:
+            raise ValueError("step_run_id is required for workflow step attempts")
+        attempt_id = str(uuid4())
+        params = (
+            attempt_id,
+            tenant_id,
+            run_id,
+            step_run_id_value,
+            step_id,
+            int(attempt_number),
+            status,
+            json.dumps(metadata or {}),
+            _utcnow_iso(),
+        )
+        query = """
+            INSERT INTO workflow_step_attempts(
+                attempt_id, tenant_id, run_id, step_run_id, step_id, attempt_number, status, metadata_json, started_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+
+        if self._using_backend():
+            with self.backend.transaction() as conn:  # type: ignore[union-attr]
+                self._execute_backend(query, params, connection=conn)
+            return attempt_id
+
+        try:
+            self._conn.execute(query, params)
+            self._conn.commit()
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower():
+                self._sqlite_retry_execute(query, params)
+                self._sqlite_retry_commit()
+            else:
+                raise
+        return attempt_id
+
+    def complete_step_attempt(
+        self,
+        *,
+        attempt_id: str,
+        status: str,
+        reason_code_core: str | None = None,
+        reason_code_detail: str | None = None,
+        retryable: bool | None = None,
+        error_summary: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        retryable_value = None if retryable is None else bool(retryable)
+        metadata_json = None if metadata is None else json.dumps(metadata)
+        params = (
+            status,
+            reason_code_core,
+            reason_code_detail,
+            retryable_value,
+            error_summary,
+            metadata_json,
+            _utcnow_iso(),
+            attempt_id,
+        )
+        query = """
+            UPDATE workflow_step_attempts
+            SET status = ?,
+                reason_code_core = ?,
+                reason_code_detail = ?,
+                retryable = ?,
+                error_summary = ?,
+                metadata_json = COALESCE(?, metadata_json),
+                ended_at = ?
+            WHERE attempt_id = ?
+        """
+
+        if self._using_backend():
+            with self.backend.transaction() as conn:  # type: ignore[union-attr]
+                self._execute_backend(query, params, connection=conn)
+            return
+
+        try:
+            self._conn.execute(query, params)
+            self._conn.commit()
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower():
+                self._sqlite_retry_execute(query, params)
+                self._sqlite_retry_commit()
+            else:
+                raise
+
+    def list_step_attempts(
+        self,
+        *,
+        run_id: str,
+        step_id: str | None = None,
+        step_run_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM workflow_step_attempts WHERE run_id = ?"
+        params: list[Any] = [str(run_id)]
+        if step_id is not None:
+            sql += " AND step_id = ?"
+            params.append(str(step_id))
+        if step_run_id is not None:
+            sql += " AND step_run_id = ?"
+            params.append(str(step_run_id))
+        sql += " ORDER BY attempt_number ASC, started_at ASC, attempt_id ASC"
+
+        if self._using_backend():
+            with self.backend.transaction() as conn:  # type: ignore[union-attr]
+                result = self._execute_backend(sql, tuple(params), connection=conn)
+            rows = self._rows_from_result(result)
+        else:
+            rows = self._conn.cursor().execute(sql, params).fetchall()
+
+        attempts: list[dict[str, Any]] = []
+        for row in rows:
+            data = self._row_to_dict(row)
+            metadata_raw = data.get("metadata_json")
+            if isinstance(metadata_raw, (dict, list)):
+                data["metadata_json"] = metadata_raw
+            elif not metadata_raw:
+                data["metadata_json"] = {}
+            else:
+                try:
+                    data["metadata_json"] = json.loads(str(metadata_raw))
+                except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.warning(
+                        "Workflows DB: malformed step attempt metadata_json run_id={} attempt_id={}: {}",
+                        run_id,
+                        data.get("attempt_id"),
+                        exc,
+                    )
+                    data["metadata_json"] = {}
+            attempts.append(data)
+        return attempts
 
     def get_last_failed_step_id(self, run_id: str) -> str | None:
         query = (

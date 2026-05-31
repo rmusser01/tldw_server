@@ -28,8 +28,9 @@ describe("WorldBookEmptyState", () => {
   }
 
   it("renders the 3-step visual flow", () => {
-    render(<WorldBookEmptyState {...defaultProps} />)
+    const { container } = render(<WorldBookEmptyState {...defaultProps} />)
 
+    expect(container.querySelector('[data-ds-component="EmptyState"]')).toBeInTheDocument()
     expect(screen.getByText(/create a world book/i)).toBeInTheDocument()
     expect(screen.getByText(/add entries/i)).toBeInTheDocument()
     expect(screen.getByText(/attach/i)).toBeInTheDocument()

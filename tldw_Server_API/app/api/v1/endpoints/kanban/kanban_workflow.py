@@ -13,6 +13,7 @@ from tldw_Server_API.app.api.v1.API_Deps.kanban_deps import (
     get_kanban_db_for_user,
     kanban_rate_limit,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     WorkflowApprovalDecisionRequest,
     WorkflowClaimRequest,
@@ -29,7 +30,7 @@ from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     WorkflowTransitionsListResponse,
     WorkflowTransitionRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     ConflictError,
     InputError,
@@ -102,7 +103,7 @@ def _workflow_http_error(
         log.exception("Workflow request failed with Kanban DB error")
         return HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "kanban_db_error", "message": str(exc)},
+            detail={"code": "kanban_db_error", "message": "Workflow database error"},
         )
 
     log.exception("Workflow request failed with unexpected error")
@@ -390,15 +391,26 @@ async def list_card_workflow_events(
     db: KanbanDB = Depends(get_kanban_db_for_user),
 ) -> WorkflowEventsListResponse:
     """List append-only workflow events for a card."""
-    events = await _run_db_call(
+    rows = await _run_db_call(
         operation="workflow.task.events.list",
         func=db.list_card_workflow_events,
         context={"card_id": card_id, "limit": limit, "offset": offset},
         card_id=card_id,
-        limit=limit,
+        limit=limit + 1,
         offset=offset,
     )
-    return WorkflowEventsListResponse(events=events)
+    has_more = len(rows) > limit
+    events = rows[:limit]
+    return WorkflowEventsListResponse(
+        events=events,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=None,
+            count=len(events),
+            has_more=has_more,
+        ),
+    )
 
 
 @router.get(
@@ -409,17 +421,30 @@ async def list_card_workflow_events(
 async def list_stale_workflow_claims(
     board_id: int | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: KanbanDB = Depends(get_kanban_db_for_user),
 ) -> WorkflowStaleClaimsListResponse:
     """List cards with expired active lease claims."""
-    claims = await _run_db_call(
+    rows = await _run_db_call(
         operation="workflow.recovery.list_stale_claims",
         func=db.list_stale_workflow_claims,
-        context={"board_id": board_id, "limit": limit},
+        context={"board_id": board_id, "limit": limit, "offset": offset},
         board_id=board_id,
-        limit=limit,
+        limit=limit + 1,
+        offset=offset,
     )
-    return WorkflowStaleClaimsListResponse(stale_claims=claims)
+    has_more = len(rows) > limit
+    claims = rows[:limit]
+    return WorkflowStaleClaimsListResponse(
+        stale_claims=claims,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=None,
+            count=len(claims),
+            has_more=has_more,
+        ),
+    )
 
 
 @router.post(

@@ -5,10 +5,12 @@ import {
 } from "@/types/persona-buddy"
 
 export type AssistantKind = "character" | "persona"
+export type AssistantSelectionMode = "tracked" | "overlay"
 
 export type AssistantSelection = {
   kind: AssistantKind
   id: string
+  slug?: string | null
   name: string
   avatar_url?: string | null
   greeting?: string | null
@@ -16,6 +18,46 @@ export type AssistantSelection = {
   extensions?: Record<string, unknown> | null
   buddy_summary?: PersonaBuddySummary | null
   metadata?: Record<string, unknown> | null
+}
+
+export const getAssistantSelectionMode = (
+  selection: AssistantSelection | null | undefined
+): AssistantSelectionMode | null => {
+  const mode = selection?.metadata?.selectionMode
+  return mode === "tracked" || mode === "overlay" ? mode : null
+}
+
+type SelectionModeCarrier = {
+  id?: unknown
+  metadata?: Record<string, unknown> | null
+  [key: string]: unknown
+}
+
+export const preserveAssistantSelectionMode = <
+  T extends SelectionModeCarrier | null | undefined
+>(
+  next: T,
+  current: SelectionModeCarrier | null | undefined
+): T => {
+  if (!next || typeof next !== "object") return next
+
+  const nextId = normalizeSelectionId(next.id)
+  const currentId = normalizeSelectionId(current?.id)
+  if (!nextId || !currentId || nextId !== currentId) return next
+
+  const nextMode = getAssistantSelectionMode(next as unknown as AssistantSelection)
+  if (nextMode) return next
+
+  const currentMode = getAssistantSelectionMode(current as unknown as AssistantSelection)
+  if (!currentMode) return next
+
+  return {
+    ...next,
+    metadata: {
+      ...(next.metadata ?? {}),
+      selectionMode: currentMode
+    }
+  }
 }
 
 type StoredSelectionRecord = Record<string, unknown>
@@ -74,6 +116,7 @@ export const normalizeAssistantSelection = (
     ...rest,
     kind,
     id,
+    slug: normalizeOptionalText(candidate.slug),
     name,
     avatar_url: normalizeOptionalText(candidate.avatar_url),
     greeting: normalizeOptionalText(candidate.greeting),

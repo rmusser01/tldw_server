@@ -20,7 +20,6 @@ Notes
 from __future__ import annotations
 
 import os
-import xml.etree.ElementTree as ET
 from typing import Any
 
 from defusedxml import ElementTree as DET
@@ -55,13 +54,12 @@ def _normalize_getref_payload(obj: dict[str, Any]) -> dict[str, Any]:
     # Attempt to find a PDF link from link array
     pdf_url: str | None = None
     for lk in (obj.get("link") or []):
-        try:
-            if (lk.get("function") or "").lower() == "full text":
-                if (lk.get("format") or "").lower() in ("application/pdf", "pdf") and lk.get("url"):
-                    pdf_url = lk.get("url")
-                    break
-        except Exception:
+        if not isinstance(lk, dict):
             continue
+        if (lk.get("function") or "").lower() == "full text":
+            if (lk.get("format") or "").lower() in ("application/pdf", "pdf") and lk.get("url"):
+                pdf_url = lk.get("url")
+                break
 
     return {
         "id": handle or title,
@@ -109,8 +107,10 @@ def get_ref_by_handle(handle: str) -> tuple[dict[str, Any] | None, str | None]:
         return _normalize_getref_payload(obj), None
     except ValueError:
         return None, "RePEc getref response was not valid JSON."
-    except Exception as e:
-        return None, f"RePEc getref error: {str(e)}"
+    except TimeoutError:
+        return None, "RePEc getref request timed out."
+    except Exception:
+        return None, "RePEc getref request failed."
 
 
 # ---------------- CitEc API: citations for a RePEc handle ----------------
@@ -135,7 +135,7 @@ def get_citations_plain(handle: str) -> tuple[dict[str, Any] | None, str | None]
         # Parse XML
         try:
             root = DET.fromstring(text)
-        except ET.ParseError:
+        except DET.ParseError:
             # Some responses may be HTML-wrapped or XSL transformed; treat as error
             return None, "CitEc response not XML in 'plain' mode."
         # Expected structure: <citationData id="..."><date>...</date><uri>...</uri><citedBy>n</citedBy><cites>m</cites></citationData>
@@ -166,8 +166,10 @@ def get_citations_plain(handle: str) -> tuple[dict[str, Any] | None, str | None]
                 except Exception:
                     out["cites"] = 0
         return out, None
-    except Exception as e:
-        return None, f"CitEc error: {str(e)}"
+    except TimeoutError:
+        return None, "CitEc request timed out."
+    except Exception:
+        return None, "CitEc request failed."
 
 
 def get_citations_amf_raw(handle: str) -> tuple[str | None, str | None]:
@@ -181,5 +183,7 @@ def get_citations_amf_raw(handle: str) -> tuple[str | None, str | None]:
         if r.status_code == 404:
             return None, None
         return r.text, None
-    except Exception as e:
-        return None, f"CitEc error: {str(e)}"
+    except TimeoutError:
+        return None, "CitEc request timed out."
+    except Exception:
+        return None, "CitEc request failed."

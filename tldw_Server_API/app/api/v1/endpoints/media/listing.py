@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from math import ceil
 from typing import Any, Optional
 
@@ -14,37 +15,45 @@ from fastapi import (
     status,
 )
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
     get_media_db_for_user,
     try_get_media_db_for_user,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.media_request_models import SearchRequest
 from tldw_Server_API.app.api.v1.schemas.media_response_models import (
     MediaListItem,
     MediaListResponse,
+    PaginationInfo,
 )
 from tldw_Server_API.app.api.v1.utils.cache import generate_etag, is_not_modified
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_DELETE
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.media_db.errors import (
-    DatabaseError,
-    InputError,
-)
+from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     fetch_keywords_for_media_batch,
     get_paginated_files,
     get_paginated_trash_files,
     search_media,
 )
-from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.media_db.errors import (
+    DatabaseError,
+    InputError,
+)
 from tldw_Server_API.app.core.Utils.metadata_utils import normalize_safe_metadata
+
 from .....core.DB_Management.media_db.legacy_maintenance import (
     permanently_delete_item,
 )
 
 router = APIRouter(tags=["Media Management"])
+_NOT_MODIFIED_OPENAPI_RESPONSE = {
+    status.HTTP_304_NOT_MODIFIED: {
+        "description": "Media listing not modified (ETag match).",
+    },
+}
 
 _MEDIA_LISTING_COERCE_EXCEPTIONS = (
     AttributeError,
@@ -90,21 +99,132 @@ _EMAIL_MEDIA_SEARCH_DELEGATION_MODES = {"opt_in", "auto_email"}
 
 
 def _normalize_media_types(media_types: list[str] | None) -> list[str]:
-    return [
-        str(media_type).strip().lower()
-        for media_type in (media_types or [])
-        if str(media_type).strip()
-    ]
+    return [str(media_type).strip().lower() for media_type in (media_types or []) if str(media_type).strip()]
 
 
 def _parse_csv_values(raw_value: str | None) -> list[str]:
     if not raw_value:
         return []
-    return [
-        value.strip()
-        for value in str(raw_value).split(",")
-        if value.strip()
-    ]
+    return [value.strip() for value in str(raw_value).split(",") if value.strip()]
+
+
+def _as_optional_str(raw_value: Any) -> str | None:
+    """Return a stripped string value for whitelisted source-picker fields."""
+    if raw_value is None:
+        return None
+    value = str(raw_value).strip()
+    return value or None
+
+
+def _as_optional_bool(raw_value: Any) -> bool | None:
+    """Coerce common stored boolean encodings without exposing unknown values."""
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, int):
+        return bool(raw_value)
+    if isinstance(raw_value, str):
+        value = raw_value.strip().lower()
+        if value in {"1", "true", "yes", "y"}:
+            return True
+        if value in {"0", "false", "no", "n"}:
+            return False
+    return None
+
+
+def _as_metadata_mapping(raw_value: Any) -> dict[str, Any]:
+    """Parse safe_metadata into a mapping for field-by-field allowlisting."""
+    if isinstance(raw_value, Mapping):
+        return dict(raw_value)
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_value)
+    except (TypeError, ValueError):
+        return {}
+    return dict(parsed) if isinstance(parsed, Mapping) else {}
+
+
+def _first_present(record: Mapping[str, Any], metadata: Mapping[str, Any], *keys: str) -> Any:
+    """Find the first non-empty value across row fields and safe metadata."""
+    for key in keys:
+        value = record.get(key)
+        if value not in (None, ""):
+            return value
+        value = metadata.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _workspace_metadata(
+    record: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+) -> tuple[str | None, str | None]:
+    """Extract workspace identity from accepted flat or nested metadata shapes."""
+    workspace_record = record.get("workspace")
+    workspace_metadata = metadata.get("workspace")
+    workspace = workspace_record if isinstance(workspace_record, Mapping) else workspace_metadata
+    workspace = workspace if isinstance(workspace, Mapping) else {}
+
+    workspace_id = _as_optional_str(
+        _first_present(record, metadata, "workspace_id", "workspaceId") or workspace.get("id")
+    )
+    workspace_name = _as_optional_str(
+        _first_present(record, metadata, "workspace_name", "workspaceName") or workspace.get("name")
+    )
+    return workspace_id, workspace_name
+
+
+def _source_picker_metadata(record: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return only source-picker-safe metadata fields for list/search payloads."""
+    if record is None:
+        return {}
+
+    safe_metadata = _as_metadata_mapping(record.get("safe_metadata"))
+    workspace_id, workspace_name = _workspace_metadata(record, safe_metadata)
+    source_metadata: dict[str, Any] = {}
+
+    status_value = _as_optional_str(
+        _first_present(record, safe_metadata, "status", "processing_status", "chunking_status")
+    )
+    if status_value:
+        source_metadata["status"] = status_value
+
+    created_at = _as_optional_str(
+        _first_present(record, safe_metadata, "created_at", "ingestion_date", "imported_at")
+    )
+    if created_at:
+        source_metadata["created_at"] = created_at
+
+    updated_at = _as_optional_str(_first_present(record, safe_metadata, "updated_at", "last_modified"))
+    if updated_at:
+        source_metadata["updated_at"] = updated_at
+
+    if workspace_id:
+        source_metadata["workspace_id"] = workspace_id
+    if workspace_name:
+        source_metadata["workspace_name"] = workspace_name
+
+    bool_fields = {
+        "workspace_artifact": ("workspace_artifact", "is_workspace_artifact"),
+        "is_generated": ("is_generated", "generated"),
+        "test_artifact": ("test_artifact", "is_test"),
+    }
+    for output_key, input_keys in bool_fields.items():
+        value = _as_optional_bool(_first_present(record, safe_metadata, *input_keys))
+        if value is not None:
+            source_metadata[output_key] = value
+
+    for output_key in ("artifact_kind", "source_kind"):
+        value = _as_optional_str(_first_present(record, safe_metadata, output_key))
+        if value:
+            source_metadata[output_key] = value
+
+    kind_value = _as_optional_str(_first_present(record, safe_metadata, "kind"))
+    if kind_value and "artifact_kind" not in source_metadata:
+        source_metadata["artifact_kind"] = kind_value
+
+    return source_metadata
 
 
 @router.get(
@@ -119,19 +239,15 @@ async def list_media_keywords(
     try:
         keywords = db.fetch_all_keywords()
     except (DatabaseError, InputError) as exc:
-        logger.error("Failed to list media keywords: {}", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to load media keywords",
+        logger.error("Failed to list media keywords")
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to load media keywords",
         ) from exc
 
     normalized_query = str(query or "").strip().lower()
     if normalized_query:
-        keywords = [
-            keyword
-            for keyword in keywords
-            if normalized_query in str(keyword).lower()
-        ]
+        keywords = [keyword for keyword in keywords if normalized_query in str(keyword).lower()]
 
     return {"keywords": keywords[:limit]}
 
@@ -169,16 +285,13 @@ def _should_delegate_media_search_to_email(
         )
         delegation_mode = "opt_in"
 
-    return bool(
-        delegation_mode == "auto_email"
-        and email_operator_enabled
-        and email_only_media_scope
-    )
+    return bool(delegation_mode == "auto_email" and email_operator_enabled and email_only_media_scope)
 
 
 @router.get(
     "/",
     summary="List Media (slash)",
+    responses=_NOT_MODIFIED_OPENAPI_RESPONSE,
 )
 async def list_media_endpoint(
     request: Request,
@@ -247,14 +360,15 @@ async def list_media_endpoint(
         media_ids: list[int] = []
         skipped_count = 0
         for r in rows or []:
-            rid_raw = r["id"] if isinstance(r, dict) else r[0]
-            title = r["title"] if isinstance(r, dict) else r[1]
-            rtype = r["type"] if isinstance(r, dict) else r[2]
+            row_record = r if isinstance(r, Mapping) else None
+            rid_raw = r["id"] if isinstance(r, Mapping) else r[0]
+            title = r["title"] if isinstance(r, Mapping) else r[1]
+            rtype = r["type"] if isinstance(r, Mapping) else r[2]
             try:
                 rid = int(rid_raw)
             except (TypeError, ValueError):
                 # Skip rows with invalid IDs rather than failing the entire listing
-                logger.error("Skipping media row with invalid id: {}", rid_raw)
+                logger.error("Skipping media row with invalid id")
                 skipped_count += 1
                 continue
             media_ids.append(rid)
@@ -263,6 +377,7 @@ async def list_media_endpoint(
                     "id": rid,
                     "title": str(title),
                     "type": str(rtype),
+                    **_source_picker_metadata(row_record),
                 }
             )
 
@@ -315,23 +430,27 @@ async def list_media_endpoint(
         for item in base_items:
             mid = item["id"]
             base_payload: dict[str, Any] = {
-                "id": mid,
-                "title": item["title"],
-                "type": item["type"],
+                **item,
                 "url": f"/api/v1/media/{mid}",
             }
             if include_keywords:
                 base_payload["keywords"] = keywords_map.get(mid, [])
             items.append(base_payload)
 
+        pagination_info = PaginationInfo(
+            results_per_page=int(results_per_page),
+            total_items=int(total_items),
+            **build_page_pagination_meta(
+                page=int(current_page),
+                per_page=int(results_per_page),
+                total=int(total_items),
+                total_pages=int(total_pages),
+            ).model_dump(),
+        )
+
         payload: dict[str, Any] = {
             "items": items,
-            "pagination": {
-                "page": int(current_page),
-                "results_per_page": int(results_per_page),
-                "total_pages": int(total_pages),
-                "total_items": int(total_items),
-            },
+            "pagination": pagination_info.model_dump(),
         }
 
         if include_keywords and keywords_available is not None:
@@ -350,7 +469,7 @@ async def list_media_endpoint(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Error listing media: {exc}", exc_info=True)
+        logger.error("Error listing media")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list media",
@@ -360,6 +479,7 @@ async def list_media_endpoint(
 @router.get(
     "/trash",
     summary="List trashed media items",
+    responses=_NOT_MODIFIED_OPENAPI_RESPONSE,
 )
 async def list_media_trash_endpoint(
     request: Request,
@@ -428,7 +548,7 @@ async def list_media_trash_endpoint(
             try:
                 rid = int(rid_raw)
             except (TypeError, ValueError):
-                logger.error("Skipping trashed media row with invalid id: {}", rid_raw)
+                logger.error("Skipping trashed media row with invalid id")
                 skipped_count += 1
                 continue
             media_ids.append(rid)
@@ -485,14 +605,20 @@ async def list_media_trash_endpoint(
                 base_payload["keywords"] = keywords_map.get(mid, [])
             items.append(base_payload)
 
+        pagination_info = PaginationInfo(
+            results_per_page=int(results_per_page),
+            total_items=int(total_items),
+            **build_page_pagination_meta(
+                page=int(current_page),
+                per_page=int(results_per_page),
+                total=int(total_items),
+                total_pages=int(total_pages),
+            ).model_dump(),
+        )
+
         payload: dict[str, Any] = {
             "items": items,
-            "pagination": {
-                "page": int(current_page),
-                "results_per_page": int(results_per_page),
-                "total_pages": int(total_pages),
-                "total_items": int(total_items),
-            },
+            "pagination": pagination_info.model_dump(),
         }
 
         if include_keywords and keywords_available is not None:
@@ -511,7 +637,7 @@ async def list_media_trash_endpoint(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Error listing trashed media: {exc}", exc_info=True)
+        logger.error("Error listing trashed media")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list trashed media",
@@ -522,7 +648,7 @@ async def list_media_trash_endpoint(
     "/trash/empty",
     summary="Empty media trash",
     dependencies=[
-        Depends(require_permissions(MEDIA_DELETE)),
+        Depends(RequirePermission(MEDIA_DELETE)),
         Depends(rbac_rate_limit("media.delete")),
     ],
 )
@@ -535,9 +661,7 @@ async def empty_media_trash_endpoint(
     Permanently delete all items currently in trash.
     """
     try:
-        cursor = db.execute_query(
-            "SELECT id FROM Media WHERE deleted = 0 AND is_trash = 1"
-        )
+        cursor = db.execute_query("SELECT id FROM Media WHERE deleted = 0 AND is_trash = 1")
         rows = cursor.fetchall()
         media_ids = [row["id"] for row in rows] if rows else []
 
@@ -584,7 +708,7 @@ async def empty_media_trash_endpoint(
             "remaining_count": remaining_count,
         }
     except Exception as exc:
-        logger.error("Error emptying media trash: {}", exc, exc_info=True)
+        logger.error("Error emptying media trash")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to empty media trash",
@@ -594,6 +718,7 @@ async def empty_media_trash_endpoint(
 @router.get(
     "/metadata-search",
     summary="Search media by safe metadata",
+    responses=_NOT_MODIFIED_OPENAPI_RESPONSE,
 )
 async def search_by_metadata(
     request: Request,
@@ -771,14 +896,15 @@ async def search_by_metadata(
                 except _MEDIA_LISTING_COERCE_EXCEPTIONS:
                     r["safe_metadata"] = None
 
+        total_pages = (total + per_page - 1) // per_page
         payload: dict[str, Any] = {
             "results": rows,
-            "pagination": {
-                "page": page,
-                "per_page": per_page,
-                "total": total,
-                "total_pages": (total + per_page - 1) // per_page,
-            },
+            "pagination": build_page_pagination_meta(
+                page=page,
+                per_page=per_page,
+                total=total,
+                total_pages=total_pages,
+            ).model_dump(),
         }
 
         etag = generate_etag(payload)
@@ -791,7 +917,7 @@ async def search_by_metadata(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Metadata search error: {exc}", exc_info=True)
+        logger.error("Metadata search error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error performing metadata search",
@@ -842,6 +968,7 @@ async def _validate_identifier_query(
     "/by-identifier",
     summary="Find media by standard identifier (DOI/PMID/PMCID/arXiv/S2)",
     dependencies=[Depends(_validate_identifier_query)],
+    responses=_NOT_MODIFIED_OPENAPI_RESPONSE,
 )
 async def get_by_identifier(
     request: Request,
@@ -870,9 +997,7 @@ async def get_by_identifier(
         if arxiv_id:
             raw_filters.append({"field": "arxiv_id", "op": "eq", "value": arxiv_id})
         if s2_paper_id:
-            raw_filters.append(
-                {"field": "s2_paper_id", "op": "eq", "value": s2_paper_id}
-            )
+            raw_filters.append({"field": "s2_paper_id", "op": "eq", "value": s2_paper_id})
 
         for f in raw_filters:
             try:
@@ -933,7 +1058,7 @@ async def get_by_identifier(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Identifier lookup error: {exc}", exc_info=True)
+        logger.error("Identifier lookup error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error in identifier lookup",
@@ -945,6 +1070,7 @@ async def get_by_identifier(
     status_code=status.HTTP_200_OK,
     summary="Search Media Items",
     response_model=MediaListResponse,
+    responses=_NOT_MODIFIED_OPENAPI_RESPONSE,
 )
 async def search_media_items(
     request: Request,
@@ -1022,25 +1148,22 @@ async def search_media_items(
                 title=item["title"],
                 type=item["type"],
                 url=f"/api/v1/media/{item['id']}",
+                **_source_picker_metadata(item),
             )
             for item in items_data
         ]
 
-        total_pages = (
-            ceil(total_items / results_per_page)
-            if results_per_page > 0 and total_items > 0
-            else 0
-        )
-
-        from tldw_Server_API.app.api.v1.schemas.media_response_models import (
-            PaginationInfo,
-        )
+        total_pages = ceil(total_items / results_per_page) if results_per_page > 0 and total_items > 0 else 0
 
         pagination_info = PaginationInfo(
-            page=page,
             results_per_page=results_per_page,
-            total_pages=total_pages,
             total_items=total_items,
+            **build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total_items,
+                total_pages=total_pages,
+            ).model_dump(),
         )
 
         try:
@@ -1049,7 +1172,7 @@ async def search_media_items(
                 pagination=pagination_info,
             )
 
-            payload_dict = response_obj.model_dump()
+            payload_dict = response_obj.model_dump(exclude_none=True)
             payload_dict["results"] = payload_dict.get("items", [])
 
             etag = generate_etag(payload_dict)
@@ -1069,12 +1192,9 @@ async def search_media_items(
             )
         except Exception as ve:
             logger.debug(
-                "Data causing validation error in search: items_count={}, "
-                "pagination={}",
+                "Data causing validation error in search: items_count={}, " "pagination={}",
                 len(formatted_items),
-                pagination_info.model_dump_json(indent=2)
-                if pagination_info
-                else "None",
+                pagination_info.model_dump_json(indent=2) if pagination_info else "None",
             )
             logger.error(
                 f"Pydantic validation error creating MediaListResponse for search: {ve}",
@@ -1089,10 +1209,7 @@ async def search_media_items(
             f"Invalid email operator query for media search bridge: {exc}",
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
+        raise map_db_error_to_http(exc) from exc
     except ValueError as ve:
         logger.warning(
             f"Invalid parameters for media search: {ve}",
@@ -1103,10 +1220,10 @@ async def search_media_items(
             detail=str(ve),
         ) from ve
     except DatabaseError as exc:
-        logger.error(f"Database error during media search: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="A database error occurred during the search.",
+        logger.error("Database error during media search")
+        raise map_db_error_to_http(
+            exc,
+            default_detail="A database error occurred during the search.",
         ) from exc
     except HTTPException:
         raise

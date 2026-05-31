@@ -81,7 +81,15 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
     with TestClient(app, headers=headers) as client:
         list_resp = client.get("/api/v1/monitoring/alerts")
         assert list_resp.status_code == 200, list_resp.text
-        items = list_resp.json()["items"]
+        payload = list_resp.json()
+        assert payload["pagination"]["total"] is None
+        assert payload["pagination"]["limit"] == 100
+        assert payload["pagination"]["offset"] == 0
+        assert payload["pagination"]["has_more"] is False
+        assert payload["pagination"]["next_offset"] is None
+        assert payload["has_more"] is False
+        assert payload["next_offset"] is None
+        items = payload["items"]
         assert len(items) == 1
         assert items[0]["alert_identity"] == f"alert:{alert_id}"
         assert items[0]["assigned_to_user_id"] == 1
@@ -90,15 +98,39 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
 
         read_resp = client.post(f"/api/v1/monitoring/alerts/{alert_id}/read")
         assert read_resp.status_code == 200, read_resp.text
-        assert read_resp.json() == {"status": "ok", "id": alert_id}
+        read_payload = read_resp.json()
+        assert read_payload["status"] == "ok"
+        assert read_payload["id"] == alert_id
+        assert read_payload["item"]["id"] == alert_id
+        assert read_payload["item"]["alert_identity"] == f"alert:{alert_id}"
+        assert read_payload["item"]["is_read"] is True
+        assert read_payload["item"]["read_at"] is not None
+        assert read_payload["item"]["acknowledged_at"] is None
+        assert read_payload["item"]["assigned_to_user_id"] == 1
+        assert read_payload["item"]["snoozed_until"] == "2026-03-10T11:00:00Z"
+        assert read_payload["item"]["escalated_severity"] == "critical"
 
         acknowledge_resp = client.post(f"/api/v1/monitoring/alerts/{alert_id}/acknowledge")
         assert acknowledge_resp.status_code == 200, acknowledge_resp.text
-        assert acknowledge_resp.json() == {"status": "ok", "id": alert_id}
+        acknowledge_payload = acknowledge_resp.json()
+        assert acknowledge_payload["status"] == "ok"
+        assert acknowledge_payload["id"] == alert_id
+        assert acknowledge_payload["item"]["id"] == alert_id
+        assert acknowledge_payload["item"]["alert_identity"] == f"alert:{alert_id}"
+        assert acknowledge_payload["item"]["is_read"] is True
+        assert acknowledge_payload["item"]["acknowledged_at"] is not None
+        assert acknowledge_payload["item"]["assigned_to_user_id"] == 1
 
         dismiss_resp = client.delete(f"/api/v1/monitoring/alerts/{alert_id}")
         assert dismiss_resp.status_code == 200, dismiss_resp.text
-        assert dismiss_resp.json() == {"status": "ok", "id": alert_id}
+        dismiss_payload = dismiss_resp.json()
+        assert dismiss_payload["status"] == "ok"
+        assert dismiss_payload["id"] == alert_id
+        assert dismiss_payload["item"]["id"] == alert_id
+        assert dismiss_payload["item"]["alert_identity"] == f"alert:{alert_id}"
+        assert dismiss_payload["item"]["is_read"] is True
+        assert dismiss_payload["item"]["acknowledged_at"] is not None
+        assert dismiss_payload["item"]["dismissed_at"] is not None
 
         refreshed_resp = client.get("/api/v1/monitoring/alerts")
         assert refreshed_resp.status_code == 200, refreshed_resp.text
@@ -114,5 +146,6 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
         )
         assert history_resp.status_code == 200, history_resp.text
         actions = [item["action"] for item in history_resp.json()["items"]]
+        assert "read" in actions
         assert "acknowledged" in actions
         assert "dismissed" in actions

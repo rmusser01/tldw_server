@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => {
@@ -8,19 +8,33 @@ const mocks = vi.hoisted(() => {
   const setSelectedCharacter = vi.fn(async () => undefined)
   const initialize = vi.fn(async () => null)
   const listPersonaProfiles = vi.fn(async () => [])
+  const capabilities = {
+    current: {
+      hasCharacters: true,
+      hasPersona: true
+    }
+  }
 
   return {
     useQuery,
     setSelectedAssistant,
     setSelectedCharacter,
     initialize,
-    listPersonaProfiles
+    listPersonaProfiles,
+    capabilities,
+    setCapabilities(nextCapabilities: typeof capabilities.current) {
+      capabilities.current = nextCapabilities
+    }
   }
 })
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback || _key
+    t: (_key: string, fallback?: string | { defaultValue?: string }) => {
+      if (typeof fallback === "string") return fallback
+      if (fallback?.defaultValue) return fallback.defaultValue
+      return _key
+    }
   })
 }))
 
@@ -57,19 +71,44 @@ vi.mock("antd", async () => {
     className?: string
   }) =>
     src ? (
-      <img
-        alt="assistant avatar"
-        src={src}
+      <span
+        aria-label="assistant avatar"
+        role="img"
+        data-avatar-src={src}
         className={className}
         data-testid="persona-avatar"
       />
     ) : null
 
-  const Dropdown = ({ children }: { children: React.ReactNode }) => <>{children}</>
+  const Dropdown = ({
+    children,
+    open,
+    popupRender
+  }: {
+    children: React.ReactNode
+    open?: boolean
+    popupRender?: (menu: React.ReactNode) => React.ReactNode
+  }) => (
+    <>
+      {children}
+      {open && popupRender ? (
+        <div data-testid="character-select-dropdown">
+          {popupRender(<div data-testid="character-select-menu" />)}
+        </div>
+      ) : null}
+    </>
+  )
   const Tooltip = ({ children }: { children: React.ReactNode }) => <>{children}</>
-  const Input = React.forwardRef<HTMLInputElement, any>((props, ref) => (
-    <input ref={ref} {...props} />
-  ))
+  type MockInputProps = React.InputHTMLAttributes<HTMLInputElement> & {
+    allowClear?: boolean
+    prefix?: React.ReactNode
+  }
+
+  const Input = React.forwardRef<HTMLInputElement, MockInputProps>(
+    ({ allowClear: _allowClear, prefix: _prefix, ...props }, ref) => (
+      <input ref={ref} {...props} />
+    )
+  )
   const Select = () => null
   const Empty = () => null
 
@@ -85,18 +124,16 @@ vi.mock("antd", async () => {
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    initialize: (...args: unknown[]) => mocks.initialize(...args),
-    listPersonaProfiles: (...args: unknown[]) =>
-      mocks.listPersonaProfiles(...args)
+    initialize: (requireAuth?: boolean) =>
+      (mocks.initialize as (requireAuth?: boolean) => unknown)(requireAuth),
+    listPersonaProfiles: (options?: unknown) =>
+      (mocks.listPersonaProfiles as (options?: unknown) => unknown)(options)
   }
 }))
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
-    capabilities: {
-      hasCharacters: true,
-      hasPersona: true
-    }
+    capabilities: mocks.capabilities.current
   })
 }))
 
@@ -191,6 +228,10 @@ import CharacterSelect from "../CharacterSelect"
 describe("CharacterSelect persona avatar", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.setCapabilities({
+      hasCharacters: true,
+      hasPersona: true
+    })
     mocks.useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => {
       if (queryKey[0] === "persona-profiles") {
         return {
@@ -223,7 +264,52 @@ describe("CharacterSelect persona avatar", () => {
     const trigger = screen.getByTestId("chat-character-select")
     const avatar = within(trigger).getByTestId("persona-avatar")
 
-    expect(avatar).toHaveAttribute("src", "https://example.com/guide.png")
+    expect(avatar).toHaveAttribute(
+      "data-avatar-src",
+      "https://example.com/guide.png"
+    )
+  })
+
+  it("does not replay the same open request when capabilities update", async () => {
+    mocks.setCapabilities({
+      hasCharacters: true,
+      hasPersona: false
+    })
+
+    const { rerender } = render(
+      <CharacterSelect
+        selectedCharacterId={null}
+        setSelectedCharacterId={vi.fn()}
+        openRequest={{ id: 1, tab: "persona" }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByPlaceholderText("Search characters...")
+      ).toBeInTheDocument()
+    })
+
+    mocks.setCapabilities({
+      hasCharacters: true,
+      hasPersona: true
+    })
+    rerender(
+      <CharacterSelect
+        selectedCharacterId={null}
+        setSelectedCharacterId={vi.fn()}
+        openRequest={{ id: 1, tab: "persona" }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByPlaceholderText("Search characters...")
+      ).toBeInTheDocument()
+    })
+    expect(
+      screen.queryByPlaceholderText("Search personas...")
+    ).not.toBeInTheDocument()
   })
 
   it("lets persona profile loading errors reject instead of caching an empty catalog", async () => {

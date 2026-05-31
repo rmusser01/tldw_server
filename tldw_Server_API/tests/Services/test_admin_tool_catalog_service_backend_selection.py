@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -60,6 +61,50 @@ class _PostgresDbWithSqliteTraps:
         ]
 
 
+class _ExplodingSqliteDb:
+    _is_sqlite = True
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError(self.message)
+
+
+class _ToolCatalogLookupDb:
+    def __init__(self) -> None:
+        self.fetchone_calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.fetchall_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def fetchone(self, query: str, *args: Any) -> tuple[int]:
+        self.fetchone_calls.append((str(query), tuple(args)))
+        return (42,)
+
+    async def fetchall(self, query: str, *args: Any) -> list[Any]:
+        self.fetchall_calls.append((str(query), tuple(args)))
+        return [("media.search",), (), {"tool_name": "notes.search"}]
+
+
+async def _assert_tool_catalog_log_sanitized(
+    call: Callable[[], Awaitable[Any]],
+    *,
+    expected_log: str,
+    raw_marker: str,
+) -> None:
+    messages: list[str] = []
+    sink_id = svc.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        with pytest.raises(RuntimeError):
+            await call()
+    finally:
+        svc.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert expected_log in joined
+    assert raw_marker not in joined
+    assert "/private/" not in joined
+
+
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_list_tool_catalogs_sqlite_backend_selection_uses_execute() -> None:
@@ -84,3 +129,146 @@ async def test_list_tool_catalogs_postgres_backend_selection_uses_fetch() -> Non
     assert "$1" in query and "$2" in query
     assert params[-2:] == (10, 0)
     assert rows and rows[0]["name"] == "pg-cat"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_resolve_tool_catalog_filter_names_handles_tuple_rows() -> None:
+    db = _ToolCatalogLookupDb()
+
+    resolved = await svc.resolve_tool_catalog_filter_names(
+        db,
+        catalog_name="A",
+        catalog_id=None,
+        metadata={"team_id": 7},
+        strict=True,
+    )
+
+    assert resolved == {"media.search", "notes.search"}
+    assert db.fetchone_calls == [
+        ("SELECT id FROM tool_catalogs WHERE name = ? AND team_id = ?", ("A", 7))
+    ]
+    assert db.fetchall_calls == [
+        ("SELECT tool_name FROM tool_catalog_entries WHERE catalog_id = ?", (42,))
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_resolve_tool_catalog_filter_names_delegates_to_db_management(monkeypatch) -> None:
+    from tldw_Server_API.app.core.DB_Management import Tool_Catalog_DB as tool_catalog_db
+
+    calls: list[dict[str, Any]] = []
+
+    async def _resolve_from_db_management(
+        db: Any,
+        *,
+        catalog_name: str | None,
+        catalog_id: Any,
+        metadata: Any,
+        strict: bool,
+    ) -> set[str]:
+        calls.append(
+            {
+                "db": db,
+                "catalog_name": catalog_name,
+                "catalog_id": catalog_id,
+                "metadata": metadata,
+                "strict": strict,
+            }
+        )
+        return {"media.search"}
+
+    monkeypatch.setattr(
+        tool_catalog_db,
+        "resolve_tool_catalog_filter_names",
+        _resolve_from_db_management,
+    )
+    db = object()
+
+    resolved = await svc.resolve_tool_catalog_filter_names(
+        db,
+        catalog_name="A",
+        catalog_id="12",
+        metadata={"team_id": 7},
+        strict=True,
+    )
+
+    assert resolved == {"media.search"}
+    assert calls == [
+        {
+            "db": db,
+            "catalog_name": "A",
+            "catalog_id": "12",
+            "metadata": {"team_id": 7},
+            "strict": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("call_factory", "expected_log", "raw_marker"),
+    [
+        (
+            lambda db: svc.list_tool_catalogs(db, org_id=None, team_id=None, limit=10, offset=0),
+            "Failed to list tool catalogs",
+            "tool catalogs list failed",
+        ),
+        (
+            lambda db: svc.list_visible_tool_catalogs(db, scope_norm="global", admin_all=True),
+            "Failed to list visible tool catalogs",
+            "visible tool catalogs list failed",
+        ),
+        (
+            lambda db: svc.create_tool_catalog(
+                db,
+                name="new-cat",
+                description="desc",
+                org_id=None,
+                team_id=None,
+                is_active=True,
+            ),
+            "Failed to create tool catalog",
+            "tool catalog create failed",
+        ),
+        (
+            lambda db: svc.get_tool_catalog(db, 42),
+            "Failed to get tool catalog",
+            "tool catalog get failed",
+        ),
+        (
+            lambda db: svc.delete_tool_catalog(db, 42),
+            "Failed to delete tool catalog",
+            "tool catalog delete failed",
+        ),
+        (
+            lambda db: svc.list_tool_catalog_entries(db, 42),
+            "Failed to list tool catalog entries",
+            "tool catalog entries list failed",
+        ),
+        (
+            lambda db: svc.add_tool_catalog_entry(db, 42, "media.search", None),
+            "Failed to add tool catalog entry",
+            "tool catalog entry add failed",
+        ),
+        (
+            lambda db: svc.delete_tool_catalog_entry(db, 42, "media.search"),
+            "Failed to delete tool catalog entry",
+            "tool catalog entry delete failed",
+        ),
+    ],
+)
+async def test_tool_catalog_service_sanitizes_backend_failure_logs(
+    call_factory: Callable[[Any], Awaitable[Any]],
+    expected_log: str,
+    raw_marker: str,
+) -> None:
+    db = _ExplodingSqliteDb(f"{raw_marker} at /private/tool-catalogs.db")
+
+    await _assert_tool_catalog_log_sanitized(
+        lambda: call_factory(db),
+        expected_log=expected_log,
+        raw_marker=raw_marker,
+    )

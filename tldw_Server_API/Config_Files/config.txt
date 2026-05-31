@@ -103,8 +103,8 @@ modelstudio_image_allowed_extra_params = []
 runner_command = go
 # Accepts JSON array or shell-style args.
 runner_args = ["run", "./cmd/tldw-agent-acp"]
-# Working directory for the runner process (e.g. ../tldw-agent).
-runner_cwd = ../tldw-agent
+# Working directory for the runner process. Relative paths resolve from this Config_Files directory.
+runner_cwd = ../../tools/tldw-agent
 # Runner environment (comma-separated key=value or JSON).
 # Relative HOME values are resolved against this Config_Files directory.
 runner_env = HOME=./acp_runner_home,PYTHONUNBUFFERED=1
@@ -154,6 +154,12 @@ agent_command =
 agent_args = []
 # JSON or comma-separated key=value env
 agent_env = {}
+# Active-session close windows and hard-delete retention. Retention deletes only
+# closed/error sessions; messages are removed by cascade.
+session_ttl_seconds = 86400
+max_session_duration_seconds = 14400
+session_retention_days = 30
+audit_retention_days = 30
 
 [Audit]
 # Auto-switch audit exports to streaming when max_rows exceeds this threshold to avoid large in-memory buffers.
@@ -234,6 +240,20 @@ rate_limit_tokens_per_minute = 100000
 run_first_rollout_mode = default_on
 run_first_provider_allowlist = openai:gpt-4o-mini,anthropic:claude-3-7-sonnet,openai:gpt-4o,google:gemini-2.5-flash
 run_first_presentation_variant = chat_phase2b_v1
+# Pre-dispatch prompt/cost guardrails for chat and character chat.
+# Disabled by default; when enabled, warning thresholds are non-blocking unless
+# prompt_guardrails_default_action = block or a hard-cap threshold is exceeded.
+# Env overrides use upper-case names such as CHAT_PROMPT_GUARDRAILS_ENABLED.
+prompt_guardrails_enabled = false
+prompt_guardrails_default_action = warn
+# prompt_guardrails_warn_total_estimated_tokens = 32000
+# prompt_guardrails_block_total_estimated_tokens = 128000
+# prompt_guardrails_warn_static_segment_tokens = 12000
+# prompt_guardrails_warn_world_book_tokens = 8000
+# prompt_guardrails_warn_max_output_tokens = 8192
+# prompt_guardrails_warn_choice_count = 1
+prompt_guardrails_warn_reasoning_efforts = high,xhigh
+prompt_guardrails_warn_on_fingerprint_churn = true
 # Controls how much historical context is loaded for each chat request.
 # Accepts 1-500; values outside range are clamped. Default: 20.
 history_messages_limit = 20
@@ -1119,6 +1139,8 @@ port_autoselect = true
 port_probe_max = 10
 # Comma-separated list of additional directories where models/logs may reside
 allowed_paths =
+# Comma-separated list of explicit local GGUF model files registered for inventory display
+registered_model_paths =
 # Optional path to a log file for llama.cpp server stdout/stderr
 log_output_file =
 
@@ -1378,7 +1400,7 @@ stable_only = false
 disable =
 
 # Comma-separated list of route keys to force-enable (useful when stable_only = true)
-enable = tools, jobs, acp, workflows, scheduler
+enable = tools, jobs, acp, workflows, scheduler, ingestion-sources
 
 # Optionally extend the curated experimental set (comma-separated)
 experimental_routes =
@@ -1509,6 +1531,28 @@ stt = faster_whisper
 max_tool_steps = 3
 persona_memory_read_mode = legacy_only
 persona_memory_write_mode = legacy_only
+# Persona dialogue-tree eval/runtime controls.
+# Environment overrides use the uppercase names in comments below.
+# PERSONA_DIALOGUE_TREE_EVAL_ENABLED
+dialogue_tree_eval_enabled = false
+# PERSONA_RUNTIME_EXPLORER_ENABLED: runtime exploration is off by default.
+runtime_explorer_enabled = false
+# PERSONA_RUNTIME_EXPLORER_MAX_DEPTH
+runtime_explorer_max_depth = 1
+# PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING
+runtime_explorer_max_branching = 2
+# PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS
+runtime_explorer_max_provider_calls = 1
+# PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS
+runtime_explorer_timeout_ms = 750
+# PERSONA_RUNTIME_EXPLORER_MAX_TOKENS
+runtime_explorer_max_tokens = 256
+# PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS
+runtime_explorer_p95_added_latency_ms = 1000
+# PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED: LLM judges cannot authorize actions.
+runtime_explorer_llm_judges_enabled = false
+# PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS
+dialogue_tree_trace_retention_days = 7
 
 [persona.rbac]
 allow_export = false

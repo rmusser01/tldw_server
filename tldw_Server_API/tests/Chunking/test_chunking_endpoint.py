@@ -270,6 +270,17 @@ def test_chunk_text_empty_content(mock_icp, client: TestClient):
     assert call_args_list[1]["method"] == "words"  # effective_options
 
 
+@patch(PATH_TO_ICP_IN_ENDPOINT_MODULE)
+def test_chunk_text_sanitizes_unexpected_error(mock_icp, client: TestClient):
+    mock_icp.side_effect = RuntimeError("chunking backend exploded")
+
+    payload = {"text_content": "This should fail.", "options": {"method": "words", "max_size": 2, "overlap": 0}}
+    response = client.post("/api/v1/chunking/chunk_text", json=payload)
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "An internal error occurred during text chunking"}
+
+
 # For rolling_summarize tests, we need to patch load_server_configs and general_llm_analyzer
 # where they are used in the endpoint (chunking.py)
 @patch(PATH_TO_LOAD_CONFIGS_IN_ENDPOINT_MODULE, new=mock_load_server_configs_for_test)
@@ -401,6 +412,23 @@ def test_chunk_text_endpoint_no_options(mock_icp, client: TestClient):
     _, passed_options_to_icp, _, _, _ = mock_icp.call_args[0]
     assert passed_options_to_icp["method"] == default_chunk_options_from_lib_real.get("method")
     assert passed_options_to_icp["max_size"] == default_chunk_options_from_lib_real.get("max_size")
+
+
+@patch(PATH_TO_ICP_IN_ENDPOINT_MODULE)
+def test_chunk_file_sanitizes_unexpected_error(mock_icp, client: TestClient):
+    mock_icp.side_effect = RuntimeError("chunking backend exploded")
+
+    files = {"file": ("test.txt", b"Chunk this content", "text/plain")}
+    form_data = {
+        "method": "words",
+        "max_size": "10",
+        "overlap": "0",
+    }
+
+    response = client.post("/api/v1/chunking/chunk_file", files=files, data=form_data)
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Internal error during file chunking"}
 
 
 def test_chunk_text_endpoint_invalid_payload_missing_text(client: TestClient):

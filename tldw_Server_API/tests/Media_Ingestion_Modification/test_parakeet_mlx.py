@@ -16,6 +16,20 @@ from typing import Optional, Callable
 pytestmark = pytest.mark.unit
 
 
+def _install_fake_mlx_core(monkeypatch):
+    """Prevent unit tests from importing the native MLX extension."""
+    import sys
+    import types
+
+    mock_mlx = types.ModuleType("mlx")
+    mock_mlx.__path__ = []
+    mock_core = types.ModuleType("mlx.core")
+    mock_core.bfloat16 = object()
+    mock_mlx.core = mock_core
+    monkeypatch.setitem(sys.modules, "mlx", mock_mlx)
+    monkeypatch.setitem(sys.modules, "mlx.core", mock_core)
+
+
 class TestParakeetMLX:
     """Test suite for Parakeet MLX transcription."""
 
@@ -135,6 +149,7 @@ class TestParakeetMLX:
         # Force macOS availability in tests and MLX availability
         monkeypatch.setattr(mlx_mod, 'IS_MACOS', True)
         monkeypatch.setattr(mlx_mod, 'check_mlx_available', lambda: True)
+        _install_fake_mlx_core(monkeypatch)
 
         # Load model
         model = mlx_mod.load_parakeet_mlx_model(force_reload=True)
@@ -162,6 +177,7 @@ class TestParakeetMLX:
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Parakeet_MLX as mlx_mod
         monkeypatch.setattr(mlx_mod, 'IS_MACOS', True)
         monkeypatch.setattr(mlx_mod, 'check_mlx_available', lambda: True)
+        _install_fake_mlx_core(monkeypatch)
 
         custom_path = "/path/to/custom/model"
         model = mlx_mod.load_parakeet_mlx_model(force_reload=True, model_path=custom_path)
@@ -294,6 +310,7 @@ class TestParakeetMLX:
         monkeypatch.setattr(mlx_mod, 'IS_MACOS', True)
         monkeypatch.setattr(mlx_mod, 'check_mlx_available', lambda: True)
         monkeypatch.setattr(config_mod, "get_stt_config", lambda: {})
+        _install_fake_mlx_core(monkeypatch)
         mlx_mod._mlx_model_cache = None
 
         model = mlx_mod.load_parakeet_mlx_model(force_reload=True)
@@ -389,9 +406,50 @@ class TestParakeetMLX:
         assert temp_audio_file in call_args[0]
 
     @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX.load_parakeet_mlx_model')
+    def test_missing_audio_file_path_is_sanitized(self, mock_load_model, tmp_path):
+        """Missing audio file errors should not expose local paths."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX import (
+            transcribe_with_parakeet_mlx
+        )
+
+        missing_path = tmp_path / "private" / "audio" / "input.wav"
+        mock_load_model.return_value = MagicMock()
+
+        result = transcribe_with_parakeet_mlx(missing_path)
+
+        assert result == "[Error: Audio file not found]"
+        assert str(missing_path) not in result
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX.load_parakeet_mlx_model')
+    def test_decoding_config_import_error_is_sanitized(
+        self,
+        mock_load_model,
+        monkeypatch,
+        sample_audio_data,
+    ):
+        """Missing dependency errors should not expose import internals."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_MLX as mlx_mod,
+        )
+
+        audio_data, sample_rate = sample_audio_data
+        mock_load_model.return_value = MagicMock()
+
+        def raise_import_error(**_kwargs):
+            raise ImportError("missing mlx dependency at /private/mlx/libmlx.dylib")
+
+        monkeypatch.setattr(mlx_mod, "_build_decoding_config", raise_import_error)
+
+        result = mlx_mod.transcribe_with_parakeet_mlx(audio_data, sample_rate)
+
+        assert result == "[Error: Missing required library]"
+        assert "libmlx.dylib" not in result
+        assert "/private/mlx" not in result
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX.load_parakeet_mlx_model')
     @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX.check_mlx_available')
     def test_transcribe_error_handling(self, mock_check_mlx, mock_load_model, sample_audio_data):
-        """Test error handling during transcription."""
+        """Transcription failures should not expose internal exception details."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX import (
             transcribe_with_parakeet_mlx
         )
@@ -401,14 +459,51 @@ class TestParakeetMLX:
         # Setup mocks
         mock_check_mlx.return_value = True
         mock_model = MagicMock()
-        mock_model.transcribe.side_effect = Exception("Model error")
+        mock_model.transcribe.side_effect = Exception("Model error at /private/mlx/model.bin")
         mock_load_model.return_value = mock_model
 
         # Transcribe with error
         result = transcribe_with_parakeet_mlx(audio_data, sample_rate)
 
-        assert "[Error:" in result
-        assert "Model error" in result
+        assert result == "[Error: Parakeet MLX transcription failed]"
+        assert "Model error" not in result
+        assert "model.bin" not in result
+
+    def test_streaming_transcription_sanitizes_runtime_errors(self, monkeypatch):
+        """Streaming generator failures should not expose internal exception details."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_MLX as mlx_mod,
+        )
+
+        class FailingSession:
+            closed = False
+
+            def add_audio(self, audio_np, sample_rate=16000):
+                raise RuntimeError("MLX stream failed at /private/mlx/chunk.raw")
+
+            def close(self):
+                self.closed = True
+
+        failing_session = FailingSession()
+        monkeypatch.setattr(mlx_mod, "IS_MACOS", True)
+        monkeypatch.setattr(
+            mlx_mod,
+            "create_parakeet_mlx_streaming_session",
+            lambda: failing_session,
+        )
+
+        result = list(
+            mlx_mod.transcribe_streaming_mlx(
+                iter([np.ones(4, dtype=np.float32)]),
+                chunk_size=4,
+                overlap=0.0,
+            )
+        )
+
+        assert result == ["[Error: Parakeet MLX streaming transcription failed]"]
+        assert "private" not in result[0]
+        assert "chunk.raw" not in result[0]
+        assert failing_session.closed is True
 
     def test_chunk_callback_functionality(self):
 

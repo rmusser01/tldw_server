@@ -37,21 +37,11 @@ def _get_emit_admin_audit_event():
 )
 async def admin_list_user_profiles(
     http_request: Request,
-    sections: str | None = Query(
-        None, description="Comma-separated list of sections to include"
-    ),
-    include_sources: bool = Query(
-        False, description="Include per-field source attribution"
-    ),
-    include_raw: bool = Query(
-        False, description="Include raw stored overrides"
-    ),
-    mask_secrets: bool = Query(
-        True, description="Mask secret values in the response"
-    ),
-    user_ids: str | None = Query(
-        None, description="Comma-separated list of user IDs to include"
-    ),
+    sections: str | None = Query(None, description="Comma-separated list of sections to include"),
+    include_sources: bool = Query(False, description="Include per-field source attribution"),
+    include_raw: bool = Query(False, description="Include raw stored overrides"),
+    mask_secrets: bool = Query(True, description="Mask secret values in the response"),
+    user_ids: str | None = Query(None, description="Comma-separated list of user IDs to include"),
     org_id: int | None = Query(None, description="Restrict to a specific organization"),
     team_id: int | None = Query(None, description="Restrict to a specific team"),
     role: str | None = None,
@@ -82,8 +72,8 @@ async def admin_list_user_profiles(
     if audit_info:
         try:
             await _get_emit_admin_audit_event()(http_request, principal, **audit_info)
-        except Exception as exc:
-            logger.warning("Admin audit emission failed: {}", exc, exc_info=True)
+        except Exception:
+            logger.warning("Admin audit emission failed")
     return response
 
 
@@ -95,18 +85,10 @@ async def admin_list_user_profiles(
 async def admin_get_user_profile(
     user_id: int,
     http_request: Request,
-    sections: str | None = Query(
-        None, description="Comma-separated list of sections to include"
-    ),
-    include_sources: bool = Query(
-        False, description="Include per-field source attribution"
-    ),
-    include_raw: bool = Query(
-        False, description="Include raw stored overrides"
-    ),
-    mask_secrets: bool = Query(
-        True, description="Mask secret values in the response"
-    ),
+    sections: str | None = Query(None, description="Comma-separated list of sections to include"),
+    include_sources: bool = Query(False, description="Include per-field source attribution"),
+    include_raw: bool = Query(False, description="Include raw stored overrides"),
+    mask_secrets: bool = Query(True, description="Mask secret values in the response"),
     principal: AuthPrincipal = Depends(get_auth_principal),
     session_manager: Any = Depends(get_session_manager_dep),
 ) -> UserProfileResponse:
@@ -123,8 +105,8 @@ async def admin_get_user_profile(
     if audit_info:
         try:
             await _get_emit_admin_audit_event()(http_request, principal, **audit_info)
-        except Exception as exc:
-            logger.warning("Admin audit emission failed: {}", exc, exc_info=True)
+        except Exception:
+            logger.warning("Admin audit emission failed")
     return response
 
 
@@ -146,8 +128,8 @@ async def admin_update_user_profile(
     if audit_info:
         try:
             await _get_emit_admin_audit_event()(http_request, principal, **audit_info)
-        except Exception as exc:
-            logger.warning("Admin audit emission failed: {}", exc, exc_info=True)
+        except Exception:
+            logger.warning("Admin audit emission failed")
     return response
 
 
@@ -165,6 +147,6 @@ async def admin_bulk_update_user_profiles(
     if audit_info:
         try:
             await _get_emit_admin_audit_event()(http_request, principal, **audit_info)
-        except Exception as exc:
-            logger.warning("Admin audit emission failed: {}", exc, exc_info=True)
+        except Exception:
+            logger.warning("Admin audit emission failed")
     return response

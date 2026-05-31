@@ -146,6 +146,65 @@ describe("SchedulerTab editor", () => {
     } as any)
   })
 
+  it("selects the requested deck from a scheduler handoff", async () => {
+    render(<SchedulerTab isActive initialDeckId={2} />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("2, 20")
+    })
+    expect(screen.getByTestId("deck-study-defaults-review-prompt-side")).toHaveTextContent(
+      "Back first"
+    )
+  })
+
+  it("uses the supplied deck visibility options for deck list and due counts", async () => {
+    render(
+      <SchedulerTab
+        isActive
+        deckVisibilityOptions={{ includeWorkspaceItems: true, workspaceId: "workspace-77" }}
+      />
+    )
+
+    expect(useDecksQuery).toHaveBeenCalledWith({
+      includeWorkspaceItems: true,
+      workspaceId: "workspace-77"
+    })
+    await waitFor(() => {
+      expect(useDueCountsQuery).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          enabled: true,
+          includeWorkspaceItems: true,
+          workspaceId: "workspace-77"
+        })
+      )
+    })
+  })
+
+  it("reapplies the same requested deck when a new scheduler handoff arrives", async () => {
+    const { rerender } = render(
+      <SchedulerTab isActive initialDeckId={2} initialDeckHandoffKey="handoff-1" />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText("Chemistry Scheduler")).toBeInTheDocument()
+      expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("2, 20")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: /biology/i }))
+    await waitFor(() => {
+      expect(screen.getByText("Biology Scheduler")).toBeInTheDocument()
+      expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("1, 10")
+    })
+
+    rerender(<SchedulerTab isActive initialDeckId={2} initialDeckHandoffKey="handoff-2" />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Chemistry Scheduler")).toBeInTheDocument()
+      expect(screen.getByTestId("deck-scheduler-editor-field-new-steps")).toHaveValue("2, 20")
+    })
+  })
+
   it("applies presets, copies another deck, and resets to defaults", async () => {
     updateDeckMock
       .mockResolvedValueOnce({
@@ -201,6 +260,31 @@ describe("SchedulerTab editor", () => {
 
     expect(updateDeckMock).not.toHaveBeenCalled()
     expect(await screen.findByText(/leech threshold must be >= 1/i)).toBeInTheDocument()
+  })
+
+  it("renders scheduler save errors with the design-system Alert", async () => {
+    updateDeckMock.mockRejectedValue(new Error("Could not save deck settings"))
+
+    render(<SchedulerTab isActive />)
+
+    fireEvent.change(screen.getByTestId("deck-scheduler-editor-field-leech-threshold"), {
+      target: { value: "9" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+
+    const alertText = await screen.findByText(/failed to save deck settings/i)
+    expect(alertText.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+  })
+
+  it("renders the FSRS switch guidance with the design-system Alert", async () => {
+    render(<SchedulerTab isActive />)
+
+    fireEvent.mouseDown(screen.getByTestId("deck-scheduler-editor-field-scheduler-type"))
+    const fsrsOptions = await screen.findAllByText("FSRS")
+    fireEvent.click(fsrsOptions[fsrsOptions.length - 1])
+
+    const alertTitle = await screen.findByText(/switching this deck to fsrs/i)
+    expect(alertTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
   })
 
   it("saves scheduler edits with optimistic locking", async () => {

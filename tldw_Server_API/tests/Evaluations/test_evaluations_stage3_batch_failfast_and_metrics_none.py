@@ -106,6 +106,77 @@ def test_batch_parallel_strict_fail_fast_cancels_remaining(monkeypatch):
     assert len(cancelled_items) <= 1
 
 
+def test_batch_parallel_sanitizes_item_failure(monkeypatch):
+    app = FastAPI()
+    app.include_router(eval_unified.router, prefix="/api/v1")
+
+    class _Limiter:
+        async def check_rate_limit(
+            self,
+            _user_id: str,
+            *,
+            endpoint: str,
+            is_batch: bool,
+            tokens_requested: int,
+            estimated_cost: float,
+        ):
+            _ = (endpoint, is_batch, tokens_requested, estimated_cost)
+            return True, {"retry_after": 0}
+
+    class _Service:
+        async def evaluate_geval(
+            self,
+            source_text: str,
+            summary: str,
+            metrics,
+            api_name: str,
+            api_key: str,
+            user_id: str,
+            webhook_user_id: str | None = None,
+        ):
+            _ = (source_text, summary, metrics, api_name, api_key, user_id, webhook_user_id)
+            raise RuntimeError("evaluation backend exploded at /private/evals.db")
+
+    async def _verify_api_key_override():
+        return "user_1"
+
+    async def _get_user_override():
+        return User(id=1, username="tester", email=None, is_active=True)
+
+    async def _rate_limit_dep_override():
+        return None
+
+    async def _fake_apply_rate_limit_headers(_limiter, _user_id, _response, _meta):
+        return None
+
+    app.dependency_overrides[eval_unified.verify_api_key] = _verify_api_key_override
+    app.dependency_overrides[eval_unified.get_eval_request_user] = _get_user_override
+    app.dependency_overrides[eval_unified.check_evaluation_rate_limit] = _rate_limit_dep_override
+
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _Limiter())
+    monkeypatch.setattr(eval_unified, "_apply_rate_limit_headers", _fake_apply_rate_limit_headers)
+    monkeypatch.setattr(eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: _Service())
+
+    body = {
+        "evaluation_type": "geval",
+        "parallel_workers": 2,
+        "continue_on_error": True,
+        "items": [
+            {"source_text": "item_0", "summary": "summary_0"},
+        ],
+    }
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/evaluations/batch", json=body)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["failed"] == 1
+    assert payload["results"][0]["error"] == "Evaluation item failed"
+    assert "evaluation backend exploded" not in str(payload)
+    assert "/private/evals.db" not in str(payload)
+
+
 @pytest.mark.asyncio
 async def test_execute_evaluation_handles_metrics_none(tmp_path, monkeypatch):
     runner = EvaluationRunner(str(tmp_path / "evals_stage3.db"), max_concurrent_evals=2, eval_timeout=10)

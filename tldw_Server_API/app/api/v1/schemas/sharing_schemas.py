@@ -9,9 +9,11 @@ Pydantic models for workspace sharing CRUD, share tokens, and admin operations.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, default_offset_pagination_aliases
 
 
 class ShareScopeType(str, Enum):
@@ -28,6 +30,7 @@ class AccessLevel(str, Enum):
 class ResourceType(str, Enum):
     CHATBOOK = "chatbook"
     WORKSPACE = "workspace"
+    PROTOTYPE_WORKSPACE = "prototype_workspace"
 
 
 # ── Workspace Sharing ──
@@ -135,6 +138,18 @@ class VerifyPasswordResponse(BaseModel):
     session_token: str | None = None
 
 
+class PrototypeLinkExchangeRequest(BaseModel):
+    display_name: str | None = Field(None, min_length=1, max_length=120)
+    password: str | None = Field(None, min_length=1, max_length=128)
+
+
+class PrototypeLinkExchangeResponse(BaseModel):
+    shared_actor_id: str
+    actor_type: Literal["external_collaborator"] = "external_collaborator"
+    session_token: str
+    runtime_policy_profile: str
+
+
 # ── Clone ──
 
 class CloneWorkspaceRequest(BaseModel):
@@ -152,6 +167,15 @@ class CloneWorkspaceResponse(BaseModel):
 class AdminShareListResponse(BaseModel):
     shares: list[ShareResponse]
     total: int
+    offset: int
+    limit: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return default_offset_pagination_aliases(self)
 
 
 class UpdateConfigRequest(BaseModel):
@@ -178,6 +202,15 @@ class AuditEventResponse(BaseModel):
 class AuditLogResponse(BaseModel):
     events: list[AuditEventResponse]
     total: int
+    offset: int
+    limit: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return default_offset_pagination_aliases(self)
 
 
 # ── Proxy responses for shared-with-me ──

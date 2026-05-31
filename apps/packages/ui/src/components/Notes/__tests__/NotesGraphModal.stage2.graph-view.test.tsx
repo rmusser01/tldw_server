@@ -83,11 +83,15 @@ const graphPayload = {
     nodes: [
       { data: { id: 'note:note-a', type: 'note', label: 'Current note' } },
       { data: { id: 'note:note-b', type: 'note', label: 'Linked note' } },
-      { data: { id: 'tag:research', type: 'tag', label: 'research' } }
+      { data: { id: 'tag:research', type: 'tag', label: 'research' } },
+      { data: { id: 'source:web:media-77', type: 'source', label: 'web: media-77' } }
     ],
     edges: [
       { data: { id: 'e1', source: 'note:note-a', target: 'note:note-b', type: 'manual' } },
-      { data: { id: 'e2', source: 'note:note-a', target: 'tag:research', type: 'tag_membership' } }
+      { data: { id: 'e2', source: 'note:note-a', target: 'tag:research', type: 'tag_membership' } },
+      { data: { id: 'e3', source: 'note:note-b', target: 'note:note-a', type: 'wikilink' } },
+      { data: { id: 'e4', source: 'note:note-a', target: 'note:note-b', type: 'backlink' } },
+      { data: { id: 'e5', source: 'note:note-a', target: 'source:web:media-77', type: 'source_membership' } }
     ]
   },
   truncated: false
@@ -179,6 +183,31 @@ describe('NotesGraphModal stage 2 graph view', () => {
 
     expect(mockCyInstance.zoom).toHaveBeenCalled()
     expect(mockCyInstance.fit.mock.calls.length).toBeGreaterThan(fitCountBefore)
+  })
+
+  it('maps graph edge types to readable labels before rendering Cytoscape', async () => {
+    renderModal()
+
+    await waitFor(() => {
+      expect(mockCytoscapeFactory).toHaveBeenCalled()
+    })
+
+    const config = mockCytoscapeFactory.mock.calls[0]?.[0]
+    const edgeElements = Array.isArray(config?.elements)
+      ? config.elements.filter((element: any) => element?.data?.source && element?.data?.target)
+      : []
+    expect(edgeElements.map((edge: any) => edge.data.displayLabel)).toEqual([
+      'Manual link',
+      'Tag',
+      'Note link',
+      'Backlink',
+      'Source'
+    ])
+
+    const edgeStyle = config?.style?.find((entry: any) => entry?.selector === 'edge')
+    expect(edgeStyle?.style?.label).toBe('data(displayLabel)')
+    expect(screen.getByTestId('notes-graph-legend')).toHaveTextContent('Tag = shared tag')
+    expect(screen.getByTestId('notes-graph-legend')).toHaveTextContent('Source = shared source')
   })
 
   it('opens selected note when a note node is tapped and confirmed', async () => {

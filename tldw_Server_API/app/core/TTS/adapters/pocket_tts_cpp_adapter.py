@@ -37,6 +37,11 @@ from .pocket_tts_cpp_runtime import (
 )
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 class PocketTTSCppAdapter(TTSAdapter):
     """Adapter for the PocketTTS.cpp command-line runtime."""
 
@@ -263,7 +268,10 @@ class PocketTTSCppAdapter(TTSAdapter):
         except (TTSValidationError, TTSModelNotFoundError, TTSUnsupportedFormatError, TTSTimeoutError):
             raise
         except Exception as exc:
-            logger.error("PocketTTS.cpp generation failed: {}", exc, exc_info=True)
+            logger.error(
+                "PocketTTS.cpp generation failed; exception_type={}",
+                _safe_exception_label(exc),
+            )
             raise TTSGenerationError(
                 "PocketTTS.cpp generation failed",
                 provider=self.PROVIDER_KEY,
@@ -372,7 +380,10 @@ class PocketTTSCppAdapter(TTSAdapter):
                 self._cli_streaming_supported = probe_result
                 return probe_result
             except Exception as exc:
-                logger.warning("PocketTTS.cpp CLI streaming probe failed: {}", exc)
+                logger.warning(
+                    "PocketTTS.cpp CLI streaming probe failed; exception_type={}",
+                    _safe_exception_label(exc),
+                )
                 self._cli_streaming_supported = False
                 return False
             finally:

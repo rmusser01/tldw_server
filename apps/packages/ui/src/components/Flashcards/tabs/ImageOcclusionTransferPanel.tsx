@@ -1,8 +1,9 @@
-import { Alert, Button, Card, Form, Input, Select, Space, Typography } from "antd"
+import { Button, Card, Form, Input, Select, Space, Typography } from "antd"
 import { useQueryClient } from "@tanstack/react-query"
 import React from "react"
 import { useTranslation } from "react-i18next"
 
+import { Alert, type AlertVariant } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import { processInChunks } from "@/utils/chunk-processing"
@@ -35,6 +36,10 @@ const NEW_DECK_OPTION_VALUE = "__new__" as const
 type DeckSelectionValue = number | typeof NEW_DECK_OPTION_VALUE | null | undefined
 
 type TransferActionStatus = "success" | "warning" | "error"
+type InlineAlertState = {
+  message: string
+  variant: Extract<AlertVariant, "warning" | "error">
+}
 
 interface ImageOcclusionTransferPanelProps {
   onTransferAction?: (summary: {
@@ -148,7 +153,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
   const [reviewPromptSide, setReviewPromptSide] = React.useState<DeckReviewPromptSide>("front")
   const [tagsInput, setTagsInput] = React.useState("")
   const [drafts, setDrafts] = React.useState<ImageOcclusionDraft[]>([])
-  const [error, setError] = React.useState<string | null>(null)
+  const [inlineAlert, setInlineAlert] = React.useState<InlineAlertState | null>(null)
   const [isGenerating, setIsGenerating] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
   const schedulerDraft = useDeckSchedulerDraft()
@@ -236,7 +241,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
       const warningCopy = t("option:flashcards.occlusionMissingSource", {
         defaultValue: "Select a source image before generating drafts."
       })
-      setError(warningCopy)
+      setInlineAlert({ message: warningCopy, variant: "warning" })
       message.warning(warningCopy)
       return
     }
@@ -244,7 +249,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
       const warningCopy = t("option:flashcards.occlusionMissingRegions", {
         defaultValue: "Draw at least one region before generating drafts."
       })
-      setError(warningCopy)
+      setInlineAlert({ message: warningCopy, variant: "warning" })
       message.warning(warningCopy)
       return
     }
@@ -253,7 +258,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
         defaultValue: "Limit each generation run to {{count}} regions or fewer.",
         count: MAX_OCCLUSION_REGIONS
       })
-      setError(warningCopy)
+      setInlineAlert({ message: warningCopy, variant: "warning" })
       message.warning(warningCopy)
       return
     }
@@ -263,13 +268,13 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
       const warningCopy = t("option:flashcards.occlusionMissingLabels", {
         defaultValue: "Every region needs an answer label before you generate drafts."
       })
-      setError(warningCopy)
+      setInlineAlert({ message: warningCopy, variant: "warning" })
       message.warning(warningCopy)
       return
     }
 
     setIsGenerating(true)
-    setError(null)
+    setInlineAlert(null)
 
     try {
       const assets = await generateImageOcclusionAssets(sourceFile, regions)
@@ -319,7 +324,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
           : t("option:flashcards.occlusionGenerationFailed", {
               defaultValue: "Image occlusion generation failed."
             })
-      setError(errorMessage)
+      setInlineAlert({ message: errorMessage, variant: "error" })
       message.error(errorMessage)
       onTransferAction?.({
         area: "occlusion",
@@ -343,7 +348,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
     }
 
     setIsSaving(true)
-    setError(null)
+    setInlineAlert(null)
     try {
       const deckId = await resolveTargetDeckId()
       const payload: FlashcardCreate[] = validDrafts.map((draft) => ({
@@ -420,7 +425,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
           : t("option:flashcards.occlusionSaveFailed", {
               defaultValue: "Saving image occlusion cards failed."
             })
-      setError(errorMessage)
+      setInlineAlert({ message: errorMessage, variant: "error" })
       message.error(errorMessage)
       onTransferAction?.({
         area: "occlusion",
@@ -498,7 +503,9 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
 
       <ImageOcclusionPanel onChange={setPanelState} />
 
-      {error && <Alert type="error" showIcon title={error} />}
+      {inlineAlert && (
+        <Alert variant={inlineAlert.variant}>{inlineAlert.message}</Alert>
+      )}
 
       <Button
         type="primary"

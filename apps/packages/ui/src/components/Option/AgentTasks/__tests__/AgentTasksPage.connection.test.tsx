@@ -1,5 +1,6 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter, useLocation } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import AgentTasksPage from "../index"
@@ -10,6 +11,10 @@ const storageMocks = vi.hoisted(() => ({
 
 const configMocks = vi.hoisted(() => ({
   getConfig: vi.fn()
+}))
+
+const deploymentMocks = vi.hoisted(() => ({
+  isHostedTldwDeployment: vi.fn(() => false)
 }))
 
 vi.mock("react-i18next", () => ({
@@ -28,6 +33,19 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("@/services/tldw/deployment-mode", () => ({
+  isHostedTldwDeployment: () => deploymentMocks.isHostedTldwDeployment()
+}))
+
+const PROJECTS_URL =
+  "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+const PROJECTS_FOR_ALPHA_URL =
+  `${PROJECTS_URL}?canonical_workspace_id=workspace-alpha&canonical_workspace_source=research_workspace`
+const PROJECTS_FOR_BETA_URL =
+  `${PROJECTS_URL}?canonical_workspace_id=workspace-beta&canonical_workspace_source=research_workspace`
+const PROJECTS_FOR_MISSING_URL =
+  `${PROJECTS_URL}?canonical_workspace_id=workspace-missing&canonical_workspace_source=research_workspace`
+
 vi.mock("antd", () => {
   const formApi = {
     resetFields: vi.fn(),
@@ -43,14 +61,16 @@ vi.mock("antd", () => {
 
   return {
     Alert: ({
+      title,
       message,
       description
     }: {
+      title?: React.ReactNode
       message?: React.ReactNode
       description?: React.ReactNode
     }) => (
       <div>
-        <div>{message}</div>
+        <div>{message ?? title}</div>
         {description ? <div>{description}</div> : null}
       </div>
     ),
@@ -101,16 +121,80 @@ vi.mock("antd", () => {
       TextArea: () => <textarea />
     }),
     Modal: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
-    Select: () => <select aria-label="select" />,
+    Select: ({
+      options = [],
+      value,
+      onChange,
+      placeholder,
+      "aria-label": ariaLabel
+    }: {
+      options?: Array<{ value: string | number; label: React.ReactNode }>
+      value?: string | number
+      onChange?: (value: string | number | undefined) => void
+      placeholder?: React.ReactNode
+      "aria-label"?: string
+    }) => (
+      <select
+        aria-label={
+          ariaLabel || (typeof placeholder === "string" ? placeholder : "select")
+        }
+        value={value ?? ""}
+        onChange={(event) => onChange?.(event.target.value || undefined)}
+      >
+        {placeholder ? <option value="">{placeholder}</option> : null}
+        {options.map((option) => (
+          <option key={String(option.value)} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    ),
     Spin: () => <div>Loading...</div>,
     Tag: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
     Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>
   }
 })
 
+const LocationProbe = () => {
+  const location = useLocation()
+  return (
+    <div data-testid="agent-tasks-route">
+      {location.pathname}
+      {location.search}
+    </div>
+  )
+}
+
+const renderAgentTasksPage = (route = "/agent-tasks") =>
+  render(
+    <MemoryRouter initialEntries={[route]}>
+      <AgentTasksPage />
+    </MemoryRouter>
+  )
+
+const renderAgentTasksPageWithRouteProbe = (route = "/agent-tasks") =>
+  render(
+    <MemoryRouter initialEntries={[route]}>
+      <AgentTasksPage />
+      <LocationProbe />
+    </MemoryRouter>
+  )
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}
+
 describe("AgentTasksPage connection and payload normalization", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    deploymentMocks.isHostedTldwDeployment.mockReturnValue(false)
+    window.location.hash = ""
 
     storageMocks.useStorage.mockImplementation((key: string, fallback: string) => {
       if (key === "serverUrl") return ["http://localhost:8000", vi.fn()]
@@ -127,15 +211,12 @@ describe("AgentTasksPage connection and payload normalization", () => {
       accessToken: ""
     })
 
-    let callCount = 0
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        callCount += 1
         const url = String(input)
 
-        if (callCount === 1) {
-          expect(url).toBe("http://127.0.0.1:8000/openapi.json")
+        if (url === "http://127.0.0.1:8000/openapi.json") {
           return {
             ok: true,
             json: async () => ({
@@ -146,8 +227,19 @@ describe("AgentTasksPage connection and payload normalization", () => {
           }
         }
 
-        if (callCount === 2) {
-          expect(url).toBe("http://127.0.0.1:8000/api/v1/agent-orchestration/projects")
+        if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+          expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
+          return {
+            ok: true,
+            json: async () => ({
+              runner: "ok",
+              agent: "ok",
+              api_keys: "ok"
+            })
+          }
+        }
+
+        if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
           expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
           return {
             ok: true,
@@ -168,31 +260,32 @@ describe("AgentTasksPage connection and payload normalization", () => {
           }
         }
 
-        expect(url).toBe(
-          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/7/tasks"
-        )
-        expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
-        return {
-          ok: true,
-          json: async () => [
-            {
-              id: 11,
-              project_id: 7,
-              title: "Draft spec",
-              status: "todo",
-              review_count: 0,
-              max_review_attempts: 3,
-              created_at: "2026-03-20T19:00:00Z",
-              updated_at: "2026-03-20T19:00:00Z"
-            }
-          ]
+        if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/7/tasks") {
+          expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
+          return {
+            ok: true,
+            json: async () => [
+              {
+                id: 11,
+                project_id: 7,
+                title: "Draft spec",
+                status: "todo",
+                review_count: 0,
+                max_review_attempts: 3,
+                created_at: "2026-03-20T19:00:00Z",
+                updated_at: "2026-03-20T19:00:00Z"
+              }
+            ]
+          }
         }
+
+        throw new Error(`unexpected fetch: ${url}`)
       })
     )
   })
 
   it("loads projects and tasks from canonical config-backed requests even when legacy storage is stale", async () => {
-    render(<AgentTasksPage />)
+    renderAgentTasksPage()
 
     const projectButton = await screen.findByText("Research Project")
     expect(projectButton).toBeInTheDocument()
@@ -202,7 +295,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
     expect(await screen.findByText("Draft spec")).toBeInTheDocument()
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledTimes(3)
+      expect(global.fetch).toHaveBeenCalledTimes(4)
     })
   })
 
@@ -218,7 +311,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
       }))
     )
 
-    render(<AgentTasksPage />)
+    renderAgentTasksPage()
 
     expect(await screen.findByText("Agent orchestration unavailable")).toBeInTheDocument()
     expect(
@@ -240,16 +333,749 @@ describe("AgentTasksPage connection and payload normalization", () => {
           })
         }
       }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
       throw new Error(`unexpected fetch: ${url}`)
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    render(<AgentTasksPage />)
+    renderAgentTasksPage()
 
     expect(await screen.findByText("Agent orchestration unavailable")).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/openapi.json"
     )
+  })
+
+  it("shows actionable ACP setup gaps from the shared health state", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
+        return {
+          ok: true,
+          json: async () => ({
+            runner: {
+              status: "missing",
+              source: "PATH"
+            },
+            agents: [
+              {
+                agent_type: "codex",
+                status: "unavailable",
+                api_key_set: false
+              }
+            ],
+            overall: "unavailable",
+            message: "ACP runner not found"
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects") {
+        return {
+          ok: true,
+          json: async () => []
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { container } = renderAgentTasksPage()
+
+    expect(await screen.findByText("ACP setup needs attention")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("ACP setup needs attention")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(1)
+    expect(screen.getByText("Runner is missing")).toBeInTheDocument()
+    expect(screen.getByText("API keys are missing")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /open agent registry/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /open acp playground/i })).toBeInTheDocument()
+  })
+
+  it("omits stored ACP credentials from hosted-mode proxy requests", async () => {
+    deploymentMocks.isHostedTldwDeployment.mockReturnValue(true)
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const headers = (init?.headers as Record<string, string> | undefined) ?? {}
+      if (url === "/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "/api/proxy/acp/health") {
+        expect(headers["X-API-KEY"]).toBeUndefined()
+        expect(headers.Authorization).toBeUndefined()
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === "/api/proxy/agent-orchestration/projects") {
+        expect(headers["X-API-KEY"]).toBeUndefined()
+        expect(headers.Authorization).toBeUndefined()
+        return {
+          ok: true,
+          json: async () => []
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderAgentTasksPage()
+
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/proxy/agent-orchestration/projects",
+      expect.objectContaining({
+        headers: { "Content-Type": "application/json" }
+      })
+    )
+  })
+
+  it("opens task run diagnostics from enriched task detail without manual ID copying", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === PROJECTS_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 7,
+              name: "Research Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z"
+            }
+          ]
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/7/tasks") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 11,
+              project_id: 7,
+              title: "Draft spec",
+              status: "triage",
+              review_count: 1,
+              max_review_attempts: 3,
+              created_at: "2026-03-20T19:00:00Z",
+              updated_at: "2026-03-20T19:00:00Z"
+            }
+          ]
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/11") {
+        expect((init?.headers as Record<string, string>)?.["X-API-KEY"]).toBe("real-key")
+        return {
+          ok: true,
+          json: async () => ({
+            id: 11,
+            project_id: 7,
+            title: "Draft spec",
+            status: "triage",
+            review_count: 1,
+            max_review_attempts: 3,
+            created_at: "2026-03-20T19:00:00Z",
+            updated_at: "2026-03-20T19:00:00Z",
+            reviews: [
+              {
+                reviewer: "reviewer-agent",
+                approved: false,
+                feedback: "Needs citations",
+                created_at: "2026-03-20T19:10:00Z"
+              }
+            ],
+            runs: [
+              {
+                id: 51,
+                task_id: 11,
+                session_id: "sess-1",
+                agent_type: "codex",
+                status: "failed",
+                error: "Workspace root not allowed",
+                started_at: "2026-03-20T19:00:00Z",
+                session: {
+                  session_id: "sess-1",
+                  available: true,
+                  links: {
+                    diagnostics: "/api/v1/acp/sessions/sess-1/diagnostics",
+                    artifacts: "/api/v1/acp/sessions/sess-1/artifacts",
+                    audit: "/api/v1/acp/sessions/sess-1/audit"
+                  }
+                },
+                history: {
+                  event_count: 3,
+                  audit_event_count: 2,
+                  artifact_count: 1,
+                  diagnostic_count: 1,
+                  tool_call_count: 4,
+                  result: {
+                    role: "assistant",
+                    preview: "I could not access the workspace."
+                  }
+                },
+                failure_context: {
+                  reason_code: "workspace_root_not_allowed",
+                  message: "Workspace root not allowed",
+                  source: "session_diagnostic"
+                },
+                review_decision: {
+                  available: true,
+                  approved: false,
+                  reviewer: "reviewer-agent",
+                  feedback_preview: "Needs citations"
+                }
+              }
+            ]
+          })
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderAgentTasksPage()
+
+    const projectButton = await screen.findByText("Research Project")
+    fireEvent.click(projectButton)
+    expect(await screen.findByText("Draft spec")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Needs human attention")
+        .closest('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /inspect/i }))
+
+    expect(await screen.findByText("Run #51")).toBeInTheDocument()
+    expect(screen.getByText("sess-1")).toBeInTheDocument()
+    expect(screen.getByText("workspace_root_not_allowed")).toBeInTheDocument()
+    expect(screen.getByText("Workspace root not allowed")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /open diagnostics/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /open artifacts/i })).toBeInTheDocument()
+    expect(screen.getByText("Needs citations")).toBeInTheDocument()
+  })
+
+  it("uses the route workspace filter to show only linked canonical workspace projects and tasks", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === PROJECTS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 7,
+              name: "Alpha Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 33,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
+              },
+              task_summary: {
+                total_tasks: 1,
+                status_counts: {
+                  todo: 1
+                }
+              }
+            },
+          ]
+        }
+      }
+      if (url === PROJECTS_FOR_BETA_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 8,
+              name: "Beta Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 34,
+                canonical_workspace_id: "workspace-beta",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
+              },
+              task_summary: {
+                total_tasks: 1,
+                status_counts: {
+                  todo: 1
+                }
+              }
+            }
+          ]
+        }
+      }
+      if (url === PROJECTS_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 7,
+              name: "Alpha Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 33,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
+              }
+            },
+            {
+              id: 8,
+              name: "Beta Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 34,
+                canonical_workspace_id: "workspace-beta",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
+              }
+            }
+          ]
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/7/tasks") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 11,
+              project_id: 7,
+              title: "Alpha task",
+              status: "todo",
+              review_count: 0,
+              max_review_attempts: 3,
+              created_at: "2026-03-20T19:00:00Z",
+              updated_at: "2026-03-20T19:00:00Z"
+            }
+          ]
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/8/tasks") {
+        throw new Error("filtered workspace should not request beta tasks")
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderAgentTasksPageWithRouteProbe("/agent-tasks?workspace=workspace-alpha")
+
+    expect(await screen.findByText("Alpha Project")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(
+      "/agent-tasks?workspace=workspace-alpha"
+    )
+    expect(screen.queryByText("Beta Project")).toBeNull()
+    expect(screen.getAllByText("Workspace: workspace-alpha").length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByText("Alpha Project"))
+
+    expect(await screen.findByText("Alpha task")).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/8/tasks",
+      expect.anything()
+    )
+
+    fireEvent.change(screen.getByLabelText("Workspace filter"), {
+      target: { value: "__all_workspaces__" }
+    })
+
+    expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(
+      "/agent-tasks"
+    )
+    expect(await screen.findByText("Beta Project")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("Workspace filter"), {
+      target: { value: "workspace-beta" }
+    })
+
+    expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(
+      "/agent-tasks?workspace=workspace-beta"
+    )
+    expect(await screen.findByText("Beta Project")).toBeInTheDocument()
+    expect(screen.queryByText("Alpha Project")).toBeNull()
+  })
+
+  it("ignores stale project responses after the workspace filter changes", async () => {
+    const alphaProjects = deferred<{ ok: boolean; json: () => Promise<unknown[]> }>()
+    const betaProjects = deferred<{ ok: boolean; json: () => Promise<unknown[]> }>()
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === PROJECTS_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 7,
+              name: "Race Alpha Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 37,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
+              }
+            },
+            {
+              id: 8,
+              name: "Race Beta Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 38,
+                canonical_workspace_id: "workspace-beta",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
+              }
+            }
+          ]
+        }
+      }
+      if (url === PROJECTS_FOR_ALPHA_URL) {
+        return alphaProjects.promise
+      }
+      if (url === PROJECTS_FOR_BETA_URL) {
+        return betaProjects.promise
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderAgentTasksPageWithRouteProbe()
+
+    expect(await screen.findByText("Race Alpha Project")).toBeInTheDocument()
+    expect(screen.getByText("Race Beta Project")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("Workspace filter"), {
+      target: { value: "workspace-alpha" }
+    })
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(PROJECTS_FOR_ALPHA_URL, expect.anything())
+    })
+
+    fireEvent.change(screen.getByLabelText("Workspace filter"), {
+      target: { value: "workspace-beta" }
+    })
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(PROJECTS_FOR_BETA_URL, expect.anything())
+    })
+
+    betaProjects.resolve({
+      ok: true,
+      json: async () => [
+        {
+          id: 8,
+          name: "Race Beta Project",
+          user_id: 1,
+          created_at: "2026-03-20T19:00:00Z",
+          canonical_workspace: {
+            acp_workspace_id: 38,
+            canonical_workspace_id: "workspace-beta",
+            canonical_workspace_source: "research_workspace",
+            link_status: "linked"
+          }
+        }
+      ]
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText("Race Alpha Project")).toBeNull()
+    })
+    expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(
+      "/agent-tasks?workspace=workspace-beta"
+    )
+
+    alphaProjects.resolve({
+      ok: true,
+      json: async () => [
+        {
+          id: 7,
+          name: "Race Alpha Project",
+          user_id: 1,
+          created_at: "2026-03-20T19:00:00Z",
+          canonical_workspace: {
+            acp_workspace_id: 37,
+            canonical_workspace_id: "workspace-alpha",
+            canonical_workspace_source: "research_workspace",
+            link_status: "linked"
+          }
+        }
+      ]
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText("Race Alpha Project")).toBeNull()
+    })
+    expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(
+      "/agent-tasks?workspace=workspace-beta"
+    )
+  })
+
+  it("surfaces workspace setup gaps when the selected canonical workspace has no linked ACP execution project", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === PROJECTS_FOR_MISSING_URL) {
+        return {
+          ok: true,
+          json: async () => []
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { container } = renderAgentTasksPage(
+      "/agent-tasks?workspace=workspace-missing"
+    )
+
+    expect(await screen.findByText("Workspace setup needs attention")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Workspace setup needs attention")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(1)
+    expect(
+      screen.getByText("No ACP execution workspace is linked to workspace-missing")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Create an agent task from Research Workspace so the execution root, environment, and MCP readiness can be validated before dispatch."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /open research workspace/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /open acp playground/i })).toBeInTheDocument()
+  })
+
+  it("does not report missing workspace setup when project loading failed", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === PROJECTS_FOR_ALPHA_URL) {
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({
+            detail: "Project API unavailable"
+          })
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderAgentTasksPage("/agent-tasks?workspace=workspace-alpha")
+
+    expect(await screen.findByText("Project API unavailable")).toBeInTheDocument()
+    expect(screen.queryByText("Workspace setup needs attention")).toBeNull()
+    expect(
+      screen.queryByText("No ACP execution workspace is linked to workspace-alpha")
+    ).toBeNull()
+  })
+
+  it("does not show an unlinked workspace warning when another matching project is linked", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === "http://127.0.0.1:8000/openapi.json") {
+        return {
+          ok: true,
+          json: async () => ({
+            paths: {
+              "/api/v1/agent-orchestration/projects": {},
+            }
+          })
+        }
+      }
+      if (url === "http://127.0.0.1:8000/api/v1/acp/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            runner: "ok",
+            agent: "ok",
+            api_keys: "ok"
+          })
+        }
+      }
+      if (url === PROJECTS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 7,
+              name: "Linked Alpha Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 33,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "research_workspace",
+                link_status: "linked"
+              }
+            },
+            {
+              id: 8,
+              name: "Stale Alpha Project",
+              user_id: 1,
+              created_at: "2026-03-20T19:00:00Z",
+              canonical_workspace: {
+                acp_workspace_id: 34,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "research_workspace",
+                link_status: "conflict"
+              }
+            }
+          ]
+        }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderAgentTasksPage("/agent-tasks?workspace=workspace-alpha")
+
+    expect(await screen.findByText("Linked Alpha Project")).toBeInTheDocument()
+    expect(screen.getByText("Stale Alpha Project")).toBeInTheDocument()
+    expect(screen.queryByText("Workspace setup needs attention")).toBeNull()
+    expect(screen.queryByText("ACP execution workspace link is conflict")).toBeNull()
   })
 })

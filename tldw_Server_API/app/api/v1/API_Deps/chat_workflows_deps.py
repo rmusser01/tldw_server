@@ -97,7 +97,7 @@ def _get_or_create_chat_workflows_db(
             logger.info("Created new ChatWorkflowsDatabase instance for user {}", user_id)
             return db_instance
         except _CHAT_WORKFLOWS_DB_EXCEPTIONS as exc:
-            logger.error("Failed to create ChatWorkflowsDatabase for user {}: {}", user_id, exc)
+            logger.error("Failed to create ChatWorkflowsDatabase (error_type={})", type(exc).__name__)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to initialize chat workflows database",
@@ -188,7 +188,10 @@ def shutdown_chat_workflows_deps(app: FastAPI | None = None) -> None:
             try:
                 db_instance.close()
             except _CHAT_WORKFLOWS_DB_EXCEPTIONS as exc:
-                logger.error("Failed to close ChatWorkflowsDatabase during shutdown: {}", exc)
+                logger.error(
+                    "Failed to close ChatWorkflowsDatabase during shutdown (error_type={})",
+                    type(exc).__name__,
+                )
         state.cache.clear()
 
     delattr(app.state, _APP_STATE_KEY)

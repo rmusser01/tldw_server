@@ -60,7 +60,7 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
     resolve_byok_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.Chunking import Chunker
 from tldw_Server_API.app.core.Chunking.base import ChunkingMethod
 from tldw_Server_API.app.core.config import load_and_log_configs as load_server_configs
@@ -337,7 +337,10 @@ async def process_text_for_chunking_json(
             if ext in ext_map:
                 effective_options['language'] = ext_map[ext]
     except Exception as ext_detect_error:
-        logger.debug("Failed to infer code language from file extension", exc_info=ext_detect_error)
+        logger.debug(
+            "Failed to infer code language from file extension ({})",
+            type(ext_detect_error).__name__,
+        )
 
     logger.debug(f"Effective chunking options before LLM setup: {effective_options}")
 
@@ -455,9 +458,9 @@ async def process_text_for_chunking_json(
         logger.warning(f"ValueError during chunking setup or process for '{request_data.file_name}': {ve}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve)) from ve
     except Exception as e:
-        logger.error(f"Unexpected error during chunking process for '{request_data.file_name}': {e}", exc_info=True)
+        logger.error("Unexpected error during chunking process ({})", type(e).__name__)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"An internal error occurred during text chunking: {type(e).__name__}") from e
+                            detail="An internal error occurred during text chunking") from e
 
     if not chunk_results:
         logger.info(f"Chunking produced no results for '{request_data.file_name}'. Returning empty list.")
@@ -566,7 +569,10 @@ async def process_file_for_chunking(
             if ext in ext_map:
                 form_options_cleaned['language'] = ext_map[ext]
     except Exception as ext_detect_error:
-        logger.debug("Failed to infer cleaned form language from file extension", exc_info=ext_detect_error)
+        logger.debug(
+            "Failed to infer cleaned form language from file extension ({})",
+            type(ext_detect_error).__name__,
+        )
     if code_mode is not None:
         form_options_cleaned['code_mode'] = code_mode
 
@@ -645,8 +651,8 @@ async def process_file_for_chunking(
         logger.warning(f"ValueError during chunking file '{file.filename}': {ve}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve)) from ve
     except Exception as e:
-        logger.error(f"Unexpected error during chunking file '{file.filename}': {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal error during file chunking: {type(e).__name__}") from e
+        logger.error("Unexpected error during chunking file ({})", type(e).__name__)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error during file chunking") from e
 
     # Convert chunk_results to ChunkedContentResponse objects
     chunked_responses = [

@@ -91,7 +91,7 @@
     "modeSpeech": "Voz",
     "moreTools": "Más",
     "writingPlayground": "Taller de escritura",
-    "workspacePlayground": "Model Playground",
+    "researchWorkspace": "Espacio de investigación",
     "acpPlayground": "ACP Playground",
     "skills": "Skills",
     "adminLlamacpp": "Llama.cpp Admin",
@@ -100,7 +100,7 @@
     "collections": "Collections",
     "dataTables": "Data Tables",
     "documentWorkspace": "Document Workspace",
-    "modelPlayground": "Workspace Playground",
+    "modelPlayground": "Laboratorio de modelos",
     "workflowEditor": "Workflow Editor",
     "modeRepo2txt": "Repo2Txt"
   },

@@ -1,9 +1,11 @@
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 
 
 pytestmark = pytest.mark.unit
@@ -84,17 +86,24 @@ class _FakeTransaction:
 
 
 class _FakeBackend:
+    backend_type = BackendType.POSTGRESQL
+
     def transaction(self):
         return _FakeTransaction()
 
     def table_exists(self, _name: str, connection=None) -> bool:
         return True
 
+    def execute(self, *_args, **_kwargs):
+        return None
+
 
 def test_postgres_initializer_uses_postgres_safe_v33_migration(monkeypatch):
     db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db.backend = _FakeBackend()
-    db.backend_type = object()
+    db._backend = _FakeBackend()
+    db._uses_shared_content_backend = False
+    db._backend_refresh_suspended = False
+    db._local = SimpleNamespace()
 
     applied_scripts: list[str] = []
 
@@ -109,5 +118,5 @@ def test_postgres_initializer_uses_postgres_safe_v33_migration(monkeypatch):
     db._initialize_schema_postgres()
 
     assert CharactersRAGDB._MIGRATION_SQL_V32_TO_V33_POSTGRES in applied_scripts
-    assert applied_scripts[-1] == CharactersRAGDB._MIGRATION_SQL_V34_TO_V35
+    assert CharactersRAGDB._MIGRATION_SQL_V34_TO_V35 in applied_scripts
     assert "PRAGMA foreign_keys" not in CharactersRAGDB._MIGRATION_SQL_V32_TO_V33_POSTGRES

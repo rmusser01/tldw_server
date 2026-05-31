@@ -48,6 +48,7 @@ def test_persona_catalog_smoke(client_with_persona_user: TestClient):
     assert isinstance(payload, list)
     assert payload
     assert payload[0]["id"] == "research_assistant"
+    assert payload[0]["mode"] == "session_scoped"
 
 
 def test_persona_catalog_returns_404_when_disabled(client_with_persona_user: TestClient, monkeypatch):

@@ -21,6 +21,31 @@ from tldw_Server_API.app.core.config import settings
 pytestmark = pytest.mark.unit
 
 
+class _LoggerStub:
+    def __init__(self):
+        self.warning_calls = []
+
+    def warning(self, *args, **kwargs):
+        self.warning_calls.append((args, kwargs))
+
+
+_SENSITIVE_LOG_MARKERS = (
+    "task-private-123",
+    "notifications backend exploded",
+    "/private/tmp/notifications.db",
+)
+
+
+def _assert_sanitized_warning_log(logger_stub: _LoggerStub, expected_message: str) -> None:
+    assert logger_stub.warning_calls
+    assert [args[0] for args, _kwargs in logger_stub.warning_calls if args] == [expected_message]
+    assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.warning_calls)
+
+    rendered_calls = repr(logger_stub.warning_calls)
+    for marker in _SENSITIVE_LOG_MARKERS:
+        assert marker not in rendered_calls
+
+
 @pytest.fixture()
 def notifications_app(monkeypatch, tmp_path):
     base_dir = tmp_path / "test_notifications_api"
@@ -223,6 +248,40 @@ def test_notification_snooze_persists_archived_state_and_supports_cancel(notific
 
     assert reconcile_calls == [(task_id, 881)]
     assert unschedule_calls == [task_id]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_snooze_task_warning_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import notifications as notifications_endpoint
+
+    class _FailingScheduler:
+        async def reconcile_task(self, *, task_id: str, user_id: int) -> None:
+            raise RuntimeError("notifications backend exploded /private/tmp/notifications.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(notifications_endpoint, "get_reminders_scheduler", lambda: _FailingScheduler(), raising=False)
+    monkeypatch.setattr(notifications_endpoint, "logger", logger_stub, raising=True)
+
+    await notifications_endpoint._reconcile_snooze_task_best_effort(task_id="task-private-123", user_id=881)
+
+    _assert_sanitized_warning_log(logger_stub, "notifications snooze reconcile_task failed")
+
+
+@pytest.mark.asyncio
+async def test_unschedule_snooze_task_warning_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import notifications as notifications_endpoint
+
+    class _FailingScheduler:
+        async def unschedule_task(self, task_id: str) -> None:
+            raise RuntimeError("notifications backend exploded /private/tmp/notifications.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(notifications_endpoint, "get_reminders_scheduler", lambda: _FailingScheduler(), raising=False)
+    monkeypatch.setattr(notifications_endpoint, "logger", logger_stub, raising=True)
+
+    await notifications_endpoint._unschedule_snooze_task_best_effort(task_id="task-private-123")
+
+    _assert_sanitized_warning_log(logger_stub, "notifications snooze unschedule_task failed")
 
 
 def test_duplicate_notifications_keep_distinct_snooze_tasks(notifications_app, monkeypatch):

@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import Query
 from pydantic import BaseModel
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
 
 
 class BioRxivPaper(BaseModel):
@@ -28,6 +29,7 @@ class BioRxivSearchResponse(BaseModel):
     page: int
     results_per_page: int
     total_pages: int
+    pagination: PagePaginationMeta
 
 
 class BioRxivSearchRequestForm:
@@ -80,6 +82,7 @@ class BioRxivPubsSearchResponse(BaseModel):
     page: int
     results_per_page: int
     total_pages: int
+    pagination: PagePaginationMeta
 
 
 class BioRxivPubsSearchRequestForm:
@@ -129,6 +132,7 @@ class PubMedSearchResponse(BaseModel):
     page: int
     results_per_page: int
     total_pages: int
+    pagination: PagePaginationMeta
 
 
 class PubMedSearchRequestForm:
@@ -252,6 +256,16 @@ class GenericSearchResponse(BaseModel):
     total_pages: int
 
 
+class GenericPageSearchResponse(BaseModel):
+    query_echo: dict[str, Any]
+    items: list[GenericPaper]
+    total_results: int
+    page: int
+    results_per_page: int
+    total_pages: int
+    pagination: PagePaginationMeta
+
+
 class IEEESearchRequestForm:
     def __init__(
         self,
@@ -327,6 +341,7 @@ class BioRxivFunderSearchResponse(BaseModel):
     page: int
     results_per_page: int
     total_pages: int
+    pagination: PagePaginationMeta
 
 
 class BioRxivFunderSearchRequestForm:

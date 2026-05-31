@@ -13,6 +13,7 @@ import {
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
 type TabChatModeParams = {
   selectedModel: string
@@ -141,9 +142,9 @@ export const tabChatMode = async (
   history: ChatHistory,
   signal: AbortSignal,
   params: Omit<TabChatModeParams, "documents">
-) => {
+): Promise<ChatSubmitResult> => {
   console.log("Using tabChatMode")
-  await runChatPipeline(
+  return runChatPipeline(
     tabChatModeDefinition,
     message,
     image,

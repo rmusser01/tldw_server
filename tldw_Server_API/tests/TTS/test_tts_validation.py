@@ -9,6 +9,7 @@ import os
 
 #
 # Local Imports
+from tldw_Server_API.app.core.TTS import tts_validation
 from tldw_Server_API.app.core.TTS.tts_validation import TTSInputValidator, validate_tts_request, ProviderLimits
 from tldw_Server_API.app.core.TTS.adapters.base import TTSRequest, AudioFormat
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
@@ -176,6 +177,30 @@ class TestTTSInputValidator:
 
         error = exc_info.value
         assert "Speed must be between 0.1 and 3.0" in str(error)
+
+    def test_validate_request_unexpected_error_log_sanitizes_exception_text(self, validator, monkeypatch):
+        """Unexpected validation failures should not leak raw exception text to logs."""
+        raw_error = "validation backend exploded"
+        logged_messages: list[str] = []
+
+        def fail_parameter_validation(request, provider=None):
+            raise RuntimeError(raw_error)
+
+        monkeypatch.setattr(validator, "_validate_parameters", fail_parameter_validation)
+        request = TTSRequest(text="Hello world", voice="alloy", format=AudioFormat.MP3, speed=1.0)
+        sink_id = tts_validation.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="ERROR",
+        )
+        try:
+            is_valid, error_message = validator.validate_request(request, provider="openai")
+        finally:
+            tts_validation.logger.remove(sink_id)
+
+        assert is_valid is False
+        assert error_message == f"Validation failed: {raw_error}"
+        assert any("Unexpected validation error" in message for message in logged_messages)
+        assert all(raw_error not in message for message in logged_messages)
 
     def test_validate_voice_reference(self, validator):
         """Test voice reference validation"""

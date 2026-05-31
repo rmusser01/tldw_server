@@ -1,5 +1,6 @@
 import React from "react"
-import { Button, Input, Modal } from "antd"
+import { Input, Modal } from "antd"
+import { ModalFooter } from "@/components/ui/layout"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,18 +55,27 @@ export const PlaygroundRawRequestModal: React.FC<PlaygroundRawRequestModalProps>
         width={780}
         destroyOnHidden
         footer={
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button onClick={onRefresh}>
-              {t("common:refresh", "Refresh")}
-            </Button>
+          <ModalFooter
+            hideCancel
+            data-testid="raw-chat-request-modal-footer"
+            actions={[
+              {
+                label: t("common:refresh", "Refresh"),
+                onClick: onRefresh
+              }
+            ]}
+            secondaryAction={{
+              label: t("common:copy", "Copy"),
+              onClick: onCopy,
+              disabled: !json
+            }}
+            primaryAction={{
+              label: t("common:close", "Close"),
+              onClick: onClose
+            }}
+          >
             {extraFooter}
-            <Button onClick={onCopy} disabled={!json}>
-              {t("common:copy", "Copy")}
-            </Button>
-            <Button type="primary" onClick={onClose}>
-              {t("common:close", "Close")}
-            </Button>
-          </div>
+          </ModalFooter>
         }
       >
         <div className="space-y-3">

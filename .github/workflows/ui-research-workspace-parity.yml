@@ -1,0 +1,142 @@
+name: UI Research Workspace Parity
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+    paths:
+      - "apps/test-utils/research-workspace/**"
+      - "apps/tldw-frontend/e2e/workflows/research-workspace.parity.spec.ts"
+      - "apps/extension/tests/e2e/research-workspace.parity.spec.ts"
+      - "apps/packages/ui/src/components/Option/ResearchWorkspace/**"
+      - "apps/packages/ui/src/store/workspace.ts"
+      - "apps/packages/ui/src/store/workspace-bundle.ts"
+      - "apps/packages/ui/src/utils/research-workspace-*.ts"
+      - "apps/tldw-frontend/package.json"
+      - "apps/extension/package.json"
+      - "apps/tldw-frontend/playwright.config.ts"
+      - "apps/extension/playwright.config.ts"
+      - "apps/bun.lock"
+      - ".github/workflows/ui-research-workspace-parity.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/test-utils/research-workspace/**"
+      - "apps/tldw-frontend/e2e/workflows/research-workspace.parity.spec.ts"
+      - "apps/extension/tests/e2e/research-workspace.parity.spec.ts"
+      - "apps/packages/ui/src/components/Option/ResearchWorkspace/**"
+      - "apps/packages/ui/src/store/workspace.ts"
+      - "apps/packages/ui/src/store/workspace-bundle.ts"
+      - "apps/packages/ui/src/utils/research-workspace-*.ts"
+      - "apps/tldw-frontend/package.json"
+      - "apps/extension/package.json"
+      - "apps/tldw-frontend/playwright.config.ts"
+      - "apps/extension/playwright.config.ts"
+      - "apps/bun.lock"
+      - ".github/workflows/ui-research-workspace-parity.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-research-workspace-parity-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  webui-research-workspace-parity:
+    name: WebUI Research Workspace Parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      TLDW_WEB_AUTOSTART: "true"
+      TLDW_WEB_CMD: "env NEXT_DISABLE_MEM_OVERRIDE=1 NODE_OPTIONS=--max-old-space-size=5120 bun run dev -- --webpack -p 8080"
+      TLDW_WEB_URL: "http://localhost:8080"
+      TLDW_SERVER_URL: "http://127.0.0.1:8000"
+      TLDW_API_KEY: "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+
+      - name: Install workspace dependencies
+        working-directory: apps
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        working-directory: apps/tldw-frontend
+        run: bunx playwright install --with-deps chromium
+
+      - name: Run WebUI research workspace parity spec
+        working-directory: apps/tldw-frontend
+        run: bun run e2e:research-workspace:parity
+
+      - name: Upload WebUI parity artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: research-workspace-webui-parity-artifacts
+          if-no-files-found: ignore
+          path: |
+            apps/tldw-frontend/test-results/**
+            apps/tldw-frontend/playwright-report/**
+
+  extension-research-workspace-parity:
+    name: Extension Research Workspace Parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TLDW_E2E_EXTENSION_LAUNCH_TIMEOUT_MS: "90000"
+      TLDW_E2E_EXTENSION_TARGET_WAIT_MS: "90000"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+
+      - name: Install workspace dependencies
+        working-directory: apps
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        working-directory: apps/extension
+        run: bunx playwright install --with-deps chromium
+
+      - name: Run extension research workspace parity spec (strict no-skip)
+        working-directory: apps/extension
+        run: bun run test:e2e:workspace-parity:strict
+
+      - name: Upload extension parity artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: research-workspace-extension-parity-artifacts
+          if-no-files-found: ignore
+          path: |
+            apps/extension/test-results/**
+            apps/extension/playwright-report/**

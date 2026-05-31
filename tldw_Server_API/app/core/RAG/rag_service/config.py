@@ -228,7 +228,7 @@ class RAGConfig:
             return config
 
         except Exception as e:
-            logger.error(f"Error loading config from {config_path}: {e}")
+            logger.error(f"Error loading RAG config: {type(e).__name__}")
             logger.warning("Using default configuration")
             return cls()
 
@@ -256,7 +256,7 @@ class RAGConfig:
                         setattr(self, attr, converter(value))
                     logger.debug(f"Override from env: {env_var} -> {section}.{attr} = {value}")
                 except Exception as e:
-                    logger.warning(f"Failed to apply env override {env_var}: {e}")
+                    logger.warning(f"Failed to apply RAG env override: {type(e).__name__}")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert configuration to dictionary."""

@@ -89,11 +89,32 @@ Admin API Endpoints
   - Regex tester honors `/regex/flags` and category gating.
 
 Web UI
-- Tab: Admin → Moderation
-  - Runtime Settings: toggle built-in PII, categories; optional “Persist to file”.
-  - Managed Blocklist: list with search, Append, Delete (ETag protection).
-  - Per-user Overrides: editor + list table; supports `categories_enabled`.
-  - Tester: try input/output text for a user and view action + redacted text.
+- `/moderation`: Moderation Review queue. This is the reviewer workflow for sanitized items that were captured from moderation outcomes. Reviewers can filter/search/sort the queue, inspect sanitized context and policy snapshots, record decisions, undo recent eligible decisions, review decision history, and apply bulk decisions with partial-failure feedback.
+- `/moderation/rules`: Content Rules configuration. This is the administrator workflow for runtime settings, managed blocklist, per-user overrides, and the tester sandbox.
+- `/moderation-playground`: legacy redirect to `/moderation/rules`.
+
+Moderation Review
+- Purpose: queue moderation outcomes that need human review without exposing raw unsafe content.
+- Capture gate:
+  - `MODERATION_REVIEW_CAPTURE_ENABLED`: when truthy, supported moderation outcomes are captured into the review queue.
+  - `MODERATION_REVIEW_DB_PATH`: optional SQLite path for review queue persistence. Defaults to `tldw_Server_API/Databases/moderation_review.db`.
+- Review item data is intentionally sanitized:
+  - `excerpt`, `context`, `effective_policy`, and `matches` are the only content-bearing fields surfaced to reviewers.
+  - `safe_fields` tells the UI which fields are allowed to render.
+  - Raw rule patterns and raw model/user text are not exposed through review item detail.
+  - Redacted review items keep top-level metadata and audit records, but replace excerpt, context, and match samples with safe placeholders.
+- Decision auditability:
+  - Item detail includes sanitized decision history: actor id, action, resulting status, reason, timestamps, undo eligibility, undo expiry, and redaction state.
+  - Undo tokens are returned only at decision time, are stored hashed, expire, are single-use, and fail if a later decision superseded the original decision.
+  - `GET /api/v1/moderation/review/audit` lists sanitized audit events and supports filtering by item, decision, actor, action, date range, cursor, and limit.
+- Review endpoints use moderation review permissions rather than the content-rules `SYSTEM_CONFIGURE` permission:
+  - `MODERATION_REVIEW_READ`: list and inspect review items.
+  - `MODERATION_REVIEW_DECIDE`: record and undo single-item decisions.
+  - `MODERATION_REVIEW_BULK_DECIDE`: record bulk decisions.
+  - `MODERATION_AUDIT_READ`: list sanitized review audit events.
+- Known unsupported producer states:
+  - Review capture currently covers moderation outcomes wired through the review capture helper. Additional producers should call `capture_moderation_review_item` with sanitized payloads rather than writing directly to the review database.
+  - There is no standalone audit export endpoint yet. Use filtered audit listing until an export contract is designed.
 
 Streaming Behavior
 - Streaming SSE always ends with `data: [DONE]` on normal termination.

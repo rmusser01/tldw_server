@@ -81,3 +81,9 @@ async def test_list_users_forwards_admin_capable_filter(monkeypatch, tmp_path):
     payload = response.json()
     assert payload["total"] == 1
     assert payload["users"][0]["id"] == 7
+    assert payload["pagination"]["total"] == 1
+    assert payload["pagination"]["limit"] == 25
+    assert payload["pagination"]["offset"] == 0
+    assert payload["pagination"]["has_more"] is False
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None

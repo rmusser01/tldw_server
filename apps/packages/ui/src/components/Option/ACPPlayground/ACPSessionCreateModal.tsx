@@ -8,9 +8,7 @@ import {
   Radio,
   Collapse,
   notification,
-  Alert,
   Steps,
-  Tag,
   Tooltip,
 } from "antd"
 import {
@@ -23,6 +21,8 @@ import {
   Loader2,
 } from "lucide-react"
 import { Button } from "@/components/Common/Button"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
+import { getDesignSystemState } from "@/design-system"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { ACPRestClient } from "@/services/acp/client"
 import { buildACPClientConfig } from "@/services/acp/connection"
@@ -146,28 +146,29 @@ const CreationProgress: React.FC<CreationProgressProps> = ({ step, error }) => {
           { title: t("acp.create.steps.creating", "Creating") },
           { title: t("acp.create.steps.startingAgent", "Starting Agent") },
           { title: t("acp.create.steps.connecting", "Connecting") },
-          { title: t("acp.create.steps.ready", "Ready") },
+          { title: t("acp.create.steps.ready", getDesignSystemState("ready").label) },
         ]}
       />
       {error && (
         <Alert
           className="mt-3"
           type="error"
-          showIcon
           title={error.message}
-          description={
-            error.suggestions.length > 0 && (
-              <ul className="mt-2 list-inside list-disc text-sm">
-                {error.suggestions.map((s, i) => (
-                  <li key={i}>
-                    <strong>{s.action}</strong>
-                    {s.description && `: ${s.description}`}
-                  </li>
-                ))}
-              </ul>
-            )
-          }
-        />
+          showIcon
+        >
+          {error.suggestions.length > 0 ? (
+            <ul className="mt-2 list-inside list-disc text-sm">
+              {error.suggestions.map((s, i) => (
+                <li key={i}>
+                  <strong>{s.action}</strong>
+                  {s.description && `: ${s.description}`}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            t("acp.create.errorNoSuggestions", "Review the error details and try again.")
+          )}
+        </Alert>
       )}
     </div>
   )

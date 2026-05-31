@@ -21,14 +21,14 @@ describe("useFeatureFlag rollout controls", () => {
     )
     window.localStorage.clear()
     delete (
-      window as Window & { __TLDW_RESEARCH_STUDIO_ROLLOUT__?: unknown }
-    ).__TLDW_RESEARCH_STUDIO_ROLLOUT__
+      window as Window & { __TLDW_RESEARCH_WORKSPACE_ROLLOUT__?: unknown }
+    ).__TLDW_RESEARCH_WORKSPACE_ROLLOUT__
   })
 
   it("respects persisted manual disable even when rollout assignment passes", () => {
     useStorageMock.mockImplementation(
       (key: string, defaultValue: unknown) => [
-        key === FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1 ? false : defaultValue,
+        key === FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1 ? false : defaultValue,
         vi.fn()
       ] as const
     )
@@ -37,12 +37,12 @@ describe("useFeatureFlag rollout controls", () => {
       "manual-disable-subject"
     )
     window.localStorage.setItem(
-      FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_studio_provenance_v1,
+      FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_workspace_provenance_v1,
       "100"
     )
 
     const { result } = renderHook(() =>
-      useFeatureFlag(FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1)
+      useFeatureFlag(FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1)
     )
     expect(result.current[0]).toBe(false)
   })
@@ -52,12 +52,12 @@ describe("useFeatureFlag rollout controls", () => {
     window.localStorage.setItem(FEATURE_ROLLOUT_SUBJECT_ID_STORAGE_KEY, "subject-a")
     window.localStorage.setItem(
       FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS
-        .research_studio_status_guardrails_v1,
+        .research_workspace_status_guardrails_v1,
       "0"
     )
 
     const { result } = renderHook(() =>
-      useFeatureFlag(FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1)
+      useFeatureFlag(FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1)
     )
     expect(result.current[0]).toBe(false)
   })
@@ -69,18 +69,18 @@ describe("useFeatureFlag rollout controls", () => {
     window.localStorage.setItem(FEATURE_ROLLOUT_SUBJECT_ID_STORAGE_KEY, subjectId)
     window.localStorage.setItem(
       FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS
-        .research_studio_status_guardrails_v1,
+        .research_workspace_status_guardrails_v1,
       String(percentage)
     )
 
     const expected = isFlagEnabledForRollout({
-      flagKey: FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1,
+      flagKey: FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1,
       subjectId,
       rolloutPercentage: percentage
     })
 
     const { result } = renderHook(() =>
-      useFeatureFlag(FEATURE_FLAGS.RESEARCH_STUDIO_STATUS_GUARDRAILS_V1)
+      useFeatureFlag(FEATURE_FLAGS.RESEARCH_WORKSPACE_STATUS_GUARDRAILS_V1)
     )
     expect(result.current[0]).toBe(expected)
   })
@@ -88,19 +88,19 @@ describe("useFeatureFlag rollout controls", () => {
   it("uses runtime window override before storage/env rollout values", () => {
     useStorageMock.mockImplementation(() => [true, vi.fn()] as const)
     window.localStorage.setItem(
-      FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_studio_provenance_v1,
+      FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS.research_workspace_provenance_v1,
       "0"
     )
     ;(
       window as Window & {
-        __TLDW_RESEARCH_STUDIO_ROLLOUT__?: Record<string, unknown>
+        __TLDW_RESEARCH_WORKSPACE_ROLLOUT__?: Record<string, unknown>
       }
-    ).__TLDW_RESEARCH_STUDIO_ROLLOUT__ = {
-      [FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1]: 100
+    ).__TLDW_RESEARCH_WORKSPACE_ROLLOUT__ = {
+      [FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1]: 100
     }
 
     const { result } = renderHook(() =>
-      useFeatureFlag(FEATURE_FLAGS.RESEARCH_STUDIO_PROVENANCE_V1)
+      useFeatureFlag(FEATURE_FLAGS.RESEARCH_WORKSPACE_PROVENANCE_V1)
     )
     expect(result.current[0]).toBe(true)
   })
@@ -109,7 +109,7 @@ describe("useFeatureFlag rollout controls", () => {
     useStorageMock.mockImplementation(() => [true, vi.fn()] as const)
     window.localStorage.setItem(
       FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS
-        .research_studio_status_guardrails_v1,
+        .research_workspace_status_guardrails_v1,
       "0"
     )
 

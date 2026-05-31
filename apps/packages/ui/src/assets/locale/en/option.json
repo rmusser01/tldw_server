@@ -3,6 +3,87 @@
   "selectAPrompt": "Select a Prompt",
   "githubRepository": "GitHub Repository",
   "settings": "Settings",
+  "setupRoute": {
+    "title": "Setup Wizard",
+    "panelTitle": "Connect your server",
+    "panelMessage": "Guided connection setup for production use.",
+    "startAction": "Start setup"
+  },
+  "setupReadiness": {
+    "title": "Setup readiness",
+    "description": "Choose the defaults that make chat, search, ingestion, and speech ready before the first large import.",
+    "valueNotSet": "Not set",
+    "actions": {
+      "openBackendSetup": "Open backend setup",
+      "refresh": "Refresh",
+      "preview": "Preview selection",
+      "provision": "Provision now",
+      "verify": "Verify readiness",
+      "continue": "Continue"
+    },
+    "errors": {
+      "adminRequiredTitle": "Admin access required",
+      "requestFailedTitle": "Readiness request failed",
+      "localSetupRequiredTitle": "Local setup required",
+      "localSetupRequiredDescription": "First-run setup is restricted to local requests.",
+      "load": "Unable to load setup readiness.",
+      "preview": "Unable to preview setup readiness.",
+      "provision": "Unable to provision setup readiness.",
+      "verify": "Unable to verify setup readiness."
+    },
+    "profile": {
+      "title": "Readiness profile",
+      "description": "Profiles set defaults only. Provisioning is a separate action.",
+      "empty": "No setup readiness profiles are available.",
+      "advancedControls": "Advanced controls"
+    },
+    "machine": {
+      "appleSilicon": "Apple Silicon",
+      "freeDiskGb": "{{value}} GB free"
+    },
+    "lanes": {
+      "noSelection": "No selection yet.",
+      "ttsSelection": "TTS: {{value}}"
+    },
+    "preview": {
+      "title": "Preview and provision",
+      "configUpdates": "Config updates",
+      "configUpdateCount": "{{count}} section(s)",
+      "installPlan": "Install plan",
+      "installPlanWork": "Provisioning work planned",
+      "noDownloads": "No downloads needed",
+      "overlays": "Overlays",
+      "none": "None",
+      "reviewTitle": "Review before provisioning",
+      "reviewDescription": "Select a profile or preview the current selection before running Provision now."
+    },
+    "consequences": {
+      "title": "Skipped-lane consequences"
+    },
+    "provision": {
+      "statusTitle": "Provision status: {{status}}",
+      "description": "Readiness provisioning has started. Refresh or watch the status cards for progress."
+    },
+    "verification": {
+      "statusTitle": "Verification: {{status}}",
+      "description": "Verification completed."
+    },
+    "statuses": {
+      "not_configured": "not configured",
+      "ready": "ready",
+      "ready_with_warnings": "ready with warnings",
+      "previewed": "previewed",
+      "failed": "failed",
+      "blocked": "blocked",
+      "provisioning": "provisioning",
+      "queued": "queued",
+      "running": "running",
+      "in_progress": "in progress",
+      "completed": "completed",
+      "skipped": "skipped",
+      "restart_required": "restart required"
+    }
+  },
   "connectionCard": {
     "headlineMissing": "Connect tldw Assistant to your server",
     "headlineSearching": "Searching for your tldw server…",
@@ -67,7 +148,9 @@
     "modePrompts": "Prompts",
     "modePromptsPlayground": "Prompts",
     "modeStt": "STT Playground",
+    "modeSttHostedDesc": "Requires a self-hosted tldw server for speech transcription.",
     "modeSpeech": "Speech",
+    "modeTtsHostedDesc": "Requires a self-hosted tldw server for speech generation.",
     "modePromptStudio": "Prompt Studio",
     "modeDocumentation": "Documentation",
     "modeFlashcards": "Flashcards",
@@ -86,7 +169,7 @@
     "acpPlayground": "ACP Playground",
     "skills": "Skills",
     "modelPlayground": "Model Playground",
-    "workspacePlayground": "Research Studio",
+    "researchWorkspace": "Research Workspace",
     "modeKanban": "Kanban Playground",
     "modeShortcutHint": "{{shortcut}} to switch",
     "quickIngest": "Quick Ingest",
@@ -256,8 +339,10 @@
     "generatingLabel": "Generating...",
     "generateError": "Generation failed: {{detail}}",
     "generateUnavailable": "Chat completions unavailable.",
+    "generationUnavailableShort": "Generation unavailable",
     "modelMissing": "Select a model in Settings to generate.",
     "generationInProgress": "Stop generation before switching sessions.",
+    "revisionConfirmBroadTarget": "Confirm before applying a broad text-changing request.",
     "generateShortcutTooltip": "Ctrl/Cmd+Enter to generate",
     "stopShortcutTooltip": "Esc to stop",
     "shortcutsHint": "Shortcuts: Ctrl/Cmd+Enter to generate, Esc to stop.",
@@ -362,6 +447,64 @@
     "noMatchesTitle": "No matches",
     "noMatchesDescription": "Try a different search term.",
     "noMatchesList": "No matches in this source."
+  },
+  "agentRegistry": {
+    "health": {
+      "title": "ACP System Health",
+      "runnerBinary": "Runner Binary",
+      "agentStatus": "Agent Status",
+      "apiKeys": "API Keys",
+      "unavailableTitle": "Health check unavailable",
+      "unavailableBody": "Could not reach the ACP health endpoint. Ensure the server is running."
+    },
+    "executionHealth": {
+      "title": "ACP Execution Health",
+      "unavailableTitle": "Execution health summary unavailable",
+      "unavailableBody": "The admin summary endpoint may require newer backend support or elevated permissions.",
+      "sessions": "Sessions",
+      "sessionWindowSingular": "{{total}} session in {{days}}d",
+      "sessionWindowPlural": "{{total}} sessions in {{days}}d",
+      "statusCount": "{{count}} {{status}}",
+      "noSessions": "No sessions recorded",
+      "compatibility": "Compatibility",
+      "liveCertificationRequired": "Live certification required",
+      "noLiveCertificationBlocker": "No live-certification blocker",
+      "supportStateCount": "{{count}} {{state}}",
+      "unverifiedAgents": "Unverified agents: {{agents}}",
+      "noDocumentedUnverifiedAgents": "No documented-unverified agents",
+      "executionEvidenceDocs": "Execution evidence docs",
+      "retentionAndRedaction": "Retention and redaction",
+      "retentionSummary": "Retention {{sessionDays}}d sessions / {{auditDays}}d audit",
+      "redactedDrillThroughEnabled": "Redacted drill-through enabled",
+      "reviewRedactionSettings": "Review redaction settings",
+      "failureBucketsTitle": "Failure buckets",
+      "noRecentFailureBuckets": "No recent failure buckets",
+      "setupHealthTitle": "Setup health",
+      "setupStatus": "{{label}} {{status}}",
+      "evidenceCount": "{{count}} evidence",
+      "setupBlockers": "{{label}} {{status}}: {{blockers}}",
+      "noSetupBlockers": "No setup blockers in this window",
+      "failureBuckets": {
+        "setupBlockers": "Setup blockers",
+        "runnerSessionFailures": "Runner/session failures",
+        "reviewerRejections": "Reviewer rejections",
+        "reviewerFailures": "Reviewer failures",
+        "governanceDenials": "Governance denials",
+        "structuredCompletionFailures": "Structured completion failures",
+        "sandboxRuntimeErrors": "Sandbox runtime errors",
+        "retentionRedactionActions": "Retention/redaction actions"
+      },
+      "setupDimensions": {
+        "agent": "Agent",
+        "workspace": "Workspace",
+        "sandboxRuntime": "Sandbox runtime",
+        "mcpInjection": "MCP injection",
+        "schedulerTriggerPath": "Scheduler trigger path"
+      }
+    },
+    "loadFailedTitle": "Agent registry could not load",
+    "registeredAgents": "Registered Agents",
+    "empty": "No agents registered"
   },
   "promptStudio": {
     "title": "Prompt Studio Playground",
@@ -509,6 +652,8 @@
     "reviewWarningConfirm": "Enable review",
     "reviewWarningCancel": "Cancel",
     "reviewRunLabel": "Review",
+    "review.warnLongTime": "Processing may take a while ({{time}})",
+    "review.summary": "{{count}} items | {{preset}} preset | {{time}} estimated",
     "reviewDraftsCreated": "Drafts ready for review.",
     "reviewDraftsFailedTitle": "Review drafts couldn't be created.",
     "reviewDraftsFailedFallback": "Failed to create review drafts.",
@@ -604,18 +749,18 @@
     "tipsHybrid": "Hybrid input: drop files or paste URLs (comma/newline separated) to build the queue.",
     "tipsPerType": "Per-type settings (Audio/PDF/Video) apply to new items of that type.",
     "tipsInspector": "Use the Inspector to see status, type, and quick checks before ingesting.",
-    "supportedFormats": "Supported: docs, PDFs, audio, video, and web URLs.",
+    "supportedFormats": "Supported: docs, PDFs, HTML/XML/JSON, audio, video, and web URLs.",
     "localFilesWarning": "Local files are kept only while this dialog is open. Complete your ingest run before closing, or reattach files when you return.",
     "itemsReady": "{{count}} item(s) ready",
     "itemsReadySr": "{{count}} item(s) ready",
     "dragAndDrop": "Drag and drop files",
-    "dragAndDropHint": "Docs, PDFs, audio, and video are all welcome.",
+    "dragAndDropHint": "Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome.",
     "dropzoneProcessing": "Processing in progress...",
     "dropzoneWaitProcessing": "Wait for completion to add more",
     "dropzoneOffline": "Server not connected",
     "dropzoneConnectHint": "Connect to add files",
     "dropzoneRejectTitle": "Some files not supported",
-    "dropzoneRejectHint": "Check file type and size (max 500 MB)",
+    "dropzoneRejectHint": "Check file type and size (max {{maxSize}})",
     "dropzoneRelease": "Release to add files",
     "dropzoneReleaseSingle": "Release to add 1 file",
     "dropzoneReleaseMultiple": "Release to add {{count}} files",
@@ -826,6 +971,15 @@
   },
   "tts": {
     "playground": "TTS Playground"
+  },
+  "hostedAudio": {
+    "badge": "Hosted mode",
+    "title": "Audio features require a self-hosted tldw server",
+    "description": "{{featureName}} depends on server-side audio runtimes, local model dependencies, host audio tooling, or provider keys that are only exposed in self-hosted deployments. The hosted product keeps these routes visible so you can find the feature boundary without exposing controls that cannot run here.",
+    "quickstart": "Open self-hosting quickstart",
+    "opensInNewTab": "(opens in new tab)",
+    "loadingTts": "Loading TTS playground.",
+    "loadingStt": "Loading STT playground."
   },
   "notesEmpty": {
     "connectTitle": "Connect to use Notes",
@@ -1069,6 +1223,17 @@
     "allCaughtUp": "You're all caught up!",
     "allCaughtUpDescription": "No cards are due for review. Great job!",
     "reviewedThisSession": "{{count}} cards reviewed this session",
+    "recentStudySessionsTitle": "Recent study sessions",
+    "recentStudySessionsLoading": "Loading recent study sessions...",
+    "recentStudySessionsLoadFailed": "Failed to load recent study sessions",
+    "recentStudySessionsLoadFailedFallback": "Failed to load recent study sessions.",
+    "recentStudySessionsRetry": "Retry",
+    "recentStudySessionsEmpty": "No completed study sessions yet.",
+    "recentStudySessionsCompletedTag": "Completed",
+    "recentStudySessionsSessionNumber": "Session #{{id}}",
+    "recentStudySessionsDeckNumber": "Deck {{id}}",
+    "recentStudySessionsViewingCompleted": "Viewing completed session",
+    "recentStudySessionsViewCompleted": "View completed session",
     "reviewedToday": "Reviewed today",
     "retentionRate": "Retention rate",
     "lapseRate": "Lapse rate",
@@ -1428,18 +1593,34 @@
     "system": "System prompts",
     "quick": "Quick prompts"
   },
+  "moderationReview": {
+    "nav": "Moderation Review",
+    "title": "Moderation Review",
+    "desc": "Review flagged items, escalations, and decisions"
+  },
+  "moderationRules": {
+    "nav": "Content Rules",
+    "title": "Content Rules",
+    "desc": "Configure moderation policies, blocklists, and testing"
+  },
   "moderationPlayground": {
-    "nav": "Moderation Playground",
-    "title": "Moderation Playground",
-    "subtitle": "Family safety controls and server guardrails in one place.",
-    "desc": "Content safety rules, blocklists, and testing",
+    "nav": "Content Rules",
+    "title": "Content Rules",
+    "subtitle": "Configure moderation policies, blocklists, user overrides, and rule tests.",
+    "desc": "Configure moderation policies, blocklists, and testing",
     "onboarding": {
-      "title": "Welcome to Content Controls",
-      "description": "Set up content safety rules to protect your family or enforce server guardrails.",
+      "title": "Welcome to Content Rules",
+      "description": "Set up content safety rules, blocklists, overrides, and test cases.",
       "guardrailsCta": "Set up Family Guardrails",
       "dismiss": "Skip \u2014 I\u2019ll explore on my own",
       "tabHint": "Start here: Policy & Settings tab sets your base rules. Then test them in the Test Sandbox.",
       "startHereBadge": "Start here"
+    }
+  },
+  "mcpHub": {
+    "toolCatalogs": {
+      "serverInventoryErrorTitle": "Could not load server inventory",
+      "serverInventoryGuidance": "Tool Catalog guidance may be incomplete until the server list loads."
     }
   },
   "repo2txt": {

@@ -73,6 +73,34 @@ describe("TldwApiClient ingestion sources contract", () => {
     expect(result.sources[0]?.last_successful_sync_summary?.degraded_count).toBe(1)
   })
 
+  it("browses ingestion source directories with normalized path entries", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      roots: [{ name: "imports", path: "/srv/tldw/imports", is_root: true }],
+      current_path: "/srv/tldw/imports",
+      parent_path: null,
+      entries: [
+        { name: "notes", path: "/srv/tldw/imports/notes", is_root: false },
+        { name: "media", path: "/srv/tldw/imports/media" }
+      ],
+      error: null
+    })
+
+    const client = createClient()
+    const result = await client.browseIngestionSourceDirectories("/srv/tldw/imports")
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/ingestion-sources/browse-directories?path=%2Fsrv%2Ftldw%2Fimports",
+        method: "GET"
+      })
+    )
+    expect(result.current_path).toBe("/srv/tldw/imports")
+    expect(result.entries).toEqual([
+      { name: "notes", path: "/srv/tldw/imports/notes", is_root: false },
+      { name: "media", path: "/srv/tldw/imports/media", is_root: false }
+    ])
+  })
+
   it("fetches source detail and item lists with normalized ids", async () => {
     mocks.bgRequest.mockResolvedValueOnce({
       id: 7,

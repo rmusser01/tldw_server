@@ -1,0 +1,222 @@
+"""Configuration bootstrap helpers for standalone MCP gateway runtimes."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from json import JSONDecodeError
+from pathlib import Path
+from typing import Any, Literal, cast
+
+from mcp_unified.interfaces.storage import ProfileStore
+from mcp_unified.profiles.models import MCPProfile
+from mcp_unified.profiles.store import InMemoryProfileStore
+
+from .bootstrap import GatewayProfileBootstrap, bootstrap_profile_gateway
+from .runtime import GatewayRuntime
+
+try:  # pragma: no cover - Python <3.11 fallback is exercised only on older runtimes.
+    import tomllib as _tomllib
+except ModuleNotFoundError:  # pragma: no cover - defensive for unsupported runtimes.
+    _tomllib = None
+
+GatewayConfigFormat = Literal["json", "toml"]
+GatewayProfileStoreKind = Literal["memory", "sqlite"]
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayProfileStoreConfig:
+    """Profile-store selection for standalone gateway bootstrap."""
+
+    kind: GatewayProfileStoreKind = "memory"
+    sqlite_path: str | Path | None = None
+
+    def __post_init__(self) -> None:
+        """Validate and normalize the configured profile store kind."""
+
+        normalized_kind = str(self.kind).strip().lower()
+        if normalized_kind not in {"memory", "sqlite"}:
+            raise ValueError(
+                f"Unsupported gateway profile store kind: {self.kind!r}"
+            )
+        object.__setattr__(self, "kind", normalized_kind)
+        if normalized_kind == "sqlite":
+            if self.sqlite_path is None:
+                raise ValueError("sqlite_path is required for sqlite profile store")
+            if not str(self.sqlite_path).strip():
+                raise ValueError("sqlite_path cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayProfileBootstrapConfig:
+    """Profile bootstrap configuration for a standalone gateway runtime."""
+
+    store: GatewayProfileStoreConfig | Mapping[str, Any] = field(
+        default_factory=GatewayProfileStoreConfig
+    )
+    profiles: Iterable[MCPProfile | Mapping[str, Any]] = field(default_factory=tuple)
+    default_profile_id: str | None = None
+    default_preset_id: str | None = None
+
+    def __post_init__(self) -> None:
+        """Normalize nested config values into copy-isolated profile data."""
+
+        store = self.store
+        if isinstance(store, Mapping):
+            store = GatewayProfileStoreConfig(**store)
+        elif not isinstance(store, GatewayProfileStoreConfig):
+            raise TypeError("store must be a GatewayProfileStoreConfig or mapping")
+
+        object.__setattr__(self, "store", store)
+        object.__setattr__(
+            self,
+            "profiles",
+            tuple(_copy_profile(profile) for profile in self.profiles or ()),
+        )
+
+
+async def bootstrap_profile_gateway_from_config(
+    backend: GatewayRuntime,
+    config: GatewayProfileBootstrapConfig | Mapping[str, Any] | None = None,
+    *,
+    profile_store: ProfileStore | None = None,
+) -> GatewayProfileBootstrap:
+    """Build a profile-aware gateway runtime from explicit gateway config."""
+
+    resolved_config = _validate_bootstrap_config(config)
+    store = profile_store
+    if store is None:
+        store_config = resolved_config.store
+        if isinstance(store_config, Mapping):
+            store_config = GatewayProfileStoreConfig(**store_config)
+        store = _build_profile_store(store_config)
+
+    return await bootstrap_profile_gateway(
+        backend,
+        profile_store=store,
+        profiles=resolved_config.profiles,
+        default_profile_id=resolved_config.default_profile_id,
+        default_preset_id=resolved_config.default_preset_id,
+    )
+
+
+def load_gateway_profile_bootstrap_config(
+    path: str | Path,
+    *,
+    format: GatewayConfigFormat | str | None = None,
+) -> GatewayProfileBootstrapConfig:
+    """Load gateway profile bootstrap config from a JSON or TOML file.
+
+    The file format is inferred from `.json` or `.toml` suffixes unless an
+    explicit `format` is supplied. The parsed payload must be a top-level
+    object accepted by `GatewayProfileBootstrapConfig`. Invalid formats,
+    unreadable files, malformed payloads, non-object payloads, and config
+    schema/type errors raise `ValueError` with user-facing context.
+    """
+
+    config_path = Path(path)
+    config_format = _detect_config_format(config_path, format)
+    try:
+        raw_payload = config_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Unable to read gateway config file: {config_path}") from exc
+
+    payload = _parse_config_payload(raw_payload, config_format)
+    if not isinstance(payload, Mapping):
+        raise ValueError("Gateway config file must contain an object")
+    try:
+        return GatewayProfileBootstrapConfig(**payload)
+    except TypeError as exc:
+        raise ValueError(f"Invalid gateway config schema or types: {exc}") from exc
+
+
+def _validate_bootstrap_config(
+    config: GatewayProfileBootstrapConfig | Mapping[str, Any] | None,
+) -> GatewayProfileBootstrapConfig:
+    """Return a validated bootstrap config model."""
+
+    if config is None:
+        return GatewayProfileBootstrapConfig()
+    if isinstance(config, GatewayProfileBootstrapConfig):
+        return config
+    return GatewayProfileBootstrapConfig(**config)
+
+
+def _detect_config_format(
+    path: Path,
+    explicit_format: GatewayConfigFormat | str | None,
+) -> GatewayConfigFormat:
+    """Infer or validate the gateway config file format."""
+
+    if explicit_format is not None:
+        normalized_format = str(explicit_format).strip().lower()
+        if normalized_format in {"json", "toml"}:
+            return cast(GatewayConfigFormat, normalized_format)
+        raise ValueError(
+            f"Unsupported gateway config format: {explicit_format!r}"
+        )
+
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        return "json"
+    if suffix == ".toml":
+        return "toml"
+    raise ValueError(
+        f"Unsupported gateway config format for path: {path}"
+    )
+
+
+def _parse_config_payload(raw_payload: str, config_format: GatewayConfigFormat) -> Any:
+    """Parse one gateway config payload by validated format."""
+
+    if config_format == "json":
+        try:
+            return json.loads(raw_payload)
+        except JSONDecodeError as exc:
+            raise ValueError(f"Invalid gateway config JSON: {exc}") from exc
+
+    if config_format == "toml":
+        if _tomllib is None:
+            raise ValueError("Gateway TOML config loading requires Python 3.11 tomllib")
+        try:
+            return _tomllib.loads(raw_payload)
+        except ValueError as exc:
+            raise ValueError(f"Invalid gateway config TOML: {exc}") from exc
+
+    raise ValueError(f"Unsupported gateway config format: {config_format!r}")
+
+
+def _build_profile_store(store_config: GatewayProfileStoreConfig) -> ProfileStore:
+    """Create the configured profile store without importing optional stores early."""
+
+    if store_config.kind == "memory":
+        return InMemoryProfileStore()
+    if store_config.kind == "sqlite":
+        from mcp_unified.storage.sqlite import SQLiteMCPStore
+
+        sqlite_path = store_config.sqlite_path
+        if sqlite_path is None:
+            raise ValueError("sqlite_path is required for sqlite profile store")
+        return SQLiteMCPStore(sqlite_path)
+    raise ValueError(
+        f"Unsupported gateway profile store kind: {store_config.kind!r}"
+    )
+
+
+def _copy_profile(profile: MCPProfile | Mapping[str, Any]) -> MCPProfile:
+    """Return a validated, copy-isolated profile config value."""
+
+    if isinstance(profile, MCPProfile):
+        return profile.model_copy(deep=True)
+    return MCPProfile.model_validate(profile).model_copy(deep=True)
+
+
+__all__ = [
+    "GatewayConfigFormat",
+    "GatewayProfileBootstrapConfig",
+    "GatewayProfileStoreConfig",
+    "GatewayProfileStoreKind",
+    "bootstrap_profile_gateway_from_config",
+    "load_gateway_profile_bootstrap_config",
+]

@@ -1,0 +1,484 @@
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { ChatAssistantOverlay } from "@/types/chat-session-settings"
+
+const storageState = vi.hoisted(() => {
+  const store = new Map<string, unknown>()
+  return {
+    store,
+    get: vi.fn(async (key: string) => store.get(key)),
+    set: vi.fn(async (key: string, value: unknown) => {
+      store.set(key, value)
+    }),
+    remove: vi.fn(async (key: string) => {
+      store.delete(key)
+    }),
+    initialize: vi.fn(async () => undefined),
+    getChatSettings: vi.fn(),
+    updateChatSettings: vi.fn()
+  }
+})
+
+vi.mock("@/utils/safe-storage", () => ({
+  createSafeStorage: () => ({
+    get: storageState.get,
+    set: storageState.set,
+    remove: storageState.remove
+  })
+}))
+
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    initialize: (requireAuth?: boolean) =>
+      (storageState.initialize as (requireAuth?: boolean) => unknown)(
+        requireAuth
+      ),
+    getChatSettings: (serverChatId: unknown) =>
+      storageState.getChatSettings(serverChatId),
+    updateChatSettings: (serverChatId: unknown, payload: unknown) =>
+      storageState.updateChatSettings(serverChatId, payload)
+  }
+}))
+
+import {
+  applyChatSettingsPatch,
+  getChatSettingsStorageKey,
+  normalizeChatSettingsRecord,
+  resolveChatSettingsKey,
+  syncChatSettingsForServerChat
+} from "@/services/chat-settings"
+
+const buildOverlay = (
+  overrides: Record<string, unknown> = {}
+): ChatAssistantOverlay => ({
+  kind: "persona",
+  id: "persona-7",
+  name: "Planner",
+  avatar_url: "https://example.com/avatar.png",
+  system_prompt_snapshot: "You are concise and structured.",
+  updatedAt: "2026-05-22T18:00:00.000Z",
+  ...overrides
+} as ChatAssistantOverlay)
+
+describe("chat settings assistant overlay", () => {
+  beforeEach(() => {
+    storageState.store.clear()
+    vi.clearAllMocks()
+  })
+
+  it("accepts assistantOverlay.system_prompt_snapshot during normalization", () => {
+    const settings = normalizeChatSettingsRecord({
+      schemaVersion: 2,
+      updatedAt: "2026-05-22T18:00:00.000Z",
+      assistantOverlay: buildOverlay()
+    })
+
+    expect(settings?.assistantOverlay).toEqual(
+      expect.objectContaining({
+        system_prompt_snapshot: "You are concise and structured."
+      })
+    )
+  })
+
+  it("rejects malformed assistantOverlay payloads during normalization", () => {
+    const settings = normalizeChatSettingsRecord({
+      schemaVersion: 2,
+      updatedAt: "2026-05-22T18:00:00.000Z",
+      assistantOverlay: buildOverlay({
+        kind: "invalid-kind",
+        system_prompt_snapshot: { text: "bad" }
+      })
+    })
+
+    expect(settings?.assistantOverlay).toBeUndefined()
+  })
+
+  it("rejects oversized assistantOverlay id and name during normalization", () => {
+    const oversized = "x".repeat(20_001)
+    const tooLongId = normalizeChatSettingsRecord({
+      schemaVersion: 2,
+      updatedAt: "2026-05-22T18:00:00.000Z",
+      assistantOverlay: buildOverlay({
+        id: oversized
+      })
+    })
+    const tooLongName = normalizeChatSettingsRecord({
+      schemaVersion: 2,
+      updatedAt: "2026-05-22T18:00:00.000Z",
+      assistantOverlay: buildOverlay({
+        name: oversized
+      })
+    })
+
+    expect(tooLongId?.assistantOverlay).toBeUndefined()
+    expect(tooLongName?.assistantOverlay).toBeUndefined()
+  })
+
+  it("trims assistantOverlay optional string fields during normalization", () => {
+    const settings = normalizeChatSettingsRecord({
+      schemaVersion: 2,
+      updatedAt: "2026-05-22T18:00:00.000Z",
+      assistantOverlay: buildOverlay({
+        avatar_url: "  https://example.com/avatar-trimmed.png  ",
+        system_prompt_snapshot: "  Stay concise.  "
+      })
+    })
+
+    expect(settings?.assistantOverlay).toEqual(
+      expect.objectContaining({
+        avatar_url: "https://example.com/avatar-trimmed.png",
+        system_prompt_snapshot: "Stay concise."
+      })
+    )
+  })
+
+  it("persists assistantOverlay locally before a server chat id exists", async () => {
+    const scratch = await applyChatSettingsPatch({
+      historyId: null,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: buildOverlay({
+          id: "persona-scratch"
+        })
+      }
+    })
+    const local = await applyChatSettingsPatch({
+      historyId: "history-overlay-1",
+      serverChatId: null,
+      patch: {
+        assistantOverlay: buildOverlay({
+          id: "persona-local"
+        })
+      }
+    })
+
+    expect(scratch?.assistantOverlay?.id).toBe("persona-scratch")
+    expect(local?.assistantOverlay?.id).toBe("persona-local")
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({ historyId: null, serverChatId: null })
+        )
+      )
+    ).toMatchObject({
+      assistantOverlay: expect.objectContaining({ id: "persona-scratch" })
+    })
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: "history-overlay-1",
+            serverChatId: null
+          })
+        )
+      )
+    ).toMatchObject({
+      assistantOverlay: expect.objectContaining({ id: "persona-local" })
+    })
+  })
+
+  it("reconciles scratch assistantOverlay into server chat settings when a server chat id appears", async () => {
+    storageState.getChatSettings.mockRejectedValue(new Error("404 not found"))
+    storageState.updateChatSettings.mockResolvedValueOnce({
+      settings: {
+        schemaVersion: 2,
+        updatedAt: "2026-05-22T18:05:00.000Z",
+        assistantOverlay: buildOverlay({
+          id: "persona-scratch"
+        })
+      }
+    })
+
+    await applyChatSettingsPatch({
+      historyId: null,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: buildOverlay({
+          id: "persona-scratch"
+        })
+      }
+    })
+
+    const syncedWithoutExplicitFallback = await syncChatSettingsForServerChat({
+      historyId: null,
+      serverChatId: "server-chat-17"
+    })
+
+    expect(syncedWithoutExplicitFallback).toBeNull()
+    expect(storageState.updateChatSettings).not.toHaveBeenCalled()
+
+    const synced = await syncChatSettingsForServerChat({
+      historyId: null,
+      serverChatId: "server-chat-17",
+      allowScratchFallback: true
+    })
+
+    expect(storageState.updateChatSettings).toHaveBeenCalledWith(
+      "server-chat-17",
+      expect.objectContaining({
+        assistantOverlay: expect.objectContaining({
+          id: "persona-scratch"
+        })
+      })
+    )
+    expect(synced?.assistantOverlay).toEqual(
+      expect.objectContaining({
+        id: "persona-scratch"
+      })
+    )
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: "server-chat-17"
+          })
+        )
+      )
+    ).toMatchObject({
+      assistantOverlay: expect.objectContaining({
+        id: "persona-scratch"
+      })
+    })
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: null
+          })
+        )
+      )
+    ).toBeUndefined()
+  })
+
+  it("does not seed server chat settings from scratch fallback unless explicitly allowed", async () => {
+    storageState.getChatSettings.mockRejectedValue(new Error("404 not found"))
+
+    await applyChatSettingsPatch({
+      historyId: null,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: buildOverlay({
+          id: "persona-unscoped"
+        })
+      }
+    })
+
+    const synced = await syncChatSettingsForServerChat({
+      historyId: null,
+      serverChatId: "server-chat-unscoped"
+    })
+
+    expect(synced).toBeNull()
+    expect(storageState.updateChatSettings).not.toHaveBeenCalled()
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: "server-chat-unscoped"
+          })
+        )
+      )
+    ).toBeUndefined()
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: null
+          })
+        )
+      )
+    ).toMatchObject({
+      assistantOverlay: expect.objectContaining({
+        id: "persona-unscoped"
+      })
+    })
+  })
+
+  it("reconciles scratch assistantOverlay into server chat settings only when explicitly allowed", async () => {
+    storageState.getChatSettings.mockRejectedValue(new Error("404 not found"))
+    storageState.updateChatSettings.mockResolvedValueOnce({
+      settings: {
+        schemaVersion: 2,
+        updatedAt: "2026-05-22T18:05:00.000Z",
+        assistantOverlay: buildOverlay({
+          id: "persona-scratch"
+        })
+      }
+    })
+
+    await applyChatSettingsPatch({
+      historyId: null,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: buildOverlay({
+          id: "persona-scratch"
+        })
+      }
+    })
+
+    const synced = await syncChatSettingsForServerChat({
+      historyId: null,
+      serverChatId: "server-chat-18",
+      allowScratchFallback: true
+    })
+
+    expect(storageState.updateChatSettings).toHaveBeenCalledWith(
+      "server-chat-18",
+      expect.objectContaining({
+        assistantOverlay: expect.objectContaining({
+          id: "persona-scratch"
+        })
+      })
+    )
+    expect(synced?.assistantOverlay).toEqual(
+      expect.objectContaining({
+        id: "persona-scratch"
+      })
+    )
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: "server-chat-18"
+          })
+        )
+      )
+    ).toMatchObject({
+      assistantOverlay: expect.objectContaining({
+        id: "persona-scratch"
+      })
+    })
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: null
+          })
+        )
+      )
+    ).toBeUndefined()
+  })
+
+  it("merges a partial local overlay patch into the existing valid overlay", async () => {
+    const historyId = "history-overlay-preserve"
+    const storageKey = getChatSettingsStorageKey(
+      resolveChatSettingsKey({
+        historyId,
+        serverChatId: null
+      })
+    )
+    storageState.store.set(storageKey, {
+      schemaVersion: 2,
+      updatedAt: "2026-05-22T18:00:00.000Z",
+      assistantOverlay: buildOverlay({
+        id: "persona-existing",
+        name: "Existing Overlay"
+      })
+    })
+
+    const next = await applyChatSettingsPatch({
+      historyId,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: {
+          name: "Renamed Only"
+        } as never
+      }
+    })
+
+    expect(next?.assistantOverlay).toEqual(
+      expect.objectContaining({
+        id: "persona-existing",
+        name: "Renamed Only"
+      })
+    )
+    expect(storageState.store.get(storageKey)).toMatchObject({
+      assistantOverlay: expect.objectContaining({
+        id: "persona-existing",
+        name: "Renamed Only"
+      })
+    })
+  })
+
+  it("preserves an existing valid local overlay when a merged overlay patch remains invalid", async () => {
+    const historyId = "history-overlay-invalid-merge"
+    const storageKey = getChatSettingsStorageKey(
+      resolveChatSettingsKey({
+        historyId,
+        serverChatId: null
+      })
+    )
+    storageState.store.set(storageKey, {
+      schemaVersion: 2,
+      updatedAt: "2026-05-22T18:00:00.000Z",
+      assistantOverlay: buildOverlay({
+        id: "persona-existing",
+        name: "Existing Overlay"
+      })
+    })
+
+    const next = await applyChatSettingsPatch({
+      historyId,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: {
+          name: "x".repeat(20_001)
+        } as never
+      }
+    })
+
+    expect(next?.assistantOverlay).toEqual(
+      expect.objectContaining({
+        id: "persona-existing",
+        name: "Existing Overlay"
+      })
+    )
+    expect(storageState.store.get(storageKey)).toMatchObject({
+      assistantOverlay: expect.objectContaining({
+        id: "persona-existing",
+        name: "Existing Overlay"
+      })
+    })
+  })
+
+  it("allows assistantOverlay to be cleared explicitly with null", async () => {
+    const historyId = "history-overlay-clear"
+
+    await applyChatSettingsPatch({
+      historyId,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: buildOverlay({
+          id: "persona-clear"
+        })
+      }
+    })
+
+    const next = await applyChatSettingsPatch({
+      historyId,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: null
+      }
+    })
+
+    expect(next?.assistantOverlay).toBeNull()
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId,
+            serverChatId: null
+          })
+        )
+      )
+    ).toMatchObject({
+      assistantOverlay: null
+    })
+  })
+})

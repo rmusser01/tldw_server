@@ -5,11 +5,16 @@ Implements JSON-RPC 2.0 with enhanced error handling and request routing.
 """
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
+import inspect
 import json
+import re
 import secrets
+import time
 import uuid
+from collections import OrderedDict
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 from enum import IntEnum
@@ -26,24 +31,14 @@ except ImportError:  # Fallback for v1
         from pydantic import root_validator as model_validator  # type: ignore
     except ImportError:
         model_validator = None  # type: ignore
-import contextlib
-import inspect
-import re
-import time
-from collections import OrderedDict
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Infrastructure.redis_factory import create_async_redis_client
-from tldw_Server_API.app.core.Metrics.telemetry import get_telemetry_manager
-from tldw_Server_API.app.core.testing import is_truthy
-
-from .auth.authnz_rbac import Action, Resource, get_rbac_policy
-from .auth.rate_limiter import RateLimitExceeded, get_rate_limiter
+from .auth.authnz_rbac import Action, Resource
+from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config
+from .interfaces.runtime import MCPRuntimeDependencies, TelemetryProvider
 from .modules.base import BaseModule
-from .modules.registry import get_module_registry
-from .monitoring.metrics import get_metrics_collector
 
 try:  # pragma: no cover - optional dependency
     from redis.exceptions import RedisError
@@ -120,6 +115,22 @@ _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS = (
     InvalidParamsException,
 )
 
+_MCP_TOOL_EXECUTION_ERROR = "tool_execution_error"
+_TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
+
+
+def _is_truthy(value: Any) -> bool:
+    """Parse host-neutral truthy flags without importing tldw_server helpers."""
+    try:
+        return str(value or "").strip().lower() in _TRUTHY_VALUES
+    except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+        return False
+
+
+async def _no_redis_client_factory(**_kwargs: Any) -> None:
+    """Fallback Redis factory used when embedders do not provide Redis support."""
+    return None
+
 
 class MCPRequest(BaseModel):
     """MCP request following JSON-RPC 2.0 specification"""
@@ -170,14 +181,21 @@ class MCPResponse(BaseModel):
 
 
 class RequestContext:
-    """Context for request processing"""
+    """Context for request processing.
+
+    Request contexts store caller metadata and explicit database path mappings
+    only. Host-specific database path resolution is owned by MCPProtocol or
+    MCPServer dependencies so standalone callers do not import tldw_server
+    adapters through this neutral context object.
+    """
     def __init__(
         self,
         request_id: str,
         user_id: Optional[str] = None,
         client_id: Optional[str] = None,
         session_id: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None,
+        db_paths: Optional[dict[str, str]] = None,
     ):
         self.request_id = request_id
         self.user_id = user_id
@@ -185,19 +203,7 @@ class RequestContext:
         self.session_id = session_id
         self.metadata = metadata or {}
         self.start_time = datetime.now(timezone.utc)
-        # Derive per-user db paths (read-only) if possible
-        self.db_paths: dict[str, str] = {}
-        try:
-            if self.user_id is not None:
-                # Attempt to parse an integer user id (expected by DatabasePaths)
-                uid_int = int(str(self.user_id))
-                from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-                paths = DatabasePaths.get_all_user_db_paths(uid_int)
-                # Convert Paths to strings for downstream use
-                self.db_paths = {k: str(v) for k, v in paths.items()}
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as _e:
-            # Non-fatal: leave db_paths empty when user id is not numeric or any failure occurs
-            pass
+        self.db_paths = dict(db_paths or {})
         # Build a bound logger for this request
         self.logger = logger.bind(
             request_id=request_id,
@@ -228,7 +234,7 @@ class PreparedToolCall:
 class IdempotencyManager:
     """Idempotency manager with Redis backing and local lock fallback."""
 
-    def __init__(self) -> None:
+    def __init__(self, redis_client_factory: Optional[Callable[..., Any]] = None) -> None:
         self._local_cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
         self._local_bindings: OrderedDict[str, tuple[float, str]] = OrderedDict()
         self._local_locks: dict[str, asyncio.Lock] = {}
@@ -237,6 +243,7 @@ class IdempotencyManager:
         self._redis_ready = False
         self._redis_attempted = False
         self._redis_guard = asyncio.Lock()
+        self._redis_client_factory = redis_client_factory or _no_redis_client_factory
 
     def _prune_local_locks(self) -> None:
         """Drop stale local locks once their cache/binding entries are gone."""
@@ -264,13 +271,21 @@ class IdempotencyManager:
                 return False
             url = params.pop("url", None)
             try:
-                self._redis_client = await create_async_redis_client(
+                self._redis_client = await self._redis_client_factory(
                     preferred_url=url,
                     decode_responses=True,
                     fallback_to_fake=False,
                     context="mcp_idempotency",
                     redis_kwargs=params,
                 )
+                if self._redis_client is None:
+                    logger.warning(
+                        "MCP idempotency Redis unavailable; falling back to local locks. "
+                        "Error: Redis client factory returned None for context=mcp_idempotency",
+                    )
+                    self._redis_client = None
+                    self._redis_ready = False
+                    return False
                 self._redis_ready = True
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
                 logger.warning(
@@ -528,16 +543,24 @@ class MCPProtocol:
     - Request tracing
     """
 
-    def __init__(self):
-        self.module_registry = get_module_registry()
-        self.rbac_policy = get_rbac_policy()
-        self.rate_limiter = get_rate_limiter()
+    def __init__(self, dependencies: MCPRuntimeDependencies | None = None):
+        if dependencies is None:
+            from .adapters.tldw_runtime import build_default_runtime_dependencies
+
+            dependencies = build_default_runtime_dependencies()
+        self.dependencies = dependencies
+        self.module_registry = self.dependencies.module_registry
+        self.rbac_policy = self.dependencies.rbac_policy
+        self.rate_limiter = self.dependencies.rate_limiter
+        self.tool_catalog_provider = self.dependencies.tool_catalog_provider
         self.protocol_version = "2024-11-05"
-        self.metrics = get_metrics_collector()
+        self.metrics = self.dependencies.metrics_collector
         # Strict tool name validation regex
         self._tool_name_re = re.compile(r'^[A-Za-z0-9_.:-]{1,100}$')
         # Idempotency manager for write-capable tools
-        self._idempotency = IdempotencyManager()
+        self._idempotency = IdempotencyManager(
+            redis_client_factory=self.dependencies.redis_client_factory,
+        )
         # Integrity secret for prepared tool call execution
         self._prepared_call_secret = secrets.token_bytes(32)
         # Governance preflight state
@@ -563,10 +586,9 @@ class MCPProtocol:
         logger.info("MCP Protocol handler initialized")
 
     @property
-    def telemetry(self):
-        """Always return the *current* global telemetry manager so that a
-        shutdown/re-init cycle is picked up automatically."""
-        return get_telemetry_manager()
+    def telemetry(self) -> TelemetryProvider:
+        """Return the injected telemetry provider."""
+        return self.dependencies.telemetry_provider
 
     async def _rbac_check(self, user_id: Optional[str], resource: Resource, action: Action, resource_id: Optional[str] = None) -> bool:
         if not user_id:
@@ -611,21 +633,37 @@ class MCPProtocol:
         if raw is None:
             return None
         try:
-            from tldw_Server_API.app.core.AuthNZ.api_key_manager import normalize_scope
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            normalize_scope = None  # type: ignore
-
-        if normalize_scope is not None:
-            try:
-                return set(normalize_scope(raw))
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                pass
+            return set(self.dependencies.api_key_scope_normalizer.normalize(raw))
+        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(
+                "MCP API key scope normalization failed; using local fallback: {}",
+                exc.__class__.__name__,
+            )
 
         if isinstance(raw, str):
-            return {raw.strip().lower()} if raw.strip() else set()
-        if isinstance(raw, list):
+            stripped = raw.strip()
+            if stripped.startswith("["):
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    if isinstance(parsed, list):
+                        return {
+                            item.strip().lower()
+                            for item in parsed
+                            if isinstance(item, str) and item.strip()
+                        }
+            return {stripped.lower()} if stripped else set()
+        if isinstance(raw, (list, tuple, set)):
             return {str(item).strip().lower() for item in raw if str(item).strip()}
         return set()
+
+    def _resolve_user_db_paths(self, user_id: Optional[str]) -> dict[str, str]:
+        try:
+            return self.dependencies.database_path_resolver.resolve_user_db_paths(user_id)
+        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+            return {}
 
     def _api_key_scope_level(self, context: RequestContext) -> Optional[str]:
         scopes = self._api_key_scopes(context)
@@ -953,7 +991,7 @@ class MCPProtocol:
                 status=status,
             )
             if error:
-                log.error("MCP tool execution failed", error_type=error.__class__.__name__, error_message=str(error)[:200])
+                log.error("MCP tool execution failed", error_type=error.__class__.__name__)
             else:
                 log.info("MCP tool executed")
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
@@ -974,7 +1012,7 @@ class MCPProtocol:
         if isinstance(raw, (int, float)):
             return bool(raw)
         if isinstance(raw, str):
-            return is_truthy(raw)
+            return _is_truthy(raw)
         return False
 
     @staticmethod
@@ -1224,7 +1262,8 @@ class MCPProtocol:
         if context is None:
             context = RequestContext(
                 request_id=str(uuid.uuid4()),
-                client_id="unknown"
+                client_id="unknown",
+                db_paths=self._resolve_user_db_paths(None),
             )
 
         # Bound logger for this request
@@ -1245,7 +1284,7 @@ class MCPProtocol:
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
                 log.debug(
                     "Failed to read rg_ingress_enforced from metadata; rate limit will be enforced",
-                    error=str(exc),
+                    error_type=type(exc).__name__,
                 )
                 skip_rate_limit = False
             if not skip_rate_limit:
@@ -1405,7 +1444,7 @@ class MCPProtocol:
             masked = self._mask_secrets(str(e))
             secret_redacted = bool(getattr(e, "_mcp_masked_secret", False)) or masked != str(e)
             if secret_redacted:
-                log.error(
+                log.error(  # noqa: TRY400 - avoid logging sanitized exception traceback.
                     f"MCP request failed: method={request.method}, error={masked}",
                     extra={"audit": True},
                 )
@@ -1439,7 +1478,7 @@ class MCPProtocol:
             masked = self._mask_secrets(str(e))
             secret_redacted = bool(getattr(e, "_mcp_masked_secret", False)) or masked != str(e)
             if secret_redacted:
-                log.error(
+                log.error(  # noqa: TRY400 - avoid logging sanitized exception traceback.
                     f"MCP request failed: method={request.method}, error={masked}",
                     extra={"audit": True},
                 )
@@ -1486,14 +1525,14 @@ class MCPProtocol:
         masked = self._mask_secrets(original)
         if masked == original:
             with contextlib.suppress(Exception):
-                setattr(exc, "_mcp_masked_secret", False)
+                exc._mcp_masked_secret = False
             return exc
         try:
             sanitized = exc.__class__(masked)
         except Exception:
             sanitized = RuntimeError(masked)
         with contextlib.suppress(Exception):
-            setattr(sanitized, "_mcp_masked_secret", True)
+            sanitized._mcp_masked_secret = True
         if hasattr(sanitized, "__dict__") and hasattr(exc, "__dict__"):
             with contextlib.suppress(Exception):
                 for attr in ("errno", "code", "name", "lineno"):
@@ -1502,7 +1541,18 @@ class MCPProtocol:
         with contextlib.suppress(Exception):
             sanitized.args = (masked,)
         with contextlib.suppress(Exception):
-            setattr(sanitized, "_mcp_masked_secret", True)
+            sanitized._mcp_masked_secret = True
+        return sanitized
+
+    @staticmethod
+    def _generic_exception_like(exc: Exception, message: str) -> Exception:
+        """Return an exception of the same class when possible, with safe text only."""
+        try:
+            sanitized = exc.__class__(message)
+        except Exception:
+            sanitized = RuntimeError(message)
+        with contextlib.suppress(Exception):
+            sanitized._mcp_sanitized_error = True
         return sanitized
 
     def _error_response(
@@ -1704,7 +1754,7 @@ class MCPProtocol:
             elif isinstance(raw_strict, (int, float)):
                 strict = bool(raw_strict)
             elif isinstance(raw_strict, str):
-                strict = is_truthy(raw_strict)
+                strict = _is_truthy(raw_strict)
         catalog_name = None
         catalog_id = None
         if isinstance(params, dict):
@@ -1713,72 +1763,19 @@ class MCPProtocol:
         if catalog_name is None and catalog_id is None:
             return None
         try:
-            from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-            pool = await get_db_pool()
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            context.logger.debug(f"Catalog lookup unavailable: {exc}")
-            return None
-
-        resolved_id: Optional[int] = None
-        if catalog_id is not None:
-            try:
-                resolved_id = int(catalog_id)
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                resolved_id = None
-
-        if resolved_id is None and isinstance(catalog_name, str) and catalog_name.strip():
-            name = catalog_name.strip()
-            meta = getattr(context, "metadata", {}) or {}
-            team_id = meta.get("team_id")
-            org_id = meta.get("org_id")
-
-            row = None
-            try:
-                if team_id is not None:
-                    row = await pool.fetchone(
-                        "SELECT id FROM tool_catalogs WHERE name = ? AND team_id = ?",
-                        name,
-                        team_id,
-                    )
-                if row is None and org_id is not None:
-                    row = await pool.fetchone(
-                        "SELECT id FROM tool_catalogs WHERE name = ? AND org_id = ? AND team_id IS NULL",
-                        name,
-                        org_id,
-                    )
-                if row is None:
-                    row = await pool.fetchone(
-                        "SELECT id FROM tool_catalogs WHERE name = ? AND org_id IS NULL AND team_id IS NULL",
-                        name,
-                    )
-                if row and row.get("id") is not None:
-                    resolved_id = int(row.get("id"))
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-                context.logger.debug(f"Catalog lookup failed: {exc}")
-
-        if resolved_id is None:
-            return set() if strict else None
-
-        try:
-            rows = await pool.fetchall(
-                "SELECT tool_name FROM tool_catalog_entries WHERE catalog_id = ?",
-                resolved_id,
+            metadata = context.metadata if isinstance(getattr(context, "metadata", None), dict) else {}
+            return await self.tool_catalog_provider.resolve_tool_names(
+                catalog_name=catalog_name if isinstance(catalog_name, str) else None,
+                catalog_id=catalog_id,
+                metadata=metadata,
+                strict=strict,
             )
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            context.logger.debug(f"Catalog entries lookup failed: {exc}")
-            return None
-
-        names: set[str] = set()
-        for r in rows:
-            try:
-                val = r["tool_name"] if isinstance(r, dict) else r[0]
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                val = None
-            if isinstance(val, str):
-                names.add(val)
-        if names:
-            return names
-        return set() if strict else None
+            context.logger.debug(
+                "Catalog lookup unavailable; returning fallback: {}",
+                exc.__class__.__name__,
+            )
+            return set() if strict else None
 
     async def _handle_tools_list(
         self,
@@ -1917,18 +1914,13 @@ class MCPProtocol:
         metadata = getattr(context, "metadata", None)
         if not isinstance(metadata, dict):
             return None
-        if not is_truthy(metadata.get("mcp_policy_context_enabled")):
+        if not _is_truthy(metadata.get("mcp_policy_context_enabled")):
             return None
         cached = metadata.get("_mcp_effective_tool_policy")
         if isinstance(cached, dict):
             return cached
         try:
-            from tldw_Server_API.app.services.mcp_hub_policy_resolver import (
-                get_mcp_hub_policy_resolver,
-            )
-
-            resolver = await get_mcp_hub_policy_resolver()
-            policy = await resolver.resolve_for_context(
+            policy = await self.dependencies.effective_policy_resolver.resolve_for_context(
                 user_id=context.user_id,
                 metadata=metadata,
             )
@@ -1992,12 +1984,7 @@ class MCPProtocol:
         if str(policy.get("resolution_error") or "").strip():
             return {"status": "deny", "reason": "policy_unavailable"}
         try:
-            from tldw_Server_API.app.services.mcp_hub_approval_service import (
-                get_mcp_hub_approval_service,
-            )
-
-            approval_service = await get_mcp_hub_approval_service()
-            return await approval_service.evaluate_tool_call(
+            return await self.dependencies.approval_evaluator.evaluate_tool_call(
                 effective_policy=policy,
                 tool_name=tool_name,
                 tool_args=tool_args,
@@ -2046,12 +2033,7 @@ class MCPProtocol:
                 "scope_payload": {"path_scope_mode": path_scope_mode, "reason": "policy_unavailable"},
             }
         try:
-            from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
-                get_mcp_hub_path_enforcement_service,
-            )
-
-            path_service = await get_mcp_hub_path_enforcement_service()
-            return await path_service.evaluate_tool_call(
+            return await self.dependencies.path_scope_enforcer.evaluate_tool_call(
                 effective_policy=policy,
                 context=context,
                 tool_name=tool_name,
@@ -2136,12 +2118,7 @@ class MCPProtocol:
         cached = metadata.get("_mcp_effective_external_access")
         if not isinstance(cached, dict):
             try:
-                from tldw_Server_API.app.services.mcp_hub_external_access_resolver import (
-                    get_mcp_hub_external_access_resolver,
-                )
-
-                resolver = await get_mcp_hub_external_access_resolver()
-                cached = await resolver.resolve_for_sources(
+                cached = await self.dependencies.external_access_evaluator.resolve_for_sources(
                     sources=[dict(item) for item in sources if isinstance(item, dict)],
                     effective_policy=policy,
                 )
@@ -2563,10 +2540,14 @@ class MCPProtocol:
                             self.metrics.record_tool_invalid_params(getattr(module, "name", "unknown"), str(tool_name))
                         raise InvalidParamsException(str(_tool_e)) from _tool_e
                     except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as _tool_e:
+                        sanitized_tool_error = self._generic_exception_like(
+                            _tool_e,
+                            _MCP_TOOL_EXECUTION_ERROR,
+                        )
                         span.set_attribute("mcp.status", "failure")
-                        span.set_attribute("mcp.error_type", _tool_e.__class__.__name__)
-                        span.set_attribute("mcp.error_message", str(_tool_e)[:200])
-                        raise
+                        span.set_attribute("mcp.error_type", sanitized_tool_error.__class__.__name__)
+                        span.set_attribute("mcp.error_message", _MCP_TOOL_EXECUTION_ERROR)
+                        raise sanitized_tool_error from None
                     finally:
                         span.set_attribute("mcp.duration_ms", max(0.0, (time.time() - t0) * 1000.0))
 
@@ -2600,8 +2581,10 @@ class MCPProtocol:
                 return response_payload
 
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
-                sanitized_error = self._mask_secrets(str(e))
-                context.logger.exception(f"Tool execution failed: {tool_name} - {sanitized_error}")
+                context.logger.error(  # noqa: TRY400 - structured audit log records sanitized type only.
+                    "Tool execution failed",
+                    error_type=e.__class__.__name__,
+                )
                 try:
                     duration = max(0.0, time.time() - t0)
                     self.metrics.record_module_operation(module=getattr(module, "name", "unknown"), operation="tools_call", duration=duration, success=False)

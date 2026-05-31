@@ -25,6 +25,13 @@ export type QuickChatWorkflowRecommendation = {
 export const QUICK_CHAT_WORKFLOW_GUIDES_STORAGE_KEY =
   "quickChatWorkflowGuidesV1"
 
+const RESEARCH_WORKSPACE_ROUTE = "/research-workspace"
+
+const QUICK_CHAT_ROUTE_ALIASES: Record<string, string> = {}
+
+const canonicalizeQuickChatRoute = (route: string): string =>
+  QUICK_CHAT_ROUTE_ALIASES[route] ?? route
+
 export const QUICK_CHAT_WORKFLOW_GUIDES: QuickChatWorkflowGuide[] = [
   {
     id: "ingest-summarize-media",
@@ -41,9 +48,9 @@ export const QUICK_CHAT_WORKFLOW_GUIDES: QuickChatWorkflowGuide[] = [
     title: "Find which page fits my goal",
     question: "I know my goal, but not which page has the right tools. Where should I start?",
     answer:
-      "Start in Workspace Playground for guided multi-tool workflows, then open the specialized page it suggests (Media, Knowledge, Characters, or Evaluations).",
-    route: "/workspace-playground",
-    routeLabel: "Workspace Playground",
+      "Start in Research Workspace for guided multi-tool workflows, then open the specialized page it suggests (Media, Knowledge, Characters, or Evaluations).",
+    route: RESEARCH_WORKSPACE_ROUTE,
+    routeLabel: "Research Workspace",
     tags: ["workflow", "onboarding", "discovery", "navigation"]
   },
   {
@@ -132,8 +139,8 @@ const normalizeGuideRoute = (route: unknown): string | null => {
   if (typeof route !== "string") return null
   const trimmed = route.trim()
   if (!trimmed) return null
-  if (trimmed.startsWith("/")) return trimmed
-  return `/${trimmed}`
+  const normalized = trimmed.startsWith("/") ? trimmed : `/${trimmed}`
+  return canonicalizeQuickChatRoute(normalized)
 }
 
 const deriveRouteLabel = (route: string): string => {
@@ -315,7 +322,7 @@ export const normalizeQuickChatRoutePath = (
   if (normalized.length > 1 && normalized.endsWith("/")) {
     normalized = normalized.slice(0, -1)
   }
-  return normalized || null
+  return normalized ? canonicalizeQuickChatRoute(normalized) : null
 }
 
 export const filterQuickChatWorkflowGuides = (

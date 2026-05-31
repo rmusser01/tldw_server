@@ -220,6 +220,17 @@ class RecipeRunsService:
         if not validation["valid"]:
             joined = "; ".join(validation["errors"])
             raise ValueError(f"Dataset validation failed: {joined}")
+        recipe = self.recipe_registry.get_recipe(recipe_id)
+        launch_validator = getattr(recipe, "validate_run_config_for_launch", None)
+        if callable(launch_validator):
+            launch_errors = [
+                str(error)
+                for error in (launch_validator(normalized_run_config) or [])
+                if str(error).strip()
+            ]
+            if launch_errors:
+                joined = "; ".join(launch_errors)
+                raise ValueError(f"Run config validation failed: {joined}")
         validation_metadata = {
             key: value
             for key, value in validation.items()

@@ -968,7 +968,7 @@ def process_epub(
     except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
         logging.exception(f"Unexpected error processing EPUB {file_path}: {str(e)}")
         result["status"] = "Error"
-        result["error"] = f"Unexpected processing error: {str(e)}"
+        result["error"] = "Ebook processing failed"
         log_counter("epub_processing_error", labels={"file_path": file_path, "error": type(e).__name__})
 
 
@@ -1488,7 +1488,7 @@ def _process_markup_or_plain_text(
     except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
         logging.exception(f"Error processing {file_type} file {file_path}: {str(e)}")
         result["status"] = "Error"
-        result["error"] = str(e)
+        result["error"] = "Document processing failed"
         log_counter(f"{file_type}_processing_error", labels={"file_path": file_path, "error": type(e).__name__})
 
     end_time = datetime.now()
@@ -1609,9 +1609,12 @@ def ingest_text_file(file_path, title=None, author=None, keywords=None, base_dir
 
         logging.info(f"Text file '{title}' by {author} ingested successfully.")
         return f"Text file '{title}' by {author} ingested successfully."
-    except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
+    except ValueError as e:
         logging.error(f"Error ingesting text file: {str(e)}")
         return f"Error ingesting text file: {str(e)}"
+    except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
+        logging.error(f"Error ingesting text file: {str(e)}")
+        return "Error ingesting text file"
 
 
 def ingest_folder(folder_path, keywords=None, base_dir: Optional[Path] = None):
@@ -1651,9 +1654,12 @@ def ingest_folder(folder_path, keywords=None, base_dir: Optional[Path] = None):
                 )
                 results.append(result)
         logging.info("Completed ingestion of all text files in the folder.")
-    except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
+    except OSError as e:
         logging.exception(f"Error ingesting folder: {str(e)}")
         return f"Error ingesting folder: {str(e)}"
+    except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
+        logging.exception(f"Error ingesting folder: {str(e)}")
+        return "Error ingesting folder"
 
     return "\n".join(results)
 

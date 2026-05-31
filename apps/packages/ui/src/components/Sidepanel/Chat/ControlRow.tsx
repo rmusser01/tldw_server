@@ -8,23 +8,40 @@ import {
   Image as ImageIcon,
   UploadCloud,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  MessageSquare,
+  X
 } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { ModelSelect } from "@/components/Common/ModelSelect"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import { FeatureHint, useFeatureHintSeen } from "@/components/Common/FeatureHint"
-import { CharacterSelect } from "./CharacterSelect"
+import { McpToolSelector } from "@/components/Common/McpToolSelector"
+import { ConversationContextPopover } from "./ConversationContextPopover"
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useMcpTools } from "@/hooks/useMcpTools"
 import { browser } from "wxt/browser"
 import { useStorage } from "@plasmohq/storage/hook"
 import { fetchChatModels } from "@/services/tldw-server"
-import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
+import {
+  buildSidepanelChatHandoffRoute,
+  consumeSidepanelChatHandoff,
+  createSidepanelChatHandoff,
+  type SidepanelChatHandoffPageContext
+} from "@/services/sidepanel-chat-handoff"
+import {
+  buildQuickIngestOpenDetailFromUrl,
+  requestQuickIngestOpen,
+  type QuickIngestOpenDetail
+} from "@/utils/quick-ingest-open"
+import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import { buildSidepanelFullAppChatPath } from "@/utils/sidepanel-full-app-route"
 import type { ToolChoice } from "@/store/option"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
+import type { ConversationContextComposition } from "@/types/conversation-context"
+import type { ConversationContextCompositionStatus } from "@/hooks/chat/useConversationContextComposition"
 
 interface ControlRowProps {
   // Prompt selection
@@ -34,6 +51,16 @@ interface ControlRowProps {
   // Character selection
   selectedCharacterId: string | null
   setSelectedCharacterId: (id: string | null) => void
+  // Conversation context
+  serverChatId?: string | null
+  conversationContextComposition?: ConversationContextComposition | null
+  conversationContextStatus?: ConversationContextCompositionStatus
+  conversationContextSaveSelection?: (
+    selection: {
+      worldBookIds: number[]
+      dictionaryIds: number[]
+    }
+  ) => Promise<unknown> | unknown
   // Toggles
   webSearch: boolean
   setWebSearch: (value: boolean) => void
@@ -44,6 +71,12 @@ interface ControlRowProps {
   chatLoopStatus?: "idle" | "running" | "complete" | "error" | "cancelled"
   pendingApprovalsCount?: number
   runningToolCount?: number
+  draftMessage?: string
+  hasVisiblePageContextForHandoff?: boolean
+  getVisiblePageContextForHandoff?: () =>
+    | Promise<SidepanelChatHandoffPageContext | undefined>
+    | SidepanelChatHandoffPageContext
+    | undefined
   // Image upload
   onImageUpload: (file: File) => void
   // RAG toggle
@@ -58,6 +91,10 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   setSelectedQuickPrompt,
   selectedCharacterId,
   setSelectedCharacterId,
+  serverChatId,
+  conversationContextComposition,
+  conversationContextStatus = "idle",
+  conversationContextSaveSelection,
   webSearch,
   setWebSearch,
   chatMode,
@@ -67,18 +104,37 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   chatLoopStatus = "idle",
   pendingApprovalsCount = 0,
   runningToolCount = 0,
+  draftMessage = "",
+  hasVisiblePageContextForHandoff = false,
+  getVisiblePageContextForHandoff,
   onImageUpload,
   onToggleRag,
   isConnected
 }) => {
   const { t } = useTranslation(["sidepanel", "playground", "common"])
+  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const [moreOpen, setMoreOpen] = React.useState(false)
+  const [handoffFeedback, setHandoffFeedback] = React.useState<{
+    tone: "warning" | "error"
+    message: string
+  } | null>(null)
+  const continueInWebUIPendingRef = React.useRef(false)
+  const [continueInWebUIPending, setContinueInWebUIPending] =
+    React.useState(false)
+  const [systemPromptOverride, setSystemPromptOverride] = React.useState<
+    string | undefined
+  >(undefined)
   const moreBtnRef = React.useRef<HTMLButtonElement>(null)
+  const fullAppHandoffDescriptionId = React.useId()
   const { capabilities } = useServerCapabilities()
+  const [activePlaylistDetail, setActivePlaylistDetail] =
+    React.useState<QuickIngestOpenDetail | null>(null)
   const {
     hasMcp,
     healthState: mcpHealthState,
-    tools: mcpTools,
+    discoveredTools: discoveredMcpTools,
+    chatTools: chatMcpTools,
+    toolCounts: mcpToolCounts,
     toolsLoading: mcpToolsLoading,
     catalogs: mcpCatalogs,
     catalogsLoading: mcpCatalogsLoading,
@@ -91,8 +147,16 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     setToolCatalog,
     setToolCatalogId,
     setToolModules,
-    setToolCatalogStrict
+    setToolCatalogStrict,
+    setToolEnabled: setMcpToolEnabled,
+    resetToolFilter: resetMcpToolFilter
   } = useMcpTools()
+  const chatMcpToolCount = chatMcpTools.length
+  const translateMcpToolSelector = React.useCallback(
+    (key: string, fallback?: string, options?: Record<string, unknown>) =>
+      t(key, fallback ?? key, options),
+    [t]
+  )
 
   const [catalogDraft, setCatalogDraft] = React.useState(toolCatalog)
   const [advancedToolsExpanded, setAdvancedToolsExpanded] = React.useState(false)
@@ -213,25 +277,267 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const knowledgeHintSeen = useFeatureHintSeen("knowledge-search")
   const moreToolsHintSeen = useFeatureHintSeen("more-tools")
 
-  const openQuickIngest = () => {
-    requestQuickIngestOpen()
+  React.useEffect(() => {
+    setSystemPromptOverride(undefined)
+  }, [selectedSystemPrompt])
+
+  const playlistImportEnabled =
+    Boolean(isConnected) && Boolean(capabilities?.hasMediaPlaylistPreflight)
+
+  const resolveActivePlaylistDetail =
+    React.useCallback(async (): Promise<QuickIngestOpenDetail | null> => {
+      if (!playlistImportEnabled) return null
+      try {
+        const tabs = await browser.tabs?.query({
+          active: true,
+          currentWindow: true
+        })
+        const activeTab = tabs?.find(
+          (tab) => typeof tab.url === "string" && tab.url.trim().length > 0
+        )
+        return activeTab?.url ? buildQuickIngestOpenDetailFromUrl(activeTab.url) : null
+      } catch {
+        return null
+      }
+    }, [playlistImportEnabled])
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    if (!moreOpen || !playlistImportEnabled) {
+      setActivePlaylistDetail(null)
+      return
+    }
+
+    void resolveActivePlaylistDetail().then((detail) => {
+      if (!cancelled) {
+        setActivePlaylistDetail(detail)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [moreOpen, playlistImportEnabled, resolveActivePlaylistDetail])
+
+  const quickIngestLabel =
+    playlistImportEnabled && activePlaylistDetail
+      ? t("sidepanel:controlRow.importPlaylist", "Import playlist to tldw")
+      : t("sidepanel:controlRow.quickIngest", "Quick Ingest")
+  const rolePlayKind =
+    selectedAssistant?.kind === "persona"
+      ? "persona"
+      : selectedAssistant?.kind === "character" || selectedCharacterId
+        ? "character"
+        : null
+  const rolePlayActive = Boolean(rolePlayKind)
+  const rolePlayKindLabel =
+    rolePlayKind === "persona"
+      ? t("sidepanel:controlRow.persona", "Persona")
+      : t("sidepanel:controlRow.character", "Character")
+  const rolePlayName =
+    selectedAssistant?.name?.trim() ||
+    (selectedCharacterId
+      ? t("sidepanel:controlRow.characterById", "Character {{id}}", {
+          id: selectedCharacterId
+        })
+      : "")
+  const rolePlayChipTitle = rolePlayActive
+    ? t(
+        "sidepanel:controlRow.characterChatChip",
+        "Character Chat: {{kind}} {{name}}",
+        {
+          kind: rolePlayKindLabel,
+          name: rolePlayName
+        }
+      )
+    : ""
+  const fullAppChatPath = React.useMemo(
+    () =>
+      buildSidepanelFullAppChatPath({
+        selectedAssistant,
+        selectedCharacterId
+      }),
+    [selectedAssistant, selectedCharacterId]
+  )
+  const fullAppButtonLabel = rolePlayActive
+    ? t(
+        "sidepanel:controlRow.openCharacterChatInFullUI",
+        "Open Character Chat in full app"
+      )
+    : t("sidepanel:controlRow.openInFullUI", "Open full app")
+  const fullAppHandoffDescription = rolePlayActive
+    ? t(
+        "sidepanel:controlRow.openRolePlayFullAppDescription",
+        "Opens /chat in a new tab with the active role-play route. Use Continue in WebUI to carry a draft or page context."
+      )
+    : t(
+        "sidepanel:controlRow.openFullAppDescription",
+        "Opens /chat in a new tab. Use Continue in WebUI to carry a draft or page context."
+      )
+  const continueInWebUIButtonLabel = t(
+    "sidepanel:controlRow.continueInWebUI",
+    "Continue in WebUI"
+  )
+  const continueInWebUIDescription = t(
+    "sidepanel:controlRow.continueInWebUIDescription",
+    "Creates a short-lived handoff with the sidepanel draft and visible page context, then opens /chat in the WebUI."
+  )
+  const draftText = draftMessage ?? ""
+  const hasDraftForHandoff = draftText.trim().length > 0
+  const continueInWebUIEnabled =
+    hasDraftForHandoff || hasVisiblePageContextForHandoff
+  const continueInWebUIButtonDisabled =
+    !continueInWebUIEnabled || continueInWebUIPending
+  const activeCharacterIdForRouteIntent =
+    selectedAssistant?.kind === "character"
+      ? String(selectedAssistant.id ?? "").trim()
+      : selectedAssistant?.kind === "persona"
+        ? ""
+      : selectedCharacterId == null
+        ? ""
+        : String(selectedCharacterId).trim()
+  const routeIntent = React.useMemo(
+    () => ({
+      path: fullAppChatPath,
+      ...(activeCharacterIdForRouteIntent
+        ? {
+            mode: "character" as const,
+            characterId: activeCharacterIdForRouteIntent
+          }
+        : {})
+    }),
+    [activeCharacterIdForRouteIntent, fullAppChatPath]
+  )
+  const openRolePlayPicker = React.useCallback(() => {
+    if (typeof window === "undefined") return
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-sidepanel-assistant-select", {
+        detail: {
+          tab: selectedAssistant?.kind === "persona" ? "persona" : "character"
+        }
+      })
+    )
+  }, [selectedAssistant?.kind])
+  const clearRolePlaySelection = React.useCallback(() => {
+    setSelectedCharacterId(null)
+    void setSelectedAssistant(null)
+  }, [setSelectedAssistant, setSelectedCharacterId])
+
+  const openQuickIngest = async () => {
+    const detail =
+      playlistImportEnabled
+        ? (await resolveActivePlaylistDetail()) ?? activePlaylistDetail
+        : null
+    requestQuickIngestOpen(detail ?? undefined)
     setMoreOpen(false)
     requestAnimationFrame(() => moreBtnRef.current?.focus())
   }
 
-  const openFullApp = () => {
+  const openFullAppPath = React.useCallback(async (routePath: string) => {
+    const path = `/options.html#${routePath}`
+    const restoreFocus = () => {
+      setMoreOpen(false)
+      requestAnimationFrame(() => moreBtnRef.current?.focus())
+    }
+    const openFallback = (url: string) => {
+      const opened = window.open(url, "_blank")
+      if (opened) {
+        restoreFocus()
+        return true
+      }
+      return false
+    }
+
     try {
-      const url = browser.runtime.getURL("/options.html#/")
-      if (browser.tabs?.create) {
-        browser.tabs.create({ url })
-        setMoreOpen(false)
-        requestAnimationFrame(() => moreBtnRef.current?.focus())
-        return
+      const runtime = browser.runtime
+      const url = runtime?.id && runtime.getURL ? runtime.getURL(path) : null
+      if (url) {
+        if (browser.tabs?.create) {
+          try {
+            await browser.tabs.create({ url })
+            restoreFocus()
+            return true
+          } catch {
+            return openFallback(url)
+          }
+        }
+        return openFallback(url)
       }
     } catch {}
-    window.open("/options.html#/", "_blank")
-    setMoreOpen(false)
-    requestAnimationFrame(() => moreBtnRef.current?.focus())
+    return openFallback(routePath)
+  }, [])
+
+  const openFullApp = () => {
+    void openFullAppPath(fullAppChatPath)
+  }
+
+  const pageContextHasVisibleContent = (
+    pageContext: SidepanelChatHandoffPageContext | undefined
+  ) =>
+    Boolean(
+      pageContext &&
+        (pageContext.title?.trim() ||
+          pageContext.url?.trim() ||
+          pageContext.snippets.some((snippet) => snippet.text.trim().length > 0))
+    )
+
+  const continueInWebUI = async () => {
+    if (!continueInWebUIEnabled || continueInWebUIPendingRef.current) return
+    continueInWebUIPendingRef.current = true
+    setContinueInWebUIPending(true)
+    setHandoffFeedback(null)
+
+    try {
+      let pageContext: SidepanelChatHandoffPageContext | undefined
+      try {
+        pageContext = await getVisiblePageContextForHandoff?.()
+      } catch {
+        pageContext = undefined
+      }
+
+      if (!hasDraftForHandoff && !pageContextHasVisibleContent(pageContext)) {
+        setHandoffFeedback({
+          tone: "warning",
+          message: t(
+            "sidepanel:controlRow.continueInWebUINothingToSend",
+            "Nothing to continue in WebUI"
+          )
+        })
+        return
+      }
+
+      try {
+        const pkg = await createSidepanelChatHandoff({
+          draftText,
+          pageContext,
+          routeIntent
+        })
+        const handoffPath = buildSidepanelChatHandoffRoute(fullAppChatPath, pkg.id)
+        const opened = await openFullAppPath(handoffPath)
+        if (!opened) {
+          await consumeSidepanelChatHandoff(pkg.id).catch(() => undefined)
+          setHandoffFeedback({
+            tone: "error",
+            message: t(
+              "sidepanel:controlRow.continueInWebUIFailed",
+              "Could not continue in WebUI"
+            )
+          })
+        }
+      } catch {
+        setHandoffFeedback({
+          tone: "error",
+          message: t(
+            "sidepanel:controlRow.continueInWebUIFailed",
+            "Could not continue in WebUI"
+          )
+        })
+      }
+    } finally {
+      continueInWebUIPendingRef.current = false
+      setContinueInWebUIPending(false)
+    }
   }
 
   const moreMenuContent = (
@@ -302,7 +608,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
               ? t("sidepanel:controlRow.mcpToolsUnhealthy", "MCP tools are offline")
               : mcpToolsLoading
                 ? t("sidepanel:controlRow.mcpToolsLoading", "Loading tools...")
-                : mcpTools.length === 0
+                : chatMcpToolCount === 0
                   ? t("sidepanel:controlRow.mcpToolsEmpty", "No MCP tools available")
                   : ""
         }
@@ -310,7 +616,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           !hasMcp ||
           mcpHealthState === "unhealthy" ||
           mcpToolsLoading ||
-          mcpTools.length === 0
+          chatMcpToolCount === 0
             ? undefined
             : false
         }
@@ -325,7 +631,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             !hasMcp ||
             mcpHealthState === "unhealthy" ||
             mcpToolsLoading ||
-            mcpTools.length === 0
+            chatMcpToolCount === 0
           }
         >
           <Radio.Button value="auto">
@@ -345,48 +651,17 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
       <div className="text-caption text-text-muted font-medium">
         {t("sidepanel:controlRow.mcpToolsLabel", "MCP tools")}
       </div>
-      {mcpToolsLoading ? (
-        <div className="text-xs text-text-muted">
-          {t("sidepanel:controlRow.mcpToolsLoading", "Loading tools...")}
-        </div>
-      ) : mcpTools.length === 0 ? (
-        <div className="text-xs text-text-muted">
-          {!hasMcp
-            ? t("sidepanel:controlRow.mcpToolsUnavailable", "MCP tools unavailable")
-            : mcpHealthState === "unhealthy"
-              ? t("sidepanel:controlRow.mcpToolsUnhealthy", "MCP tools are offline")
-              : t("sidepanel:controlRow.mcpToolsEmpty", "No MCP tools available")}
-        </div>
-      ) : (
-        <div className="flex flex-wrap gap-1">
-          {mcpTools.slice(0, 6).map((tool, index) => {
-            const toolFn = (tool as any)?.function
-            const name =
-              (typeof tool?.name === "string" && tool.name) ||
-              (typeof toolFn?.name === "string" && toolFn.name) ||
-              (typeof (tool as any)?.id === "string" && (tool as any).id) ||
-              `tool-${index + 1}`
-            const description =
-              (typeof tool?.description === "string" && tool.description) ||
-              (typeof toolFn?.description === "string" && toolFn.description) ||
-              ""
-            return (
-              <span
-                key={`${name}-${index}`}
-                title={description || name}
-                className="rounded-full border border-border px-2 py-0.5 text-[11px] text-text"
-              >
-                {name}
-              </span>
-            )
-          })}
-          {mcpTools.length > 6 && (
-            <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-text-muted">
-              +{mcpTools.length - 6}
-            </span>
-          )}
-        </div>
-      )}
+      <McpToolSelector
+        discoveredTools={discoveredMcpTools}
+        toolCounts={mcpToolCounts}
+        toolsLoading={mcpToolsLoading}
+        hasMcp={hasMcp}
+        healthState={mcpHealthState}
+        onToolEnabledChange={setMcpToolEnabled}
+        onReset={resetMcpToolFilter}
+        compact
+        t={translateMcpToolSelector}
+      />
 
       <div className="panel-divider my-1" />
       <div className="text-caption text-text-muted font-medium">
@@ -635,42 +910,125 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
       </div>
       <button
         type="button"
-        onClick={openQuickIngest}
+        onClick={() => {
+          void openQuickIngest()
+        }}
         data-testid="chat-quick-ingest"
         className="w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 hover:bg-surface2"
-        title={t("sidepanel:controlRow.quickIngest", "Quick Ingest")}
+        title={quickIngestLabel}
       >
         <UploadCloud className="size-4 text-text-subtle" />
-        {t("sidepanel:controlRow.quickIngest", "Quick Ingest")}
+        {quickIngestLabel}
       </button>
       <button
         type="button"
         onClick={openFullApp}
+        aria-describedby={fullAppHandoffDescriptionId}
         data-testid="chat-open-full-app"
         className="w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 hover:bg-surface2"
-        title={t("sidepanel:controlRow.openInFullUI", "Open full app")}
+        title={fullAppHandoffDescription}
       >
         <ExternalLink className="size-4 text-text-subtle" />
-        {t("sidepanel:controlRow.openInFullUI", "Open full app")}
+        {fullAppButtonLabel}
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          void continueInWebUI()
+        }}
+        disabled={continueInWebUIButtonDisabled}
+        aria-disabled={continueInWebUIButtonDisabled}
+        aria-busy={continueInWebUIPending || undefined}
+        data-testid="chat-continue-in-webui"
+        className={`w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 ${
+          !continueInWebUIButtonDisabled
+            ? "hover:bg-surface2"
+            : "cursor-not-allowed opacity-50"
+        }`}
+        title={continueInWebUIDescription}
+      >
+        <ExternalLink className="size-4 text-text-subtle" />
+        {continueInWebUIButtonLabel}
+      </button>
+      {handoffFeedback && (
+        <div
+          role={handoffFeedback.tone === "error" ? "alert" : "status"}
+          className={`px-3 text-xs ${
+            handoffFeedback.tone === "error" ? "text-danger" : "text-warning"
+          }`}
+        >
+          {handoffFeedback.message}
+        </div>
+      )}
+      <span id={fullAppHandoffDescriptionId} className="sr-only">
+        {fullAppHandoffDescription}
+      </span>
 
     </div>
   )
 
   return (
-    <div data-testid="control-row" className="flex items-center gap-2 flex-wrap">
+    <div data-testid="control-row" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        {rolePlayActive && (
+          <div
+            data-testid="sidepanel-character-chat-chip"
+            className="flex min-h-[32px] max-w-full items-center overflow-hidden rounded-md border border-primary/30 bg-primary/10 text-xs text-text"
+            title={rolePlayChipTitle}
+          >
+            <button
+              type="button"
+              data-testid="sidepanel-character-chat-switch"
+              onClick={openRolePlayPicker}
+              className="flex min-w-0 items-center gap-1.5 px-2 py-1.5 text-left hover:bg-primary/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              aria-label={t(
+                "sidepanel:controlRow.switchCharacterChat",
+                "Switch Character Chat assistant"
+              )}
+            >
+              <MessageSquare className="size-3.5 shrink-0 text-primary" />
+              <span className="shrink-0 font-semibold">
+                {t("sidepanel:controlRow.characterChat", "Character Chat")}
+              </span>
+              <span className="min-w-0 truncate text-text-muted">
+                {rolePlayKindLabel}: {rolePlayName}
+              </span>
+            </button>
+            <button
+              type="button"
+              data-testid="sidepanel-character-chat-clear"
+              onClick={clearRolePlaySelection}
+              className="flex h-8 w-8 shrink-0 items-center justify-center border-l border-primary/20 text-text-muted hover:bg-primary/15 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              aria-label={t(
+                "sidepanel:controlRow.clearCharacterChat",
+                "Clear Character Chat selection"
+              )}
+              title={t(
+                "sidepanel:controlRow.clearCharacterChat",
+                "Clear Character Chat selection"
+              )}
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
         {/* Prompt, Model & Character selectors */}
         <PromptSelect
           selectedSystemPrompt={selectedSystemPrompt}
+          systemPrompt={systemPromptOverride}
           setSelectedSystemPrompt={setSelectedSystemPrompt}
+          setSystemPrompt={setSystemPromptOverride}
           setSelectedQuickPrompt={setSelectedQuickPrompt}
           iconClassName="size-4"
           className="px-2 text-text-muted hover:text-text"
         />
         <ModelSelect iconClassName="size-4" showSelectedName />
-        <CharacterSelect
+        <ConversationContextPopover
+          chatId={serverChatId}
           selectedCharacterId={selectedCharacterId}
           setSelectedCharacterId={setSelectedCharacterId}
+          composition={conversationContextComposition}
+          compositionStatus={conversationContextStatus}
+          saveSelection={conversationContextSaveSelection}
           iconClassName="size-4"
           className="px-2 text-text-muted hover:text-text"
         />
@@ -720,6 +1078,28 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             <span className="hidden sm:inline">{t("sidepanel:controlRow.web", "Web")}</span>
           </button>
         )}
+
+        <Upload
+          accept="image/*"
+          showUploadList={false}
+          beforeUpload={(file) => {
+            onImageUpload(file)
+            return false
+          }}
+        >
+          <button
+            type="button"
+            data-testid="chat-attach-image"
+            className="flex items-center gap-2 px-3 py-2 sm:px-2 sm:py-1 rounded text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors min-h-[44px] sm:min-h-0 text-text-muted hover:bg-surface2 hover:text-text"
+            aria-label={t("sidepanel:controlRow.attachImage", "Attach image")}
+            title={t("sidepanel:controlRow.attachImage", "Attach image")}
+          >
+            <ImageIcon className="size-3.5" />
+            <span className="hidden sm:inline">
+              {t("sidepanel:controlRow.attach", "Attach")}
+            </span>
+          </button>
+        </Upload>
 
         {/* More Tools Menu */}
         <div className="relative">

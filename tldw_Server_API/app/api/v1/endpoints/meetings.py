@@ -11,7 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps.Meetings_DB_Deps import (
     get_meetings_db_for_user,
     get_meetings_db_for_websocket,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User
 from tldw_Server_API.app.api.v1.schemas.meetings_schemas import (
     MeetingArtifactCreate,
     MeetingArtifactResponse,
@@ -28,7 +28,6 @@ from tldw_Server_API.app.api.v1.schemas.meetings_schemas import (
     MeetingTemplateResponse,
     MeetingTemplateScope,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Meetings_DB import MeetingsDatabase
 from tldw_Server_API.app.core.Meetings.artifact_service import MeetingArtifactService
 from tldw_Server_API.app.core.Meetings.events_service import MeetingEventsService
@@ -415,7 +414,19 @@ def share_session_to_webhook(
     )
 
 
-@router.get("/sessions/{session_id}/events", dependencies=[Depends(check_rate_limit)])
+@router.get(
+    "/sessions/{session_id}/events",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Meeting session event stream.",
+            "content": {
+                "text/event-stream": {},
+            },
+        },
+    },
+    dependencies=[Depends(check_rate_limit)],
+)
 async def stream_session_events(
     session_id: str,
     meetings_db: MeetingsDatabase = Depends(get_meetings_db_for_user),
@@ -482,7 +493,7 @@ async def stream_session_ws(
         except WebSocketDisconnect:
             break
         except Exception as exc:
-            logger.warning("Meetings websocket received invalid JSON frame: {}", exc)
+            logger.warning("Meetings websocket received invalid JSON frame")
             await websocket.send_json({"type": "error", "detail": "invalid_message", "session_id": session_id})
             continue
 

@@ -110,8 +110,10 @@ def get_vixra_by_id(vid: str) -> tuple[dict[str, Any] | None, str | None]:
             "provider": "vixra",
         }
         return item, None
-    except _VIXRA_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"vixra error: {str(e)}"
+    except TimeoutError:
+        return None, "viXra request timed out."
+    except _VIXRA_NONCRITICAL_EXCEPTIONS:
+        return None, "viXra request failed."
 
 
 def search(term: str, page: int = 1, results_per_page: int = 10) -> tuple[list[dict[str, Any]] | None, int, str | None]:
@@ -183,8 +185,10 @@ def search(term: str, page: int = 1, results_per_page: int = 10) -> tuple[list[d
                 break
         total = len(items)
         return items, total, None
-    except _VIXRA_NONCRITICAL_EXCEPTIONS as e:
-        return None, 0, f"vixra search error: {str(e)}"
+    except TimeoutError:
+        return None, 0, "viXra search request timed out."
+    except _VIXRA_NONCRITICAL_EXCEPTIONS:
+        return None, 0, "viXra search request failed."
 
 
 def _parse_abs_details(html: str) -> tuple[str | None, str | None, str | None]:

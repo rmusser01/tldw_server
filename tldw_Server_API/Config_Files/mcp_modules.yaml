@@ -64,6 +64,16 @@ modules:
     max_concurrent: 10
     settings: {}
 
+  - id: persona_visuals
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.persona_visuals_module:PersonaVisualsModule
+    enabled: false
+    name: Persona Visuals
+    version: "1.0.0"
+    department: persona
+    max_concurrent: 10
+    description: Persona visual pack draft and runtime state tools
+    settings: {}
+
   - id: filesystem
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule
     enabled: true
@@ -72,6 +82,22 @@ modules:
     department: system
     max_concurrent: 16
     settings: {}
+
+  - id: codegraph
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.codegraph_module:CodeGraphModule
+    enabled: false
+    name: CodeGraph
+    version: "0.1.0"
+    department: code
+    max_concurrent: 4
+    settings:
+      index_base_dir: Databases/codegraph
+      max_file_size_bytes: 1048576
+      foreground_max_files: 500
+      foreground_max_bytes: 50000000
+      max_index_seconds: 20
+      max_context_chars: 35000
+      max_search_results: 100
 
   - id: knowledge
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.knowledge_module:KnowledgeModule

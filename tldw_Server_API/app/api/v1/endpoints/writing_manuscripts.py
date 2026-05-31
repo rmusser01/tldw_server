@@ -2,16 +2,14 @@
 from __future__ import annotations
 
 import json
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, rbac_rate_limit, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_rate_limiter_dep,
-    rbac_rate_limit,
-)
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import (
     ChapterSummary,
     ManuscriptAnalysisListResponse,
@@ -45,12 +43,17 @@ from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import (
     ManuscriptRelationshipResponse,
     ManuscriptResearchRequest,
     ManuscriptResearchResponse,
+    ManuscriptRestoredEntityResponse,
     ManuscriptSceneCreate,
     ManuscriptSceneResponse,
     ManuscriptSceneUpdate,
     ManuscriptSearchResponse,
     ManuscriptSearchResult,
     ManuscriptStructureResponse,
+    ManuscriptTrashListResponse,
+    ManuscriptVersionCreateRequest,
+    ManuscriptVersionListResponse,
+    ManuscriptVersionResponse,
     ManuscriptWorldInfoCreate,
     ManuscriptWorldInfoResponse,
     ManuscriptWorldInfoUpdate,
@@ -64,8 +67,7 @@ from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import (
     CHARACTER_ROLES,
     WORLD_INFO_KINDS,
 )
-from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -78,6 +80,8 @@ from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelp
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import PROVIDER_CAPABILITIES
 
 router = APIRouter()
+ManuscriptVersionEntityType = Literal["manuscript", "part", "chapter", "scene"]
+ManuscriptTrashEntityType = Literal["project", "manuscript", "part", "chapter", "scene"]
 
 # ---------------------------------------------------------------------------
 # Exception tuple and helpers (mirrors writing.py)
@@ -112,11 +116,7 @@ async def _enforce_rate_limit(rate_limiter: RateLimiter, user_id: int, scope: st
         allowed, meta = await rate_limiter.check_user_rate_limit(int(user_id), scope)
     except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
         retry_after = 60
-        logger.exception(
-            "Rate limiter check failed for user_id={} scope={}",
-            user_id,
-            scope,
-        )
+        logger.error("Rate limiter check failed")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Rate limiter unavailable",
@@ -134,7 +134,7 @@ def _handle_db_errors(exc: Exception, entity_label: str) -> NoReturn:
         raise exc
     if isinstance(exc, InputError):
         logger.warning("Input error for {}: {}", entity_label, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise map_db_error_to_http(exc) from exc
     if isinstance(exc, ConflictError):
         message = str(exc)
         lowered = message.lower()
@@ -143,18 +143,20 @@ def _handle_db_errors(exc: Exception, entity_label: str) -> NoReturn:
         # should not be reported as 409.
         if ("not found" in lowered or "soft-deleted" in lowered or "soft deleted" in lowered) and "version conflict" not in lowered:
             logger.debug("Entity not found for {}: {}", entity_label, exc)
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=f"{entity_label} not found"
+            raise map_db_error_to_http(
+                exc,
+                conflict_status_code=status.HTTP_404_NOT_FOUND,
+                conflict_detail=f"{entity_label} not found",
             ) from exc
         logger.warning("Conflict error for {}: {}", entity_label, exc)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message) from exc
+        raise map_db_error_to_http(exc) from exc
     if isinstance(exc, CharactersRAGDBError):
-        logger.error("Database error for {}: {}", entity_label, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error while processing {entity_label}",
+        logger.error("Database error while processing writing entity")
+        raise map_db_error_to_http(
+            exc,
+            default_detail=f"Database error while processing {entity_label}",
         ) from exc
-    logger.exception("Unexpected error for {}: {}", entity_label, exc)
+    logger.error("Unexpected error while processing writing entity")
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=f"Unexpected error while processing {entity_label}",
@@ -211,7 +213,18 @@ async def list_projects(
             status_filter=status_filter, limit=limit, offset=offset
         )
         items = [ManuscriptProjectResponse(**p) for p in projects]
-        return ManuscriptProjectListResponse(projects=items, total=total)
+        return ManuscriptProjectListResponse(
+            projects=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(items),
+            ),
+        )
     except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "manuscript projects")
 
@@ -2425,3 +2438,142 @@ async def list_analyses(
         return ManuscriptAnalysisListResponse(analyses=items, total=len(items))
     except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "analyses")
+
+
+# ===================================================================
+# Manual versions and trash
+# ===================================================================
+
+
+@router.post(
+    "/{entity_type}/{entity_id}/versions",
+    response_model=ManuscriptVersionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a manual manuscript snapshot",
+    tags=["manuscripts"],
+)
+async def create_version(
+    entity_type: ManuscriptVersionEntityType,
+    entity_id: str,
+    payload: ManuscriptVersionCreateRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.update")),
+) -> ManuscriptVersionResponse:
+    try:
+        version = _get_helper(db).create_version(entity_type, entity_id, label=payload.label)
+        return ManuscriptVersionResponse(**version)
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript version")
+
+
+@router.get(
+    "/{entity_type}/{entity_id}/versions",
+    response_model=ManuscriptVersionListResponse,
+    summary="List manual manuscript snapshots",
+    tags=["manuscripts"],
+)
+async def list_versions(
+    entity_type: ManuscriptVersionEntityType,
+    entity_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.list")),
+) -> ManuscriptVersionListResponse:
+    try:
+        versions = _get_helper(db).list_versions(entity_type, entity_id)
+        return ManuscriptVersionListResponse(
+            versions=[ManuscriptVersionResponse(**version) for version in versions],
+            total=len(versions),
+        )
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript versions")
+
+
+@router.get(
+    "/{entity_type}/{entity_id}/versions/{version_number}",
+    response_model=ManuscriptVersionResponse,
+    summary="Get a manual manuscript snapshot",
+    tags=["manuscripts"],
+)
+async def get_version(
+    entity_type: ManuscriptVersionEntityType,
+    entity_id: str,
+    version_number: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.get")),
+) -> ManuscriptVersionResponse:
+    try:
+        version = _get_helper(db).get_version(entity_type, entity_id, version_number)
+        return ManuscriptVersionResponse(**version)
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript version")
+
+
+@router.post(
+    "/{entity_type}/{entity_id}/versions/{version_number}/restore",
+    response_model=ManuscriptRestoredEntityResponse,
+    summary="Restore a manual manuscript snapshot",
+    tags=["manuscripts"],
+)
+async def restore_version(
+    entity_type: ManuscriptVersionEntityType,
+    entity_id: str,
+    version_number: int,
+    expected_version: int | None = Header(None, description="Expected current entity version"),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.update")),
+) -> ManuscriptRestoredEntityResponse:
+    try:
+        restored = _get_helper(db).restore_version(
+            entity_type,
+            entity_id,
+            version_number,
+            expected_version=expected_version,
+        )
+        return ManuscriptRestoredEntityResponse.model_validate(restored)
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript version restore")
+
+
+@router.get(
+    "/trash",
+    response_model=ManuscriptTrashListResponse,
+    summary="List soft-deleted manuscript records",
+    tags=["manuscripts"],
+)
+async def list_trash(
+    entity_type: ManuscriptTrashEntityType | None = Query(
+        None,
+        description="Optional project/manuscript/part/chapter/scene filter",
+    ),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.list")),
+) -> ManuscriptTrashListResponse:
+    try:
+        items = _get_helper(db).list_trash(entity_type=entity_type)
+        return ManuscriptTrashListResponse(items=items, total=len(items))
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript trash")
+
+
+@router.post(
+    "/trash/{entity_type}/{entity_id}/restore",
+    response_model=ManuscriptRestoredEntityResponse,
+    summary="Restore a soft-deleted manuscript record",
+    tags=["manuscripts"],
+)
+async def restore_trash(
+    entity_type: ManuscriptTrashEntityType,
+    entity_id: str,
+    expected_version: int | None = Header(None, description="Expected deleted entity version"),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.update")),
+) -> ManuscriptRestoredEntityResponse:
+    try:
+        restored = _get_helper(db).restore_trash(
+            entity_type,
+            entity_id,
+            expected_version=expected_version,
+        )
+        return ManuscriptRestoredEntityResponse.model_validate(restored)
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript trash restore")

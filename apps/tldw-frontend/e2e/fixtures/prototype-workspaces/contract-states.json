@@ -1,0 +1,238 @@
+{
+  "version": 2,
+  "source": "Docs/API-related/Prototype_Workspaces_Contract_Matrix.md",
+  "riskGate": "Risk Gate 4 frozen",
+  "states": [
+    {
+      "state": "invalid_link",
+      "httpStatus": 404,
+      "stableErrorCategory": "invalid_or_unavailable_link",
+      "frontendStateBucket": "Link unavailable",
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "state": "expired_link",
+      "httpStatus": 404,
+      "stableErrorCategory": "invalid_or_unavailable_link",
+      "frontendStateBucket": "Link unavailable",
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "state": "revoked_link",
+      "httpStatus": 404,
+      "stableErrorCategory": "invalid_or_unavailable_link",
+      "frontendStateBucket": "Link unavailable",
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "state": "exhausted_link",
+      "httpStatus": 404,
+      "stableErrorCategory": "invalid_or_unavailable_link",
+      "frontendStateBucket": "Link unavailable",
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "state": "password_required",
+      "httpStatus": 403,
+      "stableErrorCategory": "password_required",
+      "frontendStateBucket": "Password required",
+      "retryable": true,
+      "mockResponse": {
+        "detail": {
+          "category": "password_required",
+          "message": "Prototype link password is required",
+          "frontend_state": "password_required",
+          "retryable": true
+        }
+      }
+    },
+    {
+      "state": "bad_password",
+      "httpStatus": 403,
+      "stableErrorCategory": "invalid_password",
+      "frontendStateBucket": "Password rejected",
+      "retryable": true,
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_password",
+          "message": "Prototype link password is invalid",
+          "frontend_state": "password_rejected",
+          "retryable": true
+        }
+      }
+    },
+    {
+      "state": "archived_workspace",
+      "httpStatus": 403,
+      "stableErrorCategory": "workspace_unavailable",
+      "frontendStateBucket": "Workspace unavailable",
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "workspace_unavailable",
+          "message": "Prototype workspace is archived",
+          "frontend_state": "workspace_unavailable",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "state": "missing_workspace",
+      "httpStatus": 404,
+      "stableErrorCategory": "invalid_or_unavailable_link",
+      "frontendStateBucket": "Link unavailable",
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "state": "owner_mismatch",
+      "httpStatus": 404,
+      "stableErrorCategory": "invalid_or_unavailable_link",
+      "frontendStateBucket": "Link unavailable",
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "state": "inactive_session",
+      "httpStatus": 403,
+      "stableErrorCategory": "inactive_session",
+      "frontendStateBucket": "Session inactive",
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "inactive_session",
+          "message": "Prototype session token is no longer active",
+          "frontend_state": "session_inactive",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "state": "bootstrap_failed",
+      "httpStatus": 409,
+      "stableErrorCategory": "bootstrap_failed",
+      "frontendStateBucket": "Setup failed",
+      "retryable": true,
+      "mockResponse": {
+        "detail": {
+          "category": "bootstrap_failed",
+          "message": "Prototype branch session could not be created",
+          "frontend_state": "setup_failed",
+          "retryable": true
+        }
+      }
+    },
+    {
+      "state": "preview_unavailable",
+      "httpStatus": 404,
+      "stableErrorCategory": "preview_unavailable",
+      "frontendStateBucket": "Preview unavailable",
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "preview_unavailable",
+          "message": "Prototype preview is unavailable",
+          "frontend_state": "preview_unavailable",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "state": "stale_promotion",
+      "httpStatus": 409,
+      "stableErrorCategory": "stale_promotion",
+      "frontendStateBucket": "Promotion stale",
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "stale_promotion",
+          "message": "Prototype promotion request is stale",
+          "frontend_state": "promotion_stale",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "state": "promotion_conflict",
+      "httpStatus": 409,
+      "stableErrorCategory": "promotion_conflict",
+      "frontendStateBucket": "Promotion conflict",
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "promotion_conflict",
+          "message": "Prototype promotion request conflicts with canonical state",
+          "frontend_state": "promotion_conflict",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "state": "promotion_validation_failed",
+      "httpStatus": 409,
+      "stableErrorCategory": "promotion_validation_failed",
+      "frontendStateBucket": "Promotion failed",
+      "retryable": true,
+      "mockResponse": {
+        "detail": {
+          "category": "promotion_validation_failed",
+          "message": "Prototype promotion validation failed",
+          "frontend_state": "promotion_failed",
+          "retryable": true
+        }
+      }
+    }
+  ],
+  "routeStateAuditChecklist": [
+    "Token-only collaborator entry calls the workspace detail hook with null and does not fall back to a stale owner workspace id.",
+    "Password handoff from /share/:token remains transient and is not written to persistent workspace state.",
+    "Collaborator entry clears or overwrites stale session/share-token state when the URL changes.",
+    "Owner view does not render for session_token or share_token entries before workspace detail is loaded."
+  ]
+}

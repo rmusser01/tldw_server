@@ -8,9 +8,11 @@ import numpy as np
 import pytest
 
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, ProviderStatus, TTSRequest
+from tldw_Server_API.app.core.TTS.adapters import pocket_tts_adapter as pocket_mod
 from tldw_Server_API.app.core.TTS.adapters.pocket_tts_adapter import PocketTTSOnnxAdapter
 from tldw_Server_API.app.core.TTS.adapter_registry import TTSAdapterFactory, TTSProvider
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
+    TTSGenerationError,
     TTSInvalidVoiceReferenceError,
     TTSModelNotFoundError,
     TTSProviderInitializationError,
@@ -37,6 +39,44 @@ class DummyPocketEngine:
     ):
         for _ in range(2):
             yield np.zeros(240, dtype=np.float32)
+
+
+class FailingGeneratePocketEngine(DummyPocketEngine):
+    def __init__(self, marker):
+        super().__init__()
+        self.marker = marker
+
+    def generate(self, text, voice, max_frames=500):
+        raise RuntimeError(self.marker)
+
+
+class FailingStreamPocketEngine(DummyPocketEngine):
+    def __init__(self, marker):
+        super().__init__()
+        self.marker = marker
+
+    def stream(
+        self,
+        text,
+        voice,
+        max_frames=500,
+        first_chunk_frames=2,
+        target_buffer_sec=0.2,
+        max_chunk_frames=15,
+    ):
+        raise RuntimeError(self.marker)
+        yield np.zeros(240, dtype=np.float32)
+
+
+def _capture_pocket_logs(level="DEBUG"):
+    messages = []
+    sink_id = pocket_mod.logger.add(
+        lambda message: messages.append(
+            f"{message.record['message']}\n{message.record.get('extra', {})}"
+        ),
+        level=level,
+    )
+    return messages, sink_id
 
 
 def _valid_voice_reference_bytes():
@@ -126,6 +166,44 @@ async def test_pocket_tts_initialize_success(tmp_path, monkeypatch):
     assert success is True
     assert adapter.status == ProviderStatus.AVAILABLE
     assert adapter._engine is not None
+
+
+@pytest.mark.asyncio
+async def test_pocket_tts_registration_failure_log_sanitizes_exception_extra(tmp_path, monkeypatch):
+    raw_marker = "RAW_POCKET_REGISTER_SECRET_MARKER token=secret"
+    models_dir, tokenizer_path = _create_pocket_assets(tmp_path, precision="int8")
+    dummy_module = types.SimpleNamespace(PocketTTSOnnx=DummyPocketEngine)
+    monkeypatch.setitem(sys.modules, "pocket_tts_onnx", dummy_module)
+
+    class FailingResourceManager:
+        def register_model(self, **kwargs):
+            raise RuntimeError(raw_marker)
+
+    async def get_failing_resource_manager():
+        return FailingResourceManager()
+
+    from tldw_Server_API.app.core.TTS import tts_resource_manager
+
+    monkeypatch.setattr(tts_resource_manager, "get_resource_manager", get_failing_resource_manager)
+    adapter = PocketTTSOnnxAdapter(
+        {
+            "model_path": str(models_dir),
+            "tokenizer_path": str(tokenizer_path),
+            "precision": "int8",
+            "device": "cpu",
+        }
+    )
+    messages, sink_id = _capture_pocket_logs()
+
+    try:
+        assert await adapter.initialize() is True
+    finally:
+        pocket_mod.logger.remove(sink_id)
+
+    rendered_logs = "\n".join(messages)
+    assert "PocketTTS provider registration failed" in rendered_logs
+    assert "RAW_POCKET_REGISTER_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
 
 
 @pytest.mark.asyncio
@@ -229,3 +307,101 @@ async def test_pocket_tts_generate_pcm_bytes():
     response = await adapter.generate(request)
     assert response.audio_data is not None
     assert len(response.audio_data) > 0
+
+
+@pytest.mark.asyncio
+async def test_pocket_tts_generation_failure_log_sanitizes_exception_text():
+    raw_marker = "RAW_POCKET_GENERATION_SECRET_MARKER token=secret"
+    adapter = PocketTTSOnnxAdapter({})
+    adapter._initialized = True
+    adapter._status = ProviderStatus.AVAILABLE
+    adapter._engine = FailingGeneratePocketEngine(raw_marker)
+
+    request = TTSRequest(
+        text="hello",
+        voice="clone",
+        format=AudioFormat.PCM,
+        stream=False,
+        voice_reference=_valid_voice_reference_bytes(),
+        extra_params={
+            "validate_reference": False,
+            "convert_reference": False,
+        },
+    )
+    messages, sink_id = _capture_pocket_logs(level="ERROR")
+
+    try:
+        with pytest.raises(TTSGenerationError) as exc_info:
+            await adapter.generate(request)
+    finally:
+        pocket_mod.logger.remove(sink_id)
+
+    assert raw_marker in exc_info.value.details["error"]
+    rendered_logs = "\n".join(messages)
+    assert "PocketTTS generation failed" in rendered_logs
+    assert "RAW_POCKET_GENERATION_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+
+
+@pytest.mark.asyncio
+async def test_pocket_tts_streaming_failure_log_sanitizes_exception_text():
+    raw_marker = "RAW_POCKET_STREAM_SECRET_MARKER token=secret"
+    adapter = PocketTTSOnnxAdapter({})
+    adapter._initialized = True
+    adapter._status = ProviderStatus.AVAILABLE
+    adapter._engine = FailingStreamPocketEngine(raw_marker)
+
+    request = TTSRequest(
+        text="hello",
+        voice="clone",
+        format=AudioFormat.PCM,
+        stream=True,
+        voice_reference=_valid_voice_reference_bytes(),
+        extra_params={
+            "validate_reference": False,
+            "convert_reference": False,
+        },
+    )
+    response = await adapter.generate(request)
+    messages, sink_id = _capture_pocket_logs(level="ERROR")
+
+    try:
+        with pytest.raises(TTSGenerationError) as exc_info:
+            async for _chunk in response.audio_stream:
+                pass
+    finally:
+        pocket_mod.logger.remove(sink_id)
+
+    assert raw_marker in exc_info.value.details["error"]
+    rendered_logs = "\n".join(messages)
+    assert "PocketTTS streaming failed" in rendered_logs
+    assert "RAW_POCKET_STREAM_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+
+
+def test_pocket_tts_stream_chunk_conversion_log_sanitizes_exception_text():
+    raw_marker = "RAW_POCKET_STREAM_CHUNK_SECRET_MARKER token=secret"
+
+    class BadArray:
+        def __array__(self, dtype=None):
+            raise RuntimeError(raw_marker)
+
+    adapter = PocketTTSOnnxAdapter({})
+    writer = pocket_mod.StreamingAudioWriter(
+        format=AudioFormat.PCM.value,
+        sample_rate=adapter.sample_rate,
+        channels=1,
+    )
+    messages, sink_id = _capture_pocket_logs(level="WARNING")
+
+    try:
+        result = adapter._convert_stream_chunk(BadArray(), adapter._audio_normalizer, writer)
+    finally:
+        writer.close()
+        pocket_mod.logger.remove(sink_id)
+
+    assert result == b""
+    rendered_logs = "\n".join(messages)
+    assert "PocketTTS stream chunk conversion error" in rendered_logs
+    assert "RAW_POCKET_STREAM_CHUNK_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs

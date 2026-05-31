@@ -174,3 +174,59 @@ def test_claims_review_metrics_endpoint():
         fastapi_app.dependency_overrides.pop(get_auth_principal, None)
         fastapi_app.dependency_overrides.pop(get_request_user, None)
         fastapi_app.dependency_overrides.pop(get_media_db_for_user, None)
+
+
+def test_claims_review_metrics_endpoint_includes_canonical_pagination():
+    """Review metrics pagination should expose the full filtered total."""
+
+    from tldw_Server_API.app.main import app as fastapi_app
+
+    class _User:
+        def __init__(self) -> None:
+            self.id = 1
+            self.username = "admin"
+            self.is_admin = True
+
+    async def _override_user():
+        return _User()
+
+    db_path = _seed_review_metrics_db()
+
+    async def _override_db():
+        override_db = MediaDatabase(db_path=db_path, client_id="1")
+        try:
+            yield override_db
+        finally:
+            try:
+                override_db.close_connection()
+            except Exception:
+                _ = None
+
+    fastapi_app.dependency_overrides[get_auth_principal] = _principal_override_admin()
+    fastapi_app.dependency_overrides[get_request_user] = _override_user
+    fastapi_app.dependency_overrides[get_media_db_for_user] = _override_db
+
+    try:
+        with TestClient(fastapi_app) as client:
+            r = client.get(
+                "/api/v1/claims/review/metrics"
+                "?start_date=2024-01-10&end_date=2024-01-10&limit=1&offset=0"
+            )
+            assert r.status_code == 200, r.text
+            payload = r.json()
+            assert payload["total"] == 2
+            assert len(payload["items"]) == 1
+            assert payload["pagination"] == {
+                "mode": "offset",
+                "limit": 1,
+                "offset": 0,
+                "total": 2,
+                "has_more": True,
+                "next_offset": 1,
+            }
+            assert payload["has_more"] is True
+            assert payload["next_offset"] == 1
+    finally:
+        fastapi_app.dependency_overrides.pop(get_auth_principal, None)
+        fastapi_app.dependency_overrides.pop(get_request_user, None)
+        fastapi_app.dependency_overrides.pop(get_media_db_for_user, None)

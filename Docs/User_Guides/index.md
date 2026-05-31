@@ -60,6 +60,7 @@ This section is organized by product surface so you can quickly find the right d
 - [TTS Providers Getting Started](WebUI_Extension/TTS_Getting_Started.md)
 - [TTS Setup Guide (Runbook Index)](WebUI_Extension/TTS-SETUP-GUIDE.md)
 - [PocketTTS Voice Cloning Guide](WebUI_Extension/PocketTTS_Voice_Cloning_Guide.md)
+- [Bulk Conference Playlist Ingest](Bulk_Conference_Playlist_Ingest.md)
 - [EPUB Reader Guide](WebUI_Extension/EPUB_Reader_Guide.md)
 - [Image Generation Setup](WebUI_Extension/Image_Generation_Setup.md)
 
@@ -75,10 +76,14 @@ This section is organized by product surface so you can quickly find the right d
 
 ### Chatbooks and Workflows
 
-- [Chatbook User Guide](WebUI_Extension/Chatbook_User_Guide.md)
+- [Chatbook User Guide](WebUI_Extension/Chatbook_User_Guide.md) - backup, restore, sharing, OpenWebUI chat JSON and database import, and post-import attachment hydration for referenced images/files
 - [Chatbook Tools Getting Started](WebUI_Extension/Chatbook_Tools_Getting_Started.md)
 - [Google Keep Notes Import and Export](WebUI_Extension/Google_Keep_Notes_Import_Export_Guide.md)
 - [Workflows Examples](WebUI_Extension/Workflows_Examples.md)
+
+### Prototype Workspaces
+
+- [Prototype Workspaces User Guide](Prototype_Workspaces.md)
 
 ## Integrations and Experiments
 

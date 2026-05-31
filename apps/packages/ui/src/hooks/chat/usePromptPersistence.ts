@@ -6,6 +6,8 @@ type LogE2EDebug = (
   payload: Record<string, unknown>,
 ) => void;
 
+const noopLogE2EDebug: LogE2EDebug = () => {};
+
 /**
  * Syncs selectedSystemPrompt and selectedQuickPrompt between
  * Zustand store and browser storage with ref-based dedup.
@@ -15,13 +17,13 @@ export const usePromptPersistence = ({
   setSelectedSystemPrompt,
   selectedQuickPrompt,
   setSelectedQuickPrompt,
-  logE2EDebug,
+  logE2EDebug = noopLogE2EDebug,
 }: {
   selectedSystemPrompt: string | null;
   setSelectedSystemPrompt: (prompt: string) => void;
   selectedQuickPrompt: string | null;
   setSelectedQuickPrompt: (prompt: string | null) => void;
-  logE2EDebug: LogE2EDebug;
+  logE2EDebug?: LogE2EDebug;
 }) => {
   const [storedSystemPrompt, setStoredSystemPrompt] = useStorage<string | null>(
     "selectedSystemPrompt",
@@ -33,26 +35,58 @@ export const usePromptPersistence = ({
   );
   const storedSystemPromptRef = React.useRef<string | null>(storedSystemPrompt);
   const storedQuickPromptRef = React.useRef<string | null>(storedQuickPrompt);
+  const hydratedSystemPromptFromStorageRef = React.useRef(false);
+  const hydratedQuickPromptFromStorageRef = React.useRef(false);
 
   // Storage → Zustand sync
   React.useEffect(() => {
-    if (storedSystemPrompt && storedSystemPrompt !== selectedSystemPrompt) {
+    if (
+      !hydratedSystemPromptFromStorageRef.current &&
+      storedSystemPrompt &&
+      storedSystemPrompt === selectedSystemPrompt
+    ) {
+      hydratedSystemPromptFromStorageRef.current = true;
+      storedSystemPromptRef.current = storedSystemPrompt;
+      return;
+    }
+
+    if (
+      !hydratedSystemPromptFromStorageRef.current &&
+      storedSystemPrompt &&
+      storedSystemPrompt !== selectedSystemPrompt
+    ) {
       logE2EDebug("syncSystem", {
         storedSystemPrompt,
         selectedSystemPrompt,
       });
       storedSystemPromptRef.current = storedSystemPrompt;
+      hydratedSystemPromptFromStorageRef.current = true;
       setSelectedSystemPrompt(storedSystemPrompt);
     }
   }, [selectedSystemPrompt, setSelectedSystemPrompt, storedSystemPrompt, logE2EDebug]);
 
   React.useEffect(() => {
-    if (storedQuickPrompt && storedQuickPrompt !== selectedQuickPrompt) {
+    if (
+      !hydratedQuickPromptFromStorageRef.current &&
+      storedQuickPrompt &&
+      storedQuickPrompt === selectedQuickPrompt
+    ) {
+      hydratedQuickPromptFromStorageRef.current = true;
+      storedQuickPromptRef.current = storedQuickPrompt;
+      return;
+    }
+
+    if (
+      !hydratedQuickPromptFromStorageRef.current &&
+      storedQuickPrompt &&
+      storedQuickPrompt !== selectedQuickPrompt
+    ) {
       logE2EDebug("syncQuick", {
         storedQuickPrompt,
         selectedQuickPrompt,
       });
       storedQuickPromptRef.current = storedQuickPrompt;
+      hydratedQuickPromptFromStorageRef.current = true;
       setSelectedQuickPrompt(storedQuickPrompt);
     }
   }, [selectedQuickPrompt, setSelectedQuickPrompt, storedQuickPrompt, logE2EDebug]);

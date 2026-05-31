@@ -26,6 +26,7 @@ function makeTester(overrides: Record<string, any> = {}) {
     history: [],
     running: false,
     runTest: vi.fn().mockResolvedValue(undefined),
+    runTestWith: vi.fn().mockResolvedValue(undefined),
     clearHistory: vi.fn(),
     loadFromHistory: vi.fn(),
     ...overrides
@@ -61,8 +62,8 @@ describe("TestSandboxPanel", () => {
   it("renders phase selector with 'User message' and 'AI response' buttons", () => {
     const tester = makeTester()
     render(<TestSandboxPanel tester={tester as any} messageApi={messageApi} />)
-    expect(screen.getByRole("button", { name: "User message" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "AI response" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "User message" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "AI response" })).toBeInTheDocument()
   })
 
   it("renders all quick sample buttons", () => {
@@ -157,6 +158,108 @@ describe("TestSandboxPanel", () => {
     render(<TestSandboxPanel tester={tester as any} messageApi={messageApi} />)
     expect(screen.getByText("Content Redacted")).toBeInTheDocument()
     expect(screen.getByText("My phone number is [REDACTED]")).toBeInTheDocument()
+  })
+
+  it("explains when the moderation engine is disabled", () => {
+    const tester = makeTester({
+      text: "sample",
+      result: {
+        flagged: false,
+        action: "pass",
+        sample: null,
+        redacted_text: null,
+        effective: { enabled: false },
+        category: null
+      }
+    })
+    render(<TestSandboxPanel tester={tester as any} messageApi={messageApi} />)
+
+    expect(screen.getByText("Why this result?")).toBeInTheDocument()
+    expect(screen.getByText(/moderation engine is disabled/i)).toBeInTheDocument()
+  })
+
+  it("explains when the selected phase is disabled", () => {
+    const tester = makeTester({
+      phase: "output",
+      text: "sample",
+      result: {
+        flagged: false,
+        action: "pass",
+        sample: null,
+        redacted_text: null,
+        effective: { enabled: true, output_enabled: false },
+        category: null
+      }
+    })
+    render(<TestSandboxPanel tester={tester as any} messageApi={messageApi} />)
+
+    expect(screen.getByText(/AI response moderation is disabled/i)).toBeInTheDocument()
+  })
+
+  it("explains no-match pass results", () => {
+    const tester = makeTester({
+      text: "clean sample",
+      result: {
+        flagged: false,
+        action: "pass",
+        sample: null,
+        redacted_text: null,
+        effective: { enabled: true, input_enabled: true },
+        category: null
+      }
+    })
+    render(<TestSandboxPanel tester={tester as any} messageApi={messageApi} />)
+
+    expect(screen.getByText(/no active rule matched/i)).toBeInTheDocument()
+  })
+
+  it("explains matched rule and category results", () => {
+    const tester = makeTester({
+      text: "contains secret",
+      result: {
+        flagged: true,
+        action: "block",
+        sample: "secret",
+        redacted_text: null,
+        effective: { enabled: true, input_enabled: true },
+        category: "confidential"
+      }
+    })
+    render(<TestSandboxPanel tester={tester as any} messageApi={messageApi} />)
+
+    expect(screen.getByText(/matched an active confidential rule/i)).toBeInTheDocument()
+    expect(screen.getByText(/sample "secret"/i)).toBeInTheDocument()
+  })
+
+  it("explains per-user override and global fallback outcomes", () => {
+    const overrideTester = makeTester({
+      userId: "alice",
+      text: "sample",
+      result: {
+        flagged: true,
+        action: "warn",
+        sample: null,
+        redacted_text: null,
+        effective: { enabled: true, user_override: { enabled: true } },
+        category: null
+      }
+    })
+    const { rerender } = render(<TestSandboxPanel tester={overrideTester as any} messageApi={messageApi} />)
+    expect(screen.getByText(/per-user override/i)).toBeInTheDocument()
+
+    const fallbackTester = makeTester({
+      text: "sample",
+      result: {
+        flagged: true,
+        action: "warn",
+        sample: null,
+        redacted_text: null,
+        effective: { enabled: true },
+        category: null
+      }
+    })
+    rerender(<TestSandboxPanel tester={fallbackTester as any} messageApi={messageApi} />)
+    expect(screen.getByText(/global policy fallback/i)).toBeInTheDocument()
   })
 
   it("shows 'Running...' text when running is true", () => {

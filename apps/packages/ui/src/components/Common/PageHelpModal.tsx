@@ -218,8 +218,12 @@ export function PageHelpModal() {
 
   // Get tutorials for current route
   const availableTutorials = useMemo(
-    () => getTutorialsForRoute(location.pathname),
-    [location.pathname]
+    () =>
+      getTutorialsForRoute(location.pathname, {
+        completedTutorialIds: completedTutorials,
+        includeLocked: true
+      }),
+    [location.pathname, completedTutorials]
   )
 
   // Determine default tab based on available tutorials
@@ -336,6 +340,10 @@ export function PageHelpModal() {
           {
             label: t("common:shortcuts.goToPlayground", "Go to Playground"),
             keys: formatShortcut(defaultShortcuts.modePlayground)
+          },
+          {
+            label: t("common:shortcuts.goToSources", "Go to Sources"),
+            keys: formatShortcut(defaultShortcuts.modeSources)
           },
           {
             label: t("common:shortcuts.goToMedia", "Go to Media"),

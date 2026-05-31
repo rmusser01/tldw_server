@@ -60,7 +60,7 @@ Sample YAML (checked in):
 
 ## Security Notes
 
-- Keep the Prometheus endpoint gated by `require_permissions("system.logs")` / admin-style principals. Do not expose it unauthenticated; use credentials or an ingress/auth proxy for Prometheus scraping on internal networks.
+- Keep the Prometheus endpoint gated by `RequirePermission("system.logs")` / admin-style principals. Do not expose it unauthenticated; use credentials or an ingress/auth proxy for Prometheus scraping on internal networks.
 
 ## References
 

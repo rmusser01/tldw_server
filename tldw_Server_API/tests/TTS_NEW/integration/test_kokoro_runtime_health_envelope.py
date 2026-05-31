@@ -64,6 +64,11 @@ class _FakeTTSService:
         return {}
 
 
+class _FailingTTSHealthService:
+    def get_status(self):
+        raise RuntimeError("TTS health backend leaked /private/tts-health.json")
+
+
 class _FakeConfigManager:
     def __init__(self, provider_configs):
         self._provider_configs = dict(provider_configs)
@@ -79,6 +84,23 @@ class _FakeCircuitManager:
     def get_all_status(self, detailed=False):
         assert detailed is True
         return dict(self._statuses)
+
+
+@pytest.mark.asyncio
+async def test_tts_health_error_log_is_sanitized(monkeypatch):
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_health, "logger", fake_logger)
+    monkeypatch.setattr(audio_health, "ensure_request_id", lambda _request: "req-test")
+
+    health = await audio_health.get_tts_health(
+        request=MagicMock(),
+        tts_service=_FailingTTSHealthService(),
+    )
+
+    assert health["status"] == "error"
+    assert health["message"] == "TTS health check failed"
+    assert health["request_id"] == "req-test"
+    fake_logger.error.assert_called_once_with("Error getting TTS health")
 
 
 @pytest.mark.asyncio

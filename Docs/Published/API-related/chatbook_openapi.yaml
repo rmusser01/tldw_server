@@ -38,7 +38,7 @@ paths:
       tags:
         - Export
       summary: Create a new chatbook
-      description: Export selected content to a chatbook file
+      description: Export selected content to a chatbook archive. Sync exports return a completed job reference with a job-backed download URL.
       operationId: createChatbook
       requestBody:
         required: true
@@ -70,12 +70,41 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /chatbooks/export/continue:
+    post:
+      tags:
+        - Export
+      summary: Continue a truncated chatbook export
+      description: Continue a truncated export in sync mode. Requests with `async_mode=true` are rejected with HTTP 400.
+      operationId: continueChatbookExport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContinueExportRequest'
+      responses:
+        '200':
+          description: Continuation export created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateChatbookResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /chatbooks/import:
     post:
       tags:
         - Import
       summary: Import a chatbook
-      description: Import content from an uploaded chatbook file
+      description: Import content from an uploaded chatbook file using direct multipart form fields. Sync imports return `imported_items` plus `warnings`.
       operationId: importChatbook
       requestBody:
         required: true
@@ -89,12 +118,38 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: Chatbook file to import
-                options:
+                  description: Chatbook archive to import, OpenWebUI JSON when source_format is openwebui_json, or OpenWebUI SQLite database when source_format is openwebui_db
+                source_format:
+                  type: string
+                  enum:
+                    - chatbook
+                    - openwebui_json
+                    - openwebui_db
+                  default: chatbook
+                  description: Import source format. Use openwebui_json for normal OpenWebUI Export Chats JSON files and openwebui_db for uploaded webui.db or .sqlite databases.
+                selected_openwebui_user_id:
+                  type: string
+                  description: Required when source_format is openwebui_db. Use a source_user_id returned by the preview endpoint.
+                content_selections:
                   type: string
                   format: json
-                  description: JSON string with import options
-                  example: '{"conflict_resolution": "skip", "prefix_imported": true}'
+                  description: Optional JSON object encoded as a string, for example '{"conversation":["conv_123"]}'. Unsupported import content types are rejected.
+                conflict_resolution:
+                  $ref: '#/components/schemas/ConflictResolution'
+                prefix_imported:
+                  type: boolean
+                  default: false
+                import_media:
+                  type: boolean
+                  default: false
+                  description: Must remain false; media import is not supported yet.
+                import_embeddings:
+                  type: boolean
+                  default: false
+                  description: Must remain false; embedding import is not supported yet.
+                async_mode:
+                  type: boolean
+                  default: false
       responses:
         '200':
           description: Chatbook imported successfully
@@ -112,10 +167,10 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '409':
-          $ref: '#/components/responses/Conflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -124,7 +179,7 @@ paths:
       tags:
         - Import
       summary: Preview chatbook contents
-      description: Preview the contents of a chatbook without importing
+      description: Preview the contents of a chatbook without importing. Invalid archives or manifests return HTTP 400; unexpected server faults return HTTP 500.
       operationId: previewChatbook
       requestBody:
         required: true
@@ -138,7 +193,15 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: Chatbook file to preview
+                  description: Chatbook archive to preview, OpenWebUI JSON when source_format is openwebui_json, or OpenWebUI SQLite database when source_format is openwebui_db
+                source_format:
+                  type: string
+                  enum:
+                    - chatbook
+                    - openwebui_json
+                    - openwebui_db
+                  default: chatbook
+                  description: Preview source format. Use openwebui_json for normal OpenWebUI Export Chats JSON files and openwebui_db for uploaded webui.db or .sqlite databases.
       responses:
         '200':
           description: Chatbook preview retrieved
@@ -152,6 +215,95 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /chatbooks/openwebui/hydration/preview:
+    post:
+      tags:
+        - Import
+      summary: Preview OpenWebUI attachment hydration
+      description: Preview files referenced by imported OpenWebUI conversations from a server-local OpenWebUI data root. The data root must contain webui.db and uploads/ and resolve under configured ingestion source allowed roots.
+      operationId: previewOpenWebUIAttachmentHydration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenWebUIHydrationRequest'
+      responses:
+        '200':
+          description: Hydration preview retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenWebUIHydrationPreviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /chatbooks/openwebui/hydration/jobs:
+    post:
+      tags:
+        - Jobs
+      summary: Create OpenWebUI attachment hydration job
+      description: Enqueue a background job that hydrates referenced OpenWebUI files for imported conversations. Image files are copied into tldw-owned storage, non-image files are registered in Media DB when available, and supported-file processing is opt-in.
+      operationId: createOpenWebUIAttachmentHydrationJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenWebUIHydrationRequest'
+      responses:
+        '200':
+          description: Hydration job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenWebUIHydrationJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /chatbooks/openwebui/hydration/jobs/{job_id}:
+    get:
+      tags:
+        - Jobs
+      summary: Get OpenWebUI attachment hydration job
+      description: Return one OpenWebUI hydration job visible to the current caller. Non-admin users can only read their own jobs.
+      operationId: getOpenWebUIAttachmentHydrationJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Hydration job retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenWebUIHydrationJobResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -235,7 +387,7 @@ paths:
       tags:
         - Jobs
       summary: Remove export job
-      description: Remove a completed or cancelled export job
+      description: Remove a completed, cancelled, failed, or expired export job
       operationId: removeExportJob
       parameters:
         - $ref: '#/components/parameters/JobId'
@@ -302,33 +454,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
-
-  /chatbooks/import/jobs/{job_id}/remove:
-    delete:
-      tags:
-        - Jobs
-      summary: Remove import job
-      description: Remove a completed or cancelled import job
-      operationId: removeImportJob
-      parameters:
-        - $ref: '#/components/parameters/JobId'
-      responses:
-        '200':
-          description: Import job removed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RemoveJobResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /chatbooks/import/jobs/{job_id}:
     delete:
       tags:
         - Jobs
@@ -354,6 +479,31 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /chatbooks/import/jobs/{job_id}/remove:
+    delete:
+      tags:
+        - Jobs
+      summary: Remove import job
+      description: Remove a completed, cancelled, or failed import job
+      operationId: removeImportJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Import job removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoveJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -486,9 +636,7 @@ components:
       type: string
       enum:
         - skip
-        - overwrite
         - rename
-        - merge
       default: skip
 
     ExportStatus:
@@ -516,6 +664,7 @@ components:
       required:
         - name
         - description
+        - content_selections
       properties:
         name:
           type: string
@@ -525,7 +674,7 @@ components:
         description:
           type: string
           minLength: 1
-          maxLength: 1000
+          maxLength: 5000
           example: Regular weekly backup of all content
         content_selections:
           type: object
@@ -571,6 +720,17 @@ components:
     ImportChatbookRequest:
       type: object
       properties:
+        source_format:
+          type: string
+          enum:
+            - chatbook
+            - openwebui_json
+            - openwebui_db
+          default: chatbook
+        selected_openwebui_user_id:
+          type: string
+          nullable: true
+          description: Required for OpenWebUI database imports.
         content_selections:
           type: object
           additionalProperties:
@@ -584,13 +744,38 @@ components:
           default: false
         import_media:
           type: boolean
-          default: true
+          default: false
+          description: Must remain false; media import is not supported yet.
         import_embeddings:
           type: boolean
           default: false
+          description: Must remain false; embedding import is not supported yet.
         async_mode:
           type: boolean
           default: false
+
+    ContinueExportRequest:
+      type: object
+      required:
+        - export_id
+        - continuations
+      properties:
+        export_id:
+          type: string
+          description: Export ID from the original chatbook manifest
+        continuations:
+          type: array
+          description: Continuation tokens from the original manifest truncation metadata
+          items:
+            type: object
+            additionalProperties: true
+        name:
+          type: string
+          maxLength: 255
+        async_mode:
+          type: boolean
+          default: false
+          description: Must remain false; async continuation exports are not supported.
 
     CreateChatbookResponse:
       type: object
@@ -604,12 +789,11 @@ components:
           type: string
         job_id:
           type: string
+          nullable: true
           description: Job ID if async mode
-        file_path:
-          type: string
-          description: File path if sync mode
         download_url:
           type: string
+          nullable: true
           description: Download URL if sync mode
 
     ImportChatbookResponse:
@@ -624,6 +808,7 @@ components:
           type: string
         job_id:
           type: string
+          nullable: true
         imported_items:
           type: object
           additionalProperties:
@@ -632,6 +817,54 @@ components:
             conversation: 5
             note: 10
             character: 2
+        warnings:
+          type: array
+          items:
+            type: string
+        source_format:
+          type: string
+          enum:
+            - chatbook
+            - openwebui_json
+            - openwebui_db
+        openwebui_result:
+          $ref: '#/components/schemas/OpenWebUIImportResult'
+        openwebui_db_result:
+          $ref: '#/components/schemas/OpenWebUIDatabaseImportResult'
+
+    OpenWebUIImportResult:
+      type: object
+      properties:
+        imported_chats:
+          type: integer
+        skipped_chats:
+          type: integer
+        failed_chats:
+          type: integer
+        imported_messages:
+          type: integer
+        skipped_messages:
+          type: integer
+        duplicate_chats:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+
+    OpenWebUIDatabaseImportResult:
+      allOf:
+        - $ref: '#/components/schemas/OpenWebUIImportResult'
+        - type: object
+          properties:
+            selected_user_id:
+              type: string
+            selected_user_label:
+              type: string
+            mirrored_folders:
+              type: integer
+            folder_links:
+              type: integer
 
     ContentItemResponse:
       type: object
@@ -666,7 +899,7 @@ components:
       properties:
         version:
           type: string
-          example: "1.0"
+          example: "1.0.0"
         name:
           type: string
         description:
@@ -772,10 +1005,270 @@ components:
     PreviewChatbookResponse:
       type: object
       properties:
+        source_format:
+          type: string
+          enum:
+            - chatbook
+            - openwebui_json
+            - openwebui_db
         manifest:
           $ref: '#/components/schemas/ChatbookManifestResponse'
+        openwebui_preview:
+          $ref: '#/components/schemas/OpenWebUIPreview'
+        openwebui_db_preview:
+          $ref: '#/components/schemas/OpenWebUIDatabasePreview'
         error:
           type: string
+          nullable: true
+
+    OpenWebUIPreview:
+      type: object
+      properties:
+        chat_count:
+          type: integer
+        message_count:
+          type: integer
+        branched_chat_count:
+          type: integer
+        duplicate_chat_count:
+          type: integer
+        attachment_reference_count:
+          type: integer
+        malformed_chat_count:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    OpenWebUIDatabaseUserPreview:
+      type: object
+      properties:
+        source_user_id:
+          type: string
+        display_label:
+          type: string
+        email:
+          type: string
+          nullable: true
+        chat_count:
+          type: integer
+        folder_count:
+          type: integer
+        message_count:
+          type: integer
+        branched_chat_count:
+          type: integer
+        duplicate_chat_count:
+          type: integer
+        archived_chat_count:
+          type: integer
+        pinned_chat_count:
+          type: integer
+        attachment_reference_count:
+          type: integer
+        warning_count:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+
+    OpenWebUIDatabasePreview:
+      type: object
+      properties:
+        user_count:
+          type: integer
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpenWebUIDatabaseUserPreview'
+        warnings:
+          type: array
+          items:
+            type: string
+
+    OpenWebUIHydrationScopeRequest:
+      type: object
+      properties:
+        conversation_ids:
+          type: array
+          maxItems: 1000
+          description: Imported tldw conversation IDs to scan. Empty means no conversations are selected.
+          items:
+            type: string
+        source_user_id:
+          type: string
+          nullable: true
+          description: Optional OpenWebUI source user ID used for chat_file fallback lookups.
+
+    OpenWebUIHydrationRequest:
+      type: object
+      required:
+        - openwebui_data_root
+      properties:
+        openwebui_data_root:
+          type: string
+          maxLength: 4096
+          description: Server-local OpenWebUI data root containing webui.db and uploads/. Must resolve under configured ingestion source allowed roots.
+        scope:
+          $ref: '#/components/schemas/OpenWebUIHydrationScopeRequest'
+        process_supported_files:
+          type: boolean
+          default: false
+          description: Opt-in flag for processing supported non-image files after registration. Defaults to false.
+
+    OpenWebUIHydrationSummary:
+      type: object
+      properties:
+        referenced_files:
+          type: integer
+          minimum: 0
+        returned_items:
+          type: integer
+          minimum: 0
+          description: Number of item records included in this response.
+        omitted_items:
+          type: integer
+          minimum: 0
+          description: Number of item records omitted because the response item cap was reached.
+        resolved_files:
+          type: integer
+          minimum: 0
+        image_files:
+          type: integer
+          minimum: 0
+        media_files:
+          type: integer
+          minimum: 0
+        missing_files:
+          type: integer
+          minimum: 0
+        unsupported_files:
+          type: integer
+          minimum: 0
+        failed_files:
+          type: integer
+          minimum: 0
+        hydrated_images:
+          type: integer
+          minimum: 0
+        registered_media_files:
+          type: integer
+          minimum: 0
+        already_hydrated:
+          type: integer
+          minimum: 0
+        processed_files:
+          type: integer
+          minimum: 0
+        warning_count:
+          type: integer
+          minimum: 0
+
+    OpenWebUIHydrationItem:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+          nullable: true
+        message_id:
+          type: string
+          nullable: true
+        file_id:
+          type: string
+          nullable: true
+        status:
+          type: string
+        warning_code:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        file_kind:
+          type: string
+          nullable: true
+        mime_type:
+          type: string
+          nullable: true
+        media_id:
+          type: integer
+          nullable: true
+        media_file_id:
+          type: string
+          nullable: true
+        checksum:
+          type: string
+          nullable: true
+        processing_status:
+          type: string
+          nullable: true
+
+    OpenWebUIHydrationPreviewResponse:
+      type: object
+      properties:
+        scope:
+          $ref: '#/components/schemas/OpenWebUIHydrationScopeRequest'
+        process_supported_files:
+          type: boolean
+          default: false
+        summary:
+          $ref: '#/components/schemas/OpenWebUIHydrationSummary'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OpenWebUIHydrationItem'
+        warnings:
+          type: array
+          items:
+            type: string
+
+    OpenWebUIHydrationJobResponse:
+      type: object
+      required:
+        - job_id
+        - status
+      properties:
+        job_id:
+          type: string
+        job_uuid:
+          type: string
+          nullable: true
+        status:
+          type: string
+        domain:
+          type: string
+          default: chatbooks
+        queue:
+          type: string
+          default: default
+        job_type:
+          type: string
+          default: openwebui_attachment_hydration
+        owner_user_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        result:
+          type: object
+          nullable: true
+          additionalProperties: true
+        error:
+          type: string
+          nullable: true
 
     ExportJobResponse:
       type: object
@@ -959,6 +1452,16 @@ components:
           example:
             detail: Authentication required
             error_type: AuthenticationError
+
+    Forbidden:
+      description: Permission denied
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: OpenWebUI hydration requires owner or admin access
+            error_type: PermissionError
 
     NotFound:
       description: Resource not found

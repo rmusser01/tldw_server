@@ -1,6 +1,7 @@
 import importlib
 import sqlite3
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -64,3 +65,26 @@ def test_jobs_migrations_uses_shared_sqlite_policy_helper(tmp_path):
         "foreign_keys": False,
         "temp_store": None,
     }]
+
+
+def test_ensure_jobs_tables_sanitizes_schema_failure_log(tmp_path, monkeypatch):
+    jobs_migrations = importlib.import_module("tldw_Server_API.app.core.Jobs.migrations")
+    secret = "sk_jobsMigrationSecret1234567890"
+    db_path = tmp_path / secret / "jobs.db"
+    fake_logger = MagicMock()
+
+    def fail_connect(path):
+        raise sqlite3.OperationalError(f"unable to open database file {path} token={secret}")
+
+    monkeypatch.setattr(jobs_migrations.sqlite3, "connect", fail_connect)
+    monkeypatch.setattr(jobs_migrations, "logger", fake_logger)
+
+    result = jobs_migrations.ensure_jobs_tables(db_path)
+
+    assert result == db_path
+    fake_logger.warning.assert_called_once()
+    warning_args = fake_logger.warning.call_args.args
+    rendered = " ".join(str(arg) for arg in warning_args)
+    assert "Failed to ensure Jobs schema" in rendered
+    assert str(db_path) not in rendered
+    assert secret not in rendered

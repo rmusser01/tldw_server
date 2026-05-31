@@ -307,9 +307,15 @@ class SyntheticEvalWorkflowService:
             limit=limit,
             offset=offset,
         )
+        total = self.repository.count_draft_samples(
+            recipe_kind=recipe_kind,
+            review_state=review_state,
+            source_kind=source_kind,
+            generation_batch_id=generation_batch_id,
+        )
         return {
             "data": rows,
-            "total": len(rows),
+            "total": total,
         }
 
     def review_sample(

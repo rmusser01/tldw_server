@@ -56,6 +56,11 @@ def perform_transcription(*args, **kwargs):
     return _perform_transcription(*args, **kwargs)
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.config import loaded_config_data
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_api_key_env_keys,
+    custom_openai_provider_number,
+    custom_openai_section_name,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
@@ -127,22 +132,6 @@ _PROVIDER_ENV_MAP: dict[str, str] = {
     "local-llm": "LOCAL_LLM_API_KEY",
     "ollama": "OLLAMA_API_KEY",
     "aphrodite": "APHRODITE_API_KEY",
-}
-
-_PROVIDERS_REQUIRING_KEYS = {
-    "openai",
-    "anthropic",
-    "cohere",
-    "groq",
-    "openrouter",
-    "deepseek",
-    "huggingface",
-    "mistral",
-    "google",
-    "qwen",
-    "custom-openai-api",
-    "custom-openai-api-2",
-    "aphrodite",
 }
 
 media_config = loaded_config_data.get('media_processing', {}) if loaded_config_data else {}
@@ -358,14 +347,25 @@ def _resolve_eval_api_key(api_name: Optional[str]) -> Optional[str]:
     if not api_name:
         return None
     provider = api_name.lower().strip()
-    section_key = _PROVIDER_SECTION_MAP.get(
-        provider,
-        f"{provider.replace('-', '_').replace('.', '_')}_api",
+    custom_number = custom_openai_provider_number(provider)
+    section_key = (
+        custom_openai_section_name(custom_number)
+        if custom_number is not None
+        else _PROVIDER_SECTION_MAP.get(
+            provider,
+            f"{provider.replace('-', '_').replace('.', '_')}_api",
+        )
     )
     normalized_env_name = provider.upper().replace("-", "_").replace(".", "_")
-    env_key = _PROVIDER_ENV_MAP.get(
-        provider,
-        f"{''.join(ch if ch.isalnum() or ch == '_' else '_' for ch in normalized_env_name)}_API_KEY",
+    env_keys = (
+        custom_openai_api_key_env_keys(custom_number)
+        if custom_number is not None
+        else (
+            _PROVIDER_ENV_MAP.get(
+                provider,
+                f"{''.join(ch if ch.isalnum() or ch == '_' else '_' for ch in normalized_env_name)}_API_KEY",
+            ),
+        )
     )
 
     api_key: Optional[Any] = None
@@ -377,7 +377,10 @@ def _resolve_eval_api_key(api_name: Optional[str]) -> Optional[str]:
         api_key = None
 
     if not api_key:
-        api_key = os.getenv(env_key)
+        for env_key in env_keys:
+            api_key = os.getenv(env_key)
+            if api_key:
+                break
 
     return str(api_key) if api_key else None
 
@@ -1146,14 +1149,15 @@ def process_videos(
         except _VIDEO_NONCRITICAL_EXCEPTIONS as exc:
             msg = f"Exception processing '{video_input}': {exc}"
             logging.exception(msg)
-            errors.append(msg)
+            public_error = "Video processing failed"
+            errors.append(public_error)
             # Append an error result structure
             results.append({
                 "status": "Error",
                 "input_ref": video_input,
                 "processing_source": video_input,
                 "media_type": "video",
-                "error": msg,
+                "error": public_error,
                 # Fill other fields with None/defaults
                 "metadata": {}, "transcript": None, "segments": None, "chunks": None, "summary": None,
                 "analysis_details": None, "warnings": None
@@ -1183,7 +1187,13 @@ def process_videos(
             confabulation_results = "Confabulation check skipped: no transcript/summary pairs available."
         else:
             resolved_api_key = _resolve_eval_api_key(api_name)
-            provider_requires_key = api_name.lower() in _PROVIDERS_REQUIRING_KEYS
+            api_provider_key = api_name.lower().strip()
+            try:
+                from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+
+                provider_requires_key = provider_requires_api_key(api_provider_key)
+            except _VIDEO_NONCRITICAL_EXCEPTIONS:
+                provider_requires_key = True
             if provider_requires_key and not resolved_api_key:
                 warning_msg = f"Confabulation check skipped: missing API key for provider '{api_name}'."
                 logging.warning(warning_msg)
@@ -1672,7 +1682,7 @@ def process_single_video(
         # Catch-all for unexpected errors during the process
         logger.exception(f"Unexpected exception processing {video_input}: {e}")
         processing_result["status"] = "Error"
-        processing_result["error"] = f"Unexpected error: {type(e).__name__}: {str(e)}"
+        processing_result["error"] = "Video processing failed"
         # *** Ensure input_ref is original on error ***
         processing_result["input_ref"] = video_input
         return processing_result

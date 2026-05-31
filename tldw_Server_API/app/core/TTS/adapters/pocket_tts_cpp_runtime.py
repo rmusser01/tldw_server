@@ -612,7 +612,10 @@ def prune_materialized_voice_cache(
                 path.unlink()
                 removed.append(path)
             except OSError as exc:
-                logger.warning("Failed pruning expired PocketTTS.cpp cache file {}: {}", path, exc)
+                logger.warning(
+                    "Failed pruning expired PocketTTS.cpp cache file (exception_type={})",
+                    type(exc).__name__,
+                )
             continue
         files.append((path, mtime, size))
 
@@ -637,7 +640,10 @@ def prune_materialized_voice_cache(
             removed.append(path)
             total_bytes -= size
         except OSError as exc:
-            logger.warning("Failed pruning oversized PocketTTS.cpp cache file {}: {}", path, exc)
+            logger.warning(
+                "Failed pruning oversized PocketTTS.cpp cache file (exception_type={})",
+                type(exc).__name__,
+            )
 
     return removed
 
@@ -649,4 +655,7 @@ def cleanup_transient_voice_reference(path: Optional[Path], is_transient: bool) 
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:
-        logger.warning("Failed cleaning transient PocketTTS.cpp cache file {}: {}", path, exc)
+        logger.warning(
+            "Failed cleaning transient PocketTTS.cpp cache file (exception_type={})",
+            type(exc).__name__,
+        )

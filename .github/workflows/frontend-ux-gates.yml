@@ -38,6 +38,7 @@ jobs:
       NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
       TLDW_WEB_CMD: 'env NEXT_DISABLE_MEM_OVERRIDE=1 NODE_OPTIONS=--max-old-space-size=5120 bun run dev -- --webpack -p 8080'
       TLDW_ONBOARDING_EVIDENCE_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      SKIP_WXT_PREPARE: '1'
 
     steps:
       - name: Checkout
@@ -146,6 +147,12 @@ jobs:
       NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
       TLDW_WEB_CMD: 'env NODE_OPTIONS=--max-old-space-size=4096 bun run start -- -p 8080'
       TLDW_SMOKE_HARD_GATE: '1'
+      OPENAI_API_KEY: ${{ format('sk-mock-chat-cockpit-{0}-{1}', github.run_id, github.run_attempt) }}
+      OPENAI_API_BASE: http://127.0.0.1:18080/v1
+      OPENAI_API_BASE_URL: http://127.0.0.1:18080/v1
+      CUSTOM_OPENAI_API_IP: http://127.0.0.1:18080/v1/chat/completions
+      CUSTOM_OPENAI_API_KEY: ${{ format('sk-mock-chat-cockpit-{0}-{1}', github.run_id, github.run_attempt) }}
+      SKIP_WXT_PREPARE: '1'
 
     steps:
       - name: Checkout
@@ -190,6 +197,24 @@ jobs:
             uv.lock
           extras: dev
 
+      - name: Start mock OpenAI server for /chat cockpit gate
+        shell: bash
+        run: |
+          PYTHONPATH=mock_openai_server MOCK_OPENAI_PORT=18080 \
+            python -m uvicorn mock_openai.server:app --host 127.0.0.1 --port 18080 \
+            > mock-openai-chat-cockpit.log 2>&1 &
+          echo "$!" > mock-openai-chat-cockpit.pid
+          for attempt in $(seq 1 30); do
+            if curl -sf -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+              http://127.0.0.1:18080/v1/models >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Mock OpenAI server was not ready after ${attempt} attempts."
+          cat mock-openai-chat-cockpit.log
+          exit 1
+
       - name: Start backend server (single-user)
         shell: bash
         run: |
@@ -213,6 +238,10 @@ jobs:
         working-directory: apps/tldw-frontend
         run: bun run e2e:smoke:interaction
 
+      - name: Run /chat real-server cockpit regression gate
+        working-directory: apps/tldw-frontend
+        run: bun run e2e:chat-cockpit:real:focused
+
       - name: Run Stage 7 audio regression gate
         working-directory: apps/tldw-frontend
         run: bun run e2e:smoke:audio
@@ -230,6 +259,7 @@ jobs:
           path: |
             apps/tldw-frontend/test-results/**
             apps/tldw-frontend/playwright-report/**
+            mock-openai-chat-cockpit.log
 
       - name: Print backend server log on failure
         if: failure()
@@ -249,3 +279,11 @@ jobs:
         shell: bash
         run: |
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
+
+      - name: Stop mock OpenAI server
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f mock-openai-chat-cockpit.pid ]]; then
+            kill "$(cat mock-openai-chat-cockpit.pid)" || true
+          fi

@@ -51,7 +51,9 @@ class AuthnzByokOAuthStateRepo:
             keys = row.keys()
             return {key: row[key] for key in keys}
         except Exception as row_keys_error:
-            logger.debug("BYOK OAuth state row key materialization failed; falling back to dict(row)", exc_info=row_keys_error)
+            logger.bind(error_type=type(row_keys_error).__name__).debug(
+                "BYOK OAuth state row key materialization failed; falling back to dict(row)"
+            )
         return dict(row)
 
     @staticmethod

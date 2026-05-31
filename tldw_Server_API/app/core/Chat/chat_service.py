@@ -58,6 +58,12 @@ from tldw_Server_API.app.core.Chat.prompt_template_manager import (
     apply_template_to_string,
     load_template,
 )
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
+from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
+    PromptCostGuardrailDecision,
+    evaluate_prompt_cost_guardrails,
+    load_prompt_cost_guardrail_config,
+)
 from tldw_Server_API.app.core.Chat.request_queue import (
     RequestPriority,
     get_request_queue,
@@ -85,6 +91,11 @@ from tldw_Server_API.app.core.config import (
     resolve_chat_run_first_rollout_mode,
     resolve_run_first_cohort_label,
 )
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_config_option_names,
+    custom_openai_provider_name,
+    iter_custom_openai_provider_numbers,
+)
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
@@ -106,6 +117,10 @@ from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
 )
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
+from tldw_Server_API.app.core.Moderation.review_service import (
+    capture_moderation_review_item,
+    is_moderation_review_capture_enabled,
+)
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
@@ -115,6 +130,7 @@ from tldw_Server_API.app.core.Usage.pricing_catalog import (
     get_pricing_catalog,
     list_provider_models,
 )
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
 from tldw_Server_API.app.core.Utils.cpu_bound_handler import process_large_json_async
 
@@ -207,6 +223,15 @@ _PROVIDER_MODEL_CONFIG_FIELDS: dict[str, tuple[str, str]] = {
     "ollama": ("Local-API", "ollama_model"),
     "aphrodite": ("Local-API", "aphrodite_model"),
 }
+_PROVIDER_MODEL_CONFIG_FIELDS.update(
+    {
+        custom_openai_provider_name(provider_number): (
+            "API",
+            custom_openai_config_option_names(provider_number, "model")[0],
+        )
+        for provider_number in iter_custom_openai_provider_numbers(start=3)
+    }
+)
 
 _OPENROUTER_MODEL_DISCOVERY_TIMEOUT_SECONDS = 5.0
 _DEFAULT_ASSISTANT_SYSTEM_PROMPT = "You are a helpful AI assistant."
@@ -2021,6 +2046,9 @@ def build_call_params_from_request(
         grammar_record=grammar_record,
         runtime_caps=resolve_llamacpp_runtime_caps(app_config=app_config),
     )["extra_body"]
+    billing_prompt_cache_intent = getattr(request_data, "billing_prompt_cache_intent", None)
+    if billing_prompt_cache_intent is not None:
+        call_params["billing_prompt_cache_intent"] = billing_prompt_cache_intent
 
     call_params.update(
         {
@@ -2144,7 +2172,7 @@ def estimate_tokens_from_json(request_json: str) -> int:
         return 1
 
 
-_DATA_URI_RE = re.compile(r"(data:image[^,]*,)[^\"\\s]+", re.IGNORECASE)
+_DATA_URI_RE = re.compile(r'(data:image[^,]*,)[^"\s]+', re.IGNORECASE)
 
 
 def _sanitize_data_uris(text: str) -> str:
@@ -2461,6 +2489,49 @@ async def write_mandatory_moderation_audit(
         raise MandatoryAuditWriteError("Mandatory audit persistence unavailable") from exc
 
 
+def _capture_moderation_review_item_safely(
+    *,
+    phase: str,
+    action: str | None,
+    excerpt: str | None,
+    category: str | None,
+    matched_pattern: str | None,
+    effective_policy: Any,
+    source_id: str | None,
+    user_id: str | None,
+    session_id: str | None = None,
+) -> None:
+    """Best-effort gated capture of sanitized moderation review metadata."""
+    if not action or action == "pass" or not is_moderation_review_capture_enabled():
+        return
+    try:
+        policy_snapshot = effective_policy.to_dict() if hasattr(effective_policy, "to_dict") else {}
+    except _CHAT_NONCRITICAL_EXCEPTIONS:
+        policy_snapshot = {}
+    try:
+        capture_moderation_review_item(
+            phase=phase,
+            action=action,
+            excerpt=excerpt,
+            category=category,
+            matched_pattern=matched_pattern,
+            effective_policy=policy_snapshot,
+            source_type="chat",
+            source_id=source_id,
+            user_id=user_id,
+            session_id=session_id,
+        )
+    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning("Moderation review capture failed in chat service: {}: {}", type(exc).__name__, str(exc))
+
+
+async def _capture_moderation_review_item_safely_async(**kwargs: Any) -> None:
+    action = kwargs.get("action")
+    if not action or action == "pass" or not is_moderation_review_capture_enabled():
+        return
+    await asyncio.to_thread(partial(_capture_moderation_review_item_safely, **kwargs))
+
+
 async def moderate_input_messages(
     request_data: Any,
     request: Any,
@@ -2642,14 +2713,24 @@ async def moderate_input_messages(
 
         with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
             metrics.track_moderation_input(str(req_user_id or client_id), resolved_action, category=(category or "default"))
-        await write_mandatory_moderation_audit(
-            audit_service=audit_service,
-            audit_context=audit_context,
-            audit_event_type=audit_event_type,
-            action="moderation.input",
-            result=("failure" if resolved_action == "block" else "success"),
-            metadata={"phase": "input", "action": resolved_action, "pattern": sample},
-        )
+            await write_mandatory_moderation_audit(
+                audit_service=audit_service,
+                audit_context=audit_context,
+                audit_event_type=audit_event_type,
+                action="moderation.input",
+                result=("failure" if resolved_action == "block" else "success"),
+                metadata={"phase": "input", "action": resolved_action, "pattern": sample},
+            )
+            await _capture_moderation_review_item_safely_async(
+                phase="input",
+                action=resolved_action,
+                excerpt=sample,
+                category=category,
+                matched_pattern=matched_pattern,
+                effective_policy=eff_policy,
+                source_id=str(conv_id) if conv_id is not None else None,
+                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+            )
 
         if resolved_action == "block":
             block_detail = "Input violates moderation policy"
@@ -3343,6 +3424,99 @@ async def _maybe_refund_streaming_rg(
         pass
 
 
+def _evaluate_chat_prompt_cost_guardrails(
+    *,
+    cleaned_args: Mapping[str, Any],
+    templated_llm_payload: list[dict[str, Any]],
+    selected_provider: str,
+    model: str,
+    streaming: bool,
+    continuation_metadata: Mapping[str, Any] | None = None,
+) -> PromptCostGuardrailDecision | None:
+    """Evaluate prompt-cost guardrails and fail open on diagnostic errors."""
+    try:
+        config = load_prompt_cost_guardrail_config()
+        if not config.enabled:
+            return None
+        envelope_messages = list(templated_llm_payload)
+        system_message = cleaned_args.get("system_message")
+        if system_message is not None and (
+            not isinstance(system_message, str) or system_message.strip()
+        ):
+            envelope_messages = [
+                {"role": "system", "content": system_message},
+                *envelope_messages,
+            ]
+        envelope = build_prompt_cost_envelope(envelope_messages)
+        decision = evaluate_prompt_cost_guardrails(
+            envelope,
+            request_options=cleaned_args,
+            previous_fingerprints=_extract_previous_prompt_guardrail_fingerprints(
+                cleaned_args=cleaned_args,
+                continuation_metadata=continuation_metadata,
+            ),
+            config=config,
+        )
+        if decision.action == "allow":
+            return None
+
+        metadata = decision.to_response_metadata()
+        log_metadata = {
+            "provider": selected_provider,
+            "model": model,
+            "streaming": streaming,
+            "decision": metadata,
+        }
+        if decision.action == "block":
+            logger.warning("Chat prompt cost guardrail blocked request: {}", log_metadata)
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "type": "prompt_cost_guardrail_block",
+                    "message": "Prompt cost guardrail blocked request before provider dispatch.",
+                    "prompt_guardrails": metadata,
+                },
+            )
+        logger.warning("Chat prompt cost guardrail warnings: {}", log_metadata)
+        return decision
+    except HTTPException:
+        raise
+    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(
+            "Prompt cost guardrail evaluation skipped due to {}",
+            type(exc).__name__,
+        )
+        return None
+
+
+def _extract_previous_prompt_guardrail_fingerprints(
+    *,
+    cleaned_args: Mapping[str, Any],
+    continuation_metadata: Mapping[str, Any] | None = None,
+) -> dict[str, str] | None:
+    candidates = (
+        cleaned_args.get("prompt_guardrail_previous_fingerprints"),
+        cleaned_args.get("previous_prompt_fingerprints"),
+        cleaned_args.get("tldw_previous_prompt_fingerprints"),
+        (
+            continuation_metadata.get("prompt_guardrail_fingerprints")
+            if isinstance(continuation_metadata, Mapping)
+            else None
+        ),
+    )
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        sanitized = {
+            str(key): str(value)
+            for key, value in candidate.items()
+            if isinstance(key, str) and isinstance(value, str) and value
+        }
+        if sanitized:
+            return sanitized
+    return None
+
+
 async def execute_streaming_call(
     *,
     current_loop: Any,
@@ -3416,6 +3590,14 @@ async def execute_streaming_call(
             apply_structured_response_request(
                 cleaned_args=cleaned_args,
                 structured_request_context=structured_request_context,
+            )
+            _evaluate_chat_prompt_cost_guardrails(
+                cleaned_args=cleaned_args,
+                templated_llm_payload=templated_llm_payload,
+                selected_provider=selected_provider,
+                model=model,
+                streaming=True,
+                continuation_metadata=normalized_continuation_metadata,
             )
         except (
             StructuredGenerationCapabilityError,
@@ -3828,7 +4010,13 @@ async def execute_streaming_call(
     if hasattr(raw_stream_iter, "__iter__") and not hasattr(raw_stream_iter, "__aiter__"):
         raw_stream_iter = wrap_sync_stream(raw_stream_iter)
 
-    stream_mod_state = {"block_logged": False, "redact_logged": False}
+    stream_mod_state = {
+        "block_logged": False,
+        "redact_logged": False,
+        "block_capture_logged": False,
+        "redact_capture_logged": False,
+        "warn_capture_logged": False,
+    }
     loop_compat_enabled = False
     loop_compat_run_id = str(final_conversation_id or f"run_{_uuid.uuid4().hex[:12]}")
     try:
@@ -3926,65 +4114,102 @@ async def execute_streaming_call(
                         if action == "redact":
                             moderation.redact_text(full_reply, eff_policy)
 
-                if action == "block":
-                    if not stream_mod_state["block_logged"]:
-                        with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-                            metrics.track_moderation_stream_block(
-                                str(req_user_id or client_id),
-                                category=(category or "default"),
-                            )
-                        try:
-                            if audit_service and audit_context:
-                                _schedule_background_task(
-                                    audit_service.log_event(
-                                        event_type=AuditEventType.SECURITY_VIOLATION,
-                                        context=audit_context,
-                                        action="moderation.output",
-                                        result="failure",
-                                        metadata={
-                                            "phase": "output",
-                                            "streaming": True,
-                                            "action": "block",
-                                            "pattern": sample,
-                                        },
-                                    ),
-                                    task_name="chat.stream.save.output.block.audit",
+                    if action == "block":
+                        if not stream_mod_state["block_logged"]:
+                            with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+                                metrics.track_moderation_stream_block(
+                                    str(req_user_id or client_id),
+                                    category=(category or "default"),
                                 )
-                        except _CHAT_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        stream_mod_state["block_logged"] = True
-                    post_stream_blocked = True
-                    full_reply_to_save = None
-                elif action == "redact":
-                    if not stream_mod_state["redact_logged"]:
-                        with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-                            metrics.track_moderation_output(
-                                str(req_user_id or client_id),
-                                "redact",
-                                streaming=True,
-                                category=(category or "default"),
+                            try:
+                                if audit_service and audit_context:
+                                    _schedule_background_task(
+                                        audit_service.log_event(
+                                            event_type=AuditEventType.SECURITY_VIOLATION,
+                                            context=audit_context,
+                                            action="moderation.output",
+                                            result="failure",
+                                            metadata={
+                                                "phase": "output",
+                                                "streaming": True,
+                                                "action": "block",
+                                                "pattern": sample,
+                                            },
+                                        ),
+                                        task_name="chat.stream.save.output.block.audit",
+                                    )
+                            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                pass
+                            stream_mod_state["block_logged"] = True
+                        if not stream_mod_state["block_capture_logged"]:
+                            await _capture_moderation_review_item_safely_async(
+                                phase="output",
+                                action="block",
+                                excerpt=sample,
+                                category=category,
+                                matched_pattern=matched_pattern,
+                                effective_policy=eff_policy,
+                                source_id=str(final_conversation_id) if final_conversation_id else None,
+                                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
                             )
-                        try:
-                            if audit_service and audit_context:
-                                _schedule_background_task(
-                                    audit_service.log_event(
-                                        event_type=AuditEventType.SECURITY_VIOLATION,
-                                        context=audit_context,
-                                        action="moderation.output",
-                                        result="success",
-                                        metadata={
-                                            "phase": "output",
-                                            "streaming": True,
-                                            "action": "redact",
-                                            "pattern": sample,
-                                        },
-                                    ),
-                                    task_name="chat.stream.save.output.redact.audit",
+                            stream_mod_state["block_capture_logged"] = True
+                        post_stream_blocked = True
+                        full_reply_to_save = None
+                    elif action == "redact":
+                        if not stream_mod_state["redact_logged"]:
+                            with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+                                metrics.track_moderation_output(
+                                    str(req_user_id or client_id),
+                                    "redact",
+                                    streaming=True,
+                                    category=(category or "default"),
                                 )
-                        except _CHAT_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        stream_mod_state["redact_logged"] = True
-                    full_reply_to_save = moderation.redact_text(full_reply, eff_policy)
+                            try:
+                                if audit_service and audit_context:
+                                    _schedule_background_task(
+                                        audit_service.log_event(
+                                            event_type=AuditEventType.SECURITY_VIOLATION,
+                                            context=audit_context,
+                                            action="moderation.output",
+                                            result="success",
+                                            metadata={
+                                                "phase": "output",
+                                                "streaming": True,
+                                                "action": "redact",
+                                                "pattern": sample,
+                                            },
+                                        ),
+                                        task_name="chat.stream.save.output.redact.audit",
+                                    )
+                            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                pass
+                            stream_mod_state["redact_logged"] = True
+                        if not stream_mod_state["redact_capture_logged"]:
+                            await _capture_moderation_review_item_safely_async(
+                                phase="output",
+                                action="redact",
+                                excerpt=sample,
+                                category=category,
+                                matched_pattern=matched_pattern,
+                                effective_policy=eff_policy,
+                                source_id=str(final_conversation_id) if final_conversation_id else None,
+                                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                            )
+                            stream_mod_state["redact_capture_logged"] = True
+                        full_reply_to_save = moderation.redact_text(full_reply, eff_policy)
+                    elif action == "warn":
+                        if not stream_mod_state["warn_capture_logged"]:
+                            await _capture_moderation_review_item_safely_async(
+                                phase="output",
+                                action="warn",
+                                excerpt=sample,
+                                category=category,
+                                matched_pattern=matched_pattern,
+                                effective_policy=eff_policy,
+                                source_id=str(final_conversation_id) if final_conversation_id else None,
+                                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                            )
+                            stream_mod_state["warn_capture_logged"] = True
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -4138,6 +4363,7 @@ async def execute_streaming_call(
                 request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
                 conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
                 estimated=True,
+                estimate_source="stream_estimate",
             )
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
@@ -4251,6 +4477,17 @@ async def execute_streaming_call(
             chunk_seq = 0
 
             stream_holdback = ""
+            if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
+                metadata_payload = {
+                    "event": "tldw_metadata",
+                    "conversation_id": final_conversation_id,
+                    "tldw_conversation_id": final_conversation_id,
+                }
+                if system_message_id:
+                    metadata_payload["tldw_system_message_id"] = system_message_id
+                if normalized_continuation_metadata:
+                    metadata_payload["tldw_continuation"] = normalized_continuation_metadata
+                yield f"data: {_json.dumps(metadata_payload)}\n\n"
             try:
                 stream_buffer_limit = int(os.getenv("MODERATION_STREAM_BUFFER_CHARS", "1024"))
             except _CHAT_NONCRITICAL_EXCEPTIONS:
@@ -4639,6 +4876,7 @@ async def execute_non_stream_call(
     queue_enabled = False
     pending_assistant_payload: dict[str, Any] | None = None
     pending_tool_messages: list[dict[str, Any]] = []
+    prompt_guardrail_decision: PromptCostGuardrailDecision | None = None
     try:
         try:
             if structured_request_context is None:
@@ -4650,6 +4888,14 @@ async def execute_non_stream_call(
             apply_structured_response_request(
                 cleaned_args=cleaned_args,
                 structured_request_context=structured_request_context,
+            )
+            prompt_guardrail_decision = _evaluate_chat_prompt_cost_guardrails(
+                cleaned_args=cleaned_args,
+                templated_llm_payload=templated_llm_payload,
+                selected_provider=selected_provider,
+                model=model,
+                streaming=False,
+                continuation_metadata=normalized_continuation_metadata,
             )
         except (
             StructuredGenerationCapabilityError,
@@ -4892,8 +5138,13 @@ async def execute_non_stream_call(
         usage = llm_response.get("usage")
         if usage:
             try:
-                prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
-                completion_tokens = int(usage.get("completion_tokens", 0) or 0)
+                normalized_usage = normalize_llm_usage(
+                    provider=selected_provider,
+                    usage=usage if isinstance(usage, dict) else None,
+                    choices=choices if isinstance(choices, list) else None,
+                )
+                prompt_tokens = normalized_usage.input_tokens
+                completion_tokens = normalized_usage.output_tokens
                 metrics.track_tokens(
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
@@ -4920,9 +5171,12 @@ async def execute_non_stream_call(
                     latency_ms=int((time.time() - llm_start_time) * 1000),
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
-                    total_tokens=int((usage.get("total_tokens") or 0) or (prompt_tokens + completion_tokens)),
+                    total_tokens=normalized_usage.total_tokens,
                     request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
                     conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
+                    usage_metadata=usage if isinstance(usage, dict) else None,
+                    choice_count=normalized_usage.choice_count,
+                    estimate_source=normalized_usage.estimate_source,
                 )
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 pass
@@ -4960,6 +5214,7 @@ async def execute_non_stream_call(
                     request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
                     conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
                     estimated=True,
+                    estimate_source="missing_usage",
                 )
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 pass
@@ -5123,6 +5378,16 @@ async def execute_non_stream_call(
                                 "pattern": sample,
                             },
                         )
+                        await _capture_moderation_review_item_safely_async(
+                            phase="output",
+                            action="block",
+                            excerpt=sample,
+                        category=out_category2,
+                        matched_pattern=matched_pattern,
+                        effective_policy=eff_policy,
+                        source_id=str(final_conversation_id) if final_conversation_id else None,
+                        user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                    )
                     _emit_chat_run_first_completion_metric(
                         metrics,
                         context=run_first_metric_context,
@@ -5152,6 +5417,16 @@ async def execute_non_stream_call(
                             )
                     except MandatoryAuditWriteError:
                         raise
+                        await _capture_moderation_review_item_safely_async(
+                            phase="output",
+                            action="redact",
+                            excerpt=sample,
+                        category=out_category2,
+                        matched_pattern=matched_pattern,
+                        effective_policy=eff_policy,
+                        source_id=str(final_conversation_id) if final_conversation_id else None,
+                        user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                    )
                     if isinstance(content_to_save, str):
                         content_to_save = (
                             redacted_val
@@ -5169,6 +5444,17 @@ async def execute_non_stream_call(
                                     msg["content"] = content_to_save
                     except _CHAT_NONCRITICAL_EXCEPTIONS:
                         pass
+                    if resolved_action == "warn":
+                        await _capture_moderation_review_item_safely_async(
+                            phase="output",
+                            action="warn",
+                            excerpt=sample,
+                        category=out_category2,
+                        matched_pattern=matched_pattern,
+                        effective_policy=eff_policy,
+                        source_id=str(final_conversation_id) if final_conversation_id else None,
+                        user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                    )
     except HTTPException:
         raise
     except MandatoryAuditWriteError:
@@ -5480,6 +5766,10 @@ async def execute_non_stream_call(
             encoded_payload["tldw_continuation"] = normalized_continuation_metadata
         if structured_metadata is not None:
             encoded_payload["tldw_structured"] = structured_metadata
+        if prompt_guardrail_decision is not None:
+            encoded_payload["tldw_prompt_guardrails"] = (
+                prompt_guardrail_decision.to_response_metadata()
+            )
 
     # Audit success
     if audit_service and audit_context:

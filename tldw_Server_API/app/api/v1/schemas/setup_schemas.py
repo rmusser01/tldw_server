@@ -22,6 +22,83 @@ class ConfigUpdates(BaseModel):
     )
 
 
+class SetupReadinessPreviewRequest(BaseModel):
+    profile_id: str | None = Field(
+        None,
+        description="Curated readiness profile identifier or advanced custom selection.",
+    )
+    lanes: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Lane-specific chat, embeddings/RAG, and speech setup selections.",
+    )
+
+
+class SetupReadinessSecretField(BaseModel):
+    section: str
+    key: str
+    provider: str | None = None
+    state: str
+
+
+class SetupReadinessPreviewResponse(BaseModel):
+    preview_id: str | None = None
+    profile_id: str | None = None
+    lane_ids: list[str] = Field(default_factory=list)
+    lanes: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    overlays: list[str] = Field(default_factory=list)
+    config_updates: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    secret_fields: list[SetupReadinessSecretField] = Field(default_factory=list)
+    install_plan: dict[str, Any] = Field(default_factory=dict)
+    operation_required: bool
+
+
+class SetupReadinessProvisionRequest(BaseModel):
+    preview_id: str | None = Field(
+        None,
+        description="Identifier returned by /setup/readiness/preview.",
+    )
+    selection: dict[str, Any] | None = Field(
+        None,
+        description="Optional inline selection to preview and provision in one request.",
+    )
+    confirmed: bool = Field(
+        False,
+        description="Must be true to persist config updates or queue provisioning work.",
+    )
+
+
+class SetupReadinessProvisionResponse(BaseModel):
+    operation_id: str
+    operation_status: str
+    status_url: str
+    status: str
+    lanes: list[dict[str, Any]] = Field(default_factory=list)
+    overlays: list[str] = Field(default_factory=list)
+    install_plan_submitted: bool
+    config_updates_applied: bool
+    backup_path: str | None = None
+
+
+class SetupReadinessVerifyRequest(BaseModel):
+    preview_id: str | None = Field(
+        None,
+        description="Optional preview identifier to verify.",
+    )
+    selection: dict[str, Any] | None = Field(
+        None,
+        description="Optional inline readiness selection to verify.",
+    )
+
+
+class SetupReadinessVerifyResponse(BaseModel):
+    profile_id: str | None = None
+    lane_ids: list[str] = Field(default_factory=list)
+    lanes: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    overlays: list[str] = Field(default_factory=list)
+    status: str
+    verified_at: str
+
+
 class SetupCompleteRequest(BaseModel):
     disable_first_time_setup: bool | None = Field(
         False,

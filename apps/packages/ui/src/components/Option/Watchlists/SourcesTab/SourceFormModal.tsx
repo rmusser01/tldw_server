@@ -1,14 +1,33 @@
 import React, { useEffect, useLayoutEffect, useRef } from "react"
-import { Alert, Button, Form, Input, Modal, Select, message } from "antd"
+import { Button, Form, Input, Modal, Select, message } from "antd"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { testWatchlistSource, testWatchlistSourceDraft } from "@/services/watchlists"
-import type { JobPreviewResult } from "@/types/watchlists"
-import type { WatchlistSource, SourceType } from "@/types/watchlists"
+import type { JobPreviewResult, SourcePreviewDiagnostics } from "@/types/watchlists"
+import type { SourceType } from "@/types/watchlists"
+import { buildWatchlistsModalChrome, useWatchlistsViewport } from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
+import {
+  buildSourceSettingsPayload,
+  SOURCE_SETTINGS_FORM_FIELDS,
+  sourceSettingsAreEqual,
+  sourceSettingsToFormValues
+} from "./source-settings"
 import {
   getFocusableActiveElement,
   restoreFocusToElement
 } from "../shared/focus-management"
+
+type SourceFormMode = "create" | "edit"
+
+type SourceFormInitialValues = {
+  id?: number
+  name: string
+  url: string
+  source_type: SourceType
+  tags?: string[]
+  settings?: Record<string, unknown> | null
+}
 
 interface SourceFormModalProps {
   open: boolean
@@ -18,9 +37,12 @@ interface SourceFormModalProps {
     url: string
     source_type: SourceType
     tags: string[]
+    settings?: Record<string, unknown> | null
   }) => Promise<void>
-  initialValues?: WatchlistSource
+  initialValues?: SourceFormInitialValues
+  mode?: SourceFormMode
   existingTags: string[]
+  forumsEnabled?: boolean
 }
 
 const toText = (value: unknown, fallback = ""): string =>
@@ -81,12 +103,73 @@ const resolveTestSourceErrorHint = (
   )
 }
 
+const toDiagnosticList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0)
+}
+
+const buildDiagnosticsLines = (
+  diagnostics: SourcePreviewDiagnostics | null | undefined,
+  t: (...args: any[]) => unknown
+): string[] => {
+  if (!diagnostics) return []
+  const lines: string[] = []
+  if (diagnostics.fetch_mode) {
+    lines.push(
+      toText(
+        t("watchlists:sources.form.fetchModeLine", "Fetch mode: {{value}}", {
+          value: diagnostics.fetch_mode
+        }),
+        `Fetch mode: ${diagnostics.fetch_mode}`
+      )
+    )
+  }
+  if (typeof diagnostics.fetch_status === "number") {
+    lines.push(
+      toText(
+        t("watchlists:sources.form.fetchStatusLine", "Fetch status: HTTP {{value}}", {
+          value: diagnostics.fetch_status
+        }),
+        `Fetch status: HTTP ${diagnostics.fetch_status}`
+      )
+    )
+  }
+  if (diagnostics.fetch_error) {
+    lines.push(
+      toText(
+        t("watchlists:sources.form.fetchErrorLine", "Fetch issue: {{value}}", {
+          value: diagnostics.fetch_error
+        }),
+        `Fetch issue: ${diagnostics.fetch_error}`
+      )
+    )
+  }
+  lines.push(...toDiagnosticList(diagnostics.selector_errors))
+  lines.push(...toDiagnosticList(diagnostics.selector_warnings))
+  lines.push(...toDiagnosticList(diagnostics.no_match_warnings))
+  lines.push(...toDiagnosticList(diagnostics.non_unique_warnings))
+  lines.push(...toDiagnosticList(diagnostics.fragile_selector_warnings))
+  if (diagnostics.dedupe_preview_key) {
+    lines.push(
+      toText(
+        t("watchlists:sources.form.dedupePreviewKeyLine", "Dedupe preview key: {{value}}", {
+          value: diagnostics.dedupe_preview_key
+        }),
+        `Dedupe preview key: ${diagnostics.dedupe_preview_key}`
+      )
+    )
+  }
+  return lines
+}
+
 export const SourceFormModal: React.FC<SourceFormModalProps> = ({
   open,
   onClose,
   onSubmit,
   initialValues,
-  existingTags
+  mode,
+  existingTags,
+  forumsEnabled = false
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
   const [form] = Form.useForm()
@@ -97,9 +180,13 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
   const [testErrorHint, setTestErrorHint] = React.useState<string | null>(null)
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
+  const { isConstrained } = useWatchlistsViewport()
 
-  const isEditing = !!initialValues
+  const formMode = mode ?? (typeof initialValues?.id === "number" ? "edit" : "create")
+  const isEditing = formMode === "edit"
   const testSourceId = typeof initialValues?.id === "number" ? initialValues.id : null
+  const modalChrome = buildWatchlistsModalChrome(isConstrained, 500)
+  const diagnosticsLines = buildDiagnosticsLines(testResult?.diagnostics, t)
 
   useLayoutEffect(() => {
     if (open) {
@@ -124,13 +211,15 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
           name: initialValues.name,
           url: initialValues.url,
           source_type: initialValues.source_type,
-          tags: initialValues.tags
+          tags: initialValues.tags || [],
+          ...sourceSettingsToFormValues(initialValues.settings)
         })
       } else {
         form.resetFields()
         form.setFieldsValue({
           source_type: "rss",
-          tags: []
+          tags: [],
+          ...sourceSettingsToFormValues(null)
         })
       }
       setTestResult(null)
@@ -142,8 +231,19 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields()
+      const settingsPayload = buildSourceSettingsPayload(initialValues?.settings, values)
+      const hasInitialSettings =
+        Boolean(initialValues?.settings) &&
+        Object.keys(initialValues?.settings || {}).length > 0
+      const payload = {
+        name: String(values.name || ""),
+        url: String(values.url || ""),
+        source_type: values.source_type as SourceType,
+        tags: Array.isArray(values.tags) ? values.tags : [],
+        ...(settingsPayload || hasInitialSettings ? { settings: settingsPayload || null } : {})
+      }
       setSubmitting(true)
-      await onSubmit(values)
+      await onSubmit(payload)
       form.resetFields()
     } catch (err) {
       // Validation error or submit error - handled by parent
@@ -163,14 +263,20 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
 
   const handleTestSource = async () => {
     try {
-      const values = await form.validateFields(["url", "source_type"])
+      const values = await form.validateFields([
+        "url",
+        "source_type",
+        ...SOURCE_SETTINGS_FORM_FIELDS
+      ])
       const draftUrl = String(values?.url ?? "")
       const draftType = String(values?.source_type ?? "")
+      const settingsPayload = buildSourceSettingsPayload(initialValues?.settings, values)
       const isSavedSourceUnchanged =
         !!testSourceId &&
         !!initialValues &&
         draftUrl === String(initialValues.url) &&
-        draftType === String(initialValues.source_type)
+        draftType === String(initialValues.source_type) &&
+        sourceSettingsAreEqual(initialValues.settings, settingsPayload)
 
       setTestingSource(true)
       setTestError(null)
@@ -181,7 +287,8 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
         : await testWatchlistSourceDraft(
             {
               url: draftUrl,
-              source_type: draftType as SourceType
+              source_type: draftType as SourceType,
+              settings: settingsPayload || null
             },
             { limit: 10 }
           )
@@ -248,7 +355,10 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
       cancelText={t("common:cancel", "Cancel")}
       confirmLoading={submitting}
       destroyOnHidden
-      width={500}
+      data-testid="source-form-modal"
+      width={modalChrome.width}
+      style={modalChrome.style}
+      styles={modalChrome.styles}
     >
       <Form
         form={form}
@@ -329,10 +439,10 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
           </div>
           {testResult && (
             <Alert
-              type={Number(testResult.total || 0) > 0 ? "success" : "warning"}
-              showIcon
-              message={t("watchlists:sources.form.testSourceSummary", "Test Summary")}
-              description={t(
+              variant={Number(testResult.total || 0) > 0 ? "success" : "warning"}
+              title={t("watchlists:sources.form.testSourceSummary", "Test Summary")}
+            >
+              {t(
                 "watchlists:sources.form.testSourceSummaryDescription",
                 "{{total}} preview item{{plural}}, {{ingestable}} ingestable, {{filtered}} filtered.",
                 {
@@ -342,34 +452,49 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
                   plural: Number(testResult.total || 0) === 1 ? "" : "s"
                 }
               )}
-            />
+            </Alert>
+          )}
+          {diagnosticsLines.length > 0 && (
+            <Alert
+              variant="info"
+              title={t(
+                "watchlists:sources.form.validationDiagnostics",
+                "Validation diagnostics"
+              )}
+            >
+              <div className="space-y-1">
+                {diagnosticsLines.map((line) => (
+                  <div key={line}>{line}</div>
+                ))}
+              </div>
+            </Alert>
           )}
           {testError && (
             <Alert
-              type="error"
-              showIcon
-              message={testError}
-              description={testErrorHint || testError}
-              action={(
-                <Button
-                  size="small"
-                  onClick={() => void handleTestSource()}
-                  loading={testingSource}
-                >
-                  {t("watchlists:errors.retry", "Retry")}
-                </Button>
-              )}
-            />
+              variant="error"
+              title={testError}
+              action={{
+                label: t("watchlists:errors.retry", "Retry"),
+                onClick: () => void handleTestSource(),
+                loading: testingSource
+              }}
+            >
+              {testErrorHint || testError}
+            </Alert>
           )}
         </div>
 
         <Form.Item
           name="source_type"
           label={t("watchlists:sources.form.type", "Type")}
-          extra={t(
-            "watchlists:sources.form.forumDisabledHelp",
-            "Forum monitoring is coming soon. Use RSS Feed or Website for now."
-          )}
+          extra={
+            forumsEnabled
+              ? undefined
+              : t(
+                  "watchlists:sources.form.forumDisabledHelp",
+                  "Forum monitoring is coming soon. Use RSS Feed or Website for now."
+                )
+          }
           rules={[
             {
               required: true,
@@ -388,13 +513,152 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
                 value: "site"
               },
               {
-                label: t("watchlists:sources.types.forumComingSoon", "Forum (coming soon)"),
+                label: forumsEnabled
+                  ? t("watchlists:sources.types.forum", "Forum")
+                  : t("watchlists:sources.types.forumComingSoon", "Forum (coming soon)"),
                 value: "forum",
-                disabled: true // Forum support coming later
+                disabled: !forumsEnabled
               }
             ]}
           />
         </Form.Item>
+
+        <details className="mb-4 rounded-md border border-border p-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            {t("watchlists:sources.form.advancedRules", "Advanced fetch and extraction rules")}
+          </summary>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <Form.Item
+              name="source_top_n"
+              label={t("watchlists:sources.form.topN", "Top links limit")}
+              extra={t(
+                "watchlists:sources.form.topNHelp",
+                "For websites without scrape rules, choose how many discovered links to inspect."
+              )}
+            >
+              <Input
+                placeholder={t("watchlists:sources.form.topNPlaceholder", "e.g., 10")}
+              />
+            </Form.Item>
+            <Form.Item
+              name="discover_method"
+              label={t("watchlists:sources.form.discoverMethod", "Discovery method")}
+            >
+              <Select
+                options={[
+                  {
+                    label: t("watchlists:sources.form.discoverAuto", "Auto"),
+                    value: "auto"
+                  },
+                  {
+                    label: t("watchlists:sources.form.discoverFrontpage", "Front page links"),
+                    value: "frontpage"
+                  },
+                  {
+                    label: t("watchlists:sources.form.discoverSearch", "Search provider"),
+                    value: "search"
+                  }
+                ]}
+              />
+            </Form.Item>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <Form.Item
+              name="scrape_list_url"
+              label={t("watchlists:sources.form.scrapeListUrl", "List page URL")}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.scrapeListUrlPlaceholder",
+                  "Defaults to source URL"
+                )}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_limit"
+              label={t("watchlists:sources.form.scrapeLimit", "Scrape item limit")}
+            >
+              <Input
+                placeholder={t("watchlists:sources.form.scrapeLimitPlaceholder", "e.g., 20")}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_item_selector"
+              label={t("watchlists:sources.form.itemSelector", "Item selector")}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.itemSelectorPlaceholder",
+                  "css:article"
+                )}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_link_selector"
+              label={t("watchlists:sources.form.linkSelector", "Link XPath")}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.linkSelectorPlaceholder",
+                  ".//a/@href"
+                )}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_title_selector"
+              label={t("watchlists:sources.form.titleSelector", "Title selector")}
+            >
+              <Input
+                placeholder={t("watchlists:sources.form.titleSelectorPlaceholder", "css:h2")}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_summary_selector"
+              label={t("watchlists:sources.form.summarySelector", "Summary selector")}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.summarySelectorPlaceholder",
+                  "css:.summary"
+                )}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_content_selector"
+              label={t("watchlists:sources.form.contentSelector", "Content selector")}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.contentSelectorPlaceholder",
+                  "css:.article-body"
+                )}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_date_selector"
+              label={t("watchlists:sources.form.dateSelector", "Published date selector")}
+            >
+              <Input
+                placeholder={t("watchlists:sources.form.dateSelectorPlaceholder", "css:time")}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_guid_selector"
+              label={t("watchlists:sources.form.guidSelector", "Dedupe identity XPath")}
+              extra={t(
+                "watchlists:sources.form.guidSelectorHelp",
+                "Optional stable per-item identity when URLs alone are not reliable."
+              )}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.guidSelectorPlaceholder",
+                  ".//@data-id"
+                )}
+              />
+            </Form.Item>
+          </div>
+        </details>
 
         <Form.Item
           name="tags"

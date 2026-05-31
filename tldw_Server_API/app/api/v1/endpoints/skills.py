@@ -29,6 +29,8 @@ from fastapi.responses import Response
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import CurrentPrincipal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Local Imports
 from tldw_Server_API.app.api.v1.schemas.skills_schemas import (
@@ -42,7 +44,6 @@ from tldw_Server_API.app.api.v1.schemas.skills_schemas import (
     SkillSummary,
     SkillUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Skills.exceptions import (
@@ -58,19 +59,19 @@ router = APIRouter()
 
 
 async def get_skills_service(
-    current_user: User = Depends(get_request_user),
+    principal: CurrentPrincipal,
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> SkillsService:
     """
     FastAPI dependency to get the SkillsService instance for the identified user.
     """
-    if not current_user or not isinstance(current_user.id, int):
+    if not isinstance(principal.user_id, int):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="User identification failed for Skills service.",
         )
 
-    user_id = current_user.id
+    user_id = principal.user_id
     user_base_dir = DatabasePaths.get_user_base_directory(user_id)
 
     return SkillsService(user_id=user_id, base_path=user_base_dir, db=chacha_db)
@@ -135,12 +136,18 @@ async def list_skills(
             total=total,
             limit=limit,
             offset=offset,
+            pagination=build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(skills),
+            ),
         )
     except SkillsError as e:
-        logger.error(f"Error listing skills: {e}")
+        logger.error("Error listing skills")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to list skills",
         ) from e
 
 
@@ -162,10 +169,10 @@ async def get_skills_context(
             context_text=payload["context_text"],
         )
     except SkillsError as e:
-        logger.error(f"Error getting skills context: {e}")
+        logger.error("Error getting skills context")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to get skills context",
         ) from e
 
 
@@ -188,10 +195,10 @@ async def get_skill(
             detail=f"Skill '{skill_name}' not found",
         ) from None
     except SkillsError as e:
-        logger.error(f"Error getting skill '{skill_name}': {e}")
+        logger.error("Error getting skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to get skill",
         ) from e
 
 
@@ -223,10 +230,10 @@ async def create_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error creating skill: {e}")
+        logger.error("Error creating skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to create skill",
         ) from e
 
 
@@ -266,10 +273,10 @@ async def update_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error updating skill '{skill_name}': {e}")
+        logger.error("Error updating skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to update skill",
         ) from e
 
 
@@ -297,10 +304,10 @@ async def delete_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error deleting skill '{skill_name}': {e}")
+        logger.error("Error deleting skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to delete skill",
         ) from e
 
 
@@ -333,10 +340,10 @@ async def import_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error importing skill: {e}")
+        logger.error("Error importing skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to import skill",
         ) from e
 
 
@@ -389,14 +396,27 @@ async def import_skill_from_file(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error importing skill from file: {e}")
+        logger.error("Error importing skill from file")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to import skill from file",
         ) from e
 
 
-@router.get("/{skill_name}/export")
+@router.get(
+    "/{skill_name}/export",
+    response_class=Response,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Skill zip archive",
+            "content": {
+                "application/zip": {
+                    "schema": {"type": "string", "format": "binary"},
+                },
+            },
+        },
+    },
+)
 async def export_skill(
     skill_name: str,
     service: SkillsService = Depends(get_skills_service),
@@ -421,10 +441,10 @@ async def export_skill(
             detail=f"Skill '{skill_name}' not found",
         ) from None
     except SkillsError as e:
-        logger.error(f"Error exporting skill '{skill_name}': {e}")
+        logger.error("Error exporting skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to export skill",
         ) from e
 
 
@@ -432,8 +452,8 @@ async def export_skill(
 async def execute_skill(
     skill_name: str,
     request: SkillExecuteRequest,
+    principal: CurrentPrincipal,
     service: SkillsService = Depends(get_skills_service),
-    current_user: User = Depends(get_request_user),
 ):
     """
     Execute a skill with optional arguments.
@@ -446,7 +466,7 @@ async def execute_skill(
 
         executor = SkillExecutor()
         ctx = None
-        if current_user and getattr(current_user, "id", None) is not None:
+        if isinstance(principal.user_id, int):
             # Populate full RequestContext for fork mode support
             try:
                 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
@@ -459,7 +479,7 @@ async def execute_skill(
             except Exception:
                 app_config = None
             ctx = RequestContext(
-                user_id=current_user.id,
+                user_id=principal.user_id,
                 default_provider=default_provider,
                 app_config=app_config,
                 client_id=getattr(service.db, "client_id", None) if getattr(service, "db", None) else None,
@@ -484,10 +504,10 @@ async def execute_skill(
             detail=f"Skill '{skill_name}' not found",
         ) from None
     except SkillsError as e:
-        logger.error(f"Error executing skill '{skill_name}': {e}")
+        logger.error("Error executing skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to execute skill",
         ) from e
 
 

@@ -8,14 +8,18 @@ Define, run, and monitor multi‑step workflows. Includes definition/versioning,
   - Create/list/delete workflow definitions; create new immutable versions under a definition.
 - Runs
   - Start runs from a saved definition (`run_mode` async/sync) or ad‑hoc payload; inject per‑run secrets (never persisted) and idempotency keys.
+  - Ad‑hoc runs require the same `workflows` scope as saved-definition runs.
   - Events and artifacts persisted; step run entries tracked with timestamps and status.
 - Step types (initial set)
   - `media_ingest`, `prompt` (templating), `llm`, `rag_search`, `kanban`, `mcp_tool`, `tts`, `webhook`, `delay`, `log`, `wait_for_human`, `wait_for_approval`, `branch`, `map`, `process_media`, `policy_check`, `rss_fetch`, `atom_fetch`, `embed`, `translate`, `stt_transcribe`, `notify`, `diff_change_detector`.
   - Map sub-steps: `map` supports nested types `prompt`, `log`, `delay`, `rag_search`, `media_ingest`, `mcp_tool`, `webhook`, `kanban` only (others are rejected).
 - Scheduling
   - Recurring schedules via Workflows Scheduler (cron/APS); presence gating, concurrency mode (skip/queue), coalesce/misfire behavior, jitter.
+  - Scheduler bootstrap/rescan scans all tenant rows inside each per-user scheduler DB, rather than assuming `tenant_id="default"`.
+  - Manual `run-now` uses the same target resolver as recurring execution, so watchlist-backed schedules route to `watchlist_run` on the `watchlists` queue.
 - Governance
   - RBAC checks on run listing and control; optional virtual keys for scheduled runs; audit events on key lifecycle operations.
+  - Webhook DLQ replay and artifact GC both append workflow evidence events (`webhook_delivery` and `artifact_gc`).
 
 Related Endpoints (file:line)
 - Router (prefix `/api/v1/workflows`): tldw_Server_API/app/api/v1/endpoints/workflows.py:46
@@ -48,7 +52,7 @@ Related Schemas
   - Endpoints: `/api/v1/scheduler/workflows` provide CRUD + dry-run + run-now.
   - Presence gating, concurrency mode (skip vs queue), jitter, misfire/coalesce, next‑run persistence handled in service.
 - Security & RBAC
-  - Endpoint gates: claim-first dependencies (`require_permissions(...)`) plus token scope (`require_token_scope("workflows", ...)`) on scheduler routes; per‑user scoping for definitions/runs.
+  - Endpoint gates: claim-first dependencies (`RequirePermission(...)`) plus token scope (`TokenScopeGuard("workflows", ...)`) on scheduler routes; per‑user scoping for definitions/runs.
   - Optional minting of short‑lived virtual keys for scheduled runs (env‑gated) in `workflows_scheduler`.
 - Configuration
   - `WORKFLOWS_SCHEDULER_ENABLED`, `WORKFLOWS_SCHEDULER_TZ`, `WORKFLOWS_SCHEDULER_RESCAN_SEC`, `WORKFLOWS_SCHEDULER_DATABASE_URL`, `WORKFLOWS_SCHEDULER_SQLITE_PATH`.

@@ -72,7 +72,7 @@ const dictationStrategyState = {
     speechAvailable: true,
     speechUsesServer: true,
     isDictating: false,
-    toggleIntent: "start_server" as const,
+    toggleIntent: "start_server" as "start_server" | "start_browser",
     autoFallbackActive: false,
     autoFallbackErrorClass: null as null | string,
     clearAutoFallback: vi.fn()

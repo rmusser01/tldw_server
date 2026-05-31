@@ -8,6 +8,7 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
 
 - Capabilities
   - Unified evaluations: model-graded, exact/includes/fuzzy match, GEval, RAG, response quality, propositions, OCR, label_choice, nli_factcheck
+  - Persona dialogue-tree robustness recipe for defensive persona/character red-team suites
   - Datasets and runs: CRUD, pagination, idempotent create/run, run cancellation, history
   - Embeddings A/B testing: create/run tests, status/results, significance, reranker toggles
   - Webhooks: registration, status, test helpers; delivery metrics
@@ -54,6 +55,8 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
   - Unified router aggregates CRUD, run management, evaluator-specific routes, webhooks, rate limits, admin ops
   - Service layer: `unified_evaluation_service.py` orchestrates evaluators, DB adapters, and async work
   - Evaluation types map to dedicated evaluators (e.g., `rag_evaluator.py`, `response_quality_evaluator.py`, `ocr_evaluator.py`)
+  - Persona dialogue-tree robustness runs through `recipes/persona_dialogue_tree_robustness.py` and `PersonaRobustnessEval`. It is defensive only: it tests persona drift, prompt injection, unsafe tool plans, privacy/redaction, and grounded refusal behavior.
+  - Recipe execution must use Evaluations run records and the existing Jobs worker path. Persona modules may expose thin convenience wrappers later, but must not create a parallel eval/run/status system.
 
 - Key Components
   - Service & managers: `unified_evaluation_service.py`, `evaluation_manager.py`, `webhook_manager.py`, `user_rate_limiter.py`
@@ -68,7 +71,7 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
 
 - Configuration & AuthNZ
   - Rate limits: `evaluations_auth.check_evaluation_rate_limit`; per-user limits + `GET /rate-limits`
-  - RBAC: `rbac_rate_limit`, `require_token_scope` on sensitive endpoints; admin checks for A/B runs and cleanup
+  - RBAC: `rbac_rate_limit`, `TokenScopeGuard` on sensitive endpoints; admin checks for A/B runs and cleanup
   - Canonical identity: route and Jobs code should derive one `EvaluationIdentity` via `get_evaluation_identity()` / `evaluations_identity_from_user()` and then use:
     - `user_scope` for per-user service binding and DB path selection
     - `created_by` for ownership filters and idempotency rows
@@ -84,12 +87,15 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
 
 - Concurrency & Performance
   - Async evaluators; background tasks for long-running processes (A/B runs)
+  - User-visible persona dialogue-tree recipe runs should use Jobs for status, cancellation, retries, and run history rather than ad-hoc background tasks
   - Batch endpoint parallel mode honors strict fail-fast when `continue_on_error=false` (cancel remaining work and stop scheduling new items)
   - Connection pooling and circuit breakers; streaming where supported
 
 - Error Handling & Security
   - Standardized error responses via `create_error_response`; input sanitization in schemas
   - Webhook delivery tracking, retries, and stats; safe URL handling and secrets
+  - Persona dialogue-tree traces/reports are redacted before persistence. Red-team fixtures are isolated evaluation inputs and must never be written into persona memory, exemplar stores, state docs, or chat history.
+  - LLM judges for persona dialogue-tree work are offline-only by default. They can score or soft-prune candidates, but deterministic policy/safety checks remain the only hard blockers and judges cannot authorize actions.
 
 ## 3. Developer-Related/Relevant Information for Contributors
 
@@ -102,12 +108,14 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
   - Add a new evaluator: implement in `Evaluations/` and register in service/registry
   - Add endpoints: extend `evaluations_unified.py` (or split modules) and add schemas
   - Extend A/B: update `embeddings_abtest_service.py` + schemas; update repository queries
+  - Extend persona dialogue-tree evaluations by adding scenarios to the recipe/harness and keeping target normalization compatible with both persona and character payloads
 
 - Tests (useful suites)
   - Integration/API: `tldw_Server_API/tests/Evaluations/integration/test_api_endpoints.py`
   - Unified/e2e: `tldw_Server_API/tests/Evaluations/test_evaluations_unified.py`, `tldw_Server_API/tests/e2e/test_evaluations_workflow.py`
   - OCR/RAG/Propositions: `tldw_Server_API/tests/Evaluations/test_ocr_metrics.py`, `test_rag_pipeline_runner.py`, `test_proposition_evaluations.py`
   - A/B tests: `tldw_Server_API/tests/Evaluations/test_embeddings_abtest_idempotency.py`, `embeddings_abtest/test_scaffold.py`
+  - Persona dialogue-tree recipe: `tldw_Server_API/tests/Evaluations/test_persona_dialogue_tree_recipe.py`, `test_persona_dialogue_tree_recipe_jobs_worker.py`
   - DB/CRUD (Postgres+SQLite): `tldw_Server_API/tests/Evaluations/test_evaluations_postgres_crud.py`, `tests/DB_Management/test_evaluations_unified_and_crud.py`
 
 - Local Dev Tips

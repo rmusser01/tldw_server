@@ -1107,6 +1107,201 @@ class TestSubtitleBurnAdapter:
 
 
 # =============================================================================
+# Sanitized Error Tests
+# =============================================================================
+
+class TestVideoAdapterErrorSanitization:
+    """Tests that video adapters hide backend exception details."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("adapter_name", "config", "expected"),
+        [
+            ("run_video_trim_adapter", {"input_path": "private.mp4", "start": "0"}, {"error": "input_path_error", "trimmed": False}),
+            ("run_video_convert_adapter", {"input_path": "private.mp4"}, {"error": "input_path_error", "converted": False}),
+            ("run_video_thumbnail_adapter", {"input_path": "private.mp4"}, {"error": "input_path_error", "generated": False}),
+            (
+                "run_video_extract_frames_adapter",
+                {"input_path": "private.mp4"},
+                {"error": "input_path_error", "frame_paths": [], "frame_count": 0},
+            ),
+        ],
+    )
+    async def test_video_processing_sanitizes_input_path_errors(
+        self, monkeypatch, basic_context, adapter_name, config, expected
+    ):
+        """Test video processing adapters hide resolver exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters import video as video_adapters
+
+        def raise_path_error(*args, **kwargs):
+            raise RuntimeError("resolver exposed /private/video-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_workflow_file_path",
+            raise_path_error,
+        )
+
+        result = await getattr(video_adapters, adapter_name)(config, basic_context)
+
+        assert result == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("adapter_name", "config", "expected"),
+        [
+            ("run_video_trim_adapter", {"input_path": "input.mp4", "start": "0"}, {"error": "video_trim_error", "trimmed": False}),
+            (
+                "run_video_concat_adapter",
+                {"input_paths": ["input-a.mp4", "input-b.mp4"]},
+                {"error": "video_concat_error", "concatenated": False},
+            ),
+            ("run_video_convert_adapter", {"input_path": "input.mp4"}, {"error": "video_convert_error", "converted": False}),
+            ("run_video_thumbnail_adapter", {"input_path": "input.mp4"}, {"error": "video_thumbnail_error", "generated": False}),
+            (
+                "run_video_extract_frames_adapter",
+                {"input_path": "input.mp4"},
+                {"error": "video_extract_frames_error", "frame_paths": [], "frame_count": 0},
+            ),
+        ],
+    )
+    async def test_video_processing_sanitizes_backend_errors(
+        self, monkeypatch, tmp_path, tmp_video_file, basic_context, adapter_name, config, expected
+    ):
+        """Test video processing adapters hide ffmpeg/backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters import video as video_adapters
+
+        def mock_resolve(path_value, context, config=None):
+            return tmp_video_file if "input" in str(path_value) else Path(path_value)
+
+        def raise_backend_error(*args, **kwargs):
+            raise RuntimeError("ffmpeg exploded at /private/video-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_workflow_file_path",
+            mock_resolve,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.video.processing.resolve_artifacts_dir",
+            lambda x: tmp_path / "artifacts",
+        )
+        monkeypatch.setattr(subprocess, "run", raise_backend_error)
+
+        result = await getattr(video_adapters, adapter_name)(config, basic_context)
+
+        assert result == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("adapter_name", "config", "expected"),
+        [
+            ("run_subtitle_generate_adapter", {"input_path": "private.mp4"}, {"error": "input_path_error", "generated": False}),
+            ("run_subtitle_translate_adapter", {"input_path": "private.srt"}, {"error": "input_path_error", "translated": False}),
+            (
+                "run_subtitle_burn_adapter",
+                {"video_path": "private.mp4", "subtitle_path": "private.srt"},
+                {"error": "path_error", "burned": False},
+            ),
+        ],
+    )
+    async def test_subtitle_adapters_sanitize_input_path_errors(
+        self, monkeypatch, basic_context, adapter_name, config, expected
+    ):
+        """Test subtitle adapters hide resolver exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters import video as video_adapters
+
+        def raise_path_error(*args, **kwargs):
+            raise RuntimeError("subtitle resolver exposed /private/subtitle-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.video.subtitles.resolve_workflow_file_path",
+            raise_path_error,
+        )
+
+        result = await getattr(video_adapters, adapter_name)(config, basic_context)
+
+        assert result == expected
+
+    @pytest.mark.asyncio
+    async def test_subtitle_generate_sanitizes_backend_errors(self, monkeypatch, tmp_path, tmp_video_file, basic_context):
+        """Test subtitle generation hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.video import run_subtitle_generate_adapter
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.video.subtitles.resolve_workflow_file_path",
+            make_mock_resolve_workflow_file_path(tmp_video_file),
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.video.subtitles.resolve_artifacts_dir",
+            lambda x: tmp_path / "artifacts",
+        )
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.run_stt_transcribe_adapter",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("stt backend exploded at /private/subtitle-cache"),
+        ):
+            result = await run_subtitle_generate_adapter({"input_path": str(tmp_video_file)}, basic_context)
+
+        assert result == {"error": "subtitle_generate_error", "generated": False}
+
+    @pytest.mark.asyncio
+    async def test_subtitle_translate_sanitizes_backend_errors(
+        self, monkeypatch, tmp_path, tmp_subtitle_file, basic_context
+    ):
+        """Test subtitle translation hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.video import run_subtitle_translate_adapter
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.video.subtitles.resolve_workflow_file_path",
+            make_mock_resolve_workflow_file_path(tmp_subtitle_file),
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.video.subtitles.resolve_artifacts_dir",
+            lambda x: tmp_path / "artifacts",
+        )
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.run_translate_adapter",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("translation backend exploded at /private/subtitle-cache"),
+        ):
+            result = await run_subtitle_translate_adapter({"input_path": str(tmp_subtitle_file)}, basic_context)
+
+        assert result == {"error": "subtitle_translate_error", "translated": False}
+
+    @pytest.mark.asyncio
+    async def test_subtitle_burn_sanitizes_backend_errors(
+        self, monkeypatch, tmp_path, tmp_video_file, tmp_subtitle_file, basic_context
+    ):
+        """Test subtitle burn hides ffmpeg/backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.video import run_subtitle_burn_adapter
+
+        def mock_resolve(path_value, context, config=None):
+            path = Path(path_value)
+            if path.suffix == ".srt":
+                return tmp_subtitle_file
+            return tmp_video_file
+
+        def raise_backend_error(*args, **kwargs):
+            raise RuntimeError("subtitle burn exploded at /private/subtitle-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.video.subtitles.resolve_workflow_file_path",
+            mock_resolve,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.video.subtitles.resolve_artifacts_dir",
+            lambda x: tmp_path / "artifacts",
+        )
+        monkeypatch.setattr(subprocess, "run", raise_backend_error)
+
+        result = await run_subtitle_burn_adapter(
+            {"video_path": str(tmp_video_file), "subtitle_path": str(tmp_subtitle_file)},
+            basic_context,
+        )
+
+        assert result == {"error": "subtitle_burn_error", "burned": False}
+
+
+# =============================================================================
 # Integration-like Tests (Testing Multiple Adapters Together)
 # =============================================================================
 

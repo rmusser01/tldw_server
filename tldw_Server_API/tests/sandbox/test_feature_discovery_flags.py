@@ -144,6 +144,26 @@ def test_runtimes_discovery_includes_macos_runtime_capabilities(monkeypatch) -> 
         assert isinstance(runtimes["vz_macos"].get("host"), dict)
 
 
+def test_runtimes_discovery_includes_implementation_state_labels(monkeypatch) -> None:
+    """Verify discovery exposes roadmap maturity labels for every sandbox runtime."""
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+    clear_config_cache()
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/sandbox/runtimes")
+
+    assert response.status_code == 200
+    runtimes = {item["name"]: item for item in response.json()["runtimes"]}
+    assert runtimes["docker"]["implementation_state"] == "supported"
+    assert runtimes["firecracker"]["implementation_state"] == "host_gated"
+    assert runtimes["lima"]["implementation_state"] == "host_gated"
+    assert runtimes["vz_linux"]["implementation_state"] == "host_gated"
+    assert runtimes["vz_macos"]["implementation_state"] == "scaffold"
+    assert runtimes["seatbelt"]["implementation_state"] == "host_gated"
+    assert runtimes["worktree"]["implementation_state"] == "supported"
+
+
 def test_runtimes_discovery_keeps_macos_diagnostics_summarized(monkeypatch) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
@@ -161,6 +181,7 @@ def test_runtimes_discovery_keeps_macos_diagnostics_summarized(monkeypatch) -> N
     assert "helper" not in vz_linux
     assert "templates" not in vz_linux
     assert "remediation" not in vz_linux
+    assert "reconciliation" not in vz_linux
     assert "supported_trust_levels" in vz_linux
     assert isinstance(vz_linux.get("host"), dict)
 
@@ -180,6 +201,7 @@ def test_macos_diagnostics_runtime_reasons_align_with_feature_discovery(monkeypa
     assert diagnostics["runtimes"]["vz_linux"]["reasons"] == discovery["vz_linux"]["reasons"]
     assert diagnostics["runtimes"]["vz_macos"]["reasons"] == discovery["vz_macos"]["reasons"]
     assert diagnostics["runtimes"]["seatbelt"]["supported_trust_levels"] == discovery["seatbelt"]["supported_trust_levels"]
+    assert "reconciliation" in diagnostics
 
 
 def test_runtimes_discovery_keeps_seatbelt_network_claims_best_effort(monkeypatch) -> None:

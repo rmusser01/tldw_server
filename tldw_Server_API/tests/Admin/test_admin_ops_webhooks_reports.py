@@ -9,8 +9,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import pytest
+from fastapi import HTTPException
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +275,11 @@ class TestWebhookDeliveryRecording:
     def test_record_and_list_deliveries(self, monkeypatch, tmp_path):
         """Record 5 deliveries and list them back, newest first."""
         service, _ = _configure_store(monkeypatch, tmp_path)
+        timestamps = iter(
+            f"2026-05-19T00:00:0{idx}.000000+00:00"
+            for idx in range(10)
+        )
+        monkeypatch.setattr(service, "_now_iso", lambda: next(timestamps))
 
         webhook = service.create_webhook(
             url="https://example.com/hook",
@@ -288,8 +295,9 @@ class TestWebhookDeliveryRecording:
                 success=True,
             )
 
-        deliveries = service.list_webhook_deliveries(webhook_id=webhook["id"])
+        deliveries, total = service.list_webhook_deliveries(webhook_id=webhook["id"])
 
+        assert total == 5
         assert len(deliveries) == 5
         # Newest first
         assert deliveries[0]["response_time_ms"] == 54
@@ -324,9 +332,11 @@ class TestWebhookDeliveryRecording:
                 success=True,
             )
 
-        deliveries_1 = service.list_webhook_deliveries(webhook_id=wh1["id"])
-        deliveries_2 = service.list_webhook_deliveries(webhook_id=wh2["id"])
+        deliveries_1, total_1 = service.list_webhook_deliveries(webhook_id=wh1["id"])
+        deliveries_2, total_2 = service.list_webhook_deliveries(webhook_id=wh2["id"])
 
+        assert total_1 == 3
+        assert total_2 == 2
         assert len(deliveries_1) == 3
         assert len(deliveries_2) == 2
 
@@ -352,11 +362,12 @@ class TestWebhookDeliveryRecording:
                 success=True,
             )
 
-        deliveries = service.list_webhook_deliveries(
+        deliveries, total = service.list_webhook_deliveries(
             webhook_id=webhook["id"],
             limit=cap + 100,
         )
 
+        assert total == cap
         assert len(deliveries) <= cap
 
     def test_delivery_record_fields(self, monkeypatch, tmp_path):
@@ -410,6 +421,59 @@ class TestWebhookDeliveryRecording:
         assert record["error"] == "Internal Server Error"
 
 
+class TestAdminOpsWebhookDeliveryPagination:
+    """Direct endpoint tests for admin_ops webhook delivery pagination."""
+
+    @pytest.mark.asyncio
+    async def test_list_webhook_deliveries_includes_canonical_pagination(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        monkeypatch.setattr(admin_ops, "_require_platform_admin", lambda _: None)
+
+        def _fake_deliveries(*, webhook_id: str, limit: int, offset: int) -> tuple[list[dict[str, Any]], int]:
+            assert webhook_id == "wh_1"
+            assert limit == 2
+            assert offset == 1
+            items = [
+                {
+                    "id": f"wd_{idx}",
+                    "webhook_id": "wh_1",
+                    "event_type": "webhook.test",
+                    "status_code": 200,
+                    "response_time_ms": idx,
+                    "success": True,
+                    "error": None,
+                    "attempted_at": f"2026-01-01T00:00:0{idx}Z",
+                    "payload_preview": None,
+                }
+                for idx in range(5)
+            ]
+            return items[offset:offset + limit], len(items)
+
+        monkeypatch.setattr(admin_ops, "svc_list_webhook_deliveries", _fake_deliveries)
+
+        response = await admin_ops.list_webhook_deliveries(
+            webhook_id="wh_1",
+            limit=2,
+            offset=1,
+            principal=mock.MagicMock(),
+        )
+
+        payload = response.model_dump(mode="json")
+        assert payload["total"] == 5
+        assert [item["id"] for item in payload["items"]] == ["wd_1", "wd_2"]
+        assert payload["pagination"] == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 1,
+            "total": 5,
+            "has_more": True,
+            "next_offset": 3,
+        }
+        assert payload["has_more"] is True
+        assert payload["next_offset"] == 3
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 6. Webhook Test Send — mock HTTP, verify delivery recorded
 # ═══════════════════════════════════════════════════════════════════════════
@@ -454,7 +518,8 @@ class TestWebhookTestSend:
         assert delivery["webhook_id"] == webhook["id"]
 
         # Verify delivery was also recorded in the store
-        deliveries = service.list_webhook_deliveries(webhook_id=webhook["id"])
+        deliveries, total = service.list_webhook_deliveries(webhook_id=webhook["id"])
+        assert total == 1
         assert len(deliveries) == 1
 
     def test_send_test_webhook_http_error(self, monkeypatch, tmp_path):
@@ -770,6 +835,75 @@ class TestReportScheduleListUpdateDelete:
 
         with pytest.raises(ValueError, match="not_found"):
             service.mark_report_schedule_sent(schedule_id="nonexistent")
+
+
+class TestAdminOpsScheduleErrorSanitization:
+    """Direct endpoint tests for narrow report-schedule fallback sanitization."""
+
+    @pytest.mark.asyncio
+    async def test_get_report_schedules_sanitizes_backend_error(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops._require_platform_admin",
+            lambda _: None,
+        )
+
+        def _raise_schedules() -> list[dict[str, Any]]:
+            raise OSError("report schedules backend exploded")
+
+        monkeypatch.setattr(admin_ops, "svc_list_report_schedules", _raise_schedules)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_ops.get_report_schedules(principal=mock.MagicMock())
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to list report schedules"
+
+
+class TestAdminOpsDigestErrorSanitization:
+    """Direct endpoint tests for digest preference fallback sanitization."""
+
+    @pytest.mark.asyncio
+    async def test_get_digest_preference_sanitizes_backend_error(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        def _raise_pref(*, user_id: str) -> dict[str, Any] | None:
+            _ = user_id
+            raise OSError("digest preference backend exploded")
+
+        monkeypatch.setattr(admin_ops, "svc_get_digest_preference", _raise_pref)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_ops.get_digest_preference(
+                principal=mock.MagicMock(user_id="user_42"),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to get digest preference"
+
+    @pytest.mark.asyncio
+    async def test_set_digest_preference_sanitizes_backend_error(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        class _Request:
+            async def json(self) -> dict[str, Any]:
+                return {"email": "user42@example.com", "frequency": "weekly"}
+
+        def _raise_pref(*, user_id: str, email: str, frequency: str) -> dict[str, Any]:
+            _ = (user_id, email, frequency)
+            raise OSError("digest preference write exploded")
+
+        monkeypatch.setattr(admin_ops, "svc_set_digest_preference", _raise_pref)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_ops.set_digest_preference(
+                request=_Request(),
+                principal=mock.MagicMock(user_id="user_42"),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to set digest preference"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

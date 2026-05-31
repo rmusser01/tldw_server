@@ -1,6 +1,6 @@
 # Watchlists API Cheat Sheet
 
-Quick reference for recurring scraping (RSS or site lists) with runs, items, and outputs.
+Quick reference for first-class Watchlists, recurring scraping (RSS or site lists), runs, items, and outputs.
 
 Auth:
 - Single-user: `X-API-KEY: <key>`
@@ -10,6 +10,7 @@ Base path: `/api/v1/watchlists`
 
 ## Core concepts
 
+- Watchlist: project-like tracking container for intent, sources, monitors, runs, items, and outputs.
 - Source: a target to scrape (`rss` or `site`; `forum` is feature-flagged).
 - Job: schedule + scope + filters that produce runs.
 - Run: one execution of a job.
@@ -17,7 +18,25 @@ Base path: `/api/v1/watchlists`
 - Output: rendered report from run items.
 - Template: named output template (md/html).
 
+Watchlist fields:
+- `name`, `description`, and `objective`
+- `domain`: `general`, `cti_osint`, or `news`
+- `status`: `active`, `paused`, or `archived`
+- `priority`: `low`, `medium`, `high`, or `critical`
+- `tags`
+- lifecycle timestamps including `created_at`, `updated_at`, `archived_at`, `deleted_at`, and `restore_expires_at`
+
+Existing unscoped data is associated with a default `Imported Watchlist`. New source and job create calls that omit `watchlist_id` are attached to that default container for backward compatibility.
+
 ## Endpoints
+
+Watchlists:
+- `GET /`
+- `POST /`
+- `GET /{watchlist_id}`
+- `PATCH /{watchlist_id}`
+- `DELETE /{watchlist_id}` (soft delete with restore window)
+- `POST /{watchlist_id}/restore`
 
 Sources:
 - `POST /sources`
@@ -62,14 +81,33 @@ Runs:
 
 Items:
 - `GET /items`
+- `GET /items/smart-counts`
+- `POST /items/batch-update` (batch triage flags)
 - `GET /items/{item_id}`
 - `PATCH /items/{item_id}` (flagging)
+
+Item saved views:
+- `GET /{watchlist_id}/item-views`
+- `POST /{watchlist_id}/item-views`
+- `PATCH /{watchlist_id}/item-views/{view_id}`
+- `DELETE /{watchlist_id}/item-views/{view_id}`
 
 Outputs:
 - `POST /outputs`
 - `GET /outputs`
 - `GET /outputs/{output_id}`
 - `GET /outputs/{output_id}/download`
+- `GET /outputs/{output_id}/evidence`
+- `GET /outputs/{output_id}/readiness`
+
+Content alerts:
+- `GET /{watchlist_id}/content-alert-rules`
+- `POST /{watchlist_id}/content-alert-rules`
+- `PATCH /{watchlist_id}/content-alert-rules/{rule_id}`
+- `DELETE /{watchlist_id}/content-alert-rules/{rule_id}`
+- `GET /{watchlist_id}/alerts`
+- `GET /{watchlist_id}/alerts/{alert_id}`
+- `PATCH /{watchlist_id}/alerts/{alert_id}` (review state)
 
 Templates:
 - `GET /templates`
@@ -81,7 +119,39 @@ Templates:
 - `POST /templates/compose/flow-check` (manual final flow-check diff)
 - `DELETE /templates/{template_name}`
 
+Scoped list filters:
+- `GET /sources?watchlist_id=<id>`
+- `GET /jobs?watchlist_id=<id>`
+- `GET /runs?watchlist_id=<id>`
+- `GET /runs/export.csv?watchlist_id=<id>`
+- `GET /items?watchlist_id=<id>`
+- `GET /items/smart-counts?watchlist_id=<id>`
+- `GET /outputs?watchlist_id=<id>`
+
+`watchlist_id` filters return `404` when the Watchlist does not exist or has been deleted. The legacy `/{watchlist_id}/clusters` route currently uses a job id despite the path segment name; this route is preserved for compatibility.
+
 ## Minimal payloads
+
+Create a Watchlist:
+```json
+{
+  "name": "Healthcare ransomware",
+  "description": "Track hospital impact reports",
+  "objective": "Find new ransomware reports affecting hospitals in Germany",
+  "domain": "cti_osint",
+  "priority": "high",
+  "tags": ["ransomware", "healthcare"]
+}
+```
+
+Update a Watchlist lifecycle or metadata:
+```json
+{
+  "status": "archived",
+  "priority": "critical",
+  "tags": ["cti", "ransomware"]
+}
+```
 
 Create a source (RSS):
 ```json
@@ -89,7 +159,8 @@ Create a source (RSS):
   "name": "Example Feed",
   "url": "https://example.com/feed.xml",
   "source_type": "rss",
-  "tags": ["news"]
+  "tags": ["news"],
+  "watchlist_id": 42
 }
 ```
 
@@ -118,6 +189,7 @@ Create a job:
 ```json
 {
   "name": "Docs updates",
+  "watchlist_id": 42,
   "scope": {"sources": [123]},
   "schedule_expr": "0 */6 * * *",
   "timezone": "UTC",
@@ -130,6 +202,68 @@ Create a job:
       }
     }
   }
+}
+```
+
+Create a content alert rule:
+```json
+{
+  "name": "Active exploitation",
+  "rule_kind": "cve",
+  "match_mode": "contains",
+  "pattern": "CVE-2026-1234",
+  "severity": "critical",
+  "source_constraints": {
+    "source_tags": ["advisory"]
+  },
+  "metadata": {
+    "descriptor": "active exploitation"
+  }
+}
+```
+
+Supported rule kinds are `keyword`, `regex`, `descriptor`, `classification`, `entity`, `ioc`, and `cve`. The first implementation is deterministic text matching; richer extractors can later populate descriptors, classifications, entities, and IOCs before matching. `source_constraints` is structured JSON and may include `source_ids`, `source_types`, `source_tags`, or `url_contains`.
+
+Review a content alert:
+```json
+{
+  "status": "read"
+}
+```
+
+Alert review states are `unread`, `read`, and `dismissed`.
+
+List Watchlist Updates with server-backed triage filters:
+```bash
+curl "$BASE/api/v1/watchlists/items?watchlist_id=42&sort=alert_severity_desc&has_alert=true&include_alert_summary=true&size=50" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Batch mark all matching unread alert Updates as reviewed:
+```json
+{
+  "watchlist_id": 42,
+  "scope": {
+    "reviewed": false,
+    "has_alert": true,
+    "alert_status": "unread"
+  },
+  "reviewed": true,
+  "limit": 500
+}
+```
+
+Save an Updates review view for a Watchlist:
+```json
+{
+  "name": "Unread critical alerts",
+  "filters": {
+    "reviewed": false,
+    "has_alert": true,
+    "alert_severity": "critical"
+  },
+  "sort": "alert_severity_desc",
+  "is_default": false
 }
 ```
 
@@ -302,6 +436,39 @@ Sharing policy is controlled by `WATCHLIST_SHARING_MODE`:
 - `admin_same_org`: admin cross-user reads require overlapping org membership
 - `private_only`: cross-user reads blocked
 
+## Alerts boundary
+
+Watchlist content alerts are user-facing notifications created when newly collected Watchlist items match user-defined descriptors, classifications, entities, keywords, CVEs, IOCs, or source constraints. Alert records preserve matched evidence, item/run/job/source IDs, snippets, and review state.
+
+Existing run-stat alert rules remain pipeline health behavior. Conditions such as no items, high error rate, item thresholds, or run failure should be shown as health issues, not unqualified content alerts. Topic Monitoring remains an internal dependency/reference for matching and notification patterns; product Watchlists do not store user-facing rules in the separate `monitoring_watchlists` model.
+
+## Updates triage
+
+The selected Watchlist review queue is user-facing "Updates" copy in the WebUI while the API keeps the existing `items` route names for compatibility.
+
+`GET /items` supports these Stage 4 triage query parameters:
+- `sort`: `created_desc`, `created_asc`, `published_desc`, `published_asc`, `unread_first`, `source_asc`, or `alert_severity_desc`. Default behavior remains `created_desc`.
+- `reviewed`, `queued_for_briefing`, `status`, `run_id`, `job_id`, `source_id`, `watchlist_id`, `q`, `since`, and `until`.
+- `has_alert`, `alert_status`, `alert_severity`, and `alert_rule_id` for content-alert-aware review queues.
+- `include_alert_summary=true` to attach compact alert context to each returned item.
+
+`GET /items/smart-counts` accepts the same Watchlist, source, search, date, status, and alert filters. It also supports `queue_run_id` for queued-count scoping.
+
+When `include_alert_summary=true`, each item may include:
+- `total`, `unread`, `read`, and `dismissed` alert counts.
+- `highest_severity`, `latest_alert_id`, `latest_alert_status`, and `latest_alert_created_at`.
+- `latest_matched_text`, `rule_ids`, and `severities`.
+
+Batch triage uses `POST /items/batch-update`. Provide exactly one of:
+- `item_ids`: explicit selected/page item IDs.
+- `scope`: all-filtered item criteria using `run_id`, `job_id`, `source_id`, `status`, `reviewed`, `queued_for_briefing`, `q`, `search`, `since`, `until`, `has_alert`, `alert_status`, `alert_severity`, or `alert_rule_id`.
+
+The batch payload may set `reviewed`, `status`, and/or `queued_for_briefing`. `limit` defaults to `500` and is capped at `5000`. Responses include `matched`, `changed`, `unchanged`, `failed`, ID lists, `capped`, `exhausted`, and the effective `limit` so clients can explain partial results.
+
+Saved item views are Watchlist-scoped and persist via `/{watchlist_id}/item-views`. Each view stores `name`, `filters`, `sort`, `is_default`, timestamps, and the owning `watchlist_id`. Filters are intentionally the same server-backed item filters used by the Updates queue.
+
+Report/briefing handoff remains the `queued_for_briefing` flag on items. Stage 4 supports selecting and queueing evidence; it does not create defensible report artifacts, immutable evidence snapshots, weak-evidence warnings, or a full report builder. Those are Stage 5 responsibilities.
+
 ## Ingestion and persistence
 
 - Watchlists always store run stats and scraped items in the Watchlists DB.
@@ -321,6 +488,145 @@ Create a base report from a run:
 ```
 
 Outputs can render templates (Markdown or HTML). Set `template_name` to use a named template.
+
+Output provenance:
+- Generated Watchlists outputs include `metadata.origin="watchlists"`.
+- New outputs include `metadata.watchlist_id`, `metadata.job_id`, `metadata.run_id`, `metadata.item_ids`, and `metadata.version`.
+- `GET /outputs?watchlist_id=<id>` filters by the Watchlist's jobs. Older outputs that do not yet carry `metadata.watchlist_id` are still returned when their stored `job_id` belongs to the requested Watchlist.
+- `GET /outputs?run_id=<id>` and `GET /outputs?job_id=<id>` remain supported and can be combined with `watchlist_id`.
+
+Stage 5 defensible report fields on `POST /outputs`:
+- `item_ids`: explicit included item IDs from the run. Use queued Updates (`queued_for_briefing=true`) when generating a defensible report.
+- `report_preset`: `auto`, `cti_osint`, `news_briefing`, or `general_research`. `auto` resolves from the Watchlist domain when available.
+- `include_evidence_table`: include immutable evidence rows in the render context. Default `true`.
+- `include_excluded_items`: capture same-run excluded/unselected items in the evidence snapshot. Default `true`.
+- `require_reviewed_items`: warn when included Updates have not been reviewed. Default `false`.
+- `allow_weak_evidence`: allow generation when readiness is `warning`. Set `false` to reject weak evidence with `422 report_readiness_warning`.
+- `template_name` and `template_version`: render a stored Watchlists template. Built-in Stage 5 templates include `cti_osint_report_markdown` and `news_briefing_markdown`.
+
+Create a CTI/OSINT report from queued Updates:
+```json
+{
+  "run_id": 456,
+  "item_ids": [1001, 1002],
+  "title": "Healthcare ransomware activity - May 15",
+  "format": "md",
+  "report_preset": "cti_osint",
+  "template_name": "cti_osint_report_markdown",
+  "include_evidence_table": true,
+  "include_excluded_items": true,
+  "allow_weak_evidence": true
+}
+```
+
+Create a news briefing with source-diversity and recency context:
+```json
+{
+  "run_id": 789,
+  "item_ids": [2101, 2104, 2108],
+  "title": "Election litigation briefing",
+  "format": "md",
+  "report_preset": "news_briefing",
+  "template_name": "news_briefing_markdown",
+  "include_evidence_table": true,
+  "include_excluded_items": true
+}
+```
+
+Stage 5 output metadata includes:
+- `report_preset`
+- `report_schema_version`
+- `report_snapshot_path`
+- `report_readiness` with `state`, `score`, and `warnings`
+- `included_item_count`
+- `excluded_item_count`
+- `excluded_item_total_count`
+- `excluded_items_truncated`
+- `source_count`
+- `missing_source_count`
+- `alert_count`
+- `critical_alert_count`
+- `weak_evidence_warning_count`
+
+Readiness states:
+- `ready`: report has included evidence and no readiness warnings.
+- `warning`: report can be generated, but users should review caveats before relying on it.
+- `blocked`: report cannot be generated without included evidence.
+- `legacy_live_only`: older output without an immutable snapshot; the server can only expose current metadata/readiness.
+
+Readiness warning codes currently include:
+- `no_included_items`: no items were selected for the report.
+- `single_source`: only one source is represented.
+- `missing_source_provenance`: one or more included items lack source provenance.
+- `unreviewed_items`: included items were queued but not reviewed.
+- `no_alert_evidence`: CTI report has no matching content alert evidence.
+- `stale_news`: news briefing contains stale included updates.
+- `legacy_live_only`: output predates immutable evidence snapshots.
+
+Fetch immutable report evidence:
+```bash
+curl "$BASE/api/v1/watchlists/outputs/9001/evidence" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Response shape:
+```json
+{
+  "output_id": 9001,
+  "immutable_snapshot": true,
+  "readiness": {
+    "state": "warning",
+    "score": 76,
+    "warnings": [
+      {
+        "code": "single_source",
+        "severity": "warning",
+        "message": "Only one source is represented.",
+        "affected_item_ids": [1001]
+      }
+    ]
+  },
+  "snapshot": {
+    "schema_version": 1,
+    "snapshot_id": "watchlist-report-...",
+    "generated_at": "2026-05-15T12:00:00Z",
+    "preset": "cti_osint",
+    "included_items": [
+      {
+        "id": 1001,
+        "title": "Vendor advisory confirms exploitation",
+        "url": "https://vendor.example/cve",
+        "source_name": "Vendor Advisory",
+        "published_at": "2026-05-15T10:00:00Z",
+        "summary": "Active exploitation against edge devices.",
+        "reviewed": true,
+        "queued_for_briefing": true,
+        "alerts": [
+          {
+            "rule_name": "Critical CVE",
+            "severity": "critical",
+            "matched_text": "CVE-2026-1234"
+          }
+        ]
+      }
+    ],
+    "excluded_items": [
+      {
+        "id": 1003,
+        "title": "Background market note",
+        "reason": "not_queued_for_report"
+      }
+    ],
+    "source_summary": {"unique_source_count": 2, "missing_source_count": 0},
+    "included_count": 1,
+    "excluded_count": 1,
+    "alert_count": 1,
+    "critical_alert_count": 1
+  }
+}
+```
+
+`GET /outputs/{output_id}/readiness` returns only the `readiness` object. For legacy outputs without `metadata.report_snapshot_path`, `/evidence` returns `immutable_snapshot=false`, `snapshot=null`, and `readiness.state="legacy_live_only"`.
 
 Create a report plus TTS variant output (`type=tts_audio`, `format=mp3`):
 ```json

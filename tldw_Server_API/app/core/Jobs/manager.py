@@ -29,12 +29,14 @@ from tldw_Server_API.app.core.Security.crypto import (
 )
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 
 from .audit_bridge import submit_job_audit_event
-from .fair_share import FairShareScheduler
 from .event_stream import emit_job_event
+from .fair_share import FairShareScheduler
 from .metrics import (
     ensure_jobs_metrics_registered,
     increment_cancelled,
@@ -252,7 +254,10 @@ class JobManager:
     # Standard queues across domains
     STANDARD_QUEUES = ("default", "high", "low")
     DOMAIN_ALLOWED_QUEUES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "llamacpp": ("acquisition",),
         "reading": ("reading-digest",),
+        "vn_assets": ("generation",),
+        "persona_visuals": ("generation",),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---
@@ -1330,7 +1335,11 @@ class JobManager:
                                     "job_type": job_type,
                                 }
                             )
-                            emitted_job = {**d, "request_id": request_id, "trace_id": trace_id}
+                            emitted_job = {
+                                **d,
+                                "request_id": d.get("request_id") or request_id,
+                                "trace_id": d.get("trace_id") or trace_id,
+                            }
                             # Counters bump (PG, idempotent insert occurred)
                             try:
                                 if was_insert and JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
@@ -1550,8 +1559,8 @@ class JobManager:
                                     INSERT OR IGNORE INTO jobs (
                                       uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
                                       idempotency_key, payload, result, status, priority, max_retries,
-                                      retry_count, available_at, created_at, updated_at
-                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?)
+                                      retry_count, available_at, created_at, updated_at, request_id, trace_id
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?, ?, ?)
                                     """,
                                     (
                                         uuid_val,
@@ -1572,6 +1581,8 @@ class JobManager:
                                         ),
                                         now,
                                         now,
+                                        request_id,
+                                        trace_id,
                                     ),
                                 )
                                 inserted = bool(getattr(conn, "total_changes", 0))
@@ -2166,8 +2177,11 @@ class JobManager:
         self,
         *,
         domain: str | None = None,
+        queue: str | None = None,
         status: str | None = None,
         owner_user_id: str | None = None,
+        job_type: str | None = None,
+        batch_group: str | None = None,
     ) -> int:
         """
         Return the number of jobs matching the provided filters.
@@ -2180,12 +2194,21 @@ class JobManager:
                 if domain:
                     query += " AND domain = %s"
                     params.append(domain)
+                if queue:
+                    query += " AND queue = %s"
+                    params.append(queue)
                 if status:
                     query += " AND status = %s"
                     params.append(status)
                 if owner_user_id:
                     query += " AND owner_user_id = %s"
                     params.append(owner_user_id)
+                if job_type:
+                    query += " AND job_type = %s"
+                    params.append(job_type)
+                if batch_group:
+                    query += " AND batch_group = %s"
+                    params.append(batch_group)
                 with self._pg_cursor(conn) as cur:
                     cur.execute(query, params)
                     row = cur.fetchone()
@@ -2201,13 +2224,32 @@ class JobManager:
                 if domain:
                     query += " AND domain = ?"
                     params.append(domain)
+                if queue:
+                    query += " AND queue = ?"
+                    params.append(queue)
                 if status:
                     query += " AND status = ?"
                     params.append(status)
                 if owner_user_id:
                     query += " AND owner_user_id = ?"
                     params.append(owner_user_id)
-                row = conn.execute(query, params).fetchone()
+                if job_type:
+                    query += " AND job_type = ?"
+                    params.append(job_type)
+                if batch_group:
+                    query += " AND batch_group = ?"
+                    params.append(batch_group)
+                try:
+                    row = conn.execute(query, params).fetchone()
+                except sqlite3.OperationalError as exc:
+                    if (
+                        batch_group
+                        and self._sqlite_missing_column_error(exc, "batch_group")
+                        and self._sqlite_ensure_batch_group(conn)
+                    ):
+                        row = conn.execute(query, params).fetchone()
+                    else:
+                        raise
                 if not row:
                     return 0
                 try:

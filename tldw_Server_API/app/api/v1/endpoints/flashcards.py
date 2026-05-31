@@ -6,23 +6,30 @@ import os
 import re
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner, get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, User
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     Deck,
     DeckCreate,
+    DeckDeleteResponse,
+    DeckShare,
+    DeckShareDeleteResponse,
+    DeckShareUpsert,
     DeckUpdate,
     Flashcard,
     FlashcardAnalyticsSummaryResponse,
     FlashcardAssetMetadata,
+    FlashcardBulkCreateResponse,
     FlashcardBulkUpdateError,
     FlashcardBulkUpdateItem,
     FlashcardBulkUpdateResponse,
@@ -53,12 +60,12 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
     StudyPackCreateJobRequest,
     StudyPackJobAcceptedResponse,
+    StudyPackJobListResponse,
     StudyPackJobStatusResponse,
     StudyPackSummaryResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import FLASHCARDS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -112,6 +119,7 @@ from tldw_Server_API.app.core.Utils.image_validation import (
 from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
+MAX_STUDY_PACK_JOBS_OFFSET = 10_000
 _FLASHCARDS_INT_PARSE_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TypeError,
     ValueError,
@@ -366,8 +374,8 @@ def _enqueue_study_suggestions_refresh(
             priority=5,
             max_retries=1,
         )
-    except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Study-suggestions refresh enqueue skipped for {}:{}: {}", anchor_type, anchor_id, exc)
+    except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Study-suggestions refresh enqueue skipped")
 
 
 async def _study_pack_db_for_job(
@@ -675,13 +683,17 @@ def _get_flashcards_apkg_max_media_bytes() -> int:
 def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
         _ensure_workspace_exists(db, payload.workspace_id)
+        visibility = payload.visibility if "visibility" in payload.model_fields_set else None
         review_prompt_side = payload.review_prompt_side if "review_prompt_side" in payload.model_fields_set else None
+        parent_deck_id = payload.parent_deck_id if "parent_deck_id" in payload.model_fields_set else ...
         deck_id = db.add_deck(
             payload.name,
             payload.description,
             payload.scheduler_settings.model_dump() if payload.scheduler_settings else None,
             scheduler_type=payload.scheduler_type,
             workspace_id=payload.workspace_id,
+            parent_deck_id=parent_deck_id,
+            visibility=visibility,
             review_prompt_side=review_prompt_side,
         )
         # Return the exact deck row by id
@@ -694,6 +706,8 @@ def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db
             "name": payload.name,
             "description": payload.description,
             "workspace_id": payload.workspace_id,
+            "parent_deck_id": None if parent_deck_id is ... else parent_deck_id,
+            "visibility": visibility or "private",
             "review_prompt_side": payload.review_prompt_side,
             "created_at": None,
             "last_modified": None,
@@ -711,10 +725,9 @@ def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db
     except SchedulerSettingsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to create deck: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create deck") from e
+        raise map_db_error_to_http(e) from e
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to create deck") from exc
 
 
 @router.get("/decks", response_model=list[Deck])
@@ -734,9 +747,8 @@ def list_decks(
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
         )
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to list decks: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list decks") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list decks") from exc
 
 
 @router.patch("/decks/{deck_id}", response_model=Deck)
@@ -750,7 +762,9 @@ def update_deck(
     scheduler_settings = data.pop("scheduler_settings", None)
     scheduler_type = data.pop("scheduler_type", None)
     review_prompt_side = data.pop("review_prompt_side", None)
+    visibility = data.pop("visibility", None)
     workspace_id = data.pop("workspace_id", ...)
+    parent_deck_id = data.pop("parent_deck_id", ...)
     try:
         if workspace_id is not ...:
             _ensure_workspace_exists(db, workspace_id)
@@ -759,9 +773,11 @@ def update_deck(
             name=data.get("name"),
             description=data.get("description"),
             review_prompt_side=review_prompt_side,
+            visibility=visibility,
             scheduler_settings=scheduler_settings,
             scheduler_type=scheduler_type,
             workspace_id=workspace_id,
+            parent_deck_id=parent_deck_id,
             expected_version=expected_version,
         )
         if not ok:
@@ -773,10 +789,106 @@ def update_deck(
     except SchedulerSettingsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except ConflictError as e:
+        raise map_db_error_to_http(e) from e
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update deck") from exc
+
+
+@router.get(
+    "/decks/{deck_id}/shares",
+    response_model=list[DeckShare],
+    dependencies=[Depends(check_rate_limit)],
+)
+def list_deck_shares(
+    deck_id: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> list[DeckShare]:
+    """List all per-user share grants for a deck owned by the current user."""
+    try:
+        deck = db.get_deck(deck_id)
+        if not deck or deck.get("deleted"):
+            raise HTTPException(status_code=404, detail="Deck not found")
+        return [DeckShare.model_validate(item) for item in db.list_deck_shares(deck_id)]
+    except HTTPException:
+        raise
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list deck shares") from exc
+
+
+@router.put(
+    "/decks/{deck_id}/shares/{user_id}",
+    response_model=DeckShare,
+    dependencies=[Depends(check_rate_limit)],
+)
+def upsert_deck_share(
+    deck_id: int,
+    user_id: int,
+    payload: DeckShareUpsert,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> DeckShare:
+    """Create or update a user's share role for a deck owned by the current user."""
+    try:
+        deck = db.get_deck(deck_id)
+        if not deck or deck.get("deleted"):
+            raise HTTPException(status_code=404, detail="Deck not found")
+        return DeckShare.model_validate(
+            db.upsert_deck_share(
+                deck_id,
+                user_id=user_id,
+                role=payload.role,
+                shared_by=int(current_user.id),
+            )
+        )
+    except HTTPException:
+        raise
+    except ConflictError as exc:
+        raise map_db_error_to_http(exc) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to share deck") from exc
+
+
+@router.delete(
+    "/decks/{deck_id}/shares/{user_id}",
+    response_model=DeckShareDeleteResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
+def delete_deck_share(
+    deck_id: int,
+    user_id: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> DeckShareDeleteResponse:
+    """Remove a per-user share grant from a deck owned by the current user."""
+    try:
+        deck = db.get_deck(deck_id)
+        if not deck or deck.get("deleted"):
+            raise HTTPException(status_code=404, detail="Deck not found")
+        return DeckShareDeleteResponse(removed=db.delete_deck_share(deck_id, user_id=user_id))
+    except HTTPException:
+        raise
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to remove deck share") from exc
+
+
+@router.delete("/decks/{deck_id}", response_model=DeckDeleteResponse)
+def delete_deck(
+    deck_id: int,
+    expected_version: int = Query(..., ge=1),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> DeckDeleteResponse:
+    try:
+        deck = db.get_deck(deck_id)
+        if not deck or deck.get("deleted"):
+            raise HTTPException(status_code=404, detail="Deck not found")
+        db.soft_delete_deck_by_id(deck_id, expected_version=expected_version)
+        return DeckDeleteResponse(deleted=True)
+    except HTTPException:
+        raise
+    except ConflictError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except CharactersRAGDBError as e:
-        logger.error(f"Failed to update deck: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update deck") from e
+        logger.error(f"Failed to delete deck: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete deck") from e
 
 
 @router.post("/assets", response_model=FlashcardAssetMetadata)
@@ -803,8 +915,7 @@ async def upload_flashcard_asset(
             height=height,
         )
     except CharactersRAGDBError as exc:
-        logger.error(f"Failed to store flashcard asset: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to store flashcard asset") from exc
+        raise map_db_error_to_http(exc, default_detail="Failed to store flashcard asset") from exc
 
     reference = build_flashcard_asset_reference(asset_uuid)
     return FlashcardAssetMetadata(
@@ -819,7 +930,18 @@ async def upload_flashcard_asset(
     )
 
 
-@router.get("/assets/{asset_uuid}/content")
+@router.get(
+    "/assets/{asset_uuid}/content",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Flashcard asset content.",
+            "content": {
+                "application/octet-stream": {},
+            },
+        },
+    },
+)
 def get_flashcard_asset_content(
     asset_uuid: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -883,12 +1005,11 @@ def create_flashcard(payload: FlashcardCreate, db: CharactersRAGDB = Depends(get
             if not card:
                 raise HTTPException(status_code=500, detail="Failed to fetch created flashcard")
         return card
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to create flashcard: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create flashcard") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to create flashcard") from exc
 
 
-@router.post("/bulk", response_model=FlashcardListResponse)
+@router.post("/bulk", response_model=FlashcardBulkCreateResponse)
 def create_flashcards_bulk(payload: list[FlashcardCreate], db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
         card_dicts = []
@@ -956,9 +1077,8 @@ def create_flashcards_bulk(payload: list[FlashcardCreate], db: CharactersRAGDB =
                 if c:
                     card_dicts.append(c)
         return {"items": card_dicts, "count": len(card_dicts)}
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed bulk create flashcards: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create flashcards") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to create flashcards") from exc
 
 
 @router.patch("/bulk", response_model=FlashcardBulkUpdateResponse)
@@ -1048,9 +1168,8 @@ def update_flashcards_bulk(
                     )
                 )
         return FlashcardBulkUpdateResponse(results=results)
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed bulk update flashcards: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update flashcards") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update flashcards") from exc
 
 
 @router.get("", response_model=FlashcardListResponse)
@@ -1088,10 +1207,20 @@ def list_flashcards(
             q=q,
             include_deleted=False,
         )
-        return {"items": items, "count": len(items), "total": int(total)}
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to list flashcards: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list flashcards") from e
+        total_int = int(total)
+        return {
+            "items": items,
+            "count": len(items),
+            "total": total_int,
+            "pagination": build_offset_pagination_meta(
+                total=total_int,
+                limit=limit,
+                offset=offset,
+                count=len(items),
+            ),
+        }
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list flashcards") from exc
 
 
 @router.get(
@@ -1117,9 +1246,11 @@ def list_flashcard_tag_suggestions(
     try:
         items = db.list_flashcard_tag_suggestions(q=q, limit=limit)
         return FlashcardTagSuggestionsResponse(items=items, count=len(items))
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to list flashcard tag suggestions: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list flashcard tag suggestions") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to list flashcard tag suggestions",
+        ) from exc
 
 
 @router.get("/analytics/summary", response_model=FlashcardAnalyticsSummaryResponse)
@@ -1135,9 +1266,11 @@ def get_flashcard_analytics_summary(
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
         )
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to get flashcard analytics summary: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get flashcard analytics summary") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to get flashcard analytics summary",
+        ) from exc
 
 ## (export endpoint moved earlier)
 
@@ -1147,9 +1280,8 @@ def get_flashcard_analytics_summary(
 def get_flashcard(card_uuid: str, db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
         return _fetch_flashcard_or_404(card_uuid, db)
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to get flashcard: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get flashcard") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to get flashcard") from exc
 
 
 @router.patch("/{card_uuid}", response_model=Flashcard)
@@ -1176,10 +1308,9 @@ def update_flashcard(card_uuid: str, payload: FlashcardUpdate, db: CharactersRAG
             raise HTTPException(status_code=404, detail="Flashcard not found")
         return card
     except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to update flashcard: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update flashcard") from e
+        raise map_db_error_to_http(e) from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update flashcard") from exc
 
 
 @router.delete("/{card_uuid}")
@@ -1190,10 +1321,9 @@ def delete_flashcard(card_uuid: str, expected_version: int = Query(..., ge=1), d
             raise HTTPException(status_code=404, detail="Flashcard not found or already deleted")
         return {"deleted": True}
     except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to delete flashcard: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete flashcard") from e
+        raise map_db_error_to_http(e) from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete flashcard") from exc
 
 
 @router.post("/{card_uuid}/reset-scheduling", response_model=Flashcard)
@@ -1214,10 +1344,12 @@ def reset_flashcard_scheduling(
             raise HTTPException(status_code=404, detail="Flashcard not found")
         return card
     except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to reset flashcard scheduling: {e}")
-        raise HTTPException(status_code=500, detail="Failed to reset flashcard scheduling") from e
+        raise map_db_error_to_http(e) from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to reset flashcard scheduling",
+        ) from exc
 
 
 @router.put("/{card_uuid}/tags", response_model=Flashcard)
@@ -1226,9 +1358,8 @@ def set_flashcard_tags(card_uuid: str, payload: FlashcardTagsUpdate, db: Charact
         db.set_flashcard_tags(card_uuid, payload.tags)
         card = db.get_flashcard(card_uuid)
         return card
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to set flashcard tags: {e}")
-        raise HTTPException(status_code=500, detail="Failed to set flashcard tags") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to set flashcard tags") from exc
 
 
 @router.get("/{card_uuid}/tags")
@@ -1236,9 +1367,8 @@ def get_flashcard_tags(card_uuid: str, db: CharactersRAGDB = Depends(get_chacha_
     try:
         kws = db.get_keywords_for_flashcard(card_uuid)
         return {"items": kws, "count": len(kws)}
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to get flashcard tags: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get flashcard tags") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to get flashcard tags") from exc
 
 
 @router.post(
@@ -1491,9 +1621,8 @@ def import_flashcards(
         return {'imported': len(created), 'items': created, 'errors': errors}
     except HTTPException:
         raise
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to import flashcards: {e}")
-        raise HTTPException(status_code=500, detail="Failed to import flashcards") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to import flashcards") from exc
     except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"TSV import failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to import TSV flashcards") from e
@@ -1643,9 +1772,8 @@ async def import_flashcards_json(
         return {'imported': len(created), 'items': created, 'errors': errors}
     except HTTPException:
         raise
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to import JSON flashcards: {e}")
-        raise HTTPException(status_code=500, detail="Failed to import flashcards") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to import flashcards") from exc
     except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"JSON import failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to import JSON flashcards") from e
@@ -1771,9 +1899,8 @@ async def import_flashcards_apkg(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except HTTPException:
         raise
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to import APKG flashcards: {e}")
-        raise HTTPException(status_code=500, detail="Failed to import flashcards") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to import flashcards") from exc
     except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"APKG import failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to import APKG flashcards") from e
@@ -1802,10 +1929,12 @@ def review_flashcard(payload: FlashcardReviewRequest, db: CharactersRAGDB = Depe
     except (SchedulerSettingsError, FsrsSettingsError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except ConflictError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to review flashcard: {e}")
-        raise HTTPException(status_code=500, detail="Failed to review flashcard") from e
+        raise map_db_error_to_http(
+            e,
+            conflict_status_code=status.HTTP_404_NOT_FOUND,
+        ) from e
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to review flashcard") from exc
 
 
 @router.get("/review-sessions", response_model=list[FlashcardReviewSessionSummary])
@@ -1823,11 +1952,8 @@ def list_review_sessions(
             status=status,
             limit=limit,
         )
-    except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except CharactersRAGDBError as exc:
-        logger.error(f"Failed to list flashcard review sessions: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to list flashcard review sessions") from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list flashcard review sessions") from exc
 
 
 @router.post("/review-sessions/end", response_model=FlashcardReviewSessionSummary)
@@ -1847,10 +1973,15 @@ def end_review_session(
         )
         return session
     except ConflictError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise map_db_error_to_http(
+            exc,
+            conflict_status_code=status.HTTP_404_NOT_FOUND,
+        ) from exc
     except CharactersRAGDBError as exc:
-        logger.error(f"Failed to complete flashcard review session: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to complete flashcard review session") from exc
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to complete flashcard review session",
+        ) from exc
 
 
 @router.get("/review/next", response_model=FlashcardNextReviewResponse)
@@ -1873,9 +2004,8 @@ def get_next_review_card(
         return {"card": card, "selection_reason": selection_reason}
     except (SchedulerSettingsError, FsrsSettingsError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to fetch next review card: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch next review card") from e
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch next review card") from exc
 
 
 @router.post("/study-packs/jobs", response_model=StudyPackJobAcceptedResponse, status_code=202)
@@ -1884,7 +2014,7 @@ def create_study_pack_job(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_job_manager),
-):
+) -> StudyPackJobAcceptedResponse:
     try:
         _ensure_workspace_exists(db, payload.workspace_id)
         job = jm.create_job(
@@ -1896,9 +2026,50 @@ def create_study_pack_job(
             priority=5,
             max_retries=2,
         )
-        return {"job": _serialize_study_pack_job(job)}
+        return StudyPackJobAcceptedResponse(job=_serialize_study_pack_job(job))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/study-packs/jobs", response_model=StudyPackJobListResponse)
+def list_study_pack_jobs(
+    status: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0, le=MAX_STUDY_PACK_JOBS_OFFSET),
+    current_user: User = Depends(get_request_user),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    jm: JobManager = Depends(get_job_manager),
+) -> StudyPackJobListResponse:
+    fetch_limit = limit + offset
+    jobs = jm.list_jobs(
+        domain=STUDY_PACKS_DOMAIN,
+        queue=study_pack_jobs_queue(),
+        status=status,
+        owner_user_id=str(current_user.id),
+        job_type=STUDY_PACKS_JOB_TYPE,
+        limit=fetch_limit,
+        sort_by="created_at",
+        sort_order="desc",
+    )
+    visible_jobs: list[dict[str, Any]] = []
+    for job in jobs:
+        _ensure_study_pack_job_access(job, current_user=current_user, principal=principal)
+        visible_jobs.append(_serialize_study_pack_job(job))
+    paged_jobs = visible_jobs[offset:offset + limit]
+    total = jm.count_jobs(
+        domain=STUDY_PACKS_DOMAIN,
+        queue=study_pack_jobs_queue(),
+        status=status,
+        owner_user_id=str(current_user.id),
+        job_type=STUDY_PACKS_JOB_TYPE,
+    )
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=len(paged_jobs),
+    )
+    return StudyPackJobListResponse(jobs=paged_jobs, total=total, pagination=pagination)
 
 
 @router.get("/study-packs/jobs/{job_id}", response_model=StudyPackJobStatusResponse)
@@ -1908,7 +2079,7 @@ async def get_study_pack_job_status(
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     jm: JobManager = Depends(get_job_manager),
-):
+) -> StudyPackJobStatusResponse:
     job = jm.get_job(job_id)
     if not job or str(job.get("domain") or "").strip().lower() != STUDY_PACKS_DOMAIN:
         raise HTTPException(status_code=404, detail="Study-pack job not found")
@@ -1925,11 +2096,11 @@ async def get_study_pack_job_status(
         )
         study_pack = _study_pack_from_job_result(study_pack_db, job)
     error = _public_study_pack_job_error(job)
-    return {
-        "job": _serialize_study_pack_job(job),
-        "study_pack": study_pack,
-        "error": error,
-    }
+    return StudyPackJobStatusResponse(
+        job=_serialize_study_pack_job(job),
+        study_pack=study_pack,
+        error=error,
+    )
 
 
 @router.get("/study-packs/{pack_id}", response_model=StudyPackSummaryResponse)
@@ -1949,7 +2120,7 @@ def regenerate_study_pack(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_job_manager),
-):
+) -> StudyPackJobAcceptedResponse:
     pack = db.get_study_pack(pack_id)
     if not pack:
         raise HTTPException(status_code=404, detail="Study pack not found")
@@ -1979,7 +2150,7 @@ def regenerate_study_pack(
         priority=5,
         max_retries=2,
     )
-    return {"job": _serialize_study_pack_job(job)}
+    return StudyPackJobAcceptedResponse(job=_serialize_study_pack_job(job))
 
 
 @router.get("/{card_uuid}/assistant", response_model=StudyAssistantContextResponse)
@@ -2003,10 +2174,12 @@ def get_flashcard_assistant(
     except HTTPException:
         raise
     except ConflictError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except CharactersRAGDBError as exc:
-        logger.error(f"Failed to fetch flashcard assistant context: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to fetch study assistant context") from exc
+        raise map_db_error_to_http(
+            exc,
+            conflict_status_code=status.HTTP_404_NOT_FOUND,
+        ) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch study assistant context") from exc
 
 
 @router.post("/{card_uuid}/assistant/respond", response_model=StudyAssistantRespondResponse)
@@ -2067,10 +2240,12 @@ async def respond_flashcard_assistant(
     except HTTPException:
         raise
     except ConflictError as exc:
-        raise HTTPException(status_code=409, detail="Study assistant thread version mismatch") from exc
-    except CharactersRAGDBError as exc:
-        logger.error(f"Failed to respond with flashcard assistant: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to generate study assistant response") from exc
+        raise map_db_error_to_http(
+            exc,
+            conflict_detail="Study assistant thread version mismatch",
+        ) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to generate study assistant response") from exc
     except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
         logger.error(f"Unexpected flashcard assistant failure: {exc}")
         raise HTTPException(status_code=500, detail="Failed to generate study assistant response") from exc
@@ -2154,7 +2329,21 @@ async def generate_flashcards(payload: FlashcardGenerateRequest):
         raise HTTPException(status_code=500, detail="Failed to generate flashcards") from e
 
 
-@router.get("/export")
+@router.get(
+    "/export",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Flashcard export download.",
+            "content": {
+                "application/apkg": {},
+                "application/json; charset=utf-8": {},
+                "text/csv; charset=utf-8": {},
+                "text/tab-separated-values; charset=utf-8": {},
+            },
+        },
+    },
+)
 def export_flashcards(
     deck_id: Optional[int] = None,
     workspace_id: Optional[str] = None,
@@ -2263,9 +2452,8 @@ def export_flashcards(
                                  headers={"Content-Disposition": f"attachment; filename={filename}"})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to export flashcards: {e}")
-        raise HTTPException(status_code=500, detail="Failed to export flashcards") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to export flashcards") from exc
 
 
 @router.post("/templates", response_model=FlashcardTemplate)
@@ -2278,15 +2466,13 @@ def create_flashcard_template(
     try:
         template_id = db.add_flashcard_template(**payload.model_dump())
         return _fetch_flashcard_template_or_404(template_id, db)
-    except InputError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.bind(template_name=payload.name, model_type=payload.model_type).error(
-            f"Failed to create flashcard template: {e}"
-        )
-        raise HTTPException(status_code=500, detail="Failed to create flashcard template") from e
+        raise map_db_error_to_http(e) from e
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to create flashcard template",
+        ) from exc
 
 
 @router.get("/templates", response_model=FlashcardTemplateListResponse)
@@ -2299,16 +2485,23 @@ def list_flashcard_templates(
 
     try:
         items = db.list_flashcard_templates(limit=limit, offset=offset)
+        total = db.count_flashcard_templates()
         return FlashcardTemplateListResponse(
             items=items,
             count=len(items),
-            total=db.count_flashcard_templates(),
+            total=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(items),
+            ),
         )
-    except CharactersRAGDBError as e:
-        logger.bind(limit=limit, offset=offset).error(
-            f"Failed to list flashcard templates: {e}"
-        )
-        raise HTTPException(status_code=500, detail="Failed to list flashcard templates") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to list flashcard templates",
+        ) from exc
 
 
 @router.get("/templates/{template_id}", response_model=FlashcardTemplate)
@@ -2320,11 +2513,11 @@ def get_flashcard_template(
 
     try:
         return _fetch_flashcard_template_or_404(template_id, db)
-    except CharactersRAGDBError as e:
-        logger.bind(template_id=template_id).error(
-            f"Failed to get flashcard template: {e}"
-        )
-        raise HTTPException(status_code=500, detail="Failed to get flashcard template") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to get flashcard template",
+        ) from exc
 
 
 @router.patch("/templates/{template_id}", response_model=FlashcardTemplate)
@@ -2344,17 +2537,13 @@ def update_flashcard_template(
         if not ok:
             raise HTTPException(status_code=404, detail="Flashcard template not found or not updated")
         return _fetch_flashcard_template_or_404(template_id, db)
-    except InputError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
     except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.bind(
-            template_id=template_id,
-            expected_version=expected_version,
-            updated_fields=sorted(data.keys()),
-        ).error(f"Failed to update flashcard template: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update flashcard template") from e
+        raise map_db_error_to_http(e) from e
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to update flashcard template",
+        ) from exc
 
 
 @router.delete("/templates/{template_id}")
@@ -2371,18 +2560,17 @@ def delete_flashcard_template(
             raise HTTPException(status_code=404, detail="Flashcard template not found or already deleted")
         return {"deleted": True}
     except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.bind(template_id=template_id, expected_version=expected_version).error(
-            f"Failed to delete flashcard template: {e}"
-        )
-        raise HTTPException(status_code=500, detail="Failed to delete flashcard template") from e
+        raise map_db_error_to_http(e) from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to delete flashcard template",
+        ) from exc
 
 
 @router.get("/{card_uuid}", response_model=Flashcard)
 def get_flashcard_alias(card_uuid: str, db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
         return _fetch_flashcard_or_404(card_uuid, db)
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to get flashcard: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get flashcard") from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to get flashcard") from exc

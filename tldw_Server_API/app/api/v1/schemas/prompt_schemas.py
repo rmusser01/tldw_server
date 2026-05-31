@@ -5,7 +5,13 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    PagePaginationMeta,
+    default_offset_pagination_aliases,
+)
 
 
 #
@@ -101,6 +107,7 @@ class PaginatedPromptsResponse(BaseModel):
     total_pages: int
     current_page: int
     total_items: int
+    pagination: PagePaginationMeta
 
 
 class PromptSearchResultItem(PromptResponse):  # Or a more specific search result schema
@@ -112,6 +119,7 @@ class PromptSearchResponse(BaseModel):
     total_matches: int
     page: int
     per_page: int
+    pagination: PagePaginationMeta
 
 
 class PromptVersionResponse(BaseModel):
@@ -302,3 +310,13 @@ class PromptCollectionResponse(BaseModel):
 
 class PromptCollectionListResponse(BaseModel):
     collections: list[PromptCollectionResponse] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 200
+    offset: int = 0
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return default_offset_pagination_aliases(self)

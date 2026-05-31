@@ -25,7 +25,20 @@ module.exports = {
         text: "rgb(var(--color-text) / <alpha-value>)",
         "text-muted": "rgb(var(--color-text-muted) / <alpha-value>)",
         "text-subtle": "rgb(var(--color-text-subtle) / <alpha-value>)",
-        focus: "rgb(var(--color-focus) / <alpha-value>)"
+        focus: "rgb(var(--color-focus) / <alpha-value>)",
+        state: {
+          ready: "rgb(var(--state-ready) / <alpha-value>)",
+          unavailable: "rgb(var(--state-unavailable) / <alpha-value>)",
+          setupRequired: "rgb(var(--state-setup-required) / <alpha-value>)",
+          authRequired: "rgb(var(--state-auth-required) / <alpha-value>)",
+          permissionDenied: "rgb(var(--state-permission-denied) / <alpha-value>)",
+          degraded: "rgb(var(--state-degraded) / <alpha-value>)",
+          retrying: "rgb(var(--state-retrying) / <alpha-value>)",
+          blocked: "rgb(var(--state-blocked) / <alpha-value>)",
+          empty: "rgb(var(--state-empty) / <alpha-value>)",
+          loading: "rgb(var(--state-loading) / <alpha-value>)",
+          error: "rgb(var(--state-error) / <alpha-value>)"
+        }
       },
       fontFamily: {
         display: ["Space Grotesk", "Inter", "sans-serif"],

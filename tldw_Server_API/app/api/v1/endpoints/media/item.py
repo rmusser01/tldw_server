@@ -5,8 +5,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     MediaKeywordsUpdateRequest,
@@ -23,7 +23,6 @@ from tldw_Server_API.app.api.v1.utils.rag_cache import (
     invalidate_rag_caches,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_DELETE, MEDIA_UPDATE
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     fetch_keywords_for_media,
     get_full_media_details_rich,
@@ -55,6 +54,11 @@ def _is_test_mode() -> bool:
     "/{media_id:int}",
     status_code=status.HTTP_200_OK,
     summary="Get Media Item Details",
+    responses={
+        status.HTTP_304_NOT_MODIFIED: {
+            "description": "Media item not modified (ETag match).",
+        },
+    },
 )
 async def get_media_item(
     request: Request,
@@ -101,8 +105,8 @@ async def get_media_item(
                 bool(headers.get("X-API-KEY")),
                 bool(headers.get("authorization")),
             )
-    except Exception as auth_header_log_error:
-        logger.debug("Failed to emit media item auth header diagnostics", exc_info=auth_header_log_error)
+    except Exception:
+        logger.debug("Failed to emit media item auth header diagnostics")
 
     try:
         details = get_full_media_details_rich(
@@ -144,10 +148,8 @@ async def get_media_item(
         ) from exc
     except Exception as exc:
         logger.error(
-            "Unexpected error fetching details for media {}: {}",
+            "Unexpected error fetching details for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -166,7 +168,7 @@ async def get_media_item(
         status.HTTP_409_CONFLICT: {"description": "Media could not be moved to trash"},
     },
     dependencies=[
-        Depends(require_permissions(MEDIA_DELETE)),
+        Depends(RequirePermission(MEDIA_DELETE)),
         Depends(rbac_rate_limit("media.delete")),
     ],
 )
@@ -218,10 +220,8 @@ async def delete_media_item(
         ) from exc
     except Exception as exc:
         logger.error(
-            "Unexpected error trashing media {}: {}",
+            "Unexpected error trashing media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -240,7 +240,7 @@ async def delete_media_item(
         status.HTTP_409_CONFLICT: {"description": "Media could not be restored from trash"},
     },
     dependencies=[
-        Depends(require_permissions(MEDIA_DELETE)),
+        Depends(RequirePermission(MEDIA_DELETE)),
         Depends(rbac_rate_limit("media.delete")),
     ],
 )
@@ -313,10 +313,8 @@ async def restore_media_item(
         ) from exc
     except Exception as exc:
         logger.error(
-            "Unexpected error restoring media {}: {}",
+            "Unexpected error restoring media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -335,7 +333,7 @@ async def restore_media_item(
         status.HTTP_409_CONFLICT: {"description": "Media is not in trash"},
     },
     dependencies=[
-        Depends(require_permissions(MEDIA_DELETE)),
+        Depends(RequirePermission(MEDIA_DELETE)),
         Depends(rbac_rate_limit("media.delete")),
     ],
 )
@@ -390,10 +388,8 @@ async def permanently_delete_media_item(
         ) from exc
     except Exception as exc:
         logger.error(
-            "Unexpected error permanently deleting media {}: {}",
+            "Unexpected error permanently deleting media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -504,14 +500,8 @@ async def update_media_item(
 
             content_updated = "content" in update_fields and update_fields["content"] is not None
             new_content = update_fields.get("content") if content_updated else None
-            new_content_hash = (
-                hashlib.sha256(new_content.encode()).hexdigest()
-                if content_updated
-                else current_hash
-            )
-            content_actually_changed = content_updated and (
-                new_content_hash != current_hash
-            )
+            new_content_hash = hashlib.sha256(new_content.encode()).hexdigest() if content_updated else current_hash
+            content_actually_changed = content_updated and (new_content_hash != current_hash)
 
             set_parts = []
             params: list[Any] = []
@@ -548,8 +538,7 @@ async def update_media_item(
                 params.append("pending")
             elif content_updated and not content_actually_changed:
                 logger.info(
-                    "Content provided for media {} but hash is identical. "
-                    "Content field not updated.",
+                    "Content provided for media {} but hash is identical. " "Content field not updated.",
                     media_id,
                 )
 
@@ -612,8 +601,7 @@ async def update_media_item(
                 db._update_fts_media(conn, media_id, fts_title, fts_content)
             if content_updated:
                 logger.info(
-                    "Content was present in update payload for media {}. "
-                    "Creating new document version.",
+                    "Content was present in update payload for media {}. " "Creating new document version.",
                     media_id,
                 )
                 new_doc_version_info = db.create_document_version(
@@ -638,9 +626,7 @@ async def update_media_item(
                 updated_media_info["created_doc_ver_uuid"] = new_doc_version_info.get(
                     "uuid",
                 )
-                updated_media_info["created_doc_ver_num"] = (
-                    new_doc_version_info.get("version_number")
-                )
+                updated_media_info["created_doc_ver_num"] = new_doc_version_info.get("version_number")
 
             db._log_sync_event(
                 conn,
@@ -678,10 +664,8 @@ async def update_media_item(
         ) from exc
     except Exception as exc:  # noqa: BLE001
         logger.error(
-            "Unexpected error updating media {}: {}",
+            "Unexpected error updating media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -694,7 +678,7 @@ async def update_media_item(
     response_model=MediaKeywordsResponse,
     summary="Update media keywords (add/remove/set)",
     dependencies=[
-        Depends(require_permissions(MEDIA_UPDATE)),
+        Depends(RequirePermission(MEDIA_UPDATE)),
         Depends(rbac_rate_limit("media.update")),
     ],
 )
@@ -734,10 +718,8 @@ async def update_media_keywords(
         ) from exc
     except Exception as exc:  # noqa: BLE001
         logger.error(
-            "Unexpected error updating keywords for media {}: {}",
+            "Unexpected error updating keywords for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -14,13 +14,19 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.core import config as config_mod
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_api_key_env_keys,
+    custom_openai_provider_number,
+    iter_custom_openai_provider_names,
+)
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.services.worker_startup_policy import worker_path_enabled
 
 router = APIRouter()
 _DOCS_API_KEY_PLACEHOLDER = "YOUR_API_KEY"
@@ -47,7 +53,7 @@ def load_safe_config() -> dict:
     config_path = get_config_path()
 
     if not config_path.exists():
-        logger.warning(f"Config file not found at {config_path}")
+        logger.warning("Config file not found")
         return {
             "configured": False,
             "message": "Configuration file not found"
@@ -115,6 +121,7 @@ def load_safe_config() -> dict:
 
     # Feature flags / capabilities (safe to expose)
     try:
+        has_media_routes = bool(config_mod.route_enabled("media", default_stable=True))
         has_audio_http = bool(config_mod.route_enabled("audio", default_stable=True))
         has_audio_websocket = bool(config_mod.route_enabled("audio-websocket", default_stable=True))
         caps = {
@@ -135,11 +142,24 @@ def load_safe_config() -> dict:
         caps["hasVoiceChat"] = bool(has_audio_http or has_audio_websocket)
         caps["hasVoiceConversationTransport"] = bool(has_audio_websocket)
         caps["hasAudio"] = bool(caps["hasStt"] or caps["hasTts"] or caps["hasVoiceChat"])
+        caps["hasMediaPlaylistPreflight"] = has_media_routes
+        caps["hasMediaIngestJobs"] = has_media_routes
+        caps["hasMediaIngestJobEvents"] = has_media_routes
+        caps["hasMediaIngestWorker"] = bool(
+            worker_path_enabled(
+                "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
+                "media-ingest-heavy-jobs",
+                default_stable=False,
+                test_mode=False,
+            )
+        )
+        caps["hasDurableMediaCollections"] = has_media_routes
+        caps["hasKnowledgeQaMediaScope"] = has_media_routes
         # expose both for backward-compat and forward-looking UI
         safe_config["supported_features"] = caps
         safe_config["capabilities"] = caps
-    except Exception as e:
-        logger.debug(f"Failed to derive safe capability flags: {e}")
+    except Exception:
+        logger.debug("Failed to derive safe capability flags")
 
     return safe_config
 
@@ -361,7 +381,27 @@ async def get_jobs_config_info():
     }
 
 
-@router.get("/config/quickstart")
+@router.get(
+    "/config/quickstart",
+    response_class=HTMLResponse,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Fallback quickstart HTML page when redirect resolution fails.",
+            "content": {
+                "text/html": {},
+            },
+        },
+        status.HTTP_307_TEMPORARY_REDIRECT: {
+            "description": "Redirect to the configured quickstart destination.",
+            "headers": {
+                "location": {
+                    "description": "Quickstart destination URL.",
+                    "schema": {"type": "string"},
+                },
+            },
+        },
+    },
+)
 async def get_quickstart_redirect():
     """
     Redirect to a Quickstart URL defined in config.txt or environment.
@@ -389,8 +429,8 @@ async def get_quickstart_redirect():
                     url = cfg.get('UI', 'quickstart_url').strip()
                 elif cfg.has_section('Docs') and cfg.has_option('Docs', 'quickstart_url'):
                     url = cfg.get('Docs', 'quickstart_url').strip()
-            except Exception as e:
-                logger.warning(f"Quickstart redirect: could not read config, using default. Error: {e}")
+            except Exception:
+                logger.warning("Quickstart redirect: could not read config, using default")
 
         # 4) Default
         if not url:
@@ -405,8 +445,8 @@ async def get_quickstart_redirect():
 
         logger.info(f"Redirecting /api/v1/config/quickstart to: {target}")
         return RedirectResponse(url=target, status_code=307)
-    except Exception as e:
-        logger.error(f"Quickstart redirect failed: {e}")
+    except Exception:
+        logger.error("Quickstart redirect failed")
         # Fallback to a minimal built-in HTML page with a link to /docs
         fallback_html = """
         <!DOCTYPE html>
@@ -558,8 +598,8 @@ def _resolve_provider_key(provider: str) -> Optional[str]:
         val = (keys.get(provider) or "").strip()
         if val:
             return val
-    except Exception as e:
-        logger.debug("Failed to load API keys for provider %s: %s", provider, e)
+    except Exception:
+        logger.debug("Failed to load API keys for provider")
 
     return None
 
@@ -616,7 +656,7 @@ async def list_configured_providers() -> ProvidersStatusResponse:
         "llama.cpp", "kobold", "ooba", "tabbyapi", "vllm",
         "local-llm", "ollama", "aphrodite", "mlx",
     ]
-    custom_providers = ["custom-openai-api", "custom-openai-api-2"]
+    custom_providers = list(iter_custom_openai_provider_names())
 
     items: list[ProviderStatusItem] = []
     any_configured = False
@@ -632,7 +672,15 @@ async def list_configured_providers() -> ProvidersStatusResponse:
         key_source: Optional[str] = None
         if api_key:
             env_var = _PROVIDER_ENV_KEY_MAP.get(name)
-            if env_var and os.environ.get(env_var, "").strip():
+            custom_number = custom_openai_provider_number(name)
+            has_custom_env_key = (
+                custom_number is not None
+                and any(
+                    os.environ.get(env_key, "").strip()
+                    for env_key in custom_openai_api_key_env_keys(custom_number)
+                )
+            )
+            if (env_var and os.environ.get(env_var, "").strip()) or has_custom_env_key:
                 key_source = "env"
             else:
                 key_source = "config"
@@ -703,7 +751,7 @@ async def validate_provider_key(body: ProviderValidateRequest, request: Request)
             error=f"Validation timed out after {_VALIDATION_TIMEOUT_SECONDS}s",
         )
     except Exception as exc:
-        logger.warning(f"Provider validation failed for {provider}: {exc}")
+        logger.warning("Provider validation failed")
         return ProviderValidateResponse(
             provider=provider,
             valid=False,
@@ -757,8 +805,8 @@ async def _validate_provider_http(
             err_type = err_body.get("error", {}).get("type", "")
             if err_type in ("invalid_request_error", "overloaded_error"):
                 return True, None
-        except Exception as exc:
-            logger.debug(f"Anthropic provider validation response was not JSON: {exc}")
+        except Exception:
+            return True, None
         return True, None
     if resp.status_code in (401, 403):
         return False, f"Authentication failed (HTTP {resp.status_code})"

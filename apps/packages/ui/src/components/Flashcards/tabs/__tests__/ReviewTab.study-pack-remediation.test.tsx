@@ -92,7 +92,13 @@ vi.mock("../../hooks", () => ({
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
   useEndFlashcardReviewSessionMutation: vi.fn(),
-  useRecentFlashcardReviewSessionsQuery: vi.fn(),
+  useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn()
+  })),
   useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useFlashcardAssistantQuery: vi.fn(),
   useFlashcardAssistantRespondMutation: vi.fn(),
@@ -316,6 +322,8 @@ describe("ReviewTab study-pack remediation", () => {
         isActive
       />
     )
+
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
 
     expect(
       screen.getByText(/Cells rely on ATP to power active transport\./)

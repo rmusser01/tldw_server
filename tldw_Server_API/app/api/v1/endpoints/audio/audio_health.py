@@ -1,6 +1,7 @@
 # audio_health.py
 # Description: Audio health endpoints.
 import asyncio
+import copy
 from dataclasses import asdict, is_dataclass
 import importlib.util
 import os
@@ -15,9 +16,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from starlette import status
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, check_rate_limit
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
+from tldw_Server_API.app.api.v1.schemas.audio_health import SttCapabilitiesResponse
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
+from tldw_Server_API.app.core.Ingestion_Media_Processing.transcription_models import get_transcription_models_payload
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.TTS.circuit_breaker import build_qwen_runtime_breaker_key
 from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
@@ -88,6 +92,10 @@ _PROVIDER_API_KEY_PLACEHOLDERS: dict[str, set[str]] = {
         "your_elevenlabs_api_key",
     },
 }
+_STT_CAPABILITY_FIELDS = ("batch", "streaming", "diarization", "timestamps", "segments")
+_STT_RESPONSE_SCHEMA_SOURCE = "response_schema"
+_STT_CAPABILITIES_CACHE_TTL_SECONDS = 30.0
+_STT_CAPABILITIES_CACHE: tuple[float, dict[str, Any]] | None = None
 
 
 def _build_internal_health_request(path: str) -> Request:
@@ -130,25 +138,27 @@ def _serialize_tts_caps_for_health(tts_service: TTSServiceV2, caps: Any) -> Any:
     if callable(serializer):
         try:
             return serializer(caps)
-        except Exception as exc:
-            logger.debug(f"TTS health capabilities serialization failed via service helper: {exc}")
+        except Exception:
+            logger.debug("TTS health capabilities serialization failed via service helper")
     if isinstance(caps, dict):
         return dict(caps)
     try:
         dumped = model_dump_compat(caps)
         if isinstance(dumped, dict):
             return dumped
-    except Exception as dump_error:
-        logger.debug("TTS health capabilities model dump failed", exc_info=dump_error)
+    except Exception:
+        logger.debug("TTS health capabilities model dump failed")
     try:
         if is_dataclass(caps):
             return asdict(caps)
-    except Exception as dataclass_error:
-        logger.debug("TTS health capabilities dataclass conversion failed", exc_info=dataclass_error)
+    except Exception:
+        logger.debug("TTS health capabilities dataclass conversion failed")
     return None
 
 
 def _sanitize_public_provider_detail(value: Any) -> Any:
+    """Remove sensitive keys and suspicious runtime diagnostics from public TTS health details."""
+
     if isinstance(value, str):
         if _SUSPICIOUS_PUBLIC_HEALTH_RE.search(value):
             return _SANITIZED_PUBLIC_HEALTH_MESSAGE
@@ -167,6 +177,8 @@ def _sanitize_public_provider_detail(value: Any) -> Any:
 
 
 def _normalize_public_health_key(value: Any) -> str:
+    """Normalize a provider-detail key before comparing it with the sensitive-key denylist."""
+
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
 
 
@@ -179,6 +191,8 @@ def _derive_omnivoice_supervisor_health(
     tts_service: Any,
     current_detail: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
+    """Summarize OmniVoice sidecar supervisor state without exposing process internals."""
+
     current_detail = current_detail if isinstance(current_detail, dict) else {}
     availability = str(current_detail.get("availability") or "").strip().lower()
 
@@ -243,8 +257,8 @@ def _load_auth_provider_configs() -> tuple[bool, dict[str, Any]]:
             provider_name: config_manager.get_provider_config(provider_name)
             for provider_name in _AUTH_HEALTH_PROVIDERS
         }
-    except Exception as exc:
-        logger.debug(f"TTS health auth config lookup failed: {exc}")
+    except Exception:
+        logger.debug("TTS health auth config lookup failed")
         return False, {}
 
 
@@ -255,8 +269,8 @@ def _load_detailed_circuit_breakers(tts_service: Any) -> dict[str, Any]:
     try:
         detailed = circuit_manager.get_all_status(detailed=True)
         return detailed if isinstance(detailed, dict) else {}
-    except Exception as exc:
-        logger.debug(f"TTS health detailed circuit-breaker lookup failed: {exc}")
+    except Exception:
+        logger.debug("TTS health detailed circuit-breaker lookup failed")
         return {}
 
 
@@ -447,8 +461,8 @@ def _discover_kokoro_espeak_library(adapter: Any) -> Optional[str]:
         discovered_name = _ctypes_find_library("espeak-ng") or _ctypes_find_library("espeak")
         if discovered_name and os.path.isabs(discovered_name) and os.path.exists(discovered_name):
             candidates.insert(0, discovered_name)
-    except Exception as exc:
-        logger.debug(f"Unable to discover eSpeak library via ctypes lookup: {exc}")
+    except Exception:
+        logger.debug("Unable to discover eSpeak library via ctypes lookup")
 
     for candidate in candidates:
         if candidate and os.path.exists(candidate):
@@ -579,8 +593,8 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
                                 "initialized": False,
                                 "failed": availability == "failed",
                             }
-        except Exception as envelope_exc:
-            logger.debug(f"TTS health envelope enrichment failed: {envelope_exc}")
+        except Exception:
+            logger.debug("TTS health envelope enrichment failed")
 
         if capability_envelopes:
             if not total_providers:
@@ -656,8 +670,8 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
                     kokoro_info["espeak_lib_env"] = _sanitize_health_path_value(es_env)
                     kokoro_info["espeak_lib_path"] = runtime_diagnostics.get("espeak_lib_path")
                     kokoro_info["espeak_lib_exists"] = bool(runtime_diagnostics.get("espeak_lib_exists"))
-                except Exception as exc:
-                    logger.debug(f"Kokoro health: espeak library introspection failed: {exc}")
+                except Exception:
+                    logger.debug("Kokoro health eSpeak library introspection failed")
                 kokoro_detail = provider_details.get("kokoro")
                 if not isinstance(kokoro_detail, dict):
                     kokoro_detail = {}
@@ -679,12 +693,12 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
 
                 _recompute_health_rollup(health, provider_details, capability_envelopes)
                 health["providers"]["kokoro"] = kokoro_info
-        except Exception as e:
-            logger.debug(f"Kokoro health enrichment failed: {e}")
+        except Exception:
+            logger.debug("Kokoro health enrichment failed")
 
         return health
     except Exception as e:
-        logger.error(f"Error getting TTS health: {e}", exc_info=True)
+        logger.error("Error getting TTS health")
         request_id = ensure_request_id(request)
         payload = _http_error_detail("TTS health check failed", request_id, exc=e)
         return {"status": "error", **payload, "timestamp": datetime.utcnow().isoformat()}
@@ -722,6 +736,217 @@ async def collect_setup_tts_health() -> dict[str, Any]:
             **payload,
             "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
         }
+
+
+def _stt_capability_value(value: Any) -> str:
+    if value is True:
+        return "supported"
+    if value is False:
+        return "unsupported"
+    return "unknown"
+
+
+def _stt_availability_from_health(status_info: dict[str, Any]) -> str:
+    if not any(key in status_info for key in ("available", "usable", "on_demand")):
+        return "unknown"
+    if bool(status_info.get("on_demand", False)):
+        return "on_demand"
+    if status_info.get("usable") is False:
+        return "unavailable"
+    if status_info.get("usable") is True or status_info.get("available") is True:
+        return "ready"
+    return "unavailable"
+
+
+def _public_stt_status_message(availability: str) -> str | None:
+    """Return a stable public status label without exposing raw health diagnostics."""
+    if availability == "ready":
+        return "Ready"
+    if availability == "on_demand":
+        return "Available on demand"
+    if availability == "unavailable":
+        return "Unavailable"
+    return None
+
+
+def _get_cached_stt_capabilities() -> dict[str, Any] | None:
+    cached = _STT_CAPABILITIES_CACHE
+    if cached is None:
+        return None
+    cached_at, payload = cached
+    if time.monotonic() - cached_at > _STT_CAPABILITIES_CACHE_TTL_SECONDS:
+        return None
+    return copy.deepcopy(payload)
+
+
+def _set_cached_stt_capabilities(payload: dict[str, Any]) -> None:
+    global _STT_CAPABILITIES_CACHE
+    _STT_CAPABILITIES_CACHE = (time.monotonic(), copy.deepcopy(payload))
+
+
+def _stt_catalog_entries() -> list[dict[str, Any]]:
+    catalog = get_transcription_models_payload()
+    categories = catalog.get("categories") if isinstance(catalog, dict) else {}
+    all_models = catalog.get("all_models") if isinstance(catalog, dict) else []
+    metadata_by_id: dict[str, dict[str, Any]] = {}
+
+    if isinstance(categories, dict):
+        for category, entries in categories.items():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                model_id = str(entry.get("value") or "").strip()
+                if not model_id:
+                    continue
+                metadata_by_id[model_id] = {
+                    "id": model_id,
+                    "label": entry.get("label") or model_id,
+                    "description": entry.get("description"),
+                    "category": category,
+                }
+
+    ordered_ids: list[str] = []
+    if isinstance(all_models, list):
+        for raw_model_id in all_models:
+            model_id = str(raw_model_id or "").strip()
+            if model_id and model_id not in ordered_ids:
+                ordered_ids.append(model_id)
+    for model_id in metadata_by_id:
+        if model_id not in ordered_ids:
+            ordered_ids.append(model_id)
+
+    entries: list[dict[str, Any]] = []
+    for model_id in ordered_ids:
+        entries.append(metadata_by_id.get(model_id, {"id": model_id, "label": model_id}))
+    return entries
+
+
+def _stt_provider_capability_metadata(registry: Any, provider: str | None) -> tuple[dict[str, str], dict[str, str]]:
+    provider_capabilities: dict[str, str] = {
+        "batch": "unknown",
+        "streaming": "unknown",
+        "diarization": "unknown",
+    }
+    provider_sources: dict[str, str] = {
+        "batch": "unknown",
+        "streaming": "unknown",
+        "diarization": "unknown",
+    }
+    if not provider:
+        return provider_capabilities, provider_sources
+
+    try:
+        capabilities = registry.get_capabilities(provider)
+    except Exception:
+        logger.debug("STT capability summary could not read provider capabilities for {}", provider)
+        return provider_capabilities, provider_sources
+
+    field_map = {
+        "batch": getattr(capabilities, "supports_batch", None),
+        "streaming": getattr(capabilities, "supports_streaming", None),
+        "diarization": getattr(capabilities, "supports_diarization", None),
+    }
+    for capability_name, capability_value in field_map.items():
+        provider_capabilities[capability_name] = _stt_capability_value(capability_value)
+        provider_sources[capability_name] = "provider" if capability_value is not None else "unknown"
+    return provider_capabilities, provider_sources
+
+
+@router.get(
+    "/transcriptions/capabilities",
+    response_model=SttCapabilitiesResponse,
+    summary="Summarize STT model capabilities",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(
+            TokenScopeGuard(
+                "any",
+                require_if_present=True,
+                endpoint_id="audio.transcriptions.capabilities",
+                count_as="call",
+            )
+        ),
+    ],
+)
+def get_stt_capabilities(request: Request) -> dict[str, Any]:
+    """Return read-only STT capability metadata without warming models."""
+    from datetime import datetime
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_provider_adapter
+
+    ensure_request_id(request)
+    cached_payload = _get_cached_stt_capabilities()
+    if cached_payload is not None:
+        return cached_payload
+
+    registry = stt_provider_adapter.get_stt_provider_registry()
+    models: list[dict[str, Any]] = []
+
+    for catalog_entry in _stt_catalog_entries():
+        model_id = str(catalog_entry.get("id") or "").strip()
+        if not model_id:
+            continue
+
+        provider: str | None = None
+        try:
+            provider, _provider_model, _variant = registry.resolve_provider_for_model(model_id)
+            provider = str(provider or "").strip() or None
+        except Exception:
+            logger.debug("STT capability summary could not resolve provider for {}", model_id)
+
+        try:
+            status_info = audio_files.check_transcription_model_status(model_id)
+            if not isinstance(status_info, dict):
+                status_info = {}
+        except Exception:
+            logger.debug("STT capability summary health check failed for {}", model_id)
+            status_info = {}
+
+        if not provider:
+            raw_provider = status_info.get("provider")
+            provider = str(raw_provider).strip() if raw_provider is not None else None
+
+        capabilities, sources = _stt_provider_capability_metadata(registry, provider)
+        capabilities["timestamps"] = "supported"
+        capabilities["segments"] = "supported"
+        sources["timestamps"] = _STT_RESPONSE_SCHEMA_SOURCE
+        sources["segments"] = _STT_RESPONSE_SCHEMA_SOURCE
+
+        availability = _stt_availability_from_health(status_info)
+        sources["availability"] = "health" if availability != "unknown" else "unknown"
+        if catalog_entry.get("label"):
+            sources["label"] = "static_catalog"
+        if catalog_entry.get("description"):
+            sources["description"] = "static_catalog"
+
+        model_payload: dict[str, Any] = {
+            "id": model_id,
+            "label": str(catalog_entry.get("label") or model_id),
+            "provider": provider or "unknown",
+            "availability": availability,
+            "availability_source": sources["availability"],
+            "capabilities": {field: capabilities.get(field, "unknown") for field in _STT_CAPABILITY_FIELDS},
+            "sources": sources,
+            "message": _public_stt_status_message(availability),
+        }
+        if catalog_entry.get("description"):
+            model_payload["description"] = catalog_entry.get("description")
+        if catalog_entry.get("category"):
+            model_payload["category"] = catalog_entry.get("category")
+
+        models.append(model_payload)
+
+    payload = _sanitize_public_health_payload(
+        {
+            "models": models,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    )
+    _set_cached_stt_capabilities(payload)
+    return payload
 
 
 @router.get("/transcriptions/health", summary="Check STT transcription model health")
@@ -804,7 +1029,7 @@ async def get_stt_health(
             health["message"] = f"Model {resolved_model} is available and ready for use"
             health["estimated_size"] = None
         except Exception:
-            logger.exception(f"STT health warm-up failed for model={resolved_model}, device={device}")
+            logger.exception("STT health warm-up failed")
             warm_info = {
                 "ok": False,
                 "device": device,

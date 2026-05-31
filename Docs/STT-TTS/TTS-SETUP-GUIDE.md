@@ -37,7 +37,8 @@ python Helper_Scripts/TTS_Installers/install_tts_higgs.py
 python Helper_Scripts/TTS_Installers/install_tts_vibevoice.py --variant 1.5B
 
 # OmniVoice sidecar runtime
-python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py
+python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py \
+  --model-path models/omnivoice_sidecar/models/OmniVoice
 
 # NeuTTS (deps; optional prefetch)
 python Helper_Scripts/TTS_Installers/install_tts_neutts.py --prefetch
@@ -55,20 +56,27 @@ Flags:
 
 ### OmniVoice Setup
 
-OmniVoice runs in a dedicated sidecar runtime rather than the main server interpreter.
+OmniVoice is optional, disabled by default, and runs in a dedicated sidecar runtime rather than the main server interpreter. Install the PyTorch/backend stack for your target hardware before expecting real synthesis to work; the helper installs the sidecar package/runtime wiring but does not download model assets during requests.
 
 Preferred install path:
 
 ```bash
-python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py
+python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py \
+  --model-path /absolute/path/to/local/OmniVoice/model
 ```
+
+Model path examples:
+
+- Hugging Face cache snapshot: `~/.cache/huggingface/hub/models--k2-fsa--OmniVoice/snapshots/<commit-sha>`
+- Repo-local operator-managed path: `models/omnivoice_sidecar/models/OmniVoice`
+- Any absolute directory containing the local OmniVoice model files
 
 What the installer provisions:
 
 - `models/omnivoice_sidecar/.venv`
 - `models/omnivoice_sidecar/runtime`
 - `models/omnivoice_sidecar/logs`
-- an updated `providers.omnivoice` block in `tldw_Server_API/Config_Files/tts_providers_config.yaml`
+- an updated `providers.omnivoice` block in `tldw_Server_API/Config_Files/tts_providers_config.yaml` with the explicit local `model_path`
 
 Source checkout behavior:
 
@@ -78,8 +86,28 @@ Source checkout behavior:
 Runtime notes:
 
 - The sidecar supervisor reads the configured OmniVoice interpreter path from provider config, so the dedicated `.venv` created by the installer is the runtime that gets launched.
+- Runtime synthesis fails closed if the configured model directory is missing; it does not fetch OmniVoice model assets on demand.
 - Public requests that target OmniVoice and omit `voice` normalize to `auto`.
 - Explicit voices still win over the provider default.
+- Supported request modes are automatic voice selection, voice design via `extra_params.instruct`, and cloning via direct `voice_reference` or stored `custom:<voice_id>` plus `extra_params.reference_text`.
+- The sidecar returns native 24 kHz WAV/PCM; public `response_format` conversion and any resampling happen in the main tldw adapter.
+
+Example request:
+
+```json
+{
+  "model": "omnivoice",
+  "voice": "auto",
+  "input": "A short test sentence.",
+  "response_format": "wav",
+  "stream": false,
+  "extra_params": {
+    "instruct": "A calm documentary narrator",
+    "language_id": "en",
+    "num_step": 8
+  }
+}
+```
 
 ### Model Auto-Download Controls
 

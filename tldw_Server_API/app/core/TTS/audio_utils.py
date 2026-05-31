@@ -7,6 +7,8 @@ import base64
 import binascii
 import importlib.util
 import re
+import shutil
+import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
@@ -80,17 +82,29 @@ class AudioProcessor:
 
     def __init__(self):
         """Initialize audio processor"""
+        self.ffmpeg_path: Optional[str] = None
         self.ffmpeg_available = self._check_ffmpeg()
         self.librosa_available = self._check_librosa()
 
     def _check_ffmpeg(self) -> bool:
         """Check if ffmpeg is available"""
         try:
-            import subprocess
-            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
+            ffmpeg_path = shutil.which('ffmpeg')
+            if not ffmpeg_path:
+                return False
+            result = subprocess.run(  # nosec B603
+                [ffmpeg_path, '-version'],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.ffmpeg_path = ffmpeg_path
             return result.returncode == 0
         except _AUDIO_PROCESS_EXCEPTIONS as e:
-            logger.warning(f"ffmpeg not found or not runnable; audio conversion limited. error={e}")
+            logger.warning(
+                "ffmpeg not found or not runnable; audio conversion limited ({})",
+                type(e).__name__,
+            )
             return False
 
     def _check_librosa(self) -> bool:
@@ -210,7 +224,7 @@ class AudioProcessor:
                 Path(tmp_path).unlink(missing_ok=True)
 
         except _AUDIO_PROCESS_EXCEPTIONS as e:
-            logger.error(f"Audio validation error: {e}")
+            logger.error("Audio validation error ({})", type(e).__name__)
             return False, f"Failed to validate audio: {e}", info
 
     def convert_audio(
@@ -286,8 +300,6 @@ class AudioProcessor:
                     Path(output_path).unlink(missing_ok=True)
 
             elif self.ffmpeg_available:
-                import subprocess
-
                 # Use ffmpeg for conversion
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as input_file:
                     input_file.write(audio_bytes)
@@ -298,8 +310,12 @@ class AudioProcessor:
                     output_path = output_file.name
 
                 try:
+                    ffmpeg_path = getattr(self, 'ffmpeg_path', None) or shutil.which('ffmpeg')
+                    if not ffmpeg_path:
+                        raise RuntimeError("ffmpeg executable not found")
+
                     # Build ffmpeg command
-                    cmd = ['ffmpeg', '-i', input_path, '-y']
+                    cmd = [ffmpeg_path, '-i', input_path, '-y']
 
                     if target_sample_rate:
                         cmd.extend(['-ar', str(target_sample_rate)])
@@ -307,7 +323,12 @@ class AudioProcessor:
                     cmd.append(output_path)
 
                     # Run conversion
-                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    result = subprocess.run(  # nosec B603
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
                     if result.returncode != 0:
                         raise RuntimeError(f"ffmpeg conversion failed: {result.stderr}")
 
@@ -323,7 +344,7 @@ class AudioProcessor:
                     Path(output_path).unlink(missing_ok=True)
 
         except _AUDIO_PROCESS_EXCEPTIONS as e:
-            logger.error(f"Audio conversion failed: {e}")
+            logger.error(f"Audio conversion failed ({type(e).__name__})")
             return audio_bytes  # Return original if conversion fails
 
     async def convert_audio_async(
@@ -406,7 +427,7 @@ class AudioProcessor:
                 Path(tmp_path).unlink(missing_ok=True)
 
         except _AUDIO_PROCESS_EXCEPTIONS as e:
-            logger.error(f"Failed to extract clean segment: {e}")
+            logger.error("Failed to extract clean segment ({})", type(e).__name__)
             return audio_bytes
 
 
@@ -461,7 +482,7 @@ def process_voice_reference(
         return audio_bytes, None
 
     except _AUDIO_PROCESS_EXCEPTIONS as e:
-        logger.error(f"Failed to process voice reference: {e}")
+        logger.error("Failed to process voice reference ({})", type(e).__name__)
         return None, str(e)
 
 
@@ -509,7 +530,7 @@ async def process_voice_reference_async(
         return audio_bytes, None
 
     except _AUDIO_PROCESS_EXCEPTIONS as e:
-        logger.error(f"Failed to process voice reference (async): {e}")
+        logger.error("Failed to process voice reference (async) ({})", type(e).__name__)
         return None, str(e)
 
 def split_text_into_chunks(

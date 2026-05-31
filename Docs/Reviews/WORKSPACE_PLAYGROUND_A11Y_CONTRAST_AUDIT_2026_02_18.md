@@ -1,7 +1,7 @@
 # Workspace Playground Accessibility Contrast Audit (Category 11 Stage 3)
 
 Date: 2026-02-18  
-Scope: `apps/packages/ui/src/components/Option/WorkspacePlayground/`
+Scope: `apps/packages/ui/src/components/Option/ResearchWorkspace/`
 
 ## Checklist
 

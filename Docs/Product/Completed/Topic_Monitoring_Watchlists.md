@@ -7,7 +7,7 @@ Goal: Provide a configurable, privacy-respecting content monitoring feature that
 - Scopes: global (all users), per-user; basic support for per-team and per-org when caller provides membership.
 - Integration points: chat input and output; ingestion; notes (create/update/bulk); RAG search (unified/simple/advanced). Hooks emit alerts but NEVER block content.
 - Alert storage and retrieval API with mark-as-read.
-- Admin endpoints to manage watchlists and list alerts.
+- Operational endpoints to manage watchlists and list alerts, gated by monitoring permissions.
 
 ## Non-Goals (Phase 1)
 - Email/SMS/Slack/webhook delivery (planned in Phase 2).
@@ -65,12 +65,19 @@ Goal: Provide a configurable, privacy-respecting content monitoring feature that
 - Config (optional): `tldw_Server_API/Config_Files/monitoring_watchlists.json`
 
 ## API Endpoints (Phase 1)
-- `GET  /api/v1/monitoring/watchlists`        list watchlists (admin)
-- `POST /api/v1/monitoring/watchlists`        create/update watchlist (admin)
-- `DELETE /api/v1/monitoring/watchlists/{id}` delete watchlist (admin)
-- `GET  /api/v1/monitoring/alerts`            list alerts (admin; filters: user_id, since, unread)
-- `POST /api/v1/monitoring/alerts/{id}/read`  mark alert as read (admin)
-- `POST /api/v1/monitoring/reload`            reload config file (admin)
+- `GET  /api/v1/monitoring/watchlists`        list watchlists (requires `system.logs`)
+- `POST /api/v1/monitoring/watchlists`        create/update watchlist (requires `system.logs`)
+- `DELETE /api/v1/monitoring/watchlists/{id}` delete watchlist (requires `system.logs`)
+- `GET  /api/v1/monitoring/alerts`            list alerts (requires `system.logs`; filters: user_id, since, unread)
+- `POST /api/v1/monitoring/alerts/{id}/read`  mark alert as read (requires `system.logs`)
+- `POST /api/v1/monitoring/alerts/{id}/acknowledge` acknowledge alert (requires `system.logs`)
+- `DELETE /api/v1/monitoring/alerts/{id}` dismiss alert (requires `system.logs`)
+- `POST /api/v1/monitoring/reload`            reload config file (requires `system.logs`)
+
+## Permission Model
+- `/api/v1/monitoring/*` routes require `system.logs`. These are operational monitoring routes under the non-`/admin` prefix, not anonymous or end-user public routes. Admin-role principals also pass through the shared AuthNZ admin bypass.
+- `/api/v1/admin/monitoring/*` routes inherit the admin role gate from the `/api/v1/admin` router. They are the control-plane surface for shared alert rules, overlay mutations, and alert history.
+- There is no unauthenticated public monitoring surface. Public monitoring means non-`/admin` prefix, not anonymous access.
 
 ## Reload Semantics (Phase 1)
 - Default mode is `upsert` only. No deletes or disables unless explicitly requested.
@@ -96,7 +103,7 @@ Monitoring emits alerts without changing moderation behavior or endpoint results
 - If a chunk is deduped, skip alert creation; otherwise store the similarity metrics in `metadata`.
 
 ## Security & Privacy
-- Admin-only APIs. Extend to org/team leads later.
+- Monitoring APIs are AuthNZ claim-gated. Extend to org/team leads later.
 - Opt-in via config or explicit creation of watchlists.
 - Store minimal snippets (e.g., first 200 chars around the match).
 - Local-first by default; webhook/email delivery is attempted only when operators configure those channels.
@@ -105,15 +112,24 @@ Monitoring emits alerts without changing moderation behavior or endpoint results
 - Local JSONL file sink gated by severity threshold.
 - Topic-alert notifications may also make best-effort webhook/email attempts when configured.
 - Generic notifications use the JSONL sink plus optional webhook dispatch; they do not send email in the current batch.
-- Digest modes buffer items in memory, and `flush_digest()` currently clears buffered items and returns the count only.
+- Topic-alert notifications sent through `notify()` remain immediate. Digest mode applies to generic/guardian payloads routed through `notify_or_batch()`.
+- Digest modes buffer generic/guardian items in memory by recipient. `hourly` and `daily` select the batching bucket; they do not run their own scheduler, so callers invoke `flush_digest()` at the intended cadence.
+- On flush, each selected recipient gets one compiled `monitoring_digest` payload per recipient through the generic notification path. Generic notifications use the JSONL sink plus optional webhook dispatch, so digest delivery follows that same local-first path.
+- `flush_digest()` returns the number of buffered items successfully processed. Failed digest deliveries are requeued for a later flush instead of being dropped; webhook dispatch keeps the existing best-effort retry behavior behind the generic notification path.
 - Configure via env or config:
-  - `MONITORING_NOTIFY_ENABLED`, `MONITORING_NOTIFY_MIN_SEVERITY`, `MONITORING_NOTIFY_FILE`
+  - `MONITORING_NOTIFY_ENABLED`, `MONITORING_NOTIFY_MIN_SEVERITY`, `MONITORING_NOTIFY_FILE`, `MONITORING_NOTIFY_DIGEST_MODE`
   - `MONITORING_NOTIFY_WEBHOOK_URL`, `MONITORING_NOTIFY_EMAIL_TO`, `MONITORING_NOTIFY_SMTP_HOST`, `MONITORING_NOTIFY_EMAIL_FROM`
 
 ## Alert Lifecycle
-- `POST /api/v1/monitoring/alerts/{id}/read` and `POST /api/v1/monitoring/alerts/{id}/acknowledge` currently return the same minimal `{status, id}` acknowledgement.
-- `DELETE /api/v1/monitoring/alerts/{id}` returns the same minimal acknowledgement after dismissing the alert.
-- Re-list alerts for authoritative merged state after any mutation.
+- Mutation responses include the authoritative merged alert state as `{status, id, item}`.
+- `read` marks the runtime alert as read without setting `acknowledged_at`.
+- `acknowledge` marks the runtime alert as read and records `acknowledged_at`.
+- `dismiss` marks the runtime alert as read and records `dismissed_at`.
+
+## Admin Overlay Identity Contract
+- Admin overlay mutation endpoints (`assign`, `snooze`, and `escalate`) only accept runtime-backed `alert:<id>` identities.
+- The referenced runtime alert row must exist in the monitoring alerts database before overlay state or history events are written.
+- Overlay-only identities such as `fingerprint:*` are not a public mutation contract; operators should create or locate the runtime alert first, then mutate its `alert:<id>` identity.
 
 ## Phase 2 (planned)
 - Delivery channels: email, webhook, Slack.

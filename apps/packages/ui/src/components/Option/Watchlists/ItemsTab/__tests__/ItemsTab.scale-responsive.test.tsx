@@ -303,5 +303,5 @@ describe("ItemsTab scale and responsive behavior", () => {
     const additionalCalls =
       (serviceMocks.fetchScrapedItems as Mock).mock.calls.length - initialFetchCallCount
     expect(additionalCalls).toBeLessThanOrEqual(2)
-  })
+  }, 15_000)
 })

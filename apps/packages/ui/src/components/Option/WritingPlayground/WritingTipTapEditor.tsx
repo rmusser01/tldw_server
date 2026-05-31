@@ -9,13 +9,16 @@ import { AIAnnotationExtension } from "./extensions/AIAnnotationExtension"
 import { tipTapJsonToPlainText } from "./writing-tiptap-utils"
 import {
   createTipTapEditorAdapter,
-  type WritingEditorAdapter
+  getTipTapSelection,
+  type WritingEditorAdapter,
+  type WritingEditorSelection
 } from "./writing-editor-adapter"
 
 export type WritingTipTapEditorProps = {
   content: JSONContent | null
   onContentChange: (json: JSONContent, plainText: string) => void
   onAdapterReady?: (adapter: WritingEditorAdapter | null) => void
+  onSelectionChange?: (selection: WritingEditorSelection) => void
   editable?: boolean
   placeholder?: string
   className?: string
@@ -25,6 +28,7 @@ export function WritingTipTapEditor({
   content,
   onContentChange,
   onAdapterReady,
+  onSelectionChange,
   editable = true,
   placeholder = "Start writing...",
   className,
@@ -52,11 +56,19 @@ export function WritingTipTapEditor({
     [onContentChange],
   )
 
+  const handleSelectionUpdate = useCallback(
+    ({ editor }: { editor: Editor }) => {
+      onSelectionChange?.(getTipTapSelection(editor))
+    },
+    [onSelectionChange],
+  )
+
   const editor = useEditor({
     extensions,
     content: content || { type: "doc", content: [{ type: "paragraph" }] },
     editable,
     onUpdate: handleUpdate,
+    onSelectionUpdate: handleSelectionUpdate,
   })
 
   const adapter = useMemo(
@@ -77,7 +89,7 @@ export function WritingTipTapEditor({
     const currentJson = JSON.stringify(editor.getJSON())
     const nextJson = JSON.stringify(nextContent)
     if (currentJson !== nextJson) {
-      editor.commands.setContent(nextContent, false)
+      editor.commands.setContent(nextContent, { emitUpdate: false })
     }
   }, [editor, content])
 

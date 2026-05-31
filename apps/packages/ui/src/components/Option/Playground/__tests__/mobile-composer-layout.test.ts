@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   computeKeyboardInsetPx,
   isKeyboardLikelyOpen,
-  resolveMobileComposerViewportState
+  resolveMobileComposerViewportState,
+  resolveStickyComposerTextareaMaxHeight
 } from "../mobile-composer-layout"
 
 describe("mobile-composer-layout", () => {
@@ -42,5 +43,16 @@ describe("mobile-composer-layout", () => {
       keyboardInsetPx: 0,
       keyboardOpen: false
     })
+  })
+
+  it("keeps sticky composer textarea height below the viewport cap", () => {
+    expect(
+      resolveStickyComposerTextareaMaxHeight({
+        viewportHeightPx: 480,
+        keyboardInsetPx: 0,
+        isMobileViewport: true,
+        defaultMaxHeightPx: 480
+      })
+    ).toBe(220)
   })
 })

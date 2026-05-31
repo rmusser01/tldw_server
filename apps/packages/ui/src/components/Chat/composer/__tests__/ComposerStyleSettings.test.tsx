@@ -48,6 +48,22 @@ describe("ComposerStyleSettings", () => {
     ).toBe("v3")
   })
 
+  it("activates focused variant cards with Space and Enter", () => {
+    render(<ComposerStyleSettings />)
+    const v3 = screen.getByRole("radio", { name: /split brief/i })
+    const v5 = screen.getByRole("radio", { name: /radial command/i })
+
+    v3.focus()
+    expect(document.activeElement).toBe(v3)
+    fireEvent.keyDown(v3, { key: " ", code: "Space" })
+    expect(v3.getAttribute("aria-checked")).toBe("true")
+
+    v5.focus()
+    expect(document.activeElement).toBe(v5)
+    fireEvent.keyDown(v5, { key: "Enter", code: "Enter" })
+    expect(v5.getAttribute("aria-checked")).toBe("true")
+  })
+
   it("only one card is checked at a time", () => {
     render(<ComposerStyleSettings />)
     fireEvent.click(screen.getByRole("radio", { name: /split brief/i }))

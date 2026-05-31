@@ -171,6 +171,64 @@
       ]
     }
   ],
+  "acp.runs.aggregate": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Aggregate token usage and costs across ACP runs.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.aggregate_acp_runs",
+      "methods": [
+        "GET"
+      ],
+      "name": "aggregate_acp_runs",
+      "path": "/api/v1/acp/runs/aggregate",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    }
+  ],
+  "acp.runs.list": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Query ACP run history with optional filters.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.list_acp_runs",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_acp_runs",
+      "path": "/api/v1/acp/runs",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    }
+  ],
   "acp.sessions.manage": [
     {
       "dependencies": [
@@ -293,6 +351,33 @@
           "type": "dependency"
         }
       ],
+      "description": "List available checkpoints for a sandbox-backed session.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_session_checkpoints",
+      "methods": [
+        "GET"
+      ],
+      "name": "acp_session_checkpoints",
+      "path": "/api/v1/acp/sessions/{session_id}/checkpoints",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
       "description": "Fork an ACP session from a specific message index.",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_session_fork",
       "methods": [
@@ -347,6 +432,33 @@
           "type": "dependency"
         }
       ],
+      "description": "Rollback sandbox state to a checkpoint.\n\nProvide either ``to_sequence`` (finds nearest checkpoint at or before\nthat sequence) or ``to_snapshot_id`` (restores directly).  Only works\nfor sandbox-backed sessions with an active CheckpointConsumer.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_session_rollback",
+      "methods": [
+        "POST"
+      ],
+      "name": "acp_session_rollback",
+      "path": "/api/v1/acp/sessions/{session_id}/rollback",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
       "description": "",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_session_teardown",
       "methods": [
@@ -354,6 +466,35 @@
       ],
       "name": "acp_session_teardown",
       "path": "/api/v1/acp/sessions/{session_id}/teardown",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    }
+  ],
+  "acp.sessions.prompt_async": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Submit an ACP prompt for asynchronous execution.\n\nReturns a ``task_id`` that can be polled via\n``GET /api/v1/acp/tasks/{task_id}`` for status and results.\n\nTasks are submitted to the global Scheduler and persisted in the\ndatabase, so they survive process restarts and are visible from\nany worker.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_prompt_async",
+      "methods": [
+        "POST"
+      ],
+      "name": "acp_prompt_async",
+      "path": "/api/v1/acp/sessions/prompt-async",
       "rate_limit_resources": [],
       "summary": null,
       "tags": [
@@ -538,6 +679,33 @@
           "type": "dependency"
         }
       ],
+      "description": "Stream ACP session events as Server-Sent Events.\n\nEvents are formatted as typed SSE frames with ``event: {kind}`` and\n``data: {json}`` fields.  A heartbeat comment is sent every 15 seconds\nto keep the connection alive through proxies and load balancers.\n\nUse the *last_event_id* query parameter to replay buffered events from\na given sequence number (e.g. for reconnection catch-up).",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_session_events_stream",
+      "methods": [
+        "GET"
+      ],
+      "name": "acp_session_events_stream",
+      "path": "/api/v1/acp/sessions/{session_id}/events/stream",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
       "description": "",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_session_reconciliation",
       "methods": [
@@ -628,6 +796,35 @@
       ],
       "name": "acp_setup_guide",
       "path": "/api/v1/acp/setup-guide",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    }
+  ],
+  "acp.tasks.status": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Poll for the status and result of an async ACP task.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_task_status",
+      "methods": [
+        "GET"
+      ],
+      "name": "acp_task_status",
+      "path": "/api/v1/acp/tasks/{task_id}",
       "rate_limit_resources": [],
       "summary": null,
       "tags": [
@@ -1364,6 +1561,60 @@
           "type": "dependency"
         }
       ],
+      "description": "Query ACP run history with optional filters.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.list_acp_runs",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_acp_runs",
+      "path": "/api/v1/acp/runs",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Aggregate token usage and costs across ACP runs.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.aggregate_acp_runs",
+      "methods": [
+        "GET"
+      ],
+      "name": "aggregate_acp_runs",
+      "path": "/api/v1/acp/runs/aggregate",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
       "description": "List ACP sessions for the authenticated user.",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_list_sessions",
       "methods": [
@@ -1499,6 +1750,33 @@
           "type": "dependency"
         }
       ],
+      "description": "Submit an ACP prompt for asynchronous execution.\n\nReturns a ``task_id`` that can be polled via\n``GET /api/v1/acp/tasks/{task_id}`` for status and results.\n\nTasks are submitted to the global Scheduler and persisted in the\ndatabase, so they survive process restarts and are visible from\nany worker.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_prompt_async",
+      "methods": [
+        "POST"
+      ],
+      "name": "acp_prompt_async",
+      "path": "/api/v1/acp/sessions/prompt-async",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
       "description": "Query artifacts emitted in ACP session messages.",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_session_artifacts",
       "methods": [
@@ -1533,6 +1811,33 @@
       ],
       "name": "acp_session_audit",
       "path": "/api/v1/acp/sessions/{session_id}/audit",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "List available checkpoints for a sandbox-backed session.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_session_checkpoints",
+      "methods": [
+        "GET"
+      ],
+      "name": "acp_session_checkpoints",
+      "path": "/api/v1/acp/sessions/{session_id}/checkpoints",
       "rate_limit_resources": [],
       "summary": null,
       "tags": [
@@ -1634,6 +1939,33 @@
           "type": "dependency"
         }
       ],
+      "description": "Stream ACP session events as Server-Sent Events.\n\nEvents are formatted as typed SSE frames with ``event: {kind}`` and\n``data: {json}`` fields.  A heartbeat comment is sent every 15 seconds\nto keep the connection alive through proxies and load balancers.\n\nUse the *last_event_id* query parameter to replay buffered events from\na given sequence number (e.g. for reconnection catch-up).",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_session_events_stream",
+      "methods": [
+        "GET"
+      ],
+      "name": "acp_session_events_stream",
+      "path": "/api/v1/acp/sessions/{session_id}/events/stream",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
       "description": "Fork an ACP session from a specific message index.",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_session_fork",
       "methods": [
@@ -1695,6 +2027,33 @@
       ],
       "name": "acp_session_reconciliation",
       "path": "/api/v1/acp/sessions/{session_id}/reconciliation",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Rollback sandbox state to a checkpoint.\n\nProvide either ``to_sequence`` (finds nearest checkpoint at or before\nthat sequence) or ``to_snapshot_id`` (restores directly).  Only works\nfor sandbox-backed sessions with an active CheckpointConsumer.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_session_rollback",
+      "methods": [
+        "POST"
+      ],
+      "name": "acp_session_rollback",
+      "path": "/api/v1/acp/sessions/{session_id}/rollback",
       "rate_limit_resources": [],
       "summary": null,
       "tags": [
@@ -1803,6 +2162,33 @@
       ],
       "name": "acp_setup_guide",
       "path": "/api/v1/acp/setup-guide",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "acp",
+        "acp"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Poll for the status and result of an async ACP task.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.agent_client_protocol.acp_task_status",
+      "methods": [
+        "GET"
+      ],
+      "name": "acp_task_status",
+      "path": "/api/v1/acp/tasks/{task_id}",
       "rate_limit_resources": [],
       "summary": null,
       "tags": [
@@ -2363,6 +2749,677 @@
           "type": "dependency"
         },
         {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "personalization_deps.get_usage_event_logger",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Execute a single non-streaming speech chat turn:\n\n  - Accept base64-encoded user audio.\n  - Run STT to obtain a transcript.\n  - Call the LLM with recent conversation history.\n  - Persist user/assistant messages into ChaChaNotes.\n  - Run TTS on the assistant reply and return base64-encoded audio.\n\nThis endpoint focuses on the v1 non-streaming path; streaming speech chat\nis handled by a separate WebSocket endpoint in v2.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_streaming.audio_chat_turn",
+      "methods": [
+        "POST"
+      ],
+      "name": "audio_chat_turn",
+      "path": "/api/v1/audio/chat",
+      "rate_limit_resources": [],
+      "summary": "Non-streaming Speech-to-Speech chat (STT \u2192 LLM \u2192 TTS)",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_history.list_tts_history",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_tts_history",
+      "path": "/api/v1/audio/history",
+      "rate_limit_resources": [],
+      "summary": "List TTS history entries.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_history.delete_tts_history_entry",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_tts_history_entry",
+      "path": "/api/v1/audio/history/{history_id}",
+      "rate_limit_resources": [],
+      "summary": "Delete a TTS history entry (soft delete).",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_history.get_tts_history_entry",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_tts_history_entry",
+      "path": "/api/v1/audio/history/{history_id}",
+      "rate_limit_resources": [],
+      "summary": "Get TTS history entry details.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_history.update_tts_history_entry",
+      "methods": [
+        "PATCH"
+      ],
+      "name": "update_tts_history_entry",
+      "path": "/api/v1/audio/history/{history_id}",
+      "rate_limit_resources": [],
+      "summary": "Update TTS history entry fields.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.try_get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "personalization_deps.get_usage_event_logger",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Generates audio from the input text.\n\nRequires authentication via Bearer token in Authorization header.\nRate limited to 10 requests per minute per IP address.\n\nInput is sanitized by `TTSInputValidator`, which normalizes Unicode,\nstrips HTML, and removes or rejects potentially dangerous patterns\n(e.g., obvious SQL/command/FS injection attempts). In strict mode\n(the default), such patterns result in HTTP 400 errors; in relaxed\nmode (`strict_validation` set to false via TTS config), dangerous\nsubstrings are stripped and the request is processed if non-empty.\n\nDocs: `Docs/Code_Documentation/Ingestion_Pipeline_Audio.md`,\n`Docs/STT-TTS/TTS-SETUP-GUIDE.md` (sanitization and error semantics).",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.create_speech",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_speech",
+      "path": "/api/v1/audio/speech",
+      "rate_limit_resources": [],
+      "summary": "Generates audio from text input.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_job_manager",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Submit a long-form TTS job and return job id.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.create_speech_job",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_speech_job",
+      "path": "/api/v1/audio/speech/jobs",
+      "rate_limit_resources": [],
+      "summary": "Submit a long-form TTS job",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_speech_job_artifacts",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_speech_job_artifacts",
+      "path": "/api/v1/audio/speech/jobs/{job_id}/artifacts",
+      "rate_limit_resources": [],
+      "summary": "List artifacts for a TTS job",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "personalization_deps.get_usage_event_logger",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.create_speech_metadata",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_speech_metadata",
+      "path": "/api/v1/audio/speech/metadata",
+      "rate_limit_resources": [],
+      "summary": "Returns alignment metadata for a TTS request.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_auth_principal",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_db_transaction",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps._check_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps.get_billing_org_id",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Transcribes audio into the input language.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions.create_transcription",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_transcription",
+      "path": "/api/v1/audio/transcriptions",
+      "rate_limit_resources": [],
+      "summary": "Transcribes audio into text (OpenAI Compatible)",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_auth_principal",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_db_transaction",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps._check_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps.get_billing_org_id",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "personalization_deps.get_usage_event_logger",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Translates audio into English.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions.create_translation",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_translation",
+      "path": "/api/v1/audio/translations",
+      "rate_limit_resources": [],
+      "summary": "Translates audio into English (OpenAI Compatible)",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "List all custom voice samples uploaded by the user.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.list_voices",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_voices",
+      "path": "/api/v1/audio/voices",
+      "rate_limit_resources": [],
+      "summary": "List user's custom voices",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Encode provider-specific artifacts for a stored voice reference.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.encode_voice_reference",
+      "methods": [
+        "POST"
+      ],
+      "name": "encode_voice_reference",
+      "path": "/api/v1/audio/voices/encode",
+      "rate_limit_resources": [],
+      "summary": "Encode stored voice reference for a provider",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Upload a custom voice sample for use with TTS.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.upload_voice",
+      "methods": [
+        "POST"
+      ],
+      "name": "upload_voice",
+      "path": "/api/v1/audio/voices/upload",
+      "rate_limit_resources": [],
+      "summary": "Upload a custom voice sample",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Delete a custom voice sample.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.delete_voice",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_voice",
+      "path": "/api/v1/audio/voices/{voice_id}",
+      "rate_limit_resources": [],
+      "summary": "Delete a custom voice",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Get detailed information about a specific voice.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.get_voice_details",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_voice_details",
+      "path": "/api/v1/audio/voices/{voice_id}",
+      "rate_limit_resources": [],
+      "summary": "Get voice details",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Generate a short preview of a custom voice.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.preview_voice",
+      "methods": [
+        "POST"
+      ],
+      "name": "preview_voice",
+      "path": "/api/v1/audio/voices/{voice_id}/preview",
+      "rate_limit_resources": [],
+      "summary": "Generate voice preview",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "ChaCha_Notes_DB_Deps.get_chacha_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
           "id": "auth_deps._checker",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
@@ -2451,6 +3508,16 @@
         {
           "id": "auth_deps.get_auth_principal",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps._check_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps.get_billing_org_id",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
           "type": "dependency"
         },
         {
@@ -3390,6 +4457,837 @@
       ]
     }
   ],
+  "audio.chat": [
+    {
+      "dependencies": [
+        {
+          "id": "ChaCha_Notes_DB_Deps.get_chacha_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "personalization_deps.get_usage_event_logger",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Execute a single non-streaming speech chat turn:\n\n  - Accept base64-encoded user audio.\n  - Run STT to obtain a transcript.\n  - Call the LLM with recent conversation history.\n  - Persist user/assistant messages into ChaChaNotes.\n  - Run TTS on the assistant reply and return base64-encoded audio.\n\nThis endpoint focuses on the v1 non-streaming path; streaming speech chat\nis handled by a separate WebSocket endpoint in v2.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_streaming.audio_chat_turn",
+      "methods": [
+        "POST"
+      ],
+      "name": "audio_chat_turn",
+      "path": "/api/v1/audio/chat",
+      "rate_limit_resources": [],
+      "summary": "Non-streaming Speech-to-Speech chat (STT \u2192 LLM \u2192 TTS)",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.history": [
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_history.list_tts_history",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_tts_history",
+      "path": "/api/v1/audio/history",
+      "rate_limit_resources": [],
+      "summary": "List TTS history entries.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_history.delete_tts_history_entry",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_tts_history_entry",
+      "path": "/api/v1/audio/history/{history_id}",
+      "rate_limit_resources": [],
+      "summary": "Delete a TTS history entry (soft delete).",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_history.get_tts_history_entry",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_tts_history_entry",
+      "path": "/api/v1/audio/history/{history_id}",
+      "rate_limit_resources": [],
+      "summary": "Get TTS history entry details.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_history.update_tts_history_entry",
+      "methods": [
+        "PATCH"
+      ],
+      "name": "update_tts_history_entry",
+      "path": "/api/v1/audio/history/{history_id}",
+      "rate_limit_resources": [],
+      "summary": "Update TTS history entry fields.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.speech": [
+    {
+      "dependencies": [
+        {
+          "id": "DB_Deps.try_get_media_db_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "personalization_deps.get_usage_event_logger",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Generates audio from the input text.\n\nRequires authentication via Bearer token in Authorization header.\nRate limited to 10 requests per minute per IP address.\n\nInput is sanitized by `TTSInputValidator`, which normalizes Unicode,\nstrips HTML, and removes or rejects potentially dangerous patterns\n(e.g., obvious SQL/command/FS injection attempts). In strict mode\n(the default), such patterns result in HTTP 400 errors; in relaxed\nmode (`strict_validation` set to false via TTS config), dangerous\nsubstrings are stripped and the request is processed if non-empty.\n\nDocs: `Docs/Code_Documentation/Ingestion_Pipeline_Audio.md`,\n`Docs/STT-TTS/TTS-SETUP-GUIDE.md` (sanitization and error semantics).",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.create_speech",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_speech",
+      "path": "/api/v1/audio/speech",
+      "rate_limit_resources": [],
+      "summary": "Generates audio from text input.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_job_manager",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Submit a long-form TTS job and return job id.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.create_speech_job",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_speech_job",
+      "path": "/api/v1/audio/speech/jobs",
+      "rate_limit_resources": [],
+      "summary": "Submit a long-form TTS job",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_speech_job_artifacts",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_speech_job_artifacts",
+      "path": "/api/v1/audio/speech/jobs/{job_id}/artifacts",
+      "rate_limit_resources": [],
+      "summary": "List artifacts for a TTS job",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "personalization_deps.get_usage_event_logger",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.create_speech_metadata",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_speech_metadata",
+      "path": "/api/v1/audio/speech/metadata",
+      "rate_limit_resources": [],
+      "summary": "Returns alignment metadata for a TTS request.",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.tokenizer": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tokenizer.decode_audio_tokenizer",
+      "methods": [
+        "POST"
+      ],
+      "name": "decode_audio_tokenizer",
+      "path": "/api/v1/audio/tokenizer/decode",
+      "rate_limit_resources": [],
+      "summary": "Decode Qwen3-TTS tokens into audio",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tokenizer.encode_audio_tokenizer",
+      "methods": [
+        "POST"
+      ],
+      "name": "encode_audio_tokenizer",
+      "path": "/api/v1/audio/tokenizer/encode",
+      "rate_limit_resources": [],
+      "summary": "Encode audio into Qwen3-TTS tokens",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.tokenizer.decode": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tokenizer.decode_audio_tokenizer",
+      "methods": [
+        "POST"
+      ],
+      "name": "decode_audio_tokenizer",
+      "path": "/api/v1/audio/tokenizer/decode",
+      "rate_limit_resources": [],
+      "summary": "Decode Qwen3-TTS tokens into audio",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.tokenizer.encode": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tokenizer.encode_audio_tokenizer",
+      "methods": [
+        "POST"
+      ],
+      "name": "encode_audio_tokenizer",
+      "path": "/api/v1/audio/tokenizer/encode",
+      "rate_limit_resources": [],
+      "summary": "Encode audio into Qwen3-TTS tokens",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.transcriptions": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_auth_principal",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_db_transaction",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps._check_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps.get_billing_org_id",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Transcribes audio into the input language.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions.create_transcription",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_transcription",
+      "path": "/api/v1/audio/transcriptions",
+      "rate_limit_resources": [],
+      "summary": "Transcribes audio into text (OpenAI Compatible)",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.translations": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_auth_principal",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_db_transaction",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps._check_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps.get_billing_org_id",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "personalization_deps.get_usage_event_logger",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.personalization_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Translates audio into English.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions.create_translation",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_translation",
+      "path": "/api/v1/audio/translations",
+      "rate_limit_resources": [],
+      "summary": "Translates audio into English (OpenAI Compatible)",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.voices.delete": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Delete a custom voice sample.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.delete_voice",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_voice",
+      "path": "/api/v1/audio/voices/{voice_id}",
+      "rate_limit_resources": [],
+      "summary": "Delete a custom voice",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.voices.encode": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Encode provider-specific artifacts for a stored voice reference.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.encode_voice_reference",
+      "methods": [
+        "POST"
+      ],
+      "name": "encode_voice_reference",
+      "path": "/api/v1/audio/voices/encode",
+      "rate_limit_resources": [],
+      "summary": "Encode stored voice reference for a provider",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.voices.get": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Get detailed information about a specific voice.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.get_voice_details",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_voice_details",
+      "path": "/api/v1/audio/voices/{voice_id}",
+      "rate_limit_resources": [],
+      "summary": "Get voice details",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.voices.list": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "List all custom voice samples uploaded by the user.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.list_voices",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_voices",
+      "path": "/api/v1/audio/voices",
+      "rate_limit_resources": [],
+      "summary": "List user's custom voices",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.voices.preview": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Generate a short preview of a custom voice.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.preview_voice",
+      "methods": [
+        "POST"
+      ],
+      "name": "preview_voice",
+      "path": "/api/v1/audio/voices/{voice_id}/preview",
+      "rate_limit_resources": [],
+      "summary": "Generate voice preview",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
+  "audio.voices.upload": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Upload a custom voice sample for use with TTS.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.upload_voice",
+      "methods": [
+        "POST"
+      ],
+      "name": "upload_voice",
+      "path": "/api/v1/audio/voices/upload",
+      "rate_limit_resources": [],
+      "summary": "Upload a custom voice sample",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    }
+  ],
   "chat.analytics": [
     {
       "dependencies": [
@@ -3496,6 +5394,16 @@
         {
           "id": "auth_deps.get_auth_principal",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps._check_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "billing_deps.get_billing_org_id",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
           "type": "dependency"
         },
         {
@@ -5486,12 +7394,88 @@
         }
       ],
       "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.workflows.run_adhoc",
+      "methods": [
+        "POST"
+      ],
+      "name": "run_adhoc",
+      "path": "/api/v1/workflows/run",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "workflows",
+        "workflows"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "Audit_DB_Deps.get_audit_service_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "workflows._get_db",
+          "module": "tldw_Server_API.app.api.v1.endpoints.workflows",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.workflows.run_saved",
       "methods": [
         "POST"
       ],
       "name": "run_saved",
       "path": "/api/v1/workflows/{workflow_id}/run",
+      "rate_limit_resources": [],
+      "summary": null,
+      "tags": [
+        "workflows",
+        "workflows"
+      ]
+    }
+  ],
+  "workflows.run_adhoc": [
+    {
+      "dependencies": [
+        {
+          "id": "Audit_DB_Deps.get_audit_service_for_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps",
+          "type": "dependency"
+        },
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "workflows._get_db",
+          "module": "tldw_Server_API.app.api.v1.endpoints.workflows",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.workflows.run_adhoc",
+      "methods": [
+        "POST"
+      ],
+      "name": "run_adhoc",
+      "path": "/api/v1/workflows/run",
       "rate_limit_resources": [],
       "summary": null,
       "tags": [

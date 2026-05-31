@@ -1,6 +1,8 @@
 import React from "react"
-import { Tag, Button, Space, Spin, Alert } from "antd"
+import { Tag, Button, Space } from "antd"
 import { RefreshCw, Square } from "lucide-react"
+import { LoadingState } from "@/components/ui/feedback/LoadingState"
+import { Alert } from "@/components/ui/primitives/Alert"
 import { sanitizeAdminErrorMessage } from "./admin-error-utils"
 
 type StatusState = "running" | "online" | "stopped" | "offline" | "loading" | "active" | "inactive" | "unknown"
@@ -69,8 +71,7 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({
   if (loading) {
     return (
       <div className={`flex items-center gap-2 rounded-lg border border-border bg-bg p-3 ${className || ""}`}>
-        <Spin size="small" />
-        <span className="text-sm text-text-muted">Loading status...</span>
+        <LoadingState mode="inline" size="sm" label="Loading status..." />
       </div>
     )
   }
@@ -82,19 +83,13 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({
     )
     return (
       <Alert
-        type="error"
+        variant="error"
         title="Status Error"
-        description={safeError}
-        showIcon
         className={className}
-        action={
-          onRefresh && (
-            <Button size="small" onClick={onRefresh} icon={<RefreshCw size={14} />}>
-              Retry
-            </Button>
-          )
-        }
-      />
+        action={onRefresh ? { label: "Retry", onClick: onRefresh } : undefined}
+      >
+        {safeError}
+      </Alert>
     )
   }
 

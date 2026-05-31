@@ -1,7 +1,8 @@
 import React from "react"
-import { Tag } from "antd"
-import { Bookmark, BookOpen, CheckCircle, Archive } from "lucide-react"
+import { Bookmark, BookOpen, CheckCircle, Archive, type LucideIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 import type { ReadingStatus } from "@/types/collections"
 
 interface StatusBadgeProps {
@@ -11,29 +12,41 @@ interface StatusBadgeProps {
 
 const STATUS_CONFIG: Record<
   ReadingStatus,
-  { color: string; icon: React.ComponentType<{ className?: string }>; labelKey: string }
+  {
+    stateKey: DesignSystemStateKey
+    icon: LucideIcon
+    labelKey: string
+  }
 > = {
   saved: {
-    color: "blue",
+    stateKey: "ready",
     icon: Bookmark,
     labelKey: "saved"
   },
   reading: {
-    color: "orange",
+    stateKey: "retrying",
     icon: BookOpen,
     labelKey: "reading"
   },
   read: {
-    color: "green",
+    stateKey: "ready",
     icon: CheckCircle,
     labelKey: "read"
   },
   archived: {
-    color: "default",
+    stateKey: "empty",
     icon: Archive,
     labelKey: "archived"
   }
 }
+
+const SEVERITY_BADGE_VARIANTS = {
+  success: "success",
+  error: "danger",
+  warning: "warning",
+  info: "info",
+  neutral: "secondary",
+} satisfies Record<ReturnType<typeof getDesignSystemState>["severity"], BadgeVariant>
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({
   status,
@@ -41,15 +54,20 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
 }) => {
   const { t } = useTranslation("collections")
   const config = STATUS_CONFIG[status]
+  const state = getDesignSystemState(config.stateKey)
   const Icon = config.icon
 
   return (
-    <Tag
-      color={config.color}
-      className={`flex items-center gap-1 ${size === "small" ? "text-xs py-0" : ""}`}
+    <Badge
+      variant={SEVERITY_BADGE_VARIANTS[state.severity]}
+      size={size === "small" ? "sm" : "md"}
     >
-      <Icon className={size === "small" ? "h-3 w-3" : "h-3.5 w-3.5"} />
+      <Icon
+        className={size === "small" ? "h-3 w-3" : "h-3.5 w-3.5"}
+        data-testid={`collections-status-icon-${status}`}
+        aria-hidden
+      />
       <span>{t(`status.${config.labelKey}`, config.labelKey)}</span>
-    </Tag>
+    </Badge>
   )
 }

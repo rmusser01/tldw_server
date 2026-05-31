@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import type { MediaResultItem } from '../types'
+import { buildReadAlongSegments } from '../read-along/media-read-along-segments'
+import type { ReadAlongSegment } from '../read-along/types'
+import { parseLeadingTranscriptTiming } from '@/utils/media-transcript-display'
 
 export const LARGE_PLAIN_CONTENT_THRESHOLD_CHARS = 120_000
 export const LARGE_PLAIN_CONTENT_CHUNK_CHARS = 32_000
@@ -110,10 +113,160 @@ export interface UseTranscriptDisplayDeps {
   effectiveRenderMode: string
   shouldHideTranscriptTimings: boolean
   hasClickableTranscriptTimestamps: boolean
+  activeReadAlongSegmentId?: string | null
   contentScrollContainerRef: React.RefObject<HTMLDivElement | null>
   rootContainerRef: React.RefObject<HTMLDivElement | null>
   mediaPlayerRef: React.RefObject<HTMLMediaElement | null>
   t: (key: string, opts?: Record<string, any>) => string
+}
+
+const renderReadAlongWrappedText = (
+  text: string,
+  segments: ReadAlongSegment[],
+  activeReadAlongSegmentId: string | null | undefined
+): React.ReactNode => {
+  if (!text || segments.length === 0) return text
+
+  const visibleSegments = segments
+    .filter(
+      (segment) =>
+        segment.displayStart != null &&
+        segment.displayEnd != null &&
+        segment.displayStart >= 0 &&
+        segment.displayEnd > segment.displayStart &&
+        segment.displayStart < text.length &&
+        segment.displayEnd <= text.length
+    )
+    .sort((left, right) => left.displayStart! - right.displayStart!)
+
+  if (visibleSegments.length === 0) return text
+
+  const parts: React.ReactNode[] = []
+  let cursor = 0
+  visibleSegments.forEach((segment) => {
+    const start = segment.displayStart!
+    const end = segment.displayEnd!
+    if (start < cursor) return
+    if (start > cursor) {
+      parts.push(text.slice(cursor, start))
+    }
+    const isActive = segment.id === activeReadAlongSegmentId
+    parts.push(
+      <span
+        key={`read-along-segment-${segment.id}`}
+        data-read-along-segment-id={segment.id}
+        data-read-along-active={isActive ? 'true' : undefined}
+        className={isActive ? 'rounded bg-primary/20 px-0.5 text-text' : undefined}
+      >
+        {text.slice(start, end)}
+      </span>
+    )
+    cursor = end
+  })
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor))
+  }
+
+  return <>{parts}</>
+}
+
+const getReadAlongSegmentEndOffset = (
+  segmentId: string | null | undefined
+): number | null => {
+  if (!segmentId) return null
+  const idParts = segmentId.split(':')
+  const endValue = idParts[idParts.length - 1]
+  if (!endValue) return null
+  const endOffset = Number(endValue)
+  return Number.isFinite(endOffset) && endOffset >= 0 ? endOffset : null
+}
+
+const normalizeTranscriptSource = (value: string): string => value.replace(/\r\n/g, '\n')
+
+const getVisibleTranscriptLine = (line: string): string => {
+  const parsed = parseLeadingTranscriptTiming(line)
+  return parsed ? `${parsed.leadingWhitespace}${parsed.text}` : line
+}
+
+const getDisplayOffsetForSourceOffset = (
+  sourceContent: string,
+  displayContent: string,
+  sourceOffset: number
+): number => {
+  if (!Number.isFinite(sourceOffset) || sourceOffset <= 0) return 0
+  const normalizedSource = normalizeTranscriptSource(sourceContent)
+  if (normalizedSource === displayContent) {
+    return Math.min(displayContent.length, sourceOffset)
+  }
+  if (sourceOffset >= normalizedSource.length) return displayContent.length
+
+  const lines = normalizedSource.split('\n')
+  let currentSourceOffset = 0
+  let currentDisplayOffset = 0
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const hasLineBreak = index < lines.length - 1
+    const sourceLineLength = line.length + (hasLineBreak ? 1 : 0)
+    const displayLineLength =
+      getVisibleTranscriptLine(line).length + (hasLineBreak ? 1 : 0)
+    const nextSourceOffset = currentSourceOffset + sourceLineLength
+    const nextDisplayOffset = currentDisplayOffset + displayLineLength
+
+    if (sourceOffset <= nextSourceOffset) {
+      return Math.min(displayContent.length, nextDisplayOffset)
+    }
+
+    currentSourceOffset = nextSourceOffset
+    currentDisplayOffset = nextDisplayOffset
+  }
+
+  return displayContent.length
+}
+
+const getChunkBoundaryEnd = (requiredEnd: number, totalLength: number): number => {
+  const boundedEnd = Math.max(0, Math.min(totalLength, requiredEnd))
+  if (boundedEnd <= 0) return 0
+  return Math.min(
+    totalLength,
+    Math.ceil(boundedEnd / LARGE_PLAIN_CONTENT_CHUNK_CHARS) *
+      LARGE_PLAIN_CONTENT_CHUNK_CHARS
+  )
+}
+
+const getSourceWindowForDisplayWindow = (
+  sourceContent: string,
+  displayContent: string,
+  displayWindowLength: number
+): string => {
+  const normalizedSource = normalizeTranscriptSource(sourceContent)
+  const targetDisplayLength = Math.max(
+    0,
+    Math.min(displayContent.length, displayWindowLength)
+  )
+
+  if (targetDisplayLength >= displayContent.length) return normalizedSource
+  if (normalizedSource === displayContent) {
+    return normalizedSource.slice(0, targetDisplayLength)
+  }
+
+  const lines = normalizedSource.split('\n')
+  let sourceEnd = 0
+  let displayEnd = 0
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const hasLineBreak = index < lines.length - 1
+    sourceEnd += line.length + (hasLineBreak ? 1 : 0)
+    displayEnd += getVisibleTranscriptLine(line).length + (hasLineBreak ? 1 : 0)
+
+    if (displayEnd >= targetDisplayLength) {
+      return normalizedSource.slice(0, sourceEnd)
+    }
+  }
+
+  return normalizedSource
 }
 
 export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
@@ -124,6 +277,7 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
     effectiveRenderMode,
     shouldHideTranscriptTimings,
     hasClickableTranscriptTimestamps,
+    activeReadAlongSegmentId,
     contentScrollContainerRef,
     rootContainerRef,
     mediaPlayerRef,
@@ -131,7 +285,7 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
   } = deps
 
   const [visiblePlainContentChars, setVisiblePlainContentChars] = useState(
-    () => content.length
+    () => Math.min(displayContent.length, LARGE_PLAIN_CONTENT_CHUNK_CHARS)
   )
   const [findBarOpen, setFindBarOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
@@ -169,6 +323,65 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
       Math.max(0, Math.min(displayContent.length, visiblePlainContentChars))
     )
   }, [displayContent, shouldUseChunkedPlainRendering, visiblePlainContentChars])
+
+  useEffect(() => {
+    if (!shouldUseChunkedPlainRendering) return
+    const activeSourceEndOffset = getReadAlongSegmentEndOffset(activeReadAlongSegmentId)
+    if (activeSourceEndOffset == null) return
+    const activeDisplayEndOffset = getDisplayOffsetForSourceOffset(
+      content,
+      displayContent,
+      activeSourceEndOffset
+    )
+    const nextVisibleEnd = getChunkBoundaryEnd(activeDisplayEndOffset, displayContent.length)
+
+    setVisiblePlainContentChars((prev) => {
+      const next = Math.min(displayContent.length, Math.max(prev, nextVisibleEnd))
+      return next > prev ? next : prev
+    })
+  }, [
+    activeReadAlongSegmentId,
+    content,
+    displayContent.length,
+    displayContent,
+    shouldUseChunkedPlainRendering
+  ])
+
+  const readAlongContentWindow = useMemo(() => {
+    if (!shouldUseChunkedPlainRendering) return content
+    return getSourceWindowForDisplayWindow(
+      content,
+      displayContent,
+      visiblePlainContentChars
+    )
+  }, [
+    content,
+    displayContent,
+    shouldUseChunkedPlainRendering,
+    visiblePlainContentChars
+  ])
+
+  const readAlongDisplayContentWindow = shouldUseChunkedPlainRendering
+    ? visiblePlainContent
+    : displayContent
+
+  const readAlongSegments = useMemo(
+    () =>
+      buildReadAlongSegments({
+        mediaId: selectedMedia?.id != null ? String(selectedMedia.id) : 'unknown-media',
+        content: readAlongContentWindow,
+        displayContent: readAlongDisplayContentWindow,
+        renderMode: effectiveRenderMode,
+        hideTranscriptTimings: shouldHideTranscriptTimings
+      }),
+    [
+      effectiveRenderMode,
+      readAlongContentWindow,
+      readAlongDisplayContentWindow,
+      selectedMedia?.id,
+      shouldHideTranscriptTimings
+    ]
+  )
 
   const hasUnrenderedPlainContent =
     shouldUseChunkedPlainRendering && visiblePlainContentChars < displayContent.length
@@ -209,8 +422,16 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
         defaultValue: 'No content available'
       })
     }
-    if (!normalizedFindQuery || findMatchOffsets.length === 0) {
-      return shouldUseChunkedPlainRendering ? visiblePlainContent : displayContent
+    const plainText = shouldUseChunkedPlainRendering ? visiblePlainContent : displayContent
+    if (!normalizedFindQuery) {
+      return renderReadAlongWrappedText(
+        plainText,
+        readAlongSegments,
+        activeReadAlongSegmentId
+      )
+    }
+    if (findMatchOffsets.length === 0) {
+      return plainText
     }
 
     const parts: React.ReactNode[] = []
@@ -250,9 +471,11 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
     return <>{parts}</>
   }, [
     activeFindMatchIndex,
+    activeReadAlongSegmentId,
     displayContent,
     findMatchOffsets,
     normalizedFindQuery,
+    readAlongSegments,
     shouldUseChunkedPlainRendering,
     t,
     visiblePlainContent
@@ -408,6 +631,7 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
     shouldUseChunkedPlainRendering,
     visiblePlainContent,
     hasUnrenderedPlainContent,
+    readAlongSegments,
     findMatchCount,
     highlightedPlainContent,
     // Callbacks

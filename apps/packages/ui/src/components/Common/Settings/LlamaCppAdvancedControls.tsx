@@ -1,7 +1,8 @@
 import React from "react"
-import { Alert, Button, Input, InputNumber, Select, Typography } from "antd"
+import { Button, Input, InputNumber, Select, Typography } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { useStoreChatModelSettings } from "@/store/model"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -223,22 +224,21 @@ export function LlamaCppAdvancedControls({
 
         {!grammarSupported && controls?.grammar?.effective_reason ? (
           <Alert
-            type="info"
-            showIcon
+            variant="info"
             title={controls.grammar.effective_reason}
           />
         ) : null}
 
         {conflictingExtraBodyKeys.length > 0 ? (
           <Alert
-            type="warning"
-            showIcon
+            variant="warning"
             title={t(
               "sidepanel:llamaControls.extraBodyConflictTitle",
               "First-class llama.cpp controls override reserved raw extra body keys."
             )}
-            description={conflictingExtraBodyKeys.join(", ")}
-          />
+          >
+            {conflictingExtraBodyKeys.join(", ")}
+          </Alert>
         ) : null}
 
         <div className="space-y-1">

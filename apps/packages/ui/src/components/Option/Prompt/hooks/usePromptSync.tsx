@@ -63,6 +63,7 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
     INITIAL_BATCH_SYNC_STATE
   )
   const batchSyncCancelRef = useRef(false)
+  const batchSyncRunningRef = useRef(false)
 
   const syncPromptAfterLocalSave = React.useCallback(async (localId: string) => {
     try {
@@ -317,161 +318,166 @@ export function usePromptSync(deps: UsePromptSyncDeps) {
 
   const runBatchSync = React.useCallback(
     async (retryTasks?: SyncBatchTask[]) => {
-      if (!isOnline) return
+      if (!isOnline || batchSyncRunningRef.current) return
 
-      const plan = retryTasks
-        ? {
-            tasks: retryTasks,
-            skippedConflicts: 0,
-            skippedCopilotPending: 0
-          }
-        : buildSyncBatchPlan(await getAllPromptsWithSyncStatus())
+      batchSyncRunningRef.current = true
+      try {
+        const plan = retryTasks
+          ? {
+              tasks: retryTasks,
+              skippedConflicts: 0,
+              skippedCopilotPending: 0
+            }
+          : buildSyncBatchPlan(await getAllPromptsWithSyncStatus())
 
-      if (plan.tasks.length === 0) {
-        const description = plan.skippedConflicts > 0
-          ? t("managePrompts.sync.batchNoActionableWithConflicts", {
-              defaultValue:
-                "No prompts are ready for batch sync. {{count}} prompt(s) require manual conflict resolution.",
-              count: plan.skippedConflicts
-            })
-          : t("managePrompts.sync.batchNoActionable", {
-              defaultValue: "No prompts currently need syncing."
-            })
-        notification.info({
-          message: t("managePrompts.sync.batchNothingToSync", {
-            defaultValue: "Nothing to sync"
-          }),
-          description
-        })
-        return
-      }
-
-      batchSyncCancelRef.current = false
-      setBatchSyncState({
-        running: true,
-        completed: 0,
-        total: plan.tasks.length,
-        succeeded: 0,
-        failed: [],
-        skippedConflicts: plan.skippedConflicts,
-        skippedCopilotPending: plan.skippedCopilotPending,
-        cancelled: false
-      })
-
-      let completed = 0
-      let succeeded = 0
-      const failed: BatchSyncFailure[] = []
-
-      for (const task of plan.tasks) {
-        if (batchSyncCancelRef.current) {
-          setBatchSyncState({
-            running: false,
-            completed,
-            total: plan.tasks.length,
-            succeeded,
-            failed: [...failed],
-            skippedConflicts: plan.skippedConflicts,
-            skippedCopilotPending: plan.skippedCopilotPending,
-            cancelled: true
-          })
-          notification.warning({
-            message: t("managePrompts.sync.batchCancelled", {
-              defaultValue: "Batch sync cancelled"
+        if (plan.tasks.length === 0) {
+          const description = plan.skippedConflicts > 0
+            ? t("managePrompts.sync.batchNoActionableWithConflicts", {
+                defaultValue:
+                  "No prompts are ready for batch sync. {{count}} prompt(s) require manual conflict resolution.",
+                count: plan.skippedConflicts
+              })
+            : t("managePrompts.sync.batchNoActionable", {
+                defaultValue: "No prompts currently need syncing."
+              })
+          notification.info({
+            message: t("managePrompts.sync.batchNothingToSync", {
+              defaultValue: "Nothing to sync"
             }),
-            description: t("managePrompts.sync.batchCancelledDesc", {
-              defaultValue:
-                "Synced {{completed}} of {{total}} prompts before cancellation.",
-              completed,
-              total: plan.tasks.length
-            })
+            description
           })
-          await queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
           return
         }
 
-        try {
-          const result =
-            task.direction === "pull"
-              ? await pullFromStudio(task.serverId!, task.promptId)
-              : task.serverId
-                ? await pushToStudio(task.promptId, task.preferredProjectId || 1)
-                : await autoSyncPrompt(task.promptId, task.preferredProjectId)
+        batchSyncCancelRef.current = false
+        setBatchSyncState({
+          running: true,
+          completed: 0,
+          total: plan.tasks.length,
+          succeeded: 0,
+          failed: [],
+          skippedConflicts: plan.skippedConflicts,
+          skippedCopilotPending: plan.skippedCopilotPending,
+          cancelled: false
+        })
 
-          if (result.success) {
-            succeeded += 1
-          } else {
+        let completed = 0
+        let succeeded = 0
+        const failed: BatchSyncFailure[] = []
+
+        for (const task of plan.tasks) {
+          if (batchSyncCancelRef.current) {
+            setBatchSyncState({
+              running: false,
+              completed,
+              total: plan.tasks.length,
+              succeeded,
+              failed: [...failed],
+              skippedConflicts: plan.skippedConflicts,
+              skippedCopilotPending: plan.skippedCopilotPending,
+              cancelled: true
+            })
+            notification.warning({
+              message: t("managePrompts.sync.batchCancelled", {
+                defaultValue: "Batch sync cancelled"
+              }),
+              description: t("managePrompts.sync.batchCancelledDesc", {
+                defaultValue:
+                  "Synced {{completed}} of {{total}} prompts before cancellation.",
+                completed,
+                total: plan.tasks.length
+              })
+            })
+            await queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
+            return
+          }
+
+          try {
+            const result =
+              task.direction === "pull"
+                ? await pullFromStudio(task.serverId!, task.promptId)
+                : task.serverId
+                  ? await pushToStudio(task.promptId, task.preferredProjectId || 1)
+                  : await autoSyncPrompt(task.promptId, task.preferredProjectId)
+
+            if (result.success) {
+              succeeded += 1
+            } else {
+              failed.push({
+                task,
+                error:
+                  result.error ||
+                  t("managePrompts.notification.someError", {
+                    defaultValue: "Something went wrong."
+                  })
+              })
+            }
+          } catch (error: any) {
             failed.push({
               task,
               error:
-                result.error ||
+                error?.message ||
                 t("managePrompts.notification.someError", {
                   defaultValue: "Something went wrong."
                 })
             })
           }
-        } catch (error: any) {
-          failed.push({
-            task,
-            error:
-              error?.message ||
-              t("managePrompts.notification.someError", {
-                defaultValue: "Something went wrong."
-              })
-          })
+
+          completed += 1
+          setBatchSyncState((prev) => ({
+            ...prev,
+            completed,
+            succeeded,
+            failed: [...failed]
+          }))
         }
 
-        completed += 1
-        setBatchSyncState((prev) => ({
-          ...prev,
+        await queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
+
+        setBatchSyncState({
+          running: false,
           completed,
+          total: plan.tasks.length,
           succeeded,
-          failed: [...failed]
-        }))
-      }
-
-      await queryClient.invalidateQueries({ queryKey: ["fetchAllPrompts"] })
-
-      setBatchSyncState({
-        running: false,
-        completed,
-        total: plan.tasks.length,
-        succeeded,
-        failed: [...failed],
-        skippedConflicts: plan.skippedConflicts,
-        skippedCopilotPending: plan.skippedCopilotPending,
-        cancelled: false
-      })
-
-      if (failed.length > 0) {
-        notification.warning({
-          message: t("managePrompts.sync.batchPartialFailure", {
-            defaultValue: "Sync completed with issues"
-          }),
-          description: t("managePrompts.sync.batchPartialFailureDesc", {
-            defaultValue:
-              "Synced {{succeeded}} of {{total}} prompts. {{failed}} failed.",
-            succeeded,
-            total: plan.tasks.length,
-            failed: failed.length
-          })
+          failed: [...failed],
+          skippedConflicts: plan.skippedConflicts,
+          skippedCopilotPending: plan.skippedCopilotPending,
+          cancelled: false
         })
-      } else {
-        const extra = plan.skippedConflicts > 0
-          ? t("managePrompts.sync.batchConflictReminder", {
+
+        if (failed.length > 0) {
+          notification.warning({
+            message: t("managePrompts.sync.batchPartialFailure", {
+              defaultValue: "Sync completed with issues"
+            }),
+            description: t("managePrompts.sync.batchPartialFailureDesc", {
               defaultValue:
-                " {{count}} conflict prompt(s) still need manual resolution.",
-              count: plan.skippedConflicts
+                "Synced {{succeeded}} of {{total}} prompts. {{failed}} failed.",
+              succeeded,
+              total: plan.tasks.length,
+              failed: failed.length
             })
-          : ""
-        notification.success({
-          message: t("managePrompts.sync.batchSuccess", {
-            defaultValue: "Batch sync complete"
-          }),
-          description: `${t("managePrompts.sync.batchSuccessDesc", {
-            defaultValue: "Synced {{count}} prompt(s).",
-            count: succeeded
-          })}${extra}`
-        })
+          })
+        } else {
+          const extra = plan.skippedConflicts > 0
+            ? t("managePrompts.sync.batchConflictReminder", {
+                defaultValue:
+                  " {{count}} conflict prompt(s) still need manual resolution.",
+                count: plan.skippedConflicts
+              })
+            : ""
+          notification.success({
+            message: t("managePrompts.sync.batchSuccess", {
+              defaultValue: "Batch sync complete"
+            }),
+            description: `${t("managePrompts.sync.batchSuccessDesc", {
+              defaultValue: "Synced {{count}} prompt(s).",
+              count: succeeded
+            })}${extra}`
+          })
+        }
+      } finally {
+        batchSyncRunningRef.current = false
       }
     },
     [isOnline, queryClient, t]

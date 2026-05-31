@@ -4,8 +4,9 @@
  */
 
 import React, { useMemo, useState, useEffect } from "react"
-import { Alert, Checkbox, Divider, InputNumber, Slider, Switch } from "antd"
+import { Checkbox, Divider, InputNumber, Slider, Switch } from "antd"
 import { useTranslation } from "react-i18next"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { JsonEditor } from "./JsonEditor"
 import {
   getEvalSpecSchema,
@@ -90,9 +91,8 @@ export const VisualSpecBuilder: React.FC<VisualSpecBuilderProps> = ({
   const renderBuilder = () => {
     if (!schema || schema.builder === "json") {
       return (
-        <Alert
-          type="info"
-          showIcon
+        <DsAlert
+          variant="info"
           title={t("evaluations:specBuilderJsonOnly", {
             defaultValue:
               "This evaluation type uses JSON configuration. Use the editor below."
@@ -162,15 +162,15 @@ export const VisualSpecBuilder: React.FC<VisualSpecBuilderProps> = ({
   return (
     <div className="space-y-3">
       {parseError && (
-        <Alert
-          type="warning"
-          showIcon
+        <DsAlert
+          variant="warning"
           title={t("evaluations:specBuilderParseWarning", {
             defaultValue:
               "Spec JSON is invalid. Fix the JSON to use the visual builder."
           })}
-          description={parseError}
-        />
+        >
+          {parseError}
+        </DsAlert>
       )}
 
       {renderBuilder()}

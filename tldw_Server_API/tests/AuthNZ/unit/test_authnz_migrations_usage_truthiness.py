@@ -1,11 +1,14 @@
 import sqlite3
 
+import pytest
+
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     migration_001_create_users_table,
     migration_003_create_api_keys_table,
     migration_012_create_rbac_tables,
     migration_013_create_rbac_limits_and_usage,
     migration_015_create_llm_usage_tables,
+    migration_088_add_llm_usage_cache_accounting_columns,
 )
 
 
@@ -62,3 +65,23 @@ def test_migrations_013_and_015_keep_fks_when_test_flags_disabled(monkeypatch):
     assert _fk_count(conn, "usage_daily") >= 1
     assert _fk_count(conn, "llm_usage_log") >= 1
     assert _fk_count(conn, "llm_usage_daily") >= 1
+
+
+def test_migration_088_fails_when_llm_usage_log_table_is_missing() -> None:
+    conn = sqlite3.connect(":memory:")
+
+    with pytest.raises(sqlite3.OperationalError, match="llm_usage_log"):
+        migration_088_add_llm_usage_cache_accounting_columns(conn)
+
+
+def test_migration_088_skips_existing_columns_and_adds_missing_columns() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE llm_usage_log (id INTEGER PRIMARY KEY, cached_input_tokens INTEGER)"
+    )
+
+    migration_088_add_llm_usage_cache_accounting_columns(conn)
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_log)").fetchall()}
+    assert "cached_input_tokens" in columns
+    assert "raw_usage_metadata_json" in columns

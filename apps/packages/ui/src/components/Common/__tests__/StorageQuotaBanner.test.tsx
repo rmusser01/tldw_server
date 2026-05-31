@@ -17,6 +17,22 @@ vi.mock("@/hooks/useStorageQuota", () => ({
   useStorageQuota: () => mockQuota
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (
+      key: string,
+      options?: string | { defaultValue?: string; [key: string]: unknown }
+    ) => {
+      if (typeof options === "string") return options
+      const template = options?.defaultValue ?? key
+
+      return template.replace(/\{\{(\w+)\}\}/g, (_match, token) =>
+        String(options?.[token] ?? "")
+      )
+    }
+  })
+}))
+
 import { StorageQuotaBanner } from "../StorageQuotaBanner"
 
 describe("StorageQuotaBanner", () => {
@@ -36,7 +52,9 @@ describe("StorageQuotaBanner", () => {
     mockQuota.ratio = 0.82
     mockQuota.usedBytes = 4.1 * 1024 * 1024
     render(<StorageQuotaBanner />)
-    expect(screen.getByTestId("storage-quota-banner-warning")).toBeInTheDocument()
+    const banner = screen.getByTestId("storage-quota-banner-warning")
+    expect(banner).toBeInTheDocument()
+    expect(banner).toHaveAttribute("data-ds-component", "Alert")
     expect(screen.getByText("Storage getting full")).toBeInTheDocument()
     expect(screen.getByText(/82%/)).toBeInTheDocument()
   })
@@ -46,7 +64,9 @@ describe("StorageQuotaBanner", () => {
     mockQuota.ratio = 0.97
     mockQuota.usedBytes = 4.85 * 1024 * 1024
     render(<StorageQuotaBanner />)
-    expect(screen.getByTestId("storage-quota-banner-exceeded")).toBeInTheDocument()
+    const banner = screen.getByTestId("storage-quota-banner-exceeded")
+    expect(banner).toBeInTheDocument()
+    expect(banner).toHaveAttribute("data-ds-component", "Alert")
     expect(screen.getByText("Storage nearly full")).toBeInTheDocument()
   })
 

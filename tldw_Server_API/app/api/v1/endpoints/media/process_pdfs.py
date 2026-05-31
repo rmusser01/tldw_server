@@ -35,7 +35,10 @@ from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessPDFsForm
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
-    prepare_chunking_options_dict,
+    async_resolve_chunking_for_result,
+    attach_chunking_plan_to_result,
+    resolve_chunking_options_and_plan,
+    uses_hierarchical_chunking,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
@@ -114,9 +117,9 @@ async def process_pdfs_endpoint(
             tags=["no_db"],
             metadata={"has_urls": bool(form_data.urls), "has_files": bool(files)},
         )
-    except Exception as usage_log_error:
+    except Exception:
         # Usage logging is best-effort; do not fail the request.
-        logger.debug("PDF process endpoint usage logging failed", exc_info=usage_log_error)
+        logger.debug("PDF process endpoint usage logging failed")
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])
     if legacy_urls_empty_sentinel_used:
         logger.info("Received urls=[''], treating as no URLs provided for PDF processing.")
@@ -166,9 +169,7 @@ async def process_pdfs_endpoint(
             saved_files_info = list(saved_files)
 
             for err_info in upload_errors:
-                original_filename = (
-                    err_info.get("original_filename") or err_info.get("input") or "Unknown Upload"
-                )
+                original_filename = err_info.get("original_filename") or err_info.get("input") or "Unknown Upload"
                 error_detail = str(err_info.get("error") or "Upload error")
                 normalized_err = normalise_pdf_result(
                     {
@@ -222,7 +223,7 @@ async def process_pdfs_endpoint(
                         )
                     )
                 else:
-                    error_detail = f"Download/preparation failed: {result}"
+                    error_detail = "Download/preparation failed"
                     normalized_err = normalise_pdf_result(
                         {
                             "status": "Error",
@@ -238,6 +239,7 @@ async def process_pdfs_endpoint(
         # - 207 when we have result entries (all errors)
         # - 400 when no inputs at all (handled by _validate_inputs above)
         if not items:
+
             async def _noop_processor(_: list[ProcessItem]) -> list[dict[str, Any]]:
                 return []
 
@@ -246,11 +248,7 @@ async def process_pdfs_endpoint(
                 processor=_noop_processor,
                 base_batch=batch,
             )
-            status_code = (
-                status.HTTP_207_MULTI_STATUS
-                if batch.get("results")
-                else status.HTTP_400_BAD_REQUEST
-            )
+            status_code = status.HTTP_207_MULTI_STATUS if batch.get("results") else status.HTTP_400_BAD_REQUEST
             response = JSONResponse(status_code=status_code, content=batch)
             if legacy_signal is not None:
                 apply_media_legacy_headers(response, legacy_signal)
@@ -258,22 +256,27 @@ async def process_pdfs_endpoint(
             return response
 
         # Prepare chunking options (including templates/hierarchical when requested).
+        chunking_plan: dict[str, Any] | None = None
         if form_data.perform_chunking:
-            chunk_options_dict = prepare_chunking_options_dict(form_data)
+            first_url = (form_data.urls or [None])[0]
+            first_filename = None
+            try:
+                if saved_files_info:
+                    first_filename = saved_files_info[0].get("original_filename")
+            except Exception:
+                first_filename = None
+
+            chunk_options_dict, chunking_plan = resolve_chunking_options_and_plan(
+                form_data,
+                media_type="pdf",
+                source_name=first_filename or first_url,
+            )
             try:
                 TemplateClassifier = getattr(media_mod, "TemplateClassifier", None)
             except Exception:
                 TemplateClassifier = None
 
-            if chunk_options_dict is not None:
-                first_url = (form_data.urls or [None])[0]
-                first_filename = None
-                try:
-                    if saved_files_info:
-                        first_filename = saved_files_info[0].get("original_filename")
-                except Exception:
-                    first_filename = None
-
+            if chunk_options_dict is not None and chunking_plan is None:
                 chunk_options_dict = apply_chunking_template_if_any(
                     form_data=form_data,
                     db=db,
@@ -294,12 +297,12 @@ async def process_pdfs_endpoint(
                     file_bytes = item.local_path.read_bytes()
                 except Exception as read_err:
                     logger.error(
-                        'Failed to read prepared PDF file {} from {}: {}',
+                        "Failed to read prepared PDF file {} from {}: {}",
                         original_ref,
                         item.local_path,
                         read_err,
                     )
-                    error_detail = f"Failed to read prepared file: {read_err}"
+                    error_detail = "Failed to read prepared file"
                     normalized_err = normalise_pdf_result(
                         {
                             "status": "Error",
@@ -320,20 +323,12 @@ async def process_pdfs_endpoint(
                         author_override=form_data.author,
                         keywords=form_data.keywords,
                         perform_chunking=form_data.perform_chunking or None,
-                        chunk_method=(
-                            (chunk_options_dict or {}).get("method")
-                            if form_data.perform_chunking
-                            else None
-                        ),
+                        chunk_method=((chunk_options_dict or {}).get("method") if form_data.perform_chunking else None),
                         max_chunk_size=(
-                            (chunk_options_dict or {}).get("max_size")
-                            if form_data.perform_chunking
-                            else None
+                            (chunk_options_dict or {}).get("max_size") if form_data.perform_chunking else None
                         ),
                         chunk_overlap=(
-                            (chunk_options_dict or {}).get("overlap")
-                            if form_data.perform_chunking
-                            else None
+                            (chunk_options_dict or {}).get("overlap") if form_data.perform_chunking else None
                         ),
                         perform_analysis=form_data.perform_analysis,
                         api_name=form_data.api_name,
@@ -371,12 +366,12 @@ async def process_pdfs_endpoint(
                     results.append(normalized_res)
                 except Exception as exc:
                     logger.error(
-                        'PDF processing failed for {}: {}',
+                        "PDF processing failed for {}: {}",
                         original_ref,
                         exc,
                         exc_info=True,
                     )
-                    error_detail = f"PDF processing failed: {exc}"
+                    error_detail = "PDF processing failed"
                     normalized_err = normalise_pdf_result(
                         {
                             "status": "Error",
@@ -429,11 +424,10 @@ async def process_pdfs_endpoint(
                 Chunker as _Chunker,
             )
 
-            use_hier = bool(
-                chunk_options_dict.get("hierarchical")
-                or isinstance(chunk_options_dict.get("hierarchical_template"), dict)
-            )
-            ck = _Chunker() if use_hier else None
+            ck: _Chunker | None = None
+            batch_auto_chunk_options = chunk_options_dict
+            batch_auto_chunking_plan = chunking_plan
+            batch_llm_chunking_resolved = False
 
             for res in batch.get("results", []):
                 if not isinstance(res, dict):
@@ -443,28 +437,46 @@ async def process_pdfs_endpoint(
                     continue
                 text = res.get("content")
                 if not isinstance(text, str) or not text.strip():
+                    attach_chunking_plan_to_result(res, chunking_plan)
                     continue
 
-                if use_hier and ck is not None:
+                result_chunk_options, result_chunking_plan = await async_resolve_chunking_for_result(
+                    form_data,
+                    res,
+                    media_type="pdf",
+                    default_chunk_options=batch_auto_chunk_options,
+                    default_chunking_plan=batch_auto_chunking_plan,
+                    allow_llm_assist=not batch_llm_chunking_resolved,
+                )
+                attach_chunking_plan_to_result(res, result_chunking_plan)
+                if getattr(form_data, "auto_chunking_use_llm", False) and result_chunking_plan:
+                    batch_auto_chunk_options = result_chunk_options
+                    batch_auto_chunking_plan = result_chunking_plan
+                    batch_llm_chunking_resolved = True
+                if not result_chunk_options:
+                    continue
+
+                if uses_hierarchical_chunking(result_chunk_options):
+                    ck = ck or _Chunker()
                     chunks = ck.chunk_text_hierarchical_flat(
                         text,
-                        method=chunk_options_dict.get("method") or "sentences",
-                        max_size=chunk_options_dict.get("max_size") or 500,
-                        overlap=chunk_options_dict.get("overlap") or 200,
-                        language=chunk_options_dict.get("language"),
-                        template=chunk_options_dict.get("hierarchical_template")
-                        if isinstance(
-                            chunk_options_dict.get("hierarchical_template"), dict
-                        )
-                        else None,
+                        method=result_chunk_options.get("method") or "sentences",
+                        max_size=result_chunk_options.get("max_size") or 500,
+                        overlap=result_chunk_options.get("overlap") or 200,
+                        language=result_chunk_options.get("language"),
+                        template=(
+                            result_chunk_options.get("hierarchical_template")
+                            if isinstance(result_chunk_options.get("hierarchical_template"), dict)
+                            else None
+                        ),
                     )
                 else:
-                    chunks = _improved_chunking_process(text, chunk_options_dict)
+                    chunks = _improved_chunking_process(text, result_chunk_options)
 
                 res["chunks"] = chunks
-    except Exception as rechunk_error:
+    except Exception:
         # Never fail the endpoint due to re-chunking issues.
-        logger.debug("PDF process endpoint rechunking failed; returning original result", exc_info=rechunk_error)
+        logger.debug("PDF process endpoint rechunking failed; returning original result")
 
     response = JSONResponse(status_code=final_status_code, content=batch)
     if legacy_signal is not None:

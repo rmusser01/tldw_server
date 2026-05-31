@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+
 # Git command is fixed to `git status --porcelain` and runs with shell=False.
 import subprocess  # nosec B404
 from pathlib import Path

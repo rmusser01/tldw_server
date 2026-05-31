@@ -24,7 +24,7 @@ from tldw_Server_API.app.api.v1.schemas.reading_highlights_schemas import (
     HighlightCreateRequest,
     HighlightUpdateRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.Collections.utils import (
     build_highlight_context,
     find_highlight_span,
@@ -109,7 +109,7 @@ async def create_highlight(
             context_after=context_after,
         )
     except Exception as e:
-        logger.error(f"create_highlight failed: {e}")
+        logger.error("create_highlight failed")
         raise HTTPException(status_code=500, detail="highlight_create_failed") from e
     item_title = _item_title_or_none(db, item_id)
     record_reading_highlight_created(

@@ -65,7 +65,7 @@ def _format_env_value(value: str) -> str:
     if not needs_quotes:
         return value
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f"\"{escaped}\""
+    return f'"{escaped}"'
 
 
 def _format_env_line(key: str, value: str, export: bool = False, raw_values: bool = False) -> str:

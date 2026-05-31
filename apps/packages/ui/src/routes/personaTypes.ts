@@ -14,11 +14,14 @@ import {
 export type PersonaInfo = {
   id: string
   name: string
+  mode?: "session_scoped" | "persistent_scoped"
   description?: string | null
   voice?: string | null
   avatar_url?: string | null
   system_prompt?: string | null
   greeting?: string | null
+  capabilities?: string[]
+  default_tools?: string[]
   extensions?: Record<string, unknown> | null
   buddy_summary?: PersonaBuddySummary | null
   metadata?: Record<string, unknown> | null
@@ -71,6 +74,7 @@ export type PersonaCompanionUsage = {
 export type PersonaProfileResponse = {
   id?: string
   version?: number
+  mode?: "session_scoped" | "persistent_scoped"
   buddy_summary?: PersonaBuddySummary | null
   use_persona_state_context_default?: boolean
   voice_defaults?: PersonaVoiceDefaults | null
@@ -130,6 +134,11 @@ export type SetupCommandDetourState = {
 export type SetupLiveDetourState = {
   source: "live_unavailable" | "live_failure"
   lastText: string
+}
+
+export type SetupVisualDetourState = {
+  source: "wizard_optional_card"
+  returnStep: PersonaSetupStep
 }
 
 export const DEFAULT_SETUP_REVIEW_SUMMARY: SetupReviewSummary = {
@@ -254,6 +263,7 @@ export type UnsavedStateDiscardReason =
   | "persona_switch"
   | "session_switch"
   | "restore_state"
+  | "archive_state"
   | "route_transition"
   | "before_unload"
 

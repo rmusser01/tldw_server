@@ -1,135 +1,63 @@
-# Unified RAG Capabilities
+# Unified RAG Runtime Capabilities
 
-Discover supported features, defaults, and limits at runtime.
-
-## Endpoint
+Use the capabilities endpoint to discover optional RAG features, defaults, limits, and deployment-specific support at runtime.
 
 ```bash
-curl -s "http://127.0.0.1:8000/api/v1/rag/capabilities" | jq
+curl -s http://127.0.0.1:8000/api/v1/rag/capabilities \
+  -H "X-API-KEY: your-api-key" | jq
 ```
 
-## Sample Response (abridged but structurally complete)
+Related discovery routes:
 
-```json
-{
-  "pipeline": "unified",
-  "version": "1.0.0",
-  "features": {
-    "query_expansion": {
-      "supported": true,
-      "methods": ["acronym", "synonym", "domain", "entity"]
-    },
-    "claims": {
-      "supported": true,
-      "extractors": ["aps", "claimify", "auto"],
-      "verifiers": ["nli", "llm", "hybrid"],
-      "defaults": {"top_k": 5, "confidence_threshold": 0.7, "max": 25},
-      "nli": {"env": ["RAG_NLI_MODEL", "RAG_NLI_MODEL_PATH"], "override_param": "nli_model"}
-    },
-    "semantic_cache": {
-      "supported": true,
-      "adaptive_thresholds": true,
-      "config": {"similarity_threshold": 0.85}
-    },
-    "sources": {
-      "supported": true,
-      "datastores": ["media_db", "notes_db", "character_db"]
-    },
-    "security_filtering": {"supported": true, "pii_detection": true},
-    "citation_generation": {
-      "supported": true,
-      "styles": ["APA", "MLA", "Chicago", "Harvard", "IEEE"],
-      "include_page_numbers": true
-    },
-    "answer_generation": {
-      "supported": true,
-      "configurable_model": true,
-      "pre_retrieval_clarification": true
-    },
-    "reranking": {
-      "supported": true,
-      "strategies": ["flashrank", "cross_encoder", "hybrid", "llama_cpp"],
-      "models": [
-        "flashrank",
-        "cross-encoder (e.g., BAAI/bge-reranker-v2-m3, Jina reranker)",
-        "GGUF via llama.cpp (e.g., Qwen3-Embedding-0.6B_f16.gguf, BGE/Jina GGUF)"
-      ]
-    },
-    "table_processing": {"supported": true, "methods": ["markdown", "html", "hybrid"]},
-    "vlm_late_chunking": {
-      "supported": true,
-      "backends": ["docling", "hf_table_transformer"],
-      "backends_endpoint": "/api/v1/rag/vlm/backends"
-    },
-    "enhanced_chunking": {
-      "supported": true,
-      "parent_context": true,
-      "sibling_context": true,
-      "parameters": [
-        "parent_context_size",
-        "include_parent_document",
-        "parent_max_tokens",
-        "include_sibling_chunks",
-        "sibling_window",
-        "chunk_type_filter"
-      ]
-    },
-    "feedback": {"supported": true, "apply_feedback_boost": true},
-    "monitoring": {"supported": true, "observability": true, "trace_id": true},
-    "analytics": {"supported": true},
-    "batch_processing": {"supported": true, "concurrent": true, "defaults": {"max_concurrent": 5}, "limits": {"max_concurrent_max": 20}},
-    "resilience": {
-      "supported": true,
-      "retries": true,
-      "circuit_breakers": true,
-      "research_action_dedup": true
-    },
-    "streaming": {"supported": true, "endpoint": "/api/v1/rag/search/stream", "media_type": "application/x-ndjson", "events": ["delta", "claims_overlay", "final_claims"]},
-    "quick_wins": {"supported": true, "parameters": ["highlight_results", "highlight_query_terms", "track_cost", "debug_mode"]},
-    "user_context": {"supported": true, "fields": ["user_id", "session_id"]}
-  },
-  "search": {
-    "modes": ["hybrid", "semantic", "fulltext"],
-    "hybrid": {
-      "alpha_default": 0.7,
-      "alpha_range": [0.0, 1.0],
-      "normalize_scores": true
-    },
-    "vector": {"top_k_default": 10, "top_k_max": 100},
-    "fts": {"top_k_default": 10, "query_expansion": true, "fuzzy_matching": true}
-  },
-  "defaults": {
-    "retriever": {"hybrid_alpha": 0.7, "vector_top_k": 10, "fts_top_k": 10},
-    "processor": {},
-    "cache": {"similarity_threshold": 0.85},
-    "batch_size": 32,
-    "num_workers": 4,
-    "min_score": 0.0,
-    "use_connection_pool": true,
-    "use_embedding_cache": true
-  },
-  "limits": {"top_k_max": 100, "documents_per_db_max": 1000, "answer_tokens_max": 2048, "timeout_seconds_max": 60.0},
-  "auth": {"mode": "single_user", "user_scoped": true}
-}
-```
+- `GET /api/v1/rag/features`
+- `GET /api/v1/rag/vlm/backends`
+- `GET /api/v1/rag/health/simple`
+- `GET /api/v1/rag/health`
 
-Notes:
-- Capability labels “fulltext” and “semantic” correspond to request values `"fts"` and `"vector"` for `search_mode`.
-- Source values `"characters"` and `"chats"` both map to the `character_db` datastore internally.
+## Search Modes
 
-## Switchable Profiles
+Request `search_mode` accepts:
 
-The unified RAG request supports optional switchable profile defaults via `rag_profile`:
+- `fts` - SQLite FTS/BM25-style full-text retrieval
+- `vector` - vector similarity retrieval
+- `hybrid` - combined full-text and vector retrieval
 
-- `fast`
-- `balanced`
-- `accuracy`
+Capabilities responses should use these exact request values when describing active search modes. Clients should send only `fts`, `vector`, or `hybrid` in requests. `search_mode` is accepted globally, but vector behavior depends on the selected sources and configured vector adapters; sources without vector indexing use their source-specific retrieval path.
 
-When provided, profile defaults are resolved with strict precedence:
+## Public Sources
 
-1. Explicit request field
-2. Profile default
-3. Search-Agent env/config defaults
-4. Schema default
+Public request `sources` are:
 
-Generation token limits now support up to `4000` (`max_generation_tokens <= 4000`).
+- `media_db`
+- `notes`
+- `chats`
+- `characters`
+- `kanban`
+- `prompts`
+- `world_books`
+- `dictionaries`
+- `sql`
+
+`characters` and `chats` are separate public source values. `characters` maps to character-card data, while `chats` maps to chat history. Retrieval availability remains source-specific; clients should use `metadata.source_status` from search responses to decide whether a requested source was searched, empty, or unavailable in the current deployment.
+
+Generated, test, and workspace-scoped artifacts are excluded from normal search results unless the request includes an explicit `workspace_id` scope.
+
+## Vector Store Support
+
+- ChromaDB is the default vector store adapter.
+- PGVector is conditional and available only when the optional import succeeds and configuration selects it.
+- Other declared vector-store enum values are not active adapters unless the runtime capabilities response says they are available.
+
+## What To Discover At Runtime
+
+Clients should use `/capabilities` or `/features` for:
+
+- enabled reranking strategies
+- VLM/table-processing backends
+- streaming support and event types
+- batch limits
+- cache support
+- generation and citation features
+- deployment limits such as `top_k`, timeouts, and token budgets
+
+Do not treat this page as a static replacement for runtime discovery. It describes how to interpret the active discovery endpoints.

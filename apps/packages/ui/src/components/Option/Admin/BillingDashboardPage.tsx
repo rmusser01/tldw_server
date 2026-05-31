@@ -8,7 +8,6 @@ import {
   InputNumber,
   Modal,
   Select,
-  Alert,
   Space,
   Statistic,
   Form,
@@ -16,6 +15,7 @@ import {
   message
 } from "antd"
 import { ReloadOutlined } from "@ant-design/icons"
+import { Alert } from "@/components/ui/primitives"
 import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
@@ -467,25 +467,21 @@ const BillingDashboardPage: React.FC = () => {
 
   if (adminGuard === "forbidden") {
     return (
-      <Alert
-        type="error"
-        title="Access Denied"
-        description="You do not have permission to view the billing dashboard."
-        showIcon
-        style={{ margin: 24 }}
-      />
+      <div style={{ padding: 24 }}>
+        <Alert variant="error" title="Access Denied">
+          You do not have permission to view the billing dashboard.
+        </Alert>
+      </div>
     )
   }
 
   if (adminGuard === "notFound") {
     return (
-      <Alert
-        type="warning"
-        title="Not Available"
-        description="Billing endpoints are not available on this server."
-        showIcon
-        style={{ margin: 24 }}
-      />
+      <div style={{ padding: 24 }}>
+        <Alert variant="warning" title="Not Available">
+          Billing endpoints are not available on this server.
+        </Alert>
+      </div>
     )
   }
 

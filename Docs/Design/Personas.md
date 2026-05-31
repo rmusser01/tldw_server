@@ -1,5 +1,18 @@
 # Personas
 
+
+
+https://github.com/VectorSpaceLab/general-agentic-memory
+https://arxiv.org/abs/2601.10080
+https://github.com/Neph0s/awesome-llm-role-playing-with-persona
+https://github.com/rmusser01/Clawatar
+https://www.deviantart.com/ryoma3d/art/ani-x-1220087954
+https://oshikoi.io/community/mate/8969a098-ad97-4f49-9b59-cfcb5d53a65b
+
+https://zby.github.io/commonplace/agent-memory-systems/
+https://github.com/elevenyellow/handcrafted-persona-engine/blob/624a76c8b364edbf22b779f2ed19df0c5ccad53e/src/PersonaEngine/PersonaEngine.Lib/Resources/Prompts/personality.txt
+https://github.com/vspeech/Qwen3-TTS-Train
+
 ## Problem statement
 
 The platform currently supports character cards and session context, but it lacks a first-class persona model that can persist user intent, policy constraints, and scoped behavior across conversations and workflows. This creates inconsistent behavior between sessions and increases repeated setup effort for users who want stable persona-driven assistant behavior.
@@ -59,6 +72,12 @@ UI integration:
 - Add persona selector and "effective persona" indicators in chat/workflow surfaces.
 - Allow scope-rule editing with clear include/exclude affordances.
 - Provide policy visibility (what tools are blocked/allowed and why).
+
+Wake phrase support:
+- Persona Live wake phrase support is manually armed per session.
+- V1 uses the selected persona profile's saved `voice_chat_trigger_phrases` as wake phrases and detects them in the active browser or extension surface before sending a scoped `wake_activation` frame to `/api/v1/persona/stream`.
+- V1 is not true background always-on listening. Wake listening is visible, manually armed, and only active while the Persona Live surface is open and the browser speech recognition API is available.
+- Pre-wake audio is not sent to the tldw server.
 
 Compatibility and migration:
 - Existing character-card flows remain valid; personas can optionally reference `character_card_id`.

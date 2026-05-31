@@ -333,4 +333,18 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
       expect(screen.getByPlaceholderText("Title")).toHaveValue("Selected note title")
     })
   })
+
+  it("keeps mobile controls non-overlapping and honors reduced-motion users", async () => {
+    setViewportWidth(375)
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-mobile-open-list-button")).toBeInTheDocument()
+    })
+
+    expect(screen.queryByTestId("notes-create-study-pack-button")).not.toBeInTheDocument()
+    expect(screen.getByTestId("notes-list-region").className).toContain(
+      "motion-reduce:transition-none"
+    )
+  })
 })

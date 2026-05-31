@@ -39,8 +39,8 @@ async def run_stt_transcribe_adapter(config: dict[str, Any], context: dict[str, 
         return {"error": "missing_or_invalid_file_uri"}
     try:
         resolved_path = resolve_workflow_file_uri(file_uri, context, config)
-    except AdapterError as e:
-        return {"error": str(e)}
+    except AdapterError:
+        return {"error": "file_access_denied"}
     model = str(config.get("model") or "large-v3")
     language = config.get("language") or None
     hotwords = config.get("hotwords") or None
@@ -66,5 +66,5 @@ async def run_stt_transcribe_adapter(config: dict[str, Any], context: dict[str, 
             segments, lang = segs_or_pair, None
         text = " ".join([s.get("Text", "").strip() for s in (segments or []) if isinstance(s, dict)])
         return {"text": text, "segments": segments, "language": lang}
-    except Exception as e:
-        return {"error": f"stt_error:{e}"}
+    except Exception:
+        return {"error": "stt_error"}

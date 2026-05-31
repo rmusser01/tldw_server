@@ -29,7 +29,10 @@ import {
   extractCompletedIngestJobError,
   extractCompletedIngestJobMediaId,
 } from "@/services/tldw/ingest-job-results"
-import { DOCUMENT_WORKSPACE_PATH } from "@/routes/route-paths"
+import {
+  DOCUMENT_WORKSPACE_PATH,
+  buildMediaCollectionReviewPath,
+} from "@/routes/route-paths"
 import {
   type PersistedWizardQueueItem,
   type QuickIngestSessionLifecycle,
@@ -37,11 +40,18 @@ import {
   useQuickIngestSessionStore,
 } from "@/store/quick-ingest-session"
 import { useQuickIngestStore } from "@/store/quick-ingest"
+import { useConnectionStore } from "@/store/connection"
+import { ConnectionPhase } from "@/types/connection"
 import type {
+  CommonOptions,
+  ConferenceBatchMetadata,
+  ConferenceItemMetadataOverride,
   DetectedMediaType,
   ItemProgress,
   ItemProgressStatus,
+  PlaylistQueueMetadata,
   PersistedQuickIngestTracking,
+  ReattachedQuickIngestJob,
   TypeDefaults,
   WizardQueueItem,
   WizardResultItem,
@@ -50,6 +60,7 @@ import {
   DUPLICATE_SKIP_MESSAGE,
   isDbMessageDuplicate,
 } from "./QuickIngest/constants"
+import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -70,6 +81,8 @@ type QuickIngestRequestPayload = {
     url: string
     type: QuickIngestEntryType
     defaults?: TypeDefaults
+    playlist?: PlaylistQueueMetadata
+    conferenceOverride?: ConferenceItemMetadataOverride
   }>
   files: Array<{
     id: string
@@ -77,16 +90,14 @@ type QuickIngestRequestPayload = {
     type?: string
     data: number[]
     defaults?: TypeDefaults
+    conferenceOverride?: ConferenceItemMetadataOverride
   }>
   storeRemote: boolean
   processOnly: boolean
-  common: {
-    perform_analysis: boolean
-    perform_chunking: boolean
-    overwrite_existing: boolean
-  }
+  common: CommonOptions
   advancedValues: Record<string, unknown>
   fileDefaults: TypeDefaults
+  conferenceBatchMetadata?: ConferenceBatchMetadata | null
   __quickIngestSessionId?: string
 }
 
@@ -212,6 +223,10 @@ const normalizeWizardResult = (
     mediaId:
       item.mediaId ??
       extractCompletedIngestJobMediaId(item.data),
+    persisted: item.persisted,
+    collectionItemId: item.collectionItemId ?? null,
+    retryAttempt: item.retryAttempt ?? null,
+    idempotencyKey: item.idempotencyKey ?? null,
     message: isDuplicate
       ? DUPLICATE_SKIP_MESSAGE
       : typeof item.message === "string" ? item.message : undefined,
@@ -296,6 +311,8 @@ const buildPersistedQueueItems = (
     fileSize: item.file?.size ?? item.fileSize,
     mimeType: item.file?.type || item.mimeType,
     validation: item.validation,
+    playlist: item.playlist,
+    conferenceOverride: item.conferenceOverride,
     fileStub:
       item.file || item.fileStub
         ? {
@@ -392,6 +409,9 @@ const buildPersistedReattachSignature = (
   const jobIdToItemId = Object.entries(tracking.jobIdToItemId ?? {})
     .map(([jobId, itemId]) => `${jobId}:${String(itemId || "").trim()}`)
     .sort()
+  const jobIdToCollectionItemId = Object.entries(tracking.jobIdToCollectionItemId ?? {})
+    .map(([jobId, itemId]) => `${jobId}:${String(itemId || "").trim()}`)
+    .sort()
 
   return [
     mode,
@@ -400,6 +420,7 @@ const buildPersistedReattachSignature = (
     jobIds.join(","),
     itemIds.join(","),
     jobIdToItemId.join(","),
+    jobIdToCollectionItemId.join(","),
   ].join("|")
 }
 
@@ -418,6 +439,8 @@ const hydrateQueueItems = (
         fileSize: item.fileSize,
         mimeType: item.mimeType,
         validation: item.validation,
+        playlist: item.playlist,
+        conferenceOverride: item.conferenceOverride,
       }
     }
 
@@ -438,6 +461,8 @@ const hydrateQueueItems = (
         valid: false,
         warnings,
       },
+      playlist: item.playlist,
+      conferenceOverride: item.conferenceOverride,
       fileStub: item.fileStub || {
         key: item.key,
         lastModified: item.lastModified,
@@ -546,8 +571,12 @@ const buildInitialWizardState = (
   customBasePreset: session.customBasePreset,
   presetConfig: session.presetConfig,
   customOptions: session.customOptions,
+  playlistPreflightSeed: isQuickIngestPlaylistPreflightDetail(session.openDetail)
+    ? session.openDetail
+    : null,
   processingState: session.processingState,
   results: session.results,
+  conferenceBatchMetadata: session.conferenceBatchMetadata ?? null,
   isMinimized:
     session.visibility === "hidden" && session.lifecycle === "processing",
 })
@@ -565,8 +594,10 @@ const buildSessionPatchFromWizardState = (
     customBasePreset: state.customBasePreset,
     presetConfig: state.presetConfig,
     customOptions: state.customOptions,
+    conferenceBatchMetadata: state.conferenceBatchMetadata,
     processingState: state.processingState,
     results: state.results,
+    openDetail: state.playlistPreflightSeed,
     badge: {
       queueCount:
         lifecycle === "draft"
@@ -670,6 +701,9 @@ const buildResultsFromReattachedJobs = (
             extractCompletedIngestJobError(job.result) ||
             `Quick ingest ${jobStatus || "failed"}.`,
       mediaId: extractCompletedIngestJobMediaId(job.result),
+      collectionItemId: tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ?? null,
+      retryAttempt: null,
+      idempotencyKey: null,
       title: job.result?.title ?? null,
       data: job.result,
       message: isDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined,
@@ -678,7 +712,7 @@ const buildResultsFromReattachedJobs = (
 
 const buildProgressFromReattachedJobs = (
   items: WizardQueueItem[],
-  jobs: Array<{ jobId: number; status: string; error?: string; sourceItemId?: string }>,
+  jobs: ReattachedQuickIngestJob[],
   tracking?: PersistedQuickIngestTracking
 ): ItemProgress[] =>
   jobs.map((job, index) => {
@@ -717,6 +751,7 @@ const buildProgressFromReattachedJobs = (
 
 const buildQuickIngestPayload = async (
   items: WizardQueueItem[],
+  conferenceBatchMetadata: ConferenceBatchMetadata | null,
   options: QuickIngestRequestPayload["common"] & {
     storeRemote: boolean
     reviewBeforeStorage: boolean
@@ -724,7 +759,9 @@ const buildQuickIngestPayload = async (
     typeDefaults: TypeDefaults
   }
 ): Promise<QuickIngestRequestPayload> => {
-  const validItems = items.filter((item) => item.validation.valid)
+  const validItems = items.filter(
+    (item) => item.validation.valid && item.conferenceOverride?.selected !== false
+  )
   const entries = validItems
     .filter((item): item is WizardQueueItem & { url: string } => Boolean(item.url))
     .map((item) => ({
@@ -732,6 +769,8 @@ const buildQuickIngestPayload = async (
       url: item.url,
       type: mapDetectedTypeToEntryType(item.detectedType),
       defaults: buildDefaultsForQueueItem(item, options.typeDefaults),
+      playlist: item.playlist,
+      conferenceOverride: item.conferenceOverride,
     }))
 
   const files = await Promise.all(
@@ -743,6 +782,7 @@ const buildQuickIngestPayload = async (
         type: item.file.type || undefined,
         data: Array.from(new Uint8Array(await item.file.arrayBuffer())),
         defaults: buildDefaultsForQueueItem(item, options.typeDefaults),
+        conferenceOverride: item.conferenceOverride,
       }))
   )
 
@@ -755,9 +795,13 @@ const buildQuickIngestPayload = async (
       perform_analysis: options.perform_analysis,
       perform_chunking: options.perform_chunking,
       overwrite_existing: options.overwrite_existing,
+      chunking_mode: options.chunking_mode,
+      auto_chunking_goal: options.auto_chunking_goal,
+      auto_chunking_use_llm: options.auto_chunking_use_llm,
     },
     advancedValues: options.advancedValues ?? {},
     fileDefaults: options.typeDefaults,
+    conferenceBatchMetadata,
   }
 }
 
@@ -797,13 +841,18 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     goNext,
   } = useIngestWizard()
   const { currentStep, queueItems, processingState, presetConfig, results } = state
+  const connectionState = useConnectionStore((store) => store.state)
+  const checkConnection = useConnectionStore((store) => store.checkOnce)
   const activeSessionIdRef = useRef<string | null>(null)
   const resultsRef = useRef(results)
   const hasStartedRunRef = useRef(false)
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const validQueueItems = useMemo(
-    () => queueItems.filter((item) => item.validation.valid),
+    () =>
+      queueItems.filter(
+        (item) => item.validation.valid && item.conferenceOverride?.selected !== false
+      ),
     [queueItems]
   )
   const trackedQueueItems = useMemo(
@@ -823,6 +872,55 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         : "",
     [session.tracking, shouldAttemptPersistedReattach]
   )
+  const qi = useCallback(
+    (key: string, defaultValue: string, options?: Record<string, unknown>) =>
+      options
+        ? t(`quickIngest.${key}`, { defaultValue, ...options })
+        : t(`quickIngest.${key}`, defaultValue),
+    [t],
+  )
+  const isOnlineForIngest =
+    connectionState.offlineBypass === true ||
+    (
+      connectionState.isConnected &&
+      connectionState.phase === ConnectionPhase.CONNECTED
+    )
+  const isCheckingConnection =
+    connectionState.isChecking ||
+    connectionState.phase === ConnectionPhase.SEARCHING
+  const connectionRecoveryMessage = useMemo(() => {
+    if (isCheckingConnection) {
+      return qi(
+        "wizard.offline.checkingDescription",
+        "Checking your tldw server connection before processing."
+      )
+    }
+    if (connectionState.phase === ConnectionPhase.UNCONFIGURED) {
+      return qi(
+        "wizard.offline.unconfiguredDescription",
+        "Configure your tldw server under Settings -> tldw server before processing."
+      )
+    }
+    if (connectionState.lastError) {
+      return qi(
+        "wizard.offline.errorDescription",
+        "Cannot reach your tldw server. {{error}}",
+        { error: connectionState.lastError }
+      )
+    }
+    return qi(
+      "wizard.offline.description",
+      "Reconnect to your tldw server before processing. You can still add URLs and configure queued items."
+    )
+  }, [
+    connectionState.lastError,
+    connectionState.phase,
+    isCheckingConnection,
+    qi,
+  ])
+  const handleRetryConnection = useCallback(() => {
+    void checkConnection()
+  }, [checkConnection])
 
   useEffect(() => {
     resultsRef.current = results
@@ -889,19 +987,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   // Auto-process on mount if autoProcessQueued is set and there are queued items
   const autoProcessedRef = useRef(false)
   useEffect(() => {
-    if (autoProcessQueued && !autoProcessedRef.current && queueItems.length > 0) {
+    if (
+      autoProcessQueued &&
+      !autoProcessedRef.current &&
+      validQueueItems.length > 0 &&
+      isOnlineForIngest
+    ) {
       autoProcessedRef.current = true
       skipToProcessing()
     }
-  }, [autoProcessQueued, queueItems.length, skipToProcessing])
-
-  const qi = useCallback(
-    (key: string, defaultValue: string, options?: Record<string, unknown>) =>
-      options
-        ? t(`quickIngest.${key}`, { defaultValue, ...options })
-        : t(`quickIngest.${key}`, defaultValue),
-    [t],
-  )
+  }, [autoProcessQueued, isOnlineForIngest, skipToProcessing, validQueueItems.length])
 
   // Whether processing is actively running
   const isProcessingActive = processingState.status === "running"
@@ -966,8 +1061,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     // TODO(i18n): extract STAGE_LABELS to i18n resources
     const STAGE_LABELS: Record<string, string> = {
       uploading: "Uploading",
-      processing: "Processing your file... This may take a few minutes for large files.",
-      analyzing: "Transcribing and indexing content",
+      processing: "Processing content... This may take a few minutes for large files.",
+      analyzing: "Processing and indexing content",
       storing: "Storing results",
     }
 
@@ -1159,8 +1254,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const finalizeFailure = useCallback(
     (message: string, outcome: "failed" | "cancelled") => {
+      const trackedEligibleItems = trackedQueueItems.filter(
+        (item) => item.validation.valid && item.conferenceOverride?.selected !== false
+      )
       const fallbackItems =
-        trackedQueueItems.length > 0 ? trackedQueueItems : validQueueItems
+        trackedEligibleItems.length > 0 ? trackedEligibleItems : validQueueItems
       const existingResultIds = new Set(
         resultsRef.current
           .map((result) => String(result.id || "").trim())
@@ -1280,13 +1378,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         // Best effort; background proxy handles auth for direct runtimes.
       }
 
-      const requestPayload = await buildQuickIngestPayload(validQueueItems, {
-        ...presetConfig.common,
-        storeRemote: presetConfig.storeRemote,
-        reviewBeforeStorage: presetConfig.reviewBeforeStorage,
-        advancedValues: presetConfig.advancedValues,
-        typeDefaults: presetConfig.typeDefaults,
-      })
+      const requestPayload = await buildQuickIngestPayload(
+        validQueueItems,
+        state.conferenceBatchMetadata,
+        {
+          ...presetConfig.common,
+          storeRemote: presetConfig.storeRemote,
+          reviewBeforeStorage: presetConfig.reviewBeforeStorage,
+          advancedValues: presetConfig.advancedValues,
+          typeDefaults: presetConfig.typeDefaults,
+        }
+      )
 
       const startAck = await startQuickIngestSession(requestPayload)
       if (!startAck?.ok || !startAck?.sessionId) {
@@ -1365,6 +1467,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     presetConfig.reviewBeforeStorage,
     presetConfig.storeRemote,
     presetConfig.typeDefaults,
+    state.conferenceBatchMetadata,
     markProcessingTracking,
     validQueueItems,
   ])
@@ -1455,31 +1558,48 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
+    if (!isOnlineForIngest || isCheckingConnection) return
     skipToProcessing()
-  }, [skipToProcessing])
+  }, [isCheckingConnection, isOnlineForIngest, skipToProcessing])
 
   // Navigation callbacks for WizardResultsStep CTAs
   const navigate = useNavigate()
-  const mountedRef = useRef(true)
-  useEffect(() => () => { mountedRef.current = false }, [])
 
   const handleSearchKnowledge = useCallback(() => {
+    navigate("/knowledge")
     onClose()
-    window.setTimeout(() => { if (mountedRef.current) navigate("/knowledge") }, 150)
   }, [navigate, onClose])
 
   const handleOpenWorkspace = useCallback(
     (item: WizardResultItem) => {
-      onClose()
       const mediaId = item.mediaId
       if (mediaId != null) {
-        window.setTimeout(
-          () => { if (mountedRef.current) navigate(`${DOCUMENT_WORKSPACE_PATH}?open=${mediaId}`) },
-          150
-        )
+        navigate(`${DOCUMENT_WORKSPACE_PATH}?open=${mediaId}`)
       } else {
-        window.setTimeout(() => { if (mountedRef.current) navigate(DOCUMENT_WORKSPACE_PATH) }, 150)
+        navigate(DOCUMENT_WORKSPACE_PATH)
       }
+      onClose()
+    },
+    [navigate, onClose]
+  )
+
+  const handleOpenMedia = useCallback(
+    (item: WizardResultItem) => {
+      const mediaId = item.mediaId
+      const mediaPath = mediaId != null
+        ? `/media?id=${encodeURIComponent(String(mediaId))}`
+        : "/media"
+      navigate(mediaPath)
+      onClose()
+    },
+    [navigate, onClose]
+  )
+
+  const handleOpenCollection = useCallback(
+    (collectionId: string) => {
+      const collectionPath = buildMediaCollectionReviewPath(collectionId)
+      onClose()
+      navigate(collectionPath)
     },
     [navigate, onClose]
   )
@@ -1488,7 +1608,15 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const stepContent = useMemo(() => {
     switch (currentStep) {
       case 1:
-        return <AddContentStep onQuickProcess={handleQuickProcess} />
+        return (
+          <AddContentStep
+            isOnlineForIngest={isOnlineForIngest}
+            isCheckingConnection={isCheckingConnection}
+            connectionRecoveryMessage={connectionRecoveryMessage}
+            onRetryConnection={handleRetryConnection}
+            onQuickProcess={handleQuickProcess}
+          />
+        )
       case 2:
         return (
           <WizardConfigureStep
@@ -1496,21 +1624,44 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           />
         )
       case 3:
-        return <ReviewStep />
+        return (
+          <ReviewStep
+            isOnlineForIngest={isOnlineForIngest}
+            isCheckingConnection={isCheckingConnection}
+            connectionRecoveryMessage={connectionRecoveryMessage}
+            onRetryConnection={handleRetryConnection}
+          />
+        )
       case 4:
         return <ProcessingStep />
       case 5:
         return (
           <WizardResultsStep
             onClose={onClose}
+            onOpenMedia={handleOpenMedia}
             onSearchKnowledge={handleSearchKnowledge}
             onOpenWorkspace={handleOpenWorkspace}
+            onOpenCollection={handleOpenCollection}
           />
         )
       default:
         return null
     }
-  }, [currentStep, handleQuickProcess, handleSearchKnowledge, handleOpenWorkspace, onClose, open, state.isMinimized])
+  }, [
+    connectionRecoveryMessage,
+    currentStep,
+    handleOpenMedia,
+    handleOpenCollection,
+    handleOpenWorkspace,
+    handleQuickProcess,
+    handleRetryConnection,
+    handleSearchKnowledge,
+    isCheckingConnection,
+    isOnlineForIngest,
+    onClose,
+    open,
+    state.isMinimized,
+  ])
 
   return (
     <>

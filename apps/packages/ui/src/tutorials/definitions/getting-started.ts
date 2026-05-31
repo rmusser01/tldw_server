@@ -17,6 +17,12 @@ const gettingStarted: TutorialDefinition = {
     "A quick tour of the main features to help you get the most out of tldw",
   icon: Rocket,
   priority: 0,
+  sequence: {
+    nextTutorialId: "knowledge-basics",
+    nextRoute: "/knowledge",
+    nextLabelKey: "tutorials:gettingStarted.sequence.knowledgeLabel",
+    nextLabelFallback: "Continue in Knowledge"
+  },
   steps: [
     {
       target: '[data-testid="companion-home-shell"]',
@@ -25,7 +31,7 @@ const gettingStarted: TutorialDefinition = {
       contentKey: "tutorials:gettingStarted.welcome.content",
       contentFallback:
         "This is your home dashboard. From here you can access all of tldw's features. Let's take a quick tour.",
-      placement: "center",
+      placement: "bottom",
       disableBeacon: true,
     },
     {
@@ -62,7 +68,7 @@ const gettingStarted: TutorialDefinition = {
       contentKey: "tutorials:gettingStarted.nextStep.content",
       contentFallback:
         "To start using Chat, go to Settings > tldw Server and add an LLM provider API key (e.g., OpenAI, Anthropic). Then come back and open Chat!",
-      placement: "center",
+      placement: "bottom",
     },
   ],
 }

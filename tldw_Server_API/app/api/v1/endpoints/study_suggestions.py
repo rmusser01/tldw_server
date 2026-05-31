@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,7 +14,7 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, User
 from tldw_Server_API.app.api.v1.schemas.study_suggestions import (
     SuggestionActionRequest,
     SuggestionActionResponse,
@@ -22,7 +23,6 @@ from tldw_Server_API.app.api.v1.schemas.study_suggestions import (
     SuggestionSnapshotResponse,
     SuggestionStatusResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -346,10 +346,10 @@ def _persist_flashcard_deck(
     )
     try:
         note_db.add_flashcards_bulk(flashcard_payloads)
-    except Exception as exc:
+    except Exception:
         with contextlib.suppress(Exception):
             soft_delete_deck(note_db, deck_id=int(deck_id))
-        logger.warning("Flashcard follow-up generation cleanup deleted deck {} after insert failure: {}", deck_id, exc)
+        logger.warning("Flashcard follow-up generation cleanup deleted deck after insert failure")
         raise
     return str(deck_id)
 

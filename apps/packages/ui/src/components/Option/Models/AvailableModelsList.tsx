@@ -25,6 +25,22 @@ const isAbortLikeError = (error: unknown): boolean => {
   )
 }
 
+const getModelLoadErrorMessage = (error: unknown): string | null => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error
+  }
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === "string" && message.trim()) {
+      return message
+    }
+  }
+  return null
+}
+
 export const AvailableModelsList: React.FC = () => {
   const { t } = useTranslation(['settings', 'common'])
   const { data, status, error, refetch, isFetching } = useQuery({
@@ -74,20 +90,30 @@ export const AvailableModelsList: React.FC = () => {
   }
 
   if (status === 'error') {
+    const errorMessage = getModelLoadErrorMessage(error)
     return (
       <Alert
         type="error"
         showIcon
         title={t('settings:models.loadErrorTitle', 'Unable to load models from server')}
         description={
-          <div className="flex flex-col gap-1 text-xs">
+          <div className="flex flex-col gap-2 text-xs">
             <span>
-              {(error as any)?.message ||
-                t(
-                  'settings:models.loadErrorBody',
-                  'The models endpoint returned an error. Check your server URL and API key, then try again.'
-                )}
+              {t(
+                'settings:models.loadErrorBody',
+                'The models endpoint returned an error. Check your server URL and API key, then try again.'
+              )}
             </span>
+            {errorMessage ? (
+              <details>
+                <summary className="cursor-pointer font-medium">
+                  {t('settings:models.requestDetails', 'Request details')}
+                </summary>
+                <code className="mt-1 block whitespace-pre-wrap break-words rounded border border-border bg-surface2 px-2 py-1">
+                  {errorMessage}
+                </code>
+              </details>
+            ) : null}
             <Button size="small" onClick={() => refetch()} loading={isFetching}>
               {t('common:retry', 'Retry')}
             </Button>

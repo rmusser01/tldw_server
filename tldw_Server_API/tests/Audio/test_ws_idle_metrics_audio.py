@@ -1,10 +1,8 @@
-import os
 import time
 import pytest
-from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
-from tldw_Server_API.tests.Audio.ws_test_helpers import ws_session_or_skip
+from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifespan, ws_session_or_skip
 
 
 @pytest.mark.asyncio
@@ -25,7 +23,7 @@ async def test_audio_ws_idle_timeout_increments_metric(monkeypatch):
         labels={"component": "audio", "endpoint": "audio_unified_ws", "transport": "ws"},
     ).get("count", 0)
 
-    with TestClient(app) as client:
+    with ws_client_without_lifespan(app) as client:
         try:
             ws = client.websocket_connect(f"/api/v1/audio/stream/transcribe?token={token}")
         except Exception:

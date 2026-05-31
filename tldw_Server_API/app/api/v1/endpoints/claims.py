@@ -2,12 +2,8 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import AdminPrincipal, get_auth_principal, get_request_user, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_auth_principal,
-    require_permissions,
-    require_roles,
-)
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
     ClaimNotificationResponse,
@@ -40,7 +36,6 @@ from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import get_claims_rebuild_service
 
@@ -48,9 +43,7 @@ router = APIRouter(prefix="/claims", tags=["claims"])
 
 
 @router.get("/status")
-def claims_rebuild_status(
-    _principal: AuthPrincipal = Depends(require_roles("admin")),  # noqa: B008
-) -> dict[str, Any]:
+def claims_rebuild_status(_principal: AdminPrincipal) -> dict[str, Any]:
     """Return statistics about the claims rebuild worker. Admin only."""
     return claims_service.claims_rebuild_status(
         rebuild_service=get_claims_rebuild_service(),
@@ -67,10 +60,11 @@ def list_all_claims(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0, le=100000),
     include_deleted: bool = Query(False),
+    envelope: bool = Query(False),
     user_id: Optional[int] = None,
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
-) -> list[dict[str, Any]]:
+) -> Any:
     """List claims across accessible media for the current user."""
     return claims_service.list_all_claims(
         media_id=media_id,
@@ -81,6 +75,7 @@ def list_all_claims(
         limit=limit,
         offset=offset,
         include_deleted=include_deleted,
+        envelope=envelope,
         user_id=user_id,
         current_user=current_user,
         db=db,
@@ -191,7 +186,7 @@ def evaluate_watchlist_notifications(
 
 @router.get("/settings", response_model=ClaimsSettingsResponse)
 def get_claims_settings(
-    _principal: AuthPrincipal = Depends(require_roles("admin")),  # noqa: B008
+    _principal: AdminPrincipal,
 ) -> ClaimsSettingsResponse:
     """Return current claims settings."""
     return claims_service.get_claims_settings(_principal)
@@ -200,8 +195,8 @@ def get_claims_settings(
 @router.put("/settings", response_model=ClaimsSettingsResponse)
 def update_claims_settings(
     payload: ClaimsSettingsUpdate,
-    principal: AuthPrincipal = Depends(require_roles("admin")),  # noqa: B008
-    _perm: AuthPrincipal = Depends(require_permissions(SYSTEM_CONFIGURE)),  # noqa: B008
+    principal: AdminPrincipal,
+    _perm: AuthPrincipal = Depends(RequirePermission(SYSTEM_CONFIGURE)),  # noqa: B008
 ) -> ClaimsSettingsResponse:
     """Update claims settings (optionally persisted)."""
     return claims_service.update_claims_settings(
@@ -346,11 +341,12 @@ def get_review_queue(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0, le=100000),
     include_deleted: bool = Query(False),
+    envelope: bool = Query(False),
     user_id: Optional[int] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
-) -> list[dict[str, Any]]:
+) -> Any:
     """Return claims queued for review."""
     return claims_service.get_review_queue(
         status_filter=status_filter,
@@ -361,6 +357,7 @@ def get_review_queue(
         limit=limit,
         offset=offset,
         include_deleted=include_deleted,
+        envelope=envelope,
         user_id=user_id,
         principal=principal,
         current_user=current_user,
@@ -601,7 +598,18 @@ def list_claims_analytics_exports(
     )
 
 
-@router.get("/analytics/export/{export_id}")
+@router.get(
+    "/analytics/export/{export_id}",
+    responses={
+        200: {
+            "description": "Prepared claims analytics export as JSON or CSV.",
+            "content": {
+                "application/json": {},
+                "text/csv": {},
+            },
+        },
+    },
+)
 def download_claims_analytics_export(
     export_id: str,
     principal: AuthPrincipal = Depends(get_auth_principal),
@@ -628,11 +636,12 @@ def list_claim_clusters(
     keyword: Optional[str] = None,
     min_size: Optional[int] = Query(None, ge=1),
     watchlisted: Optional[bool] = None,
+    envelope: bool = Query(False),
     user_id: Optional[int] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
-) -> list[dict[str, Any]]:
+) -> Any:
     """List cluster summaries, optionally filtered by timeframe or keyword."""
     return claims_service.list_claim_clusters(
         limit=limit,
@@ -641,6 +650,7 @@ def list_claim_clusters(
         keyword=keyword,
         min_size=min_size,
         watchlisted=watchlisted,
+        envelope=envelope,
         user_id=user_id,
         principal=principal,
         current_user=current_user,
@@ -745,15 +755,17 @@ def list_claim_cluster_members(
     cluster_id: int,
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0, le=100000),
+    envelope: bool = Query(False),
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
-) -> list[dict[str, Any]]:
+) -> Any:
     """Return cluster members."""
     return claims_service.list_claim_cluster_members(
         cluster_id=cluster_id,
         limit=limit,
         offset=offset,
+        envelope=envelope,
         principal=principal,
         current_user=current_user,
         db=db,
@@ -765,6 +777,7 @@ def claim_cluster_timeline(
     cluster_id: int,
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0, le=100000),
+    envelope: bool = Query(False),
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
@@ -774,6 +787,7 @@ def claim_cluster_timeline(
         cluster_id=cluster_id,
         limit=limit,
         offset=offset,
+        envelope=envelope,
         principal=principal,
         current_user=current_user,
         db=db,
@@ -785,6 +799,7 @@ def claim_cluster_evidence(
     cluster_id: int,
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0, le=100000),
+    envelope: bool = Query(False),
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
@@ -794,6 +809,7 @@ def claim_cluster_evidence(
         cluster_id=cluster_id,
         limit=limit,
         offset=offset,
+        envelope=envelope,
         principal=principal,
         current_user=current_user,
         db=db,

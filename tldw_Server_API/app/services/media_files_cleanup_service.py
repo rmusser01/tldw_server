@@ -59,8 +59,10 @@ def _get_storage_base_path() -> Path | None:
         storage_path = config.get("media_storage_path") or config.get("storage_path")
         if storage_path:
             return Path(storage_path)
-    except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"media_files_cleanup: failed to read storage path from config: {e}")
+    except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
+        logger.bind(error_type=type(exc).__name__).debug(
+            "media_files_cleanup: failed to read storage path from config"
+        )
 
     # Fallback to default location
     project_root = Path(__file__).resolve().parents[3]
@@ -72,7 +74,9 @@ def _enumerate_user_ids() -> list[int]:
     try:
         base = DatabasePaths.get_user_db_base_dir()
     except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"media_files_cleanup: failed to resolve user db base dir: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "media_files_cleanup: failed to resolve user db base dir"
+        )
         return []
 
     uids: list[int] = []
@@ -112,8 +116,11 @@ def _collect_known_storage_paths(user_id: int) -> set[str]:
                 path = row[0] if isinstance(row, (list, tuple)) else row.get("storage_path")
                 if path:
                     known_paths.add(path)
-    except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"media_files_cleanup: failed to query MediaFiles for user {user_id}: {e}")
+    except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
+        logger.bind(error_type=type(exc).__name__).warning(
+            "media_files_cleanup: failed to query MediaFiles for user {user_id}",
+            user_id=user_id,
+        )
 
     return known_paths
 
@@ -233,8 +240,10 @@ async def cleanup_orphaned_files() -> dict:
             except OSError:
                 pass
 
-        except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"media_files_cleanup: failed to remove {file_path}: {e}")
+        except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
+            logger.bind(error_type=type(exc).__name__).warning(
+                "media_files_cleanup: failed to remove orphaned media file"
+            )
             errors.append(str(file_path))
 
     # Record metrics
@@ -276,12 +285,19 @@ async def _cleanup_loop():
     while True:
         try:
             result = await cleanup_orphaned_files()
-            logger.debug(f"media_files_cleanup: cycle completed: {result}")
+            logger.debug(
+                "media_files_cleanup: cycle completed "
+                f"status={result.get('status')} "
+                f"files_removed={result.get('files_removed')} "
+                f"bytes_freed={result.get('bytes_freed')}"
+            )
         except asyncio.CancelledError:
             logger.info("media_files_cleanup: task cancelled")
             break
         except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"media_files_cleanup: error in cleanup cycle: {e}")
+            logger.bind(error_type=type(e).__name__).error(
+                "media_files_cleanup: error in cleanup cycle"
+            )
             with contextlib.suppress(_MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS):
                 get_metrics_registry().increment(
                     "media_files_cleanup_runs_total",

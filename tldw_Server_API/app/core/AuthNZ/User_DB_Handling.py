@@ -695,7 +695,7 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
             logger.error(f"Failed to validate user data for user {subject_identifier} into User model: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing user data: Invalid format - {e}"
+            detail="Error processing user data: Invalid format."
         ) from e
     except _USER_DB_NONCRITICAL_EXCEPTIONS as e:  # Catch other potential errors during model creation
         if pii_redact_logs:

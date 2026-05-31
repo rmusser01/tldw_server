@@ -1,4 +1,5 @@
 import type { IngestPreset, PresetConfig, CommonOptions, TypeDefaults } from "./types"
+import { shouldSubmitQuickIngestAdvancedField } from "@/services/tldw/quick-ingest-chunking"
 
 /**
  * Preset configurations for Quick Ingest.
@@ -11,7 +12,10 @@ export const DEFAULT_PRESETS: PresetMap = {
     common: {
       perform_analysis: false,
       perform_chunking: false,
-      overwrite_existing: false
+      overwrite_existing: false,
+      chunking_mode: "auto",
+      auto_chunking_goal: "balanced",
+      auto_chunking_use_llm: false
     },
     storeRemote: true,
     reviewBeforeStorage: false,
@@ -26,7 +30,10 @@ export const DEFAULT_PRESETS: PresetMap = {
     common: {
       perform_analysis: true,
       perform_chunking: true,
-      overwrite_existing: false
+      overwrite_existing: false,
+      chunking_mode: "auto",
+      auto_chunking_goal: "balanced",
+      auto_chunking_use_llm: false
     },
     storeRemote: true,
     reviewBeforeStorage: false,
@@ -41,7 +48,10 @@ export const DEFAULT_PRESETS: PresetMap = {
     common: {
       perform_analysis: true,
       perform_chunking: true,
-      overwrite_existing: true
+      overwrite_existing: true,
+      chunking_mode: "auto",
+      auto_chunking_goal: "balanced",
+      auto_chunking_use_llm: false
     },
     storeRemote: true,
     reviewBeforeStorage: true,
@@ -131,7 +141,7 @@ export const PRESET_ORDER: IngestPreset[] = ["quick", "standard", "deep", "custo
 /**
  * Default preset for new users.
  */
-export const DEFAULT_PRESET: IngestPreset = "standard"
+export const DEFAULT_PRESET: Exclude<IngestPreset, "custom"> = "standard"
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   if (!value || typeof value !== "object") return false
@@ -158,6 +168,16 @@ const serializeAdvancedValues = (values?: Record<string, unknown>) => {
   return JSON.stringify(normalizeAdvancedValue(values ?? {}))
 }
 
+const filterApplicableAdvancedValues = (
+  values: Record<string, unknown> | undefined,
+  common: CommonOptions,
+) =>
+  Object.fromEntries(
+    Object.entries(values ?? {}).filter(([fieldName]) =>
+      shouldSubmitQuickIngestAdvancedField(fieldName, common)
+    )
+  )
+
 /**
  * Check if current configuration matches a specific preset.
  */
@@ -178,7 +198,13 @@ export function configMatchesPreset(
   if (
     config.common.perform_analysis !== preset.common.perform_analysis ||
     config.common.perform_chunking !== preset.common.perform_chunking ||
-    config.common.overwrite_existing !== preset.common.overwrite_existing
+    config.common.overwrite_existing !== preset.common.overwrite_existing ||
+    (config.common.chunking_mode ?? "auto") !==
+      (preset.common.chunking_mode ?? "auto") ||
+    (config.common.auto_chunking_goal ?? "balanced") !==
+      (preset.common.auto_chunking_goal ?? "balanced") ||
+    Boolean(config.common.auto_chunking_use_llm) !==
+      Boolean(preset.common.auto_chunking_use_llm)
   ) {
     return false
   }
@@ -217,8 +243,12 @@ export function configMatchesPreset(
   }
 
   if (
-    serializeAdvancedValues(config.advancedValues) !==
-    serializeAdvancedValues(preset.advancedValues)
+    serializeAdvancedValues(
+      filterApplicableAdvancedValues(config.advancedValues, config.common)
+    ) !==
+    serializeAdvancedValues(
+      filterApplicableAdvancedValues(preset.advancedValues, preset.common)
+    )
   ) {
     return false
   }

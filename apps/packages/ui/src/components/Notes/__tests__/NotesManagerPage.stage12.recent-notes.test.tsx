@@ -237,6 +237,25 @@ describe("NotesManagerPage stage 12 recent notes", () => {
     expect(persistedCall?.[1]?.[1]?.id).toBe("n1")
   })
 
+  it("handles recent-note persistence promise failures", async () => {
+    const catchSpy = vi.fn()
+    mockSetSetting.mockReturnValue({ catch: catchSpy })
+
+    renderPage()
+    fireEvent.click(await screen.findByTestId("mock-note-n1"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-recent-item-n1")).toHaveTextContent("Alpha note")
+    })
+    await waitFor(() => {
+      expect(mockSetSetting).toHaveBeenCalledWith(
+        expect.objectContaining({ key: "tldw:notesRecentOpened" }),
+        expect.arrayContaining([expect.objectContaining({ id: "n1" })])
+      )
+    })
+    expect(catchSpy).toHaveBeenCalled()
+  })
+
   it("loads persisted recent notes and keeps in-note search guidance visible", async () => {
     mockGetSetting.mockImplementation(async (setting: { key?: string }) => {
       if (setting?.key === "tldw:notesRecentOpened") {

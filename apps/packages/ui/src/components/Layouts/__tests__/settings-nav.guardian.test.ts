@@ -1,9 +1,13 @@
+import fs from "node:fs"
+import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 
 import {
   getSettingsNavGroups,
   isSettingsAnnouncementBadgeActive
 } from "../settings-nav"
+import enOption from "@/assets/locale/en/option.json"
+import enSettings from "@/assets/locale/en/settings.json"
 import type { ServerCapabilities } from "@/services/tldw/server-capabilities"
 import {
   FAMILY_WIZARD_SETTINGS_PATH,
@@ -57,10 +61,10 @@ vi.mock("@/routes/route-registry", () => {
       },
       {
         kind: "options",
-        path: "/workspace-playground",
+        path: "/research-workspace",
         nav: {
           group: "workspace",
-          labelToken: "settings:researchStudioNav",
+          labelToken: "settings:researchWorkspaceNav",
           icon: MockIcon,
           beta: true,
           order: 0
@@ -82,11 +86,107 @@ const makeCapabilities = (
 const flattenPaths = (caps?: ServerCapabilities | null): string[] =>
   getSettingsNavGroups(caps).flatMap((group) => group.items.map((item) => item.to))
 
+const localeNamespaces: Record<string, unknown> = {
+  option: enOption,
+  settings: enSettings
+}
+
+const getPathValue = (source: unknown, keyPath: string): unknown =>
+  keyPath.split(".").reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== "object") return undefined
+    return (current as Record<string, unknown>)[segment]
+  }, source)
+
+const resolveLocaleToken = (token: string): unknown => {
+  const [namespace, keyPath] = token.split(":")
+  if (!namespace || !keyPath) return undefined
+
+  return getPathValue(localeNamespaces[namespace], keyPath)
+}
+
 describe("settings nav guardian gating", () => {
+  it("uses label tokens that resolve to user-facing English locale copy", () => {
+    const missingTokens = getSettingsNavGroups(undefined)
+      .flatMap((group) => group.items.map((item) => item.labelToken))
+      .filter((token) => {
+        const value = resolveLocaleToken(token)
+        return typeof value !== "string" || value.trim().length === 0
+      })
+
+    expect(missingTokens).toEqual([])
+  })
+
+  it("keeps settings navigation locale keys present across locale directories", () => {
+    const localeRoot = path.resolve(process.cwd(), "src/assets/locale")
+    const requiredSettingsKeys = [
+      "navigation.connect",
+      "navigation.aiModels",
+      "navigation.experience",
+      "navigation.knowledgeWorkspace",
+      "navigation.safetyAdmin",
+      "navigation.dataManagement",
+      "navigation.about",
+      "providerKeys.navTitle",
+      "dataManagement.navTitle"
+    ]
+
+    const locales = fs
+      .readdirSync(localeRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+
+    for (const locale of locales) {
+      const settingsPath = path.join(localeRoot, locale, "settings.json")
+      expect(
+        fs.existsSync(settingsPath),
+        `Missing settings locale file: ${settingsPath}`
+      ).toBe(true)
+
+      const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as unknown
+      for (const keyPath of requiredSettingsKeys) {
+        const value = getPathValue(parsed, keyPath)
+        expect(
+          typeof value,
+          `Missing or non-string locale key: ${locale}.${keyPath}`
+        ).toBe("string")
+        expect(String(value).trim().length).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it("groups settings routes by user task", () => {
+    const groups = getSettingsNavGroups(undefined)
+    const pathsByGroup = Object.fromEntries(
+      groups.map((group) => [group.key, group.items.map((item) => item.to)])
+    )
+
+    expect(groups.map((group) => group.key)).toEqual([
+      "connect",
+      "aiModels",
+      "experience",
+      "knowledgeWorkspace",
+      "safetyAdmin",
+      "dataManagement",
+      "about"
+    ])
+    expect(pathsByGroup.connect).toEqual(
+      expect.arrayContaining([
+        "/settings/tldw",
+        "/settings/provider-keys",
+        "/settings/health"
+      ])
+    )
+    expect(pathsByGroup.aiModels).toContain("/settings/model")
+    expect(pathsByGroup.experience).toEqual(
+      expect.arrayContaining(["/settings", "/settings/chat"])
+    )
+    expect(pathsByGroup.dataManagement).toEqual(["/settings/data"])
+  })
+
   it("keeps only settings-prefixed routes in settings navigation", () => {
     const paths = flattenPaths(undefined)
     expect(paths).toContain("/settings/chat")
-    expect(paths).not.toContain("/workspace-playground")
+    expect(paths).not.toContain("/research-workspace")
   })
 
   it("includes guardian route by default when capabilities are not resolved", () => {

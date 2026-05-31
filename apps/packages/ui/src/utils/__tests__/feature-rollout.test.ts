@@ -24,15 +24,15 @@ describe("feature-rollout utilities", () => {
 
   it("produces deterministic buckets", () => {
     const firstBucket = computeRolloutBucket(
-      "research_studio_provenance_v1",
+      "research_workspace_provenance_v1",
       "subject-a"
     )
     const secondBucket = computeRolloutBucket(
-      "research_studio_provenance_v1",
+      "research_workspace_provenance_v1",
       "subject-a"
     )
     const differentBucket = computeRolloutBucket(
-      "research_studio_provenance_v1",
+      "research_workspace_provenance_v1",
       "subject-b"
     )
 
@@ -44,7 +44,7 @@ describe("feature-rollout utilities", () => {
   })
 
   it("enforces rollout gates consistently for the same subject", () => {
-    const flagKey = "research_studio_status_guardrails_v1"
+    const flagKey = "research_workspace_status_guardrails_v1"
     const subjectId = "subject-fixed"
     const enabledAt10 = isFlagEnabledForRollout({
       flagKey,

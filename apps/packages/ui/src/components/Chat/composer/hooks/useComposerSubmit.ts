@@ -16,31 +16,40 @@ import React from "react"
  *   awaited. Use it for optimistic UI actions: form.reset(), clear draft
  *   attachments, textAreaFocus(). Playground and Sidepanel both use this
  *   "clear immediately, let the request fly" pattern.
- * - `afterSend` runs only if the dispatch resolves. On rejection it's
- *   skipped and the error propagates so the caller can render it.
+ * - `afterSend` runs only if the dispatch resolves. It receives the resolved
+ *   `sendMessage` result so callers can distinguish successful submissions
+ *   from handled failed/skipped results. On rejection it's skipped and the
+ *   error propagates so the caller can render it.
  */
 
-export interface UseComposerSubmitOptions<TPayload> {
-  sendMessage: (payload: TPayload) => Promise<unknown>
+export interface UseComposerSubmitOptions<TPayload, TResult = unknown> {
+  sendMessage: (payload: TPayload) => Promise<TResult>
 }
 
-export interface ComposerSubmitHooks {
+export interface ComposerSubmitHooks<TResult = unknown> {
   beforeSend?: () => void
-  afterSend?: () => void
+  afterSend?: (result: TResult) => void
 }
 
-export interface UseComposerSubmitResult<TPayload> {
-  dispatch: (payload: TPayload, hooks?: ComposerSubmitHooks) => Promise<void>
+export interface UseComposerSubmitResult<TPayload, TResult = unknown> {
+  dispatch: (
+    payload: TPayload,
+    hooks?: ComposerSubmitHooks<TResult>
+  ) => Promise<TResult>
 }
 
-export function useComposerSubmit<TPayload>({
+export function useComposerSubmit<TPayload, TResult = unknown>({
   sendMessage,
-}: UseComposerSubmitOptions<TPayload>): UseComposerSubmitResult<TPayload> {
+}: UseComposerSubmitOptions<TPayload, TResult>): UseComposerSubmitResult<
+  TPayload,
+  TResult
+> {
   const dispatch = React.useCallback(
-    async (payload: TPayload, hooks?: ComposerSubmitHooks) => {
+    async (payload: TPayload, hooks?: ComposerSubmitHooks<TResult>) => {
       hooks?.beforeSend?.()
-      await sendMessage(payload)
-      hooks?.afterSend?.()
+      const result = await sendMessage(payload)
+      hooks?.afterSend?.(result)
+      return result
     },
     [sendMessage]
   )

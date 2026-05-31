@@ -1,8 +1,8 @@
 # Flashcards Study Guide
 
-_Last updated: 2026-03-13_
+_Last updated: 2026-05-26_
 
-This guide explains the Flashcards flow in `Study`, `Manage`, `Transfer`, and `Scheduler`, including scheduling basics, queue states, cloze syntax, and import/export formats.
+This guide explains the Flashcards flow in `Study`, `Manage`, `Create & Import`, `Templates`, and `Scheduler`, including extension selected-text capture, scheduling basics, queue states, cloze syntax, and import/export formats.
 
 ## Card Images
 
@@ -23,12 +23,38 @@ Why the 8 KB field limit did not increase:
 
 ## Daily Study Workflow
 
-1. Add cards through `Manage` (manual create), `Transfer` import, `Transfer` generate, or `Transfer` image occlusion.
+1. Add cards through `Manage` manual creation, `Create & Import` import/generate/structured Q&A/image occlusion, or the extension selected-text handoff.
 2. Open `Scheduler` when you want to tune a deck's spaced-repetition policy.
 3. Open `Study` and review due cards.
 4. Reveal the answer, then rate recall (`Again`, `Hard`, `Good`, `Easy`).
 5. Use `Manage` when you want to inspect queue state on expanded cards or document rows while cleaning up a deck.
 6. Repeat daily. The scheduler adjusts next due dates from your ratings.
+
+## Extension Selected-Text Capture
+
+Use this path when you find useful passages while browsing and want to save editable flashcards, generate a small draft batch without leaving the sidepanel, apply existing templates to drafts, review due cards quickly, or send selected text directly to full Flashcards generation.
+
+Workflow:
+
+1. Select text on the source page.
+2. Open the extension sidepanel and choose `Flashcards`.
+3. Choose `Capture page selection` to add the selection to the sidepanel draft queue.
+4. Choose `Generate draft cards` to generate a small editable draft batch in the sidepanel from the selected text.
+5. Choose `Apply template` on a queued draft when an existing template should fill or reshape the card fields before saving.
+6. Select a deck, edit each draft's `Front` and `Back`, then choose `Save card` or `Save all`.
+7. Choose `Generate from selection` to open full Flashcards generation with the selected text and source page context.
+8. Choose `Review due card` to review the next due card for the selected deck, reveal the answer, and submit `Again`, `Hard`, `Good`, or `Easy`.
+9. Use `Open full Flashcards` for imports, richer review tools, or broader deck management.
+
+Important behavior:
+
+- The sidepanel Flashcards route saves queued captured and generated drafts and keeps the source page URL as provenance.
+- `Apply template` uses templates from full Flashcards and can be applied per draft before saving.
+- Create the deck in full Flashcards first if the sidepanel shows no deck options.
+- `Review due card` is a compact sidepanel review loop. Use full Flashcards for cram, assistant support, analytics, undo/re-rate, and broader deck management.
+- The browser context menu path still works: choose `tldw` -> `Save` -> `Save to Notes`, review the selection in the sidepanel dialog, then choose `Generate flashcards`.
+- Use `Generate from selection`, the context-menu path, or full Web UI `/flashcards` -> `Create & Import` -> `Generate` when you want the fuller generation workflow instead of the sidepanel's compact generated draft batch.
+- If the sidepanel cannot capture on the current site, use full Web UI `/flashcards` and paste text into `Create & Import`.
 
 ## Study Assistant Conflict Recovery
 
@@ -96,9 +122,9 @@ You can now set scheduler policy at deck-creation time instead of creating the d
 Flashcards creation flows:
 
 - `Manage` manual card creation
-- `Transfer` structured Q&A preview save
-- `Transfer` generated flashcards save
-- `Transfer` image occlusion save
+- `Create & Import` structured Q&A preview save
+- `Create & Import` generated flashcards save
+- `Create & Import` image occlusion save
 
 How it works:
 
@@ -194,7 +220,7 @@ Notes:
 
 - Without headers, default column order is `Deck, Front, Back, Tags, Notes`.
 - `Tags` can be comma-separated or space-separated.
-- If imports fail by row, use row-level errors in `Transfer` and jump to inline format help.
+- If imports fail by row, use row-level errors in `Create & Import` and jump to inline format help.
 
 ### JSON / JSONL
 
@@ -214,7 +240,7 @@ Accepted payload forms:
 
 ### Structured Q And A Preview
 
-Use `Transfer` → `Structured Q&A` when you already wrote your own questions and answers and only want the app to convert them into flashcards without LLM rewriting.
+Use `Create & Import` -> `Structured Q&A` when you already wrote your own questions and answers and only want the app to convert them into flashcards without LLM rewriting.
 
 Accepted label pairs:
 
@@ -231,7 +257,7 @@ Preview rules:
 
 ### Image Occlusion Authoring
 
-Use `Transfer` → `Image Occlusion` when you want to turn one labeled screenshot, diagram, or slide into several image-backed cards.
+Use `Create & Import` -> `Image Occlusion` when you want to turn one labeled screenshot, diagram, or slide into several image-backed cards.
 
 Workflow:
 
@@ -261,7 +287,7 @@ Current limits:
 
 ### APKG Export
 
-APKG export is available from `Transfer` and preserves scheduling metadata for Anki import.
+APKG export is available from `Create & Import` and preserves scheduling metadata for Anki import.
 
 Image-backed cards:
 

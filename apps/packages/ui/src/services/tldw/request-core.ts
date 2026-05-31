@@ -337,7 +337,13 @@ export const tldwRequest = async (
         })
       : null
   const hostedMode = transport?.mode === "hosted"
-  if (isAbsolute && !isAbsoluteUrlAllowlisted(absolutePath, cfg)) {
+  const sameOriginAbsoluteUrl =
+    isAbsolute && isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, cfg)
+  if (
+    isAbsolute &&
+    !sameOriginAbsoluteUrl &&
+    !isAbsoluteUrlAllowlisted(absolutePath, cfg)
+  ) {
     return {
       ok: false,
       status: 400,
@@ -353,8 +359,6 @@ export const tldwRequest = async (
   const url = isAbsolute
     ? normalizedPath
     : transport?.url || String(normalizedPath)
-  const sameOriginAbsoluteUrl =
-    isAbsolute && isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, cfg)
   const shouldSkipAuth = noAuth || (isAbsolute && !sameOriginAbsoluteUrl)
   const h: Record<string, string> = { ...(headers || {}) }
   const hasContentType = Object.keys(h).some(

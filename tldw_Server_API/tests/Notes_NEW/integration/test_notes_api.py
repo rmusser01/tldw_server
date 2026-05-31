@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 
 
 pytestmark = pytest.mark.integration
@@ -30,6 +30,22 @@ class _BulkStubDB:
 
     def get_note_by_id(self, note_id: str):
         return None
+
+
+class _FolderConflictStubDB:
+    client_id = "folder_conflict_stub"
+
+    def __init__(self) -> None:
+        self._lookup_count = 0
+
+    def get_note_folder_by_path(self, folder_path: str) -> dict[str, object] | None:
+        self._lookup_count += 1
+        if self._lookup_count == 1:
+            return None
+        return {"id": 42, "name": "Inbox", "path": "Inbox", "parent_id": None}
+
+    def create_note_folder_path(self, folder_path: str) -> dict[str, object]:
+        raise ConflictError("Folder already exists")
 
 
 @pytest.fixture()
@@ -92,6 +108,33 @@ def client_with_bulk_stub(monkeypatch):
     fastapi_app.dependency_overrides.clear()
 
 
+@pytest.fixture()
+def client_with_folder_conflict_stub(monkeypatch):
+    async def override_user():
+        return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
+
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+
+    def override_db_dep():
+        return _FolderConflictStubDB()
+
+    monkeypatch.setenv("MINIMAL_TEST_APP", "0")
+    monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
+
+    from tldw_Server_API.app import main as app_main
+
+    importlib.reload(app_main)
+    fastapi_app = app_main.app
+
+    fastapi_app.dependency_overrides[get_request_user] = override_user
+    fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_db_dep
+
+    with TestClient(fastapi_app) as client:
+        yield client
+
+    fastapi_app.dependency_overrides.clear()
+
+
 def test_create_get_update_delete_note(client_with_notes_db: TestClient):
     client = client_with_notes_db
 
@@ -132,6 +175,52 @@ def test_create_get_update_delete_note(client_with_notes_db: TestClient):
     ver = curr.get("version", 1)
     del_resp = client.delete(f"/api/v1/notes/{note_id}", headers={"expected-version": str(ver)})
     assert del_resp.status_code in (200, 204)
+
+
+def test_note_folder_list_and_create_endpoints(client_with_notes_db: TestClient) -> None:
+    client = client_with_notes_db
+
+    empty_response = client.get("/api/v1/notes/folders/")
+    assert empty_response.status_code == 200, empty_response.text
+    assert empty_response.json()["items"] == []
+
+    create_response = client.post(
+        "/api/v1/notes/folders/",
+        json={"path": "Inbox/Captured Articles"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    assert created["name"] == "Captured Articles"
+    assert created["path"] == "Inbox/Captured Articles"
+    assert created["parent_id"] is not None
+
+    duplicate_response = client.post(
+        "/api/v1/notes/folders/",
+        json={"path": "inbox/captured articles"},
+    )
+    assert duplicate_response.status_code == 200, duplicate_response.text
+    assert duplicate_response.json()["id"] == created["id"]
+
+    list_response = client.get("/api/v1/notes/folders/")
+    assert list_response.status_code == 200, list_response.text
+    payload = list_response.json()
+    assert payload["count"] == 2
+    assert [folder["path"] for folder in payload["items"]] == [
+        "Inbox",
+        "Inbox/Captured Articles",
+    ]
+
+
+def test_create_note_folder_refetches_after_conflict(
+    client_with_folder_conflict_stub: TestClient,
+) -> None:
+    response = client_with_folder_conflict_stub.post(
+        "/api/v1/notes/folders/",
+        json={"path": "Inbox"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == 42
 
 
 def test_keywords_crud_and_linking(client_with_notes_db: TestClient):
@@ -241,6 +330,22 @@ def test_list_and_search_pagination_and_404s(client_with_notes_db: TestClient):
     d1, d2 = page1.json(), page2.json()
     assert isinstance(d1, dict) and isinstance(d2, dict)
     assert isinstance(d1.get("notes"), list) and isinstance(d2.get("notes"), list)
+    assert d1["pagination"]["mode"] == "offset"
+    assert d1["pagination"]["limit"] == 2
+    assert d1["pagination"]["offset"] == 0
+    assert d1["pagination"]["total"] == d1["total"]
+    assert d1["pagination"]["has_more"] is True
+    assert d1["pagination"]["next_offset"] == 2
+    assert d1["has_more"] is True
+    assert d1["next_offset"] == 2
+    assert d2["pagination"]["mode"] == "offset"
+    assert d2["pagination"]["limit"] == 2
+    assert d2["pagination"]["offset"] == 2
+    assert d2["pagination"]["total"] == d2["total"]
+    assert d2["pagination"]["has_more"] is True
+    assert d2["pagination"]["next_offset"] == 4
+    assert d2["has_more"] is True
+    assert d2["next_offset"] == 4
     # Verify disjointness of pages by IDs
     ids1 = {n.get("id") for n in d1.get("notes", [])}
     ids2 = {n.get("id") for n in d2.get("notes", [])}
@@ -342,6 +447,56 @@ def test_keywords_list_pagination_and_search_limit(client_with_notes_db: TestCli
     results = search.json()
     assert isinstance(results, list)
     assert len(results) <= 7
+
+
+def test_keyword_collections_list_includes_canonical_pagination(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    first = client.post("/api/v1/notes/collections", json={"name": "Collection A"})
+    second = client.post("/api/v1/notes/collections", json={"name": "Collection B"})
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+
+    page1 = client.get("/api/v1/notes/collections", params={"limit": 1, "offset": 0})
+    page2 = client.get("/api/v1/notes/collections", params={"limit": 1, "offset": 1})
+    assert page1.status_code == 200, page1.text
+    assert page2.status_code == 200, page2.text
+
+    payload1 = page1.json()
+    payload2 = page2.json()
+    assert len(payload1["collections"]) == 1
+    assert len(payload2["collections"]) == 1
+    page1_ids = {collection["id"] for collection in payload1["collections"]}
+    page2_ids = {collection["id"] for collection in payload2["collections"]}
+    assert page1_ids.isdisjoint(page2_ids)
+    assert payload1["total"] == 2
+    assert payload1["count"] == 1
+    assert payload1["limit"] == 1
+    assert payload1["offset"] == 0
+    assert payload1["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 0,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert payload1["has_more"] is True
+    assert payload1["next_offset"] == 1
+    assert payload2["total"] == 2
+    assert payload2["count"] == 1
+    assert payload2["limit"] == 1
+    assert payload2["offset"] == 1
+    assert payload2["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert payload2["has_more"] is False
+    assert payload2["next_offset"] is None
 
 
 def test_keywords_list_without_trailing_slash_does_not_hit_note_lookup(client_with_notes_db: TestClient):

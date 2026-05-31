@@ -169,6 +169,7 @@ class Scheduler:
                      depends_on: Optional[list[str]] = None,
                      idempotency_key: Optional[str] = None,
                      metadata: Optional[dict[str, Any]] = None,
+                     max_retries: Optional[int] = None,
                      auth_context: Optional[AuthContext] = None) -> str:
         """
         Submit a task to the scheduler.
@@ -181,6 +182,7 @@ class Scheduler:
             depends_on: Task dependencies
             idempotency_key: Idempotency key for deduplication
             metadata: Additional metadata
+            max_retries: Optional retry override for this submission
             auth_context: Authorization context for the request
 
         Returns:
@@ -197,6 +199,7 @@ class Scheduler:
             depends_on=depends_on,
             idempotency_key=idempotency_key,
             metadata=metadata,
+            max_retries=max_retries,
             auth_context=auth_context
         )
 
@@ -278,6 +281,7 @@ class Scheduler:
             depends_on = task_spec.get('depends_on')
             idempotency_key = task_spec.get('idempotency_key')
             metadata = task_spec.get('metadata')
+            max_retries = task_spec.get('max_retries')
 
             try:
                 task, existing_id = await self._prepare_task_for_submission(
@@ -288,6 +292,7 @@ class Scheduler:
                     depends_on=depends_on,
                     idempotency_key=idempotency_key,
                     metadata=metadata,
+                    max_retries=max_retries,
                     auth_context=auth_context,
                     pending_idempotency=pending_idempotency
                 )
@@ -523,6 +528,7 @@ class Scheduler:
         depends_on: Optional[list[str]],
         idempotency_key: Optional[str],
         metadata: Optional[dict[str, Any]],
+        max_retries: Optional[int],
         auth_context: Optional[AuthContext],
         pending_idempotency: Optional[dict[str, str]] = None
     ) -> tuple[Optional[Task], Optional[str]]:
@@ -615,6 +621,12 @@ class Scheduler:
         if self.payload_service:
             sanitized_payload = self.payload_service.prepare_payload(sanitized_payload)
 
+        retry_limit = handler_meta.get('max_retries', self.config.default_max_retries)
+        if max_retries is not None:
+            if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
+                raise ValueError("max_retries must be a non-negative integer")
+            retry_limit = max_retries
+
         task = Task(
             handler=handler,
             payload=sanitized_payload,
@@ -623,7 +635,7 @@ class Scheduler:
             depends_on=depends_on,
             idempotency_key=idempotency_key,
             metadata=metadata,
-            max_retries=handler_meta.get('max_retries', self.config.default_max_retries),
+            max_retries=retry_limit,
             timeout=handler_meta.get('timeout', self.config.default_task_timeout)
         )
 
@@ -901,6 +913,16 @@ async def get_global_scheduler(config: Optional[SchedulerConfig] = None,
             await _GLOBAL_SCHEDULER.start(start_workers)
         elif not getattr(_GLOBAL_SCHEDULER, "_started", False):
             await _GLOBAL_SCHEDULER.start(start_workers)
+        return _GLOBAL_SCHEDULER
+
+
+async def get_existing_global_scheduler() -> Optional[Scheduler]:
+    """Return the started global Scheduler without creating or starting one."""
+    async with _GLOBAL_SCHEDULER_LOCK:
+        if _GLOBAL_SCHEDULER is None:
+            return None
+        if not getattr(_GLOBAL_SCHEDULER, "_started", False):
+            return None
         return _GLOBAL_SCHEDULER
 
 

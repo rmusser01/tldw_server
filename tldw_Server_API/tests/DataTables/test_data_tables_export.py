@@ -1,6 +1,7 @@
 import contextlib
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -16,6 +17,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 pytestmark = pytest.mark.integration
@@ -28,7 +30,7 @@ def _principal_override():
             user_id=1,
             api_key_id=None,
             subject="test-user",
-            token_type="single_user",
+            token_type="single_user",  # nosec B106 - auth principal stub token type, not a credential
             jti=None,
             roles=["admin"],
             permissions=["media.create", "media.read", "media.update", "media.delete"],
@@ -161,6 +163,20 @@ def test_export_data_table_async_pending(tmp_path, monkeypatch):
         )
         media_db.update_data_table(table_id, row_count=1)
 
+        async def fake_create_artifact(self, file_req, request_id=None):  # noqa: ANN001, ARG001
+            return (
+                SimpleNamespace(
+                    file_id=77,
+                    export={"status": "pending", "format": "csv", "job_id": "job-77"},
+                ),
+                202,
+            )
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.data_tables.FileArtifactsService.create_artifact",
+            fake_create_artifact,
+        )
+
         with TestClient(app) as client:
             table_uuid = table.get("uuid")
             resp = client.get(f"/api/v1/data-tables/{table_uuid}/export?format=csv&async_mode=async")
@@ -169,6 +185,89 @@ def test_export_data_table_async_pending(tmp_path, monkeypatch):
             export_info = payload["export"]
             assert export_info["status"] == "pending"
             assert export_info["job_id"]
+    finally:
+        app.dependency_overrides.clear()
+        media_db.close_connection()
+        collections_db.close()
+        _restore_settings(prev_base_dir)
+
+
+def test_export_maps_table_fetch_database_error(tmp_path, monkeypatch):
+    app, media_db, collections_db, prev_base_dir = _build_app(tmp_path, monkeypatch)
+
+    def fail_fetch(self, *args, **kwargs):  # noqa: ANN001, ARG001
+        raise DatabaseError("driver failed")
+
+    monkeypatch.setattr(MediaDatabase, "get_data_table_by_uuid", fail_fetch)
+
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get("/api/v1/data-tables/table-uuid/export?format=csv&async_mode=sync")
+            assert resp.status_code == 500, resp.text
+            assert resp.json()["detail"] == "Failed to export data table"
+    finally:
+        app.dependency_overrides.clear()
+        media_db.close_connection()
+        collections_db.close()
+        _restore_settings(prev_base_dir)
+
+
+def test_export_maps_columns_database_error(tmp_path, monkeypatch):
+    app, media_db, collections_db, prev_base_dir = _build_app(tmp_path, monkeypatch)
+    try:
+        table = media_db.create_data_table(
+            name="Roster",
+            prompt="Export",
+            description="Export table",
+            status="ready",
+            row_count=1,
+        )
+
+        def fail_columns(self, *args, **kwargs):  # noqa: ANN001, ARG001
+            raise DatabaseError("driver failed")
+
+        monkeypatch.setattr(MediaDatabase, "list_data_table_columns", fail_columns)
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get(
+                f"/api/v1/data-tables/{table.get('uuid')}/export?format=csv&async_mode=sync"
+            )
+            assert resp.status_code == 500, resp.text
+            assert resp.json()["detail"] == "Failed to export data table"
+    finally:
+        app.dependency_overrides.clear()
+        media_db.close_connection()
+        collections_db.close()
+        _restore_settings(prev_base_dir)
+
+
+def test_export_maps_rows_database_error(tmp_path, monkeypatch):
+    app, media_db, collections_db, prev_base_dir = _build_app(tmp_path, monkeypatch)
+    try:
+        table = media_db.create_data_table(
+            name="Roster",
+            prompt="Export",
+            description="Export table",
+            status="ready",
+            row_count=1,
+        )
+        table_id = int(table.get("id"))
+        media_db.insert_data_table_columns(
+            table_id,
+            [{"name": "Name", "type": "text", "position": 0}],
+        )
+
+        def fail_rows(self, *args, **kwargs):  # noqa: ANN001, ARG001
+            raise DatabaseError("driver failed")
+
+        monkeypatch.setattr(MediaDatabase, "list_data_table_rows", fail_rows)
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get(
+                f"/api/v1/data-tables/{table.get('uuid')}/export?format=csv&async_mode=sync"
+            )
+            assert resp.status_code == 500, resp.text
+            assert resp.json()["detail"] == "Failed to export data table"
     finally:
         app.dependency_overrides.clear()
         media_db.close_connection()

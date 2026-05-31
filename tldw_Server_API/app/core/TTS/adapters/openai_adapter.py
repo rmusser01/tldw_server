@@ -58,6 +58,12 @@ def _is_timeout_error(exc: Exception) -> bool:
     name = exc.__class__.__name__.lower()
     return "timeout" in name
 
+
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 class OpenAIAdapter(TTSAdapter):
     """Adapter for OpenAI's TTS API.
     Note: This class implements all abstract methods so it can be instantiated
@@ -189,7 +195,10 @@ class OpenAIAdapter(TTSAdapter):
                         await self._handle_http_status_error(e)
                     logger.info(f"{self.provider_name}: API key verified during initialization")
                 except TTSAuthenticationError as auth_exc:
-                    logger.error(f"{self.provider_name}: API key verification failed during initialization: {auth_exc}")
+                    logger.error(
+                        f"{self.provider_name}: API key verification failed during initialization; "
+                        f"exception_type={_safe_exception_label(auth_exc)}"
+                    )
                     self._status = ProviderStatus.ERROR
                     raise TTSProviderInitializationError(
                         f"Failed to initialize {self.provider_name}: authentication failed",
@@ -199,12 +208,13 @@ class OpenAIAdapter(TTSAdapter):
                 except (TTSRateLimitError, TTSNetworkError, TTSTimeoutError, TTSProviderError) as non_fatal:
                     logger.warning(
                         f"{self.provider_name}: API key verification during initialization did not succeed "
-                        f"({type(non_fatal).__name__}: {non_fatal}). Continuing initialization; "
+                        f"(exception_type={_safe_exception_label(non_fatal)}). Continuing initialization; "
                         "the first real request will surface any persistent issues."
                     )
                 except Exception as exc:
                     logger.warning(
-                        f"{self.provider_name}: Unexpected error during API key verification on init: {exc}. "
+                        f"{self.provider_name}: Unexpected error during API key verification on init; "
+                        f"exception_type={_safe_exception_label(exc)}. "
                         "Continuing initialization."
                     )
 
@@ -218,7 +228,10 @@ class OpenAIAdapter(TTSAdapter):
         except TTSProviderNotConfiguredError:
             return False
         except Exception as e:
-            logger.error(f"{self.provider_name}: Initialization failed: {e}")
+            logger.error(
+                f"{self.provider_name}: Initialization failed; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             self._status = ProviderStatus.ERROR
             raise TTSProviderInitializationError(
                 f"Failed to initialize {self.provider_name}",
@@ -268,7 +281,10 @@ class OpenAIAdapter(TTSAdapter):
         try:
             validate_tts_request(request, provider=self.provider_key)
         except Exception as e:
-            logger.error(f"{self.provider_name} request validation failed: {e}")
+            logger.error(
+                f"{self.provider_name} request validation failed; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             raise
 
         # Map voice if needed
@@ -334,7 +350,10 @@ class OpenAIAdapter(TTSAdapter):
                 error_msg = error_content.decode()
             except Exception:
                 error_msg = ""
-        logger.error(f"{self.provider_name} API error: {status_code} - {error_msg}")
+        logger.error(
+            f"{self.provider_name} API error: {status_code}; "
+            f"exception_type={_safe_exception_label(e)}; response body redacted"
+        )
 
         if status_code == 401:
             # Standardize message and provider fields
@@ -363,7 +382,10 @@ class OpenAIAdapter(TTSAdapter):
         if _is_http_status_error(e):
             await self._handle_http_status_error(e)
         if isinstance(e, (CoreNetworkError, RetryExhaustedError)) or _is_httpx_exception(e):
-            logger.error(f"{self.provider_name} network/timeout error: {e}")
+            logger.error(
+                f"{self.provider_name} network/timeout error; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             reason = str(e) or e.__class__.__name__
             if _is_timeout_error(e) or "timeout" in reason.lower():
                 raise timeout_error(self.provider_name, timeout_seconds=60.0) from e
@@ -378,7 +400,10 @@ class OpenAIAdapter(TTSAdapter):
                 TTSTimeoutError,
             ),
         ):
-            logger.error(f"{self.provider_name} unexpected error: {e}")
+            logger.error(
+                f"{self.provider_name} unexpected error; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             raise TTSProviderError(
                 f"Unexpected error in {self.provider_name}",
                 provider=self.provider_name,
@@ -414,9 +439,15 @@ class OpenAIAdapter(TTSAdapter):
                     if hasattr(response, "aclose"):
                         await response.aclose()  # type: ignore[func-returns-value]
                 except Exception as stream_close_error:
-                    logger.debug("OpenAI TTS response close after stream failed", exc_info=stream_close_error)
+                    logger.debug(
+                        "OpenAI TTS response close after stream failed; "
+                        f"exception_type={_safe_exception_label(stream_close_error)}"
+                    )
         except Exception as e:
-            logger.error(f"{self.provider_name} streaming error: {e}")
+            logger.error(
+                f"{self.provider_name} streaming error; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             await self._raise_normalized_request_error(e)
 
     async def _generate_complete(
@@ -445,7 +476,10 @@ class OpenAIAdapter(TTSAdapter):
             self.client = None
             logger.debug(f"{self.provider_name}: Resources cleaned up")
         except Exception as e:
-            logger.warning(f"{self.provider_name}: Error during cleanup: {e}")
+            logger.warning(
+                f"{self.provider_name}: Error during cleanup; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
 
     def map_voice(self, voice_id: str) -> str:
         """Map generic voice ID to OpenAI voice"""

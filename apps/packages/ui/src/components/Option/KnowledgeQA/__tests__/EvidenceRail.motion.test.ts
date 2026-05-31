@@ -18,4 +18,12 @@ describe("EvidenceRail motion preferences", () => {
       /<aside className="absolute right-0 top-0 h-full w-\[88vw\] max-w-md border-l border-border bg-surface shadow-xl[^"]*motion-reduce:animate-none/
     )
   })
+
+  it("explains evidence actions without adding a separate persistence panel", () => {
+    const source = readFileSync(sourcePath, "utf8")
+
+    expect(source).toContain(
+      "Use each source card to copy citations, copy excerpts, or open supported sources."
+    )
+  })
 })

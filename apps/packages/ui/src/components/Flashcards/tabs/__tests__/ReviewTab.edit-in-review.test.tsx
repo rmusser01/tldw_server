@@ -11,6 +11,8 @@ import {
   useCramQueueQuery,
   useReviewQuery,
   useReviewFlashcardMutation,
+  useEndFlashcardReviewSessionMutation,
+  useRecentFlashcardReviewSessionsQuery,
   useFlashcardAssistantQuery,
   useFlashcardAssistantRespondMutation,
   useUpdateFlashcardMutation,
@@ -102,7 +104,13 @@ vi.mock("../../hooks", () => ({
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
   useEndFlashcardReviewSessionMutation: vi.fn(),
-  useRecentFlashcardReviewSessionsQuery: vi.fn(),
+  useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn()
+  })),
   useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useFlashcardAssistantQuery: vi.fn(),
   useFlashcardAssistantRespondMutation: vi.fn(),
@@ -180,6 +188,16 @@ describe("ReviewTab edit-in-review workflow", () => {
     } as any)
     vi.mocked(useReviewFlashcardMutation).mockReturnValue({
       mutateAsync: vi.fn()
+    } as any)
+    vi.mocked(useEndFlashcardReviewSessionMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false
+    } as any)
+    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false
     } as any)
     vi.mocked(useFlashcardAssistantQuery).mockReturnValue({
       data: null,

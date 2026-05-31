@@ -35,6 +35,155 @@ class _ExitedProcess(_FakeProcess):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_supervisor_spawn_exports_omnivoice_runtime_config_and_creates_dirs(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import omnivoice_sidecar_supervisor as supervisor_module
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
+
+    spawn_envs: list[dict[str, str]] = []
+    runtime_path = tmp_path / "runtime"
+    scratch_dir = runtime_path / "scratch"
+
+    class _ReadyClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, *, headers=None, timeout=None):  # noqa: ARG002
+            return httpx.Response(200, json={"status": "ok", "ready": True})
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ARG001
+        assert runtime_path.is_dir()  # nosec B101
+        assert scratch_dir.is_dir()  # nosec B101
+        spawn_envs.append(dict(kwargs["env"]))
+        return _FakeProcess()
+
+    monkeypatch.setattr(supervisor_module, "is_port_free", lambda host, port: True, raising=True)
+    monkeypatch.setattr(supervisor_module.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec, raising=True)
+    monkeypatch.setattr(
+        supervisor_module,
+        "create_sidecar_async_client",
+        lambda *, timeout: _ReadyClient(),
+        raising=True,
+    )
+
+    supervisor = OmniVoiceSidecarSupervisor(
+        provider_config={
+            "model": "omnivoice",
+            "extra_params": {
+                "model_path": str(tmp_path / "models" / "omnivoice"),
+                "runtime_path": str(runtime_path),
+                "scratch_dir": str(scratch_dir),
+                "device_map": "cpu",
+                "dtype": "float32",
+            },
+        },
+        repo_root=tmp_path,
+    )
+
+    await supervisor.ensure_started()
+
+    assert len(spawn_envs) == 1  # nosec B101
+    env = spawn_envs[0]
+    assert env["OMNIVOICE_MODEL"] == "omnivoice"  # nosec B101
+    assert env["OMNIVOICE_MODEL_PATH"].endswith("models/omnivoice")  # nosec B101
+    assert env["OMNIVOICE_RUNTIME_PATH"].endswith("runtime")  # nosec B101
+    assert env["OMNIVOICE_SCRATCH_DIR"].endswith("scratch")  # nosec B101
+    assert env["OMNIVOICE_DEVICE_MAP"] == "cpu"  # nosec B101
+    assert env["OMNIVOICE_DTYPE"] == "float32"  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_supervisor_defaults_scratch_dir_under_configured_runtime_path(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import omnivoice_sidecar_supervisor as supervisor_module
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
+
+    spawn_envs: list[dict[str, str]] = []
+    runtime_path = tmp_path / "runtime"
+    expected_scratch = runtime_path / "scratch"
+
+    class _ReadyClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, *, headers=None, timeout=None):  # noqa: ARG002
+            return httpx.Response(200, json={"status": "ok", "ready": True})
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ARG001
+        assert runtime_path.is_dir()  # nosec B101
+        assert expected_scratch.is_dir()  # nosec B101
+        spawn_envs.append(dict(kwargs["env"]))
+        return _FakeProcess()
+
+    monkeypatch.setattr(supervisor_module, "is_port_free", lambda host, port: True, raising=True)
+    monkeypatch.setattr(supervisor_module.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec, raising=True)
+    monkeypatch.setattr(
+        supervisor_module,
+        "create_sidecar_async_client",
+        lambda *, timeout: _ReadyClient(),
+        raising=True,
+    )
+
+    supervisor = OmniVoiceSidecarSupervisor(
+        provider_config={
+            "model": "omnivoice",
+            "extra_params": {
+                "runtime_path": str(runtime_path),
+            },
+        },
+        repo_root=tmp_path,
+    )
+
+    await supervisor.ensure_started()
+
+    assert spawn_envs[0]["OMNIVOICE_RUNTIME_PATH"] == str(runtime_path)  # nosec B101
+    assert spawn_envs[0]["OMNIVOICE_SCRATCH_DIR"] == str(expected_scratch)  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["idle_stopped", "model_unavailable", "runtime_missing", "degraded"])
+async def test_supervisor_readiness_accepts_reachable_degraded_health_statuses(tmp_path, monkeypatch, status):
+    from tldw_Server_API.app.core.TTS.adapters import omnivoice_sidecar_supervisor as supervisor_module
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
+
+    class _DegradedClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, *, headers=None, timeout=None):  # noqa: ARG002
+            return httpx.Response(200, json={"status": status, "ready": False})
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ARG001
+        return _FakeProcess()
+
+    monkeypatch.setattr(supervisor_module, "is_port_free", lambda host, port: True, raising=True)
+    monkeypatch.setattr(supervisor_module.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec, raising=True)
+    monkeypatch.setattr(
+        supervisor_module,
+        "create_sidecar_async_client",
+        lambda *, timeout: _DegradedClient(),
+        raising=True,
+    )
+
+    supervisor = OmniVoiceSidecarSupervisor(
+        provider_config={"extra_params": {"host": "127.0.0.1", "healthcheck_timeout_seconds": 0.02}},
+        repo_root=tmp_path,
+    )
+
+    await supervisor.ensure_started()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_supervisor_generates_fresh_token_and_includes_it_on_internal_requests(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.TTS.adapters import omnivoice_sidecar_supervisor as supervisor_module
     from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_protocol import X_TLDW_SIDECAR_TOKEN_HEADER
@@ -175,8 +324,11 @@ async def test_supervisor_readiness_polling_fails_cleanly_when_sidecar_never_rea
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def get(self, url, *, headers=None):  # noqa: ARG002
+        async def get(self, url, *, headers=None, timeout=None):  # noqa: ARG002
             raise httpx.ConnectError("not ready")
+
+        async def post(self, url, *, headers=None):  # noqa: ARG002
+            return httpx.Response(500)
 
     async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ARG001
         return _FakeProcess()
@@ -202,9 +354,13 @@ async def test_supervisor_readiness_polling_fails_cleanly_when_sidecar_never_rea
         repo_root=tmp_path,
     )
 
-    with pytest.raises(RuntimeError, match="health"):
+    with pytest.raises(RuntimeError, match="health") as excinfo:
         await supervisor.ensure_started()
 
+    root_cause = excinfo.value
+    while root_cause.__cause__ is not None:
+        root_cause = root_cause.__cause__
+    assert isinstance(root_cause, httpx.ConnectError)  # nosec B101
     assert supervisor.last_failure_at is not None  # nosec B101
 
 

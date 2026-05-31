@@ -30,6 +30,8 @@ pwd_context = CryptContext(
     pbkdf2_sha256__rounds=200000,
 )
 
+_ACCESS_KIND = "access"
+
 
 class TokenData(BaseModel):
     """Token payload data"""
@@ -37,7 +39,7 @@ class TokenData(BaseModel):
     username: Optional[str] = None
     roles: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
-    token_type: str = "access"
+    token_type: str = _ACCESS_KIND
     jti: Optional[str] = None  # JWT ID for revocation
     iat: Optional[datetime] = None
     exp: Optional[datetime] = None
@@ -88,8 +90,8 @@ class JWTManager:
         """Verify a password against its hash"""
         try:
             return pwd_context.verify(plain_password, hashed_password)
-        except Exception as e:
-            logger.error(f"Password verification failed: {e}")
+        except Exception:
+            logger.error("Password verification failed")
             return False
 
     def create_access_token(
@@ -128,7 +130,7 @@ class JWTManager:
             "username": username,
             "roles": roles or [],
             "permissions": permissions or [],
-            "token_type": "access",
+            "token_type": _ACCESS_KIND,
             "jti": jti,
             "iat": now,
             "exp": expire,
@@ -184,7 +186,7 @@ class JWTManager:
         logger.info(f"Refresh token created for user: {subject}", extra={"audit": True})
         return token, token_id
 
-    def verify_token(self, token: str, token_type: str = "access") -> TokenData:
+    def verify_token(self, token: str, token_type: str = _ACCESS_KIND) -> TokenData:
         """
         Verify and decode a JWT token.
 
@@ -232,7 +234,7 @@ class JWTManager:
                 headers={"WWW-Authenticate": "Bearer"},
             ) from None
         except JWTError as e:
-            logger.warning(f"Invalid token: {e}")
+            logger.warning("Invalid token")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token",
@@ -428,7 +430,7 @@ def create_access_token(subject: str, **kwargs) -> str:
     return manager.create_access_token(subject, **kwargs)
 
 
-def verify_token(token: str, token_type: str = "access") -> TokenData:
+def verify_token(token: str, token_type: str = _ACCESS_KIND) -> TokenData:
     """Verify a token"""
     manager = get_jwt_manager()
     return manager.verify_token(token, token_type)

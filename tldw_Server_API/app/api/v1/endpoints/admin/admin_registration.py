@@ -55,8 +55,8 @@ async def create_registration_code(
     if audit_info:
         try:
             await _get_emit_admin_audit_event()(http_request, principal, **audit_info)
-        except Exception as exc:
-            logger.debug("Audit emission failed for registration code creation: {}", exc)
+        except Exception:
+            logger.debug("Audit emission failed for registration code creation")
     return response
 
 
@@ -79,6 +79,6 @@ async def delete_registration_code(
     if audit_info:
         try:
             await _get_emit_admin_audit_event()(http_request, principal, **audit_info)
-        except Exception as exc:
-            logger.debug("Audit emission failed for registration code deletion: {}", exc)
+        except Exception:
+            logger.debug("Audit emission failed for registration code deletion")
     return response

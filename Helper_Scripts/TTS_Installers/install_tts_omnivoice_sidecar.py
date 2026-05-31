@@ -115,8 +115,25 @@ def create_runtime_layout(layout: OmniVoiceRuntimeLayout) -> OmniVoiceRuntimeLay
 
     layout.runtime_base.mkdir(parents=True, exist_ok=True)
     layout.runtime_dir.mkdir(parents=True, exist_ok=True)
+    (layout.runtime_dir / "scratch").mkdir(parents=True, exist_ok=True)
     layout.logs_dir.mkdir(parents=True, exist_ok=True)
     return layout
+
+
+def validate_local_model_path(model_path: Path) -> Path:
+    """Resolve and validate an existing local OmniVoice model directory."""
+
+    resolved = model_path.expanduser().resolve()
+    if not resolved.is_dir():
+        raise SystemExit(f"OmniVoice model path is not a directory: {resolved}")
+    return resolved
+
+
+def _resolve_path_from_repo_root(path: Path, repo_root: Path) -> Path:
+    expanded = path.expanduser()
+    if expanded.is_absolute():
+        return expanded.resolve()
+    return (repo_root / expanded).resolve()
 
 
 def validate_runtime_layout(layout: OmniVoiceRuntimeLayout) -> list[str]:
@@ -130,14 +147,29 @@ def validate_runtime_layout(layout: OmniVoiceRuntimeLayout) -> list[str]:
 
 
 def _path_for_config(path: Path, repo_root: Optional[Path]) -> str:
+    path_posix = path.as_posix()
     if not path.is_absolute():
-        return path.as_posix()
+        return path_posix
     if repo_root is not None:
         try:
-            return os.path.relpath(path, repo_root).replace(os.sep, "/")
-        except ValueError:
+            rel_path = os.path.relpath(path, repo_root)
+            rel_path_posix = rel_path.replace("\\", "/").replace(os.sep, "/")
+            if ":" in rel_path_posix and getattr(path, "drive", ""):
+                return path_posix
+            return rel_path_posix
+        except (TypeError, ValueError):
             pass
-    return str(path)
+    return path_posix
+
+
+def _validate_config_path_scalar(value: str) -> str:
+    if any(character in value for character in ('"', "\n", "\r")):
+        raise SystemExit(f"Unsafe path value for YAML config: {value!r}")
+    return value
+
+
+def _safe_path_for_config(path: Path, repo_root: Optional[Path]) -> str:
+    return _validate_config_path_scalar(_path_for_config(path, repo_root))
 
 
 def _find_provider_block(lines: list[str], provider_name: str) -> tuple[Optional[int], Optional[int], Optional[int]]:
@@ -163,10 +195,23 @@ def _find_provider_block(lines: list[str], provider_name: str) -> tuple[Optional
             while block_end < len(lines):
                 next_line = lines[block_end]
                 next_stripped = next_line.strip()
+                next_indent = len(next_line) - len(next_line.lstrip(" "))
                 if not next_stripped or next_stripped.startswith("#"):
+                    lookahead = block_end + 1
+                    while lookahead < len(lines):
+                        lookahead_line = lines[lookahead]
+                        lookahead_stripped = lookahead_line.strip()
+                        if lookahead_stripped and not lookahead_stripped.startswith("#"):
+                            break
+                        lookahead += 1
+                    if lookahead >= len(lines):
+                        break
+                    lookahead_line = lines[lookahead]
+                    lookahead_indent = len(lookahead_line) - len(lookahead_line.lstrip(" "))
+                    if lookahead_indent <= block_indent:
+                        break
                     block_end += 1
                     continue
-                next_indent = len(next_line) - len(next_line.lstrip(" "))
                 if next_indent <= block_indent:
                     break
                 block_end += 1
@@ -179,6 +224,10 @@ def _find_providers_indent(lines: list[str]) -> Optional[int]:
         if line.strip() == "providers:":
             return len(line) - len(line.lstrip(" "))
     return None
+
+
+def _has_unsupported_providers_declaration(lines: list[str]) -> bool:
+    return any(line.strip().startswith("providers:") for line in lines)
 
 
 def _insert_provider_block(lines: list[str], provider_name: str, block_lines: list[str]) -> list[str]:
@@ -268,6 +317,7 @@ def patch_tts_config(
     config_path: Path,
     layout: OmniVoiceRuntimeLayout,
     source_checkout: Path,
+    model_path: Path,
     repo_root: Optional[Path] = None,
 ) -> bool:
     """Patch only the OmniVoice provider block."""
@@ -277,20 +327,35 @@ def patch_tts_config(
         return False
 
     lines = config_path.read_text(encoding="utf-8").splitlines()
-    unsupported_construct = _find_unsupported_yaml_construct(lines)
-    if unsupported_construct is not None:
+    block_start, block_end, block_indent = _find_provider_block(lines, PROVIDER_NAME)
+    if block_start is not None and block_end is not None:
+        unsupported_construct = _find_unsupported_yaml_construct(lines[block_start:block_end])
+        if unsupported_construct is not None:
+            logger.warning(
+                "Skipping OmniVoice provider config patch at {} because the provider block contains unsupported "
+                "constructs ({})",
+                config_path,
+                unsupported_construct,
+            )
+            return False
+    providers_indent = _find_providers_indent(lines)
+    if providers_indent is None and _has_unsupported_providers_declaration(lines):
         logger.warning(
-            "Skipping OmniVoice provider config patch at {} because the YAML contains unsupported constructs ({})",
+            "Skipping OmniVoice provider config patch at {} because the providers declaration is unsupported",
             config_path,
-            unsupported_construct,
         )
         return False
-    block_start, block_end, block_indent = _find_provider_block(lines, PROVIDER_NAME)
-    providers_indent = _find_providers_indent(lines)
     effective_block_indent = block_indent if block_indent is not None else ((providers_indent or 0) + 2)
     provider_indent = " " * effective_block_indent
     key_indent = provider_indent + "  "
     nested_indent = key_indent + "  "
+    scratch_dir = layout.runtime_dir / "scratch"
+    repo_path_config = _safe_path_for_config(source_checkout, repo_root)
+    model_path_config = _safe_path_for_config(model_path, repo_root)
+    python_path_config = _safe_path_for_config(layout.interpreter_path, repo_root)
+    runtime_path_config = _safe_path_for_config(layout.runtime_dir, repo_root)
+    scratch_dir_config = _safe_path_for_config(scratch_dir, repo_root)
+    logs_path_config = _safe_path_for_config(layout.logs_dir, repo_root)
     block_lines = [
         f"{provider_indent}{PROVIDER_NAME}:",
         f"{key_indent}enabled: true",
@@ -299,10 +364,12 @@ def patch_tts_config(
         f"{key_indent}sample_rate: 24000",
         f"{key_indent}max_concurrent_generations: 1",
         f"{key_indent}extra_params:",
-        f'{nested_indent}repo_path: "{_path_for_config(source_checkout, repo_root)}"',
-        f'{nested_indent}python_path: "{_path_for_config(layout.interpreter_path, repo_root)}"',
-        f'{nested_indent}runtime_path: "{_path_for_config(layout.runtime_dir, repo_root)}"',
-        f'{nested_indent}logs_path: "{_path_for_config(layout.logs_dir, repo_root)}"',
+        f'{nested_indent}repo_path: "{repo_path_config}"',
+        f'{nested_indent}model_path: "{model_path_config}"',
+        f'{nested_indent}python_path: "{python_path_config}"',
+        f'{nested_indent}runtime_path: "{runtime_path_config}"',
+        f'{nested_indent}scratch_dir: "{scratch_dir_config}"',
+        f'{nested_indent}logs_path: "{logs_path_config}"',
         f'{nested_indent}host: "127.0.0.1"',
         f"{nested_indent}port: 8039",
         f"{nested_indent}autoselect_port: true",
@@ -371,8 +438,9 @@ def install_sidecar_runtime(
     interpreter_path: Path,
     repo_root: Path,
     source_checkout: Path,
+    install_inference_deps: bool = True,
 ) -> None:
-    """Install the minimal sidecar runtime into the dedicated environment."""
+    """Install the sidecar runtime and OmniVoice source dependencies."""
 
     _run_checked_command([str(interpreter_path), "-m", "pip", "install", "--upgrade", "pip"])
     _run_checked_command(
@@ -389,18 +457,19 @@ def install_sidecar_runtime(
         ]
     )
     if source_checkout.exists():
-        _run_checked_command(
-            [
-                str(interpreter_path),
-                "-m",
-                "pip",
-                "install",
-                "--no-deps",
-                "-e",
-                str(source_checkout),
-            ],
-            cwd=repo_root,
-        )
+        install_command = [
+            str(interpreter_path),
+            "-m",
+            "pip",
+            "install",
+        ]
+        if not install_inference_deps:
+            logger.warning(
+                "OmniVoice source dependencies are required in the sidecar venv; "
+                "installing dependencies despite install_inference_deps=False"
+            )
+        install_command.extend(["-e", str(source_checkout)])
+        _run_checked_command(install_command, cwd=repo_root)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -408,19 +477,35 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--repo-url", default=DEFAULT_REPO_URL)
     parser.add_argument("--runtime-base", default=str(DEFAULT_RUNTIME_BASE))
     parser.add_argument("--source-dir")
+    parser.add_argument("--model-path", help="Resolved local OmniVoice model directory")
     parser.add_argument("--config-path", default=str(DEFAULT_CONFIG_PATH))
     parser.add_argument("--skip-clone", action="store_true")
     parser.add_argument("--skip-install", action="store_true")
+    parser.add_argument("--skip-model-check", action="store_true")
+    parser.add_argument("--recreate-venv", action="store_true")
+    parser.add_argument(
+        "--install-inference-deps",
+        action="store_true",
+        default=True,
+        help="Retained for compatibility; OmniVoice source dependencies are installed by default.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
+    if not args.model_path:
+        raise SystemExit("OmniVoice model path is required; pass --model-path")
+
     _ensure_prerequisites()
 
     repo_root = resolve_repo_root()
+    model_path = _resolve_path_from_repo_root(Path(args.model_path), repo_root)
+    if not args.skip_model_check:
+        model_path = validate_local_model_path(model_path)
+
     runtime_base = Path(args.runtime_base)
-    config_path = Path(args.config_path)
+    config_path = _resolve_path_from_repo_root(Path(args.config_path), repo_root)
     source_checkout = resolve_source_checkout(
         repo_root=repo_root,
         source_dir=Path(args.source_dir) if args.source_dir else None,
@@ -443,12 +528,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if missing:
         raise SystemExit(f"OmniVoice runtime layout incomplete: {', '.join(missing)}")
 
-    patch_tts_config(
+    config_updated = patch_tts_config(
         config_path=config_path,
         layout=layout,
         source_checkout=source_checkout,
+        model_path=model_path,
         repo_root=repo_root,
     )
+    if not config_updated:
+        raise SystemExit("OmniVoice provider configuration was not updated")
     logger.info("OmniVoice sidecar runtime ready at {}", layout.runtime_base)
     return 0
 

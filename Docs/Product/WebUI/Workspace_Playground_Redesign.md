@@ -6,6 +6,19 @@ Feature: NotebookLM-Style Three-Pane Research Interface
 Location: apps/packages/ui/src/components/Option/WorkspacePlayground/
 Status: Planning
 
+Current first-slice decision: `WorkspacePlayground` is the canonical shell for
+the roadmap first slice, while `ChatWorkspace` and `DocumentWorkspace` remain
+specialized routes. See
+`Docs/Design/Workspace_Canonical_Model_Decision_2026_05.md`. Server sync should
+use the existing `/api/v1/workspaces` family first.
+
+First implementation slice: the Studio pane now includes a work-product
+template entry point with Executive Brief as the first actionable path. Research
+Dossier, Competitive Market Memo, and Technical Project Spec are visible as
+planned templates, but remain metadata-only in this slice. Generated work
+products can carry template ID, review state, source lineage, review checklist,
+and export intent separately from generation status.
+
 ---
 ## 1. Executive Summary
 
@@ -275,6 +288,16 @@ Note: Server-side workspace_tag field support may need to be added to some endpo
 - Empty sources: Regular chat without RAG
 
 ### 4.3 Studio Pane (Right)
+
+#### Work Product Templates:
+- Executive Brief: actionable first-value template using selected sources and
+  the report generation path.
+- Research Dossier, Competitive Market Memo, Technical Project Spec: visible
+  planned templates for roadmap alignment, not end-to-end flows yet.
+- Generated work-product artifacts retain source lineage and review checklist
+  metadata aligned to
+  [Traceable Work Product Artifact Contract](../Traceable_Work_Product_Artifact_Contract.md)
+  so review and export affordances can be layered on later.
 
 #### Output Grid (3x3):
 ```text

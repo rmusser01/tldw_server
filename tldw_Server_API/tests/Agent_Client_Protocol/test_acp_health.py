@@ -121,6 +121,7 @@ def test_sandbox_config_new_fields(monkeypatch):
     assert cfg.max_concurrent_sessions_per_user == 5
     assert cfg.max_tokens_per_session == 1_000_000
     assert cfg.max_session_duration_seconds == 14400
+    assert cfg.session_retention_days == 30
     assert cfg.audit_retention_days == 30
     assert cfg.allowed_egress_hosts == []
 
@@ -129,12 +130,16 @@ def test_sandbox_config_custom_values(monkeypatch):
     """New sandbox config fields can be customized via env vars."""
     monkeypatch.setenv("ACP_SESSION_TTL_SECONDS", "3600")
     monkeypatch.setenv("ACP_MAX_CONCURRENT_SESSIONS_PER_USER", "10")
+    monkeypatch.setenv("ACP_SESSION_RETENTION_DAYS", "7")
+    monkeypatch.setenv("ACP_AUDIT_RETENTION_DAYS", "14")
     monkeypatch.setenv("ACP_SANDBOX_ALLOWED_EGRESS_HOSTS", "api.anthropic.com,api.openai.com")
 
     from tldw_Server_API.app.core.Agent_Client_Protocol.config import load_acp_sandbox_config
     cfg = load_acp_sandbox_config()
     assert cfg.session_ttl_seconds == 3600
     assert cfg.max_concurrent_sessions_per_user == 10
+    assert cfg.session_retention_days == 7
+    assert cfg.audit_retention_days == 14
     assert cfg.allowed_egress_hosts == ["api.anthropic.com", "api.openai.com"]
 
 
@@ -196,6 +201,23 @@ def test_acp_health_agents_detection(client_user_only, stub_runner_client):
     for agent in agents:
         assert "status" in agent
         assert agent["status"] in ("available", "unavailable", "requires_setup", "unknown")
+        assert "support_state" in agent
+        assert "verification_level" in agent
+
+
+def test_acp_health_includes_custom_entrypoint_metadata(client_user_only, stub_runner_client):
+    """Health endpoint exposes classifier entrypoint metadata for custom profiles."""
+    resp = client_user_only.get("/api/v1/acp/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    custom = next(agent for agent in data["agents"] if agent["agent_type"] == "custom")
+
+    entrypoint = custom["entrypoint"]
+    assert entrypoint["entrypoint_strategy"] == "custom_template"
+    assert entrypoint["probe_state"] == "custom_template"
+    assert entrypoint["primary_blocker"] == "custom_template"
+    assert "custom_template" in entrypoint["blockers"]
+    assert "custom ACP profile" in entrypoint["status_message"]
 
 
 def test_acp_health_runner_probe_with_running_client(client_user_only, stub_runner_client):
@@ -223,7 +245,154 @@ def test_acp_setup_guide_returns_guides(client_user_only, stub_runner_client):
         assert "name" in guide
         assert "status" in guide
         assert "steps" in guide
+        assert "compatibility" in guide
+        assert guide["compatibility"]["support_state"] in (
+            "supported",
+            "supported_with_caveats",
+            "experimental",
+            "documented_unverified",
+            "unsupported",
+        )
+        assert guide["compatibility"]["verification_level"] in (
+            "documented_only",
+            "stub_smoke_tested",
+            "live_e2e_tested",
+            "sandbox_tested",
+            "production_supported",
+        )
         assert len(guide["steps"]) > 0
+
+
+def test_acp_setup_guide_marks_configured_but_unverified_agents(client_user_only, stub_runner_client):
+    """Setup guide keeps runtime availability separate from compatibility support state."""
+    resp = client_user_only.get("/api/v1/acp/setup-guide?agent_type=custom")
+    assert resp.status_code == 200
+    data = resp.json()
+    guide = data["guides"][0]
+    compatibility = guide["compatibility"]
+    assert compatibility["support_state"] == "documented_unverified"
+    assert compatibility["verification_level"] == "documented_only"
+    assert compatibility["docs_url"] == "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    assert any("certification checklist" in step.lower() for step in guide["steps"])
+
+
+def test_acp_setup_guide_codex_includes_entrypoint_blocker_steps(client_user_only, stub_runner_client):
+    """Setup guide surfaces documented-candidate ACP adapter blockers."""
+    resp = client_user_only.get("/api/v1/acp/setup-guide?agent_type=codex")
+    assert resp.status_code == 200
+    data = resp.json()
+    guide = data["guides"][0]
+
+    entrypoint = guide["entrypoint"]
+    assert entrypoint["entrypoint_strategy"] == "documented_candidate"
+    assert entrypoint["primary_blocker"] == "adapter_required"
+    assert any("adapter" in step.lower() for step in guide["steps"])
+
+
+def test_acp_agents_includes_opencode_entrypoint_metadata(client_user_only, stub_runner_client):
+    """Agent list exposes native ACP command metadata separately from compatibility support."""
+    resp = client_user_only.get("/api/v1/acp/agents")
+    assert resp.status_code == 200
+    data = resp.json()
+    opencode = next(agent for agent in data["agents"] if agent["type"] == "opencode")
+
+    entrypoint = opencode["entrypoint"]
+    assert entrypoint["entrypoint_strategy"] == "native_acp"
+    assert entrypoint["acp_command"] == "opencode"
+    assert entrypoint["acp_args"] == ["acp"]
+    assert entrypoint["probe_state"] in {"ready_to_probe", "blocked"}
+
+
+def test_entrypoint_status_from_entry_normalizes_docs_url() -> None:
+    """Registry-backed entrypoint status uses served docs-static URLs."""
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_mod
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistryEntry
+
+    status = acp_mod._entrypoint_status_from_entry(
+        AgentRegistryEntry(
+            type="docs_agent",
+            name="Docs Agent",
+            entrypoint_strategy="documented_candidate",
+            certification_blocker="adapter_required",
+            compatibility_docs_url="Docs/Development/ACP_Compatibility_Matrix.md",
+        )
+    )
+
+    assert status["docs_url"] == "/docs-static/Development/ACP_Compatibility_Matrix.md"
+
+
+def test_acp_agents_normalizes_invalid_runner_compatibility_values(
+    client_user_only,
+    stub_runner_client,
+    monkeypatch,
+):
+    """Runner-provided compatibility values are normalized before Pydantic validation."""
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_mod
+
+    async def _list_agents():
+        return {
+            "agents": [
+                {
+                    "type": "runner_agent",
+                    "name": "Runner Agent",
+                    "description": "Provided by runner",
+                    "isConfigured": True,
+                    "support_state": "not-a-real-state",
+                    "verification_level": "not-a-real-level",
+                    "compatibility_docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
+                    "entrypoint": {
+                        "profile_key": "runner_agent",
+                        "entrypoint_strategy": "adapter_acp",
+                        "probe_state": "blocked",
+                        "acp_command": "runner-acp",
+                        "acp_args": ["--stdio"],
+                        "primary_blocker": "adapter_missing",
+                        "blockers": ["adapter_missing"],
+                        "status_message": "Adapter command is not installed.",
+                        "docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
+                    },
+                }
+            ],
+            "defaultAgentType": "runner_agent",
+        }
+
+    monkeypatch.setattr(acp_mod, "_get_registry_agents", lambda: None)
+    stub_runner_client.list_agents = _list_agents
+
+    resp = client_user_only.get("/api/v1/acp/agents")
+    assert resp.status_code == 200
+    data = resp.json()
+    agent = data["agents"][0]
+    assert agent["support_state"] == "documented_unverified"
+    assert agent["verification_level"] == "documented_only"
+    assert agent["compatibility_docs_url"] == "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    assert agent["entrypoint"]["entrypoint_strategy"] == "adapter_acp"
+    assert agent["entrypoint"]["primary_blocker"] == "adapter_missing"
+    assert agent["entrypoint"]["blockers"] == ["adapter_missing"]
+
+
+def test_acp_agents_static_fallback_includes_conservative_entrypoint_metadata(
+    client_user_only,
+    monkeypatch,
+):
+    """Static fallback rows include conservative entrypoint readiness metadata."""
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_mod
+
+    async def _runner_unavailable():
+        raise RuntimeError("runner unavailable")
+
+    monkeypatch.setattr(acp_mod, "_get_registry_agents", lambda: None)
+    monkeypatch.setattr(acp_mod, "get_runner_client", _runner_unavailable)
+
+    resp = client_user_only.get("/api/v1/acp/agents")
+    assert resp.status_code == 200
+    data = resp.json()
+    custom = next(agent for agent in data["agents"] if agent["type"] == "custom")
+
+    entrypoint = custom["entrypoint"]
+    assert entrypoint["profile_key"] == "custom"
+    assert entrypoint["entrypoint_strategy"] == "custom_template"
+    assert entrypoint["primary_blocker"] == "custom_template"
 
 
 def test_acp_setup_guide_filter_agent(client_user_only, stub_runner_client):

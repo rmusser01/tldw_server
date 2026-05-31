@@ -1,7 +1,7 @@
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, useLocation } from "react-router-dom"
 
 import { CommandPalette } from "../CommandPalette"
 
@@ -12,6 +12,11 @@ vi.mock("react-i18next", () => ({
 }))
 
 describe("CommandPalette MCP Hub discoverability", () => {
+  const RouteProbe = () => {
+    const location = useLocation()
+    return <div data-testid="route-probe">{location.pathname}</div>
+  }
+
   it("shows Go to MCP Hub when the palette opens with an empty query", async () => {
     render(
       <MemoryRouter>
@@ -42,6 +47,25 @@ describe("CommandPalette MCP Hub discoverability", () => {
     fireEvent.change(searchInput, { target: { value: "mcp" } })
 
     expect(screen.getAllByRole("option", { name: /MCP Hub/i })).toHaveLength(1)
+  })
+
+  it("opens MCP Hub on its canonical top-level route", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <CommandPalette />
+        <RouteProbe />
+      </MemoryRouter>
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    const goToMcpHub = screen.getByRole("option", { name: /Go to MCP Hub/i })
+
+    expect(goToMcpHub).toHaveAttribute("data-target-path", "/mcp-hub")
+    fireEvent.click(goToMcpHub)
+
+    expect(screen.getByTestId("route-probe")).toHaveTextContent("/mcp-hub")
   })
 
   it("keeps the specific Theme setting when searching a shared settings route", async () => {

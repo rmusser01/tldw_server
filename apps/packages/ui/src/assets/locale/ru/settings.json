@@ -3,7 +3,13 @@
     "serverAndAuth": "Сервер и авторизация",
     "knowledgeTools": "Инструменты знаний",
     "workspace": "Рабочее пространство",
-    "about": "О нас"
+    "about": "О нас",
+    "connect": "Подключение",
+    "aiModels": "ИИ и модели",
+    "experience": "Опыт",
+    "knowledgeWorkspace": "Знания и рабочее пространство",
+    "safetyAdmin": "Безопасность и администрирование",
+    "dataManagement": "Управление данными"
   },
   "healthNav": "Состояние",
   "worldBooksNav": "Книги мира",
@@ -1659,5 +1665,11 @@
     "subtitle": "Настройте значения по умолчанию, пресеты и поведение быстрого импорта."
   },
   "acpPlaygroundNav": "Песочница ACP",
-  "skillsNav": "Навыки"
+  "skillsNav": "Навыки",
+  "providerKeys": {
+    "navTitle": "Ключи провайдеров"
+  },
+  "dataManagement": {
+    "navTitle": "Управление данными"
+  }
 }

@@ -20,6 +20,7 @@ import {
   consumeStreamingChunk,
   type StreamingChunk
 } from "@/utils/streaming-chunks"
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import { buildMessageSteeringSnippet } from "@/utils/message-steering"
 import { useStoreMessageOption } from "@/store/option"
 import type { ChatHistory, Message, ToolChoice } from "~/store/option"
@@ -35,8 +36,16 @@ import {
   normalizeImageGenerationVariantBundle,
   type ImageGenerationEventSyncPolicy
 } from "@/utils/image-generation-chat"
+import {
+  chatSubmitFailed,
+  chatSubmitSkipped,
+  chatSubmitSubmitted,
+  type ChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
+import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup"
 
 const STREAMING_UPDATE_INTERVAL_MS = 80
+const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
 let didLogPipelineSetHistoryMissing = false
 
 export type ChatModeParamsBase = {
@@ -64,6 +73,7 @@ export type ChatModeParamsBase = {
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
   historyForModel?: ChatHistory
+  messageForModel?: string
   regenerateFromMessage?: Message
   messageSteering?: MessageSteeringFlags
   messageSteeringPrompts?: MessageSteeringPromptTemplates
@@ -148,9 +158,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   history: ChatHistory,
   signal: AbortSignal,
   params: TParams
-) => {
+): Promise<ChatSubmitResult> => {
   const {
-    selectedModel,
+    selectedModel: rawSelectedModel,
     toolChoice,
     setMessages,
     saveMessageOnSuccess,
@@ -164,7 +174,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     clusterId,
     userMessageType,
     assistantMessageType,
-    modelIdOverride,
+    modelIdOverride: rawModelIdOverride,
     userMessageId,
     assistantMessageId,
     userParentMessageId,
@@ -174,6 +184,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     imageEventSyncPolicy,
     conversationId
   } = params
+  const selectedModelSelection =
+    parseProviderQualifiedModelSelection(rawSelectedModel)
+  const selectedModel =
+    selectedModelSelection.modelId || rawSelectedModel
+  const modelIdOverride = rawModelIdOverride
+    ? String(rawModelIdOverride).trim()
+    : undefined
 
   const resolvedAssistantMessageId = assistantMessageId ?? generateID()
   const resolvedUserMessageId =
@@ -201,6 +218,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
   const context: ChatModeContext<TParams> = {
     ...params,
+    selectedModel,
+    modelIdOverride,
     message,
     image,
     isRegenerate,
@@ -471,7 +490,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         conversationId: preflight.conversationId,
         imageEventSyncPolicy
       })
-      return
+      return chatSubmitSubmitted()
     }
 
     const promptData = await mode.preparePrompt(context)
@@ -583,6 +602,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     const toolCalls = extractToolCalls(generationInfo)
+    if (
+      fullText.trim().length === 0 &&
+      (!Array.isArray(toolCalls) || toolCalls.length === 0) &&
+      !isImageGenerationTurn
+    ) {
+      throw new Error(EMPTY_RESPONSE_ERROR_MESSAGE)
+    }
     applyMcpModuleDisclosureFromToolCalls(toolCalls)
     const finalGenerationInfo = streamTransportInterrupted
       ? {
@@ -651,12 +677,17 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       conversationId: modelClient.conversationId,
       imageEventSyncPolicy
     })
+    return chatSubmitSubmitted()
   } catch (e) {
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
-    const assistantContent = buildAssistantErrorContent(fullText, e)
-    const interruptionReason =
-      e instanceof Error && e.message.trim().length > 0
+    const isAbort = signal.aborted || isAbortLikeError(e)
+    const assistantContent = isAbort
+      ? fullText
+      : buildAssistantErrorContent(fullText, e)
+    const interruptionReason = isAbort
+      ? "Request cancelled"
+      : e instanceof Error && e.message.trim().length > 0
         ? e.message
         : "Something went wrong."
     setMessagesWithTransition((prev) =>
@@ -703,9 +734,14 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       prompt_id: promptId
     })
 
+    if (isAbort) {
+      return chatSubmitSkipped(interruptionReason)
+    }
+
     if (!errorSave) {
       throw e
     }
+    return chatSubmitFailed(interruptionReason)
   } finally {
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     setIsProcessing(false)

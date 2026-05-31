@@ -1,5 +1,6 @@
 import React from "react"
 import type { NetworkingIssue } from "@web/lib/api-base"
+import { SetupRequiredPanel } from "@tldw/ui/components/ui/state"
 
 type ConfigurationErrorScreenProps = {
   issue: NetworkingIssue
@@ -9,43 +10,37 @@ export const ConfigurationErrorScreen = ({
   issue
 }: ConfigurationErrorScreenProps) => {
   if (issue.kind === "loopback_api_not_browser_reachable") {
+    const openSetup = () => {
+      window.location.assign("/setup")
+    }
+
+    const openSettings = () => {
+      window.location.assign("/settings")
+    }
+
     return (
       <main
         data-testid="networking-config-error"
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          padding: "2rem",
-          background: "#f7f4ee",
-          color: "#1f1a17"
-        }}>
-        <section
-          style={{
-            width: "100%",
-            maxWidth: "40rem",
-            padding: "2rem",
-            borderRadius: "1rem",
-            border: "1px solid #d8cdc1",
-            background: "#fffaf4",
-            boxShadow: "0 20px 50px rgba(61, 42, 27, 0.08)"
-          }}>
-          <h1 style={{ marginTop: 0 }}>WebUI networking configuration error</h1>
-          <p>
-            The configured API URL points to <code>{issue.apiOrigin}</code>,
-            which is only reachable from the host machine.
-          </p>
-          <p>
-            This page is running from <code>{issue.pageOrigin}</code>, so
-            browsers on other devices cannot connect to that loopback API
-            address.
-          </p>
-          <p style={{ marginBottom: 0 }}>
-            Set the WebUI API URL to a LAN-reachable address for the API host,
-            or switch to quickstart mode so the browser uses the same-origin
-            proxy instead.
-          </p>
-        </section>
+        className="flex min-h-screen items-center justify-center bg-bg px-4 py-10 text-text"
+      >
+        <SetupRequiredPanel
+          title="WebUI networking configuration error"
+          message={
+            <>
+              The configured API URL points to <code>{issue.apiOrigin}</code>,
+              which is only reachable from the host machine. Set the WebUI API
+              URL to a LAN-reachable address for the API host, or switch to
+              quickstart mode so the browser uses the same-origin proxy.
+            </>
+          }
+          diagnostics={[
+            { label: "API origin", value: issue.apiOrigin, code: true },
+            { label: "Page origin", value: issue.pageOrigin, code: true }
+          ]}
+          primaryAction={{ label: "Open setup", onClick: openSetup }}
+          secondaryActions={[{ label: "Open Settings", onClick: openSettings }]}
+          className="w-full max-w-2xl"
+        />
       </main>
     )
   }

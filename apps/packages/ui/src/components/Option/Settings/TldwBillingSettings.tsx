@@ -1,13 +1,13 @@
 import {
   Segmented,
   Space,
-  Alert,
   Button,
   Select,
   Tag
 } from "antd"
 import React from "react"
-import type { TFunction } from "react-i18next"
+import type { TFunction } from "i18next"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 
 export type BillingPlan = {
   name: string
@@ -330,23 +330,23 @@ export const TldwBillingSettings = ({
       </div>
 
       {billingError && (
-        <Alert
-          type="error"
-          showIcon
+        <DsAlert
+          variant="error"
           className="mt-4"
           title={t('settings:tldw.billing.errorTitle', 'Billing unavailable')}
-          description={billingError}
-        />
+        >
+          {billingError}
+        </DsAlert>
       )}
 
       <div className="mt-4 space-y-4">
         {billingStatusError ? (
-          <Alert
-            type="error"
-            showIcon
+          <DsAlert
+            variant="error"
             title={t('settings:tldw.billing.subscriptionError', 'Unable to load subscription')}
-            description={billingStatusError}
-          />
+          >
+            {billingStatusError}
+          </DsAlert>
         ) : billingStatus ? (
           <div className="rounded border border-border bg-surface p-3">
             <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -380,9 +380,8 @@ export const TldwBillingSettings = ({
               )}
             </div>
             {billingStatus.cancel_at_period_end && (
-              <Alert
-                type="warning"
-                showIcon
+              <DsAlert
+                variant="warning"
                 className="mt-3"
                 title={t(
                   'settings:tldw.billing.cancelAtPeriodEnd',
@@ -433,53 +432,49 @@ export const TldwBillingSettings = ({
         ) : null}
 
         {billingUsage?.has_exceeded && (
-          <Alert
-            type="error"
-            showIcon
-            message={t(
+          <DsAlert
+            variant="error"
+            title={t(
               'settings:tldw.billing.limitExceeded',
               'Usage has exceeded one or more plan limits.'
             )}
-            description={
-              <div className="mt-1">
-                {billingUsage.limit_checks && (
-                  <div className="text-xs mb-2">
-                    {Object.entries(billingUsage.limit_checks)
-                      .filter(([, v]) => v.exceeded)
-                      .map(([k]) => k.replace(/_/g, ' '))
-                      .join(', ') || 'plan limits'}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  className="text-xs underline"
-                  onClick={() => document.getElementById('tldw-billing-plans')?.scrollIntoView({ behavior: 'smooth' })}
-                >
-                  {t('settings:tldw.billing.viewPlans', 'View upgrade options')}
-                </button>
-              </div>
-            }
-          />
+          >
+            <div className="mt-1">
+              {billingUsage.limit_checks && (
+                <div className="text-xs mb-2">
+                  {Object.entries(billingUsage.limit_checks)
+                    .filter(([, v]) => v.exceeded)
+                    .map(([k]) => k.replace(/_/g, ' '))
+                    .join(', ') || 'plan limits'}
+                </div>
+              )}
+              <button
+                type="button"
+                className="text-xs underline"
+                onClick={() => document.getElementById('tldw-billing-plans')?.scrollIntoView({ behavior: 'smooth' })}
+              >
+                {t('settings:tldw.billing.viewPlans', 'View upgrade options')}
+              </button>
+            </div>
+          </DsAlert>
         )}
         {!billingUsage?.has_exceeded && billingUsage?.has_warnings && (
-          <Alert
-            type="warning"
-            showIcon
-            message={t(
+          <DsAlert
+            variant="warning"
+            title={t(
               'settings:tldw.billing.limitWarning',
               'Approaching plan limits for some resources.'
             )}
-            description={
-              billingUsage.limit_checks ? (
-                <div className="text-xs mt-1">
-                  {Object.entries(billingUsage.limit_checks)
-                    .filter(([, v]) => v.warning && !v.exceeded)
-                    .map(([k]) => k.replace(/_/g, ' '))
-                    .join(', ')} {t('settings:tldw.billing.nearingLimit', 'usage is nearing the limit.')}
-                </div>
-              ) : undefined
-            }
-          />
+          >
+            {billingUsage.limit_checks ? (
+              <div className="text-xs mt-1">
+                {Object.entries(billingUsage.limit_checks)
+                  .filter(([, v]) => v.warning && !v.exceeded)
+                  .map(([k]) => k.replace(/_/g, ' '))
+                  .join(', ')} {t('settings:tldw.billing.nearingLimit', 'usage is nearing the limit.')}
+              </div>
+            ) : null}
+          </DsAlert>
         )}
 
         <div id="tldw-billing-plans" className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -488,12 +483,12 @@ export const TldwBillingSettings = ({
               {t('settings:tldw.billing.selectPlan', 'Select a plan')}
             </div>
             {billingPlansError && (
-              <Alert
-                type="error"
-                showIcon
+              <DsAlert
+                variant="error"
                 title={t('settings:tldw.billing.plansError', 'Unable to load plans')}
-                description={billingPlansError}
-              />
+              >
+                {billingPlansError}
+              </DsAlert>
             )}
             {!billingPlansError && (
               <>
@@ -564,12 +559,12 @@ export const TldwBillingSettings = ({
               {t('settings:tldw.billing.usageTitle', 'Usage')}
             </div>
             {billingUsageError && (
-              <Alert
-                type="error"
-                showIcon
+              <DsAlert
+                variant="error"
                 title={t('settings:tldw.billing.usageError', 'Unable to load usage data')}
-                description={billingUsageError}
-              />
+              >
+                {billingUsageError}
+              </DsAlert>
             )}
             {!billingUsageError && !billingLoading && sortedUsageEntries.length === 0 && (
               <span className="text-xs text-text-muted">
@@ -630,13 +625,13 @@ export const TldwBillingSettings = ({
             </div>
           )}
           {billingInvoicesError && (
-            <Alert
-              type="error"
-              showIcon
+            <DsAlert
+              variant="error"
               className="mt-3"
               title={t('settings:tldw.billing.invoices.error', 'Unable to load invoices')}
-              description={billingInvoicesError}
-            />
+            >
+              {billingInvoicesError}
+            </DsAlert>
           )}
           {!billingInvoicesLoading && !billingInvoicesError && billingInvoices.length === 0 && (
             <div className="mt-2 text-xs text-text-muted">

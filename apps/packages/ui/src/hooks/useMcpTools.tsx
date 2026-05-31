@@ -1,6 +1,7 @@
 import React from "react"
 import { useQuery } from "@tanstack/react-query"
 import { apiSend } from "@/services/api-send"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useSetting } from "@/hooks/useSetting"
 import {
@@ -13,20 +14,37 @@ import {
   type McpToolDefinition
 } from "@/services/tldw/mcp"
 import {
+  MCP_DISABLED_TOOLS_SETTING,
   MCP_TOOL_CATALOG_SETTING,
   MCP_TOOL_CATALOG_ID_SETTING,
   MCP_TOOL_CATALOG_STRICT_SETTING,
-  MCP_TOOL_MODULE_SETTING
+  MCP_TOOL_MODULE_SETTING,
+  type McpDisabledToolPreferences
 } from "@/services/settings/ui-settings"
 import { useMcpToolsStore, type McpHealthState } from "@/store/mcp-tools"
+import {
+  buildChatToolFilterState,
+  normalizeChatToolName,
+  type ChatToolFilterCounts,
+  type ResolvedMcpTool
+} from "@/utils/chat-tools"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 
 type McpToolsStatus = {
   hasMcp: boolean
   healthState: McpHealthState
   healthLoading: boolean
   tools: McpToolDefinition[]
+  discoveredTools: ResolvedMcpTool[]
+  availableTools: ResolvedMcpTool[]
+  chatTools: ResolvedMcpTool[]
   toolsLoading: boolean
   toolsAvailable: boolean | null
+  disabledToolPreferences: McpDisabledToolPreferences
+  activeToolPreferenceScope: string
+  disabledToolNames: string[]
+  collisionToolNames: string[]
+  toolCounts: ChatToolFilterCounts
   catalogs: McpToolCatalog[]
   catalogsLoading: boolean
   toolCatalog: string
@@ -39,6 +57,9 @@ type McpToolsStatus = {
   setToolCatalogId: (catalogId: number | null) => void
   setToolModules: (moduleIds: string[]) => void
   setToolCatalogStrict: (strict: boolean) => void
+  setToolEnabled: (toolName: string, enabled: boolean) => void
+  setToolsEnabled: (toolNames: string[], enabled: boolean) => void
+  resetToolFilter: () => void
 }
 
 const normalizeModuleList = (modules: string[] | null | undefined): string[] => {
@@ -59,6 +80,103 @@ const areModuleListsEqual = (left: string[], right: string[]): boolean => {
   return left.every((value, index) => value === right[index])
 }
 
+const DEFAULT_TOOL_PREFERENCE_SCOPE =
+  "server:unknown|auth:single-user|org:none|principal:anonymous"
+
+const normalizePreferenceScopeServerUrl = (
+  serverUrl: string | null | undefined
+): string => {
+  const trimmed = typeof serverUrl === "string" ? serverUrl.trim() : ""
+  if (!trimmed) return "unknown"
+  try {
+    const parsed = new URL(trimmed)
+    const pathname =
+      parsed.pathname && parsed.pathname !== "/"
+        ? parsed.pathname.replace(/\/+$/g, "")
+        : ""
+    return `${parsed.protocol}//${parsed.host}${pathname}`
+  } catch {
+    return trimmed.replace(/\/+$/g, "")
+  }
+}
+
+const decodeJwtPayload = (token: string | null | undefined): unknown => {
+  if (typeof token !== "string" || !token.trim()) return null
+  const [, payload] = token.split(".")
+  if (!payload) return null
+  try {
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/")
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")
+    const decoded = globalThis.atob(padded)
+    return JSON.parse(decoded)
+  } catch {
+    return null
+  }
+}
+
+const resolvePreferenceScopePrincipal = (
+  config: TldwConfig | null | undefined
+): string => {
+  const payload = decodeJwtPayload(config?.accessToken)
+  if (payload && typeof payload === "object") {
+    const data = payload as Record<string, unknown>
+    for (const key of ["sub", "user_id", "username", "email"]) {
+      const value = data[key]
+      if (typeof value === "string" && value.trim()) {
+        return value.trim()
+      }
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return String(value)
+      }
+    }
+  }
+  return "anonymous"
+}
+
+const deriveMcpToolPreferenceScope = (
+  config: TldwConfig | null | undefined
+): string => {
+  if (!config) return DEFAULT_TOOL_PREFERENCE_SCOPE
+  const server = normalizePreferenceScopeServerUrl(config.serverUrl)
+  const auth =
+    config.authMode === "multi-user" || config.authMode === "single-user"
+      ? config.authMode
+      : "single-user"
+  const org =
+    typeof config.orgId === "number" && Number.isFinite(config.orgId)
+      ? String(config.orgId)
+      : "none"
+  const principal = resolvePreferenceScopePrincipal(config)
+  return `server:${server}|auth:${auth}|org:${org}|principal:${principal}`
+}
+
+const normalizeDisabledToolNames = (toolNames: string[]): string[] => {
+  const seen = new Set<string>()
+  for (const toolName of toolNames) {
+    const normalized = normalizeChatToolName(toolName)
+    if (normalized) seen.add(normalized)
+  }
+  return [...seen].sort((left, right) => left.localeCompare(right))
+}
+
+const normalizeDisabledToolPreferences = (
+  preferences: McpDisabledToolPreferences | null | undefined
+): McpDisabledToolPreferences => {
+  if (
+    preferences &&
+    typeof preferences === "object" &&
+    preferences.version === 1 &&
+    preferences.scopes &&
+    typeof preferences.scopes === "object"
+  ) {
+    return preferences
+  }
+  return {
+    version: 1,
+    scopes: {}
+  }
+}
+
 type UseMcpToolsOptions = {
   enabled?: boolean
 }
@@ -67,9 +185,10 @@ export const useMcpTools = (
   options: UseMcpToolsOptions = {}
 ): McpToolsStatus => {
   const { capabilities, loading } = useServerCapabilities()
+  const { config: connectionConfig } = useCanonicalConnectionConfig()
   const hasMcp = Boolean(capabilities?.hasMcp) && !loading
   const probeEnabled = options.enabled ?? true
-  const setTools = useMcpToolsStore((state) => state.setTools)
+  const setToolFilterState = useMcpToolsStore((state) => state.setToolFilterState)
   const setHealthState = useMcpToolsStore((state) => state.setHealthState)
   const setToolsLoading = useMcpToolsStore((state) => state.setToolsLoading)
   const toolCatalog = useMcpToolsStore((state) => state.toolCatalog)
@@ -85,6 +204,31 @@ export const useMcpTools = (
   const [storedCatalogId, persistCatalogId] = useSetting(MCP_TOOL_CATALOG_ID_SETTING)
   const [storedModule, persistModule] = useSetting(MCP_TOOL_MODULE_SETTING)
   const [storedStrict, persistStrict] = useSetting(MCP_TOOL_CATALOG_STRICT_SETTING)
+  const [storedDisabledToolPreferences, persistStoredDisabledToolPreferences] =
+    useSetting(MCP_DISABLED_TOOLS_SETTING)
+  const normalizedStoredDisabledToolPreferences = React.useMemo(
+    () => normalizeDisabledToolPreferences(storedDisabledToolPreferences),
+    [storedDisabledToolPreferences]
+  )
+  const [disabledToolPreferences, setDisabledToolPreferences] =
+    React.useState<McpDisabledToolPreferences>(
+      normalizedStoredDisabledToolPreferences
+    )
+  React.useEffect(() => {
+    setDisabledToolPreferences(normalizedStoredDisabledToolPreferences)
+  }, [normalizedStoredDisabledToolPreferences])
+  const activeToolPreferenceScope = React.useMemo(
+    () => deriveMcpToolPreferenceScope(connectionConfig),
+    [connectionConfig]
+  )
+  const disabledToolNames = React.useMemo(
+    () =>
+      normalizeDisabledToolNames(
+        disabledToolPreferences.scopes[activeToolPreferenceScope]
+          ?.disabledToolNames ?? []
+      ),
+    [activeToolPreferenceScope, disabledToolPreferences]
+  )
   const normalizedToolModules = React.useMemo(
     () => normalizeModuleList(toolModules),
     [toolModules]
@@ -100,7 +244,7 @@ export const useMcpTools = (
     toolCatalogStrict
   })
   const healthQuery = useQuery({
-    queryKey: ["mcp-health"],
+    queryKey: ["mcp-health", activeToolPreferenceScope],
     queryFn: async () => apiSend({ path: "/api/v1/mcp/health", method: "GET" }),
     enabled: hasMcp && probeEnabled,
     staleTime: 60_000,
@@ -126,6 +270,7 @@ export const useMcpTools = (
   const toolsQuery = useQuery({
     queryKey: [
       "mcp-tools",
+      activeToolPreferenceScope,
       toolCatalog,
       toolCatalogId,
       normalizedToolModules,
@@ -166,7 +311,7 @@ export const useMcpTools = (
   })
 
   const catalogsQuery = useQuery({
-    queryKey: ["mcp-tool-catalogs"],
+    queryKey: ["mcp-tool-catalogs", activeToolPreferenceScope],
     queryFn: async () => {
       try {
         return await fetchMcpToolCatalogsViaDiscovery("all")
@@ -181,7 +326,7 @@ export const useMcpTools = (
   })
 
   const moduleOptionsQuery = useQuery({
-    queryKey: ["mcp-tool-modules"],
+    queryKey: ["mcp-tool-modules", activeToolPreferenceScope],
     queryFn: async () => {
       try {
         return await fetchMcpModulesViaDiscovery()
@@ -205,16 +350,27 @@ export const useMcpTools = (
     refetchOnWindowFocus: false
   })
 
-  const tools = React.useMemo(
+  const toolFilterState = React.useMemo(
     () =>
-      (toolsQuery.data ?? []).filter((tool) => {
-        if (!tool || typeof tool !== "object") return false
-        if (!("canExecute" in tool)) return true
-        return (tool as McpToolDefinition).canExecute !== false
+      buildChatToolFilterState({
+        tools: toolsQuery.data ?? [],
+        disabledToolNames
       }),
-    [toolsQuery.data]
+    [disabledToolNames, toolsQuery.data]
   )
-  const toolsAvailable = !probeEnabled || toolsQuery.isLoading ? null : tools.length > 0
+  const {
+    discoveredTools,
+    availableTools,
+    chatTools,
+    collisionToolNames,
+    counts: toolCounts
+  } = toolFilterState
+  const tools = React.useMemo(
+    () => availableTools.map((tool) => tool.tool as McpToolDefinition),
+    [availableTools]
+  )
+  const toolsAvailable =
+    !probeEnabled || toolsQuery.isLoading ? null : availableTools.length > 0
   const catalogs = catalogsQuery.data ?? []
   const moduleOptionsSource =
     moduleOptionsQuery.data && moduleOptionsQuery.data.length > 0
@@ -281,15 +437,58 @@ export const useMcpTools = (
 
   React.useEffect(() => {
     if (!hasMcp && !loading) {
-      setTools([])
+      setToolFilterState({
+        discoveredTools: [],
+        availableTools: [],
+        chatTools: [],
+        disabledToolPreferences,
+        activeToolPreferenceScope,
+        disabledToolNames,
+        collisionToolNames: [],
+        toolCounts: {
+          discovered: 0,
+          executable: 0,
+          disabled: 0,
+          colliding: 0,
+          chatEnabled: 0
+        }
+      })
+      setToolsLoading(false)
+      return
+    }
+    if (!probeEnabled) {
       setToolsLoading(false)
       return
     }
     setToolsLoading(toolsQuery.isLoading)
     if (!toolsQuery.isLoading) {
-      setTools(tools)
+      setToolFilterState({
+        discoveredTools,
+        availableTools,
+        chatTools,
+        disabledToolPreferences,
+        activeToolPreferenceScope,
+        disabledToolNames,
+        collisionToolNames,
+        toolCounts
+      })
     }
-  }, [hasMcp, loading, setTools, setToolsLoading, tools, toolsQuery.isLoading])
+  }, [
+    activeToolPreferenceScope,
+    availableTools,
+    chatTools,
+    collisionToolNames,
+    disabledToolNames,
+    disabledToolPreferences,
+    discoveredTools,
+    hasMcp,
+    loading,
+    probeEnabled,
+    setToolFilterState,
+    setToolsLoading,
+    toolCounts,
+    toolsQuery.isLoading
+  ])
 
   const persistToolCatalog = React.useCallback(
     (catalog: string) => {
@@ -325,13 +524,93 @@ export const useMcpTools = (
     [persistStrict, setToolCatalogStrict]
   )
 
+  const updateDisabledToolPreferences = React.useCallback(
+    (
+      updater: (
+        current: McpDisabledToolPreferences
+      ) => McpDisabledToolPreferences
+    ) => {
+      const next = updater(disabledToolPreferences)
+      setDisabledToolPreferences(next)
+      void persistStoredDisabledToolPreferences(next)
+    },
+    [disabledToolPreferences, persistStoredDisabledToolPreferences]
+  )
+
+  const setToolsEnabled = React.useCallback(
+    (toolNames: string[], enabled: boolean) => {
+      const normalizedNames = normalizeDisabledToolNames(toolNames)
+      if (normalizedNames.length === 0) return
+      updateDisabledToolPreferences((current) => {
+        const currentScopePreference =
+          current.scopes[activeToolPreferenceScope]
+        const disabledSet = new Set(
+          normalizeDisabledToolNames(
+            currentScopePreference?.disabledToolNames ?? []
+          )
+        )
+        for (const toolName of normalizedNames) {
+          if (enabled) {
+            disabledSet.delete(toolName)
+          } else {
+            disabledSet.add(toolName)
+          }
+        }
+        const disabledToolNames = [...disabledSet].sort((left, right) =>
+          left.localeCompare(right)
+        )
+        const scopes = { ...current.scopes }
+        if (disabledToolNames.length > 0) {
+          scopes[activeToolPreferenceScope] = {
+            disabledToolNames,
+            updatedAt: new Date().toISOString()
+          }
+        } else {
+          delete scopes[activeToolPreferenceScope]
+        }
+        return {
+          version: 1,
+          scopes
+        }
+      })
+    },
+    [activeToolPreferenceScope, updateDisabledToolPreferences]
+  )
+
+  const setToolEnabled = React.useCallback(
+    (toolName: string, enabled: boolean) => {
+      setToolsEnabled([toolName], enabled)
+    },
+    [setToolsEnabled]
+  )
+
+  const resetToolFilter = React.useCallback(() => {
+    updateDisabledToolPreferences((current) => {
+      if (!current.scopes[activeToolPreferenceScope]) return current
+      const scopes = { ...current.scopes }
+      delete scopes[activeToolPreferenceScope]
+      return {
+        version: 1,
+        scopes
+      }
+    })
+  }, [activeToolPreferenceScope, updateDisabledToolPreferences])
+
   return {
     hasMcp,
     healthState,
     healthLoading: probeEnabled ? healthQuery.isLoading : false,
     tools,
+    discoveredTools,
+    availableTools,
+    chatTools,
     toolsLoading: probeEnabled ? toolsQuery.isLoading : false,
     toolsAvailable,
+    disabledToolPreferences,
+    activeToolPreferenceScope,
+    disabledToolNames,
+    collisionToolNames,
+    toolCounts,
     catalogs,
     catalogsLoading: probeEnabled ? catalogsQuery.isLoading : false,
     toolCatalog,
@@ -343,6 +622,9 @@ export const useMcpTools = (
     setToolCatalog: persistToolCatalog,
     setToolCatalogId: persistToolCatalogId,
     setToolModules: persistToolModule,
-    setToolCatalogStrict: persistToolCatalogStrict
+    setToolCatalogStrict: persistToolCatalogStrict,
+    setToolEnabled,
+    setToolsEnabled,
+    resetToolFilter
   }
 }

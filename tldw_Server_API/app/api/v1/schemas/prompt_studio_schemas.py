@@ -5,8 +5,12 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    default_offset_pagination_aliases,
+)
 from .prompt_studio_base import EvaluationStatus, JobStatus, JobType, TimestampMixin, UUIDMixin
 
 ########################################################################################################################
@@ -83,6 +87,13 @@ class EvaluationList(BaseModel):
     total: int = Field(..., ge=0, description="Total count")
     limit: int = Field(..., ge=1, description="Page limit")
     offset: int = Field(..., ge=0, description="Page offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> "EvaluationList":
+        return default_offset_pagination_aliases(self)
 
 
 # Simple execute request for prompts (compat endpoint)

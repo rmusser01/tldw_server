@@ -264,6 +264,21 @@ describe("QuizPlayground navigation intents", () => {
     expect(window.sessionStorage.getItem(RESULTS_FILTER_PREFS_KEY)).toBeNull()
   })
 
+  it("keeps reset current tab available before quizzes or attempts exist", () => {
+    vi.mocked(useQuizzesQuery).mockReturnValueOnce({
+      data: { items: [], count: 0 },
+      isLoading: false
+    } as any)
+    vi.mocked(useAttemptsQuery).mockReturnValueOnce({
+      data: { items: [], count: 0 },
+      isLoading: false
+    } as any)
+
+    render(<QuizPlayground />)
+
+    expect(screen.getByTestId("quiz-reset-current-tab")).toBeInTheDocument()
+  })
+
   it("keeps inactive tab panes mounted for per-tab state preservation", () => {
     render(<QuizPlayground />)
     expect(screen.getByTestId("destroy-inactive-tab-pane")).toHaveTextContent("false")

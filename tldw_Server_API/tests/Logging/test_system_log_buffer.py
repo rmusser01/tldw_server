@@ -15,6 +15,16 @@ def _reload_log_buffer():
     return importlib.reload(log_buffer)
 
 
+class _CapturingLogger:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def debug(self, message: str, *args, **_kwargs) -> None:
+        if args:
+            message = message.format(*args)
+        self.messages.append(message)
+
+
 def test_system_log_file_query_reads_shared_file(tmp_path, monkeypatch):
     log_path = tmp_path / "system_logs.jsonl"
     monkeypatch.setenv("SYSTEM_LOG_FILE_ENABLED", "true")
@@ -149,6 +159,59 @@ def test_append_log_file_failure_avoids_sink_reentry(monkeypatch, tmp_path):
 
     assert called
     assert "write denied" in called[0]
+
+
+def test_system_log_settings_config_read_failure_log_is_sanitized(monkeypatch):
+    log_buffer = _reload_log_buffer()
+
+    import tldw_Server_API.app.core.config as config_mod
+
+    def _raise_config_error():
+        raise RuntimeError("config read failed at /private/system-log-config.ini")
+
+    monkeypatch.delenv("SYSTEM_LOG_FILE_PATH", raising=False)
+    monkeypatch.delenv("SYSTEM_LOG_FILE_MAX_ENTRIES", raising=False)
+    monkeypatch.delenv("SYSTEM_LOG_FILE_COMPACT_EVERY_WRITES", raising=False)
+    monkeypatch.setattr(config_mod, "load_comprehensive_config", _raise_config_error, raising=True)
+    capture = _CapturingLogger()
+    monkeypatch.setattr(log_buffer, "logger", capture)
+
+    log_buffer._init_log_file_settings()
+
+    joined = "\n".join(capture.messages)
+    assert "System log settings config read failed" in joined
+    assert "config read failed at" not in joined
+    assert "/private/system-log-config.ini" not in joined
+
+
+def test_read_log_file_failure_log_is_sanitized(monkeypatch):
+    log_buffer = _reload_log_buffer()
+
+    class FailingLogPath:
+        def exists(self):
+            return True
+
+        def read_text(self, encoding):
+            raise OSError("system log read failed at /private/system_logs.jsonl")
+
+    @contextmanager
+    def _noop_lock(_timeout=None):
+        yield
+
+    capture = _CapturingLogger()
+    monkeypatch.setattr(log_buffer, "logger", capture)
+    monkeypatch.setattr(log_buffer, "_LOG_FILE_SETTINGS_INITIALIZED", True)
+    monkeypatch.setattr(log_buffer, "_LOG_FILE_ENABLED", True)
+    monkeypatch.setattr(log_buffer, "_LOG_FILE_PATH", FailingLogPath())
+    monkeypatch.setattr(log_buffer, "_log_file_lock", _noop_lock)
+
+    entries = log_buffer._read_log_file_entries()
+
+    joined = "\n".join(capture.messages)
+    assert entries == []
+    assert "Failed to read system log file" in joined
+    assert "system log read failed" not in joined
+    assert "/private/system_logs.jsonl" not in joined
 
 
 def test_query_system_logs_handles_naive_start_with_aware_entries(monkeypatch):

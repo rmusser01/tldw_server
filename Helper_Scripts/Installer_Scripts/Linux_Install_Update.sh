@@ -151,11 +151,7 @@ fi
 
 log "Installation/Update process completed"
 echo "Installation/Update completed successfully!"
-echo "To run TLDW, use the run_tldw.sh script"
-echo "Which is what I'm doing for you now..."
-# Run TLDW
-cd "tldw" || exit
-source venv/bin/activate
-python3 summarize.py -gui
-deactivate
-echo "TLDW has been ran. Goodbye!"
+echo "To launch tldw_server, use Linux_Run_tldw.sh:"
+echo "  bash Linux_Run_tldw.sh all    # API + WebUI"
+echo "  bash Linux_Run_tldw.sh api    # API only"
+echo "  bash Linux_Run_tldw.sh webui  # WebUI only"

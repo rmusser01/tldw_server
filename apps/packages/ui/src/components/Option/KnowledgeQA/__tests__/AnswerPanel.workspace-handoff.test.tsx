@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AnswerPanel } from "../AnswerPanel"
 
 const navigateMock = vi.fn()
-const queueWorkspacePlaygroundPrefillMock = vi.fn()
+const queueResearchWorkspacePrefillMock = vi.fn()
 const messageOpenMock = vi.fn()
 const trackMetricMock = vi.fn()
 
@@ -47,10 +47,10 @@ vi.mock("react-router-dom", async () => {
   }
 })
 
-vi.mock("@/utils/workspace-playground-prefill", () => ({
+vi.mock("@/utils/research-workspace-prefill", () => ({
   buildKnowledgeQaWorkspacePrefill: vi.fn((payload) => payload),
-  queueWorkspacePlaygroundPrefill: (...args: unknown[]) =>
-    queueWorkspacePlaygroundPrefillMock(...args),
+  queueResearchWorkspacePrefill: (...args: unknown[]) =>
+    queueResearchWorkspacePrefillMock(...args),
 }))
 
 vi.mock("@/utils/knowledge-qa-search-metrics", () => ({
@@ -64,7 +64,7 @@ vi.mock("../KnowledgeQAProvider", () => ({
 describe("AnswerPanel workspace handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    queueWorkspacePlaygroundPrefillMock.mockResolvedValue(undefined)
+    queueResearchWorkspacePrefillMock.mockResolvedValue(undefined)
     trackMetricMock.mockResolvedValue(undefined)
   })
 
@@ -74,7 +74,7 @@ describe("AnswerPanel workspace handoff", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue in editor" }))
 
     await waitFor(() =>
-      expect(queueWorkspacePlaygroundPrefillMock).toHaveBeenCalledWith(
+      expect(queueResearchWorkspacePrefillMock).toHaveBeenCalledWith(
         expect.objectContaining({
           threadId: "thread-xyz",
           query: "Compare reports",
@@ -86,6 +86,6 @@ describe("AnswerPanel workspace handoff", () => {
       type: "workspace_handoff",
       source_count: 1,
     })
-    expect(navigateMock).toHaveBeenCalledWith("/workspace-playground")
+    expect(navigateMock).toHaveBeenCalledWith("/research-workspace")
   })
 })

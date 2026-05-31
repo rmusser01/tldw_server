@@ -172,25 +172,15 @@ def _normalize_incident_record(value: Any) -> dict[str, Any]:
 
     incident = dict(value)
     incident["assigned_to_user_id"] = (
-        int(incident["assigned_to_user_id"])
-        if incident.get("assigned_to_user_id") is not None
-        else None
+        int(incident["assigned_to_user_id"]) if incident.get("assigned_to_user_id") is not None else None
     )
     incident["assigned_to_label"] = (
-        str(incident["assigned_to_label"]).strip() or None
-        if incident.get("assigned_to_label") is not None
-        else None
+        str(incident["assigned_to_label"]).strip() or None if incident.get("assigned_to_label") is not None else None
     )
     incident["root_cause"] = (
-        str(incident["root_cause"]).strip() or None
-        if incident.get("root_cause") is not None
-        else None
+        str(incident["root_cause"]).strip() or None if incident.get("root_cause") is not None else None
     )
-    incident["impact"] = (
-        str(incident["impact"]).strip() or None
-        if incident.get("impact") is not None
-        else None
-    )
+    incident["impact"] = str(incident["impact"]).strip() or None if incident.get("impact") is not None else None
     incident["action_items"] = _normalize_incident_action_items(incident.get("action_items"))
     incident.setdefault("acknowledged_at", None)
 
@@ -269,12 +259,12 @@ def _normalize_rollout_percent(value: Any, *, strict: bool) -> int:
     except (TypeError, ValueError):
         if strict:
             raise ValueError("invalid_rollout_percent") from None
-        return 100
+        return 0
     if 0 <= parsed <= 100:
         return parsed
     if strict:
         raise ValueError("invalid_rollout_percent")
-    return 100
+    return 0
 
 
 def _normalize_allowlist_ids(values: list[int] | None) -> list[int]:
@@ -575,17 +565,12 @@ def list_incidents(
         incidents = [item for item in incidents if item.get("severity") == severity_norm]
     if tag:
         tag_norm = tag.strip().lower()
-        incidents = [
-            item for item in incidents if tag_norm in {t.lower() for t in (item.get("tags") or [])}
-        ]
+        incidents = [item for item in incidents if tag_norm in {t.lower() for t in (item.get("tags") or [])}]
     incidents.sort(key=lambda item: _parse_iso(item.get("updated_at")), reverse=True)
     total = len(incidents)
     safe_offset = max(0, offset)
     safe_limit = max(1, limit)
-    items = [
-        _normalize_incident_record(item)
-        for item in incidents[safe_offset:safe_offset + safe_limit]
-    ]
+    items = [_normalize_incident_record(item) for item in incidents[safe_offset : safe_offset + safe_limit]]
     for inc in items:
         inc["mtta_minutes"] = None
         inc["mttr_minutes"] = None
@@ -611,15 +596,6 @@ def list_incidents(
             except (ValueError, TypeError):
                 pass
     return items, total
-
-
-def get_incident(*, incident_id: str) -> dict[str, Any] | None:
-    with _locked_store() as store:
-        incidents = list(store.get("incidents", []))
-    for incident in incidents:
-        if incident.get("id") == incident_id:
-            return _normalize_incident_record(incident)
-    return None
 
 
 def create_incident(
@@ -735,23 +711,11 @@ def update_incident(
                         else None
                     )
             if root_cause is not _UNSET:
-                updated_incident["root_cause"] = (
-                    str(root_cause).strip() or None
-                    if root_cause is not None
-                    else None
-                )
+                updated_incident["root_cause"] = str(root_cause).strip() or None if root_cause is not None else None
             if impact is not _UNSET:
-                updated_incident["impact"] = (
-                    str(impact).strip() or None
-                    if impact is not None
-                    else None
-                )
+                updated_incident["impact"] = str(impact).strip() or None if impact is not None else None
             if runbook_url is not _UNSET:
-                updated_incident["runbook_url"] = (
-                    str(runbook_url).strip() or None
-                    if runbook_url is not None
-                    else None
-                )
+                updated_incident["runbook_url"] = str(runbook_url).strip() or None if runbook_url is not None else None
             if action_items is not _UNSET:
                 updated_incident["action_items"] = _normalize_incident_action_items(action_items)
             if note:
@@ -839,10 +803,7 @@ def notify_incident_stakeholders(
     incident = get_incident(incident_id=incident_id)
     email_service = get_email_service()
 
-    subject = (
-        f"[Incident {incident['id']}] {incident['title']}"
-        f" \u2014 {incident['status']}"
-    )
+    subject = f"[Incident {incident['id']}] {incident['title']}" f" \u2014 {incident['status']}"
     body_parts = [
         f"Incident: {incident['title']}",
         f"Status: {incident['status']}",
@@ -1096,15 +1057,18 @@ def list_webhook_deliveries(
     *,
     webhook_id: str,
     limit: int = 50,
-) -> list[dict[str, Any]]:
+    offset: int = 0,
+) -> tuple[list[dict[str, Any]], int]:
     """Return delivery records for a webhook, newest first."""
     limit = max(1, min(limit, _WEBHOOK_DELIVERIES_CAP))
+    offset = max(0, int(offset))
     with _locked_store() as store:
         deliveries = store.get("webhook_deliveries", [])
         wh_deliveries = [d for d in deliveries if d.get("webhook_id") == webhook_id]
     # Sort newest first
     wh_deliveries.sort(key=lambda d: d.get("attempted_at") or "", reverse=True)
-    return wh_deliveries[:limit]
+    total = len(wh_deliveries)
+    return wh_deliveries[offset: offset + limit], total
 
 
 def _create_webhook_http_client(*, timeout: float):
@@ -1222,6 +1186,7 @@ def list_invitations(
         if status_norm in _INVITATION_STATUSES:
             invitations = [inv for inv in invitations if inv.get("status") == status_norm]
 
+    invitations.reverse()
     invitations.sort(key=lambda item: item.get("created_at") or "", reverse=True)
     return invitations
 
@@ -1269,10 +1234,7 @@ def create_invitation(
 
         # Check for duplicate pending invitation to same email
         for existing in invitations:
-            if (
-                existing.get("email") == email_norm
-                and existing.get("status") == "pending"
-            ):
+            if existing.get("email") == email_norm and existing.get("status") == "pending":
                 expires_at_existing = existing.get("expires_at")
                 if expires_at_existing:
                     expiry_dt = _parse_iso(expires_at_existing)
@@ -1362,6 +1324,7 @@ def _prune_health_history(entries: list[dict[str, Any]]) -> list[dict[str, Any]]
 
     # Second pass: cap per dependency (keep newest)
     from collections import Counter
+
     counts: Counter[str] = Counter()
     for entry in fresh:
         counts[entry.get("dependency_name", "")] += 1
@@ -1459,9 +1422,9 @@ def get_uptime_stats(dependency_name: str, days: int = 30) -> dict[str, Any]:
 
     # Filter to the requested dependency and time window
     entries = [
-        e for e in history
-        if e.get("dependency_name") == dependency_name
-        and (e.get("checked_at") or "") >= window_start_iso
+        e
+        for e in history
+        if e.get("dependency_name") == dependency_name and (e.get("checked_at") or "") >= window_start_iso
     ]
 
     total_checks = len(entries)
@@ -1469,10 +1432,7 @@ def get_uptime_stats(dependency_name: str, days: int = 30) -> dict[str, Any]:
 
     uptime_pct = round((healthy_checks / total_checks) * 100, 2) if total_checks > 0 else 100.0
 
-    latencies = [
-        e["latency_ms"] for e in entries
-        if isinstance(e.get("latency_ms"), (int, float))
-    ]
+    latencies = [e["latency_ms"] for e in entries if isinstance(e.get("latency_ms"), (int, float))]
     avg_latency_ms = round(sum(latencies) / len(latencies), 1) if latencies else 0.0
 
     # Estimate downtime in minutes: each unhealthy check represents ~60 min (hourly granularity)
@@ -1572,9 +1532,15 @@ def list_email_deliveries(
     if status:
         log = [entry for entry in log if entry.get("status") == status]
     total = len(log)
-    # Newest first
-    log.sort(key=lambda e: e.get("sent_at") or "", reverse=True)
-    return log[offset: offset + limit], total
+    # Newest first. Use append position as a deterministic tie-breaker for
+    # platforms where rapid records can share identical timestamp strings.
+    ordered = sorted(
+        enumerate(log),
+        key=lambda item: ((item[1].get("sent_at") or ""), item[0]),
+        reverse=True,
+    )
+    log = [entry for _, entry in ordered]
+    return log[offset : offset + limit], total
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1820,8 +1786,7 @@ def resend_invitation(*, invitation_id: str) -> dict[str, Any]:
                 # Regenerate token and extend expiry
                 inv["token"] = secrets.token_urlsafe(32)
                 inv["expires_at"] = (
-                    datetime.now(timezone.utc)
-                    + timedelta(days=_INVITATION_DEFAULT_EXPIRY_DAYS)
+                    datetime.now(timezone.utc) + timedelta(days=_INVITATION_DEFAULT_EXPIRY_DAYS)
                 ).isoformat()
                 inv["resend_count"] = resend_count + 1
                 inv["last_resent_at"] = _now_iso()
@@ -1882,9 +1847,7 @@ def record_api_key_usage(
         entry["total_tokens"] = entry.get("total_tokens", 0) + total_tokens
         entry["prompt_tokens"] = entry.get("prompt_tokens", 0) + prompt_tokens
         entry["completion_tokens"] = entry.get("completion_tokens", 0) + completion_tokens
-        entry["estimated_cost_usd"] = round(
-            entry.get("estimated_cost_usd", 0.0) + cost_usd, 6
-        )
+        entry["estimated_cost_usd"] = round(entry.get("estimated_cost_usd", 0.0) + cost_usd, 6)
         entry["last_used_at"] = _now_iso()
 
         # Update or append daily snapshot
@@ -1895,12 +1858,14 @@ def record_api_key_usage(
             snap["tokens"] = snap.get("tokens", 0) + total_tokens
             snap["cost_usd"] = round(snap.get("cost_usd", 0.0) + cost_usd, 6)
         else:
-            snapshots.append({
-                "date": today,
-                "requests": 1,
-                "tokens": total_tokens,
-                "cost_usd": round(cost_usd, 6),
-            })
+            snapshots.append(
+                {
+                    "date": today,
+                    "requests": 1,
+                    "tokens": total_tokens,
+                    "cost_usd": round(cost_usd, 6),
+                }
+            )
 
         # Cap daily snapshots at 90 days
         if len(snapshots) > _API_KEY_USAGE_DAILY_CAP:
@@ -1934,4 +1899,4 @@ def list_api_key_usage(*, limit: int = 10) -> list[dict[str, Any]]:
         items = list(usage_map.values())
 
     items.sort(key=lambda item: item.get("total_tokens", 0), reverse=True)
-    return items[:max(1, limit)]
+    return items[: max(1, limit)]

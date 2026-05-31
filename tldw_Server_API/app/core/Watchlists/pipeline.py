@@ -35,6 +35,7 @@ import hashlib
 import inspect
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
@@ -59,6 +60,7 @@ from tldw_Server_API.app.core.Watchlists.fetchers import (
     fetch_site_article_async,
     fetch_site_items_with_rules,
 )
+from tldw_Server_API.app.core.Watchlists.content_alerts import evaluate_content_alert_rules_for_item
 from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters, normalize_filters
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 
@@ -141,6 +143,60 @@ async def _maybe_await(value):
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+_SENSITIVE_ERROR_TOKEN_RE = re.compile(
+    r"(?i)(?:"
+    r"['\"](?:api[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|"
+    r"token|secret|password|credential)['\"]\s*:\s*['\"][^'\"]+['\"]"
+    r"|(?:^|[?&\s,;])(?:api[_-]?key|auth[_-]?token|access[_-]?token|"
+    r"refresh[_-]?token|token|secret|password|credential)\s*[:=]\s*"
+    r"(?:['\"][^'\"]*['\"]|[^'\"\s,;&]+)"
+    r")"
+)
+_AUTHORIZATION_BEARER_RE = re.compile(
+    r"(?i)(?:['\"]authorization['\"]\s*:\s*['\"]bearer\s+[^'\"]+['\"]|"
+    r"\bauthorization\s*:\s*bearer\s+(?:['\"][^'\"]+['\"]|[^'\"\s,;&]+))"
+)
+_BEARER_SECRET_RE = re.compile(
+    r"(?i)(?:['\"]bearer['\"]\s*:\s*['\"]bearer\s+[^'\"]+['\"]|"
+    r"\bbearer\s+(?:['\"][^'\"]+['\"]|[^'\"\s,;&]+))"
+)
+_STANDALONE_HTTP_URL_RE = re.compile(r"(?i)^https?://\S+$")
+
+
+def _source_error_url_without_credentials(text: str) -> str | None:
+    """Return a URL without userinfo, query, or fragment when text is a standalone URL."""
+    if not _STANDALONE_HTTP_URL_RE.fullmatch(text):
+        return None
+    parsed = urlparse(text)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    hostname = parsed.hostname or parsed.netloc.rsplit("@", 1)[-1]
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    netloc = f"{hostname}:{parsed.port}" if parsed.port is not None else hostname
+    return urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
+
+
+def _safe_source_error_text(value: Any) -> str:
+    """Return bounded source-error text with common credentials and local paths removed."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        safe_url = _source_error_url_without_credentials(text)
+        if safe_url:
+            return safe_url[:500]
+    except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(
+            "watchlists.source_error_url_parse_failed: error_type={}",
+            type(exc).__name__,
+        )
+    text = _AUTHORIZATION_BEARER_RE.sub("Authorization: Bearer [redacted]", text)
+    text = _BEARER_SECRET_RE.sub("Bearer [redacted]", text)
+    text = _SENSITIVE_ERROR_TOKEN_RE.sub("[redacted]", text)
+    return text[:500]
 
 
 def _ingest_watchlist_media(
@@ -557,7 +613,9 @@ async def _maybe_auto_generate_output(
         "item_count": len(items_payload),
         "format": template_format,
         "type": output_type,
-        "origin": "auto_output",
+        "origin": "watchlists",
+        "generation_mode": "auto_output",
+        "auto_output": True,
         "run_id": run.id,
         "job_id": getattr(job, "id", None),
     }
@@ -571,6 +629,33 @@ async def _maybe_auto_generate_output(
         run_id=run.id,
     )
     return artifact.id
+
+
+def _update_auto_output_audio_metadata(
+    collections_db: CollectionsDatabase,
+    output_id: int,
+    audio_result: Any,
+) -> None:
+    """Attach audio trigger state to an auto-generated output artifact."""
+    from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+        apply_audio_briefing_result_metadata,
+    )
+
+    row = collections_db.get_output_artifact(output_id)
+    metadata: dict[str, Any] = {}
+    raw_metadata = getattr(row, "metadata_json", None)
+    if raw_metadata:
+        try:
+            parsed = json.loads(raw_metadata)
+            if isinstance(parsed, dict):
+                metadata = parsed
+        except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
+            metadata = {}
+    apply_audio_briefing_result_metadata(metadata, audio_result, requested=True)
+    collections_db.update_output_artifact_metadata(
+        output_id,
+        metadata_json=json.dumps(metadata),
+    )
 
 
 async def run_watchlist_job(
@@ -749,9 +834,14 @@ async def run_watchlist_job(
         history_pages_total = 0
         history_any_stop = False
         history_used = False
+        source_statuses: list[dict[str, Any]] = []
 
         for src in sources:
             source_companion_events: list[dict[str, Any]] = []
+            source_items_found_start = items_found
+            source_items_ingested_start = items_ingested
+            source_status = "ok"
+            source_error: str | None = None
             if _run_is_cancelled(db, run.id):
                 logger.info(f"watchlists.run_cancelled: stopping run {run.id} before source {getattr(src, 'id', '?')}")
                 break
@@ -761,6 +851,7 @@ async def run_watchlist_job(
                     if not _forums_enabled():
                         with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                             db.update_source_scrape_meta(int(src.id), last_scraped_at=_utcnow_iso(), status="forum_disabled")
+                        source_status = "forum_disabled"
                         continue
                     if not test_mode:
                         await asyncio.sleep(_forum_delay_seconds())
@@ -772,6 +863,7 @@ async def run_watchlist_job(
                         defer_dt = _dt.fromisoformat(str(src.defer_until))
                         if now_utc < defer_dt:
                             # still deferred
+                            source_status = "deferred"
                             continue
                         # past due: clear defer
                         with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
@@ -814,6 +906,23 @@ async def run_watchlist_job(
                                     route=str(companion_route),
                                 )
                             )
+                        if status == "ingested":
+                            try:
+                                target_watchlist_id = getattr(job, "watchlist_id", None)
+                                if target_watchlist_id is None:
+                                    source_watchlist_ids = db.list_source_watchlist_ids(int(_src.id))
+                                    target_watchlist_id = source_watchlist_ids[0] if source_watchlist_ids else None
+                                if target_watchlist_id is not None:
+                                    evaluate_content_alert_rules_for_item(
+                                        db,
+                                        watchlist_id=int(target_watchlist_id),
+                                        item=item,
+                                    )
+                            except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as alert_err:
+                                logger.debug(
+                                    "watchlist content alert evaluation failed "
+                                    f"(source_id={getattr(_src, 'id', '?')}, item_id={getattr(item, 'id', '?')}): {alert_err}"
+                                )
                     except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as rec_err:
                         logger.debug(f"record_scraped_item failed (source_id={getattr(_src, 'id', '?')}): {rec_err}")
 
@@ -938,6 +1047,7 @@ async def run_watchlist_job(
                                 defer_until=defer_until_val,
                                 consec_not_modified=new_count,
                             )
+                        source_status = "not_modified" if defer_until_val is None else f"not_modified_backoff:{secs}"
                         continue
                     if status == 429:
                         # Defer per Retry-After
@@ -947,9 +1057,12 @@ async def run_watchlist_job(
                             until = (datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(seconds=ra)).isoformat()
                             with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                                 db.update_source_scrape_meta(int(src.id), status="deferred", defer_until=until)
+                        source_status = "deferred"
                         continue
                     if status // 100 != 2:
                         # error path — track consecutive errors and apply backoff
+                        source_status = f"error:{status}"
+                        source_error = f"HTTP {status}"
                         with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                             prev_errors = int(getattr(src, "consec_errors", 0) or 0)
                             new_errors = prev_errors + 1
@@ -1290,11 +1403,14 @@ async def run_watchlist_job(
                             urls_to_fetch = [src.url]
 
                     if not urls_to_fetch:
+                        source_status = "skipped:no_urls"
                         continue
 
                     skip_article_fetch = bool(scrape_rules.get("skip_article_fetch")) if isinstance(scrape_rules, dict) else False
 
                     items_found += len(urls_to_fetch)
+                    extraction_failure_count = 0
+                    extraction_success_count = 0
                     for page_url in urls_to_fetch:
                         if _run_is_cancelled(db, run.id):
                             logger.info(f"watchlists.run_cancelled: stopping run {run.id} during site item processing")
@@ -1340,6 +1456,7 @@ async def run_watchlist_job(
                             if prefetch.get("author") and not article.get("author"):
                                 article["author"] = prefetch.get("author")
                         if not article:
+                            extraction_failure_count += 1
                             _record_scraped(
                                 status="error",
                                 url=page_url,
@@ -1352,6 +1469,7 @@ async def run_watchlist_job(
                             )
                             continue
 
+                        extraction_success_count += 1
                         article["url"] = article.get("url") or page_url
                         if not article.get("title"):
                             article["title"] = prefetch.get("title") if prefetch and prefetch.get("title") else src.name
@@ -1529,15 +1647,32 @@ async def run_watchlist_job(
                                 media_uuid=ingested_media_uuid,
                                 published_at=(prefetch.get("published") or prefetch.get("published_raw")) if prefetch else None,
                             )
+                    if extraction_failure_count:
+                        if extraction_success_count:
+                            source_status = "partial:extraction"
+                            source_error = (
+                                f"{extraction_failure_count} of "
+                                f"{extraction_failure_count + extraction_success_count} URLs failed extraction"
+                            )
+                        else:
+                            source_status = "error:extraction"
+                            source_error = f"No article content extracted from {extraction_failure_count} URL(s)"
                     with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                         db.update_source_scrape_meta(int(src.id), last_scraped_at=_utcnow_iso(), status="ok", consec_errors=0)
                     # Apply retention policy if configured
                     _apply_feed_retention(collections_db, collections_origin, src)
                 else:
                     # Unknown type - skip
+                    source_status = "skipped:unknown_type"
                     continue
             except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Source processing failed (id={getattr(src, 'id', '?')}): {e}")
+                logger.debug(
+                    "Source processing failed (id={}) error_type={}",
+                    getattr(src, "id", "?"),
+                    type(e).__name__,
+                )
+                source_status = "error"
+                source_error = _safe_source_error_text(e) or type(e).__name__
                 with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                     prev_errors = int(getattr(src, "consec_errors", 0) or 0)
                     new_errors = prev_errors + 1
@@ -1554,6 +1689,16 @@ async def run_watchlist_job(
                     if auto_disable:
                         logger.warning(f"watchlists.health: auto-disabled source {src.id} after {new_errors} consecutive errors")
             finally:
+                source_statuses.append(
+                    {
+                        "source_id": int(getattr(src, "id", 0) or 0),
+                        "name": getattr(src, "name", None),
+                        "status": source_status,
+                        "error": source_error,
+                        "items_found": max(0, items_found - source_items_found_start),
+                        "items_ingested": max(0, items_ingested - source_items_ingested_start),
+                    }
+                )
                 if companion_activity_db is not None and source_companion_events:
                     try:
                         companion_activity_db.insert_companion_activity_events_bulk(
@@ -1567,7 +1712,17 @@ async def run_watchlist_job(
                             exc,
                         )
 
-        stats = {"items_found": items_found, "items_ingested": items_ingested}
+        source_errors = sum(
+            1
+            for source_status_entry in source_statuses
+            if str(source_status_entry.get("status") or "").startswith(("error", "partial:"))
+        )
+        stats = {
+            "items_found": items_found,
+            "items_ingested": items_ingested,
+            "source_statuses": source_statuses,
+            "source_errors": source_errors,
+        }
         try:
             if filter_stats["filters_matched"]:
                 stats["filters_matched"] = int(filter_stats["filters_matched"])  # type: ignore[assignment]
@@ -1634,20 +1789,29 @@ async def run_watchlist_job(
         try:
             if isinstance(job_output_prefs, dict) and job_output_prefs.get("generate_audio"):
                 from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+                    apply_audio_briefing_result_metadata,
                     trigger_audio_briefing,
                 )
 
-                audio_task_id = await trigger_audio_briefing(
+                audio_result = await trigger_audio_briefing(
                     user_id=user_id,
                     job_id=job_id,
                     run_id=run.id,
                     output_prefs=job_output_prefs,
                     db=db,
                 )
-                if audio_task_id:
-                    stats["audio_briefing_task_id"] = audio_task_id
+                apply_audio_briefing_result_metadata(stats, audio_result)
+                if auto_output_id:
+                    try:
+                        _update_auto_output_audio_metadata(collections_db, int(auto_output_id), audio_result)
+                    except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
+                        logger.debug(f"auto-output audio metadata update failed for output {auto_output_id}: {exc}")
         except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Audio briefing trigger failed for job {job_id}: {exc}")
+            logger.warning(
+                "Audio briefing trigger failed for job {} (error_type={})",
+                job_id,
+                type(exc).__name__,
+            )
 
         # Persist post-run augmentation fields (e.g., auto_output_id, audio_briefing_task_id).
         try:

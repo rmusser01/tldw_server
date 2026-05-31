@@ -111,7 +111,10 @@ class ActionRegistry:
                 if action.enabled(classification):
                     available.append(action)
             except Exception as action_error:
-                logger.debug("Research action capability check failed; action skipped", exc_info=action_error)
+                logger.debug(
+                    "Research action capability check failed; action skipped",
+                    error_type=type(action_error).__name__,
+                )
         return available
 
     async def execute(self, name: str, params: dict[str, Any]) -> ActionOutput:
@@ -567,7 +570,10 @@ def _create_reasoning_preamble_action(
                 if _aio.iscoroutine(result):
                     await result
             except Exception as progress_error:
-                logger.debug("Research agent progress callback failed", exc_info=progress_error)
+                logger.debug(
+                    "Research agent progress callback failed",
+                    error_type=type(progress_error).__name__,
+                )
 
         return ActionOutput(
             action_name="__reasoning_preamble",
@@ -1135,7 +1141,10 @@ async def research_loop(
                 if asyncio.iscoroutine(result):
                     await result
             except Exception as progress_error:
-                logger.debug("Research iteration progress callback failed", exc_info=progress_error)
+                logger.debug(
+                    "Research iteration progress callback failed",
+                    error_type=type(progress_error).__name__,
+                )
 
     for iteration in range(1, max_iterations + 1):
         logger.debug(f"Research loop iteration {iteration}/{max_iterations}")

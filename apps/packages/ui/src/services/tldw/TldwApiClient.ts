@@ -1,5 +1,24 @@
 import type { ChatScope } from "@/types/chat-scope"
 import { toChatScopeParams } from "@/types/chat-scope"
+import type {
+  LlamacppAsset,
+  LlamacppAssetsResponse,
+  LlamacppConfigResponse,
+  LlamacppConfigUpdateRequest,
+  LlamacppHardwareSnapshotResponse,
+  LlamacppInventoryItem,
+  LlamacppInventoryResponse,
+  LlamacppLifecycleActionResponse,
+  LlamacppLogTailResponse,
+  LlamacppProfile,
+  LlamacppProfileCreateRequest,
+  LlamacppProfileListResponse,
+  LlamacppProfileUpdateRequest,
+  LlamacppRuntimeListResponse,
+  LlamacppUseInChatResponse,
+  LlamacppValidationRequest,
+  LlamacppValidationResponse
+} from "@/types/llamacpp-admin"
 import { Storage } from "@plasmohq/storage"
 import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage"
 import { bgRequest, bgStream, bgUpload } from "@/services/background-proxy"
@@ -10,7 +29,10 @@ import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
 import { appendPathQuery } from "@/services/tldw/path-utils"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
-import { captureChatRequestDebugSnapshot } from "@/services/tldw/chat-request-debug"
+import {
+  captureChatRequestDebugSnapshot,
+  type ChatRequestDebugMetadata
+} from "@/services/tldw/chat-request-debug"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { toTrimmedStringArray } from "@/services/tldw/client-utils"
 import { getTldwTTSModel, getTldwTTSVoice } from "@/services/tts"
@@ -24,6 +46,14 @@ import {
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
 import {
+  buildProviderAvailabilityMap,
+  normalizeProviderAvailabilityKey,
+  shouldFetchProviderAvailability,
+  toNonEmptyProviderString,
+  toOptionalProviderBoolean,
+  type TldwProvidersResponse
+} from "@/services/tldw/model-provider-availability"
+import {
   buildContentPayload,
   mapApiDetailToUi,
   mapApiListToUi,
@@ -32,6 +62,14 @@ import {
   type ApiDataTableJobStatus
 } from "@/services/tldw/data-tables"
 import type { DataTableColumn } from "@/types/data-tables"
+import type {
+  AudioPreset,
+  AudioPresetCreatePayload,
+  AudioPresetKind,
+  AudioPresetListResponse,
+  AudioPresetUpdatePayload,
+  AudioPresetValidationResponse
+} from "@/types/audio-presets"
 import type {
   CreateReadingSavedSearchRequest,
   CreateReadingDigestScheduleRequest,
@@ -244,6 +282,17 @@ export interface OpenAICredentialSourceSwitchResponse {
   provider: "openai"
   auth_source: "api_key" | "oauth"
   updated_at?: string | null
+}
+
+export type OpenWebUIHydrationScopeRequest = {
+  conversation_ids?: string[]
+  source_user_id?: string | null
+}
+
+export type OpenWebUIHydrationRequest = {
+  openwebui_data_root: string
+  scope?: OpenWebUIHydrationScopeRequest
+  process_supported_files?: boolean
 }
 
 const getCurrentBrowserSurface = (): BrowserSurface => {
@@ -507,6 +556,11 @@ export interface TldwModel {
   function_calling?: boolean
   json_output?: boolean
   type?: string
+  is_configured?: boolean
+  provider_is_configured?: boolean
+  provider_enabled?: boolean
+  availability?: string
+  catalog_only?: boolean
   modalities?: {
     input?: string[]
     output?: string[]
@@ -703,6 +757,15 @@ export interface ChatCompletionRequest {
   research_context?: ChatResearchContext
 }
 
+export type ChatCompletionRequestOptions = {
+  signal?: AbortSignal
+  debugMetadata?: ChatRequestDebugMetadata
+}
+
+export type ChatCompletionStreamOptions = ChatCompletionRequestOptions & {
+  streamIdleTimeoutMs?: number
+}
+
 export interface ServerChatSummary {
   id: string
   title: string
@@ -717,6 +780,11 @@ export interface ServerChatSummary {
   external_ref?: string | null
   bm25_norm?: number | null
   character_id?: string | number | null
+  character_name?: string | null
+  assistant_kind?: "character" | "persona" | null
+  assistant_id?: string | number | null
+  assistant_name?: string | null
+  persona_memory_mode?: "read_only" | "read_write" | null
   parent_conversation_id?: string | null
   root_id?: string | null
   forked_from_message_id?: string | null
@@ -1169,6 +1237,102 @@ export interface MediaIngestionBudgetDiagnostics {
   error?: string | null
 }
 
+export interface SandboxAdminRuntimeDiagnosticsSummary {
+  total: number
+  ready: number
+  unavailable: number
+  host_gated: number
+  scaffold: number
+  host_local_warning_runtimes?: string[]
+  repair_supported_runtimes?: string[]
+}
+
+export interface SandboxAdminRuntimeDiagnosticsItem {
+  name: string
+  available: boolean
+  implementation_state?: string | null
+  readiness: string
+  reasons?: string[]
+  normalized_reasons?: string[]
+  boundary_class?: string | null
+  vm_grade_isolation?: boolean
+  untrusted_eligible?: boolean
+  isolation_warnings?: string[]
+  strict_deny_all_supported?: boolean
+  strict_allowlist_supported?: boolean
+  session_reuse_model?: string | null
+  requires_live_health_check?: boolean
+  repair_supported?: boolean
+  recommended_action?: string
+}
+
+export interface SandboxAdminStartupWarningSummary {
+  present: boolean
+  blocking: boolean
+  codes?: string[]
+}
+
+export interface SandboxAdminRuntimeDiagnosticsResponse {
+  source: "feature_discovery"
+  summary: SandboxAdminRuntimeDiagnosticsSummary
+  runtimes: SandboxAdminRuntimeDiagnosticsItem[]
+  startup_warning_summary?: SandboxAdminStartupWarningSummary | null
+}
+
+export type SandboxWorkspaceDiagnosticStateValue =
+  | "available"
+  | "not_configured"
+  | "unavailable"
+  | "blocked"
+  | "unknown"
+
+export interface SandboxWorkspaceDiagnosticState {
+  state: SandboxWorkspaceDiagnosticStateValue
+  reason_code?: string | null
+  message: string
+  management_surface?: string | null
+}
+
+export interface SandboxWorkspaceDiagnosticsRunSummary {
+  id: string
+  runtime?: string | null
+  runtime_version?: string | null
+  base_image?: string | null
+  phase: string
+  status_reason_code?: string | null
+  status_reason_details?: Record<string, unknown> | null
+  exit_code?: number | null
+  started_at?: string | null
+  finished_at?: string | null
+  message?: string | null
+  session_id?: string | null
+  persona_id?: string | null
+  workspace_id?: string | null
+  workspace_group_id?: string | null
+  scope_snapshot_id?: string | null
+}
+
+export interface SandboxWorkspaceDiagnosticsRunList {
+  total: number
+  limit: number
+  has_more: boolean
+  items: SandboxWorkspaceDiagnosticsRunSummary[]
+}
+
+export interface SandboxWorkspaceDiagnosticsLinks {
+  runtime_config?: string | null
+  admin_runs?: string | null
+}
+
+export interface SandboxWorkspaceDiagnosticsResponse {
+  workspace_id: string
+  source_label: "research_workspace"
+  runtime: SandboxWorkspaceDiagnosticState
+  admission: SandboxWorkspaceDiagnosticState
+  runs: SandboxWorkspaceDiagnosticsRunList
+  links: SandboxWorkspaceDiagnosticsLinks
+}
+
 export class TldwApiClientBase {
   private storage: Storage
   private config: TldwConfig | null = null
@@ -1215,6 +1379,30 @@ export class TldwApiClientBase {
 
   private getMissingApiKeyMessage(): string {
     return "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
+  }
+
+  private async syncConnectionServerUrl(serverUrl: unknown): Promise<void> {
+    const normalized =
+      typeof serverUrl === "string" ? serverUrl.trim().replace(/\/$/, "") : ""
+    if (!normalized) {
+      await this.storage.remove("tldwServerUrl").catch(() => undefined)
+      if (typeof window === "undefined") return
+      try {
+        window.localStorage?.removeItem("tldw-api-host")
+      } catch {
+        // Best-effort compatibility mirror for the WebUI bootstrap.
+      }
+      return
+    }
+
+    await this.storage.set("tldwServerUrl", normalized).catch(() => undefined)
+
+    if (typeof window === "undefined") return
+    try {
+      window.localStorage?.setItem("tldw-api-host", normalized)
+    } catch {
+      // Best-effort compatibility mirror for the WebUI bootstrap.
+    }
   }
 
   normalizeRagQuery(rawQuery: string): string {
@@ -1309,9 +1497,37 @@ export class TldwApiClientBase {
     return cfg
   }
 
-  async request<T>(init: any, requireAuth = true): Promise<T> {
+  async request<T = any>(init: any, requireAuth = true): Promise<T> {
     await this.ensureConfigForRequest(requireAuth && !init?.noAuth)
     return await bgRequest<T>(init)
+  }
+
+  async requestWithCurrentConfig<T = any>(
+    init: any,
+    requireAuth = true
+  ): Promise<T> {
+    const cfg = await this.ensureConfigForRequest(requireAuth && !init?.noAuth)
+    if (getCurrentBrowserSurface() !== "webui-page") {
+      return await bgRequest<T>(init)
+    }
+
+    const response = await tldwRequest(init, {
+      getConfig: async () => cfg
+    })
+    if (!response?.ok) {
+      const message =
+        typeof response?.error === "string" && response.error.trim()
+          ? response.error
+          : `Request failed: ${response?.status ?? 0}`
+      const error = new Error(message) as Error & {
+        status?: number
+        details?: unknown
+      }
+      error.status = response?.status
+      error.details = response?.data
+      throw error
+    }
+    return response.data as T
   }
 
   async fetchWithAuth(
@@ -1457,6 +1673,9 @@ export class TldwApiClientBase {
     const newConfig = { ...(currentConfig as any), ...config } as TldwConfig
     await this.storage.set('tldwConfig', newConfig)
     this.config = newConfig
+    if (Object.prototype.hasOwnProperty.call(config, "serverUrl")) {
+      await this.syncConnectionServerUrl(config.serverUrl)
+    }
     await this.initialize().catch(() => null)
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("tldw:config-updated"))
@@ -1698,10 +1917,10 @@ export class TldwApiClientBase {
     try {
       if (!this.baseUrl) await this.initialize()
       if (!this.baseUrl) return null
-      return await bgRequest<any>({
+      return await this.requestWithCurrentConfig<any>({
         path: `${this.baseUrl.replace(/\/$/, '')}/openapi.json` as any,
         method: 'GET' as any
-      })
+      }, false)
     } catch {
       return null
     }
@@ -1806,6 +2025,9 @@ export class TldwApiClientBase {
       if (/\s/.test(value)) return false
       return /[/:._-]/.test(value)
     }
+    const providerAvailability = shouldFetchProviderAvailability(list)
+      ? await buildProviderAvailabilityMap(() => this.getProviders())
+      : new Map()
 
     return list.map((m: any) => {
       const rawModel =
@@ -1822,11 +2044,16 @@ export class TldwApiClientBase {
         rawName && !isLikelyModelId(rawName) && rawName !== canonicalModelId
           ? `${rawName} (${canonicalModelId})`
           : canonicalModelId
+      const provider = toNonEmptyString(m.provider) || "default"
+      const inheritedAvailability = providerAvailability.get(
+        normalizeProviderAvailabilityKey(provider) || ""
+      )
 
       return {
+        ...m,
         id: canonicalModelId,
         name: displayName,
-        provider: String(m.provider || "default"),
+        provider,
         description: m.description,
         capabilities: Array.isArray(m.capabilities)
           ? m.capabilities
@@ -1855,6 +2082,24 @@ export class TldwApiClientBase {
           (m.capabilities && m.capabilities.json_mode) ?? m.json_output
         ),
         type: typeof m.type === "string" ? m.type : undefined,
+        is_configured:
+          toOptionalProviderBoolean(m.is_configured) ??
+          toOptionalProviderBoolean(m.provider_configured) ??
+          toOptionalProviderBoolean(m.configured) ??
+          inheritedAvailability?.is_configured,
+        provider_is_configured:
+          toOptionalProviderBoolean(m.provider_is_configured) ??
+          toOptionalProviderBoolean(m.provider_configured) ??
+          toOptionalProviderBoolean(m.configured) ??
+          inheritedAvailability?.is_configured,
+        provider_enabled:
+          toOptionalProviderBoolean(m.provider_enabled) ??
+          toOptionalProviderBoolean(m.enabled) ??
+          inheritedAvailability?.provider_enabled,
+        availability:
+          toNonEmptyProviderString(m.availability) ??
+          inheritedAvailability?.availability,
+        catalog_only: toOptionalProviderBoolean(m.catalog_only),
         modalities:
           m.modalities && typeof m.modalities === "object"
             ? {
@@ -1885,8 +2130,11 @@ export class TldwApiClientBase {
     })
   }
 
-  async getProviders(): Promise<any> {
-    return await bgRequest<any>({ path: '/api/v1/llm/providers', method: 'GET' })
+  async getProviders(): Promise<TldwProvidersResponse> {
+    return await bgRequest<TldwProvidersResponse>({
+      path: '/api/v1/llm/providers',
+      method: 'GET'
+    })
   }
 
   /**
@@ -2052,6 +2300,28 @@ export class TldwApiClientBase {
     })
   }
 
+  async getSandboxRuntimeDiagnostics(): Promise<SandboxAdminRuntimeDiagnosticsResponse> {
+    return await bgRequest<SandboxAdminRuntimeDiagnosticsResponse>({
+      path: "/api/v1/sandbox/admin/runtime-diagnostics",
+      method: "GET"
+    })
+  }
+
+  async getSandboxWorkspaceDiagnostics(
+    workspaceId: string,
+    options?: { sourceLabel?: "research_workspace"; limit?: number }
+  ): Promise<SandboxWorkspaceDiagnosticsResponse> {
+    const query = this.buildQuery({
+      source_label: options?.sourceLabel || "research_workspace",
+      limit: options?.limit
+    })
+    const encodedWorkspaceId = encodeURIComponent(workspaceId)
+    return await bgRequest<SandboxWorkspaceDiagnosticsResponse>({
+      path: `/api/v1/sandbox/workspaces/${encodedWorkspaceId}/diagnostics${query}`,
+      method: "GET"
+    })
+  }
+
   async getLlamacppStatus(): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/llamacpp/status",
@@ -2063,6 +2333,76 @@ export class TldwApiClientBase {
     return await bgRequest<any>({
       path: "/api/v1/llamacpp/models",
       method: "GET"
+    })
+  }
+
+  async getLlamacppConfig(): Promise<LlamacppConfigResponse> {
+    return await bgRequest<LlamacppConfigResponse>({
+      path: "/api/v1/llamacpp/config",
+      method: "GET"
+    })
+  }
+
+  async updateLlamacppConfig(
+    payload: LlamacppConfigUpdateRequest
+  ): Promise<LlamacppConfigResponse> {
+    return await bgRequest<LlamacppConfigResponse>({
+      path: "/api/v1/llamacpp/config",
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async validateLlamacpp(
+    payload: LlamacppValidationRequest
+  ): Promise<LlamacppValidationResponse> {
+    return await bgRequest<LlamacppValidationResponse>({
+      path: "/api/v1/llamacpp/validate",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async getLlamacppInventory(): Promise<LlamacppInventoryResponse> {
+    return await bgRequest<LlamacppInventoryResponse>({
+      path: "/api/v1/llamacpp/inventory",
+      method: "GET"
+    })
+  }
+
+  async getLlamacppAssets(): Promise<LlamacppAssetsResponse> {
+    return await bgRequest<LlamacppAssetsResponse>({
+      path: "/api/v1/llamacpp/assets",
+      method: "GET"
+    })
+  }
+
+  async registerLlamacppModelPath(path: string): Promise<LlamacppInventoryItem> {
+    return await bgRequest<LlamacppInventoryItem>({
+      path: "/api/v1/llamacpp/models/register-path",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  }
+
+  async registerLlamacppAssetPath(path: string): Promise<LlamacppAsset> {
+    return await bgRequest<LlamacppAsset>({
+      path: "/api/v1/llamacpp/assets/register-path",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  }
+
+  async importLlamacppAssetFolder(path: string): Promise<LlamacppAsset> {
+    return await bgRequest<LlamacppAsset>({
+      path: "/api/v1/llamacpp/assets/import-folder",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
     })
   }
 
@@ -2081,12 +2421,163 @@ export class TldwApiClientBase {
     })
   }
 
+  async startLlamacppModel(
+    modelId: string,
+    serverArgs?: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    return await bgRequest<Record<string, unknown>>({
+      path: "/api/v1/llamacpp/start-by-model",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        model_id: modelId,
+        server_args: serverArgs || {}
+      }
+    })
+  }
+
   async stopLlamacppServer(): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/llamacpp/stop_server",
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: {}
+    })
+  }
+
+  async useLlamacppInChat(): Promise<LlamacppUseInChatResponse> {
+    return await bgRequest<LlamacppUseInChatResponse>({
+      path: "/api/v1/llamacpp/use-in-chat",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async tailLlamacppLogs(lines?: number): Promise<LlamacppLogTailResponse> {
+    const query = this.buildQuery(lines === undefined ? {} : { lines })
+    return await bgRequest<LlamacppLogTailResponse>({
+      path: `/api/v1/llamacpp/logs/tail${query}`,
+      method: "GET"
+    })
+  }
+
+  async listLlamacppProfiles(): Promise<LlamacppProfileListResponse> {
+    return await bgRequest<LlamacppProfileListResponse>({
+      path: "/api/v1/llamacpp/profiles",
+      method: "GET"
+    })
+  }
+
+  async createLlamacppProfile(
+    payload: LlamacppProfileCreateRequest
+  ): Promise<LlamacppProfile> {
+    return await bgRequest<LlamacppProfile>({
+      path: "/api/v1/llamacpp/profiles",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async updateLlamacppProfile(
+    profileId: string,
+    payload: LlamacppProfileUpdateRequest
+  ): Promise<LlamacppProfile> {
+    return await bgRequest<LlamacppProfile>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async deleteLlamacppProfile(
+    profileId: string
+  ): Promise<{ profile_id: string; deleted: boolean }> {
+    return await bgRequest<{ profile_id: string; deleted: boolean }>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
+      method: "DELETE"
+    })
+  }
+
+  async startLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/start`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async stopLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/stop`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async pauseLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/pause`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async resumeLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/resume`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async useLlamacppProfileInChat(
+    profileId: string
+  ): Promise<LlamacppUseInChatResponse> {
+    return await bgRequest<LlamacppUseInChatResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/use-in-chat`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async listLlamacppInstances(): Promise<LlamacppRuntimeListResponse> {
+    return await bgRequest<LlamacppRuntimeListResponse>({
+      path: "/api/v1/llamacpp/instances",
+      method: "GET"
+    })
+  }
+
+  async tailLlamacppInstanceLogs(
+    profileId: string,
+    lines?: number
+  ): Promise<LlamacppLogTailResponse> {
+    const query = this.buildQuery(lines === undefined ? {} : { lines })
+    return await bgRequest<LlamacppLogTailResponse>({
+      path: `/api/v1/llamacpp/instances/${encodeURIComponent(profileId)}/logs/tail${query}`,
+      method: "GET"
+    })
+  }
+
+  async getLlamacppHardware(): Promise<LlamacppHardwareSnapshotResponse> {
+    return await bgRequest<LlamacppHardwareSnapshotResponse>({
+      path: "/api/v1/llamacpp/hardware",
+      method: "GET"
     })
   }
 
@@ -2126,15 +2617,25 @@ export class TldwApiClientBase {
     })
   }
 
-  async createChatCompletion(request: ChatCompletionRequest): Promise<Response> {
+  async createChatCompletion(
+    request: ChatCompletionRequest,
+    options?: ChatCompletionRequestOptions
+  ): Promise<Response> {
     // Non-stream request via background
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
       mode: "non-stream",
-      body: request
+      body: request,
+      metadata: options?.debugMetadata
     })
-    const res = await bgRequest<Response>({ path: '/api/v1/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request })
+    const res = await bgRequest<Response>({
+      path: '/api/v1/chat/completions',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: request,
+      abortSignal: options?.signal
+    })
     // bgRequest returns parsed data; for non-streaming chat we expect a JSON structure or text. To keep existing consumers happy, wrap as Response-like
     // For simplicity, return a minimal object with json() and text()
     const data = res as any
@@ -2142,13 +2643,14 @@ export class TldwApiClientBase {
     return createJsonResponseLike(safeData, { status: 200 })
   }
 
-  async *streamChatCompletion(request: ChatCompletionRequest, options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number }): AsyncGenerator<any, void, unknown> {
+  async *streamChatCompletion(request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
     request.stream = true
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
       mode: "stream",
-      body: request
+      body: request,
+      metadata: options?.debugMetadata
     })
     for await (const line of bgStream({ path: '/api/v1/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request, abortSignal: options?.signal, streamIdleTimeoutMs: options?.streamIdleTimeoutMs })) {
       try {
@@ -2161,6 +2663,13 @@ export class TldwApiClientBase {
   }
 
   // RAG Methods
+  async getResearchWorkspaceCapabilities(): Promise<unknown> {
+    return await this.request<unknown>({
+      path: '/api/v1/research-workspace/capabilities',
+      method: 'GET'
+    })
+  }
+
   async ragHealth(): Promise<any> {
     return await this.request<any>({ path: '/api/v1/rag/health', method: 'GET' })
   }
@@ -3146,6 +3655,41 @@ export class TldwApiClientBase {
     return await bgRequest<any>({ path: '/api/v1/notes/', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { content, ...metadata } })
   }
 
+  async listNoteFolders(): Promise<{
+    items: Array<{
+      id: number
+      name: string
+      path: string
+      parent_id: number | null
+    }>
+    folders?: Array<{
+      id: number
+      name: string
+      path: string
+      parent_id: number | null
+    }>
+    count: number
+  }> {
+    return await bgRequest({
+      path: "/api/v1/notes/folders/",
+      method: "GET"
+    })
+  }
+
+  async createNoteFolder(path: string): Promise<{
+    id: number
+    name: string
+    path: string
+    parent_id: number | null
+  }> {
+    return await bgRequest({
+      path: "/api/v1/notes/folders/",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  }
+
   async listNotes(
     params?: {
       page?: number
@@ -3256,7 +3800,7 @@ export class TldwApiClientBase {
   }
 
   // Characters API
-  private normalizeCharacterListResponse(payload: unknown): any[] {
+  normalizeCharacterListResponse(payload: unknown): any[] {
     if (Array.isArray(payload)) {
       return payload
     }
@@ -3554,7 +4098,7 @@ export class TldwApiClientBase {
     }
   }
 
-  private getCharacterListIdentity(character: any, fallbackIndex: number): string {
+  getCharacterListIdentity(character: any, fallbackIndex: number): string {
     const id = character?.id ?? character?.character_id ?? character?.characterId
     if (id !== undefined && id !== null && String(id).trim().length > 0) {
       return `id:${String(id)}`
@@ -4173,7 +4717,7 @@ export class TldwApiClientBase {
     }
   }
 
-  private normalizeChatSummary(input: any): ServerChatSummary {
+  normalizeChatSummary(input: any): ServerChatSummary {
     const created_at = String(input?.created_at || input?.createdAt || "")
     const updated_at =
       input?.updated_at ??
@@ -4195,6 +4739,44 @@ export class TldwApiClientBase {
         : typeof messageCountRaw === "string" && messageCountRaw.trim().length > 0
           ? Number.parseFloat(messageCountRaw)
           : null
+    const character_id = input?.character_id ?? input?.characterId ?? null
+    const character_name =
+      typeof input?.character_name === "string" && input.character_name.trim().length > 0
+        ? input.character_name.trim()
+        : typeof input?.characterName === "string" &&
+            input.characterName.trim().length > 0
+          ? input.characterName.trim()
+          : null
+    const assistant_kind =
+      input?.assistant_kind ??
+      input?.assistantKind ??
+      (character_id != null ? "character" : null)
+    const assistant_id =
+      input?.assistant_id ??
+      input?.assistantId ??
+      (assistant_kind === "character" && character_id != null
+        ? String(character_id)
+        : null)
+    const assistant_name =
+      typeof input?.assistant_name === "string" && input.assistant_name.trim().length > 0
+        ? input.assistant_name.trim()
+        : typeof input?.assistantName === "string" &&
+            input.assistantName.trim().length > 0
+          ? input.assistantName.trim()
+          : character_name
+    const scope_type =
+      input?.scope_type === "global" || input?.scopeType === "global"
+        ? "global"
+        : input?.scope_type === "workspace" || input?.scopeType === "workspace"
+          ? "workspace"
+          : null
+    const workspace_id =
+      typeof input?.workspace_id === "string" && input.workspace_id.trim().length > 0
+        ? input.workspace_id
+        : typeof input?.workspaceId === "string" &&
+            input.workspaceId.trim().length > 0
+          ? input.workspaceId
+          : null
     return {
       id: String(input?.id ?? ""),
       title: String(input?.title || ""),
@@ -4215,7 +4797,25 @@ export class TldwApiClientBase {
           : typeof input?.relevance === "number"
             ? input?.relevance
             : null,
-      character_id: input?.character_id ?? input?.characterId ?? null,
+      character_id,
+      character_name,
+      assistant_kind:
+        assistant_kind === "character" || assistant_kind === "persona"
+          ? assistant_kind
+          : null,
+      assistant_id:
+        assistant_id == null || assistant_id === ""
+          ? null
+          : String(assistant_id),
+      assistant_name,
+      persona_memory_mode:
+        input?.persona_memory_mode === "read_only" ||
+        input?.persona_memory_mode === "read_write"
+          ? input.persona_memory_mode
+          : input?.personaMemoryMode === "read_only" ||
+              input?.personaMemoryMode === "read_write"
+            ? input.personaMemoryMode
+            : null,
       parent_conversation_id:
         input?.parent_conversation_id ?? input?.parentConversationId ?? null,
       root_id: input?.root_id ?? input?.rootId ?? null,
@@ -4226,7 +4826,9 @@ export class TldwApiClientBase {
           ? input.version
           : typeof input?.expected_version === "number"
             ? input.expected_version
-            : null
+            : null,
+      scope_type,
+      workspace_id
     }
   }
 
@@ -4240,9 +4842,9 @@ export class TldwApiClientBase {
 
   async listChats(
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<ServerChatSummary[]> {
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
@@ -4271,9 +4873,9 @@ export class TldwApiClientBase {
 
   async listChatsWithMeta(
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<{ chats: ServerChatSummary[]; total: number }> {
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
@@ -4310,12 +4912,12 @@ export class TldwApiClientBase {
     }
   }
 
-  async createChat(payload: Record<string, any>): Promise<ServerChatSummary> {
+  async createChat(payload: Record<string, any>, options?: { scope?: ChatScope }): Promise<ServerChatSummary> {
     const res = await bgRequest<any>({
       path: "/api/v1/chats/",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: { ...payload, ...toChatScopeParams(options?.scope) }
     })
     return this.normalizeChatSummary(res)
   }
@@ -4333,10 +4935,14 @@ export class TldwApiClientBase {
     })
   }
 
-  async getChat(chat_id: string | number): Promise<ServerChatSummary> {
+  async getChat(
+    chat_id: string | number,
+    options?: { scope?: ChatScope }
+  ): Promise<ServerChatSummary> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
-      path: `/api/v1/chats/${cid}`,
+      path: appendPathQuery(`/api/v1/chats/${cid}`, query),
       method: "GET"
     })
     return this.normalizeChatSummary(res)
@@ -4411,10 +5017,11 @@ export class TldwApiClientBase {
 
   async getChatLorebookDiagnostics(
     chat_id: string | number,
-    params?: Record<string, any>
+    params?: Record<string, any>,
+    options?: { scope?: ChatScope }
   ): Promise<LorebookDiagnosticExportResponse> {
     const cid = String(chat_id)
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     return await bgRequest<LorebookDiagnosticExportResponse>({
       path: `/api/v1/chats/${cid}/diagnostics/lorebook${query}`,
       method: "GET"
@@ -4494,11 +5101,16 @@ export class TldwApiClientBase {
       permission?: ConversationSharePermission
       ttl_seconds?: number
       label?: string
-    }
+    },
+    options?: { scope?: ChatScope }
   ): Promise<ConversationShareLinkCreateResponse> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ConversationShareLinkCreateResponse>({
-      path: `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+        query
+      ),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload || {},
@@ -4506,23 +5118,33 @@ export class TldwApiClientBase {
   }
 
   async listConversationShareLinks(
-    chat_id: string | number
+    chat_id: string | number,
+    options?: { scope?: ChatScope }
   ): Promise<ConversationShareLinksListResponse> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ConversationShareLinksListResponse>({
-      path: `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+        query
+      ),
       method: "GET",
     })
   }
 
   async revokeConversationShareLink(
     chat_id: string | number,
-    shareId: string
+    shareId: string,
+    options?: { scope?: ChatScope }
   ): Promise<{ success: boolean; share_id: string }> {
     const cid = encodeURIComponent(String(chat_id))
     const sid = encodeURIComponent(String(shareId))
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<{ success: boolean; share_id: string }>({
-      path: `/api/v1/chat/conversations/${cid}/share-links/${sid}`,
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${cid}/share-links/${sid}`,
+        query
+      ),
       method: "DELETE",
     })
   }
@@ -4541,10 +5163,13 @@ export class TldwApiClientBase {
   async listChatMessages(
     chat_id: string | number,
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<ServerChatMessage[]> {
     const cid = String(chat_id)
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({
+      ...toChatScopeParams(options?.scope),
+      ...(params || {})
+    })
     const cacheKey = this.getChatMessagesCacheKey(cid, query)
     const cached = this.chatMessagesCache.get(cacheKey)
     if (cached && cached.expiresAt > Date.now()) {
@@ -4685,11 +5310,13 @@ export class TldwApiClientBase {
 
   async addChatMessage(
     chat_id: string | number,
-    payload: Record<string, any>
+    payload: Record<string, any>,
+    options?: { scope?: ChatScope }
   ): Promise<ServerChatMessage> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<ServerChatMessage>({
-      path: `/api/v1/chats/${cid}/messages`,
+      path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload
@@ -4733,12 +5360,14 @@ export class TldwApiClientBase {
 
   async persistCharacterCompletion(
     chat_id: string | number,
-    payload: Record<string, any>
+    payload: Record<string, any>,
+    options?: { scope?: ChatScope }
   ): Promise<any> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     try {
       const res = await bgRequest<any>({
-        path: `/api/v1/chats/${cid}/completions/persist`,
+        path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: payload
@@ -4756,18 +5385,19 @@ export class TldwApiClientBase {
   async *streamCharacterChatCompletion(
     chat_id: string | number,
     payload?: Record<string, any>,
-    options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number }
+    options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number; scope?: ChatScope }
   ): AsyncGenerator<any> {
     const cid = String(chat_id)
     const body = { ...(payload || {}), stream: true }
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     captureChatRequestDebugSnapshot({
-      endpoint: `/api/v1/chats/${cid}/complete-v2`,
+      endpoint: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
       method: "POST",
       mode: "stream",
       body
     })
     for await (const line of bgStream({
-      path: `/api/v1/chats/${cid}/complete-v2`,
+      path: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
@@ -4869,9 +5499,10 @@ export class TldwApiClientBase {
     snippet: string
     tags?: string[]
     make_flashcard?: boolean
-  }): Promise<any> {
+  }, options?: { scope?: ChatScope }): Promise<any> {
     const body = {
       ...payload,
+      ...toChatScopeParams(options?.scope),
       conversation_id: String(payload.conversation_id),
       message_id: String(payload.message_id)
     }
@@ -4993,12 +5624,13 @@ export class TldwApiClientBase {
     scan_depth?: number
     token_budget?: number
     recursive_scanning?: boolean
-  }): Promise<WorldBookProcessResponse> {
+  }, options?: { signal?: AbortSignal }): Promise<WorldBookProcessResponse> {
     return await bgRequest<WorldBookProcessResponse>({
       path: "/api/v1/characters/world-books/process",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      abortSignal: options?.signal
     })
   }
 
@@ -5142,14 +5774,16 @@ export class TldwApiClientBase {
     text: string
     token_budget?: number
     dictionary_id?: number | string
+    dictionary_ids?: Array<number | string>
     max_iterations?: number
     chat_id?: string
-  }): Promise<any> {
+  }, options?: { signal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/chat/dictionaries/process",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      abortSignal: options?.signal
     })
   }
 
@@ -5344,13 +5978,16 @@ export class TldwApiClientBase {
     })
   }
 
-  async previewChatbook(file: File): Promise<any> {
+  async previewChatbook(file: File, options?: { source_format?: string }): Promise<any> {
     const data = await file.arrayBuffer()
     const name = file.name || "chatbook.zip"
     const type = file.type || "application/zip"
+    const fields: Record<string, any> = {}
+    if (options?.source_format) fields.source_format = options.source_format
     return await bgUpload<any>({
       path: "/api/v1/chatbooks/preview",
       method: "POST",
+      fields,
       file: { name, type, data }
     })
   }
@@ -5364,6 +6001,8 @@ export class TldwApiClientBase {
       import_embeddings?: boolean
       async_mode?: boolean
       content_selections?: Record<string, string[]>
+      source_format?: string
+      selected_openwebui_user_id?: string
     }
   ): Promise<any> {
     const data = await file.arrayBuffer()
@@ -5372,13 +6011,45 @@ export class TldwApiClientBase {
     const normalized: Record<string, any> = {}
     for (const [k, v] of Object.entries(options || {})) {
       if (typeof v === "undefined" || v === null) continue
-      normalized[k] = typeof v === "boolean" ? (v ? "true" : "false") : v
+      if (typeof v === "boolean") {
+        normalized[k] = v ? "true" : "false"
+      } else if (typeof v === "object") {
+        normalized[k] = JSON.stringify(v)
+      } else {
+        normalized[k] = v
+      }
     }
     return await bgUpload<any>({
       path: "/api/v1/chatbooks/import",
       method: "POST",
       fields: normalized,
       file: { name, type, data }
+    })
+  }
+
+  async previewOpenWebUIHydration(payload: OpenWebUIHydrationRequest): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/preview",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async createOpenWebUIHydrationJob(payload: OpenWebUIHydrationRequest): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/jobs",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async getOpenWebUIHydrationJob(job_id: string): Promise<any> {
+    const id = encodeURIComponent(String(job_id))
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/openwebui/hydration/jobs/${id}`,
+      method: "GET"
     })
   }
 
@@ -5535,6 +6206,79 @@ export class TldwApiClientBase {
     return await bgRequest<any>({
       path: `/api/v1/audio/transcriptions/health${query}`,
       method: "GET"
+    })
+  }
+
+  async getTranscriptionCapabilities(options?: { timeoutMs?: number }): Promise<any> {
+    await this.ensureConfigForRequest(true)
+    return await bgRequest<any>({
+      path: "/api/v1/audio/transcriptions/capabilities",
+      method: "GET",
+      timeoutMs: options?.timeoutMs
+    })
+  }
+
+  async listAudioPresets(options?: {
+    kind?: AudioPresetKind
+    favorite?: boolean
+    is_default?: boolean
+    limit?: number
+    offset?: number
+    timeoutMs?: number
+  }): Promise<AudioPresetListResponse> {
+    await this.ensureConfigForRequest(true)
+    const query = this.buildQuery({
+      kind: options?.kind,
+      favorite: options?.favorite,
+      is_default: options?.is_default,
+      limit: options?.limit,
+      offset: options?.offset
+    })
+    return await this.requestWithCurrentConfig<AudioPresetListResponse>({
+      path: `/api/v1/audio/presets${query}`,
+      method: "GET",
+      timeoutMs: options?.timeoutMs
+    })
+  }
+
+  async createAudioPreset(payload: AudioPresetCreatePayload): Promise<AudioPreset> {
+    await this.ensureConfigForRequest(true)
+    return await this.requestWithCurrentConfig<AudioPreset>({
+      path: "/api/v1/audio/presets",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async updateAudioPreset(
+    presetId: string,
+    payload: AudioPresetUpdatePayload
+  ): Promise<AudioPreset> {
+    await this.ensureConfigForRequest(true)
+    return await this.requestWithCurrentConfig<AudioPreset>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async deleteAudioPreset(presetId: string): Promise<void> {
+    await this.ensureConfigForRequest(true)
+    await this.requestWithCurrentConfig<void>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
+      method: "DELETE"
+    })
+  }
+
+  async validateAudioPreset(
+    presetId: string
+  ): Promise<AudioPresetValidationResponse> {
+    await this.ensureConfigForRequest(true)
+    return await this.requestWithCurrentConfig<AudioPresetValidationResponse>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}/validate`,
+      method: "POST"
     })
   }
 
@@ -6368,6 +7112,7 @@ export class TldwApiClientBase {
     title?: string
     tags?: string[]
     notes?: string
+    archive_mode?: "use_default" | "always" | "never"
     status?: string
     favorite?: boolean
     summary?: string
@@ -7043,23 +7788,34 @@ import { chatRagMethods } from "./domains/chat-rag"
 import { collectionsMethods } from "./domains/collections"
 import { modelsAudioMethods } from "./domains/models-audio"
 import { presentationsMethods } from "./domains/presentations"
+import { prototypeWorkspaceMethods } from "./domains/prototype-workspaces"
 import { workspaceApiMethods } from "./domains/workspace-api"
 import { webClipperMethods } from "./domains/web-clipper"
 
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class TldwApiClient extends TldwApiClientBase {}
 
 // Declaration merging: extend the class type with all domain methods
+type TldwDomainMethodOverride =
+  | keyof TldwApiClientBase
+  | "normalizeCharacterListResponse"
+  | "getCharacterListIdentity"
+  | "normalizeChatSummary"
+type TldwDomainMethods<T> = Omit<T, TldwDomainMethodOverride>
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging, no-redeclare
 export interface TldwApiClient
   extends
-    Omit<typeof adminMethods, never>,
-    Omit<typeof mediaMethods, never>,
-    Omit<typeof characterMethods, never>,
-    Omit<typeof chatRagMethods, never>,
-    Omit<typeof collectionsMethods, never>,
-    Omit<typeof modelsAudioMethods, never>,
-    Omit<typeof presentationsMethods, never>,
-    Omit<typeof workspaceApiMethods, never>,
-    Omit<typeof webClipperMethods, never> {}
+    TldwDomainMethods<typeof adminMethods>,
+    TldwDomainMethods<typeof mediaMethods>,
+    TldwDomainMethods<typeof characterMethods>,
+    TldwDomainMethods<typeof chatRagMethods>,
+    TldwDomainMethods<typeof collectionsMethods>,
+    TldwDomainMethods<typeof modelsAudioMethods>,
+    TldwDomainMethods<typeof presentationsMethods>,
+    TldwDomainMethods<typeof prototypeWorkspaceMethods>,
+    TldwDomainMethods<typeof workspaceApiMethods>,
+    TldwDomainMethods<typeof webClipperMethods> {}
 
 // Apply domain methods to the prototype
 Object.assign(
@@ -7071,6 +7827,7 @@ Object.assign(
   collectionsMethods,
   modelsAudioMethods,
   presentationsMethods,
+  prototypeWorkspaceMethods,
   workspaceApiMethods,
   webClipperMethods
 )

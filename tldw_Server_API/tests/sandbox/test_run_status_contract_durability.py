@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 
 def _client(monkeypatch) -> TestClient:
@@ -25,7 +25,7 @@ def _client(monkeypatch) -> TestClient:
 
 def test_queued_post_run_status_has_no_started_or_finished_markers(monkeypatch) -> None:
     with _client(monkeypatch) as client:
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "spec_version": "1.0",
             "runtime": "docker",
             "base_image": "python:3.11-slim",
@@ -44,11 +44,24 @@ def test_queued_post_run_status_has_no_started_or_finished_markers(monkeypatch) 
             pytest.fail(f"Queued run should not include finished_at marker, got {data['finished_at']!r}")
         if data["exit_code"] is not None:
             pytest.fail(f"Queued run should not include exit_code, got {data['exit_code']!r}")
+        if data.get("status_reason_code") != "queued":
+            pytest.fail(f"Queued run should expose status_reason_code='queued', got {data.get('status_reason_code')!r}")
+        details = data.get("status_reason_details")
+        if details != {
+            "code": "queued",
+            "category": "lifecycle",
+            "severity": "info",
+            "terminal": False,
+            "retryable": False,
+            "operator_action": "none",
+            "user_message_key": "sandbox.status.queued",
+        }:
+            pytest.fail(f"Queued run should expose queued status_reason_details, got {details!r}")
 
 
 def test_post_run_response_fields_are_persisted_consistently_for_get(monkeypatch) -> None:
     with _client(monkeypatch) as client:
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "spec_version": "1.0",
             "runtime": "docker",
             "base_image": "python:3.11-slim",
@@ -74,6 +87,8 @@ def test_post_run_response_fields_are_persisted_consistently_for_get(monkeypatch
             "spec_version",
             "runtime",
             "phase",
+            "status_reason_code",
+            "status_reason_details",
             "exit_code",
             "started_at",
             "finished_at",

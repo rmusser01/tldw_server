@@ -116,6 +116,21 @@ _TTS_NONCRITICAL_EXCEPTIONS = (
     TTSValidationError,
     CircuitOpenError,
 )
+_OMNIVOICE_ALIAS_VALUES = {"omnivoice", "omni-voice", "omni_voice"}
+_OMNIVOICE_INSTRUCT_KEYS = ("instruct", "voice_design", "voice_description")
+_OMNIVOICE_SEMANTIC_GENERATION_KEYS = {
+    "num_step",
+    "guidance_scale",
+    "denoise",
+    "t_shift",
+    "position_temperature",
+    "class_temperature",
+    "layer_penalty_factor",
+    "postprocess_output",
+    "preprocess_prompt",
+    "audio_chunk_duration",
+    "audio_chunk_threshold",
+}
 
 class TTSServiceV2:
     """
@@ -1706,7 +1721,6 @@ class TTSServiceV2:
             bool(getattr(request, "stream", False)),
             metadata_only,
         )
-        fallback = fallback and not self._is_explicit_omnivoice_request(request, provider)
         factory = await self._ensure_factory()
 
         provider_hint: Optional[str] = None
@@ -1727,6 +1741,11 @@ class TTSServiceV2:
                         provider_hint = getattr(provider_enum, "value", str(provider_enum)).lower()
             except _TTS_NONCRITICAL_EXCEPTIONS:
                 provider_hint = None
+        fallback = fallback and not self._is_explicit_omnivoice_request(
+            request,
+            provider=provider,
+            provider_hint=provider_hint,
+        )
 
         try:
             adapter, provider_key, request_for_provider = await self._prepare_generate_speech_request(
@@ -2264,11 +2283,19 @@ class TTSServiceV2:
                     raise TTSGenerationError(error_message, provider=provider_key)
                 success = True
         except _TTS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Fallback generation failed: {e}")
-            error_message = str(e)
+            logger.error(
+                "Fallback generation failed for provider {}: {}",
+                provider_key,
+                type(e).__name__,
+            )
+            error_message = "All providers failed"
             if self._stream_errors_as_audio:
                 yield f"ERROR: All providers failed - {str(e)}".encode()
-            raise TTSGenerationError(f"All providers failed - {str(e)}") from e
+            raise TTSGenerationError(
+                error_message,
+                provider=provider_key,
+                details={"error_type": type(e).__name__},
+            ) from e
         finally:
             await self._close_response_audio_stream(response)
             self._cleanup_transient_pocket_tts_cpp_voice_path(request_for_provider)
@@ -2573,8 +2600,11 @@ class TTSServiceV2:
                     return await factory.registry.create_adapter_with_overrides(provider_enum, overrides)
                 return await factory.registry.get_adapter(provider_enum)
 
-        # Get adapter by model name
-        model_provider = factory.get_provider_for_model(model)
+        # Get adapter by model name. Some tests and integrations inject a
+        # minimal factory that only implements get_adapter_by_model.
+        model_provider = None
+        if hasattr(factory, "get_provider_for_model"):
+            model_provider = factory.get_provider_for_model(model)
         if model_provider == TTSProvider.OMNIVOICE:
             return await factory.registry.create_adapter_with_overrides(
                 model_provider,
@@ -2594,16 +2624,40 @@ class TTSServiceV2:
     def _is_explicit_omnivoice_request(
         request: OpenAISpeechRequest,
         provider: Optional[str] = None,
+        provider_hint: Optional[str] = None,
     ) -> bool:
         provider_value = (provider or "").strip().lower()
-        if provider_value in {"omnivoice", "omni-voice", "omni_voice"}:
+        if provider_value in _OMNIVOICE_ALIAS_VALUES:
             return True
+        if provider_value:
+            return False
         model_value = (getattr(request, "model", None) or "").strip().lower()
-        return (
+        if (
             model_value.startswith("omnivoice")
             or model_value.startswith("omni-voice")
             or model_value.startswith("omni_voice")
-        )
+        ):
+            return True
+        provider_hint_value = (provider_hint or "").strip().lower()
+        if provider_hint_value and provider_hint_value not in _OMNIVOICE_ALIAS_VALUES:
+            return False
+        voice = (getattr(request, "voice", None) or "").strip().lower()
+        has_omnivoice_semantics = False
+        if voice.startswith("custom:"):
+            has_omnivoice_semantics = True
+        if getattr(request, "voice_reference", None):
+            has_omnivoice_semantics = True
+        extras = getattr(request, "extra_params", None)
+        if not isinstance(extras, dict):
+            return has_omnivoice_semantics
+        if any(extras.get(key) is not None for key in _OMNIVOICE_INSTRUCT_KEYS):
+            has_omnivoice_semantics = True
+        if any(key in extras for key in _OMNIVOICE_SEMANTIC_GENERATION_KEYS):
+            has_omnivoice_semantics = True
+        mode = extras.get("omnivoice_mode", extras.get("mode"))
+        if isinstance(mode, str) and mode.strip().lower() in {"design", "clone"}:
+            has_omnivoice_semantics = True
+        return has_omnivoice_semantics
 
     def _get_or_create_omnivoice_supervisor(self) -> OmniVoiceSidecarSupervisor:
         if self._closing:

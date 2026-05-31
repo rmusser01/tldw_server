@@ -11,7 +11,7 @@ const seedTutorialLocalStorage = (completedTutorials: string[] = []) => ({
   "tldw-tutorials": JSON.stringify({
     state: {
       completedTutorials,
-      seenPromptPages: ["/chat", "/workspace-playground"]
+      seenPromptPages: ["/chat", "/research-workspace"]
     },
     version: 0
   })
@@ -130,8 +130,50 @@ async function openQuickChatBrowseGuides(page: Page, label: string): Promise<Loc
   return modal
 }
 
+async function persistOfflineBypass(page: Page) {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        try {
+          localStorage.setItem("__tldw_allow_offline", "true")
+        } catch {
+          // ignore localStorage availability
+        }
+
+        try {
+          const storage = chrome?.storage?.local
+          if (typeof storage?.set === "function") {
+            storage.set({ __tldw_allow_offline: true }, () => resolve())
+            return
+          }
+        } catch {
+          // ignore chrome storage availability
+        }
+
+        resolve()
+      })
+  )
+}
+
+async function navigateToKnowledgeGuideRoute(
+  page: Page,
+  url: string,
+  label: string
+) {
+  await persistOfflineBypass(page)
+  await page.goto(url, { waitUntil: "domcontentloaded" })
+  await persistOfflineBypass(page)
+  await waitForConnectionStore(page, `${label}-route`)
+  await forceConnected(
+    page,
+    { serverUrl: DEFAULT_SERVER_CONFIG.serverUrl },
+    `${label}-route`
+  )
+  await dismissWelcomeOverlayIfPresent(page)
+}
+
 test.describe("Quick Chat Browse Guides tutorials validation", () => {
-  test("shows workspace tutorial cards on /workspace-playground route", async () => {
+  test("shows workspace tutorial cards on /research-workspace route", async () => {
     const { context, page, optionsUrl } = await launchWithBuiltExtension({
       seedConfig: DEFAULT_SERVER_CONFIG,
       seedLocalStorage: seedTutorialLocalStorage()
@@ -145,16 +187,16 @@ test.describe("Quick Chat Browse Guides tutorials validation", () => {
         "quick-chat-guides-workspace"
       )
 
-      await page.goto(`${optionsUrl}#/workspace-playground`)
+      await page.goto(`${optionsUrl}#/research-workspace`)
       await page.waitForLoadState("networkidle")
       await dismissWelcomeOverlayIfPresent(page)
 
-      const modal = await openQuickChatBrowseGuides(page, "workspace-playground")
+      const modal = await openQuickChatBrowseGuides(page, "research-workspace")
       await expect(
-        modal.getByTestId("quick-chat-guides-tutorial-workspace-playground-basics")
+        modal.getByTestId("quick-chat-guides-tutorial-research-workspace-basics")
       ).toBeVisible()
       await expect(
-        modal.getByTestId("quick-chat-guides-tutorial-action-workspace-playground-basics")
+        modal.getByTestId("quick-chat-guides-tutorial-action-research-workspace-basics")
       ).toHaveText(/Start/i)
       await expect(
         modal.getByTestId("quick-chat-guides-workflow-section")
@@ -251,6 +293,7 @@ test.describe("Quick Chat Browse Guides tutorials validation", () => {
   test("shows knowledge tutorial card on /knowledge/thread route", async () => {
     const { context, page, optionsUrl } = await launchWithBuiltExtension({
       seedConfig: DEFAULT_SERVER_CONFIG,
+      allowOffline: true,
       seedLocalStorage: seedTutorialLocalStorage()
     })
 
@@ -262,9 +305,11 @@ test.describe("Quick Chat Browse Guides tutorials validation", () => {
         "quick-chat-guides-knowledge-thread"
       )
 
-      await page.goto(`${optionsUrl}#/knowledge/thread/thread-123`)
-      await page.waitForLoadState("networkidle")
-      await dismissWelcomeOverlayIfPresent(page)
+      await navigateToKnowledgeGuideRoute(
+        page,
+        `${optionsUrl}#/knowledge/thread/thread-123`,
+        "knowledge-thread"
+      )
 
       const modal = await openQuickChatBrowseGuides(page, "knowledge-thread")
       await expect(
@@ -281,6 +326,7 @@ test.describe("Quick Chat Browse Guides tutorials validation", () => {
   test("shows knowledge tutorial card on /knowledge/shared route", async () => {
     const { context, page, optionsUrl } = await launchWithBuiltExtension({
       seedConfig: DEFAULT_SERVER_CONFIG,
+      allowOffline: true,
       seedLocalStorage: seedTutorialLocalStorage()
     })
 
@@ -292,9 +338,11 @@ test.describe("Quick Chat Browse Guides tutorials validation", () => {
         "quick-chat-guides-knowledge-shared"
       )
 
-      await page.goto(`${optionsUrl}#/knowledge/shared/share-token-123`)
-      await page.waitForLoadState("networkidle")
-      await dismissWelcomeOverlayIfPresent(page)
+      await navigateToKnowledgeGuideRoute(
+        page,
+        `${optionsUrl}#/knowledge/shared/share-token-123`,
+        "knowledge-shared"
+      )
 
       const modal = await openQuickChatBrowseGuides(page, "knowledge-shared")
       await expect(

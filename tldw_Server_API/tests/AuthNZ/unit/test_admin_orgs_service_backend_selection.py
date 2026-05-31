@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -63,6 +64,33 @@ class _PostgresTxConnWithSqliteTrap:
         return "OK"
 
 
+class _ExplodingTeamsDb:
+    _is_sqlite = True
+
+    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("teams backend exploded at /private/orgs.db")
+
+
+async def _assert_orgs_service_log_sanitized(
+    call: Callable[[], Awaitable[Any]],
+    *,
+    expected_log: str,
+    raw_marker: str,
+) -> None:
+    messages: list[str] = []
+    sink_id = admin_orgs_service.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        with pytest.raises(RuntimeError):
+            await call()
+    finally:
+        admin_orgs_service.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert expected_log in joined
+    assert raw_marker not in joined
+    assert "/private/" not in joined
+
+
 def _admin_principal() -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
@@ -72,6 +100,15 @@ def _admin_principal() -> AuthPrincipal:
         is_admin=True,
         org_ids=[],
         team_ids=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_teams_by_org_sanitizes_backend_failure_log() -> None:
+    await _assert_orgs_service_log_sanitized(
+        lambda: admin_orgs_service.list_teams_by_org(org_id=42, db=_ExplodingTeamsDb()),
+        expected_log="Failed to list teams by organization",
+        raw_marker="teams backend exploded",
     )
 
 

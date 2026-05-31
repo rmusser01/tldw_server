@@ -1,7 +1,8 @@
 import React from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Alert, Empty, Input, List, Modal, Select, Tag } from "antd"
+import { Empty, Input, List, Modal, Select, Tag } from "antd"
 import { useTranslation } from "react-i18next"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 export type PromptInsertItem = {
@@ -78,7 +79,8 @@ export const PromptInsertModal: React.FC<Props> = ({
     data: prompts = [],
     isLoading,
     isError,
-    error
+    error,
+    refetch
   } = useQuery({
     queryKey: ["promptInsertPrompts"],
     queryFn: async () => {
@@ -147,6 +149,7 @@ export const PromptInsertModal: React.FC<Props> = ({
   })
   const noMatches = t("option:noMatchingPrompts", "No matching prompts")
   const errorTitle = t("option:error", "Error")
+  const retryLabel = t("option:retry", "Retry")
   const errorFallback = t("option:somethingWentWrong", "Something went wrong")
   const errorDescription =
     error instanceof Error && error.message ? error.message : errorFallback
@@ -185,12 +188,18 @@ export const PromptInsertModal: React.FC<Props> = ({
         <div className="max-h-80 overflow-auto rounded-md border border-border">
           {showLoadError ? (
             <div className="p-3">
-              <Alert
-                type="error"
-                showIcon
+              <DesignSystemAlert
+                variant="error"
                 title={errorTitle}
-                description={errorDescription}
-              />
+                action={{
+                  label: retryLabel,
+                  onClick: () => {
+                    void refetch()
+                  }
+                }}
+              >
+                {errorDescription}
+              </DesignSystemAlert>
             </div>
           ) : filteredPrompts.length === 0 ? (
             <div className="py-8">

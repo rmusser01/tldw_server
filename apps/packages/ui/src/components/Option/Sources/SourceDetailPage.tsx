@@ -1,8 +1,9 @@
 import React from "react"
-import { Alert, Button, Empty, Space, Spin, Tag, Typography } from "antd"
+import { Button, Empty, Space, Spin, Tag, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 
 import { PageShell } from "@/components/Common/PageShell"
+import { Alert } from "@/components/ui/primitives"
 import {
   useIngestionSourceDetailQuery,
   useIngestionSourceItemsQuery,
@@ -116,11 +117,13 @@ export const SourceDetailPage: React.FC<SourceDetailPageProps> = ({
         </Space>
       </div>
 
-      {detail.last_error ? <Alert type="error" title={detail.last_error} /> : null}
+      {detail.last_error ? (
+        <Alert variant="error" title={detail.last_error} />
+      ) : null}
 
       {detail.last_successful_snapshot_id || detail.last_successful_sync_summary ? (
         <Alert
-          type="info"
+          variant="info"
           title="Source identity is locked after the first successful sync."
         />
       ) : null}

@@ -6,11 +6,10 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints.reminders import router as reminders_router
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL, TASKS_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
-
 
 pytestmark = pytest.mark.unit
 
@@ -157,10 +156,10 @@ def test_task_mutations_log_scheduler_sync_failures(reminders_app, monkeypatch):
 
     class _FailingScheduler:
         async def reconcile_task(self, *, task_id: str, user_id: int) -> None:
-            raise RuntimeError(f"reconcile failed for {task_id}:{user_id}")
+            raise RuntimeError(f"reconcile failed for {task_id}:{user_id} at /private/reminders.db")
 
         async def unschedule_task(self, *, task_id: str) -> None:
-            raise RuntimeError(f"unschedule failed for {task_id}")
+            raise RuntimeError(f"unschedule failed for {task_id} at /private/reminders.db")
 
     monkeypatch.setattr(reminders_endpoint, "logger", _FakeLogger(), raising=False)
     monkeypatch.setattr(reminders_endpoint, "get_reminders_scheduler", lambda: _FailingScheduler(), raising=False)
@@ -182,6 +181,13 @@ def test_task_mutations_log_scheduler_sync_failures(reminders_app, monkeypatch):
         delete_response = client.delete(f"/api/v1/tasks/{task_id}")
         assert delete_response.status_code == 200, delete_response.text
 
-    assert len(warning_calls) >= 3
-    assert any("reconcile_task failed" in msg for msg, _ in warning_calls)
-    assert any("unschedule_task failed" in msg for msg, _ in warning_calls)
+    assert warning_calls == [
+        ("reminders endpoint reconcile_task failed", ()),
+        ("reminders endpoint reconcile_task failed", ()),
+        ("reminders endpoint unschedule_task failed", ()),
+    ]
+    rendered_logs = repr(warning_calls)
+    assert task_id not in rendered_logs
+    assert "880" not in rendered_logs
+    assert "/private/" not in rendered_logs
+    assert "failed for" not in rendered_logs

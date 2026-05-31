@@ -298,6 +298,7 @@ def test_audio_transcriptions_uses_provider_timed_segments_for_srt(monkeypatch, 
         if resp.status_code == 404:
             pytest.skip("audio/transcriptions endpoint not mounted in this build")
         assert resp.status_code == 200, resp.text
+        assert resp.headers["content-type"].startswith("application/x-subrip")
         assert "00:00:01,000 --> 00:00:02,500" in resp.text
         assert "00:00:02,500 --> 00:00:04,000" in resp.text
         assert "00:00:00,000 --> 00:00:10,000" not in resp.text

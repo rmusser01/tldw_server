@@ -2,6 +2,7 @@
 
 import React from "react"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => {
       | "jobs"
       | "runs"
       | "items"
+      | "alerts"
       | "outputs"
       | "templates"
       | "settings",
@@ -21,7 +23,22 @@ const mocks = vi.hoisted(() => {
     })
   }
   return {
+    watchlistContainer: {
+      id: 42,
+      name: "Healthcare ransomware",
+      description: "Track hospital impact",
+      objective: "Find new ransomware affecting hospitals",
+      domain: "cti_osint",
+      status: "active",
+      priority: "high",
+      tags: ["ransomware", "hospitals"],
+      created_at: "2026-05-15T00:00:00Z",
+      updated_at: "2026-05-15T00:00:00Z"
+    },
+    createWatchlistMock: vi.fn(),
     fetchWatchlistRunsMock: vi.fn(),
+    fetchWatchlistsMock: vi.fn(),
+    updateWatchlistMock: vi.fn(),
     recordWatchlistsIaExperimentTelemetryMock: vi.fn(),
     trackWatchlistsOnboardingTelemetryMock: vi.fn(),
     notificationDestroyMock: vi.fn(),
@@ -105,8 +122,31 @@ vi.mock("antd", async () => {
       {...rest}
     />
   )
-  return { ...actual, Alert, Tabs, Empty, Button, Modal, Drawer, Tooltip, Switch }
+  const Select = ({ value, options = [], onChange, "aria-label": ariaLabel, ...rest }: any) => (
+    <select
+      aria-label={ariaLabel}
+      value={value == null ? "" : String(value)}
+      onChange={(event) => {
+        const rawValue = event.currentTarget.value
+        const numeric = Number(rawValue)
+        onChange?.(Number.isFinite(numeric) && rawValue.trim() !== "" ? numeric : rawValue)
+      }}
+      {...rest}
+    >
+      {options.map((option: any) => (
+        <option key={String(option.value)} value={String(option.value)}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  )
+  const Tag = ({ children }: any) => <span>{children}</span>
+  return { ...actual, Alert, Tabs, Empty, Button, Modal, Drawer, Tooltip, Switch, Select, Tag }
 })
+
+vi.mock("@/components/Common/WorkspaceConnectionGate", () => ({
+  default: ({ children }: { children: React.ReactNode }) => <>{children}</>
+}))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => ({
@@ -136,7 +176,10 @@ vi.mock("react-router-dom", async () => {
 })
 
 vi.mock("@/services/watchlists", () => ({
+  createWatchlist: (...args: any[]) => mocks.createWatchlistMock(...args),
   fetchWatchlistRuns: (...args: any[]) => mocks.fetchWatchlistRunsMock(...args),
+  fetchWatchlists: (...args: any[]) => mocks.fetchWatchlistsMock(...args),
+  updateWatchlist: (...args: any[]) => mocks.updateWatchlistMock(...args),
   recordWatchlistsIaExperimentTelemetry: (...args: any[]) =>
     mocks.recordWatchlistsIaExperimentTelemetryMock(...args)
 }))
@@ -150,7 +193,17 @@ vi.mock("@/store/watchlists", () => ({
   useWatchlistsStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       activeTab: mocks.state.activeTab,
+      watchlists: [mocks.watchlistContainer],
+      watchlistsLoading: false,
+      watchlistsError: null,
+      selectedWatchlistId: 42,
       setActiveTab: mocks.state.setActiveTab,
+      setWatchlists: vi.fn(),
+      setWatchlistsLoading: vi.fn(),
+      setWatchlistsError: vi.fn(),
+      setSelectedWatchlistId: vi.fn(),
+      addWatchlist: vi.fn(),
+      updateWatchlistInList: vi.fn(),
       openRunDetail: vi.fn(),
       resetStore: vi.fn()
     })
@@ -184,12 +237,24 @@ vi.mock("../shared/WatchlistsHealthBar", () => ({
   WatchlistsHealthBar: () => <div data-testid="watchlists-health-bar" />
 }))
 
+const renderPage = () =>
+  render(
+    <MemoryRouter initialEntries={["/watchlists"]}>
+      <WatchlistsPlaygroundPage />
+    </MemoryRouter>
+  )
+
 describe("WatchlistsPlaygroundPage orientation guidance", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     connectionMocks.useConnectionUxState.mockReturnValue({
       uxState: "connected_ok",
       hasCompletedFirstRun: true
+    })
+    mocks.fetchWatchlistsMock.mockResolvedValue({
+      items: [mocks.watchlistContainer],
+      total: 1,
+      has_more: false
     })
     mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.recordWatchlistsIaExperimentTelemetryMock.mockResolvedValue({ accepted: true })
@@ -200,6 +265,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     localStorage.removeItem("watchlists:ia-experiment:v1")
     localStorage.removeItem("watchlists:orientation-dismissed:v1")
     localStorage.removeItem("watchlists:secondary-expanded:v1")
+    localStorage.removeItem("watchlists:teach-points:v1")
   })
 
   afterEach(() => {
@@ -209,46 +275,95 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     localStorage.removeItem("watchlists:ia-experiment:v1")
     localStorage.removeItem("watchlists:orientation-dismissed:v1")
     localStorage.removeItem("watchlists:secondary-expanded:v1")
+    localStorage.removeItem("watchlists:teach-points:v1")
   })
 
   it("shows per-tab orientation and explicit Activity to Reports next action", () => {
     mocks.state.activeTab = "runs"
-    render(<WatchlistsPlaygroundPage />)
+    renderPage()
 
     expect(screen.getByTestId("watchlists-orientation-title")).toHaveTextContent("Activity")
+    expect(
+      screen
+        .getByTestId("watchlists-orientation-title")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
     expect(screen.getByTestId("watchlists-orientation-description")).toHaveTextContent("Reports")
 
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-reports"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("outputs")
   })
 
+  it("uses the canonical alert for tab teach points", () => {
+    mocks.state.activeTab = "jobs"
+    render(<WatchlistsPlaygroundPage />)
+
+    expect(screen.getByTestId("watchlists-teach-point-title")).toHaveTextContent(
+      "Monitor setup tip"
+    )
+    expect(
+      screen
+        .getByTestId("watchlists-teach-point-title")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+  })
+
   it("supports the primary workflow journey from overview through reports", () => {
-    const { rerender } = render(<WatchlistsPlaygroundPage />)
+    const { rerender } = renderPage()
 
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-feeds"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
 
     mocks.state.activeTab = "sources"
-    rerender(<WatchlistsPlaygroundPage />)
+    rerender(
+      <MemoryRouter initialEntries={["/watchlists"]}>
+        <WatchlistsPlaygroundPage />
+      </MemoryRouter>
+    )
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-monitors"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
     expect(localStorage.getItem("watchlists:secondary-expanded:v1")).toContain("\"monitors\":true")
 
     mocks.state.activeTab = "jobs"
-    rerender(<WatchlistsPlaygroundPage />)
+    rerender(
+      <MemoryRouter initialEntries={["/watchlists"]}>
+        <WatchlistsPlaygroundPage />
+      </MemoryRouter>
+    )
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-activity"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("items")
     expect(localStorage.getItem("watchlists:secondary-expanded:v1")).toContain("\"activity\":true")
 
     mocks.state.activeTab = "runs"
-    rerender(<WatchlistsPlaygroundPage />)
+    rerender(
+      <MemoryRouter initialEntries={["/watchlists"]}>
+        <WatchlistsPlaygroundPage />
+      </MemoryRouter>
+    )
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-reports"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("outputs")
   })
 
+  it("keeps repeat-user jumps and command palette reachable before deep tabs", () => {
+    renderPage()
+
+    expect(screen.getByTestId("watchlists-health-bar")).toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-repeat-actions")).toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-repeat-open-runs")).toHaveTextContent("Check activity")
+    expect(screen.getByTestId("watchlists-repeat-open-items")).toHaveTextContent("Review articles")
+    expect(screen.getByTestId("watchlists-repeat-open-outputs")).toHaveTextContent("View reports")
+
+    fireEvent.click(screen.getByTestId("watchlists-repeat-open-runs"))
+    expect(mocks.state.setActiveTab).toHaveBeenCalledWith("items")
+    expect(localStorage.getItem("watchlists:secondary-expanded:v1")).toContain("\"activity\":true")
+
+    fireEvent.click(screen.getByTestId("watchlists-open-command-palette"))
+    expect(screen.getByTestId("watchlists-command-palette-input")).toBeInTheDocument()
+  })
+
   it("persists orientation dismissal per tab and restores on demand", () => {
     mocks.state.activeTab = "runs"
-    render(<WatchlistsPlaygroundPage />)
+    renderPage()
 
     expect(screen.getByTestId("watchlists-orientation-title")).toHaveTextContent("Activity")
     fireEvent.click(screen.getAllByRole("button", { name: "Dismiss" })[0])
@@ -262,7 +377,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
   })
 
   it("exposes an accessible label on the watchlists docs help icon", () => {
-    render(<WatchlistsPlaygroundPage />)
+    renderPage()
 
     expect(
       screen.getByRole("link", { name: "Open watchlists documentation" })

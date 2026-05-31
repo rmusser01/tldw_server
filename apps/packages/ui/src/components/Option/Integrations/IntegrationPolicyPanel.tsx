@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react"
 import {
-  Alert,
   Button,
   Card,
   Descriptions,
@@ -25,9 +24,15 @@ import type {
   TelegramLinkedActorItem,
   TelegramPairingCodeResponse
 } from "@/services/integrations-control-plane"
+import {
+  RecoveryCallout,
+  type CapabilityStateDescriptor
+} from "@/components/ui/state"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 
 type SharedPolicyPanelProps = {
   errorMessage?: string
+  errorState?: CapabilityStateDescriptor
   loading?: boolean
   onRefresh?: () => void
 }
@@ -85,14 +90,15 @@ const WorkspacePolicyEditor: React.FC<
     installationIds?: string[]
     policy?: SlackWorkspacePolicyResponse["policy"] | DiscordWorkspacePolicyResponse["policy"]
     errorMessage?: string
+    errorState?: CapabilityStateDescriptor
     loading?: boolean
     onSave: (payload: SlackWorkspacePolicyUpdate | DiscordWorkspacePolicyUpdate) => Promise<unknown>
     onRefresh?: () => void
   }
-> = ({ title, panelKind, summary, installationIds = [], policy, errorMessage, loading, onSave, onRefresh }) => {
+> = ({ title, panelKind, summary, installationIds = [], policy, errorMessage, errorState, loading, onSave, onRefresh }) => {
   const [form] = Form.useForm<WorkspacePolicyFormValues>()
   const [saving, setSaving] = useState(false)
-  const isUnavailable = Boolean(errorMessage) || (!loading && !policy)
+  const isUnavailable = Boolean(errorMessage || errorState) || (!loading && !policy)
 
   useEffect(() => {
     const quotaPerMinute =
@@ -174,11 +180,27 @@ const WorkspacePolicyEditor: React.FC<
   return (
     <Card title={title} loading={loading}>
       {summary ? <Typography.Paragraph type="secondary">{summary}</Typography.Paragraph> : null}
-      {errorMessage ? (
-        <Alert type="error" showIcon style={{ marginBottom: 16 }} title={errorMessage} />
+      {errorState ? (
+        <RecoveryCallout
+          state={errorState.state}
+          title={errorState.title}
+          message={errorState.message}
+          diagnostics={errorState.diagnostics}
+          primaryAction={
+            onRefresh
+              ? {
+                  label: "Try again",
+                  onClick: onRefresh
+                }
+              : undefined
+          }
+          className="mb-4"
+        />
+      ) : errorMessage ? (
+        <DsAlert variant="error" className="mb-4" title={errorMessage} />
       ) : null}
-      {!errorMessage && isUnavailable ? (
-        <Alert type="warning" showIcon style={{ marginBottom: 16 }} title={`${title} is unavailable`} />
+      {!errorMessage && !errorState && isUnavailable ? (
+        <DsAlert variant="warning" className="mb-4" title={`${title} is unavailable`} />
       ) : null}
       <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
         {policyDescription.map((item) => (
@@ -255,18 +277,19 @@ const TelegramPolicyEditor: React.FC<
     linkedActors?: TelegramLinkedActorItem[]
     pairingCode?: TelegramPairingCodeResponse | null
     errorMessage?: string
+    errorState?: CapabilityStateDescriptor
     loading?: boolean
     onSave: (payload: TelegramBotConfigUpdate) => Promise<unknown>
     onGeneratePairingCode: () => Promise<TelegramPairingCodeResponse>
     onRevokeActor: (actorId: number) => Promise<unknown>
     onRefresh?: () => void
   }
-> = ({ bot, linkedActors = [], pairingCode, errorMessage, loading, onSave, onGeneratePairingCode, onRevokeActor, onRefresh }) => {
+> = ({ bot, linkedActors = [], pairingCode, errorMessage, errorState, loading, onSave, onGeneratePairingCode, onRevokeActor, onRefresh }) => {
   const [form] = Form.useForm<TelegramBotConfigUpdate>()
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [localPairingCode, setLocalPairingCode] = useState<TelegramPairingCodeResponse | null>(pairingCode ?? null)
-  const isUnavailable = Boolean(errorMessage) || (!loading && !bot)
+  const isUnavailable = Boolean(errorMessage || errorState) || (!loading && !bot)
 
   useEffect(() => {
     setLocalPairingCode(pairingCode ?? null)
@@ -332,8 +355,24 @@ const TelegramPolicyEditor: React.FC<
 
   return (
     <Card title="Telegram bot" loading={loading}>
-      {errorMessage ? (
-        <Alert type="error" showIcon style={{ marginBottom: 16 }} title={errorMessage} />
+      {errorState ? (
+        <RecoveryCallout
+          state={errorState.state}
+          title={errorState.title}
+          message={errorState.message}
+          diagnostics={errorState.diagnostics}
+          primaryAction={
+            onRefresh
+              ? {
+                  label: "Try again",
+                  onClick: onRefresh
+                }
+              : undefined
+          }
+          className="mb-4"
+        />
+      ) : errorMessage ? (
+        <DsAlert variant="error" className="mb-4" title={errorMessage} />
       ) : null}
       <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
         <Descriptions.Item label="Bot username">{bot?.bot_username ?? "—"}</Descriptions.Item>
@@ -367,20 +406,14 @@ const TelegramPolicyEditor: React.FC<
       </Form>
 
       {localPairingCode ? (
-        <Alert
-          type="success"
-          showIcon
-          style={{ marginTop: 16 }}
-          title="Pairing code generated"
-          description={
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <span>
-                <strong>{localPairingCode.pairing_code}</strong>
-              </span>
-              <span>Expires at {new Date(localPairingCode.expires_at).toLocaleString()}</span>
-            </div>
-          }
-        />
+        <DsAlert variant="success" className="mt-4" title="Pairing code generated">
+          <div className="flex flex-col">
+            <span>
+              <strong>{localPairingCode.pairing_code}</strong>
+            </span>
+            <span>Expires at {new Date(localPairingCode.expires_at).toLocaleString()}</span>
+          </div>
+        </DsAlert>
       ) : null}
 
       <div style={{ marginTop: 16 }}>
@@ -423,6 +456,7 @@ export const IntegrationPolicyPanel: React.FC<IntegrationPolicyPanelProps> = (pr
         onGeneratePairingCode={props.onGeneratePairingCode}
         onRevokeActor={props.onRevokeActor}
         errorMessage={props.errorMessage}
+        errorState={props.errorState}
         onRefresh={props.onRefresh}
       />
     )
@@ -443,6 +477,7 @@ export const IntegrationPolicyPanel: React.FC<IntegrationPolicyPanelProps> = (pr
       installationIds={policy?.installation_ids}
       policy={policy?.policy}
       errorMessage={props.errorMessage}
+      errorState={props.errorState}
       loading={props.loading}
       onSave={props.onSave}
       onRefresh={props.onRefresh}

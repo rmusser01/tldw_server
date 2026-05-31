@@ -54,7 +54,9 @@ describe("PlaygroundForm signal surface guard", () => {
     expect(formSource).toContain("data-mobile-keyboard")
     expect(formSource).toContain("scrollMarginBottom")
     expect(formSource).toContain("previousSendStateRef")
-    expect(formSource).toContain("onSuccess: () =>")
+    expect(formSource).toContain("onMutate: () => ({")
+    expect(formSource).toContain("errorKeyToDismiss: chatErrorBanner?.key")
+    expect(formSource).toContain("onSuccess: (_data, _variables, context) =>")
     expect(formSource).toContain("onError: (error) =>")
     expect(formSource).toContain("textAreaFocus()")
     expect(formSource).toContain("tldw:focus-composer")
@@ -127,5 +129,22 @@ describe("PlaygroundForm signal surface guard", () => {
     expect(recommendationsPanelSource).toContain(
       "playground:composer.recommendationsTitle"
     )
+  })
+
+  it("routes the character starter through character selection before scene controls", () => {
+    const formSourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
+    const formSource = fs.readFileSync(formSourcePath, "utf8")
+    const characterStarterStart = formSource.indexOf('if (mode === "character")')
+    const ragStarterStart = formSource.indexOf('if (mode === "rag" || mode === "knowledge")')
+    const characterStarterBlock = formSource.slice(
+      characterStarterStart,
+      ragStarterStart
+    )
+
+    expect(characterStarterStart).toBeGreaterThanOrEqual(0)
+    expect(ragStarterStart).toBeGreaterThan(characterStarterStart)
+    expect(formSource).toContain("dispatchOpenAssistantSelect")
+    expect(characterStarterBlock).toContain('source: "playground-starter"')
+    expect(characterStarterBlock).not.toContain("setOpenActorSettings(true)")
   })
 })

@@ -19,7 +19,10 @@ import { useSelectedModel } from "@/hooks/chat/useSelectedModel";
 import { usePromptPersistence } from "@/hooks/chat/usePromptPersistence";
 import { useRagSettings } from "@/hooks/chat/useRagSettings";
 import { useFileUpload } from "@/hooks/chat/useFileUpload";
+import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant";
+import type { AssistantSelection } from "@/types/assistant-selection";
 import type { Character } from "@/types/character";
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter";
 import { useSetting } from "@/hooks/useSetting";
@@ -33,36 +36,9 @@ import { useChatLoopState } from "@/services/chat-loop/hooks";
 import { subscribeChatLoopEvents } from "@/services/chat-loop/bridge";
 import type { ChatScope } from "@/types/chat-scope";
 
-const buildAssistantKey = (
-  kind: string | null | undefined,
-  id: string | number | null | undefined,
-) => (kind && id != null ? `${kind}:${String(id)}` : null);
-
 export const useMessageOption = (
   opts: { forceCompareEnabled?: boolean; scope?: ChatScope } = {},
 ) => {
-  const e2eDebugEnabled =
-    typeof window !== "undefined" && (window as any).__tldw_e2e_debug;
-  const e2eDebugCounts = React.useRef({
-    syncSystem: 0,
-    syncQuick: 0,
-    storeSystem: 0,
-    storeQuick: 0,
-  });
-  const logE2EDebug = (
-    key: keyof typeof e2eDebugCounts.current,
-    payload: Record<string, unknown>,
-  ) => {
-    if (!e2eDebugEnabled) return;
-    const counts = e2eDebugCounts.current;
-    counts[key] += 1;
-    if (counts[key] <= 10 || counts[key] % 50 === 0) {
-      console.log(`[E2E_DEBUG] ${key}`, {
-        count: counts[key],
-        ...payload,
-      });
-    }
-  };
   // Controllers come from Context (for aborting streaming requests)
   const { controller: abortController, setController: setAbortController } =
     usePageAssist();
@@ -257,48 +233,54 @@ export const useMessageOption = (
     t,
     scope: opts.scope,
   });
-
-  const lastAssistantKeyRef = React.useRef<string | null>(
-    buildAssistantKey(selectedAssistant?.kind, selectedAssistant?.id),
-  );
-
-  React.useEffect(() => {
-    const nextAssistantKey = buildAssistantKey(
-      selectedAssistant?.kind,
-      selectedAssistant?.id,
-    );
-    if (lastAssistantKeyRef.current === nextAssistantKey) {
-      return;
-    }
-    const activeServerAssistantKey = buildAssistantKey(
-      serverChatAssistantKind,
-      serverChatAssistantId ?? serverChatCharacterId,
-    );
-    if (
-      serverChatId &&
-      nextAssistantKey &&
-      nextAssistantKey === activeServerAssistantKey
-    ) {
-      lastAssistantKeyRef.current = nextAssistantKey;
-      return;
-    }
-    lastAssistantKeyRef.current = nextAssistantKey;
-    setServerChatId(null);
-    setMessages([]);
-    setHistory([]);
-    setHistoryId(null);
-  }, [
-    selectedAssistant?.id,
-    selectedAssistant?.kind,
-    serverChatAssistantId,
-    serverChatAssistantKind,
-    serverChatCharacterId,
+  const { settings: chatSettings } = useChatSettingsRecord({
+    historyId,
     serverChatId,
-    setHistory,
-    setHistoryId,
-    setMessages,
-    setServerChatId,
-  ]);
+  });
+  const effectiveAssistantState = React.useMemo(
+    () =>
+      resolveEffectiveAssistantState({
+        tracked: {
+          assistantKind: serverChatAssistantKind,
+          assistantId: serverChatAssistantId,
+          characterId: serverChatCharacterId,
+        },
+        settings: chatSettings ?? null,
+        draftSelection: selectedAssistant,
+      }),
+    [
+      chatSettings,
+      selectedAssistant,
+      serverChatAssistantId,
+      serverChatAssistantKind,
+      serverChatCharacterId,
+    ],
+  );
+  const effectiveSelectedAssistant = React.useMemo<AssistantSelection | null>(() => {
+    if (effectiveAssistantState.mode === "plain") {
+      return selectedAssistant;
+    }
+
+    const matchesDraftSelection =
+      selectedAssistant?.kind === effectiveAssistantState.kind &&
+      selectedAssistant.id === effectiveAssistantState.id;
+    const draftMetadata = matchesDraftSelection ? selectedAssistant : null;
+
+    return {
+      ...draftMetadata,
+      kind: effectiveAssistantState.kind!,
+      id: effectiveAssistantState.id!,
+      name:
+        effectiveAssistantState.displayName ??
+        draftMetadata?.name ??
+        (effectiveAssistantState.kind === "persona" ? "Persona" : "Assistant"),
+      avatar_url: effectiveAssistantState.avatarUrl ?? draftMetadata?.avatar_url ?? null,
+      system_prompt:
+        effectiveAssistantState.systemPromptSnapshot ??
+        draftMetadata?.system_prompt ??
+        null,
+    };
+  }, [effectiveAssistantState, selectedAssistant]);
 
   React.useEffect(() => {
     if (!serverChatId || temporaryChat) return;
@@ -310,7 +292,6 @@ export const useMessageOption = (
     setSelectedSystemPrompt,
     selectedQuickPrompt,
     setSelectedQuickPrompt,
-    logE2EDebug,
   });
 
   useRagSettings({
@@ -393,6 +374,7 @@ export const useMessageOption = (
     serverChatAssistantKind,
     serverChatAssistantId,
     serverChatPersonaMemoryMode,
+    serverChatMetaLoaded,
     serverChatState,
     serverChatTopic,
     serverChatClusterId,
@@ -432,7 +414,7 @@ export const useMessageOption = (
     setSelectedSystemPrompt,
     invalidateServerChatHistory,
     selectedCharacter,
-    selectedAssistant,
+    selectedAssistant: effectiveSelectedAssistant,
     scope: opts.scope,
   });
   const onSubmit = React.useCallback(
@@ -583,7 +565,7 @@ export const useMessageOption = (
     setCompareMaxModels,
     selectedCharacter,
     setSelectedCharacter,
-    selectedAssistant,
+    selectedAssistant: effectiveSelectedAssistant,
     setSelectedAssistant,
     replyTarget,
     clearReplyTarget,

@@ -91,7 +91,7 @@
     "modeSpeech": "സ്പീച്ച്",
     "moreTools": "കൂടുതൽ",
     "writingPlayground": "എഴുത്ത് പ്ലേഗ്രൗണ്ട്",
-    "workspacePlayground": "Model Playground",
+    "researchWorkspace": "ഗവേഷണ വർക്ക്‌സ്‌പേസ്",
     "acpPlayground": "ACP Playground",
     "skills": "Skills",
     "adminLlamacpp": "Llama.cpp Admin",
@@ -100,7 +100,7 @@
     "collections": "Collections",
     "dataTables": "Data Tables",
     "documentWorkspace": "Document Workspace",
-    "modelPlayground": "Workspace Playground",
+    "modelPlayground": "മോഡൽ പ്ലേഗ്രൗണ്ട്",
     "workflowEditor": "Workflow Editor",
     "modeRepo2txt": "Repo2Txt"
   },

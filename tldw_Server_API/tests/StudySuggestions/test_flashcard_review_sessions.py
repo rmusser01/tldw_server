@@ -253,6 +253,19 @@ def test_review_flashcard_without_review_session_id_auto_creates_active_session(
     assert sessions[0]["scope_key"] == f"due:deck:{deck_id}"  # nosec B101
 
 
+def test_review_session_preserves_deck_name_snapshot_after_deck_rename(db: CharactersRAGDB):
+    deck_id, card_uuid = _create_card(db, deck_name="Original Deck Name")
+
+    updated = db.review_flashcard(card_uuid, rating=4, answer_time_ms=700)
+    session_id = int(updated["review_session_id"])
+    db.update_deck(deck_id, name="Renamed Deck")
+
+    sessions = db.list_flashcard_review_sessions(deck_id=deck_id)
+
+    assert int(sessions[0]["id"]) == session_id  # nosec B101
+    assert sessions[0]["deck_name_snapshot"] == "Original Deck Name"  # nosec B101
+
+
 def test_review_flashcard_rejects_unknown_or_wrong_deck_review_session_id(db: CharactersRAGDB):
     deck_id, card_uuid = _create_card(db, deck_name="Primary Session Deck")
     other_deck_id, _ = _create_card(db, deck_name="Other Session Deck")

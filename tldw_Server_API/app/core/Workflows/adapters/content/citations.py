@@ -238,9 +238,9 @@ async def run_citations_adapter(config: dict[str, Any], context: dict[str, Any])
             "count": len(result.academic_citations),
         }
 
-    except Exception as e:
-        logger.exception(f"Citations adapter error: {e}")
-        return {"error": f"citations_error:{e}"}
+    except Exception:
+        logger.exception("Citations adapter error")
+        return {"error": "citations_error"}
 
 
 @registry.register(

@@ -13,6 +13,7 @@ os.environ.setdefault("READING_DIGEST_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("TEST_MODE", "1")
 
 from tldw_Server_API.app.main import app as fastapi_app
+from tldw_Server_API.app.api.v1.endpoints import quizzes as quiz_endpoints
 from tldw_Server_API.app.api.v1.endpoints.quizzes import (
     convert_attempt_remediation_conversions,
     get_attempt_remediation_conversions,
@@ -22,7 +23,12 @@ from tldw_Server_API.app.api.v1.schemas.quizzes import (
     QuizRemediationConvertResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
+)
 from tldw_Server_API.app.services import quiz_generator
 from tldw_Server_API.tests.test_config import TestConfig
 
@@ -211,6 +217,305 @@ def test_quiz_endpoints_flow(client_with_quizzes_db: TestClient):
     assert result["answers"][0]["is_correct"] is True
 
 
+def test_delete_quiz_happy_path(client_with_quizzes_db: TestClient):
+    create_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Delete Me"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+
+    delete_response = client_with_quizzes_db.delete(
+        f"/api/v1/quizzes/{created['id']}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"status": "deleted"}
+
+
+def test_create_quiz_maps_conflict_error_to_409(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def raise_conflict(**_kwargs):
+        raise ConflictError("quiz name already exists")
+
+    monkeypatch.setattr(quizzes_db, "create_quiz", raise_conflict)
+
+    response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Duplicate Quiz"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "quiz name already exists"
+
+
+def test_create_question_returns_404_for_conflict_error(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    quiz_id = quizzes_db.create_quiz(name="Question Conflict Quiz")
+
+    def raise_conflict(**_kwargs):
+        raise ConflictError("Quiz question target not found")
+
+    monkeypatch.setattr(quizzes_db, "create_question", raise_conflict)
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/questions",
+        json={
+            "question_type": "multiple_choice",
+            "question_text": "Which organ filters blood?",
+            "options": ["Heart", "Kidney", "Lung"],
+            "correct_answer": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Quiz question target not found"
+
+
+def test_update_quiz_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Update Error Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+
+    def raise_input_error(_quiz_id: int, _updates: dict):
+        raise InputError("invalid quiz update")
+
+    monkeypatch.setattr(quizzes_db, "update_quiz", raise_input_error)
+
+    response = client_with_quizzes_db.patch(
+        f"/api/v1/quizzes/{created['id']}",
+        json={"name": "Updated Quiz"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid quiz update"
+
+
+def test_delete_quiz_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Delete Error Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+
+    def raise_input_error(*_args, **_kwargs):
+        raise InputError("invalid quiz delete")
+
+    monkeypatch.setattr(quizzes_db, "delete_quiz", raise_input_error)
+
+    response = client_with_quizzes_db.delete(
+        f"/api/v1/quizzes/{created['id']}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid quiz delete"
+
+
+def test_create_question_returns_404_for_missing_quiz(client_with_quizzes_db: TestClient):
+    response = client_with_quizzes_db.post(
+        "/api/v1/quizzes/999/questions",
+        json={
+            "question_type": "multiple_choice",
+            "question_text": "Missing quiz question",
+            "options": ["A", "B"],
+            "correct_answer": 0,
+            "points": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Quiz not found (Entity: quizzes, ID: 999)"
+
+
+def test_question_update_and_delete_happy_path(client_with_quizzes_db: TestClient):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Question CRUD Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    create_question_response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/questions",
+        json={
+            "question_type": "multiple_choice",
+            "question_text": "Original question text",
+            "options": ["1", "2", "3"],
+            "correct_answer": 1,
+            "points": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert create_question_response.status_code == 200
+    created_question = create_question_response.json()
+
+    update_response = client_with_quizzes_db.patch(
+        f"/api/v1/quizzes/{quiz_id}/questions/{created_question['id']}",
+        json={
+            "question_text": "Updated question text",
+            "expected_version": created_question["version"],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert update_response.status_code == 200
+    updated_question = update_response.json()
+    assert updated_question["question_text"] == "Updated question text"
+
+    delete_response = client_with_quizzes_db.delete(
+        f"/api/v1/quizzes/{quiz_id}/questions/{created_question['id']}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"status": "deleted"}
+
+
+def test_create_question_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Question Create Error Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    def raise_input_error(*_args, **_kwargs):
+        raise InputError("invalid question create")
+
+    monkeypatch.setattr(quizzes_db, "create_question", raise_input_error)
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/questions",
+        json={
+            "question_type": "multiple_choice",
+            "question_text": "Broken question",
+            "options": ["A", "B"],
+            "correct_answer": 0,
+            "points": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid question create"
+
+
+def test_update_question_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Question Update Error Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    create_question_response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/questions",
+        json={
+            "question_type": "multiple_choice",
+            "question_text": "Question to update",
+            "options": ["A", "B"],
+            "correct_answer": 0,
+            "points": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert create_question_response.status_code == 200
+    question_id = create_question_response.json()["id"]
+
+    def raise_input_error(*_args, **_kwargs):
+        raise InputError("invalid question update")
+
+    monkeypatch.setattr(quizzes_db, "update_question", raise_input_error)
+
+    response = client_with_quizzes_db.patch(
+        f"/api/v1/quizzes/{quiz_id}/questions/{question_id}",
+        json={"question_text": "Updated text"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid question update"
+
+
+def test_delete_question_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Question Delete Error Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    create_question_response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/questions",
+        json={
+            "question_type": "multiple_choice",
+            "question_text": "Question to delete",
+            "options": ["A", "B"],
+            "correct_answer": 0,
+            "points": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert create_question_response.status_code == 200
+    question_id = create_question_response.json()["id"]
+
+    def raise_input_error(*_args, **_kwargs):
+        raise InputError("invalid question delete")
+
+    monkeypatch.setattr(quizzes_db, "delete_question", raise_input_error)
+
+    response = client_with_quizzes_db.delete(
+        f"/api/v1/quizzes/{quiz_id}/questions/{question_id}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid question delete"
+
+
 def test_quiz_workspace_id_contract_and_scope_filters(
     client_with_quizzes_db: TestClient,
     quizzes_db: CharactersRAGDB,
@@ -373,6 +678,121 @@ def test_quiz_list_ignores_workspace_tag_query_param(client_with_quizzes_db: Tes
     assert baseline.status_code == 200
     assert filtered.status_code == 200
     assert filtered.json()["count"] == baseline.json()["count"]
+    assert filtered.json()["pagination"]["total"] == filtered.json()["count"]
+    assert filtered.json()["pagination"]["limit"] == 50
+    assert filtered.json()["pagination"]["offset"] == 0
+    assert filtered.json()["pagination"]["has_more"] is False
+    assert filtered.json()["has_more"] is False
+    assert filtered.json()["next_offset"] is None
+
+
+def test_list_quizzes_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def raise_input_error(*_args, **_kwargs):
+        raise InputError("invalid quiz list query")
+
+    monkeypatch.setattr(quizzes_db, "list_quizzes", raise_input_error)
+
+    response = client_with_quizzes_db.get("/api/v1/quizzes", headers=AUTH_HEADERS)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid quiz list query"
+
+
+def test_get_quiz_returns_404_for_missing_quiz(client_with_quizzes_db: TestClient):
+    response = client_with_quizzes_db.get("/api/v1/quizzes/999", headers=AUTH_HEADERS)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Quiz not found"
+
+
+def test_get_quiz_maps_database_error_to_contextual_500(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def raise_db_error(_quiz_id: int):
+        raise CharactersRAGDBError("quiz read backend unavailable")
+
+    monkeypatch.setattr(quizzes_db, "get_quiz", raise_db_error)
+
+    response = client_with_quizzes_db.get("/api/v1/quizzes/1", headers=AUTH_HEADERS)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to fetch quiz"
+
+
+def test_list_questions_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Question List Error Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    def raise_input_error(*_args, **_kwargs):
+        raise InputError("invalid question list query")
+
+    monkeypatch.setattr(quizzes_db, "list_questions", raise_input_error)
+
+    response = client_with_quizzes_db.get(
+        f"/api/v1/quizzes/{quiz_id}/questions",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid question list query"
+
+
+def test_question_list_returns_canonical_pagination(client_with_quizzes_db: TestClient):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Question Pagination Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    for index in range(2):
+        create_question_response = client_with_quizzes_db.post(
+            f"/api/v1/quizzes/{quiz_id}/questions",
+            json={
+                "question_type": "multiple_choice",
+                "question_text": f"Question {index}",
+                "options": ["A", "B"],
+                "correct_answer": 1,
+                "points": 1,
+                "order_index": index,
+            },
+            headers=AUTH_HEADERS,
+        )
+        assert create_question_response.status_code == 200
+
+    response = client_with_quizzes_db.get(
+        f"/api/v1/quizzes/{quiz_id}/questions",
+        params={"limit": 1, "offset": 0},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 2
+    assert len(payload["items"]) == 1
+    assert payload["pagination"]["total"] == 2
+    assert payload["pagination"]["limit"] == 1
+    assert payload["pagination"]["offset"] == 0
+    assert payload["pagination"]["has_more"] is True
+    assert payload["pagination"]["next_offset"] == 1
+    assert payload["has_more"] is True
+    assert payload["next_offset"] == 1
 
 
 def test_attempts_list_route_is_not_shadowed_by_quiz_id(client_with_quizzes_db: TestClient):
@@ -411,17 +831,302 @@ def test_attempts_list_route_is_not_shadowed_by_quiz_id(client_with_quizzes_db: 
         headers=AUTH_HEADERS,
     )
     assert submit_attempt_response.status_code == 200
+    second_attempt_response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/attempts",
+        headers=AUTH_HEADERS,
+    )
+    assert second_attempt_response.status_code == 200
+    second_attempt_id = second_attempt_response.json()["id"]
 
     list_attempts_response = client_with_quizzes_db.get(
         "/api/v1/quizzes/attempts",
-        params={"quiz_id": quiz_id, "limit": 20, "offset": 0},
+        params={"quiz_id": quiz_id, "limit": 1, "offset": 0},
         headers=AUTH_HEADERS,
     )
     assert list_attempts_response.status_code == 200
     attempts_payload = list_attempts_response.json()
     assert attempts_payload["count"] >= 1
-    assert any(item["id"] == attempt_id for item in attempts_payload["items"])
+    assert all(item["id"] in {attempt_id, second_attempt_id} for item in attempts_payload["items"])
+    assert len(attempts_payload["items"]) == 1
     assert all(item["quiz_id"] == quiz_id for item in attempts_payload["items"])
+    assert attempts_payload["pagination"]["total"] >= 2
+    assert attempts_payload["pagination"]["limit"] == 1
+    assert attempts_payload["pagination"]["offset"] == 0
+    assert attempts_payload["pagination"]["has_more"] is True
+    assert attempts_payload["pagination"]["next_offset"] == 1
+    assert attempts_payload["has_more"] is True
+    assert attempts_payload["next_offset"] == 1
+
+
+def test_start_attempt_returns_404_for_missing_quiz(client_with_quizzes_db: TestClient):
+    response = client_with_quizzes_db.post(
+        "/api/v1/quizzes/999/attempts",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Quiz not found (Entity: quizzes, ID: 999)"
+
+
+def test_start_attempt_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Attempt Input Error Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    def raise_input_error(*_args, **_kwargs):
+        raise InputError("invalid attempt start")
+
+    monkeypatch.setattr(quizzes_db, "start_attempt", raise_input_error)
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/attempts",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid attempt start"
+
+
+def test_start_attempt_returns_404_for_conflict_error(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Attempt Conflict Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    def raise_conflict(*_args, **_kwargs):
+        raise ConflictError("Quiz attempt target not found")
+
+    monkeypatch.setattr(quizzes_db, "start_attempt", raise_conflict)
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/attempts",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Quiz attempt target not found"
+
+
+def test_submit_attempt_returns_404_for_missing_attempt(client_with_quizzes_db: TestClient):
+    response = client_with_quizzes_db.put(
+        "/api/v1/quizzes/attempts/999",
+        json={"answers": []},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Attempt not found (Entity: quiz_attempts, ID: 999)"
+
+
+def test_submit_attempt_returns_404_for_conflict_error(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Attempt Submit Conflict Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    create_question_response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/questions",
+        json={
+            "question_type": "multiple_choice",
+            "question_text": "Attempt submit question",
+            "options": ["A", "B"],
+            "correct_answer": 1,
+            "points": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert create_question_response.status_code == 200
+    question_id = create_question_response.json()["id"]
+
+    start_attempt_response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/attempts",
+        headers=AUTH_HEADERS,
+    )
+    assert start_attempt_response.status_code == 200
+    attempt_id = start_attempt_response.json()["id"]
+
+    def raise_conflict(*_args, **_kwargs):
+        raise ConflictError("Quiz attempt target not found")
+
+    monkeypatch.setattr(quizzes_db, "submit_attempt", raise_conflict)
+
+    response = client_with_quizzes_db.put(
+        f"/api/v1/quizzes/attempts/{attempt_id}",
+        json={"answers": [{"question_id": question_id, "user_answer": 1}]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Quiz attempt target not found"
+
+
+def test_submit_attempt_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Attempt Submit Error Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    start_attempt_response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/attempts",
+        headers=AUTH_HEADERS,
+    )
+    assert start_attempt_response.status_code == 200
+    attempt_id = start_attempt_response.json()["id"]
+
+    def raise_input_error(*_args, **_kwargs):
+        raise InputError("invalid attempt submit")
+
+    monkeypatch.setattr(quizzes_db, "submit_attempt", raise_input_error)
+
+    response = client_with_quizzes_db.put(
+        f"/api/v1/quizzes/attempts/{attempt_id}",
+        json={"answers": []},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid attempt submit"
+
+
+def test_list_attempts_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def raise_input_error(*_args, **_kwargs):
+        raise InputError("invalid attempts query")
+
+    monkeypatch.setattr(quizzes_db, "list_attempts", raise_input_error)
+
+    response = client_with_quizzes_db.get(
+        "/api/v1/quizzes/attempts",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid attempts query"
+
+
+def test_list_attempts_maps_database_error_to_contextual_500(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def raise_db_error(*_args, **_kwargs):
+        raise CharactersRAGDBError("attempt list backend unavailable")
+
+    monkeypatch.setattr(quizzes_db, "list_attempts", raise_db_error)
+
+    response = client_with_quizzes_db.get(
+        "/api/v1/quizzes/attempts",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to list attempts"
+
+
+def test_get_attempt_happy_path(client_with_quizzes_db: TestClient):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Attempt Read Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    create_question_response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/questions",
+        json={
+            "question_type": "multiple_choice",
+            "question_text": "Attempt read question",
+            "options": ["A", "B"],
+            "correct_answer": 1,
+            "points": 1,
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert create_question_response.status_code == 200
+    question_id = create_question_response.json()["id"]
+
+    start_attempt_response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/{quiz_id}/attempts",
+        headers=AUTH_HEADERS,
+    )
+    assert start_attempt_response.status_code == 200
+    attempt_id = start_attempt_response.json()["id"]
+
+    submit_attempt_response = client_with_quizzes_db.put(
+        f"/api/v1/quizzes/attempts/{attempt_id}",
+        json={"answers": [{"question_id": question_id, "user_answer": 1}]},
+        headers=AUTH_HEADERS,
+    )
+    assert submit_attempt_response.status_code == 200
+
+    response = client_with_quizzes_db.get(
+        f"/api/v1/quizzes/attempts/{attempt_id}",
+        params={"include_questions": True, "include_answers": True},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == attempt_id
+    assert payload["quiz_id"] == quiz_id
+    assert payload["questions"][0]["id"] == question_id
+    assert payload["answers"][0]["question_id"] == question_id
+
+
+def test_get_attempt_returns_404_for_missing_attempt(client_with_quizzes_db: TestClient):
+    response = client_with_quizzes_db.get("/api/v1/quizzes/attempts/999", headers=AUTH_HEADERS)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Attempt not found"
+
+
+def test_get_attempt_maps_database_error_to_contextual_500(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def raise_db_error(*_args, **_kwargs):
+        raise CharactersRAGDBError("attempt read backend unavailable")
+
+    monkeypatch.setattr(quizzes_db, "get_attempt", raise_db_error)
+
+    response = client_with_quizzes_db.get("/api/v1/quizzes/attempts/1", headers=AUTH_HEADERS)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to fetch attempt"
 
 
 def test_get_quiz_attempt_question_assistant_returns_thread_messages_and_context(
@@ -458,6 +1163,81 @@ def test_get_quiz_attempt_question_assistant_returns_thread_messages_and_context
     assert payload["context_snapshot"]["attempt"]["id"] == attempt_id
     assert payload["context_snapshot"]["question"]["id"] == question_id
     assert "follow_up" in payload["available_actions"]
+
+
+def test_get_quiz_attempt_question_assistant_returns_400_for_input_error(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    question_id = question_ids[0]
+
+    def fake_build_context(*args, **kwargs):
+        raise InputError("invalid study assistant context")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.quizzes.build_quiz_attempt_question_context",
+        fake_build_context,
+    )
+
+    response = client_with_quizzes_db.get(
+        f"/api/v1/quizzes/attempts/{attempt_id}/questions/{question_id}/assistant",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid study assistant context"
+
+
+def test_get_quiz_attempt_question_assistant_returns_404_for_conflict_error(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    question_id = question_ids[0]
+
+    def fake_build_context(*args, **kwargs):
+        raise ConflictError("Quiz attempt target not found")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.quizzes.build_quiz_attempt_question_context",
+        fake_build_context,
+    )
+
+    response = client_with_quizzes_db.get(
+        f"/api/v1/quizzes/attempts/{attempt_id}/questions/{question_id}/assistant",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Quiz attempt target not found"
+
+
+def test_get_quiz_attempt_question_assistant_returns_500_for_db_error(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    question_id = question_ids[0]
+
+    def fake_build_context(*args, **kwargs):
+        raise CharactersRAGDBError("study assistant context backend unavailable")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.quizzes.build_quiz_attempt_question_context",
+        fake_build_context,
+    )
+
+    response = client_with_quizzes_db.get(
+        f"/api/v1/quizzes/attempts/{attempt_id}/questions/{question_id}/assistant",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to fetch study assistant context"
 
 
 def test_get_attempt_remediation_conversions_returns_active_rows(
@@ -718,6 +1498,133 @@ def test_convert_remediation_questions_returns_409_for_conflict(
     assert "already exists" in response.json()["detail"].lower()
 
 
+def test_convert_remediation_questions_returns_400_for_input_error(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    deck_id = quizzes_db.add_deck("Renal Deck")
+
+    def raise_input_error(**_kwargs):
+        raise InputError("invalid remediation request")
+
+    monkeypatch.setattr(quizzes_db, "convert_quiz_remediation_questions", raise_input_error)
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/attempts/{attempt_id}/remediation-conversions/convert",
+        json={
+            "question_ids": [question_ids[0]],
+            "target_deck_id": deck_id,
+            "replace_active": False,
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid remediation request"
+
+
+def test_convert_remediation_questions_returns_500_for_db_error(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    deck_id = quizzes_db.add_deck("Renal Deck")
+
+    def raise_db_error(**_kwargs):
+        raise CharactersRAGDBError("remediation backend unavailable")
+
+    monkeypatch.setattr(quizzes_db, "convert_quiz_remediation_questions", raise_db_error)
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/attempts/{attempt_id}/remediation-conversions/convert",
+        json={
+            "question_ids": [question_ids[0]],
+            "target_deck_id": deck_id,
+            "replace_active": False,
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to convert remediation questions"
+
+
+def test_get_attempt_remediation_conversions_returns_500_for_db_error(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    attempt_id, _question_ids = _create_attempt_with_missed_questions(quizzes_db)
+
+    def raise_db_error(_attempt_id: int):
+        raise CharactersRAGDBError("remediation read backend unavailable")
+
+    monkeypatch.setattr(quizzes_db, "list_attempt_remediation_conversions", raise_db_error)
+
+    response = client_with_quizzes_db.get(
+        f"/api/v1/quizzes/attempts/{attempt_id}/remediation-conversions",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to list remediation conversions"
+
+
+def test_get_attempt_remediation_conversions_returns_404_for_missing_attempt(
+    client_with_quizzes_db: TestClient,
+):
+    response = client_with_quizzes_db.get(
+        "/api/v1/quizzes/attempts/999/remediation-conversions",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Attempt not found"
+
+
+def test_get_attempt_remediation_conversions_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    attempt_id, _question_ids = _create_attempt_with_missed_questions(quizzes_db)
+
+    def raise_input_error(_attempt_id: int):
+        raise InputError("invalid remediation conversion query")
+
+    monkeypatch.setattr(quizzes_db, "list_attempt_remediation_conversions", raise_input_error)
+
+    response = client_with_quizzes_db.get(
+        f"/api/v1/quizzes/attempts/{attempt_id}/remediation-conversions",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid remediation conversion query"
+
+
+def test_get_attempt_remediation_conversions_maps_attempt_lookup_db_error_to_contextual_500(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def raise_db_error(*_args, **_kwargs):
+        raise CharactersRAGDBError("attempt lookup backend unavailable")
+
+    monkeypatch.setattr(quizzes_db, "get_attempt", raise_db_error)
+
+    response = client_with_quizzes_db.get(
+        "/api/v1/quizzes/attempts/1/remediation-conversions",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to list remediation conversions"
+
+
 def test_get_attempt_remediation_conversions_marks_orphaned_linked_flashcards(
     client_with_quizzes_db: TestClient,
     quizzes_db: CharactersRAGDB,
@@ -848,6 +1755,103 @@ def test_quiz_attempt_question_assistant_respond_returns_409_for_stale_thread_ve
     assert response.status_code == 409
     assert response.json()["detail"] == "Study assistant thread version mismatch"
     assert call_count == 0
+
+
+def test_quiz_attempt_question_assistant_respond_returns_409_for_db_conflict(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    question_id = question_ids[0]
+
+    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+        _ = (action, context, message, provider, model)
+        return {
+            "assistant_text": "The glomerulus is where blood filtration begins.",
+            "structured_payload": {},
+            "provider": "openai",
+            "model": "gpt-test",
+        }
+
+    original_append = quizzes_db.append_study_assistant_message
+    call_count = 0
+
+    def raise_conflict(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise ConflictError("Version mismatch updating study assistant thread")
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.quizzes.generate_study_assistant_reply",
+        fake_generate_reply,
+    )
+    monkeypatch.setattr(quizzes_db, "append_study_assistant_message", raise_conflict)
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/attempts/{attempt_id}/questions/{question_id}/assistant/respond",
+        json={"action": "explain"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Study assistant thread version mismatch"
+
+
+def test_quiz_attempt_question_assistant_respond_returns_400_for_input_error(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    question_id = question_ids[0]
+
+    async def raise_input_error(*, action, context, message=None, provider=None, model=None):
+        _ = (action, context, message, provider, model)
+        raise InputError("invalid study assistant action")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.quizzes.generate_study_assistant_reply",
+        raise_input_error,
+    )
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/attempts/{attempt_id}/questions/{question_id}/assistant/respond",
+        json={"action": "explain"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid study assistant action"
+
+
+def test_quiz_attempt_question_assistant_respond_returns_500_for_db_error(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    question_id = question_ids[0]
+
+    async def raise_db_error(*, action, context, message=None, provider=None, model=None):
+        _ = (action, context, message, provider, model)
+        raise CharactersRAGDBError("study assistant reply backend unavailable")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.quizzes.generate_study_assistant_reply",
+        raise_db_error,
+    )
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/attempts/{attempt_id}/questions/{question_id}/assistant/respond",
+        json={"action": "explain"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to generate study assistant response"
 
 
 def test_quiz_multi_select_endpoints_flow(client_with_quizzes_db: TestClient):
@@ -1132,6 +2136,72 @@ def test_generate_quiz_rejects_invalid_quiz_attempt_question_source_identifier(
     assert "quiz_attempt_question source_id" in response.json()["detail"]
 
 
+def test_generate_quiz_maps_input_error_to_400(
+    client_with_quizzes_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def raise_input_error(**_kwargs):
+        raise InputError("invalid quiz generation request")
+
+    monkeypatch.setattr(quiz_endpoints, "generate_quiz_from_sources", raise_input_error)
+
+    response = client_with_quizzes_db.post(
+        "/api/v1/quizzes/generate",
+        json={
+            "num_questions": 1,
+            "sources": [{"source_type": "media", "source_id": "1"}],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid quiz generation request"
+
+
+def test_generate_quiz_returns_404_for_conflict_error(
+    client_with_quizzes_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def raise_conflict(**_kwargs):
+        raise ConflictError("Quiz attempt 999 not found")
+
+    monkeypatch.setattr(quiz_endpoints, "generate_quiz_from_sources", raise_conflict)
+
+    response = client_with_quizzes_db.post(
+        "/api/v1/quizzes/generate",
+        json={
+            "num_questions": 1,
+            "sources": [{"source_type": "media", "source_id": "1"}],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Quiz attempt 999 not found"
+
+
+def test_generate_quiz_maps_database_error_to_contextual_500(
+    client_with_quizzes_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def raise_db_error(**_kwargs):
+        raise CharactersRAGDBError("quiz generation backend unavailable")
+
+    monkeypatch.setattr(quiz_endpoints, "generate_quiz_from_sources", raise_db_error)
+
+    response = client_with_quizzes_db.post(
+        "/api/v1/quizzes/generate",
+        json={
+            "num_questions": 1,
+            "sources": [{"source_type": "media", "source_id": "1"}],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to generate quiz"
+
+
 def test_quiz_json_import_roundtrip(client_with_quizzes_db: TestClient):
     workspace_response = client_with_quizzes_db.put(
         "/api/v1/workspaces/ws-1",
@@ -1322,3 +2392,143 @@ def test_quiz_json_import_roundtrip(client_with_quizzes_db: TestClient):
     }
     assert answer_by_question_id[question_ids_by_type["multiple_choice"]]["source_citations"] == source_by_type["multiple_choice"]
     assert answer_by_question_id[question_ids_by_type["matching"]]["source_citations"] == source_by_type["matching"]
+
+
+def test_quiz_json_import_records_quiz_input_errors(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def raise_input_error(**_kwargs):
+        raise InputError("invalid imported quiz")
+
+    monkeypatch.setattr(quizzes_db, "create_quiz", raise_input_error)
+
+    import_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes/import/json",
+        json={
+            "export_format": "tldw.quiz.export.v1",
+            "quizzes": [
+                {
+                    "quiz": {"name": "Broken Imported Quiz"},
+                    "questions": [],
+                }
+            ],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert import_response.status_code == 200
+    payload = import_response.json()
+    assert payload["imported_quizzes"] == 0
+    assert payload["failed_quizzes"] == 1
+    assert payload["imported_questions"] == 0
+    assert payload["failed_questions"] == 0
+    assert payload["items"] == []
+    assert payload["errors"] == [
+        {
+            "source_index": 0,
+            "question_index": None,
+            "quiz_name": "Broken Imported Quiz",
+            "error": "Failed to create quiz: invalid imported quiz",
+        }
+    ]
+
+
+def test_quiz_json_import_records_question_input_errors(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    workspace_response = client_with_quizzes_db.put(
+        "/api/v1/workspaces/ws-1",
+        json={"name": "Workspace One"},
+        headers=AUTH_HEADERS,
+    )
+    assert workspace_response.status_code == 200
+
+    create_question_calls = {"count": 0}
+
+    def raise_input_error(*_args, **_kwargs):
+        create_question_calls["count"] += 1
+        raise InputError("invalid imported question")
+
+    monkeypatch.setattr(quizzes_db, "create_question", raise_input_error)
+
+    import_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes/import/json",
+        json={
+            "export_format": "tldw.quiz.export.v1",
+            "quizzes": [
+                {
+                    "quiz": {"name": "Quiz With Bad Question", "workspace_id": "ws-1"},
+                    "questions": [
+                        {
+                            "question_type": "multiple_choice",
+                            "question_text": "What is 2 + 2?",
+                            "options": ["3", "4", "5"],
+                            "correct_answer": 1,
+                            "order_index": 0,
+                        }
+                    ],
+                }
+            ],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert create_question_calls["count"] == 1
+    assert import_response.status_code == 200
+    payload = import_response.json()
+    assert payload["imported_quizzes"] == 1
+    assert payload["failed_quizzes"] == 0
+    assert payload["imported_questions"] == 0
+    assert payload["failed_questions"] == 1
+    assert payload["items"][0]["imported_questions"] == 0
+    assert payload["items"][0]["failed_questions"] == 1
+    assert payload["errors"] == [
+        {
+            "source_index": 0,
+            "question_index": 0,
+            "quiz_name": "Quiz With Bad Question",
+            "error": "Failed to create question: invalid imported question",
+        }
+    ]
+
+
+def test_quiz_json_import_sanitizes_database_error_messages(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def raise_db_error(**_kwargs):
+        raise CharactersRAGDBError("low-level insert exploded")
+
+    monkeypatch.setattr(quizzes_db, "create_quiz", raise_db_error)
+
+    import_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes/import/json",
+        json={
+            "export_format": "tldw.quiz.export.v1",
+            "quizzes": [
+                {
+                    "quiz": {"name": "Broken Database Quiz"},
+                    "questions": [],
+                }
+            ],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert import_response.status_code == 200
+    payload = import_response.json()
+    assert payload["imported_quizzes"] == 0
+    assert payload["failed_quizzes"] == 1
+    assert payload["errors"] == [
+        {
+            "source_index": 0,
+            "question_index": None,
+            "quiz_name": "Broken Database Quiz",
+            "error": "Failed to create quiz",
+        }
+    ]

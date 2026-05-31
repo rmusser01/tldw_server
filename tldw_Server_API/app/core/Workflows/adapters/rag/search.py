@@ -91,7 +91,7 @@ async def run_rag_search_adapter(config: dict[str, Any], context: dict[str, Any]
         from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
         media_db_path = str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id()))
     except Exception as exc:
-        logger.error(f"Failed to resolve Media DB path for workflow search: {exc}")
+        logger.error("Failed to resolve Media DB path for workflow search")
         raise RuntimeError("Failed to resolve Media DB path for workflow search") from exc
 
     # Map supported options directly to pipeline
@@ -339,14 +339,14 @@ async def run_web_search_adapter(config: dict[str, Any], context: dict[str, Any]
             }
             if isinstance(rewrite_result, dict) and rewrite_result.get("error"):
                 query_rewrite_meta["error"] = rewrite_result.get("error")
-        except Exception as exc:
+        except Exception:
             query_rewrite_meta = {
                 "enabled": True,
                 "strategy": query_rewrite_strategy,
                 "original_query": original_query,
                 "query_used": query,
                 "rewritten": False,
-                "error": str(exc),
+                "error": "query_rewrite_error",
             }
 
     # Test mode simulation
@@ -390,7 +390,7 @@ async def run_web_search_adapter(config: dict[str, Any], context: dict[str, Any]
             return {"error": "search_failed", "query": query}
 
         if raw_results.get("processing_error"):
-            return {"error": f"search_error:{raw_results.get('processing_error')}", "query": query}
+            return {"error": "search_error", "query": query}
 
         results = raw_results.get("results") or []
         formatted_results = []
@@ -413,13 +413,13 @@ async def run_web_search_adapter(config: dict[str, Any], context: dict[str, Any]
                     scraped = await asyncio.wait_for(scrape_article(link), timeout=fetch_timeout_seconds)
                 except asyncio.TimeoutError:
                     return idx, None, "timeout"
-                except _RAG_ADAPTER_NONCRITICAL_EXCEPTIONS as exc:
-                    return idx, None, str(exc)
+                except _RAG_ADAPTER_NONCRITICAL_EXCEPTIONS:
+                    return idx, None, "fetch_failed"
                 if not isinstance(scraped, dict):
                     return idx, None, "invalid_scrape_payload"
                 scraped_content = str(scraped.get("content") or "").strip()
                 if not scraped_content:
-                    return idx, None, str(scraped.get("error") or "empty_content")
+                    return idx, None, "empty_content"
                 return idx, _truncate_content_by_tokens(scraped_content, max_content_tokens, model=tokenizer_model), None
 
             targets = list(enumerate(formatted_results[:fetch_limit]))
@@ -492,15 +492,15 @@ async def run_web_search_adapter(config: dict[str, Any], context: dict[str, Any]
                 )
                 out["summary"] = summary
                 out["text"] = summary  # Replace text with summary for downstream
-            except _RAG_ADAPTER_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Web search summarization failed: {e}")
-                out["summary_error"] = str(e)
+            except _RAG_ADAPTER_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Web search summarization failed")
+                out["summary_error"] = "summary_failed"
 
         return out
 
-    except _RAG_ADAPTER_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Web search adapter error: {e}")
-        return {"error": f"web_search_error:{e}"}
+    except _RAG_ADAPTER_NONCRITICAL_EXCEPTIONS:
+        logger.error("Web search adapter error")
+        return {"error": "web_search_error"}
 
 
 @registry.register(
@@ -609,8 +609,8 @@ async def run_rss_fetch_adapter(config: dict[str, Any], context: dict[str, Any])
         results = results[:limit]
         text_concat = "\n\n".join([r.get("summary") or r.get("title") or "" for r in results if (r.get("summary") or r.get("title"))])
         return {"results": results, "count": len(results), "text": text_concat}
-    except _RAG_ADAPTER_NONCRITICAL_EXCEPTIONS as e:
-        return {"error": f"rss_error:{e}"}
+    except _RAG_ADAPTER_NONCRITICAL_EXCEPTIONS:
+        return {"error": "rss_error"}
 
 
 @registry.register(

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Tag, Card, Space, Typography, Button, Alert, Tooltip, InputNumber, Spin } from 'antd'
+import { Tag, Card, Space, Typography, Button, Tooltip, InputNumber } from 'antd'
 import { browser } from 'wxt/browser'
 import { Link, useNavigate } from 'react-router-dom'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
@@ -11,11 +11,19 @@ import { useAntdNotification } from '@/hooks/useAntdNotification'
 import { getReturnTo, clearReturnTo } from "@/utils/return-to"
 import { ServerOverviewHint } from "@/components/Common/ServerOverviewHint"
 import {
+  RecoveryCallout,
+  SetupRequiredPanel,
+  StatePanel
+} from "@/components/ui/state"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
+import { LoadingState } from "@/components/ui/feedback"
+import {
   useConnectionState,
   useConnectionUxState
 } from "@/hooks/useConnectionState"
 import { cleanUrl } from "@/libs/clean-url"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import { getDesignSystemState } from "@/design-system"
 
 type Check = {
   key: string
@@ -102,6 +110,10 @@ const makeChecks = (t: TFunction): Check[] => {
     }
   ]
 }
+
+const READY_STATE_LABEL = getDesignSystemState("ready")?.label
+const DEGRADED_STATE_LABEL = getDesignSystemState("degraded")?.label
+const LOADING_STATE_LABEL = getDesignSystemState("loading")?.label
 
 type Result = { status: 'unknown'|'healthy'|'unhealthy', detail?: any, statusCode?: number, durationMs?: number }
 
@@ -335,12 +347,12 @@ export default function HealthStatus() {
 
   const describeStatus = (status: Result['status']): string => {
     if (status === 'healthy') {
-      return t('healthPage.statusHealthy', 'Healthy')
+      return t('healthPage.statusReady', READY_STATE_LABEL)
     }
     if (status === 'unhealthy') {
-      return t('healthPage.statusUnhealthy', 'Unhealthy')
+      return t('healthPage.statusDegraded', DEGRADED_STATE_LABEL)
     }
-    return t('healthPage.statusUnknown', 'Unknown')
+    return t('healthPage.statusLoading', LOADING_STATE_LABEL)
   }
 
   const showAuthCallout =
@@ -361,9 +373,8 @@ export default function HealthStatus() {
     <Space orientation="vertical" size="large" className="w-full">
       {/* Summary banner */}
       {allChecked && (
-        <Alert
-          type={allHealthy ? 'success' : 'warning'}
-          showIcon
+        <StatePanel
+          state={allHealthy ? "ready" : "degraded"}
           title={
             allHealthy
               ? t('settings:healthPage.summaryAllHealthy', {
@@ -376,13 +387,18 @@ export default function HealthStatus() {
                   total: totalChecks
                 })
           }
-          description={
+          message={
             !allHealthy
               ? t('settings:healthPage.summaryUnhealthyHint', {
                   defaultValue: 'Review the failing checks below for troubleshooting guidance.'
                 })
               : undefined
           }
+          primaryAction={{
+            label: t('healthPage.recheckAll', 'Recheck All'),
+            onClick: () => runChecks(true),
+            loading
+          }}
         />
       )}
 
@@ -462,9 +478,14 @@ export default function HealthStatus() {
       </div>
 
       {(showAuthCallout || showUnreachableCallout || showDegradedCallout) && (
-        <Alert
-          type={showDegradedCallout ? "info" : "error"}
-          showIcon
+        <RecoveryCallout
+          state={
+            showAuthCallout
+              ? "auth_required"
+              : showUnreachableCallout
+                ? "unavailable"
+                : "degraded"
+          }
           className="mt-3"
           title={
             showAuthCallout
@@ -482,9 +503,9 @@ export default function HealthStatus() {
                     "Chat is ready — some tools are offline"
                   )
           }
-          description={
-            <div className="space-y-1 text-sm">
-              <div>
+          message={
+            <span className="space-y-1 text-sm">
+              <span className="block">
                 {showAuthCallout
                   ? t(
                       "healthSummary.issueAuthHint",
@@ -498,11 +519,11 @@ export default function HealthStatus() {
                     : t(
                         "healthPage.degradedBody",
                         "Core chat is connected, but some health checks are failing. You can continue using the assistant while you investigate."
-                      )}
-              </div>
+                  )}
+              </span>
               {(typeof lastStatusCode === "number" && lastStatusCode > 0) ||
               lastError ? (
-                <div className="text-[11px] text-text-muted">
+                <span className="block text-[11px] text-text-muted">
                   {t(
                     "healthPage.lastErrorSummary",
                     "Most recent connection error: {{code}} {{message}}",
@@ -518,78 +539,75 @@ export default function HealthStatus() {
                       message: lastError || ""
                     }
                   )}
-                </div>
+                </span>
               ) : null}
-              <div>
-                {showAuthCallout ? (
-                  <Button
-                    type="primary"
-                    size="small"
-                    onClick={() => navigate("/")}
-                  >
-                    {t("healthPage.fixApiKeyCta", "Fix API key")}
-                  </Button>
-                ) : showUnreachableCallout ? (
-                  <Button
-                    type="primary"
-                    size="small"
-                    onClick={() => navigate("/")}
-                  >
-                    {t("healthPage.editUrlCta", "Edit server URL")}
-                  </Button>
-                ) : (
-                  <Button
-                    type="primary"
-                    size="small"
-                    onClick={() => {
-                      const target = getReturnTo()
-                      if (target) {
-                        clearReturnTo()
-                        navigate(target)
-                      } else {
-                        navigate(-1)
-                      }
-                    }}
-                  >
-                    {t("healthPage.backToAppCta", "Back to app")}
-                  </Button>
-                )}
-              </div>
-            </div>
+            </span>
           }
+          primaryAction={{
+            label: showAuthCallout
+              ? t("healthPage.fixApiKeyCta", "Fix API key")
+              : showUnreachableCallout
+                ? t("healthPage.editUrlCta", "Edit server URL")
+                : t("healthPage.backToAppCta", "Back to app"),
+            onClick: () => {
+              if (showAuthCallout || showUnreachableCallout) {
+                navigate("/")
+                return
+              }
+              const target = getReturnTo()
+              if (target) {
+                clearReturnTo()
+                navigate(target)
+              } else {
+                navigate(-1)
+              }
+            }
+          }}
         />
       )}
 
       {!serverUrl && (
-        <Alert
-          type="info"
-          showIcon
+        <DesignSystemAlert
+          variant="info"
           className="mt-2"
           title={t(
             'healthPage.noServerBannerTitle',
             'Don’t have a server yet?'
           )}
-          description={
-            <span className="text-sm">
-              {t(
-                'healthPage.noServerBannerBody',
-                'You can explore the UI first, then connect a tldw server later to enable chat history, media ingest, and Knowledge search.'
-              )}
-            </span>
-          }
-        />
+        >
+          {t(
+            'healthPage.noServerBannerBody',
+            'You can explore the UI first, then connect a tldw server later to enable chat history, media ingest, and Knowledge search.'
+          )}
+        </DesignSystemAlert>
       )}
 
       {!serverUrl || coreStatus === 'failed' ? (
-        <Alert
-          type="warning"
-          showIcon
-          title={!serverUrl ? t('healthPage.serverNotConfigured', 'Server is not configured.') : t('healthPage.unableToReachCore', 'Unable to reach server core health endpoint.')}
-          description={serverUrl ? t('healthPage.triedGet', 'Tried GET {{url}}', { url: `${serverUrl.replace(/\/$/, '')}/api/v1/health` }) : t('healthPage.configureHint', 'Please configure a server URL under tldw settings.')}
-          action={<Link to="/settings/tldw"><Button size="small">{t('healthPage.configureCta', 'Configure')}</Button></Link>}
-        />
+        !serverUrl ? (
+          <SetupRequiredPanel
+            title={t('healthPage.serverNotConfigured', 'Server is not configured.')}
+            message={t('healthPage.configureHint', 'Please configure a server URL under tldw settings.')}
+            primaryAction={{
+              label: t('healthPage.configureCta', 'Configure'),
+              onClick: () => navigate("/settings/tldw")
+            }}
+          />
+        ) : (
+          <RecoveryCallout
+            state="unavailable"
+            title={t('healthPage.unableToReachCore', 'Unable to reach server core health endpoint.')}
+            message={t('healthPage.triedGet', 'Tried GET {{url}}', { url: `${serverUrl.replace(/\/$/, '')}/api/v1/health` })}
+            primaryAction={{
+              label: t('healthPage.configureCta', 'Configure'),
+              onClick: () => navigate("/settings/tldw")
+            }}
+          />
+        )
       ) : (
-        <Alert type="success" showIcon title={t('healthPage.connectedTo', 'Connected to {{host}}', { host: serverUrl })} />
+        <DesignSystemAlert
+          variant="success"
+          title={t('healthPage.connectedTo', 'Connected to {{host}}', { host: serverUrl })}
+        />
       )}
 
       {(!serverUrl || coreStatus === 'failed') && (
@@ -597,20 +615,20 @@ export default function HealthStatus() {
       )}
 
       {autoRefresh && showIntervalWarning && (
-        <Alert
-          type="warning"
-          showIcon
+        <DesignSystemAlert
+          variant="warning"
           title={t(
             'healthPage.autoRefreshWarningTitle',
             'Auto-refresh is enabled with a short interval'
           )}
-          description={t(
+          className="mb-4"
+        >
+          {t(
             'healthPage.intervalWarning',
             'Short intervals can put load on your server. Consider using at least {{seconds}}s.',
             { seconds: SAFE_FLOOR_SEC }
           )}
-          className="mb-4"
-        />
+        </DesignSystemAlert>
       )}
 
       <div className="flex items-center gap-4">
@@ -707,7 +725,11 @@ export default function HealthStatus() {
                 extra={
                   isCheckRunning ? (
                     <Space size="small">
-                      <Spin size="small" />
+                      <LoadingState
+                        mode="inline"
+                        size="sm"
+                        data-testid={`health-check-${c.key}-loading`}
+                      />
                       <span className="text-text-subtle">{t('healthPage.checking', 'Checking…')}</span>
                     </Space>
                   ) : (
@@ -720,12 +742,12 @@ export default function HealthStatus() {
                 <Space size="middle" className="flex flex-wrap">
                   {r.status === 'healthy' ? (
                     <Tag color="green" className={recentHealthy.has(c.key) ? 'animate-pulse ring-2 ring-emerald-400' : undefined}>
-                      {t('healthPage.healthy', 'Healthy')}
+                      {t('healthPage.ready', READY_STATE_LABEL)}
                     </Tag>
                   ) : r.status === 'unhealthy' ? (
-                    <Tag color="red">{t('healthPage.unhealthy', 'Unhealthy')}</Tag>
+                    <Tag color="red">{t('healthPage.degraded', DEGRADED_STATE_LABEL)}</Tag>
                   ) : (
-                    <Tag>{t('healthPage.unknown', 'Unknown')}</Tag>
+                    <Tag>{t('healthPage.loadingState', LOADING_STATE_LABEL)}</Tag>
                   )}
                   <Typography.Text type="secondary">{c.path}</Typography.Text>
                   {typeof r.statusCode !== 'undefined' && (
@@ -848,15 +870,15 @@ export default function HealthStatus() {
               </Button>
             </div>
             {queueError && (
-              <Alert
-                type="warning"
-                showIcon
+              <DesignSystemAlert
+                variant="warning"
                 title={t(
                   "healthPage.queueError",
                   "Queue diagnostics unavailable"
                 )}
-                description={queueError}
-              />
+              >
+                {queueError}
+              </DesignSystemAlert>
             )}
             {queueStatus && (
               <Card

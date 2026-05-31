@@ -16,7 +16,15 @@ def client_with_wf(tmp_path, auth_headers):
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
 
     async def override_user():
-        return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
+        return User(
+            id=1,
+            username="tester",
+            email="t@e.com",
+            is_active=True,
+            is_admin=True,
+            tenant_id="default",
+            roles=["admin"],
+        )
 
     def override_db():
 
@@ -114,6 +122,28 @@ def test_log_only_outputs_shape(client_with_wf: TestClient):
     assert out.get("logged") is True
     assert out.get("level") == "debug"
     assert out.get("message", "").endswith("Bob")
+
+
+def test_log_only_run_persists_canonical_attempt_row(client_with_wf: TestClient):
+    client = client_with_wf
+    definition = {
+        "name": "log-only-attempt-row",
+        "version": 1,
+        "steps": [
+            {"id": "l1", "type": "log", "config": {"message": "Hello {{ inputs.name }}", "level": "info"}},
+        ],
+    }
+    wid = client.post("/api/v1/workflows", json=definition).json()["id"]
+    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"name": "Ivy"}}).json()["run_id"]
+    data = _wait_for_terminal(client, run_id)
+    assert data["status"] == "succeeded"
+
+    db = app.dependency_overrides[wf_mod._get_db]()
+    attempts = db.list_step_attempts(run_id=run_id, step_id="l1")
+    assert len(attempts) == 1
+    assert attempts[0]["attempt_number"] == 1
+    assert attempts[0]["status"] == "succeeded"
+    assert attempts[0]["ended_at"] is not None
 
 
 def test_step_types_include_deep_research(client_with_wf: TestClient):

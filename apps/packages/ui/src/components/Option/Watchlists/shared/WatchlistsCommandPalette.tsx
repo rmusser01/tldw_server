@@ -2,6 +2,8 @@ import React, { useCallback, useMemo, useState } from "react"
 import { Input, Modal } from "antd"
 import {
   CalendarClock,
+  Copy,
+  Download,
   FileOutput,
   FileText,
   Newspaper,
@@ -20,6 +22,7 @@ export interface CommandPaletteCommand {
   icon: React.ReactNode
   category: "navigate" | "create" | "action"
   keywords?: string[]
+  disabledReason?: string
   onExecute: () => void
 }
 
@@ -74,6 +77,7 @@ export const WatchlistsCommandPalette: React.FC<WatchlistsCommandPaletteProps> =
 
   const handleSelect = useCallback(
     (cmd: CommandPaletteCommand) => {
+      if (cmd.disabledReason) return
       onClose()
       setQuery("")
       cmd.onExecute()
@@ -124,17 +128,29 @@ export const WatchlistsCommandPalette: React.FC<WatchlistsCommandPaletteProps> =
               {cmds.map((cmd) => (
                 <div
                   key={cmd.id}
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-hover"
+                  className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm ${
+                    cmd.disabledReason
+                      ? "cursor-not-allowed opacity-60"
+                      : "cursor-pointer hover:bg-surface-hover"
+                  }`}
                   onClick={() => handleSelect(cmd)}
                   role="button"
                   tabIndex={0}
+                  aria-disabled={cmd.disabledReason ? true : undefined}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleSelect(cmd)
                   }}
                   data-testid={`watchlists-command-${cmd.id}`}
                 >
                   <span className="text-text-muted">{cmd.icon}</span>
-                  <span className="flex-1">{cmd.label}</span>
+                  <span className="flex-1">
+                    <span>{cmd.label}</span>
+                    {cmd.disabledReason && (
+                      <span className="block text-xs text-text-muted">
+                        {cmd.disabledReason}
+                      </span>
+                    )}
+                  </span>
                 </div>
               ))}
             </div>
@@ -156,6 +172,9 @@ export const useWatchlistsCommands = (actions: {
   openSettings: () => void
   refreshCurrentView: () => void
   startGuidedTour: () => void
+  createPipeline?: () => void
+  exportSources?: () => void
+  exportRuns?: () => void
 }): CommandPaletteCommand[] => {
   const { t } = useTranslation(["watchlists"])
 
@@ -171,10 +190,10 @@ export const useWatchlistsCommands = (actions: {
       },
       {
         id: "nav-articles",
-        label: t("watchlists:commandPalette.commands.openArticles", "Open Articles"),
+        label: t("watchlists:commandPalette.commands.openArticles", "Open Updates"),
         icon: <Newspaper className="h-4 w-4" />,
         category: "navigate" as const,
-        keywords: ["items", "articles", "content"],
+        keywords: ["items", "updates", "content"],
         onExecute: () => actions.setActiveTab("items")
       },
       {
@@ -210,6 +229,20 @@ export const useWatchlistsCommands = (actions: {
         onExecute: () => actions.setActiveTab("templates")
       },
       {
+        id: "create-pipeline",
+        label: t("watchlists:commandPalette.commands.createPipeline", "Create pipeline"),
+        icon: <Plus className="h-4 w-4" />,
+        category: "create" as const,
+        keywords: ["wizard", "pipeline", "digest", "audio", "briefing"],
+        disabledReason: actions.createPipeline
+          ? undefined
+          : t(
+              "watchlists:commandPalette.unavailable.createPipeline",
+              "Pipeline wizard is unavailable in this view."
+            ),
+        onExecute: actions.createPipeline || (() => undefined)
+      },
+      {
         id: "create-feed",
         label: t("watchlists:commandPalette.commands.createFeed", "Create feed"),
         icon: <Plus className="h-4 w-4" />,
@@ -238,6 +271,106 @@ export const useWatchlistsCommands = (actions: {
         category: "action" as const,
         keywords: ["reload", "update"],
         onExecute: actions.refreshCurrentView
+      },
+      {
+        id: "action-clone-feed",
+        label: t("watchlists:commandPalette.commands.cloneFeed", "Clone selected feed"),
+        icon: <Copy className="h-4 w-4" />,
+        category: "action" as const,
+        keywords: ["copy", "duplicate", "source", "feed"],
+        disabledReason: t(
+          "watchlists:commandPalette.unavailable.cloneFeed",
+          "Choose a feed row to clone."
+        ),
+        onExecute: () => undefined
+      },
+      {
+        id: "action-clone-monitor",
+        label: t("watchlists:commandPalette.commands.cloneMonitor", "Clone selected monitor"),
+        icon: <Copy className="h-4 w-4" />,
+        category: "action" as const,
+        keywords: ["copy", "duplicate", "job", "monitor"],
+        disabledReason: t(
+          "watchlists:commandPalette.unavailable.cloneMonitor",
+          "Choose a monitor row to clone."
+        ),
+        onExecute: () => undefined
+      },
+      {
+        id: "action-validate-feeds",
+        label: t("watchlists:commandPalette.commands.validateFeeds", "Validate feeds"),
+        icon: <RefreshCw className="h-4 w-4" />,
+        category: "action" as const,
+        keywords: ["test", "check", "validate", "sources"],
+        disabledReason: t(
+          "watchlists:commandPalette.unavailable.validateFeeds",
+          "Select feeds in the Feeds table, then use Check Now."
+        ),
+        onExecute: () => undefined
+      },
+      {
+        id: "action-run-monitor",
+        label: t("watchlists:commandPalette.commands.runMonitor", "Run monitor"),
+        icon: <Play className="h-4 w-4" />,
+        category: "action" as const,
+        keywords: ["run", "start", "monitor", "job"],
+        disabledReason: t(
+          "watchlists:commandPalette.unavailable.runMonitor",
+          "Choose a monitor row to run."
+        ),
+        onExecute: () => undefined
+      },
+      {
+        id: "action-preview-monitor",
+        label: t("watchlists:commandPalette.commands.previewMonitor", "Preview monitor"),
+        icon: <FileText className="h-4 w-4" />,
+        category: "action" as const,
+        keywords: ["preview", "monitor", "job"],
+        disabledReason: t(
+          "watchlists:commandPalette.unavailable.previewMonitor",
+          "Choose a monitor row to preview."
+        ),
+        onExecute: () => undefined
+      },
+      {
+        id: "action-retry-run",
+        label: t("watchlists:commandPalette.commands.retryRun", "Retry failed run"),
+        icon: <RefreshCw className="h-4 w-4" />,
+        category: "action" as const,
+        keywords: ["retry", "failed", "activity", "run"],
+        disabledReason: t(
+          "watchlists:commandPalette.unavailable.retryRun",
+          "Open a failed run to choose full, delivery, or audio retry."
+        ),
+        onExecute: () => undefined
+      },
+      {
+        id: "action-export-sources",
+        label: t("watchlists:commandPalette.commands.exportSources", "Export feeds OPML"),
+        icon: <Download className="h-4 w-4" />,
+        category: "action" as const,
+        keywords: ["export", "opml", "feeds", "sources"],
+        disabledReason: actions.exportSources
+          ? undefined
+          : t(
+              "watchlists:commandPalette.unavailable.exportSources",
+              "Feed export is unavailable in this view."
+            ),
+        onExecute: actions.exportSources || (() => undefined)
+      },
+      {
+        id: "action-export-runs",
+        label: t("watchlists:commandPalette.commands.exportRuns", "Export activity CSV"),
+        icon: <Download className="h-4 w-4" />,
+        category: "action" as const,
+        keywords: ["export", "csv", "runs", "activity"],
+        disabledReason: actions.exportRuns
+          ? undefined
+          : t(
+              "watchlists:commandPalette.unavailable.exportRuns",
+              "Activity export is unavailable in this view."
+            ),
+        onExecute: actions.exportRuns || (() => undefined)
       },
       {
         id: "action-settings",

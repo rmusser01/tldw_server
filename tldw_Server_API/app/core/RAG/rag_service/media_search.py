@@ -110,8 +110,8 @@ async def _reformulate_query(
         reformulated = text.strip().strip('"\'')
         return reformulated if reformulated else query
 
-    except Exception as exc:
-        logger.debug(f"Media query reformulation failed: {exc!r}")
+    except Exception:
+        logger.debug("Media query reformulation failed; using original query")
         return query
 
 
@@ -182,8 +182,8 @@ async def search_images(
 
         return images
 
-    except Exception as exc:
-        logger.warning(f"Image search failed: {exc!r}")
+    except Exception:
+        logger.warning("Image search failed; returning no image results")
         return []
 
 
@@ -263,6 +263,6 @@ async def search_videos(
 
         return videos
 
-    except Exception as exc:
-        logger.warning(f"Video search failed: {exc!r}")
+    except Exception:
+        logger.warning("Video search failed; returning no video results")
         return []

@@ -189,6 +189,44 @@ class TestNemoTranscription:
         assert kwargs.get("source_lang") == "fr"
         assert kwargs.get("target_lang") == "en"
 
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.load_canary_model')
+    def test_transcribe_with_canary_sanitizes_runtime_errors(self, mock_load_model):
+        """Canary runtime failures should not leak backend exception text."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            transcribe_with_canary,
+        )
+
+        mock_model = MagicMock()
+        mock_model.transcribe.side_effect = RuntimeError(
+            "canary failed at /private/models/canary"
+        )
+        mock_load_model.return_value = mock_model
+
+        result = transcribe_with_canary("audio.wav", 16000, "en")
+
+        assert result == "[Transcription error] Canary transcription failed"
+        assert "canary failed" not in result
+        assert "/private/models/canary" not in result
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.load_parakeet_model')
+    def test_transcribe_with_parakeet_sanitizes_runtime_errors(self, mock_load_model):
+        """Parakeet runtime failures should not leak backend exception text."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            transcribe_with_parakeet,
+        )
+
+        mock_model = MagicMock()
+        mock_model.transcribe.side_effect = RuntimeError(
+            "parakeet failed at /private/models/parakeet"
+        )
+        mock_load_model.return_value = mock_model
+
+        result = transcribe_with_parakeet("audio.wav", 16000, "standard")
+
+        assert result == "[Transcription error] Parakeet transcription failed"
+        assert "parakeet failed" not in result
+        assert "/private/models/parakeet" not in result
+
     def test_transcribe_with_nemo_unified(self, sample_audio):
 
         """Test unified Nemo transcription entry point."""

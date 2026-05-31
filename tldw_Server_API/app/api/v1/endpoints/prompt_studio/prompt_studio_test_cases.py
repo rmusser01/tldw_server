@@ -35,9 +35,15 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_access,
     require_project_write_access,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Local imports
-from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import ListResponse, StandardResponse
+from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import (
+    ListResponse,
+    PageListResponse,
+    StandardResponse,
+)
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_test import (
     RunTestCasesSimpleRequest,
     TestCaseBulkCreate,
@@ -52,7 +58,6 @@ from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import Conflict
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_generator import TestCaseGenerator
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_io import TestCaseIO
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager import TestCaseManager
-from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 PROMPT_STUDIO_TEST_CASE_EXCEPTIONS = (
@@ -202,17 +207,14 @@ async def create_test_case(
         )
 
     except ConflictError as e:
-        logger.warning("Conflict creating test case: {}", e)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Test case already exists"
+        logger.warning("Conflict creating test case")
+        raise map_db_error_to_http(
+            e,
+            conflict_detail="Test case already exists",
         ) from e
     except DatabaseError as e:
-        logger.error(f"Database error creating test case: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create test case"
-        ) from e
+        logger.error("Database error creating test case")
+        raise map_db_error_to_http(e, default_detail="Failed to create test case") from e
 
 @router.post(
     "/bulk",
@@ -316,15 +318,12 @@ async def create_bulk_test_cases(
         )
 
     except DatabaseError as e:
-        logger.error(f"Database error creating bulk test cases: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create test cases"
-        ) from e
+        logger.error("Database error creating bulk test cases")
+        raise map_db_error_to_http(e, default_detail="Failed to create test cases") from e
 
 @router.get(
     "/list/{project_id}",
-    response_model=ListResponse,
+    response_model=PageListResponse,
     openapi_extra={
         "responses": {
             "200": {
@@ -364,7 +363,7 @@ async def list_test_cases(
     signature_id: Optional[int] = Query(None, description="Filter by signature"),
     _: bool = Depends(require_project_access),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db)
-) -> ListResponse:
+) -> PageListResponse:
     """
     List test cases in a project.
 
@@ -401,26 +400,25 @@ async def list_test_cases(
             return_pagination=True
         )
 
-        return ListResponse(
+        return PageListResponse(
             success=True,
             data=[TestCaseResponse(**tc) for tc in result["test_cases"]],
-            metadata=result["pagination"]
+            metadata=result["pagination"],
+            pagination=build_page_pagination_meta(
+                page=result["pagination"]["page"],
+                per_page=result["pagination"]["per_page"],
+                total=result["pagination"]["total"],
+                total_pages=result["pagination"]["total_pages"],
+            ),
         )
 
     except DatabaseError as e:
-        logger.error(f"Database error listing test cases: {e}")
         detail = "Failed to list test cases"
-        if is_test_mode():
-            detail = f"{detail}: {e}"
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=detail,
-        ) from e
+        logger.error("Database error listing test cases")
+        raise map_db_error_to_http(e, default_detail=detail) from e
     except Exception as e:  # noqa: BLE001
-        logger.exception("Unexpected error listing test cases: {}", e)
+        logger.error("Unexpected error listing test cases")
         detail = "Failed to list test cases"
-        if is_test_mode():
-            detail = f"{detail}: {e}"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=detail,
@@ -463,11 +461,8 @@ async def get_test_case(
         )
 
     except DatabaseError as e:
-        logger.error(f"Database error getting test case: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get test case"
-        ) from e
+        logger.error("Database error getting test case")
+        raise map_db_error_to_http(e, default_detail="Failed to get test case") from e
 
 @router.put("/update/{test_case_id}", response_model=StandardResponse, openapi_extra={
     "responses": {
@@ -528,15 +523,15 @@ async def update_test_case(
         )
 
     except InputError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
+        raise map_db_error_to_http(
+            e,
+            input_status_code=status.HTTP_404_NOT_FOUND,
         ) from e
     except DatabaseError as e:
-        logger.error(f"Database error updating test case: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update test case"
+        logger.error("Database error updating test case")
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to update test case",
         ) from e
 
 @router.delete("/delete/{test_case_id}", response_model=StandardResponse, openapi_extra={
@@ -597,11 +592,8 @@ async def delete_test_case(
         )
 
     except DatabaseError as e:
-        logger.error(f"Database error deleting test case: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete test case"
-        ) from e
+        logger.error("Database error deleting test case")
+        raise map_db_error_to_http(e, default_detail="Failed to delete test case") from e
 
 ########################################################################################################################
 # Import/Export Endpoints
@@ -699,7 +691,7 @@ async def import_test_cases(
         # Check if we exceeded the limit
         new_total = current_count + imported
         if new_total > security_config.max_test_cases:
-            logger.warning(f"Import would exceed test case limit for project {import_data.project_id}")
+            logger.warning("Import would exceed test case limit")
 
         logger.info(f"User {user_context['user_id']} imported {imported} test cases")
 
@@ -712,8 +704,14 @@ async def import_test_cases(
             }
         )
 
+    except (DatabaseError, InputError, ConflictError) as e:
+        logger.error("Error importing test cases")
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to import test cases",
+        ) from e
     except PROMPT_STUDIO_TEST_CASE_EXCEPTIONS as e:
-        logger.error(f"Error importing test cases: {e}")
+        logger.error("Error importing test cases")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to import test cases"
@@ -798,8 +796,14 @@ async def import_test_cases_csv_upload(
                 "total_test_cases": current_total
             }
         )
+    except (DatabaseError, InputError, ConflictError) as e:
+        logger.error("Error importing test cases via upload")
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to import CSV test cases",
+        ) from e
     except PROMPT_STUDIO_TEST_CASE_EXCEPTIONS as e:
-        logger.error(f"Error importing test cases via upload: {e}")
+        logger.error("Error importing test cases via upload")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to import CSV test cases") from e
 
 
@@ -843,8 +847,14 @@ async def get_csv_import_template(
             media_type="text/csv",
             headers={"Content-Disposition": "attachment; filename=prompt_studio_test_cases_template.csv"}
         )
+    except (DatabaseError, InputError, ConflictError) as e:
+        logger.error("Failed to generate CSV template")
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to generate CSV template",
+        ) from e
     except PROMPT_STUDIO_TEST_CASE_EXCEPTIONS as e:
-        logger.error(f"Failed to generate CSV template: {e}")
+        logger.error("Failed to generate CSV template")
         raise HTTPException(status_code=500, detail="Failed to generate CSV template") from e
 
 # Compatibility: run test cases endpoint returning {"results": [...]}
@@ -963,8 +973,14 @@ async def export_test_cases(
             }
         )
 
+    except (DatabaseError, InputError, ConflictError) as e:
+        logger.error("Error exporting test cases")
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to export test cases",
+        ) from e
     except PROMPT_STUDIO_TEST_CASE_EXCEPTIONS as e:
-        logger.error(f"Error exporting test cases: {e}")
+        logger.error("Error exporting test cases")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to export test cases"
@@ -1082,13 +1098,19 @@ async def generate_test_cases(
         )
 
     except ValueError as e:
-        logger.warning("Invalid test case generation request: {}", e)
+        logger.warning("Invalid test case generation request")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid test case generation request"
         ) from e
+    except (DatabaseError, InputError, ConflictError) as e:
+        logger.error("Error generating test cases")
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to generate test cases",
+        ) from e
     except PROMPT_STUDIO_TEST_CASE_EXCEPTIONS as e:
-        logger.error(f"Error generating test cases: {e}")
+        logger.error("Error generating test cases")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate test cases"

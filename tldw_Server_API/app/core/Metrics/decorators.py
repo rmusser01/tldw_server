@@ -340,8 +340,8 @@ def count_calls(
                         extracted = label_extractor(*args, **kwargs)
                         if isinstance(extracted, dict):
                             metric_labels.update(extracted)
-                    except _METRIC_DECORATOR_NONCRITICAL_EXCEPTIONS as e:
-                        logger.debug(f"label_extractor failed (async): error={e}")
+                    except _METRIC_DECORATOR_NONCRITICAL_EXCEPTIONS:
+                        logger.debug("label_extractor failed (async)")
 
                 increment_counter(counter_name, labels=metric_labels)
                 return await func(*args, **kwargs)
@@ -356,8 +356,8 @@ def count_calls(
                         extracted = label_extractor(*args, **kwargs)
                         if isinstance(extracted, dict):
                             metric_labels.update(extracted)
-                    except _METRIC_DECORATOR_NONCRITICAL_EXCEPTIONS as e:
-                        logger.debug(f"label_extractor failed (sync): error={e}")
+                    except _METRIC_DECORATOR_NONCRITICAL_EXCEPTIONS:
+                        logger.debug("label_extractor failed (sync)")
 
                 increment_counter(counter_name, labels=metric_labels)
                 return func(*args, **kwargs)

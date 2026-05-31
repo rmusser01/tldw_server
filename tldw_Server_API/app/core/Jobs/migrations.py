@@ -264,5 +264,5 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
         except _JOBS_PATH_EXCEPTIONS:
             logger.info(f"Ensured Jobs schema at {db_path}")
     except _JOBS_DB_EXCEPTIONS as e:
-        logger.warning(f"Failed to ensure Jobs schema at {db_path}: {e}")
+        logger.warning("Failed to ensure Jobs schema ({})", type(e).__name__)
     return db_path

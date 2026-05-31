@@ -20,11 +20,41 @@ This module tests all 11 research adapters:
 from __future__ import annotations
 
 import json
+import sys
+import types
 from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.unit
+
+
+def _patch_module_import(monkeypatch, module_name: str, fake_module: object) -> None:
+    """Patch a locally imported optional module without replacing global package state."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == module_name:
+            return fake_module
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+
+def _fake_httpx_module_with_error(message: str) -> object:
+    class _ExplodingClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, *args, **kwargs):
+            raise RuntimeError(message)
+
+    return types.SimpleNamespace(AsyncClient=lambda *args, **kwargs: _ExplodingClient())
 
 
 # =============================================================================
@@ -1108,6 +1138,49 @@ async def test_arxiv_search_adapter_sort_options(monkeypatch):
     assert "papers" in result
 
 
+@pytest.mark.asyncio
+async def test_arxiv_search_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test arXiv search hides provider exception details."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        run_arxiv_search_adapter,
+        search as search_module,
+    )
+
+    class _ExplodingSearch:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def results(self):
+            raise RuntimeError("arXiv backend exploded at /private/arxiv-cache")
+
+    fake_arxiv = types.SimpleNamespace(
+        Search=_ExplodingSearch,
+        SortCriterion=types.SimpleNamespace(
+            Relevance="relevance",
+            LastUpdatedDate="last_updated",
+            SubmittedDate="submitted",
+        ),
+        SortOrder=types.SimpleNamespace(Ascending="ascending", Descending="descending"),
+    )
+    monkeypatch.setitem(sys.modules, "arxiv", fake_arxiv)
+
+    messages: list[str] = []
+    sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_arxiv_search_adapter({"query": "private topic"}, {})
+    finally:
+        search_module.logger.remove(sink_id)
+
+    assert result == {"papers": [], "error": "arXiv search failed"}
+    joined = "\n".join(messages)
+    assert "arXiv search error" in joined
+    assert "arXiv backend exploded" not in joined
+    assert "/private/arxiv-cache" not in joined
+
+
 # =============================================================================
 # arXiv Download Adapter Tests
 # =============================================================================
@@ -1206,6 +1279,41 @@ async def test_arxiv_download_adapter_cancelled(monkeypatch):
     assert result.get("__status__") == "cancelled"
 
 
+@pytest.mark.asyncio
+async def test_arxiv_download_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test arXiv download hides provider exception details."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        run_arxiv_download_adapter,
+        search as search_module,
+    )
+
+    class _ExplodingSearch:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def results(self):
+            raise RuntimeError("arXiv download token at /private/arxiv-download-cache")
+
+    fake_arxiv = types.SimpleNamespace(Search=_ExplodingSearch)
+    monkeypatch.setitem(sys.modules, "arxiv", fake_arxiv)
+
+    messages: list[str] = []
+    sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_arxiv_download_adapter({"arxiv_id": "2301.00001"}, {"step_run_id": "arxiv-test"})
+    finally:
+        search_module.logger.remove(sink_id)
+
+    assert result == {"error": "arXiv download failed", "downloaded": False}
+    joined = "\n".join(messages)
+    assert "arXiv download error" in joined
+    assert "arXiv download token" not in joined
+    assert "/private/arxiv-download-cache" not in joined
+
+
 # =============================================================================
 # PubMed Search Adapter Tests
 # =============================================================================
@@ -1288,6 +1396,37 @@ async def test_pubmed_search_adapter_cancelled(monkeypatch):
     result = await run_pubmed_search_adapter(config, context)
 
     assert result.get("__status__") == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_pubmed_search_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test PubMed search hides HTTP backend exception details."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        run_pubmed_search_adapter,
+        search as search_module,
+    )
+
+    _patch_module_import(
+        monkeypatch,
+        "httpx",
+        _fake_httpx_module_with_error("PubMed token at /private/pubmed-cache"),
+    )
+
+    messages: list[str] = []
+    sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_pubmed_search_adapter({"query": "private topic"}, {})
+    finally:
+        search_module.logger.remove(sink_id)
+
+    assert result == {"papers": [], "error": "PubMed search failed"}
+    joined = "\n".join(messages)
+    assert "PubMed search error" in joined
+    assert "PubMed token" not in joined
+    assert "/private/pubmed-cache" not in joined
 
 
 # =============================================================================
@@ -1379,6 +1518,37 @@ async def test_semantic_scholar_search_adapter_cancelled(monkeypatch):
     assert result.get("__status__") == "cancelled"
 
 
+@pytest.mark.asyncio
+async def test_semantic_scholar_search_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test Semantic Scholar search hides HTTP backend exception details."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        run_semantic_scholar_search_adapter,
+        search as search_module,
+    )
+
+    _patch_module_import(
+        monkeypatch,
+        "httpx",
+        _fake_httpx_module_with_error("Semantic Scholar token at /private/s2-cache"),
+    )
+
+    messages: list[str] = []
+    sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_semantic_scholar_search_adapter({"query": "private topic"}, {})
+    finally:
+        search_module.logger.remove(sink_id)
+
+    assert result == {"papers": [], "error": "Semantic Scholar search failed"}
+    joined = "\n".join(messages)
+    assert "Semantic Scholar search error" in joined
+    assert "Semantic Scholar token" not in joined
+    assert "/private/s2-cache" not in joined
+
+
 # =============================================================================
 # Google Scholar Search Adapter Tests
 # =============================================================================
@@ -1461,6 +1631,38 @@ async def test_google_scholar_search_adapter_cancelled(monkeypatch):
     result = await run_google_scholar_search_adapter(config, context)
 
     assert result.get("__status__") == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_google_scholar_search_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test Google Scholar search hides provider exception details."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        run_google_scholar_search_adapter,
+        search as search_module,
+    )
+
+    fake_scholarly = types.SimpleNamespace(
+        search_pubs=lambda query: (_ for _ in ()).throw(
+            RuntimeError("Google Scholar token at /private/scholar-cache")
+        )
+    )
+    monkeypatch.setitem(sys.modules, "scholarly", types.SimpleNamespace(scholarly=fake_scholarly))
+
+    messages: list[str] = []
+    sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_google_scholar_search_adapter({"query": "private topic"}, {})
+    finally:
+        search_module.logger.remove(sink_id)
+
+    assert result == {"papers": [], "error": "Google Scholar search failed"}
+    joined = "\n".join(messages)
+    assert "Google Scholar search error" in joined
+    assert "Google Scholar token" not in joined
+    assert "/private/scholar-cache" not in joined
 
 
 # =============================================================================
@@ -1546,6 +1748,37 @@ async def test_patent_search_adapter_cancelled(monkeypatch):
     result = await run_patent_search_adapter(config, context)
 
     assert result.get("__status__") == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_patent_search_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test patent search hides HTTP backend exception details."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        run_patent_search_adapter,
+        search as search_module,
+    )
+
+    _patch_module_import(
+        monkeypatch,
+        "httpx",
+        _fake_httpx_module_with_error("Patent token at /private/patent-cache"),
+    )
+
+    messages: list[str] = []
+    sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_patent_search_adapter({"query": "private topic"}, {})
+    finally:
+        search_module.logger.remove(sink_id)
+
+    assert result == {"patents": [], "error": "Patent search failed"}
+    joined = "\n".join(messages)
+    assert "Patent search error" in joined
+    assert "Patent token" not in joined
+    assert "/private/patent-cache" not in joined
 
 
 # =============================================================================
@@ -1655,6 +1888,59 @@ async def test_doi_resolve_adapter_cancelled(monkeypatch):
     result = await run_doi_resolve_adapter(config, context)
 
     assert result.get("__status__") == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_doi_resolve_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test DOI resolve hides backend exception details."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        bibliography as bibliography_module,
+        run_doi_resolve_adapter,
+    )
+
+    class ExplodingClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, *args, **kwargs):
+            raise RuntimeError("DOI backend exploded at /private/doi-cache")
+
+    class FakeHttpx:
+        AsyncClient = staticmethod(lambda *args, **kwargs: ExplodingClient())
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "httpx":
+            return FakeHttpx
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    messages: list[str] = []
+    sink_id = bibliography_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_doi_resolve_adapter({"doi": "10.1234/example"}, {})
+    finally:
+        bibliography_module.logger.remove(sink_id)
+
+    assert result == {
+        "metadata": {},
+        "error": "DOI resolution failed",
+        "resolved": False,
+    }
+    joined = "\n".join(messages)
+    assert "DOI resolve error" in joined
+    assert "DOI backend exploded" not in joined
+    assert "/private/doi-cache" not in joined
 
 
 # =============================================================================
@@ -1785,6 +2071,38 @@ async def test_reference_parse_adapter_invalid_json_response(monkeypatch):
 
     assert result["parsed"] == {}
     assert "raw_text" in result
+
+
+@pytest.mark.asyncio
+async def test_reference_parse_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test reference parse hides LLM backend exception details."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        bibliography as bibliography_module,
+        run_reference_parse_adapter,
+    )
+
+    async def explode_chat(*args, **kwargs):
+        raise RuntimeError("reference backend exploded at /private/reference-cache")
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_svc
+
+    monkeypatch.setattr(chat_svc, "perform_chat_api_call_async", explode_chat)
+
+    messages: list[str] = []
+    sink_id = bibliography_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_reference_parse_adapter({"citation": "Smith 2024. Example."}, {})
+    finally:
+        bibliography_module.logger.remove(sink_id)
+
+    assert result == {"parsed": {}, "error": "Reference parsing failed"}
+    joined = "\n".join(messages)
+    assert "Reference parse error" in joined
+    assert "reference backend exploded" not in joined
+    assert "/private/reference-cache" not in joined
 
 
 # =============================================================================
@@ -2154,6 +2472,44 @@ async def test_literature_review_adapter_with_template(monkeypatch):
     assert "review" in result
 
 
+@pytest.mark.asyncio
+async def test_literature_review_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test literature review hides LLM backend exception details."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        bibliography as bibliography_module,
+        run_literature_review_adapter,
+    )
+
+    async def explode_chat(*args, **kwargs):
+        raise RuntimeError("literature backend exploded at /private/literature-cache")
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_svc
+
+    monkeypatch.setattr(chat_svc, "perform_chat_api_call_async", explode_chat)
+
+    messages: list[str] = []
+    sink_id = bibliography_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_literature_review_adapter(
+            {"papers": [{"title": "Paper", "authors": ["Author"], "year": 2024}]},
+            {},
+        )
+    finally:
+        bibliography_module.logger.remove(sink_id)
+
+    assert result == {
+        "review": "",
+        "error": "Literature review generation failed",
+    }
+    joined = "\n".join(messages)
+    assert "Literature review error" in joined
+    assert "literature backend exploded" not in joined
+    assert "/private/literature-cache" not in joined
+
+
 # =============================================================================
 # Integration Tests - Testing Adapter Chaining
 # =============================================================================
@@ -2292,8 +2648,7 @@ async def test_literature_review_adapter_llm_error(monkeypatch):
     result = await run_literature_review_adapter(config, context)
 
     assert result["review"] == ""
-    assert "error" in result
-    assert "LLM service unavailable" in result["error"]
+    assert result.get("error") == "Literature review generation failed"
 
 
 @pytest.mark.asyncio
@@ -2317,8 +2672,7 @@ async def test_reference_parse_adapter_llm_error(monkeypatch):
     result = await run_reference_parse_adapter(config, context)
 
     assert result["parsed"] == {}
-    assert "error" in result
-    assert "API timeout" in result["error"]
+    assert result.get("error") == "Reference parsing failed"
 
 
 # =============================================================================

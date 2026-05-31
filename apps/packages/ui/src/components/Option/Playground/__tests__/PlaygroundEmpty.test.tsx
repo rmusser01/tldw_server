@@ -44,6 +44,7 @@ describe("PlaygroundEmpty", () => {
 
     const shell = screen.getByTestId("playground-empty-shell");
 
+    expect(shell).toHaveAttribute("data-ds-component", "EmptyState");
     expect(
       within(shell).getByRole("heading", { name: "Start a new chat" }),
     ).toBeInTheDocument();
@@ -54,10 +55,13 @@ describe("PlaygroundEmpty", () => {
       within(shell).getByRole("button", { name: "Quick Ingest" }),
     ).toBeInTheDocument();
     expect(
-      within(shell).getByRole("button", {
+      within(shell).getByRole("button", { name: "Explore chat modes" }),
+    ).toBeInTheDocument();
+    expect(
+      within(shell).queryByRole("button", {
         name: /Compare AI models side-by-side/i,
       }),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
     expect(
       within(shell).getByRole("button", { name: "Take a quick tour" }),
     ).toBeInTheDocument();
@@ -74,10 +78,33 @@ describe("PlaygroundEmpty", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("keeps starter modes behind a discoverable launcher on first render", () => {
+    render(<PlaygroundEmpty />);
+
+    const shell = screen.getByTestId("playground-empty-shell");
+
+    expect(
+      within(shell).queryByRole("button", {
+        name: /Compare AI models side-by-side/i,
+      }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(shell).getByRole("button", { name: "Explore chat modes" }),
+    );
+
+    expect(
+      within(shell).getByRole("button", {
+        name: /Compare AI models side-by-side/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("dispatches starter telemetry and starter action events when compare is selected", () => {
     const dispatchSpy = vi.spyOn(window, "dispatchEvent");
     render(<PlaygroundEmpty />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Explore chat modes" }));
     fireEvent.click(
       screen.getByRole("button", { name: /Compare AI models side-by-side/i }),
     );
@@ -146,6 +173,7 @@ describe("PlaygroundEmpty", () => {
   it("routes the deep research starter to the research console", () => {
     render(<PlaygroundEmpty />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Explore chat modes" }));
     fireEvent.click(screen.getByRole("button", { name: /Deep Research/i }));
 
     expect(navigate).toHaveBeenCalledWith("/research");

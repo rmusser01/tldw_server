@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import {
+  formatQuickSetupCadenceLabel,
   getLocalTimezone,
+  normalizeQuickSetupIntervalCadence,
   parseQuickSetupExtraSourceUrls,
   QUICK_SETUP_DEFAULT_VALUES,
   resolveQuickSetupSchedule,
@@ -17,6 +19,7 @@ describe("watchlists overview quick setup helpers", () => {
       sourceType: "rss",
       monitorName: "",
       schedulePreset: "daily",
+      scheduleCadence: { kind: "daily", time: "08:00" },
       runNow: true,
       setupGoal: "briefing",
       includeAudioBriefing: true
@@ -43,6 +46,98 @@ describe("watchlists overview quick setup helpers", () => {
       schedule_expr: "0 8 * * MON-FRI",
       timezone: "America/New_York"
     })
+
+    timezoneSpy.mockRestore()
+  })
+
+  it("resolves variable cadence drafts into existing schedule fields", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(() => ({
+        resolvedOptions: () => ({ timeZone: "America/Los_Angeles" })
+      }) as Intl.DateTimeFormat)
+
+    expect(resolveQuickSetupSchedule({ kind: "manual" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "interval", every: 5, unit: "hour" })).toEqual({
+      schedule_expr: "0 */5 * * *",
+      timezone: "America/Los_Angeles"
+    })
+    expect(resolveQuickSetupSchedule({ kind: "interval", every: 30, unit: "minute" })).toEqual({
+      schedule_expr: "*/30 * * * *",
+      timezone: "America/Los_Angeles"
+    })
+    expect(resolveQuickSetupSchedule({ kind: "daily", time: "07:45" })).toEqual({
+      schedule_expr: "45 7 * * *",
+      timezone: "America/Los_Angeles"
+    })
+    expect(resolveQuickSetupSchedule({ kind: "weekdays", time: "08:15" })).toEqual({
+      schedule_expr: "15 8 * * MON-FRI",
+      timezone: "America/Los_Angeles"
+    })
+    expect(resolveQuickSetupSchedule({ kind: "weekly", weekday: "mon", time: "08:00" })).toEqual({
+      schedule_expr: "0 8 * * MON",
+      timezone: "America/Los_Angeles"
+    })
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "15 6 * * WED" })).toEqual({
+      schedule_expr: "15 6 * * WED",
+      timezone: "America/Los_Angeles"
+    })
+
+    timezoneSpy.mockRestore()
+  })
+
+  it("normalizes interval cadence labels and payload bounds consistently", () => {
+    expect(normalizeQuickSetupIntervalCadence(30, "hours")).toEqual({
+      kind: "interval",
+      every: 23,
+      unit: "hours"
+    })
+    expect(normalizeQuickSetupIntervalCadence(1, "minutes")).toEqual({
+      kind: "interval",
+      every: 5,
+      unit: "minutes"
+    })
+
+    const intervalCopy = {
+      interval: (value: number, unit: "minutes" | "hours") => `Every ${value} ${unit}`
+    }
+    expect(
+      formatQuickSetupCadenceLabel({ kind: "interval", every: 30, unit: "hours" }, intervalCopy)
+    ).toBe("Every 23 hours")
+    expect(
+      resolveQuickSetupSchedule({ kind: "interval", every: 30, unit: "hours" }).schedule_expr
+    ).toBe("0 */23 * * *")
+    expect(
+      formatQuickSetupCadenceLabel({ kind: "interval", every: 1, unit: "minutes" }, intervalCopy)
+    ).toBe("Every 5 minutes")
+    expect(
+      resolveQuickSetupSchedule({ kind: "interval", every: 1, unit: "minutes" }).schedule_expr
+    ).toBe("*/5 * * * *")
+  })
+
+  it("passes weekly cadence tokens to label copy for localization", () => {
+    expect(
+      formatQuickSetupCadenceLabel(
+        { kind: "weekly", weekday: "fri", time: "06:30" },
+        {
+          weekly: (weekday, time) => `${weekday}:${time}`
+        }
+      )
+    ).toBe("FRI:06:30")
+  })
+
+  it("does not serialize invalid advanced cron drafts", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(() => ({
+        resolvedOptions: () => ({ timeZone: "America/Los_Angeles" })
+      }) as Intl.DateTimeFormat)
+
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "15 6 *" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "15 6 * * WED;rm" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "61 6 * * WED" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "? 6 * * WED" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "*/1 * * * *" })).toEqual({})
 
     timezoneSpy.mockRestore()
   })
@@ -113,8 +208,130 @@ describe("watchlists overview quick setup helpers", () => {
       schedule_expr: "0 8 * * *",
       timezone: "UTC",
       output_prefs: {
-        template_name: "briefing_md",
+        template_name: "briefing_markdown",
+        template: {
+          default_name: "briefing_markdown"
+        },
         generate_audio: true
+      }
+    })
+
+    timezoneSpy.mockRestore()
+  })
+
+  it("uses explicit variable cadence when building monitor payloads", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(() => ({
+        resolvedOptions: () => ({ timeZone: "UTC" })
+      }) as Intl.DateTimeFormat)
+
+    expect(
+      toQuickSetupJobPayload(
+        {
+          monitorName: " Every Five Hours ",
+          schedulePreset: "daily",
+          scheduleCadence: { kind: "interval", every: 5, unit: "hours" },
+          setupGoal: "triage",
+          includeAudioBriefing: false
+        },
+        [42]
+      )
+    ).toEqual({
+      name: "Every Five Hours",
+      scope: { sources: [42] },
+      active: true,
+      schedule_expr: "0 */5 * * *",
+      timezone: "UTC"
+    })
+
+    expect(
+      toQuickSetupJobPayload(
+        {
+          monitorName: " Weekly Brief ",
+          schedulePreset: "daily",
+          scheduleCadence: { kind: "weekly", weekday: "fri", time: "06:30" },
+          setupGoal: "triage",
+          includeAudioBriefing: false
+        },
+        [42]
+      )
+    ).toEqual(
+      expect.objectContaining({
+        schedule_expr: "30 6 * * FRI",
+        timezone: "UTC"
+      })
+    )
+
+    expect(
+      toQuickSetupJobPayload(
+        {
+          monitorName: " Cron Brief ",
+          schedulePreset: "daily",
+          scheduleCadence: { kind: "advanced", cron: "15 6 * * WED" },
+          setupGoal: "triage",
+          includeAudioBriefing: false
+        },
+        [42]
+      )
+    ).toEqual(
+      expect.objectContaining({
+        schedule_expr: "15 6 * * WED",
+        timezone: "UTC"
+      })
+    )
+
+    timezoneSpy.mockRestore()
+  })
+
+  it("attaches selected Watchlist id when building collection payloads", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(() => ({
+        resolvedOptions: () => ({ timeZone: "UTC" })
+      }) as Intl.DateTimeFormat)
+
+    expect(
+      toQuickSetupSourcePayload(
+        {
+          sourceName: " Security Feed ",
+          sourceUrl: " https://example.com/security.xml ",
+          sourceType: "rss"
+        },
+        42
+      )
+    ).toEqual({
+      name: "Security Feed",
+      url: "https://example.com/security.xml",
+      source_type: "rss",
+      active: true,
+      watchlist_id: 42
+    })
+
+    expect(
+      toQuickSetupJobPayload(
+        {
+          monitorName: " Security Monitor ",
+          schedulePreset: "daily",
+          setupGoal: "briefing",
+          includeAudioBriefing: false
+        },
+        [101],
+        42
+      )
+    ).toEqual({
+      name: "Security Monitor",
+      scope: { sources: [101] },
+      active: true,
+      schedule_expr: "0 8 * * *",
+      timezone: "UTC",
+      watchlist_id: 42,
+      output_prefs: {
+        template_name: "briefing_markdown",
+        template: {
+          default_name: "briefing_markdown"
+        },
+        generate_audio: false
       }
     })
 

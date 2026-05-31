@@ -3,6 +3,7 @@ import {
   Button,
   Input,
   Progress,
+  Segmented,
   Select,
   Space,
   Switch,
@@ -23,7 +24,21 @@ type CommonOptions = {
   perform_analysis: boolean
   perform_chunking: boolean
   overwrite_existing: boolean
+  chunking_mode?: "auto" | "manual"
+  auto_chunking_goal?: "balanced" | "qa_search" | "navigation_summary"
+  auto_chunking_use_llm?: boolean
 }
+
+const CHUNKING_MODE_OPTIONS = [
+  { label: "Auto", value: "auto" },
+  { label: "Manual", value: "manual" },
+]
+
+const AUTO_CHUNKING_GOAL_OPTIONS = [
+  { label: "Balanced", value: "balanced" },
+  { label: "Search/Q&A", value: "qa_search" },
+  { label: "Reading/Summary", value: "navigation_summary" },
+]
 
 type TypeDefaults = {
   audio?: { language?: string; diarize?: boolean }
@@ -172,7 +187,51 @@ export const IngestOptionsPanel: React.FC<IngestOptionsPanelProps> = ({
   )
   const handleChunkingToggle = React.useCallback(
     (value: boolean) => {
-      setCommon((current) => ({ ...current, perform_chunking: value }))
+      setCommon((current) => ({
+        ...current,
+        perform_chunking: value,
+        ...(value
+          ? {
+              chunking_mode: "auto",
+              auto_chunking_goal: current.auto_chunking_goal ?? "balanced",
+              auto_chunking_use_llm: current.auto_chunking_use_llm ?? false
+            }
+          : {})
+      }))
+    },
+    [setCommon]
+  )
+  const chunkingMode = common.chunking_mode === "manual" ? "manual" : "auto"
+  const autoChunkingGoal =
+    common.auto_chunking_goal === "qa_search" ||
+    common.auto_chunking_goal === "navigation_summary"
+      ? common.auto_chunking_goal
+      : "balanced"
+  const handleChunkingModeChange = React.useCallback(
+    (value: string | number) => {
+      const mode = value === "manual" ? "manual" : "auto"
+      setCommon((current) => ({
+        ...current,
+        chunking_mode: mode,
+        auto_chunking_goal: current.auto_chunking_goal ?? "balanced",
+        auto_chunking_use_llm: current.auto_chunking_use_llm ?? false
+      }))
+    },
+    [setCommon]
+  )
+  const handleAutoChunkingGoalChange = React.useCallback(
+    (value: string) => {
+      const goal =
+        value === "qa_search" || value === "navigation_summary"
+          ? value
+          : "balanced"
+      setCommon((current) => ({ ...current, auto_chunking_goal: goal }))
+    },
+    [setCommon]
+  )
+  const handleAutoChunkingUseLlmChange = React.useCallback(
+    (value: boolean) => {
+      setCommon((current) => ({ ...current, auto_chunking_use_llm: value }))
     },
     [setCommon]
   )
@@ -403,8 +462,63 @@ export const IngestOptionsPanel: React.FC<IngestOptionsPanelProps> = ({
         </Tooltip>
       </Space>
 
-      {/* Chunking template selector - visible when chunking is enabled */}
-      {common.perform_chunking && setChunkingTemplateName && (
+      {common.perform_chunking && (
+        <div className="mt-2 pt-2 border-t border-border space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-medium">
+              {qi("chunkingModeLabel", "Chunking mode")}
+            </span>
+            <Segmented
+              aria-label={qi("chunkingModeLabel", "Chunking mode")}
+              options={CHUNKING_MODE_OPTIONS}
+              value={chunkingMode}
+              onChange={handleChunkingModeChange}
+              disabled={running}
+            />
+          </div>
+          {chunkingMode === "auto" ? (
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+              <label className="flex flex-col gap-1 text-sm text-text">
+                <span>{qi("autoChunkingGoalLabel", "Auto chunking goal")}</span>
+                <Select
+                  aria-label={qi("autoChunkingGoalLabel", "Auto chunking goal")}
+                  value={autoChunkingGoal}
+                  onChange={handleAutoChunkingGoalChange}
+                  options={AUTO_CHUNKING_GOAL_OPTIONS}
+                  disabled={running}
+                />
+              </label>
+              <Tooltip
+                title={qi(
+                  "autoChunkingUseLlmTooltip",
+                  "Allow configured AI providers to refine chunk boundaries when available."
+                )}
+              >
+                <Space align="center" size="small">
+                  <Switch
+                    checked={common.auto_chunking_use_llm === true}
+                    onChange={handleAutoChunkingUseLlmChange}
+                    disabled={running}
+                    aria-label={qi(
+                      "autoChunkingUseLlmLabel",
+                      "Use AI to improve chunk boundaries"
+                    )}
+                  />
+                  <span className="text-sm">
+                    {qi(
+                      "autoChunkingUseLlmLabel",
+                      "Use AI to improve chunk boundaries"
+                    )}
+                  </span>
+                </Space>
+              </Tooltip>
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {/* Chunking template selector - visible for manual chunking only */}
+      {common.perform_chunking && chunkingMode === "manual" && setChunkingTemplateName && (
         <div className="mt-2 pt-2 border-t border-border space-y-2">
           <div className="flex items-center gap-2">
             <span className="min-w-32 text-sm">

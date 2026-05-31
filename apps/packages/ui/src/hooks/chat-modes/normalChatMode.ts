@@ -29,6 +29,7 @@ import {
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
 interface WebSearchPayload {
   query: string
@@ -136,10 +137,12 @@ type NormalChatModeParams = {
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
   historyId: string | null
+  serverChatId?: string | null
   setHistoryId: (id: string) => void
   uploadedFiles?: any[]
   actorSettings?: ActorSettings
   systemPromptAppendix?: string
+  overlaySystemPrompt?: string
   webSearch?: boolean
   setIsSearchingInternet?: (value: boolean) => void
   clusterId?: string
@@ -151,6 +154,7 @@ type NormalChatModeParams = {
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
   historyForModel?: ChatHistory
+  messageForModel?: string
   regenerateFromMessage?: Message
 }
 
@@ -366,11 +370,12 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
     let promptContent: string | undefined = undefined
     let webSearchSources: any[] = []
     let webSearchSystemMessage: any | null = null
+    const messageForModel = ctx.messageForModel ?? ctx.message
 
     let humanMessage = await humanMessageFormatter({
       content: [
         {
-          text: ctx.message,
+          text: messageForModel,
           type: "text"
         }
       ],
@@ -381,7 +386,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       humanMessage = await humanMessageFormatter({
         content: [
           {
-            text: ctx.message,
+            text: messageForModel,
             type: "text"
           },
           {
@@ -481,17 +486,15 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       ctx.historyForModel ?? ctx.history,
       ctx.selectedModel
     )
+    const baseSystemPrompts: string[] = []
+    const overlayPrompt = ctx.overlaySystemPrompt?.trim() || ""
     const resolvePromptWithAppendix = (content?: string | null) =>
       appendSystemPromptSuffix(content || "", ctx.systemPromptAppendix)
 
     if (!selectedPrompt) {
       const resolvedDefaultPrompt = resolvePromptWithAppendix(prompt)
       if (resolvedDefaultPrompt) {
-        applicationChatHistory.unshift(
-          await systemPromptFormatter({
-            content: resolvedDefaultPrompt
-          })
-        )
+        baseSystemPrompts.push(resolvedDefaultPrompt)
       }
     }
 
@@ -504,11 +507,9 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         selectedPrompt.system_prompt ?? selectedPrompt.content
       const resolvedSelectedPrompt =
         resolvePromptWithAppendix(selectedPromptContent)
-      applicationChatHistory.unshift(
-        await systemPromptFormatter({
-          content: resolvedSelectedPrompt
-        })
-      )
+      if (resolvedSelectedPrompt) {
+        baseSystemPrompts.push(resolvedSelectedPrompt)
+      }
       promptContent = resolvedSelectedPrompt
     }
 
@@ -516,12 +517,25 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       const resolvedTemporaryPrompt = resolvePromptWithAppendix(
         ctx.currentChatModelSettings.systemPrompt
       )
-      applicationChatHistory.unshift(
-        await systemPromptFormatter({
-          content: resolvedTemporaryPrompt
-        })
-      )
+      if (resolvedTemporaryPrompt) {
+        baseSystemPrompts.push(resolvedTemporaryPrompt)
+      }
       promptContent = resolvedTemporaryPrompt
+    }
+
+    if (overlayPrompt) {
+      baseSystemPrompts.push(overlayPrompt)
+    }
+
+    if (baseSystemPrompts.length > 0) {
+      const promptMessages = await Promise.all(
+        baseSystemPrompts.map((content) =>
+          systemPromptFormatter({
+            content
+          })
+        )
+      )
+      applicationChatHistory = [...promptMessages, ...applicationChatHistory]
     }
 
     const templatesActive = !!ctx.selectedSystemPrompt
@@ -553,12 +567,12 @@ export const normalChatMode = async (
   history: ChatHistory,
   signal: AbortSignal,
   params: NormalChatModeParams
-) => {
+): Promise<ChatSubmitResult> => {
   console.log("Using normalChatMode")
   const resolvedImage =
     image.length > 0 ? `data:image/jpeg;base64,${image.split(",")[1]}` : ""
 
-  await runChatPipeline(
+  return runChatPipeline(
     normalChatModeDefinition,
     message,
     resolvedImage,

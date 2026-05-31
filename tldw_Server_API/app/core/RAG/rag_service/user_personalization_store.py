@@ -60,16 +60,16 @@ class UserPersonalizationStore:
             self._data.setdefault("events", {})
             self._data.setdefault("pairs", {})
             self._data.setdefault("event_log", [])
-        except Exception as e:
-            logger.warning(f"Failed loading personalization data for user {self.user_id}: {e}")
+        except Exception:
+            logger.warning("Failed loading personalization data")
             self._data = _empty_store()
 
     def _save(self) -> None:
         try:
             with self.path.open("w", encoding="utf-8") as f:
                 json.dump(self._data, f)
-        except Exception as e:
-            logger.debug(f"Failed saving personalization: {e}")
+        except Exception:
+            logger.debug("Failed saving personalization")
 
     def record_event(
         self,

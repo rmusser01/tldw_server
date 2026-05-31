@@ -9,10 +9,10 @@ import {
   Spin,
   Empty,
   Tag,
-  Switch,
-  Alert
+  Switch
 } from "antd"
 import { Search, UploadCloud, FileText, BookOpen, PlayCircle } from "lucide-react"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useServerOnline } from "@/hooks/useServerOnline"
@@ -537,9 +537,8 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
       destroyOnClose
     >
       {!isOnline && (
-        <Alert
-          type="warning"
-          showIcon
+        <DesignSystemAlert
+          variant="warning"
           title={t(
             "option:documentWorkspace.serverRequired",
             "Connect to server to use document workspace"
@@ -548,31 +547,27 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
         />
       )}
       {uploadWarning && (
-        <Alert
-          type="warning"
-          showIcon
+        <DesignSystemAlert
+          variant="warning"
           title={uploadWarning.message}
           className="mb-3"
           action={
-            uploadWarning.mediaId ? (
-              <Button
-                size="small"
-                onClick={async () => {
-                  await setSetting(LAST_MEDIA_ID_SETTING, String(uploadWarning.mediaId))
-                  navigate("/media-multi")
-                  onClose()
-                }}
-              >
-                {t("option:documentWorkspace.openInMedia", "Open in Media")}
-              </Button>
-            ) : undefined
+            uploadWarning.mediaId
+              ? {
+                  label: t("option:documentWorkspace.openInMedia", "Open in Media"),
+                  onClick: async () => {
+                    await setSetting(LAST_MEDIA_ID_SETTING, String(uploadWarning.mediaId))
+                    navigate("/media-multi")
+                    onClose()
+                  }
+                }
+              : undefined
           }
         />
       )}
       {error && (
-        <Alert
-          type="error"
-          showIcon
+        <DesignSystemAlert
+          variant="error"
           title={error}
           className="mb-3"
         />

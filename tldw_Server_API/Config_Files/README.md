@@ -94,6 +94,13 @@ How to apply changes
 - `db_transaction_max_retries` (int)
 - `rate_limit_per_minute` (int): Global rate per client.
 - `rate_limit_per_conversation_per_minute` (int): Per-conversation rate.
+- `prompt_guardrails_enabled` (bool): Enable pre-dispatch prompt/cost guardrails for chat and character chat. Default: `false`.
+- `prompt_guardrails_default_action` (str): `warn|block`; warning thresholds are non-blocking by default.
+- `prompt_guardrails_warn_total_estimated_tokens` / `prompt_guardrails_block_total_estimated_tokens` (int, optional): Total prompt estimate warning and hard-cap thresholds.
+- `prompt_guardrails_warn_static_segment_tokens` / `prompt_guardrails_warn_world_book_tokens` (int, optional): Segment-specific warning thresholds for cache-sensitive prompt sections.
+- `prompt_guardrails_warn_max_output_tokens` / `prompt_guardrails_warn_choice_count` (int, optional): Warn when output caps or `n` can multiply cost.
+- `prompt_guardrails_warn_reasoning_efforts` (csv): Reasoning-effort values that should warn about hidden/reasoning-token risk. Default: `high,xhigh`.
+- `prompt_guardrails_warn_on_fingerprint_churn` (bool): Warn when static prompt fingerprints churn between requests, indicating lower cache reuse potential. Default: `true`.
 - `history_messages_limit` (int): History window size for context (1-500).
 - `history_messages_order` (str): `asc|desc` ordering of loaded history.
 
@@ -244,7 +251,10 @@ For each type in `chunking_types` (`article|audio|book|document|mediawiki_articl
 ## [API] (Hosted providers)
 For each provider, settings follow the pattern:
 - `<provider>_model` (str), `<provider>_streaming` (bool), `<provider>_temperature` (float), `<provider>_top_p|min_p` (float), `<provider>_max_tokens` (int), `<provider>_api_timeout` (int sec), `<provider>_api_retry` (int), `<provider>_api_retry_delay` (int sec)
-Providers present: `anthropic, cohere, deepseek, qwen, google, groq, huggingface, mistral, openai, openrouter` and two generic `custom_openai_api`, `custom_openai2_api` blocks.
+Providers present: `anthropic, cohere, deepseek, qwen, google, groq, huggingface, mistral, openai, openrouter` and generic OpenAI-compatible custom endpoint blocks.
+- `custom-openai-api` maps to `custom_openai_api`; `custom-openai-api-2` maps to `custom_openai2_api` / `custom_openai_api_2`.
+- Additional named OpenAI-compatible endpoints are supported as `custom-openai-api-3` through `custom-openai-api-99`. Define them with `custom_openaiN_api_*` or `custom_openai_api_N_*` fields, for example `custom_openai37_api_ip`, `custom_openai37_api_key`, and `custom_openai37_api_model`.
+- Custom OpenAI-compatible endpoint URLs can be overridden with environment variables: `CUSTOM_OPENAI_API_IP` (aliases `CUSTOM_OPENAI_API_BASE` and `CUSTOM_OPENAI_API_URL`) for `custom_openai_api`, and `CUSTOM_OPENAI2_API_IP` for `custom_openai2_api`. Backward-compatible aliases `CUSTOM_OPENAI_API_IP_1` and `CUSTOM_OPENAI_API_IP_2` are also accepted. Provider-1 env vars do not override provider-2 config values. For endpoint `N` in `3..99`, use `CUSTOM_OPENAI_API_IP_N`, `CUSTOM_OPENAI_API_BASE_N`, `CUSTOM_OPENAI_API_URL_N`, `CUSTOM_OPENAI_API_KEY_N`, and `CUSTOM_OPENAI_API_MODEL_N` or the equivalent `CUSTOM_OPENAI{N}_API_*` / `CUSTOM_OPENAI_API_N_*` aliases.
 - `model_for_summarization` (str): Preferred model for summarize endpoints.
 - `default_api` (str): Default provider for chat.
 - `default_api_for_tasks` (str): Default provider for batch/tools.

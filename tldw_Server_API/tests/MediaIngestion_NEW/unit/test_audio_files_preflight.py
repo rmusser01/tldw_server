@@ -48,6 +48,127 @@ def test_process_audio_files_uses_check_transcription_model_status(monkeypatch, 
 
 
 @pytest.mark.unit
+def test_process_audio_files_sanitizes_item_processing_failure(monkeypatch, tmp_path):
+    audio_path = tmp_path / "sample.wav"
+    with wave.open(str(audio_path), "wb") as wave_file:
+        wave_file.setnchannels(1)
+        wave_file.setsampwidth(2)
+        wave_file.setframerate(8000)
+        wave_file.writeframes(b"\x00\x00" * 8)
+
+    monkeypatch.setattr(
+        audio_files,
+        "check_transcription_model_status",
+        lambda _model_name: {
+            "available": True,
+            "message": "ok",
+            "model": "base",
+            "usable": True,
+        },
+    )
+
+    def fail_speech_to_text(**_kwargs):
+        raise RuntimeError("transcriber exploded at /private/cache/audio.wav")
+
+    monkeypatch.setattr(audio_files, "speech_to_text", fail_speech_to_text)
+
+    result = audio_files.process_audio_files(
+        inputs=[str(audio_path)],
+        transcription_model="base",
+        transcription_language="en",
+        perform_chunking=False,
+        perform_analysis=False,
+    )
+
+    item = result["results"][0]
+    assert result["errors"] == ["Audio processing failed"]
+    assert item["status"] == "Error"
+    assert item["error"] == "Audio processing failed"
+    assert "transcriber exploded" not in result["errors"][0]
+    assert "/private/cache/audio.wav" not in result["errors"][0]
+
+
+@pytest.mark.unit
+def test_process_audio_files_sanitizes_temp_dir_setup_failure(monkeypatch):
+    monkeypatch.setattr(
+        audio_files.tempfile,
+        "TemporaryDirectory",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("tempdir creation exploded at /private/tmp/audio_proc")
+        ),
+    )
+
+    result = audio_files.process_audio_files(
+        inputs=["episode.wav"],
+        transcription_model="base",
+        transcription_language="en",
+        perform_chunking=False,
+        perform_analysis=False,
+    )
+
+    assert result["processed_count"] == 0
+    assert result["errors_count"] == 1
+    assert result["errors"] == ["Audio setup failed"]
+    assert result["results"][0]["error"] == "Audio setup failed"
+    assert "tempdir creation exploded" not in str(result)
+    assert "/private/tmp/audio_proc" not in str(result)
+
+
+@pytest.mark.unit
+def test_process_audio_files_sanitizes_fatal_batch_failure(tmp_path):
+    class _FailingInputs:
+        def __iter__(self):
+            raise RuntimeError("input iterator exploded at /private/audio/list.txt")
+
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            if index != 0:
+                raise IndexError(index)
+            return "episode.wav"
+
+    result = audio_files.process_audio_files(
+        inputs=_FailingInputs(),
+        transcription_model="base",
+        transcription_language="en",
+        perform_chunking=False,
+        perform_analysis=False,
+        temp_dir=str(tmp_path),
+    )
+
+    assert result["processed_count"] == 0
+    assert result["errors_count"] == 1
+    assert set(result["errors"]) == {"Audio batch processing failed"}
+    assert result["results"][0]["error"] == "Audio batch processing failed"
+    assert "input iterator exploded" not in str(result)
+    assert "/private/audio/list.txt" not in str(result)
+
+
+@pytest.mark.unit
+def test_process_podcast_sanitizes_processing_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        audio_files,
+        "download_audio_file",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("podcast downloader exploded at /private/cache/podcast.mp3")
+        ),
+    )
+
+    result = audio_files.process_podcast(
+        url="https://example.com/podcast.mp3",
+        perform_chunking=False,
+        api_name=None,
+        temp_dir=str(tmp_path),
+    )
+
+    assert result["status"] == "Error"
+    assert result["error"] == "Podcast processing failed"
+    assert "podcast downloader exploded" not in str(result)
+    assert "/private/cache/podcast.mp3" not in str(result)
+
+
+@pytest.mark.unit
 def test_check_transcription_model_status_marks_uncached_whisper_usable(monkeypatch):
     """Uncached Whisper models should remain request-usable via first-use download."""
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib

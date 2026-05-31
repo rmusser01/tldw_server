@@ -17,7 +17,7 @@ export function BasicSettings() {
   const { capabilities, loading: capsLoading } = useServerCapabilities()
   const webFallbackHelpId = React.useId()
   const webFallbackHelpText =
-    "Requires a configured web search provider on the server (e.g., DuckDuckGo/Brave/Bing/Google/Tavily)."
+    "Uses your configured server default web provider when enabled. Queries stay on your tldw server unless fallback is enabled."
   const sourceOptions = React.useMemo(
     () => getRagSourceOptions((key, fallback) => t(key, fallback)),
     [t]
@@ -127,7 +127,7 @@ export function BasicSettings() {
           </button>
         </div>
         <p className="text-xs text-text-muted">
-          When local sources are weak, Knowledge QA can pull web results.
+          When local sources are weak, Knowledge QA can pull web results using your server default provider.
         </p>
         {settings.enable_web_fallback && !capsLoading && capabilities && !capabilities.hasWebSearch && (
           <div className="text-xs text-warn">

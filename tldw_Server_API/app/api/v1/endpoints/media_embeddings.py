@@ -10,21 +10,17 @@ import json
 import os
 from typing import Annotated, Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, resolve_user_id_for_request, User
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit
 
 # Local imports
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.utils.rag_cache import invalidate_rag_caches
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
 from tldw_Server_API.app.core.Chunking.base import ChunkerConfig
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.config import settings
@@ -39,6 +35,7 @@ router = APIRouter(prefix="/media", tags=["media-embeddings"])
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_EMBEDDING_PROVIDER = "huggingface"
 FALLBACK_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+MAX_MEDIA_EMBEDDING_JOBS_OFFSET = 10_000
 
 _MEDIA_EMBEDDINGS_PARSE_EXCEPTIONS = (TypeError, ValueError, UnicodeError, json.JSONDecodeError)
 _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS = (
@@ -60,11 +57,8 @@ def _user_embedding_config() -> dict[str, Any]:
     cfg = settings.get("EMBEDDING_CONFIG", {}).copy()
     try:
         user_db_base_dir = str(DatabasePaths.get_user_db_base_dir())
-    except Exception as exc:
-        logger.warning(
-            "Falling back to USER_DB_BASE_DIR setting after user DB base resolution failed: {}",
-            exc,
-        )
+    except Exception:
+        logger.warning("Falling back to USER_DB_BASE_DIR setting after user DB base resolution failed")
         user_db_base_dir = settings.get("USER_DB_BASE_DIR")
     cfg["USER_DB_BASE_DIR"] = user_db_base_dir
     return cfg
@@ -131,7 +125,7 @@ def _embeddings_jobs_backend() -> str:
     raw = (os.getenv("EMBEDDINGS_JOBS_BACKEND") or os.getenv("TLDW_JOBS_BACKEND") or "").strip().lower()
     if raw in {"jobs", "core", ""}:
         return "jobs"
-    logger.warning("Embeddings jobs backend override {} ignored; core Jobs is the only backend.", raw)
+    logger.warning("Embeddings jobs backend override ignored; core Jobs is the only backend")
     return "jobs"
 
 
@@ -247,8 +241,8 @@ async def get_media_content(media_id: int, db: Any) -> dict[str, Any]:
                 if latest and latest.get("content"):
                     media_item = dict(media_item)
                     media_item["content"] = latest["content"]
-        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Failed to load fallback document content for media {media_id}: {exc}")
+        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to load fallback document content")
 
         # Get content
         content = media_item  # The get_media_by_id returns all data including content
@@ -266,10 +260,10 @@ async def get_media_content(media_id: int, db: Any) -> dict[str, Any]:
         # Propagate explicit HTTP errors (e.g., 404 Not Found)
         raise
     except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error retrieving media content: {e}")
+        logger.error("Error retrieving media content")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving media content: {str(e)}"
+            detail="Error retrieving media content"
         ) from e
 
 
@@ -515,7 +509,7 @@ async def generate_embeddings_for_media(
             )
         except Exception:
             if embedding_model != FALLBACK_EMBEDDING_MODEL:
-                logger.warning(f"Failed with {embedding_model}, trying fallback {FALLBACK_EMBEDDING_MODEL}")
+                logger.warning("Primary embedding generation failed; trying fallback model")
                 try:
                     embeddings = await create_embeddings_batch_async(
                         texts=chunk_texts,
@@ -524,11 +518,11 @@ async def generate_embeddings_for_media(
                         metadata=request_metadata,
                     )
                 except Exception as exc:
-                    logger.error(f"Fallback embedding generation failed: {exc}")
+                    logger.error("Fallback embedding generation failed")
                     return {
                         "status": "error",
-                        "message": f"Failed to generate embeddings: {exc}",
-                        "error": str(exc),
+                        "message": "Failed to generate embeddings",
+                        "error": "Embedding generation failed",
                         "embedding_count": 0,
                         "chunks_processed": len(chunks),
                     }
@@ -550,7 +544,7 @@ async def generate_embeddings_for_media(
                         embeddings_to_store=embeddings,
                     )
                 except Exception as exc:
-                    logger.error(f"Error storing fallback embeddings: {exc}")
+                    logger.error("Error storing fallback embeddings")
                     return _storage_failure_result(exc, len(embeddings) if embeddings else 0)
 
                 return {
@@ -575,10 +569,10 @@ async def generate_embeddings_for_media(
             _store_embeddings(
                 model_name=embedding_model,
                 provider_name=embedding_provider,
-                embeddings_to_store=embeddings,
-            )
+            embeddings_to_store=embeddings,
+        )
         except Exception as exc:
-            logger.error(f"Error storing primary embeddings: {exc}")
+            logger.error("Error storing primary embeddings")
             return _storage_failure_result(exc, len(embeddings) if embeddings else 0)
 
         return {
@@ -588,12 +582,12 @@ async def generate_embeddings_for_media(
             "chunks_processed": len(chunks),
         }
 
-    except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error generating embeddings: {e}")
+    except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+        logger.error("Error generating embeddings")
         return {
             "status": "error",
-            "message": f"Failed to generate embeddings: {str(e)}",
-            "error": str(e),
+            "message": "Failed to generate embeddings",
+            "error": "Embedding generation failed",
             "embedding_count": 0,
             "chunks_processed": 0,
         }
@@ -645,8 +639,8 @@ async def get_embeddings_status(
                 if md_list:
                     first_md = md_list[0]
                     embedding_model = first_md.get("embedding_model") if isinstance(first_md, dict) else None
-        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"ChromaDB status check failed for media {media_id}: {e}")
+        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("ChromaDB status check failed")
 
         return EmbeddingsStatusResponse(
             media_id=media_id,
@@ -659,10 +653,10 @@ async def get_embeddings_status(
     except HTTPException:
         raise
     except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error checking embeddings status: {e}")
+        logger.error("Error checking embeddings status")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error checking embeddings status: {str(e)}"
+            detail="Error checking embeddings status"
         ) from e
 
 
@@ -719,10 +713,7 @@ async def generate_embeddings(
                 embedding_priority=request.priority,
             )
         except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(
-                "Failed to persist media embedding job "
-                f"(user_id={user_id}, media_id={media_id}, reason={type(e).__name__}: {e})"
-            )
+            logger.error("Failed to persist media embedding job")
             raise HTTPException(
                 status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to queue embedding job",
@@ -730,10 +721,7 @@ async def generate_embeddings(
 
         job_id = str((job_row or {}).get("uuid") or (job_row or {}).get("id") or "").strip()
         if not job_id:
-            logger.error(
-                "Embeddings job creation returned no job id "
-                f"(user_id={user_id}, media_id={media_id}, job_row_type={type(job_row).__name__})"
-            )
+            logger.error("Embeddings job creation returned no job id")
             raise HTTPException(
                 status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to queue embedding job",
@@ -751,10 +739,10 @@ async def generate_embeddings(
     except HTTPException:
         raise
     except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error generating embeddings: {e}")
+        logger.error("Error generating embeddings")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error generating embeddings: {str(e)}"
+            detail="Error generating embeddings"
         ) from e
 
 
@@ -821,10 +809,7 @@ async def generate_embeddings_batch(
         except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
             failed_media_ids.append(int(media_id))
             failure_reasons.append(f"media_id={media_id}: {type(exc).__name__}")
-            logger.error(
-                "Failed to persist batch embedding job "
-                f"(user_id={user_id}, media_id={media_id}, reason={type(exc).__name__}: {exc})"
-            )
+            logger.error("Failed to persist batch embedding job")
 
     if failed_media_ids and not job_ids:
         detail = {
@@ -890,7 +875,7 @@ async def search_embeddings(
             metadata=query_metadata,
         )
     except Exception as exc:
-        logger.error(f"Failed to embed search query: {exc}")
+        logger.error("Failed to embed search query")
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Embedding service unavailable",
@@ -919,7 +904,7 @@ async def search_embeddings(
             where=request.filters if request.filters else None
         )
     except Exception as exc:
-        logger.error(f"Chroma query failed for collection {collection_name}: {exc}")
+        logger.error("Chroma query failed")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Search failed",
@@ -979,9 +964,9 @@ async def delete_embeddings(
         try:
             # Use where-based delete if supported
             collection.delete(where={"media_id": str(media_id)})
-        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
+        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             # Fall back to fetching IDs then deleting by ids
-            logger.warning(f"Where-delete failed, falling back to id-based delete: {e}")
+            logger.warning("Where-delete failed for media embeddings, falling back to id delete")
             data = collection.get(where={"media_id": str(media_id)}, include=["metadatas"], limit=100000)
             ids = (data or {}).get("ids") or []
             if ids:
@@ -991,8 +976,8 @@ async def delete_embeddings(
             remaining_ids = (remaining or {}).get("ids") or []
             if remaining_ids:
                 collection.delete(ids=remaining_ids)
-        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Failed to verify embeddings delete for media {media_id}: {e}")
+        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to verify embeddings delete")
 
         invalidate_rag_caches(current_user, media_id=media_id)
 
@@ -1003,10 +988,10 @@ async def delete_embeddings(
     except HTTPException:
         raise
     except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error deleting embeddings: {e}")
+        logger.error("Error deleting embeddings")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error deleting embeddings: {str(e)}"
+            detail="Error deleting embeddings"
         ) from e
 
 
@@ -1036,13 +1021,28 @@ async def get_media_embedding_job(
 async def list_media_embedding_jobs(
     current_user: Annotated[User, Depends(get_request_user)],
     status: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0, le=MAX_MEDIA_EMBEDDING_JOBS_OFFSET),
 ):
     user_id = resolve_user_id_for_request(
         current_user,
         error_status=http_status.HTTP_400_BAD_REQUEST,
     )
     adapter = EmbeddingsJobsAdapter()
-    rows = adapter.list_jobs(user_id=user_id, status=status, limit=limit, offset=offset)
-    return {"data": rows, "pagination": {"limit": limit, "offset": offset, "count": len(rows)}}
+    fetched = adapter.list_jobs(user_id=user_id, status=status, limit=limit + 1, offset=offset)
+    rows = fetched[:limit]
+    has_more = len(fetched) > limit
+    pagination = build_offset_pagination_meta(
+        total=None,
+        limit=limit,
+        offset=offset,
+        count=len(rows),
+        has_more=has_more,
+    ).model_dump(mode="json")
+    pagination["count"] = len(rows)
+    return {
+        "data": rows,
+        "pagination": pagination,
+        "has_more": pagination["has_more"],
+        "next_offset": pagination["next_offset"],
+    }

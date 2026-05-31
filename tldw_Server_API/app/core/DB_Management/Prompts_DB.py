@@ -47,6 +47,13 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     begin_immediate_if_needed,
     configure_sqlite_connection,
 )
+from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
+    build_structured_prompt_searchable_text,
+    deserialize_prompt_record,
+    normalize_keyword,
+    normalize_text_for_search,
+    serialize_prompt_definition,
+)
 from loguru import logger as logging
 
 from tldw_Server_API.app.core.testing import is_test_mode
@@ -786,83 +793,9 @@ class PromptsDatabase:
     def _generate_uuid(self) -> str:
         return str(uuid.uuid4())
 
-    @staticmethod
-    def _serialize_prompt_definition(prompt_definition: Any) -> Optional[str]:
-        if prompt_definition is None:
-            return None
-        if isinstance(prompt_definition, str):
-            return prompt_definition
-        return json.dumps(prompt_definition, sort_keys=True)
-
-    @staticmethod
-    def _deserialize_prompt_record(prompt_data: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
-        if not prompt_data:
-            return prompt_data
-
-        record = dict(prompt_data)
-        record["prompt_format"] = record.get("prompt_format") or "legacy"
-
-        prompt_definition_payload = record.pop("prompt_definition_json", None)
-        if prompt_definition_payload is None:
-            record["prompt_definition"] = None
-            return record
-
-        if isinstance(prompt_definition_payload, dict):
-            record["prompt_definition"] = prompt_definition_payload
-            return record
-
-        if isinstance(prompt_definition_payload, str) and prompt_definition_payload.strip():
-            try:
-                record["prompt_definition"] = json.loads(prompt_definition_payload)
-            except json.JSONDecodeError:
-                record["prompt_definition"] = None
-        else:
-            record["prompt_definition"] = None
-        return record
-
-    @staticmethod
-    def build_structured_prompt_searchable_text(prompt_definition: Any) -> str:
-        if prompt_definition is None:
-            return ""
-
-        definition_payload = prompt_definition
-        if isinstance(prompt_definition, str):
-            with suppress(TypeError, ValueError, json.JSONDecodeError):
-                definition_payload = json.loads(prompt_definition)
-
-        if not isinstance(definition_payload, dict):
-            return ""
-
-        parts: list[str] = []
-
-        variables = definition_payload.get("variables")
-        if isinstance(variables, list):
-            for variable in variables:
-                if not isinstance(variable, dict):
-                    continue
-                for key in ("name", "label", "description"):
-                    value = variable.get(key)
-                    if isinstance(value, str) and value.strip():
-                        parts.append(value.strip())
-
-        blocks = definition_payload.get("blocks")
-        if isinstance(blocks, list):
-            for block in blocks:
-                if not isinstance(block, dict) or block.get("enabled") is False:
-                    continue
-                for key in ("name", "role", "content"):
-                    value = block.get(key)
-                    if isinstance(value, str) and value.strip():
-                        parts.append(value.strip())
-
-        normalized_parts: list[str] = []
-        seen: set[str] = set()
-        for part in parts:
-            if part in seen:
-                continue
-            normalized_parts.append(part)
-            seen.add(part)
-        return "\n".join(normalized_parts)
+    _serialize_prompt_definition = staticmethod(serialize_prompt_definition)
+    _deserialize_prompt_record = staticmethod(deserialize_prompt_record)
+    build_structured_prompt_searchable_text = staticmethod(build_structured_prompt_searchable_text)
 
     def _build_fts_details_text(self, details: Optional[str], prompt_definition: Any) -> str:
         detail_parts: list[str] = []
@@ -875,31 +808,8 @@ class PromptsDatabase:
 
         return "\n\n".join(detail_parts)
 
-    def _normalize_keyword(self, keyword: str) -> str:
-        """Normalize keyword while preserving case for round-trip display/export.
-
-        - Trim and collapse internal whitespace
-        - Do NOT lowercase; table uses COLLATE NOCASE for case-insensitive uniqueness
-        """
-        s = keyword.strip()
-        s = re.sub(r'\s+', ' ', s).strip()
-        return s
-
-    @staticmethod
-    def _normalize_text_for_search(val: Any) -> str:
-        """Robust case-insensitive text normalization for search.
-
-        Handles Unicode edge cases (e.g., Turkish dotted/dotless I), removes
-        diacritics and applies casefold, so different casings yield same matches.
-        """
-        import unicodedata as _ud
-        s = '' if val is None else str(val)
-        # Map Turkish I variants to ASCII I/i to stabilize comparisons
-        s = s.replace('İ', 'I').replace('ı', 'i')
-        s = s.casefold()
-        s = _ud.normalize('NFKD', s)
-        s = ''.join(ch for ch in s if _ud.category(ch) != 'Mn')
-        return s
+    _normalize_keyword = staticmethod(normalize_keyword)
+    _normalize_text_for_search = staticmethod(normalize_text_for_search)
 
     def _get_next_version(self, conn: sqlite3.Connection, table: str, id_col: str, id_val: Any) -> Optional[
         tuple[int, int]]:
@@ -2001,6 +1911,21 @@ class PromptsDatabase:
             if isinstance(e, (InputError, DatabaseError)):
                 raise
             raise DatabaseError(f"Failed to list prompt collections: {e}") from e  # noqa: TRY003
+
+    def count_prompt_collections(self) -> int:
+        try:
+            row = self.execute_query(
+                """
+                SELECT COUNT(*) AS total
+                FROM PromptCollections
+                """
+            ).fetchone()
+            return int(row["total"] if row and row["total"] is not None else 0)
+        except (DatabaseError, sqlite3.Error) as e:
+            logger.error(f"Error counting prompt collections: {e}", exc_info=True)
+            if isinstance(e, DatabaseError):
+                raise
+            raise DatabaseError(f"Failed to count prompt collections: {e}") from e  # noqa: TRY003
 
     def update_prompt_collection(
         self,

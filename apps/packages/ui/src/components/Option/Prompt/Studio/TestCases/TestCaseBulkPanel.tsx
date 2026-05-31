@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Drawer, Tabs, notification, Alert, Upload, Spin } from "antd"
+import { Drawer, Tabs, notification, Upload, Spin } from "antd"
 import type { UploadProps } from "antd"
 import { Download, Upload as UploadIcon, FileJson, FileSpreadsheet } from "lucide-react"
 import React, { useState } from "react"
@@ -12,6 +12,7 @@ import {
   type TestCaseCreatePayload
 } from "@/services/prompt-studio"
 import { Button } from "@/components/Common/Button"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 
 type TestCaseBulkPanelProps = {
   open: boolean
@@ -169,9 +170,8 @@ export const TestCaseBulkPanel: React.FC<TestCaseBulkPanelProps> = ({
             ),
             children: (
               <div className="space-y-4">
-                <Alert
-                  type="info"
-                  showIcon
+                <DsAlert
+                  variant="info"
                   title={t("managePrompts.studio.testCases.exportInfo", {
                     defaultValue:
                       "Export all test cases from this project to a file."
@@ -236,9 +236,8 @@ export const TestCaseBulkPanel: React.FC<TestCaseBulkPanelProps> = ({
             ),
             children: (
               <div className="space-y-4">
-                <Alert
-                  type="info"
-                  showIcon
+                <DsAlert
+                  variant="info"
                   title={t("managePrompts.studio.testCases.importInfo", {
                     defaultValue:
                       "Import test cases from a JSON or CSV file. New test cases will be added to the project."

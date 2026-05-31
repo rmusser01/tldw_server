@@ -1,17 +1,49 @@
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.main import app as fastapi_app
+from tldw_Server_API.app.api.v1.endpoints import personalization as personalization_ep
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import get_personalization_db_for_user
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 
 
 pytestmark = pytest.mark.unit
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.warnings.append(message.format(*args) if args else message)
+
+    def info(self, *args: Any, **kwargs: Any) -> None:
+        return
+
+
+class _UsageLogStub:
+    user_id = "1"
+
+    def log_event(self, *args: Any, **kwargs: Any) -> None:
+        return
+
+
+class _ProfileCountsDB:
+    def topic_counts(self, _user_id: str) -> int:
+        return 0
+
+    def memory_counts(self, _user_id: str) -> int:
+        return 0
+
+    def session_count(self, _user_id: str) -> int:
+        return 0
 
 
 @pytest.fixture()
@@ -33,6 +65,75 @@ def client_with_personalization_db(tmp_path):
         yield client
 
     fastapi_app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_personalization_opt_in_failure_log_is_sanitized(monkeypatch):
+    class _FailingDB:
+        def update_profile(self, **kwargs: Any):
+            raise RuntimeError("personalization backend exploded at /private/personalization.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(personalization_ep, "logger", logger)
+    monkeypatch.setattr(personalization_ep, "is_personalization_enabled", lambda: True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await personalization_ep.personalization_opt_in(
+            payload=personalization_ep.OptInRequest(enabled=True),
+            db=_FailingDB(),
+            log=_UsageLogStub(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to update personalization profile"
+    assert logger.warnings == ["Opt-in failed"]
+    logged = "\n".join(logger.warnings)
+    assert "personalization backend exploded" not in logged
+    assert "/private/personalization.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_personalization_purge_failure_log_is_sanitized(monkeypatch):
+    class _FailingDB:
+        def purge_user(self, user_id: str):
+            raise RuntimeError("personalization backend exploded at /private/personalization.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(personalization_ep, "logger", logger)
+    monkeypatch.setattr(personalization_ep, "is_personalization_enabled", lambda: True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await personalization_ep.personalization_purge(
+            db=_FailingDB(),
+            log=_UsageLogStub(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to purge personalization data"
+    assert logger.warnings == ["Purge failed"]
+    logged = "\n".join(logger.warnings)
+    assert "personalization backend exploded" not in logged
+    assert "/private/personalization.db" not in logged
+
+
+def test_profile_from_dict_invalid_updated_at_log_is_sanitized(monkeypatch):
+    logger = _LoggerStub()
+    monkeypatch.setattr(personalization_ep, "logger", logger)
+
+    profile = personalization_ep._profile_from_dict(
+        {
+            "enabled": 1,
+            "updated_at": {"raw": "/private/personalization-profile.json"},
+        },
+        _ProfileCountsDB(),
+        "private-user",
+    )
+
+    assert profile.enabled is True
+    assert logger.warnings == ["Profile updated_at missing or unparseable"]
+    logged = "\n".join(logger.warnings)
+    assert "private-user" not in logged
+    assert "/private/personalization-profile.json" not in logged
 
 
 def test_profile_roundtrip(client_with_personalization_db: TestClient):
@@ -66,6 +167,30 @@ def test_profile_roundtrip(client_with_personalization_db: TestClient):
     assert prof3["alpha"] > 0.0
 
 
+def test_explanations_response_includes_canonical_pagination(
+    client_with_personalization_db: TestClient,
+) -> None:
+    """Explanation listing returns canonical offset pagination for the scaffolded collection."""
+    response = client_with_personalization_db.get(
+        "/api/v1/personalization/explanations",
+        params={"limit": 7, "offset": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [],
+        "total": 0,
+        "pagination": {
+            "mode": "offset",
+            "limit": 7,
+            "offset": 3,
+            "total": 0,
+            "has_more": False,
+            "next_offset": None,
+        },
+    }
+
+
 def test_memories_crud(client_with_personalization_db: TestClient):
     c = client_with_personalization_db
     # Add - no id field required (MemoryCreate schema)
@@ -87,6 +212,14 @@ def test_memories_crud(client_with_personalization_db: TestClient):
     assert lst.status_code == 200
     data = lst.json()
     assert data["total"] >= 1
+    assert data["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 50,
+        "total": data["total"],
+        "total_pages": 1,
+        "has_more": False,
+    }
 
     # Patch (update)
     patch_r = c.patch(

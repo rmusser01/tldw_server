@@ -13,6 +13,9 @@ import { TtsClipsDrawer } from "@/components/Sidepanel/Chat/TtsClipsDrawer"
 import { useDarkMode } from "@/hooks/useDarkmode"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import type { Character } from "@/types/character"
+import { dispatchOpenAssistantSelect } from "@/utils/assistant-select-events"
+import { dispatchCharacterChatModeIntent } from "@/utils/character-chat-mode-intent"
+import { buildCharacterChatPath } from "@/routes/route-paths"
 import {
   tldwClient,
   type ConversationShareLinkSummary,
@@ -24,6 +27,7 @@ import {
   isShareLinkRevoked,
   sortShareLinksByCreatedDesc,
 } from "./chat-share-links"
+import { getHeaderActionPolicy } from "./header-action-policy"
 
 type Props = {
   onToggleSidebar?: () => void
@@ -71,11 +75,11 @@ export const Header: React.FC<Props> = ({
   const [shareLabel, setShareLabel] = React.useState("")
   const [shareError, setShareError] = React.useState<string | null>(null)
   const [copiedShareId, setCopiedShareId] = React.useState<string | null>(null)
-  const normalizedPath =
-    location.pathname.length > 1 && location.pathname.endsWith("/")
-      ? location.pathname.slice(0, -1)
-      : location.pathname
-  const isChatRoute = normalizedPath === "/chat"
+  const headerActionPolicy = React.useMemo(
+    () => getHeaderActionPolicy(location.pathname),
+    [location.pathname]
+  )
+  const isChatRoute = headerActionPolicy.showChatSessionActions
 
   React.useEffect(() => {
     ;(async () => {
@@ -144,11 +148,26 @@ export const Header: React.FC<Props> = ({
 
   const startCharacterChat = React.useCallback(() => {
     setTemporaryChat(false)
-    clearChat()
-    if (!selectedCharacter && typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("tldw:open-actor-settings"))
+    const characterId = selectedCharacter?.id ?? null
+    if (!isChatRoute) {
+      navigate(buildCharacterChatPath({ characterId }))
+      return
     }
-  }, [clearChat, selectedCharacter, setTemporaryChat])
+    dispatchCharacterChatModeIntent({
+      source: "chat-header",
+      characterId
+    })
+    if (!selectedCharacter?.id) {
+      dispatchOpenAssistantSelect({
+        tab: "character",
+        source: "chat-header"
+      })
+      return
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("tldw:focus-composer"))
+    }
+  }, [isChatRoute, navigate, selectedCharacter, setTemporaryChat])
 
   const refreshShareLinks = React.useCallback(async () => {
     if (!serverChatId) {
@@ -338,29 +357,44 @@ export const Header: React.FC<Props> = ({
         sidebarCollapsed={sidebarCollapsed}
         onOpenCommandPalette={openCommandPalette}
         onOpenShortcutsModal={openShortcutsModal}
-        onOpenShareModal={isChatRoute ? openShareModal : undefined}
-        shareStatusLabel={isChatRoute ? shareStatusLabel : null}
+        onOpenShareModal={
+          headerActionPolicy.showShareConversation ? openShareModal : undefined
+        }
+        shareStatusLabel={
+          headerActionPolicy.showShareConversation ? shareStatusLabel : null
+        }
         shareButtonDisabled={shareButtonDisabled}
         onOpenSettings={() => navigate(hostedMode ? "/account" : "/settings/tldw")}
         onToggleTheme={toggleDarkMode}
         themeMode={themeMode}
-        onClearChat={clearChat}
-        onStartSavedChat={startSavedChat}
-        onStartTemporaryChat={startTemporaryChat}
-        onStartCharacterChat={startCharacterChat}
+        onStartSavedChat={
+          headerActionPolicy.showChatSessionActions ? startSavedChat : undefined
+        }
+        onStartTemporaryChat={
+          headerActionPolicy.showChatSessionActions
+            ? startTemporaryChat
+            : undefined
+        }
+        onStartCharacterChat={
+          headerActionPolicy.showChatSessionActions
+            ? startCharacterChat
+            : undefined
+        }
         activeCharacterName={selectedCharacter?.name || null}
-        showChatTitle={isChatRoute}
-        showSessionModeBadge={isChatRoute}
+        showChatTitle={headerActionPolicy.showChatTitle}
+        showSessionModeBadge={headerActionPolicy.showSessionModeBadge}
         shortcutsExpanded={headerShortcutsExpanded}
         onToggleShortcuts={toggleHeaderShortcuts}
         commandKeyLabel={cmdKey}
         notificationCount={notificationCount}
         onOpenNotifications={onOpenNotifications}
       />
-      <TtsClipsDrawer
-        open={ttsClipsOpen}
-        onClose={() => setTtsClipsOpen(false)}
-      />
+      {ttsClipsOpen ? (
+        <TtsClipsDrawer
+          open={ttsClipsOpen}
+          onClose={() => setTtsClipsOpen(false)}
+        />
+      ) : null}
       <Modal
         open={shareModalOpen}
         onCancel={() => setShareModalOpen(false)}

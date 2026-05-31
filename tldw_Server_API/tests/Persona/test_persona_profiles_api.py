@@ -130,6 +130,19 @@ def test_persona_profile_scope_policy_crud(persona_db: CharactersRAGDB):
     fastapi_app.dependency_overrides.clear()
 
 
+def test_persona_profile_response_normalizes_invalid_mode():
+    response = persona_ep._persona_profile_to_response(
+        {
+            "id": "persona-invalid-mode",
+            "name": "Invalid Mode Persona",
+            "mode": "unexpected_mode",
+            "system_prompt": "Helper",
+        }
+    )
+
+    assert response.mode == "session_scoped"
+
+
 def test_persona_profile_projection_fails_open_when_buddy_lookup_breaks(
     persona_db: CharactersRAGDB,
     monkeypatch,
@@ -156,6 +169,89 @@ def test_persona_profile_projection_fails_open_when_buddy_lookup_breaks(
         assert payload["id"] == persona_id
         assert payload["buddy_summary"]["persona_name"] == "Projection Recovery Persona"
 
+    fastapi_app.dependency_overrides.clear()
+
+
+def test_create_persona_profile_sanitizes_buddy_rollback_failure(
+    persona_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def _raise_buddy_failure(*args, **kwargs):
+        _ = (args, kwargs)
+        raise ValueError("buddy validation exploded")
+
+    def _raise_rollback_failure(*args, **kwargs):
+        _ = (args, kwargs)
+        raise persona_ep.PersonaBuddyRollbackError("rollback create exploded")
+
+    monkeypatch.setattr(
+        persona_ep,
+        "_ensure_persona_buddy_after_profile_mutation",
+        _raise_buddy_failure,
+    )
+    monkeypatch.setattr(
+        persona_ep,
+        "_rollback_created_persona_profile_after_buddy_failure",
+        _raise_rollback_failure,
+    )
+
+    with _client_for_user(1, persona_db) as client:
+        created = client.post(
+            "/api/v1/persona/profiles",
+            json={
+                "name": "Rollback Create Persona",
+                "mode": "persistent_scoped",
+                "system_prompt": "Trigger rollback failure.",
+            },
+        )
+
+    assert created.status_code == 500, created.text
+    assert created.json()["detail"] == "Failed to roll back persona profile creation"
+    fastapi_app.dependency_overrides.clear()
+
+
+def test_update_persona_profile_sanitizes_buddy_rollback_failure(
+    persona_db: CharactersRAGDB,
+    monkeypatch,
+):
+    with _client_for_user(1, persona_db) as client:
+        created = client.post(
+            "/api/v1/persona/profiles",
+            json={
+                "name": "Rollback Update Persona",
+                "mode": "persistent_scoped",
+                "system_prompt": "Create before update rollback failure.",
+            },
+        )
+        assert created.status_code == 201, created.text
+        persona_id = created.json()["id"]
+
+        def _raise_buddy_failure(*args, **kwargs):
+            _ = (args, kwargs)
+            raise ValueError("buddy validation exploded")
+
+        def _raise_rollback_failure(*args, **kwargs):
+            _ = (args, kwargs)
+            raise persona_ep.PersonaBuddyRollbackError("rollback update exploded")
+
+        monkeypatch.setattr(
+            persona_ep,
+            "_ensure_persona_buddy_after_profile_mutation",
+            _raise_buddy_failure,
+        )
+        monkeypatch.setattr(
+            persona_ep,
+            "_rollback_updated_persona_profile_after_buddy_failure",
+            _raise_rollback_failure,
+        )
+
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}",
+            json={"mode": "session_scoped"},
+        )
+
+    assert updated.status_code == 500, updated.text
+    assert updated.json()["detail"] == "Failed to roll back persona profile update"
     fastapi_app.dependency_overrides.clear()
 
 
@@ -376,6 +472,7 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
                     "tts_voice": "af_heart",
                     "confirmation_mode": "always",
                     "voice_chat_trigger_phrases": ["hey helper", "okay helper"],
+                    "wake_behavior": "continuous",
                     "auto_resume": True,
                     "barge_in": False,
                     "auto_commit_enabled": True,
@@ -395,6 +492,7 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
             "hey helper",
             "okay helper",
         ]
+        assert payload["voice_defaults"]["wake_behavior"] == "continuous"
         assert payload["voice_defaults"]["auto_commit_enabled"] is True
         assert payload["voice_defaults"]["vad_threshold"] == 0.35
         assert payload["voice_defaults"]["min_silence_ms"] == 150
@@ -406,6 +504,7 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
         fetched_payload = fetched.json()
         assert fetched_payload["voice_defaults"]["tts_provider"] == "tldw"
         assert fetched_payload["voice_defaults"]["tts_voice"] == "af_heart"
+        assert fetched_payload["voice_defaults"]["wake_behavior"] == "continuous"
         assert fetched_payload["voice_defaults"]["auto_resume"] is True
         assert fetched_payload["voice_defaults"]["barge_in"] is False
         assert fetched_payload["voice_defaults"]["auto_commit_enabled"] is True
@@ -421,6 +520,7 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
                     "stt_language": "fr-FR",
                     "confirmation_mode": "destructive_only",
                     "voice_chat_trigger_phrases": ["bonjour helper"],
+                    "wake_behavior": "push_to_talk_after_wake",
                     "auto_resume": False,
                     "barge_in": True,
                     "auto_commit_enabled": False,
@@ -438,6 +538,10 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
         assert updated_payload["voice_defaults"]["voice_chat_trigger_phrases"] == [
             "bonjour helper"
         ]
+        assert (
+            updated_payload["voice_defaults"]["wake_behavior"]
+            == "push_to_talk_after_wake"
+        )
         assert updated_payload["voice_defaults"]["auto_resume"] is False
         assert updated_payload["voice_defaults"]["barge_in"] is True
         assert updated_payload["voice_defaults"]["auto_commit_enabled"] is False
@@ -445,6 +549,23 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
         assert updated_payload["voice_defaults"]["min_silence_ms"] == 640
         assert updated_payload["voice_defaults"]["turn_stop_secs"] == 0.48
         assert updated_payload["voice_defaults"]["min_utterance_secs"] == 0.82
+
+    fastapi_app.dependency_overrides.clear()
+
+
+def test_persona_profile_voice_defaults_rejects_invalid_wake_behavior(
+    persona_db: CharactersRAGDB,
+):
+    with _client_for_user(1, persona_db) as client:
+        created = client.post(
+            "/api/v1/persona/profiles",
+            json={
+                "name": "Bad Wake Helper",
+                "mode": "persistent_scoped",
+                "voice_defaults": {"wake_behavior": "always_on_background"},
+            },
+        )
+        assert created.status_code == 422, created.text
 
     fastapi_app.dependency_overrides.clear()
 
@@ -774,6 +895,20 @@ def test_persona_profile_state_history_and_restore(persona_db: CharactersRAGDB):
         assert len(active_entries) == 1
         assert active_entries[0]["is_active"] is True
         assert active_entries[0]["content"] == v1
+        active_entry_id = active_entries[0]["entry_id"]
+
+        archive = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/state/archive",
+            json={"entry_id": active_entry_id},
+        )
+        assert archive.status_code == 200, archive.text
+        assert archive.json()["soul_md"] is None
+
+        history_after_archive = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/state/history?field=soul_md&include_archived=false&limit=20"
+        )
+        assert history_after_archive.status_code == 200, history_after_archive.text
+        assert history_after_archive.json()["entries"] == []
 
     fastapi_app.dependency_overrides.clear()
 
@@ -797,6 +932,11 @@ def test_persona_profile_state_history_scoping_and_validation(persona_db: Charac
             f"/api/v1/persona/profiles/{persona_id}/state/history?field=unknown_field"
         )
         assert invalid_filter.status_code == 400
+        invalid_archive = user_one_client.post(
+            f"/api/v1/persona/profiles/{persona_id}/state/archive",
+            json={"entry_id": "   "},
+        )
+        assert invalid_archive.status_code == 422
 
     fastapi_app.dependency_overrides.clear()
 
@@ -808,6 +948,11 @@ def test_persona_profile_state_history_scoping_and_validation(persona_db: Charac
             json={"entry_id": "forged-entry"},
         )
         assert restore.status_code == 404
+        archive = user_two_client.post(
+            f"/api/v1/persona/profiles/{persona_id}/state/archive",
+            json={"entry_id": "forged-entry"},
+        )
+        assert archive.status_code == 404
 
     fastapi_app.dependency_overrides.clear()
 

@@ -221,6 +221,11 @@ export const PlaygroundCompareCluster = ({
   createCompareBranch
 }: PlaygroundCompareClusterProps) => {
   const { t } = useTranslation(["playground", "common"])
+  const tr = React.useCallback(
+    (key: string, fallback: string, options?: Record<string, unknown>) =>
+      t(key, fallback, options as any) as string,
+    [t]
+  )
   const notification = useAntdNotification()
   const [collapsed, setCollapsed] = React.useState(true)
   const [hiddenModels, setHiddenModels] = React.useState<string[]>([])
@@ -312,10 +317,10 @@ export const PlaygroundCompareCluster = ({
     setCompareContinuationModeForCluster(block.clusterId, "winner")
     setCollapsed(true)
     notification.success({
-      message: t(
+      message: tr(
         "playground:composer.compareContinueContract",
         "Next turns continue with {{model}} only. Re-enable Compare to send to multiple models again.",
-        { model: getModelLabel(modelKey) } as any
+        { model: getModelLabel(modelKey) }
       )
     })
   }
@@ -794,18 +799,18 @@ export const PlaygroundCompareCluster = ({
             <div
               key={`c-${blockIndex}-${index}`}
               role="article"
-              aria-label={t(
+              aria-label={tr(
                 "playground:composer.compareCardAria",
                 "{{model}} response from {{provider}}",
                 {
                   model: getModelLabel(modelKey),
                   provider:
                     providerLabel ||
-                    t(
+                    tr(
                       "playground:composer.compareProviderCustom",
                       "Custom provider"
                     )
-                } as any
+                }
               )}
               className={`rounded-md border border-border bg-surface p-2 shadow-sm ${
                 isChosenCard ? "ring-1 ring-success" : ""
@@ -823,7 +828,7 @@ export const PlaygroundCompareCluster = ({
                   </span>
                   <span className="truncate text-[10px] text-text-subtle">
                     {providerLabel ||
-                      t(
+                      tr(
                         "playground:composer.compareProviderCustom",
                         "Custom provider"
                       )}
@@ -845,14 +850,14 @@ export const PlaygroundCompareCluster = ({
                       )}
                     </span>
                     <span className="text-[10px] text-primaryStrong/80">
-                      {t("playground:composer.comparePreviewBudget", "~{{count}} chars", {
+                      {tr("playground:composer.comparePreviewBudget", "~{{count}} chars", {
                         count: normalizedPreviewBudget
-                      } as any)}
+                      })}
                     </span>
                   </div>
                   <p className="whitespace-pre-wrap">
                     {normalizedPreviewText ||
-                      t(
+                      tr(
                         "playground:composer.comparePreviewEmpty",
                         "No preview text available."
                       )}
@@ -866,27 +871,27 @@ export const PlaygroundCompareCluster = ({
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-text">
                       {isDiffBaselineCard
-                        ? t(
+                        ? tr(
                             "playground:composer.compareDiffBaselineLabel",
                             "Diff baseline"
                           )
-                        : t(
+                        : tr(
                             "playground:composer.compareDiffVsLabel",
                             "Diff vs {{model}}",
                             {
                               model: getModelLabel(diffBaselineModelKey || modelKey)
-                            } as any
+                            }
                           )}
                     </span>
                     <span className="text-[10px] text-text-subtle">
-                      {t("playground:composer.compareDiffOverlap", "{{percent}}% overlap", {
+                      {tr("playground:composer.compareDiffOverlap", "{{percent}}% overlap", {
                         percent: Math.round(diffPreview.overlapRatio * 100)
-                      } as any)}
+                      })}
                     </span>
                   </div>
                   {isDiffBaselineCard ? (
                     <p className="text-[10px] text-text-subtle">
-                      {t(
+                      {tr(
                         "playground:composer.compareDiffBaselineHint",
                         "Other responses are compared against this card."
                       )}
@@ -1086,9 +1091,9 @@ export const PlaygroundCompareCluster = ({
                   {costLabel ? (
                     <span
                       className="inline-flex items-center gap-1 text-[10px] text-text-subtle"
-                      aria-label={t("playground:composer.compareCost", "Cost: {{cost}}", {
+                      aria-label={tr("playground:composer.compareCost", "Cost: {{cost}}", {
                         cost: costLabel
-                      } as any)}>
+                      })}>
                       <DollarSign className="h-3 w-3" aria-hidden="true" />
                       {costLabel}
                     </span>

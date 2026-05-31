@@ -1,14 +1,25 @@
-from __future__ import annotations
-
 """
 Reusable helpers for building RFC5988 Link headers for paginated endpoints.
 
-This module is intentionally lightweight and dependency-free, so it can be
-used across endpoints (e.g., runs, events, future artifacts listings).
+This module centralizes pagination metadata and Link header construction for
+API endpoints while keeping dependencies limited to shared pagination schemas.
 """
 
+from __future__ import annotations
 
 import urllib.parse as _u
+from collections.abc import Mapping
+from typing import Any
+
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    CursorPaginationMeta,
+    OffsetPaginationMeta,
+)
+from tldw_Server_API.app.api.v1.utils.pagination import (
+    build_cursor_pagination_meta,
+    build_offset_pagination_meta,
+    build_page_pagination_meta,
+)
 
 
 def build_link_header(
@@ -91,4 +102,71 @@ def build_link_header(
     return ", ".join(links) if links else None
 
 
-__all__ = ["build_link_header"]
+def build_pagination_link_header(
+    base_path: str,
+    common_params: list[tuple[str, str]] | None = None,
+    *,
+    pagination: OffsetPaginationMeta | CursorPaginationMeta,
+    cursor_param: str = "cursor",
+    include_first_last: bool = True,
+) -> str | None:
+    """Build an RFC5988 Link header from canonical pagination metadata."""
+    if isinstance(pagination, OffsetPaginationMeta):
+        return build_link_header(
+            base_path=base_path,
+            common_params=common_params,
+            limit=pagination.limit,
+            offset=pagination.offset,
+            has_more=pagination.has_more,
+            include_first_last=include_first_last,
+        )
+
+    return build_link_header(
+        base_path=base_path,
+        common_params=common_params,
+        next_cursor=pagination.next_cursor,
+        limit=pagination.limit,
+        cursor_param=cursor_param,
+    )
+
+
+def resolve_page_pagination_metadata(
+    pagination_data: Mapping[str, Any] | None,
+    *,
+    page: int,
+    per_page: int,
+    item_count: int,
+) -> dict[str, int]:
+    """Normalize page pagination data from storage, defaulting missing totals safely."""
+    pagination = pagination_data or {}
+
+    def _as_int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    page_value = max(1, _as_int(pagination.get("page"), page))
+    per_page_value = max(1, _as_int(pagination.get("per_page") or pagination.get("limit"), per_page))
+    total_value = max(0, _as_int(pagination.get("total"), item_count))
+    total_pages_value = pagination.get("total_pages")
+    if total_pages_value is None:
+        total_pages_value = (total_value + per_page_value - 1) // per_page_value if total_value else 0
+    total_pages_value = max(0, _as_int(total_pages_value, 0))
+
+    return {
+        "page": page_value,
+        "per_page": per_page_value,
+        "total": total_value,
+        "total_pages": total_pages_value,
+    }
+
+
+__all__ = [
+    "build_cursor_pagination_meta",
+    "build_link_header",
+    "build_page_pagination_meta",
+    "build_offset_pagination_meta",
+    "build_pagination_link_header",
+    "resolve_page_pagination_metadata",
+]

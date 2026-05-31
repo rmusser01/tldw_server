@@ -45,7 +45,9 @@ const NotesSaveStatus: React.FC<NotesSaveStatusProps> = ({ state, lastSavedAt, o
   return (
     <span
       className={`inline-flex items-center gap-1.5 text-[11px] ${config.textClass}`}
+      role="status"
       aria-live="polite"
+      aria-atomic="true"
       data-testid="notes-save-status"
       data-state={state}
     >

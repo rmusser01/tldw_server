@@ -254,6 +254,27 @@ def test_persist_streamed_message_saves_then_returns_503_when_counting_degrades(
     assert [m["content"] for m in messages].count("saved once despite degraded validation") == 1
 
 
+def test_chat_export_json_returns_503_when_counting_degrades(
+    test_client: TestClient,
+    auth_headers,
+    character_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JSON export does not emit null canonical pagination totals."""
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+
+    monkeypatch.setattr(
+        character_db,
+        "count_messages_for_conversation",
+        lambda _chat_id: (_ for _ in ()).throw(RuntimeError("count unavailable")),
+    )
+
+    response = test_client.get(f"/api/v1/chats/{chat_id}/export", headers=auth_headers)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Unable to compute canonical pagination metadata for export"
+
+
 def test_persist_streamed_message_retry_reuses_saved_degraded_outcome(
     test_client: TestClient,
     auth_headers,
@@ -504,3 +525,57 @@ def test_persist_streamed_message_rejects_blank_assistant_message_id(
     )
 
     assert response.status_code == 422
+
+
+def test_persist_streamed_message_maps_input_error_to_400(
+    test_client: TestClient,
+    auth_headers,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+
+    def _raise_input_error(*args, **kwargs):
+        raise InputError("persist payload is invalid")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.post_message_to_conversation",
+        _raise_input_error,
+    )
+
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={"assistant_content": "valid reply"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "persist payload is invalid"
+
+
+def test_persist_streamed_message_maps_oversize_input_error_to_413(
+    test_client: TestClient,
+    auth_headers,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+
+    def _raise_input_error(*args, **kwargs):
+        raise InputError("Persist attachment exceeds maximum size")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.post_message_to_conversation",
+        _raise_input_error,
+    )
+
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={"assistant_content": "valid reply"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Persist attachment exceeds maximum size"
