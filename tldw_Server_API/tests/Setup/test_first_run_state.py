@@ -1,4 +1,6 @@
+import json
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -31,6 +33,30 @@ def test_records_step_and_persists_across_store_instances(tmp_path: Path):
     assert reloaded.status == FirstRunStatus.IN_PROGRESS
     assert reloaded.current_step == "providers"
     assert reloaded.step_data["providers"]["default_provider"] == "openai"
+
+
+def test_step_data_secrets_are_redacted_before_persistence(tmp_path: Path):
+    path = tmp_path / "first_run_state.json"
+    store = FirstRunStateStore(path)
+
+    store.update_step(
+        "providers",
+        {
+            "api_key": "sk-secret-raw",
+            "nested": {"refresh_token": "tok-raw"},
+            "default_provider": "openai",
+            "acknowledged": True,
+        },
+    )
+
+    state = FirstRunStateStore(path).load()
+    serialized_step_data = json.dumps(state.step_data)
+    assert "sk-secret-raw" not in serialized_step_data
+    assert "tok-raw" not in serialized_step_data
+    assert state.step_data["providers"]["api_key"] == "********"
+    assert state.step_data["providers"]["nested"]["refresh_token"] == "********"
+    assert state.step_data["providers"]["default_provider"] == "openai"
+    assert state.step_data["providers"]["acknowledged"] is True
 
 
 def test_complete_requires_first_chat_success(tmp_path: Path):
@@ -185,6 +211,22 @@ def test_mutating_methods_use_state_lock(tmp_path: Path, monkeypatch: pytest.Mon
     store.update_step("providers", {"default_provider": "openai"})
 
     assert calls == [str(tmp_path / "first_run_state.json")]
+
+
+def test_stale_lock_file_is_recovered_before_mutation(tmp_path: Path):
+    path = tmp_path / "first_run_state.json"
+    lock_path = path.with_name(f"{path.name}.lock")
+    old_timestamp = datetime.now(timezone.utc) - timedelta(hours=1)
+    lock_path.write_text(
+        json.dumps({"pid": 999999, "created_at": old_timestamp.isoformat()}),
+        encoding="utf-8",
+    )
+    store = FirstRunStateStore(path, lock_timeout_seconds=0.1, stale_lock_seconds=0.01)
+
+    state = store.update_step("providers", {"default_provider": "openai"})
+
+    assert state.step_data["providers"]["default_provider"] == "openai"
+    assert not lock_path.exists()
 
 
 def test_corrupt_state_file_is_quarantined_and_loads_blocked_recovery_state(tmp_path: Path):

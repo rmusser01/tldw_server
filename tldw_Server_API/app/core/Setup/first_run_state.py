@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +35,17 @@ TERMINAL_STATE_REASONS = {
     FirstRunStatus.SKIPPED: "state_skipped",
     FirstRunStatus.COMPLETED: "setup_already_completed",
 }
+SECRET_KEY_MARKERS = (
+    "api_key",
+    "apikey",
+    "secret",
+    "token",
+    "password",
+    "credential",
+    "authorization",
+    "bearer",
+)
+REDACTION_PLACEHOLDER = "********"
 
 
 class InvalidFirstRunTransition(ValueError):
@@ -96,12 +107,41 @@ def _sync_step_completion(state: FirstRunState, step: str) -> None:
         state.completed_steps.append(step)
 
 
+def _normalized_key(value: object) -> str:
+    return "".join(character for character in str(value).lower() if character.isalnum())
+
+
+def _is_sensitive_key(key: object) -> bool:
+    normalized_key = _normalized_key(key)
+    return any(_normalized_key(marker) in normalized_key for marker in SECRET_KEY_MARKERS)
+
+
+def _redact_secret_step_data(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            key: REDACTION_PLACEHOLDER if _is_sensitive_key(key) else _redact_secret_step_data(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_secret_step_data(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_secret_step_data(item) for item in value]
+    return value
+
+
 class FirstRunStateStore:
     """JSON-backed first-run setup state store."""
 
-    def __init__(self, path: Path, *, lock_timeout_seconds: float = 10.0):
+    def __init__(
+        self,
+        path: Path,
+        *,
+        lock_timeout_seconds: float = 10.0,
+        stale_lock_seconds: float = 300.0,
+    ):
         self.path = path
         self.lock_timeout_seconds = lock_timeout_seconds
+        self.stale_lock_seconds = stale_lock_seconds
 
     def load(self) -> FirstRunState:
         if not self.path.exists():
@@ -120,7 +160,7 @@ class FirstRunStateStore:
         except ValidationError:
             return self._recover_unreadable_state(reason="invalid_schema")
 
-    def save(self, state: FirstRunState) -> FirstRunState:
+    def _save_unlocked(self, state: FirstRunState) -> FirstRunState:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         state.updated_at = _now()
         self._atomic_write(state.model_dump_json(indent=2))
@@ -152,7 +192,7 @@ class FirstRunStateStore:
         quarantined = self._quarantine_bad_state()
         logger.warning("First-run state file unreadable; entering recovery state")
         state = _blocked_recovery_state(reason=reason, quarantined=quarantined)
-        return self.save(state)
+        return self._save_unlocked(state)
 
     def _quarantine_bad_state(self) -> bool:
         quarantine_path = self.path.with_name(
@@ -175,12 +215,18 @@ class FirstRunStateStore:
             try:
                 fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError as exc:
+                if self._recover_stale_lock(lock_path):
+                    continue
                 if time.monotonic() >= deadline:
                     raise TimeoutError("first_run_state_lock_timeout") from exc
                 time.sleep(0.05)
 
         try:
-            os.write(fd, str(os.getpid()).encode("ascii"))
+            metadata = {
+                "pid": os.getpid(),
+                "created_at": _now().isoformat(),
+            }
+            os.write(fd, json.dumps(metadata).encode("ascii"))
             os.close(fd)
             fd = None
             yield
@@ -190,12 +236,70 @@ class FirstRunStateStore:
             with suppress(FileNotFoundError):
                 lock_path.unlink()
 
+    def _recover_stale_lock(self, lock_path: Path) -> bool:
+        if not self._should_recover_lock(lock_path):
+            return False
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            return True
+        except OSError:
+            logger.warning("Failed to remove stale first-run state lock file")
+            return False
+        logger.warning("Removed stale first-run state lock file")
+        return True
+
+    def _should_recover_lock(self, lock_path: Path) -> bool:
+        metadata = self._read_lock_metadata(lock_path)
+        return self._lock_is_too_old(metadata) or self._lock_owner_is_dead(metadata)
+
+    def _read_lock_metadata(self, lock_path: Path) -> dict[str, Any]:
+        try:
+            raw_metadata = lock_path.read_text(encoding="utf-8")
+        except OSError:
+            return {}
+        try:
+            metadata = json.loads(raw_metadata)
+        except json.JSONDecodeError:
+            with suppress(ValueError):
+                return {"pid": int(raw_metadata)}
+            return {}
+        return metadata if isinstance(metadata, dict) else {}
+
+    def _lock_is_too_old(self, metadata: dict[str, Any]) -> bool:
+        created_at = metadata.get("created_at")
+        if not isinstance(created_at, str):
+            return False
+        try:
+            parsed_created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if parsed_created_at.tzinfo is None:
+            parsed_created_at = parsed_created_at.replace(tzinfo=timezone.utc)
+        return (_now() - parsed_created_at).total_seconds() > self.stale_lock_seconds
+
+    def _lock_owner_is_dead(self, metadata: dict[str, Any]) -> bool:
+        if os.name != "posix":
+            return False
+        pid = metadata.get("pid")
+        if not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        except OSError:
+            return True
+        return False
+
     def _mutate_state(self, mutator: Callable[[FirstRunState], FirstRunState | None]) -> FirstRunState:
         with self._state_lock():
             state = self.load()
             result = mutator(state)
             state = result if result is not None else state
-            return self.save(state)
+            return self._save_unlocked(state)
 
     def update_step(self, step: str, data: dict[str, Any] | None = None) -> FirstRunState:
         def _update(state: FirstRunState) -> None:
@@ -204,7 +308,7 @@ class FirstRunStateStore:
                 state.status = FirstRunStatus.IN_PROGRESS
             state.current_step = step
             if data is not None:
-                state.step_data[step] = data
+                state.step_data[step] = _redact_secret_step_data(data)
                 if data.get("acknowledged") is True and step not in state.acknowledged_steps:
                     state.acknowledged_steps.append(step)
                 elif data.get("acknowledged") is not True and step in state.acknowledged_steps:

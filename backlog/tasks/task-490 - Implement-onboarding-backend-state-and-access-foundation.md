@@ -42,7 +42,7 @@ Started Task 1 subagent-driven slice: backend first-run state store and setup sc
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 1 edge-case fix slice: update_step(step, data=None) now persists acknowledgement revocation for required steps by setting step_data[step]["acknowledged"] = False, keeping acknowledged_steps, completed_steps, and mark_completed() semantics aligned. TASK-490 remains In Progress because Task 2 endpoint/access-boundary work is intentionally not implemented. Red phase captured 1 expected failure in test_first_run_state.py before production changes. Verification after fix: test_first_run_state.py - 15 passed; test_setup_manager_masking.py - 1 passed; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings; git diff --check passed.
+Task 1 final code-quality fix slice: first-run step data is now recursively redacted before persistence for secret-looking keys, required non-secret setup fields remain intact, stale lock files with old metadata or dead POSIX owners are recovered before mutation, and the unlocked save path is private. TASK-490 remains In Progress because Task 2 endpoint/access-boundary work is intentionally not implemented. Red phase captured 2 expected failures in test_first_run_state.py before production changes: raw secrets persisted and stale_lock_seconds was unsupported. Verification after fix: test_first_run_state.py - 17 passed; test_setup_manager_masking.py - 1 passed; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 <!-- SECTION:FINAL_SUMMARY:END -->
 
