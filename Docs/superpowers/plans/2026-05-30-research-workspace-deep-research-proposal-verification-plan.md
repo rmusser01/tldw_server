@@ -21,7 +21,7 @@
   - Find the matching Deep Research import when viewing proposal artifacts and route the modal through the proposal viewer.
 - Modify `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx`
   - Add RED helper and UI tests for matching, non-matching, and modal section rendering.
-- Modify `backlog/tasks/task-571 - Show-Deep-Research-verification-in-proposal-sections.md`
+- Modify `backlog/tasks/task-574 - Show-Deep-Research-verification-in-proposal-sections.md`
   - Record acceptance criteria, plan link, verification, and final closeout.
 
 ## Stage 1: Pure Verification Contract
@@ -56,7 +56,7 @@
 
 ## Stage 4: Verification And Closeout
 
-**Goal:** Run focused tests, type-check if feasible, diff check, Bandit applicability, and update TASK-571.
+**Goal:** Run focused tests, type-check if feasible, diff check, Bandit applicability, and update TASK-574.
 
 **Success Criteria:** Verification results are recorded in the task and the branch is ready for PR.
 

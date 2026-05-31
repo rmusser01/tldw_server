@@ -12,7 +12,7 @@
 
 ## Source Requirements
 
-- Backlog: `TASK-570`
+- Backlog: `TASK-573`
 - Existing follow-up: `TASK-572` (`Import Deep Research bundles into Research Workspace artifacts`)
 - PRD: `Docs/Product/Research_Workspace_Literature_Workproducts_PRD.md`
 - Umbrella plan: `Docs/superpowers/plans/2026-05-30-research-workspace-literature-workproducts-plan.md`
@@ -34,7 +34,7 @@
 - Modify `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage2.responsive.test.tsx`
   - Mock bundle fetch and artifact insertion.
   - Cover successful import and failed/malformed bundle handling.
-- Modify `backlog/tasks/task-570 - Implement-Deep-Research-bundle-import-into-Research-Workspace-artifacts.md`
+- Modify `backlog/tasks/task-573 - Implement-Deep-Research-bundle-import-into-Research-Workspace-artifacts.md`
   - Record implementation notes, verification, and final status at closeout.
 
 ## Task 1: Add Bundle Import Adapter Tests
@@ -182,4 +182,4 @@ If only frontend TS/TSX/docs/backlog files changed, record Bandit skipped as not
 
 - [x] **Step 5: Update Backlog and commit**
 
-Update TASK-570 with notes, final summary, and DoD status, then commit the task, plan, tests, and implementation.
+Update TASK-573 with notes, final summary, and DoD status, then commit the task, plan, tests, and implementation.
