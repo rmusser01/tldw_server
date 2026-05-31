@@ -52,13 +52,13 @@ Stage 4 complete: added Research Proposal Pack RED tests for Source Audit/source
 
 Stage 5 complete: added discoverability, invalid JSON, source-lineage/source-coverage, and export-scope regression coverage; labeled Literature Review templates in the chooser; added JSON export for parsed data-table artifacts while keeping XLSX absent. Verification: `cd apps/packages/ui && bun run test -- src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage1.test.tsx src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage2.test.tsx src/workspace-templates/__tests__/work-product-templates.test.ts` passed with 4 files / 74 tests. `bun run verify:design-system-state` failed on existing product-state baseline findings outside touched work-product files; no new touched-file finding was identified in the blocked list.
 
-Stage 6 complete: created Deep Research follow-up tasks TASK-487, TASK-488, TASK-489, and TASK-571 covering launch from Matrix/Gap artifacts, follow-up seeding from hypotheses/proposals, bundle import back into Research Workspace, and verification display beside proposal sections.
+Stage 6 complete: created Deep Research follow-up tasks TASK-487, TASK-488, TASK-572, and TASK-571 covering launch from Matrix/Gap artifacts, follow-up seeding from hypotheses/proposals, bundle import back into Research Workspace, and verification display beside proposal sections.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the Research Workspace literature work-products MVP: actionable Literature Matrix, Corpus Gap Finder, Evidence-Bound Hypotheses, and Research Proposal Pack templates; source coverage/lineage metadata; JSON-first validation for Matrix/Gap/Hypotheses; proposal Source Audit enforcement; Literature Review grouping; CSV/JSON table exports; and Deep Research follow-up tasks TASK-487, TASK-488, TASK-489, and TASK-571. Verification: focused Research Workspace Vitest suite passed with 4 files / 74 tests. `bun run verify:design-system-state` remains blocked by pre-existing product-state baseline findings outside touched work-product files. Bandit skipped because this slice touched UI/docs/backlog files only, with no Python code.
+Implemented the Research Workspace literature work-products MVP: actionable Literature Matrix, Corpus Gap Finder, Evidence-Bound Hypotheses, and Research Proposal Pack templates; source coverage/lineage metadata; JSON-first validation for Matrix/Gap/Hypotheses; proposal Source Audit enforcement; Literature Review grouping; CSV/JSON table exports; and Deep Research follow-up tasks TASK-487, TASK-488, TASK-572, and TASK-571. Verification: focused Research Workspace Vitest suite passed with 4 files / 74 tests. `bun run verify:design-system-state` remains blocked by pre-existing product-state baseline findings outside touched work-product files. Bandit skipped because this slice touched UI/docs/backlog files only, with no Python code.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
