@@ -2,12 +2,14 @@ import React from "react"
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import { FirstSourceMilestonePrompt } from "@/components/Option/Onboarding/FirstSourceMilestonePrompt"
+import { PostSetupApiRecovery } from "@/components/Option/Onboarding/PostSetupApiRecovery"
 import { UnifiedSetupWizard } from "@/components/Option/Onboarding/UnifiedSetupWizard"
 import {
   useConnectionActions,
   useConnectionState
 } from "@/hooks/useConnectionState"
 import { useFocusComposerOnConnect } from "@/hooks/useComposerFocus"
+import { usePostOnboardingMediaReadiness } from "@/hooks/usePostOnboardingMediaReadiness"
 import { useSetupOnboarding } from "@/hooks/useSetupOnboarding"
 import OptionLayout from "~/components/Layouts/Layout"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
@@ -78,6 +80,13 @@ const OptionIndex = () => {
 
   useFocusComposerOnConnect(phase ?? null)
 
+  const setupStatus = firstRunState?.status
+  const shouldCheckPostOnboardingMedia =
+    setupStatus === "completed" && !firstSourceDismissed
+  const mediaReadiness = usePostOnboardingMediaReadiness(
+    shouldCheckPostOnboardingMedia
+  )
+
   if (hostedMode) {
     return (
       <OptionLayout hideHeader hideSidebar>
@@ -106,7 +115,6 @@ const OptionIndex = () => {
     )
   }
 
-  const setupStatus = firstRunState?.status
   if (!setupStatus || setupRequiredStatuses.has(setupStatus)) {
     return (
       <OptionLayout hideHeader hideSidebar>
@@ -131,7 +139,23 @@ const OptionIndex = () => {
   }
 
   const showFirstSourcePrompt =
-    setupStatus === "completed" && !firstSourceDismissed
+    shouldCheckPostOnboardingMedia && mediaReadiness.status === "ready"
+
+  if (
+    shouldCheckPostOnboardingMedia &&
+    (mediaReadiness.status === "needs_config" ||
+      mediaReadiness.status === "error")
+  ) {
+    return (
+      <OptionLayout hideHeader hideSidebar>
+        <PostSetupApiRecovery
+          errorMessage={mediaReadiness.errorMessage}
+          onRecover={mediaReadiness.recoverWithApiKey}
+          onRetry={mediaReadiness.retry}
+        />
+      </OptionLayout>
+    )
+  }
 
   return (
     <OptionLayout>

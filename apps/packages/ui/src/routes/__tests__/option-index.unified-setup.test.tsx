@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const routeMocks = vi.hoisted(() => ({
@@ -15,7 +15,17 @@ const routeMocks = vi.hoisted(() => ({
       first_chat: { completed: false }
     }
   },
-  requestQuickIngestOpen: vi.fn()
+  requestQuickIngestOpen: vi.fn(),
+  tldwConfig: {
+    current: {
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    } as Record<string, unknown>
+  },
+  getConfig: vi.fn(),
+  listMedia: vi.fn(),
+  updateConfig: vi.fn()
 }))
 
 vi.mock("~/components/Layouts/Layout", () => ({
@@ -67,6 +77,14 @@ vi.mock("@/utils/quick-ingest-open", () => ({
   requestQuickIngestOpen: routeMocks.requestQuickIngestOpen
 }))
 
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    getConfig: routeMocks.getConfig,
+    listMedia: routeMocks.listMedia,
+    updateConfig: routeMocks.updateConfig
+  }
+}))
+
 vi.mock("@/hooks/useSetupOnboarding", () => ({
   useSetupOnboarding: () => ({
     state: routeMocks.firstRunState.current,
@@ -112,6 +130,24 @@ describe("OptionIndex unified setup resolver", () => {
       acknowledged_steps: [],
       first_chat: { completed: false }
     }
+    routeMocks.tldwConfig.current = {
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    }
+    routeMocks.getConfig.mockReset()
+    routeMocks.getConfig.mockImplementation(
+      async () => routeMocks.tldwConfig.current
+    )
+    routeMocks.listMedia.mockReset()
+    routeMocks.listMedia.mockResolvedValue({ items: [] })
+    routeMocks.updateConfig.mockReset()
+    routeMocks.updateConfig.mockImplementation(async (updates) => {
+      routeMocks.tldwConfig.current = {
+        ...routeMocks.tldwConfig.current,
+        ...(updates as Record<string, unknown>)
+      }
+    })
   })
 
   it("renders setup in focused shell when backend state is not complete", async () => {
@@ -130,7 +166,7 @@ describe("OptionIndex unified setup resolver", () => {
     ).toBeInTheDocument()
   })
 
-  it("offers the first-source milestone after backend setup completion", async () => {
+  it("offers the first-source milestone after authenticated media readiness succeeds", async () => {
     routeMocks.firstRunState.current = {
       status: "completed",
       completed_steps: ["first_chat"],
@@ -147,14 +183,116 @@ describe("OptionIndex unified setup resolver", () => {
       </MemoryRouter>
     )
 
-    expect(
-      screen.getByRole("heading", { name: /add your first source/i })
+    expect(await screen.findByRole("heading", { name: /add your first source/i })
     ).toBeInTheDocument()
+    await waitFor(() => {
+      expect(routeMocks.listMedia).toHaveBeenCalledWith({
+        results_per_page: 1
+      })
+    })
     fireEvent.click(screen.getByRole("button", { name: /add source/i }))
 
     expect(routeMocks.requestQuickIngestOpen).toHaveBeenCalledWith(
       { source: "first_source_milestone" },
       { focusTrigger: true }
     )
+  })
+
+  it("shows inline API key recovery when setup is complete but media auth is missing", async () => {
+    routeMocks.firstRunState.current = {
+      status: "completed",
+      completed_steps: ["first_chat"],
+      skipped_steps: [],
+      step_data: {},
+      acknowledged_steps: ["first_chat"],
+      first_chat: { completed: true }
+    }
+    routeMocks.tldwConfig.current = {
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user"
+    }
+    const { default: OptionIndex } = await import("../option-index")
+
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+      </MemoryRouter>
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: /restore media access/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: /add your first source/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("saves a recovered API key, rechecks readiness, and then shows the first-source milestone", async () => {
+    routeMocks.firstRunState.current = {
+      status: "completed",
+      completed_steps: ["first_chat"],
+      skipped_steps: [],
+      step_data: {},
+      acknowledged_steps: ["first_chat"],
+      first_chat: { completed: true }
+    }
+    routeMocks.tldwConfig.current = {
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user"
+    }
+    const { default: OptionIndex } = await import("../option-index")
+
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+      </MemoryRouter>
+    )
+
+    const keyInput = await screen.findByLabelText(/single-user API key/i)
+    fireEvent.change(keyInput, {
+      target: { value: "recovered-api-key" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: /save API key/i }))
+
+    await waitFor(() => {
+      expect(routeMocks.updateConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serverUrl: "http://localhost:3000",
+          authMode: "single-user",
+          apiKey: "recovered-api-key"
+        })
+      )
+    })
+    expect(
+      await screen.findByRole("heading", { name: /add your first source/i })
+    ).toBeInTheDocument()
+  })
+
+  it("does not render the first-source CTA while media readiness is still checking", async () => {
+    routeMocks.firstRunState.current = {
+      status: "completed",
+      completed_steps: ["first_chat"],
+      skipped_steps: [],
+      step_data: {},
+      acknowledged_steps: ["first_chat"],
+      first_chat: { completed: true }
+    }
+    routeMocks.listMedia.mockReturnValue(new Promise(() => undefined))
+    const { default: OptionIndex } = await import("../option-index")
+
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(routeMocks.listMedia).toHaveBeenCalledWith({
+        results_per_page: 1
+      })
+    })
+    expect(
+      screen.queryByRole("heading", { name: /add your first source/i })
+    ).not.toBeInTheDocument()
   })
 })

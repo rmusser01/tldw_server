@@ -129,7 +129,7 @@ function buildFirstRunSetupRoute(entryIntent: FirstRunEntryIntent | null): strin
 - [x] Update `start-docker-single` so it reads `SINGLE_USER_API_KEY` from `$(TLDW_ENV_FILE)` and passes it to the WebUI compose as `NEXT_PUBLIC_X_API_KEY` only when the caller did not set `NEXT_PUBLIC_X_API_KEY`. Mirror the existing `Helper_Scripts/run-frontend-integration.sh` precedence: explicit `NEXT_PUBLIC_X_API_KEY` wins, otherwise use `SINGLE_USER_API_KEY`.
 - [x] Keep the Makefile command structured so the key is not echoed. Use shell variable assignment inside the recipe rather than printing the resolved key.
 - [x] If the env file has no usable `SINGLE_USER_API_KEY`, fail with a clear setup message instead of launching a WebUI that cannot authenticate.
-- [ ] Preserve explicit caller overrides:
+- [x] Preserve explicit caller overrides:
 
 ```make
 API_KEY="$$(grep '^SINGLE_USER_API_KEY=' "$(TLDW_ENV_FILE)" | cut -d= -f2-)"; \
@@ -163,7 +163,7 @@ docker compose --env-file "$(TLDW_ENV_FILE)" ...
 - `apps/packages/ui/src/routes/__tests__/option-index.unified-setup.test.tsx`
 - New component/hook tests for post-setup API recovery if split into separate files
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -174,27 +174,27 @@ docker compose --env-file "$(TLDW_ENV_FILE)" ...
 
 ### Red Tests
 
-- [ ] Add a completed-setup test where authenticated media readiness succeeds and `FirstSourceMilestonePrompt` is shown.
-- [ ] Add a completed-setup test where setup is complete but media readiness fails due to missing API key, and the inline recovery panel is shown.
-- [ ] Add a recovery submission test where entering an API key calls `tldwClient.updateConfig`, then rechecks readiness, then shows `FirstSourceMilestonePrompt`.
-- [ ] Add a test that first-source CTA is not rendered while readiness is unknown or failed.
-- [ ] Run the focused route tests and confirm the new recovery/readiness assertions fail before implementation.
+- [x] Add a completed-setup test where authenticated media readiness succeeds and `FirstSourceMilestonePrompt` is shown.
+- [x] Add a completed-setup test where setup is complete but media readiness fails due to missing API key, and the inline recovery panel is shown.
+- [x] Add a recovery submission test where entering an API key calls `tldwClient.updateConfig`, then rechecks readiness, then shows `FirstSourceMilestonePrompt`.
+- [x] Add a test that first-source CTA is not rendered while readiness is unknown or failed.
+- [x] Run the focused route tests and confirm the new recovery/readiness assertions fail before implementation.
 
 ### Implementation
 
-- [ ] Add `usePostOnboardingMediaReadiness` with these states: `checking`, `ready`, `needs_config`, `error`.
-- [ ] Implement the readiness check by requiring both client config and a successful authenticated media request. Prefer a low-cost media endpoint already wrapped by `TldwApiClient`, such as `listMedia({ results_per_page: 1 })`, because the first-source flow depends on media API auth.
-- [ ] Add `PostSetupApiRecovery` as a compact setup-shell panel with:
-  - [ ] masked API key input,
-  - [ ] submit button,
-  - [ ] clear validation error state,
-  - [ ] no detour to Settings as the primary path.
-- [ ] On submit, call `tldwClient.updateConfig` with the existing or discovered backend URL, `authMode: "single-user"`, and the entered key.
-- [ ] After successful update, immediately re-run the authenticated media readiness check.
-- [ ] Modify `option-index.tsx` so `FirstSourceMilestonePrompt` renders only when setup state is complete and media readiness is `ready`.
-- [ ] Keep `/setup` behavior unchanged except for sharing the same readiness/backend contract where it already does.
-- [ ] Run the focused tests and confirm they pass.
-- [ ] Commit with message `fix: gate first source on authenticated readiness`.
+- [x] Add `usePostOnboardingMediaReadiness` with these states: `checking`, `ready`, `needs_config`, `error`.
+- [x] Implement the readiness check by requiring both client config and a successful authenticated media request. Prefer a low-cost media endpoint already wrapped by `TldwApiClient`, such as `listMedia({ results_per_page: 1 })`, because the first-source flow depends on media API auth.
+- [x] Add `PostSetupApiRecovery` as a compact setup-shell panel with:
+  - [x] masked API key input,
+  - [x] submit button,
+  - [x] clear validation error state,
+  - [x] no detour to Settings as the primary path.
+- [x] On submit, call `tldwClient.updateConfig` with the existing or discovered backend URL, `authMode: "single-user"`, and the entered key.
+- [x] After successful update, immediately re-run the authenticated media readiness check.
+- [x] Modify `option-index.tsx` so `FirstSourceMilestonePrompt` renders only when setup state is complete and media readiness is `ready`.
+- [x] Keep `/setup` behavior unchanged except for sharing the same readiness/backend contract where it already does.
+- [x] Run the focused tests and confirm they pass.
+- [x] Commit with message `fix: gate first source on authenticated readiness`.
 
 ---
 
