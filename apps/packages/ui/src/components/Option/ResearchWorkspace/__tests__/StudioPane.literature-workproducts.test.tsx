@@ -2,7 +2,11 @@ import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { AudioGenerationSettings, WorkspaceSource } from "@/types/workspace"
+import type {
+  AudioGenerationSettings,
+  GeneratedArtifact,
+  WorkspaceSource
+} from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
 import {
   buildCorpusGapMessages,
@@ -16,6 +20,10 @@ import {
   buildLiteratureDeepResearchLaunchPath,
   isDeepResearchLaunchableLiteratureArtifact
 } from "../StudioPane/literature-deep-research-launch"
+import {
+  buildProposalDeepResearchVerificationSections,
+  findProposalDeepResearchVerificationArtifact
+} from "../StudioPane/proposal-deep-research-verification"
 
 const {
   mockAddArtifact,
@@ -341,7 +349,174 @@ const sourceDetail = (title: string, text: string) => ({
   content: { text }
 })
 
+const proposalArtifact = {
+  id: "artifact-proposal",
+  type: "report",
+  title: "Research Proposal Pack",
+  status: "completed",
+  templateId: "research_proposal_pack",
+  content: [
+    "# Rural Transfer Study",
+    "## Research Question",
+    "How should rural clinics adapt transfer coaching?",
+    "## Literature Overview",
+    "Paper A supports timely coaching. Paper B warns rural clinics differ.",
+    "## Proposed Hypothesis",
+    "Rural clinics need a lower-touch coaching protocol.",
+    "## Methodology",
+    "Run a matched cohort study with retention tracking.",
+    "## Source Audit",
+    "Paper A and Paper B are the selected source base."
+  ].join("\n\n"),
+  sourceCoverage: {
+    selectedSourceIds: ["source-1", "source-2"],
+    usableSources: [
+      { sourceId: "source-1", mediaId: 101, title: "Paper A" },
+      { sourceId: "source-2", mediaId: 202, title: "Paper B" }
+    ],
+    skippedSources: [],
+    truncatedSources: [],
+    minimumUsableSourcesMet: true
+  },
+  reviewChecklist: [
+    {
+      id: "proposal-source-audit",
+      label: "Confirm source audit before reuse",
+      checked: false
+    }
+  ],
+  createdAt: new Date("2026-02-18T00:00:00.000Z")
+} satisfies GeneratedArtifact
+
+const matchingDeepResearchImport = {
+  id: "artifact-deep-research-import",
+  type: "report",
+  title: "Deep Research: Research Proposal Pack",
+  status: "completed",
+  content: "# Deep Research Import",
+  producerMetadata: {
+    producerType: "deep_research_bundle_import",
+    runId: "research-run-7",
+    templateId: "research_proposal_pack"
+  },
+  data: {
+    deepResearch: {
+      runId: "research-run-7",
+      question: "Verify the rural transfer proposal.",
+      sourceArtifact: {
+        id: "artifact-proposal",
+        template: "research_proposal_pack",
+        title: "Research Proposal Pack"
+      },
+      verificationSummary: {
+        supported_claim_count: 2,
+        unsupported_claim_count: 1
+      },
+      unresolvedQuestions: [
+        "Which rural clinic constraints change the intervention?",
+        "Which source contradicts the sampling plan?"
+      ],
+      contradictions: [
+        {
+          claim: "Rural transfer is always stronger than urban transfer.",
+          reason: "Paper B reports mixed rural outcomes."
+        }
+      ],
+      unsupportedClaims: [
+        {
+          text: "The retention tracking cadence is validated in all rural settings."
+        }
+      ],
+      sourceTrust: [
+        { source_id: "source-1", snapshot_policy: "full_artifact" },
+        { source_id: "source-2", snapshot_policy: "excerpt_only" }
+      ]
+    }
+  },
+  createdAt: new Date("2026-02-18T00:03:00.000Z")
+} satisfies GeneratedArtifact
+
 describe("StudioPane literature work products", () => {
+  it("finds only matching Deep Research imports for proposal verification", () => {
+    const unrelatedImport = {
+      ...matchingDeepResearchImport,
+      id: "artifact-unrelated-import",
+      data: {
+        deepResearch: {
+          ...matchingDeepResearchImport.data.deepResearch,
+          sourceArtifact: {
+            id: "other-proposal",
+            template: "research_proposal_pack",
+            title: "Other Proposal"
+          }
+        }
+      }
+    } satisfies GeneratedArtifact
+    const wrongProducerImport = {
+      ...matchingDeepResearchImport,
+      id: "artifact-wrong-producer",
+      producerMetadata: {
+        producerType: "manual_report_import",
+        runId: "research-run-7"
+      }
+    } satisfies GeneratedArtifact
+    const unfinishedImport = {
+      ...matchingDeepResearchImport,
+      id: "artifact-unfinished-import",
+      status: "generating"
+    } satisfies GeneratedArtifact
+
+    expect(
+      findProposalDeepResearchVerificationArtifact(proposalArtifact, [
+        wrongProducerImport,
+        unfinishedImport,
+        unrelatedImport,
+        matchingDeepResearchImport
+      ])
+    ).toBe(matchingDeepResearchImport)
+    expect(
+      findProposalDeepResearchVerificationArtifact(proposalArtifact, [
+        unrelatedImport
+      ])
+    ).toBeNull()
+  })
+
+  it("attaches conservative Deep Research verification to proposal sections", () => {
+    const sections = buildProposalDeepResearchVerificationSections(
+      proposalArtifact,
+      matchingDeepResearchImport
+    )
+
+    expect(sections.map((section) => section.heading)).toEqual([
+      "Rural Transfer Study",
+      "Research Question",
+      "Literature Overview",
+      "Proposed Hypothesis",
+      "Methodology",
+      "Source Audit"
+    ])
+    expect(
+      sections.find((section) => section.heading === "Research Question")
+        ?.verification
+    ).toBeUndefined()
+
+    for (const heading of [
+      "Literature Overview",
+      "Proposed Hypothesis",
+      "Methodology",
+      "Source Audit"
+    ]) {
+      const verification = sections.find((section) => section.heading === heading)
+        ?.verification
+      expect(verification?.runId).toBe("research-run-7")
+      expect(verification?.supportedClaimCount).toBe(2)
+      expect(verification?.unsupportedClaimCount).toBe(1)
+      expect(verification?.unresolvedQuestions).toHaveLength(2)
+      expect(verification?.contradictionCount).toBe(1)
+      expect(verification?.sourceTrustCount).toBe(2)
+    }
+  })
+
   it("rejects array rows instead of treating them as literature matrix records", () => {
     expect(() =>
       normalizeLiteratureMatrixResponse(JSON.stringify({ rows: [["Paper A"]] }))
@@ -1795,5 +1970,38 @@ Proposal
         screen.getByTestId("studio-artifact-secondary-actions-artifact-proposal")
       ).queryByRole("link", { name: /launch deep research/i })
     ).not.toBeInTheDocument()
+  })
+
+  it("shows Deep Research verification beside compatible proposal sections", async () => {
+    const originalSourceCoverage = proposalArtifact.sourceCoverage
+    const originalReviewChecklist = proposalArtifact.reviewChecklist
+    workspaceStoreState.generatedArtifacts = [
+      proposalArtifact,
+      matchingDeepResearchImport
+    ]
+
+    renderStudioPane()
+
+    const proposalActions = screen.getByTestId(
+      "studio-artifact-primary-actions-artifact-proposal"
+    )
+    fireEvent.click(within(proposalActions).getByRole("button", { name: /view/i }))
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Deep Research verification").length).toBeGreaterThan(0)
+    })
+    expect(screen.getAllByText("Literature Overview").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Methodology").length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Run research-run-7/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/2 supported/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/1 unsupported/i).length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText(/1 contradiction/i).length
+    ).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText(/Which rural clinic constraints/i).length
+    ).toBeGreaterThan(0)
+    expect(proposalArtifact.sourceCoverage).toBe(originalSourceCoverage)
+    expect(proposalArtifact.reviewChecklist).toBe(originalReviewChecklist)
   })
 })

@@ -105,6 +105,7 @@ import {
   type ResearchWorkspaceCapabilitiesResponse
 } from "../research-workspace-capabilities"
 import { buildLiteratureDeepResearchLaunchPath } from "./literature-deep-research-launch"
+import { findProposalDeepResearchVerificationArtifact } from "./proposal-deep-research-verification"
 
 // Re-export for external consumers
 export { estimateGenerationSeconds, estimateGenerationTokens, estimateGenerationCostUsd } from "./hooks/useArtifactGeneration"
@@ -484,6 +485,12 @@ const FlashcardArtifactEditor = React.lazy(() =>
 const QuizArtifactEditor = React.lazy(() =>
   import("./ArtifactModalContent").then((module) => ({
     default: module.QuizArtifactEditor
+  }))
+)
+
+const ProposalDeepResearchVerificationViewer = React.lazy(() =>
+  import("./ArtifactModalContent").then((module) => ({
+    default: module.ProposalDeepResearchVerificationViewer
   }))
 )
 
@@ -1272,6 +1279,27 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         ...responsiveModalProps(860),
         footer: null,
         icon: null
+      })
+      return
+    }
+
+    const proposalVerificationArtifact =
+      findProposalDeepResearchVerificationArtifact(artifact, generatedArtifacts)
+    if (artifact.content && proposalVerificationArtifact) {
+      Modal.info({
+        title: artifact.title,
+        content: renderArtifactModalContent(
+          <ProposalDeepResearchVerificationViewer
+            proposalArtifact={artifact}
+            verificationArtifact={proposalVerificationArtifact}
+          />,
+          t(
+            "playground:studio.loadingProposalVerificationViewer",
+            "Loading proposal verification..."
+          )
+        ),
+        ...responsiveModalProps(980),
+        footer: null
       })
       return
     }
