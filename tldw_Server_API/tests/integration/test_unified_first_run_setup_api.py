@@ -293,6 +293,52 @@ def test_first_run_provider_validate_returns_typed_response_without_token_echo(
     assert raw_token not in str(body)
 
 
+def test_first_run_kobold_provider_validate_uses_native_validator(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    raw_token = "secret-local-token"
+
+    async def _fail_openai_validate(payload):  # noqa: ARG001
+        pytest.fail("koboldcpp validation should not use OpenAI-compatible /models")
+
+    async def _fake_kobold_validate(payload):
+        assert payload.provider_key == "koboldcpp"
+        assert payload.base_url == "http://127.0.0.1:5001/api/v1/generate"
+        assert payload.api_key == raw_token
+        return setup_endpoint.SetupProviderValidationResponse(
+            provider_key=payload.provider_key,
+            status="ready",
+        )
+
+    monkeypatch.setattr(setup_endpoint, "validate_local_openai_endpoint", _fail_openai_validate)
+    monkeypatch.setattr(
+        setup_endpoint,
+        "validate_native_kobold_endpoint",
+        _fake_kobold_validate,
+        raising=False,
+    )
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/providers/validate",
+        json={
+            "provider_key": "koboldcpp",
+            "base_url": "http://127.0.0.1:5001/api/v1/generate",
+            "api_key": raw_token,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider_key"] == "koboldcpp"
+    assert body["status"] == "ready"
+    assert raw_token not in str(body)
+
+
 def test_first_run_hosted_provider_validate_rejects_blank_key_with_typed_response(
     monkeypatch,
     tmp_path,

@@ -97,6 +97,7 @@ from tldw_Server_API.app.core.Setup.provider_validation import (
     LocalEndpointValidationRequest,
     validate_hosted_provider_credentials,
     validate_local_openai_endpoint,
+    validate_native_kobold_endpoint,
 )
 from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
 from tldw_Server_API.app.core.Setup.readiness_models import LANE_IDS, LANE_STATUSES, OVERLAY_IDS
@@ -807,6 +808,8 @@ async def validate_first_run_provider(
         model=payload.model,
         api_key=payload.api_key,
     )
+    if provider_key == "koboldcpp":
+        return await validate_native_kobold_endpoint(normalized_payload)
     return await validate_local_openai_endpoint(normalized_payload)
 
 

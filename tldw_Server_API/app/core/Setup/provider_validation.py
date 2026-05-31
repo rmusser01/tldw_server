@@ -63,6 +63,18 @@ def _extract_model_ids(body: Any) -> list[str] | None:
     return model_ids
 
 
+def _has_kobold_native_result(body: Any) -> bool:
+    if not isinstance(body, dict):
+        return False
+    results = body.get("results")
+    if not isinstance(results, list) or not results:
+        return False
+    first_result = results[0]
+    if not isinstance(first_result, dict):
+        return False
+    return isinstance(first_result.get("text"), str)
+
+
 def validate_hosted_provider_credentials(
     payload: HostedProviderValidationRequest,
 ) -> SetupProviderValidationResponse:
@@ -150,4 +162,67 @@ async def validate_local_openai_endpoint(
         provider_key=payload.provider_key,
         status=VALIDATION_STATUS_READY,
         models=model_ids,
+    )
+
+
+async def validate_native_kobold_endpoint(
+    payload: LocalEndpointValidationRequest,
+) -> SetupProviderValidationResponse:
+    """Validate a Kobold.cpp native ``/api/v1/generate`` endpoint shape."""
+    headers = {"Content-Type": "application/json"}
+    if payload.api_key:
+        headers["X-Api-Key"] = payload.api_key
+    request_body = {
+        "prompt": "ping",
+        "max_context_length": 128,
+        "max_length": 1,
+        "temperature": 0.0,
+    }
+
+    try:
+        async with _create_validation_client() as client:
+            response = await client.post(
+                payload.base_url,
+                headers=headers,
+                json=request_body,
+            )
+    except (httpx.InvalidURL, httpx.HTTPError, TimeoutError, OSError):
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_LOCAL_PROVIDER_UNREACHABLE,
+            message="Local provider endpoint is unreachable.",
+        )
+
+    if response.status_code in {401, 403}:
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_AUTH_FAILED,
+            message="Local provider rejected the supplied credentials.",
+        )
+    if response.status_code >= 400:
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
+            message="Local provider did not return a supported Kobold-compatible response.",
+        )
+
+    try:
+        body = response.json()
+    except ValueError:
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
+            message="Local provider did not return valid JSON.",
+        )
+
+    if not _has_kobold_native_result(body):
+        return _failed_response(
+            payload,
+            failure_category=FAILURE_UNSUPPORTED_API_SHAPE,
+            message="Local provider did not expose a Kobold-compatible generate response.",
+        )
+
+    return SetupProviderValidationResponse(
+        provider_key=payload.provider_key,
+        status=VALIDATION_STATUS_READY,
     )
