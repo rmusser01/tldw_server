@@ -251,7 +251,11 @@ class FirstRunStateStore:
 
     def _should_recover_lock(self, lock_path: Path) -> bool:
         metadata = self._read_lock_metadata(lock_path)
-        return self._lock_is_too_old(metadata) or self._lock_owner_is_dead(metadata)
+        if self._lock_is_too_old(metadata) or self._lock_owner_is_dead(metadata):
+            return True
+        if not self._lock_metadata_has_recovery_signal(metadata):
+            return self._lock_file_is_too_old(lock_path)
+        return False
 
     def _read_lock_metadata(self, lock_path: Path) -> dict[str, Any]:
         try:
@@ -265,6 +269,9 @@ class FirstRunStateStore:
                 return {"pid": int(raw_metadata)}
             return {}
         return metadata if isinstance(metadata, dict) else {}
+
+    def _lock_metadata_has_recovery_signal(self, metadata: dict[str, Any]) -> bool:
+        return isinstance(metadata.get("created_at"), str) or isinstance(metadata.get("pid"), int)
 
     def _lock_is_too_old(self, metadata: dict[str, Any]) -> bool:
         created_at = metadata.get("created_at")
@@ -293,6 +300,13 @@ class FirstRunStateStore:
         except OSError:
             return True
         return False
+
+    def _lock_file_is_too_old(self, lock_path: Path) -> bool:
+        try:
+            lock_stat = lock_path.stat()
+        except OSError:
+            return False
+        return (time.time() - lock_stat.st_mtime) > self.stale_lock_seconds
 
     def _mutate_state(self, mutator: Callable[[FirstRunState], FirstRunState | None]) -> FirstRunState:
         with self._state_lock():

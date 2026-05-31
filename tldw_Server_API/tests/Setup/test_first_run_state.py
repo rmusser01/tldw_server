@@ -1,4 +1,5 @@
 import json
+import os
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -222,6 +223,34 @@ def test_stale_lock_file_is_recovered_before_mutation(tmp_path: Path):
         encoding="utf-8",
     )
     store = FirstRunStateStore(path, lock_timeout_seconds=0.1, stale_lock_seconds=0.01)
+
+    state = store.update_step("providers", {"default_provider": "openai"})
+
+    assert state.step_data["providers"]["default_provider"] == "openai"
+    assert not lock_path.exists()
+
+
+def test_stale_empty_lock_file_is_recovered_before_mutation(tmp_path: Path):
+    path = tmp_path / "first_run_state.json"
+    lock_path = path.with_name(f"{path.name}.lock")
+    lock_path.touch()
+    old_timestamp = (datetime.now(timezone.utc) - timedelta(hours=1)).timestamp()
+    os.utime(lock_path, (old_timestamp, old_timestamp))
+    store = FirstRunStateStore(path, lock_timeout_seconds=0.01, stale_lock_seconds=0.001)
+
+    state = store.update_step("providers", {"default_provider": "openai"})
+
+    assert state.step_data["providers"]["default_provider"] == "openai"
+    assert not lock_path.exists()
+
+
+def test_stale_malformed_lock_file_is_recovered_before_mutation(tmp_path: Path):
+    path = tmp_path / "first_run_state.json"
+    lock_path = path.with_name(f"{path.name}.lock")
+    lock_path.write_text("not-json-not-pid", encoding="utf-8")
+    old_timestamp = (datetime.now(timezone.utc) - timedelta(hours=1)).timestamp()
+    os.utime(lock_path, (old_timestamp, old_timestamp))
+    store = FirstRunStateStore(path, lock_timeout_seconds=0.01, stale_lock_seconds=0.001)
 
     state = store.update_step("providers", {"default_provider": "openai"})
 

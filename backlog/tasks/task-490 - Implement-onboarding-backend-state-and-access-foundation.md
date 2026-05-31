@@ -42,10 +42,7 @@ Started Task 1 subagent-driven slice: backend first-run state store and setup sc
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 1 final code-quality fix slice: first-run step data is now recursively redacted before persistence for secret-looking keys, required non-secret setup fields remain intact, stale lock files with old metadata or dead POSIX owners are recovered before mutation, and the unlocked save path is private. TASK-490 remains In Progress because Task 2 endpoint/access-boundary work is intentionally not implemented. Red phase captured 2 expected failures in test_first_run_state.py before production changes: raw secrets persisted and stale_lock_seconds was unsupported. Verification after fix: test_first_run_state.py - 17 passed; test_setup_manager_masking.py - 1 passed; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings; git diff --check passed.
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+Task 1 stale-lock cleanup slice: stale lock recovery now falls back to lock file mtime when metadata is empty or malformed, so crash-created lock files can be recovered without manual deletion. The duplicate Backlog final-summary closing markers were also removed. TASK-490 remains In Progress because Task 2 endpoint/access-boundary work is intentionally not implemented. Red phase captured 2 expected failures in test_first_run_state.py before production changes: empty and malformed stale lock files timed out. Verification after fix: test_first_run_state.py - 19 passed; test_setup_manager_masking.py - 1 passed; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
