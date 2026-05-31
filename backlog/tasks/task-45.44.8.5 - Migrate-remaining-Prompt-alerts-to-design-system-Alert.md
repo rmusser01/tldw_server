@@ -31,6 +31,8 @@ Migrated remaining Prompt and Prompt Studio Alert surfaces from AntD Alert to th
 
 Removed 11 Prompt entries from the product-state baseline, reducing live baseline exceptions from 97 to 86 and leaving no Prompt/Prompt Studio baseline entries.
 
+Review follow-up: rebased on latest dev and wrapped the PromptFullPageEditor structured prompt Alert title/description in t(...) with defaultValue copy preserved.
+
 Verification recorded:
 - `bunx vitest run src/components/Option/Prompt/__tests__/ConflictResolutionModal.test.tsx src/components/Option/Prompt/__tests__/PromptDrawer.structured-prompts.test.tsx src/components/Option/Prompt/__tests__/PromptFullPageEditor.structured-prompts.test.tsx src/components/Option/Prompt/Studio/Prompts/__tests__/PromptEditorDrawer.structured.test.tsx src/components/Option/Prompt/Studio/Prompts/__tests__/ExecutePlayground.design-system.test.tsx --reporter=dot`
 - `bun run verify:design-system-state`

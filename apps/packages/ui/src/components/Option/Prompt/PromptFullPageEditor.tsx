@@ -433,11 +433,14 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
                 <Alert
                   variant="info"
                   className="mb-4"
-                  title="Structured prompt"
+                  title={t("managePrompts.fullEditor.structuredPromptTitle", {
+                    defaultValue: "Structured prompt"
+                  })}
                 >
-                  This prompt now uses ordered blocks. The raw system and user
-                  fields are locked for compatibility; save and preview use the
-                  structured definition.
+                  {t("managePrompts.fullEditor.structuredPromptDesc", {
+                    defaultValue:
+                      "This prompt now uses ordered blocks. The raw system and user fields are locked for compatibility; save and preview use the structured definition."
+                  })}
                 </Alert>
               )}
               <Form.Item
