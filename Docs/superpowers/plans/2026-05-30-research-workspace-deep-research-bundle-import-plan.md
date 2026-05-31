@@ -13,7 +13,7 @@
 ## Source Requirements
 
 - Backlog: `TASK-570`
-- Existing follow-up: `TASK-489` (`Import Deep Research bundles into Research Workspace artifacts`)
+- Existing follow-up: `TASK-572` (`Import Deep Research bundles into Research Workspace artifacts`)
 - PRD: `Docs/Product/Research_Workspace_Literature_Workproducts_PRD.md`
 - Umbrella plan: `Docs/superpowers/plans/2026-05-30-research-workspace-literature-workproducts-plan.md`
 

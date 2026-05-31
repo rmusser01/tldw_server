@@ -10,7 +10,7 @@ documentation:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Implement the next post-MVP Research Workspace / Deep Research bridge: import a completed Deep Research bundle.json into the active Research Workspace as a generated artifact, preserving run provenance, source coverage, verification summary metadata, and the source artifact return context. This implementation task references the existing follow-up TASK-489, whose ID collides with older task files in this checkout and cannot be safely edited through MCP/CLI by task ID.
+Implement the next post-MVP Research Workspace / Deep Research bridge: import a completed Deep Research bundle.json into the active Research Workspace as a generated artifact, preserving run provenance, source coverage, verification summary metadata, and the source artifact return context. This implementation task references the existing follow-up TASK-572, which was originally created as TASK-489 before tracker hygiene renumbered it away from colliding older task files.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

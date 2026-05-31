@@ -1,5 +1,5 @@
 ---
-id: TASK-489
+id: TASK-572
 title: Import Deep Research bundles into Research Workspace artifacts
 status: To Do
 documentation:
