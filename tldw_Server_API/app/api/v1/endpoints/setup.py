@@ -215,6 +215,12 @@ _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
     r"(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S{3,}"
     r")"
 )
+_LOCAL_PATH_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
+    r"(?:"
+    r"^(?:/Users|/home|/private|/var|/tmp|/etc)/[^\s,;\"']*$|"
+    r"^[A-Za-z]:\\[^\s,;\"']*$"
+    r")"
+)
 _SETUP_DEFAULT_PROVIDER_KEYS = {
     "llamacpp": "llama.cpp",
     "koboldcpp": "kobold",
@@ -273,21 +279,33 @@ def _is_unsafe_public_step_data_value(value: object) -> bool:
     if not isinstance(value, str):
         return False
     candidate = value.strip()
-    return len(candidate) >= 6 and _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE.search(candidate) is not None
+    return len(candidate) >= 6 and (
+        _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE.search(candidate) is not None
+        or _LOCAL_PATH_LIKE_FIRST_RUN_STEP_VALUE_RE.search(candidate) is not None
+    )
 
 
-def _is_public_first_run_step_value(value: Any) -> bool:
+def _allows_path_like_first_run_step_value(step: str, key: object) -> bool:
+    return step == "ingest_defaults" and key == "allowed_local_roots"
+
+
+def _is_public_first_run_step_value(value: Any, *, allow_path_like: bool = False) -> bool:
     if isinstance(value, str):
+        if allow_path_like and not _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE.search(value.strip()):
+            return True
         return not _is_unsafe_public_step_data_value(value)
     if value is None or isinstance(value, int | float | bool):
         return True
     if isinstance(value, list):
-        return all(_is_public_first_run_step_value(item) for item in value)
+        return all(
+            _is_public_first_run_step_value(item, allow_path_like=allow_path_like)
+            for item in value
+        )
     if isinstance(value, dict):
         return all(
             isinstance(key, str)
             and not _is_unsafe_public_step_data_key(key)
-            and _is_public_first_run_step_value(item)
+            and _is_public_first_run_step_value(item, allow_path_like=allow_path_like)
             for key, item in value.items()
         )
     return False
@@ -318,7 +336,13 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
         )
-    if not all(_is_public_first_run_step_value(value) for value in data.values()):
+    if not all(
+        _is_public_first_run_step_value(
+            value,
+            allow_path_like=_allows_path_like_first_run_step_value(step, key),
+        )
+        for key, value in data.items()
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
@@ -341,7 +365,10 @@ def _public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, An
             step, key
         ):
             continue
-        if _is_public_first_run_step_value(value):
+        if _is_public_first_run_step_value(
+            value,
+            allow_path_like=_allows_path_like_first_run_step_value(step, key),
+        ):
             public_data[key] = value
     return public_data
 
