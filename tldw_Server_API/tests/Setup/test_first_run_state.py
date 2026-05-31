@@ -14,6 +14,32 @@ from tldw_Server_API.app.core.Setup.first_run_state import (
 )
 
 
+def _persist_required_first_run_step_data(
+    store: FirstRunStateStore,
+    *,
+    acknowledged: bool = True,
+) -> None:
+    step_payloads = {
+        "setup_path": {"acknowledged": acknowledged, "setup_path_key": "local"},
+        "privacy_security": {"acknowledged": acknowledged, "local_only": True},
+        "providers": {"acknowledged": acknowledged, "default_provider": "openai"},
+        "ingest_defaults": {
+            "acknowledged": acknowledged,
+            "allow_local_file_ingest": False,
+            "chunking_profile": "balanced",
+            "metadata_mode": "automatic",
+        },
+        "audio_defaults": {"acknowledged": acknowledged, "mode": "skip"},
+        "optional_advanced": {
+            "acknowledged": acknowledged,
+            "rag": "defer",
+            "storage_paths": "defer",
+        },
+    }
+    for step, payload in step_payloads.items():
+        store.update_step(step, payload)
+
+
 def test_new_store_defaults_to_not_started(tmp_path: Path):
     store = FirstRunStateStore(tmp_path / "first_run_state.json")
 
@@ -78,8 +104,7 @@ def test_complete_requires_first_chat_success(tmp_path: Path):
 def test_complete_requires_required_step_acknowledgements(tmp_path: Path):
     store = FirstRunStateStore(tmp_path / "first_run_state.json")
 
-    for step in REQUIRED_FIRST_RUN_STEPS:
-        store.update_step(step, {"acknowledged": False})
+    _persist_required_first_run_step_data(store, acknowledged=False)
     store.record_first_chat_success(
         provider="openai",
         model="gpt-4.1-mini",
@@ -95,9 +120,8 @@ def test_complete_requires_required_step_acknowledgements(tmp_path: Path):
 def test_later_unacknowledged_step_blocks_completion(tmp_path: Path):
     store = FirstRunStateStore(tmp_path / "first_run_state.json")
 
-    for step in REQUIRED_FIRST_RUN_STEPS:
-        store.update_step(step, {"acknowledged": True})
-    store.update_step("providers", {"acknowledged": False})
+    _persist_required_first_run_step_data(store)
+    store.update_step("providers", {"acknowledged": False, "default_provider": "openai"})
     store.record_first_chat_success(
         provider="openai",
         model="gpt-4.1-mini",
@@ -123,8 +147,7 @@ def test_required_step_completion_is_revoked_when_acknowledgement_is_removed(tmp
 def test_required_step_without_data_revokes_acknowledgement_for_completion(tmp_path: Path):
     store = FirstRunStateStore(tmp_path / "first_run_state.json")
 
-    for step in REQUIRED_FIRST_RUN_STEPS:
-        store.update_step(step, {"acknowledged": True})
+    _persist_required_first_run_step_data(store)
     state = store.update_step("providers")
     store.record_first_chat_success(
         provider="openai",
@@ -138,6 +161,23 @@ def test_required_step_without_data_revokes_acknowledgement_for_completion(tmp_p
         store.mark_completed()
 
     assert "required_steps_missing:providers" in str(excinfo.value)
+
+
+def test_acknowledgement_without_required_step_data_blocks_completion(tmp_path: Path):
+    store = FirstRunStateStore(tmp_path / "first_run_state.json")
+
+    for step in REQUIRED_FIRST_RUN_STEPS:
+        store.update_step(step, {"acknowledged": True})
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+
+    with pytest.raises(InvalidFirstRunTransition) as excinfo:
+        store.mark_completed()
+
+    assert "required_steps_missing" in str(excinfo.value)
 
 
 def test_blocked_state_rejects_normal_mutations(tmp_path: Path):
@@ -183,8 +223,7 @@ def test_skipped_state_rejects_normal_mutations_but_skip_is_idempotent(tmp_path:
 def test_completed_state_rejects_normal_mutations(tmp_path: Path):
     store = FirstRunStateStore(tmp_path / "first_run_state.json")
 
-    for step in REQUIRED_FIRST_RUN_STEPS:
-        store.update_step(step, {"acknowledged": True})
+    _persist_required_first_run_step_data(store)
     store.record_first_chat_success(
         provider="openai",
         model="gpt-4.1-mini",
@@ -313,8 +352,7 @@ def test_skip_records_skipped_not_completed(tmp_path: Path):
 def test_first_chat_success_allows_completion(tmp_path: Path):
     store = FirstRunStateStore(tmp_path / "first_run_state.json")
 
-    for step in REQUIRED_FIRST_RUN_STEPS:
-        store.update_step(step, {"acknowledged": True})
+    _persist_required_first_run_step_data(store)
     store.record_first_chat_success(
         provider="openai",
         model="gpt-4.1-mini",
@@ -330,8 +368,7 @@ def test_first_chat_success_allows_completion(tmp_path: Path):
 def test_validate_completion_ready_does_not_mark_completed(tmp_path: Path):
     store = FirstRunStateStore(tmp_path / "first_run_state.json")
 
-    for step in REQUIRED_FIRST_RUN_STEPS:
-        store.update_step(step, {"acknowledged": True})
+    _persist_required_first_run_step_data(store)
     store.record_first_chat_success(
         provider="openai",
         model="gpt-4.1-mini",

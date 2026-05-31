@@ -14,9 +14,32 @@ from tldw_Server_API.app.core.Setup.first_run_state import (
 from tldw_Server_API.app.core.Setup.provider_catalog import REQUIRED_SETUP_PROVIDER_KEYS
 
 
-def _acknowledge_all_required_steps(store: FirstRunStateStore) -> None:
-    for step in REQUIRED_FIRST_RUN_STEPS:
-        store.update_step(step, {"acknowledged": True})
+def _persist_required_first_run_step_data(
+    store: FirstRunStateStore,
+    *,
+    skip_steps: set[str] | None = None,
+) -> None:
+    step_payloads = {
+        "setup_path": {"acknowledged": True, "setup_path_key": "local"},
+        "privacy_security": {"acknowledged": True, "local_only": True},
+        "providers": {"acknowledged": True, "default_provider": "openai"},
+        "ingest_defaults": {
+            "acknowledged": True,
+            "allow_local_file_ingest": False,
+            "chunking_profile": "balanced",
+            "metadata_mode": "automatic",
+        },
+        "audio_defaults": {"acknowledged": True, "mode": "skip"},
+        "optional_advanced": {
+            "acknowledged": True,
+            "rag": "defer",
+            "storage_paths": "defer",
+        },
+    }
+    skipped = skip_steps or set()
+    for step, payload in step_payloads.items():
+        if step not in skipped:
+            store.update_step(step, payload)
 
 app = app_main.app
 app_main._shared_is_explicit_pytest_runtime = lambda: True
@@ -273,8 +296,7 @@ def test_completed_setup_rejects_provider_save_through_first_run_write_guard(
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     _setup_needs_setup(monkeypatch)
     store = FirstRunStateStore(state_path)
-    for step in REQUIRED_FIRST_RUN_STEPS:
-        store.update_step(step, {"acknowledged": True})
+    _persist_required_first_run_step_data(store)
     store.record_first_chat_success(
         provider="openai",
         model="gpt-4.1-mini",
@@ -433,6 +455,35 @@ def test_first_run_first_chat_endpoint_failure_does_not_record_or_echo_raw_detai
     assert state.first_chat.completed is False
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"provider": "sk-secret-token", "model": "gpt-4.1-mini"},
+        {"provider": "openai", "model": "/Users/me/.env"},
+    ],
+)
+def test_first_run_first_chat_endpoint_rejects_unsafe_provider_or_model_before_verify(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+    payload,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    async def _fake_verify_first_chat(**_kwargs):
+        pytest.fail("unsafe first-chat metadata should be rejected before verification")
+
+    monkeypatch.setattr(setup_endpoint, "verify_first_chat", _fake_verify_first_chat, raising=False)
+
+    response = setup_client.post("/api/v1/setup/first-run/first-chat", json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == setup_endpoint.UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL
+    assert not state_path.exists()
+
+
 def test_first_run_complete_rejects_without_first_chat(
     monkeypatch,
     tmp_path,
@@ -458,7 +509,7 @@ def test_first_run_complete_rejects_without_first_chat(
     assert completion_calls == []
 
 
-def test_first_run_complete_rejects_missing_required_acknowledgements(
+def test_first_run_complete_rejects_acknowledgements_without_persisted_required_step_data(
     monkeypatch,
     tmp_path,
     setup_client,
@@ -467,6 +518,39 @@ def test_first_run_complete_rejects_missing_required_acknowledgements(
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     _setup_needs_setup(monkeypatch)
     FirstRunStateStore(state_path).record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    completion_calls: list[bool] = []
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "mark_setup_completed",
+        lambda completed: completion_calls.append(completed),
+    )
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/complete",
+        json={"acknowledged_steps": list(REQUIRED_FIRST_RUN_STEPS)},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"].startswith("required_steps_missing:")
+    assert completion_calls == []
+    assert FirstRunStateStore(state_path).load().status == FirstRunStatus.FIRST_CHAT_COMPLETE
+
+
+def test_first_run_complete_rejects_missing_required_acknowledgements(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    _persist_required_first_run_step_data(store, skip_steps={"audio_defaults"})
+    store.record_first_chat_success(
         provider="openai",
         model="gpt-4.1-mini",
         response_id="chatcmpl-test",
@@ -498,7 +582,9 @@ def test_first_run_complete_succeeds_after_first_chat_and_required_acknowledgeme
     state_path = tmp_path / "first_run_state.json"
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     _setup_needs_setup(monkeypatch)
-    FirstRunStateStore(state_path).record_first_chat_success(
+    store = FirstRunStateStore(state_path)
+    _persist_required_first_run_step_data(store)
+    store.record_first_chat_success(
         provider="openai",
         model="gpt-4.1-mini",
         response_id="chatcmpl-test",
@@ -1087,8 +1173,7 @@ def test_completed_setup_rejects_first_run_writes(monkeypatch, tmp_path, setup_c
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     _setup_needs_setup(monkeypatch)
     store = FirstRunStateStore(state_path)
-    for step in REQUIRED_FIRST_RUN_STEPS:
-        store.update_step(step, {"acknowledged": True})
+    _persist_required_first_run_step_data(store)
     store.record_first_chat_success(
         provider="openai",
         model="gpt-4.1-mini",
@@ -1125,8 +1210,7 @@ def test_setup_config_rejects_terminal_first_run_state_through_write_guard(
     _setup_needs_setup(monkeypatch)
     store = FirstRunStateStore(state_path)
     if state_factory == "completed":
-        for step in REQUIRED_FIRST_RUN_STEPS:
-            store.update_step(step, {"acknowledged": True})
+        _persist_required_first_run_step_data(store)
         store.record_first_chat_success(
             provider="openai",
             model="gpt-4.1-mini",
@@ -1212,8 +1296,7 @@ def test_setup_complete_marks_legacy_complete_only_after_first_run_completion(
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     _setup_needs_setup(monkeypatch)
     store = FirstRunStateStore(state_path)
-    for step in REQUIRED_FIRST_RUN_STEPS:
-        store.update_step(step, {"acknowledged": True})
+    _persist_required_first_run_step_data(store)
     store.record_first_chat_success(
         provider="openai",
         model="gpt-4.1-mini",
@@ -1242,8 +1325,7 @@ def test_setup_complete_does_not_persist_first_run_completion_when_legacy_write_
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     _setup_needs_setup(monkeypatch)
     store = FirstRunStateStore(state_path)
-    for step in REQUIRED_FIRST_RUN_STEPS:
-        store.update_step(step, {"acknowledged": True})
+    _persist_required_first_run_step_data(store)
     store.record_first_chat_success(
         provider="openai",
         model="gpt-4.1-mini",
@@ -1610,6 +1692,42 @@ def test_first_run_state_get_filters_huggingface_token_like_allowed_public_step_
     body = response.json()
     assert body["step_data"]["providers"] == {"acknowledged": True}
     assert "hf_abcdef1234567890" not in str(body)
+
+
+def test_first_run_state_get_filters_unsafe_first_chat_metadata(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    state = FirstRunStateStore(state_path).record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    payload = setup_endpoint.json.loads(state.model_dump_json())
+    payload["first_chat"].update(
+        {
+            "provider": "sk-secret-token",
+            "model": "/Users/me/.env",
+            "response_id": "hf_abcdef1234567890",
+        }
+    )
+    state_path.write_text(setup_endpoint.json.dumps(payload), encoding="utf-8")
+
+    response = setup_client.get("/api/v1/setup/first-run/state")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["first_chat"]["completed"] is True
+    assert body["first_chat"]["provider"] is None
+    assert body["first_chat"]["model"] is None
+    assert body["first_chat"]["response_id"] is None
+    rendered_body = str(body)
+    assert "sk-secret-token" not in rendered_body
+    assert "/Users/me/.env" not in rendered_body
+    assert "hf_abcdef1234567890" not in rendered_body
 
 
 def test_first_run_state_get_filters_non_public_step_fields(

@@ -99,15 +99,23 @@ def _ensure_mutable_state(state: FirstRunState) -> None:
 
 def _sync_step_completion(state: FirstRunState, step: str) -> None:
     is_required = step in REQUIRED_FIRST_RUN_STEPS
-    is_acknowledged = state.step_data.get(step, {}).get("acknowledged") is True
 
-    if is_required and not is_acknowledged:
+    if is_required and not _required_step_is_ready(state, step):
         if step in state.completed_steps:
             state.completed_steps.remove(step)
         return
 
     if step not in state.completed_steps:
         state.completed_steps.append(step)
+
+
+def _required_step_is_ready(state: FirstRunState, step: str) -> bool:
+    step_data = state.step_data.get(step)
+    return (
+        isinstance(step_data, Mapping)
+        and step_data.get("acknowledged") is True
+        and any(key != "acknowledged" for key in step_data)
+    )
 
 
 def _ensure_completion_ready(state: FirstRunState) -> None:
@@ -117,7 +125,7 @@ def _ensure_completion_ready(state: FirstRunState) -> None:
     missing_steps = [
         step
         for step in REQUIRED_FIRST_RUN_STEPS
-        if state.step_data.get(step, {}).get("acknowledged") is not True
+        if not _required_step_is_ready(state, step)
     ]
     if missing_steps:
         raise InvalidFirstRunTransition("required_steps_missing:" + ",".join(missing_steps))

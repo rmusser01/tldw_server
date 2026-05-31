@@ -409,6 +409,34 @@ def _public_first_run_step_list(value: object) -> list[str]:
     return [step for step in value if _is_public_first_run_step_name(step)]
 
 
+def _safe_public_first_chat_metadata_value(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value if not _is_unsafe_public_step_data_value(value) else None
+
+
+def _require_safe_first_chat_request_metadata(*, provider: str, model: str) -> None:
+    if (
+        _safe_public_first_chat_metadata_value(provider) is None
+        or _safe_public_first_chat_metadata_value(model) is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
+        )
+
+
+def _public_first_chat_payload(value: object) -> dict[str, Any]:
+    payload = model_dump_compat(value)
+    return {
+        "completed": payload.get("completed") is True,
+        "provider": _safe_public_first_chat_metadata_value(payload.get("provider")),
+        "model": _safe_public_first_chat_metadata_value(payload.get("model")),
+        "response_id": _safe_public_first_chat_metadata_value(payload.get("response_id")),
+        "completed_at": payload.get("completed_at"),
+    }
+
+
 def _public_first_run_state(state: FirstRunStateResponse) -> FirstRunStateResponse:
     payload = model_dump_compat(state)
     current_step = payload.get("current_step")
@@ -434,6 +462,7 @@ def _public_first_run_state(state: FirstRunStateResponse) -> FirstRunStateRespon
         }
     else:
         payload["step_data"] = {}
+    payload["first_chat"] = _public_first_chat_payload(payload.get("first_chat"))
     return FirstRunStateResponse.model_validate(payload)
 
 
@@ -690,6 +719,8 @@ def _acknowledge_first_run_steps(
         if step not in valid_steps:
             continue
         existing_data = dict(store.load().step_data.get(step, {}))
+        if not any(key != "acknowledged" for key in existing_data):
+            continue
         existing_data["acknowledged"] = True
         store.update_step(step, existing_data)
 
@@ -1029,6 +1060,7 @@ async def verify_first_run_first_chat(
     payload: FirstChatVerifyRequest,
     _guard: None = Depends(_require_first_run_write_access),
 ) -> FirstChatVerifyResponse:
+    _require_safe_first_chat_request_metadata(provider=payload.provider, model=payload.model)
     result = await verify_first_chat(
         provider=payload.provider,
         model=payload.model,
@@ -1039,6 +1071,8 @@ async def verify_first_run_first_chat(
         return response
 
     try:
+        _require_safe_first_chat_request_metadata(provider=response.provider, model=response.model)
+        response.response_id = _safe_public_first_chat_metadata_value(response.response_id)
         _first_run_store().record_first_chat_success(
             provider=response.provider,
             model=response.model,
