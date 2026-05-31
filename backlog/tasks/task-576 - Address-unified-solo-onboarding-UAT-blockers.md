@@ -16,6 +16,7 @@ modified_files:
 - Makefile
 - Dockerfiles/docker-compose.webui.yml
 - apps/tldw-frontend/pages/_app.tsx
+- apps/tldw-frontend/next.config.mjs
 - apps/tldw-frontend/__tests__/app/app-layout.test.tsx
 - apps/tldw-frontend/__tests__/frontend-quickstart-networking.test.ts
 - apps/tldw-frontend/__tests__/extension/runtime-bootstrap.test.ts
@@ -56,7 +57,7 @@ Plan and implement repairs required for a clean first-time solo-user walkthrough
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-['Stage 6 verification passed: apps/tldw-frontend vitest suite for frontend-quickstart-networking, app-layout, runtime-bootstrap: 35 tests passed.', 'Stage 6 verification passed: apps/packages/ui vitest suite for option-index unified setup, UnifiedSetupWizard, quick-ingest-batch: 43 tests passed.', 'Additional touched UI regressions passed: tldw-api-client.quickstart-auth, quick-ingest-open, QuickIngestButton.resume, AddContentStep.url-detection: 19 tests passed.', 'git diff --check passed.', 'Bandit not applicable before Stage 7: touched scope was TS/React/Makefile/docs only; no backend Python files touched.', 'Stage 7 UAT found an additional backend blocker: local Next quickstart rewrites send x-forwarded-host/proto without a client IP header, and the setup guard rejected first-run state/metadata as remote.', 'Added regression coverage in test_setup_guard for local rewrite metadata without forwarded IP (RED) and remote spoof protection; implemented guard handling and verified 6 setup guard tests passed.']
+['Stage 6 verification passed: apps/tldw-frontend vitest suite for frontend-quickstart-networking, app-layout, runtime-bootstrap: 35 tests passed.', 'Stage 6 verification passed: apps/packages/ui vitest suite for option-index unified setup, UnifiedSetupWizard, quick-ingest-batch: 43 tests passed.', 'Additional touched UI regressions passed: tldw-api-client.quickstart-auth, quick-ingest-open, QuickIngestButton.resume, AddContentStep.url-detection: 19 tests passed.', 'git diff --check passed.', 'Bandit not applicable before Stage 7: touched scope was TS/React/Makefile/docs only; no backend Python files touched.', 'Stage 7 UAT found an additional backend blocker: local Next quickstart rewrites send x-forwarded-host/proto without a client IP header, and the setup guard rejected first-run state/metadata as remote.', 'Added regression coverage in test_setup_guard for local rewrite metadata without forwarded IP (RED) and remote spoof protection; implemented guard handling and verified 6 setup guard tests passed.', 'Bandit passed for tldw_Server_API/app/api/v1/API_Deps/setup_deps.py with no findings.', 'Stage 7 UAT reached and passed the first-chat completion gate with OpenAI; after redirect to Companion, post-onboarding readiness hit a quickstart rewrite/CORS blocker on GET /api/v1/media?results_per_page=1 because the backend redirected to the internal API origin.', 'Added Next quickstart rewrite coverage for /api/v1/media and implemented an internal /api/v1/media -> /api/v1/media/ rewrite; frontend-quickstart-networking test now passes 11 tests.']
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

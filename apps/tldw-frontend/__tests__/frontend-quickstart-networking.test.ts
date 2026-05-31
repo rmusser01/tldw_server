@@ -103,6 +103,10 @@ describe("frontend quickstart networking", () => {
     expect(rewrites).toEqual(
       expect.arrayContaining([
         {
+          source: "/api/v1/media",
+          destination: "http://app:8000/api/v1/media/",
+        },
+        {
           source: "/api/:path*/",
           destination: "http://app:8000/api/:path*/",
         },
