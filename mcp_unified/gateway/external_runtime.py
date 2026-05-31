@@ -10,6 +10,10 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 from uuid import uuid4
 
+from mcp_unified.federation.installers import (
+    ExternalServerInstaller,
+    NullExternalServerInstaller,
+)
 from mcp_unified.federation.models import (
     BrokeredExternalCredential,
     ExternalToolCallResult,
@@ -17,10 +21,6 @@ from mcp_unified.federation.models import (
     FederatedToolResult,
     FederationPolicyDenied,
     VirtualExternalTool,
-)
-from mcp_unified.federation.installers import (
-    ExternalServerInstaller,
-    NullExternalServerInstaller,
 )
 from mcp_unified.federation.transports import ExternalFederationTransport
 from mcp_unified.interfaces.storage import AuditStore, ExternalRegistryStore
@@ -922,14 +922,14 @@ class GatewayExternalRuntimeManager:
                 target_type=target_type,
                 target_id=target_id,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - audit failures must not block cleanup.
             return
 
     @staticmethod
     async def _close_best_effort(transport: ExternalFederationTransport) -> None:
         try:
             await transport.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - adapter close failures are best-effort here.
             return
 
     @staticmethod

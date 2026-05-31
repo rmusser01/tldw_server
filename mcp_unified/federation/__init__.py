@@ -18,8 +18,8 @@ from .config_schema import (
     load_external_server_registry,
     parse_external_server_registry,
 )
-from .manager import ExternalFederationManager
 from .installers import ExternalServerInstaller, NullExternalServerInstaller
+from .manager import ExternalFederationManager
 from .models import (
     BrokeredExternalCredential,
     ExternalToolCallResult,

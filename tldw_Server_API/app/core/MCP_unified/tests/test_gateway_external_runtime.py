@@ -4,14 +4,13 @@ import json
 from typing import Any
 
 import pytest
-
+from mcp_unified.federation.installers import ExternalServerInstaller
 from mcp_unified.federation.models import (
     BrokeredExternalCredential,
     ExternalToolCallResult,
     ExternalToolDefinition,
     FederationPolicyDenied,
 )
-from mcp_unified.federation.installers import ExternalServerInstaller
 from mcp_unified.gateway.external_runtime import (
     GatewayExternalRuntimeError,
     GatewayExternalRuntimeManager,

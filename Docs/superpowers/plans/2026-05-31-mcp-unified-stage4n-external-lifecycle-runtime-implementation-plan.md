@@ -488,7 +488,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi
 
 Expected: runtime manager and FastAPI route tests pass.
 
-- [ ] **Step 6: Commit FastAPI routes**
+- [x] **Step 6: Commit FastAPI routes**
 
 ```bash
 git add mcp_unified/gateway/bootstrap.py mcp_unified/gateway/fastapi.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
@@ -503,7 +503,7 @@ git commit -m "feat: expose external runtime gateway routes"
 - Modify: `backlog/tasks/task-581 - Implement-MCP-external-server-lifecycle-runtime-integration.md`
 - Modify: this plan file
 
-- [ ] **Step 1: Add boundary/export tests**
+- [x] **Step 1: Add boundary/export tests**
 
 Assert:
 
@@ -513,7 +513,7 @@ Assert:
   `ExternalServerInstaller` export if they are public
 - package import-boundary test still finds no `tldw_Server_API` imports
 
-- [ ] **Step 2: Run focused compatibility suite**
+- [x] **Step 2: Run focused compatibility suite**
 
 Run:
 
@@ -531,7 +531,7 @@ python -m pytest \
 
 Expected: all focused tests pass.
 
-- [ ] **Step 3: Run lint/security/whitespace checks**
+- [x] **Step 3: Run lint/security/whitespace checks**
 
 Run:
 
@@ -545,7 +545,7 @@ git diff --check
 Expected: Ruff passes, Bandit reports no new findings in touched package code,
 and diff check passes.
 
-- [ ] **Step 4: Update Backlog and plan status**
+- [x] **Step 4: Update Backlog and plan status**
 
 Record:
 
@@ -554,7 +554,7 @@ Record:
 - known skips, especially no durable CLI lifecycle commands by design
 - final summary
 
-- [ ] **Step 5: Commit final validation**
+- [x] **Step 5: Commit final validation**
 
 ```bash
 git add mcp_unified/gateway/__init__.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py Docs/superpowers/plans/2026-05-31-mcp-unified-stage4n-external-lifecycle-runtime-implementation-plan.md backlog/tasks/task-581\ -\ Implement-MCP-external-server-lifecycle-runtime-integration.md
