@@ -124,6 +124,16 @@ async def bootstrap_profile_gateway_from_config(
         assignment_store=assignment_store,
         audit_store=audit_store,
     )
+    external_registry_manager: GatewayExternalRegistryManager | None = None
+    if _supports_external_registry_store(storage.profile_store):
+        external_storage = build_gateway_external_registry_storage(
+            resolved_config.store,
+            external_registry_store=cast(ExternalRegistryStore, storage.profile_store),
+            audit_store=storage.audit_store,
+        )
+        external_registry_manager = external_registry_manager_from_storage(
+            external_storage,
+        )
 
     return await bootstrap_profile_gateway(
         backend,
@@ -134,6 +144,7 @@ async def bootstrap_profile_gateway_from_config(
         profiles=resolved_config.profiles,
         default_profile_id=resolved_config.default_profile_id,
         default_preset_id=resolved_config.default_preset_id,
+        external_registry_manager=external_registry_manager,
     )
 
 
@@ -345,6 +356,23 @@ def _supports_credential_grant_store(candidate: object) -> bool:
             "list_grants",
             "upsert_grant",
             "delete_grant",
+        )
+    )
+
+
+def _supports_external_registry_store(candidate: object) -> bool:
+    """Return whether an object provides the external-registry store API."""
+
+    return all(
+        callable(getattr(candidate, method_name, None))
+        for method_name in (
+            "get_server",
+            "list_servers",
+            "list_server_definitions",
+            "create_server",
+            "upsert_server",
+            "update_server",
+            "delete_server",
         )
     )
 

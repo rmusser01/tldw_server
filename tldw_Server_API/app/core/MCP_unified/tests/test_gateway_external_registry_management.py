@@ -67,6 +67,15 @@ class InMemoryExternalRegistryStore:
         self.servers[server.id] = server.model_copy(deep=True)
         return self.servers[server.id].model_copy(deep=True)
 
+    async def update_server(
+        self,
+        server: ExternalServerDefinition,
+    ) -> ExternalServerDefinition | None:
+        if server.id not in self.servers:
+            return None
+        self.servers[server.id] = server.model_copy(deep=True)
+        return self.servers[server.id].model_copy(deep=True)
+
     async def delete_server(self, server_id: str) -> bool:
         return self.servers.pop(server_id, None) is not None
 
@@ -77,6 +86,17 @@ class StaleDeleteExternalRegistryStore(InMemoryExternalRegistryStore):
     async def delete_server(self, server_id: str) -> bool:
         del server_id
         return False
+
+
+class StaleUpdateExternalRegistryStore(InMemoryExternalRegistryStore):
+    """Registry store double that preloads a server but reports stale update."""
+
+    async def update_server(
+        self,
+        server: ExternalServerDefinition,
+    ) -> ExternalServerDefinition | None:
+        del server
+        return None
 
 
 class InMemoryCredentialGrantStore:
@@ -116,6 +136,19 @@ class InMemoryCredentialGrantStore:
         before = len(self.grants)
         self.grants = [grant for grant in self.grants if grant.id != grant_id]
         return len(self.grants) != before
+
+
+class FailingCredentialGrantStore(InMemoryCredentialGrantStore):
+    """Credential grant store double that reports unavailable grant state."""
+
+    async def list_grants(
+        self,
+        *,
+        profile_id: str | None = None,
+        external_server_id: str | None = None,
+    ) -> list[CredentialGrant]:
+        del profile_id, external_server_id
+        raise RuntimeError("credential grant store unavailable")
 
 
 class InMemoryAuditStore:
@@ -474,6 +507,20 @@ async def test_gateway_external_registry_patch_normalizes_list_fields() -> None:
 
 
 @pytest.mark.asyncio
+async def test_gateway_external_registry_patch_stale_update_result_raises_not_found() -> None:
+    manager = _manager(
+        StaleUpdateExternalRegistryStore([_server()]),
+        credential_grant_store=InMemoryCredentialGrantStore(),
+    )
+
+    with pytest.raises(GatewayExternalRegistryManagementError) as exc_info:
+        await manager.patch_server("search", {"name": "Search v2"})
+
+    assert exc_info.value.reason_code == "external_server_not_found"
+    assert exc_info.value.to_payload()["server_id"] == "search"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("patch_document", [{}, {"created_at": "2026-05-31"}])
 async def test_gateway_external_registry_rejects_empty_and_unsupported_patch_fields(
     patch_document: dict[str, object],
@@ -584,6 +631,21 @@ async def test_gateway_external_registry_slot_removal_without_grant_store_fails_
 
 
 @pytest.mark.asyncio
+async def test_gateway_external_registry_slot_removal_grant_store_failure_fails_closed() -> None:
+    manager = _manager(
+        InMemoryExternalRegistryStore(
+            [_server(credential_slots=["api_key", "oauth_token"], enabled=False)]
+        ),
+        credential_grant_store=FailingCredentialGrantStore(),
+    )
+
+    with pytest.raises(GatewayExternalRegistryManagementError) as exc_info:
+        await manager.patch_server("search", {"credential_slots": ["api_key"]})
+
+    assert exc_info.value.reason_code == "credential_grant_store_unavailable"
+
+
+@pytest.mark.asyncio
 async def test_gateway_external_registry_delete_missing_server_raises_not_found() -> None:
     manager = _manager(InMemoryExternalRegistryStore())
 
@@ -623,6 +685,19 @@ async def test_gateway_external_registry_delete_with_enabled_credential_grants_f
 @pytest.mark.asyncio
 async def test_gateway_external_registry_delete_without_grant_store_fails_closed() -> None:
     manager = _manager(InMemoryExternalRegistryStore([_server()]))
+
+    with pytest.raises(GatewayExternalRegistryManagementError) as exc_info:
+        await manager.delete_server("search")
+
+    assert exc_info.value.reason_code == "credential_grant_store_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_gateway_external_registry_delete_grant_store_failure_fails_closed() -> None:
+    manager = _manager(
+        InMemoryExternalRegistryStore([_server()]),
+        credential_grant_store=FailingCredentialGrantStore(),
+    )
 
     with pytest.raises(GatewayExternalRegistryManagementError) as exc_info:
         await manager.delete_server("search")

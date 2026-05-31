@@ -257,7 +257,7 @@ class GatewayExternalRegistryManager:
             deep=True,
         )
         try:
-            stored = await self.external_registry_store.upsert_server(updated)
+            stored = await self.external_registry_store.update_server(updated)
         except ExternalRegistryStoreUnavailableError as exc:
             await self._audit_expected_failure(
                 "external_server.patch_failed",
@@ -270,6 +270,19 @@ class GatewayExternalRegistryManager:
                 reason_code="external_registry_store_unavailable",
                 server_id=normalized_server_id,
             ) from exc
+
+        if stored is None:
+            await self._audit_expected_failure(
+                "external_server.patch_failed",
+                reason_code="external_server_not_found",
+                server_id=normalized_server_id,
+                target_id=normalized_server_id,
+            )
+            raise self._error(
+                f"External server not found: {normalized_server_id}",
+                reason_code="external_server_not_found",
+                server_id=normalized_server_id,
+            )
 
         await self._append_audit_event(
             "external_server.patched",
@@ -468,9 +481,20 @@ class GatewayExternalRegistryManager:
                 reason_code=missing_store_reason_code,
                 server_id=server_id,
             )
-        grants = await self.credential_grant_store.list_grants(
-            external_server_id=server_id,
-        )
+        try:
+            grants = await self.credential_grant_store.list_grants(
+                external_server_id=server_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.opt(exception=True).warning(
+                "Gateway external registry credential grant lookup failed",
+                server_id=server_id,
+            )
+            raise self._error(
+                "Credential grant store unavailable",
+                reason_code=missing_store_reason_code,
+                server_id=server_id,
+            ) from exc
         if any(grant.enabled for grant in grants):
             raise self._error(
                 f"External server has credential grants: {server_id}",

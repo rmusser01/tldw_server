@@ -442,6 +442,32 @@ async def test_sqlite_store_create_server_rejects_duplicate_id(
 
 
 @pytest.mark.asyncio
+async def test_sqlite_store_update_server_does_not_create_missing_server(
+    tmp_path: Path,
+) -> None:
+    from mcp_unified.storage import ExternalServerDefinition, SQLiteMCPStore
+
+    store = SQLiteMCPStore(tmp_path / "mcp.sqlite")
+    server = ExternalServerDefinition(
+        id="search",
+        name="Search",
+        transport="websocket",
+        url="wss://example.test/mcp",
+    )
+
+    assert await store.update_server(server) is None
+    assert await store.get_server("search") is None
+
+    await store.create_server(server)
+    updated = await store.update_server(server.model_copy(update={"name": "Search v2"}))
+
+    assert updated is not None
+    assert updated.name == "Search v2"
+    assert (await store.get_server("search")).name == "Search v2"
+    await store.aclose()
+
+
+@pytest.mark.asyncio
 async def test_sqlite_store_appends_and_queries_audit_events(tmp_path: Path) -> None:
     from mcp_unified.storage import AuditEvent, SQLiteMCPStore
 

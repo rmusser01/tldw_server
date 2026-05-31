@@ -231,6 +231,13 @@ class SQLiteMCPStore:
         """Store an external server definition and return the persisted model."""
         return await self._run_db(self._upsert_server_sync, server)
 
+    async def update_server(
+        self,
+        server: ExternalServerDefinition,
+    ) -> ExternalServerDefinition | None:
+        """Update an existing external server definition without creating it."""
+        return await self._run_db(self._update_server_sync, server)
+
     async def create_server(
         self,
         server: ExternalServerDefinition,
@@ -530,6 +537,28 @@ class SQLiteMCPStore:
             },
             update_columns=("enabled", "transport", "updated_at", "payload"),
         )
+        return self._load_model(payload, ExternalServerDefinition)
+
+    def _update_server_sync(
+        self,
+        server: ExternalServerDefinition,
+    ) -> ExternalServerDefinition | None:
+        payload = self._dump_model(server)
+        table = self._table("mcp_external_servers")
+        statement = (
+            table.update()
+            .where(table.c.id == server.id)
+            .values(
+                enabled=int(server.enabled),
+                transport=server.transport,
+                updated_at=server.updated_at.isoformat(),
+                payload=payload,
+            )
+        )
+        with self._engine.begin() as connection:
+            result = connection.execute(statement)
+        if not result.rowcount:
+            return None
         return self._load_model(payload, ExternalServerDefinition)
 
     def _create_server_sync(

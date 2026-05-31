@@ -1817,6 +1817,49 @@ def test_gateway_config_bootstrap_uses_sqlite_profile_store(tmp_path: Path) -> N
     asyncio.run(bootstrap.profile_store.aclose())
 
 
+def test_gateway_config_sqlite_bootstrap_exposes_external_registry_manager(
+    tmp_path: Path,
+) -> None:
+    """Mount external registry routes from a real SQLite profile bootstrap."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+
+    sqlite_path = tmp_path / "gateway.db"
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                default_preset_id="project-researcher",
+            ),
+        )
+    )
+    app = create_gateway_app(
+        bootstrap.runtime,
+        prefix="/mcp",
+        profile_bootstrap=bootstrap,
+        enable_external_registry_management=True,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/external-servers")
+
+    assert bootstrap.external_registry_manager is not None
+    assert bootstrap.external_registry_manager.external_registry_store is bootstrap.profile_store
+    assert bootstrap.external_registry_manager.credential_grant_store is bootstrap.profile_store
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "servers": [],
+        "store": {"kind": "sqlite", "persistent": True},
+    }
+    asyncio.run(bootstrap.profile_store.aclose())
+
+
 def test_gateway_config_bootstrap_preserves_injected_profile_store(tmp_path: Path) -> None:
     """Prefer caller-injected stores over config-selected store creation."""
 

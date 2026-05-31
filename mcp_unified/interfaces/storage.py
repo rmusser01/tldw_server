@@ -204,6 +204,13 @@ class ExternalRegistryStore(Protocol):
         """Create or replace an external server definition."""
         ...
 
+    async def update_server(
+        self,
+        server: ExternalServerDefinition,
+    ) -> ExternalServerDefinition | None:
+        """Update an existing external server definition, or return None."""
+        ...
+
     async def delete_server(self, server_id: str) -> bool:
         """Delete an external server and report whether it existed."""
         ...
