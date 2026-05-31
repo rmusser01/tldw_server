@@ -258,7 +258,8 @@ def _handle_duplicate_preset(args: argparse.Namespace) -> int:
     name = _optional_cli_text(args.name, field="name")
     return _handle_profile_management_command(
         args,
-        lambda manager: manager.duplicate_preset(
+        lambda manager: _duplicate_preset_for_cli(
+            manager,
             preset_id,
             profile_id=profile_id,
             name=name,
@@ -283,7 +284,7 @@ def _handle_set_default_profile(args: argparse.Namespace) -> int:
     profile_id = _require_cli_text(args.profile_id, field="profile_id")
     return _handle_profile_management_command(
         args,
-        lambda manager: manager.set_default_profile(profile_id),
+        lambda manager: _set_default_profile_for_cli(manager, profile_id),
         require_persistent=True,
     )
 
@@ -371,6 +372,49 @@ def _manager_from_bundle(
         store_metadata=bundle.metadata,
         fallback_default_profile_id=fallback_default_profile_id,
     )
+
+
+async def _duplicate_preset_for_cli(
+    manager: GatewayProfileManager,
+    preset_id: str,
+    *,
+    profile_id: str | None = None,
+    name: str | None = None,
+) -> dict[str, Any]:
+    """Duplicate a preset and expose CLI-level preset metadata fields."""
+
+    payload = await manager.duplicate_preset(
+        preset_id,
+        profile_id=profile_id,
+        name=name,
+    )
+    profile = payload.get("profile")
+    if isinstance(profile, Mapping):
+        payload = dict(payload)
+        if profile.get("preset_id") is not None:
+            payload["preset_id"] = profile["preset_id"]
+        if profile.get("preset_version") is not None:
+            payload["preset_version"] = profile["preset_version"]
+    return payload
+
+
+async def _set_default_profile_for_cli(
+    manager: GatewayProfileManager,
+    profile_id: str,
+) -> dict[str, Any]:
+    """Set the default profile and return the compact CLI write envelope."""
+
+    payload = await manager.set_default_profile(profile_id)
+    assignment = payload.get("assignment")
+    assigned_profile_id = profile_id
+    if isinstance(assignment, Mapping) and isinstance(assignment.get("profile_id"), str):
+        assigned_profile_id = assignment["profile_id"]
+    return {
+        "ok": payload["ok"],
+        "profile_id": assigned_profile_id,
+        "assignment": assignment,
+        "store": payload["store"],
+    }
 
 
 async def _seed_readonly_memory_store(

@@ -463,6 +463,8 @@ def test_gateway_cli_duplicate_preset_persists_to_sqlite_store(
     assert exit_code == 0
     assert captured.err == ""
     assert payload["ok"] is True
+    assert payload["preset_id"] == "project-researcher"
+    assert payload["preset_version"] == "2026.05.27"
     assert payload["profile"]["id"] == "project-researcher"
     assert payload["profile"]["preset_id"] == "project-researcher"
     assert payload["store"] == {"kind": "sqlite", "persistent": True}
@@ -497,6 +499,8 @@ def test_gateway_cli_duplicate_preset_accepts_custom_id_and_name(
     payload = json.loads(captured.out)
     assert exit_code == 0
     assert captured.err == ""
+    assert payload["preset_id"] == "project-researcher"
+    assert payload["preset_version"] == "2026.05.27"
     assert payload["profile"]["id"] == "workspace-researcher"
     assert payload["profile"]["name"] == "Workspace Researcher"
     assert payload["profile"]["preset_id"] == "project-researcher"
@@ -524,8 +528,9 @@ def test_gateway_cli_set_default_profile_persists_sqlite_assignment(
     payload = json.loads(captured.out)
     assert exit_code == 0
     assert captured.err == ""
+    assert set(payload) == {"ok", "profile_id", "assignment", "store"}
     assert payload["ok"] is True
-    assert payload["profile"]["id"] == "reviewer"
+    assert payload["profile_id"] == "reviewer"
     assert payload["assignment"]["id"] == "gateway-default"
     assert payload["assignment"]["profile_id"] == "reviewer"
     assert payload["store"] == {"kind": "sqlite", "persistent": True}
