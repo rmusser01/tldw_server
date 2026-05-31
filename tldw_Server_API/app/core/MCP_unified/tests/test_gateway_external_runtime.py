@@ -21,6 +21,17 @@ class InMemoryExternalRegistryStore:
             server.id: server.model_copy(deep=True)
             for server in servers or ()
         }
+        self.mutations = 0
+
+    def set_server(self, server: ExternalServerDefinition) -> None:
+        """Store a caller-owned server definition."""
+        self.mutations += 1
+        self.servers[server.id] = server.model_copy(deep=True)
+
+    def delete_server(self, server_id: str) -> None:
+        """Delete a server definition from the fake registry."""
+        self.mutations += 1
+        self.servers.pop(server_id, None)
 
     async def get_server(self, server_id: str) -> ExternalServerDefinition | None:
         """Return one server definition by id."""
@@ -97,6 +108,7 @@ class RecordingExternalTransport:
         self.connected = False
         self.connect_count = 0
         self.close_count = 0
+        self.list_tools_count = 0
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.runtime_auth_seen: BrokeredExternalCredential | None = None
         self.fail_list = False
@@ -123,6 +135,7 @@ class RecordingExternalTransport:
 
     async def list_tools(self) -> list[ExternalToolDefinition]:
         """Return configured tools or raise a discovery failure."""
+        self.list_tools_count += 1
         if self.fail_list:
             raise RuntimeError("discovery failed")
         return [tool.copy() for tool in self.tools]
@@ -207,3 +220,169 @@ async def test_external_runtime_stop_is_idempotent_and_clears_tools() -> None:
     assert rows["servers"][0]["status"] == "stopped"
     assert rows["servers"][0]["tool_count"] == 0
     assert transport.close_count == 1
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_refresh_failure_isolates_one_server() -> None:
+    research = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    docs = RecordingExternalTransport(
+        server_id="docs",
+        tools=[ExternalToolDefinition(name="lookup")],
+    )
+    store = InMemoryExternalRegistryStore(
+        [
+            _server(),
+            _server(id="docs", name="Docs", command=["fake-docs-mcp"]),
+        ]
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: {"research": research, "docs": docs}[server.id],
+    )
+    await manager.start_server("research")
+    await manager.start_server("docs")
+
+    research.fail_list = True
+    payload = await manager.refresh_server()
+    rows = await manager.list_runtime_servers()
+    tools = await manager.list_virtual_tools()
+
+    statuses = {row["id"]: row for row in rows["servers"]}
+    assert payload["reason_code"] == "external_server_refreshed"
+    assert payload["refreshed_servers"] == 1
+    assert payload["errors"] == {"research": "external_server_discovery_failed"}
+    assert statuses["research"]["status"] in {"degraded", "unhealthy"}
+    assert statuses["research"]["tool_count"] == 0
+    assert statuses["docs"]["status"] == "healthy"
+    assert [tool.virtual_name for tool in tools] == ["ext.docs.lookup"]
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_restart_reloads_registry_definition() -> None:
+    first = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search", description="Old search")],
+    )
+    second = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="lookup", description="New lookup")],
+    )
+    transports = [first, second]
+    store = InMemoryExternalRegistryStore([_server(name="Research v1")])
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transports.pop(0),
+    )
+    await manager.start_server("research")
+    store.set_server(_server(name="Research v2", command=["fake-research-mcp-v2"]))
+
+    payload = await manager.restart_server("research")
+    rows = await manager.list_runtime_servers()
+    tools = await manager.list_virtual_tools()
+
+    assert payload["reason_code"] == "external_server_restarted"
+    assert first.close_count == 1
+    assert second.connect_count == 1
+    assert rows["servers"][0]["name"] == "Research v2"
+    assert [tool.virtual_name for tool in tools] == ["ext.research.lookup"]
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_reconcile_starts_stops_restarts_and_refreshes() -> None:
+    existing_servers = [
+        _server(id="unchanged", name="Unchanged", command=["fake-unchanged"]),
+        _server(id="changed", name="Changed", command=["fake-changed-v1"]),
+        _server(id="to_disable", name="To Disable", command=["fake-disable"]),
+        _server(id="to_delete", name="To Delete", command=["fake-delete"]),
+    ]
+    store = InMemoryExternalRegistryStore(existing_servers)
+    unchanged = RecordingExternalTransport(
+        server_id="unchanged",
+        tools=[ExternalToolDefinition(name="read")],
+    )
+    changed_old = RecordingExternalTransport(
+        server_id="changed",
+        tools=[ExternalToolDefinition(name="old")],
+    )
+    changed_new = RecordingExternalTransport(
+        server_id="changed",
+        tools=[ExternalToolDefinition(name="new")],
+    )
+    to_disable = RecordingExternalTransport(
+        server_id="to_disable",
+        tools=[ExternalToolDefinition(name="stop_me")],
+    )
+    to_delete = RecordingExternalTransport(
+        server_id="to_delete",
+        tools=[ExternalToolDefinition(name="remove_me")],
+    )
+    added = RecordingExternalTransport(
+        server_id="added",
+        tools=[ExternalToolDefinition(name="created")],
+    )
+    transport_queues: dict[str, list[RecordingExternalTransport]] = {
+        "unchanged": [unchanged],
+        "changed": [changed_old, changed_new],
+        "to_disable": [to_disable],
+        "to_delete": [to_delete],
+        "added": [added],
+    }
+
+    def factory(server: ExternalServerDefinition) -> RecordingExternalTransport:
+        return transport_queues[server.id].pop(0)
+
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=factory,
+    )
+    for server in existing_servers:
+        await manager.start_server(server.id)
+
+    unchanged.tools = [ExternalToolDefinition(name="read_again")]
+    store.set_server(_server(id="changed", name="Changed", command=["fake-changed-v2"]))
+    store.set_server(
+        _server(
+            id="to_disable",
+            name="To Disable",
+            command=["fake-disable"],
+            enabled=False,
+        )
+    )
+    store.delete_server("to_delete")
+    store.set_server(
+        _server(
+            id="added",
+            name="Added",
+            command=["fake-added"],
+            auto_start=True,
+        )
+    )
+
+    payload = await manager.reconcile()
+    rows = await manager.list_runtime_servers()
+    tools = await manager.list_virtual_tools()
+
+    statuses = {row["id"]: row["status"] for row in rows["servers"]}
+    assert payload["reason_code"] == "external_server_reconciled"
+    assert payload["started_servers"] == 1
+    assert payload["stopped_servers"] == 2
+    assert payload["restarted_servers"] == 1
+    assert payload["refreshed_servers"] == 1
+    assert payload["errors"] == {}
+    assert unchanged.list_tools_count == 2
+    assert changed_old.close_count == 1
+    assert changed_new.connect_count == 1
+    assert to_disable.close_count == 1
+    assert to_delete.close_count == 1
+    assert added.connect_count == 1
+    assert statuses["added"] == "healthy"
+    assert statuses["changed"] == "healthy"
+    assert statuses["to_disable"] == "disabled"
+    assert [tool.virtual_name for tool in tools] == [
+        "ext.added.created",
+        "ext.changed.new",
+        "ext.unchanged.read_again",
+    ]

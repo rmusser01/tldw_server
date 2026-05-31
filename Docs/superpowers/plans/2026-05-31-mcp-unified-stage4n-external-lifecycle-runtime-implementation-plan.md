@@ -203,7 +203,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_externa
 
 Expected: new start/stop tests pass; future red tests may still fail as they are added.
 
-- [ ] **Step 5: Commit lifecycle core**
+- [x] **Step 5: Commit lifecycle core**
 
 ```bash
 git add mcp_unified/gateway/external_runtime.py mcp_unified/federation/transports.py mcp_unified/gateway/__init__.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime.py
@@ -216,18 +216,18 @@ git commit -m "feat: add gateway external runtime lifecycle"
 - Modify: `mcp_unified/gateway/external_runtime.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime.py`
 
-- [ ] **Step 1: Add red tests for refresh failure isolation**
+- [x] **Step 1: Add red tests for refresh failure isolation**
 
 Test that discovery failure on one server clears only that server's tools, marks
 its status degraded/unhealthy, and preserves other active servers.
 
-- [ ] **Step 2: Add red tests for restart reload**
+- [x] **Step 2: Add red tests for restart reload**
 
 Update the in-memory store between start and restart. Assert the old transport
 closed, a new transport connected, and discovered tool metadata reflects the
 updated server definition.
 
-- [ ] **Step 3: Add red tests for reconcile**
+- [x] **Step 3: Add red tests for reconcile**
 
 Tests:
 
@@ -237,7 +237,7 @@ Tests:
 - changed active definition is replaced
 - unchanged active server is refreshed
 
-- [ ] **Step 4: Implement `refresh_server`, `restart_server`, and `reconcile`**
+- [x] **Step 4: Implement `refresh_server`, `restart_server`, and `reconcile`**
 
 Keep partial failures per-server. Response envelopes should include:
 
@@ -254,7 +254,7 @@ Keep partial failures per-server. Response envelopes should include:
 }
 ```
 
-- [ ] **Step 5: Run focused runtime tests**
+- [x] **Step 5: Run focused runtime tests**
 
 Run:
 

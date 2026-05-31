@@ -70,57 +70,7 @@ class GatewayExternalRuntimeManager:
             self._require_enabled(server)
             if server.id in self._transports:
                 await self._stop_server_unlocked(server.id)
-
-            transport = self._transport_factory(server.model_copy(deep=True))
-            try:
-                await transport.connect()
-                tools = await transport.list_tools()
-            except Exception as exc:  # noqa: BLE001 - transport adapters define their own errors.
-                self._last_errors[server.id] = self._exception_summary(exc)
-                await self._close_best_effort(transport)
-                await self._audit_best_effort(
-                    "external_server.lifecycle",
-                    payload={
-                        "reason_code": "external_server_start_failed",
-                        "server_id": server.id,
-                        "error_type": type(exc).__name__,
-                        "error_message": str(exc),
-                    },
-                    target_type="external_server",
-                    target_id=server.id,
-                )
-                raise
-
-            self._servers[server.id] = server.model_copy(deep=True)
-            self._transports[server.id] = transport
-            self._last_errors[server.id] = None
-            self._replace_server_tools(server.id, tools)
-            await self._audit(
-                "external_server.lifecycle",
-                payload={
-                    "reason_code": "external_server_started",
-                    "server_id": server.id,
-                    "transport": server.transport,
-                },
-                target_type="external_server",
-                target_id=server.id,
-            )
-            await self._audit(
-                "external_server.discovery",
-                payload={
-                    "reason_code": "external_server_discovered",
-                    "server_id": server.id,
-                    "tool_count": len(tools),
-                },
-                target_type="external_server",
-                target_id=server.id,
-            )
-            return {
-                "ok": True,
-                "reason_code": "external_server_started",
-                "server_id": server.id,
-                "tool_count": len(tools),
-            }
+            return await self._start_server_unlocked(server)
 
     async def stop_server(self, server_id: str) -> dict[str, Any]:
         """Stop one external server and clear its discovered virtual tools."""
@@ -146,6 +96,137 @@ class GatewayExternalRuntimeManager:
                 "ok": True,
                 "reason_code": "external_server_stopped",
                 "server_id": server_id,
+            }
+
+    async def restart_server(self, server_id: str) -> dict[str, Any]:
+        """Reload one server definition and replace its active transport."""
+        async with self._lock:
+            stop_reason = "external_server_already_stopped"
+            if server_id in self._transports:
+                await self._stop_server_unlocked(server_id)
+                stop_reason = "external_server_stopped"
+            server = await self._load_server(server_id)
+            self._require_enabled(server)
+            started = await self._start_server_unlocked(server)
+            return {
+                "ok": True,
+                "reason_code": "external_server_restarted",
+                "server_id": server.id,
+                "stop_reason_code": stop_reason,
+                "start_reason_code": started["reason_code"],
+                "tool_count": started["tool_count"],
+            }
+
+    async def refresh_server(self, server_id: str | None = None) -> dict[str, Any]:
+        """Refresh discovered tools for one active server or every active server."""
+        async with self._lock:
+            if server_id is not None:
+                if server_id not in self._transports:
+                    await self._load_server(server_id)
+                    target_ids = [server_id]
+                else:
+                    target_ids = [server_id]
+            else:
+                target_ids = sorted(self._transports)
+
+            refreshed = 0
+            errors: dict[str, str] = {}
+            for target_id in target_ids:
+                if target_id not in self._transports:
+                    errors[target_id] = "external_server_not_running"
+                    continue
+                ok = await self._refresh_server_tools_unlocked(target_id)
+                if ok:
+                    refreshed += 1
+                else:
+                    errors[target_id] = "external_server_discovery_failed"
+
+            payload: dict[str, Any] = {
+                "ok": not errors,
+                "reason_code": "external_server_refreshed",
+                "refreshed_servers": refreshed,
+                "total_servers": len(target_ids),
+                "virtual_tools": len(self._virtual_tools),
+                "errors": errors,
+            }
+            if server_id is not None:
+                payload["server_id"] = server_id
+            return payload
+
+    async def reconcile(self, server_id: str | None = None) -> dict[str, Any]:
+        """Reconcile active transports against current registry definitions."""
+        async with self._lock:
+            definitions = {
+                server.id: server
+                for server in await self._list_server_definitions()
+            }
+            if server_id is not None:
+                if server_id not in definitions and server_id not in self._transports:
+                    raise GatewayExternalRuntimeError(
+                        f"External server '{server_id}' was not found",
+                        reason_code="external_server_not_found",
+                        server_id=server_id,
+                    )
+                target_ids = [server_id]
+            else:
+                target_ids = sorted(set(definitions) | set(self._transports))
+
+            started = 0
+            stopped = 0
+            restarted = 0
+            refreshed = 0
+            errors: dict[str, str] = {}
+
+            for target_id in target_ids:
+                server = definitions.get(target_id)
+                is_active = target_id in self._transports
+                if server is None:
+                    if is_active:
+                        await self._stop_server_unlocked(target_id)
+                        stopped += 1
+                    continue
+                if not server.enabled:
+                    if is_active:
+                        await self._stop_server_unlocked(target_id)
+                        stopped += 1
+                    continue
+                if not is_active:
+                    if server.auto_start:
+                        try:
+                            await self._start_server_unlocked(server)
+                        except GatewayExternalRuntimeError as exc:
+                            errors[target_id] = exc.reason_code
+                        else:
+                            started += 1
+                    continue
+
+                current = self._servers.get(target_id)
+                if current is None or self._definition_changed(current, server):
+                    await self._stop_server_unlocked(target_id)
+                    try:
+                        await self._start_server_unlocked(server)
+                    except GatewayExternalRuntimeError as exc:
+                        errors[target_id] = exc.reason_code
+                    else:
+                        restarted += 1
+                    continue
+
+                ok = await self._refresh_server_tools_unlocked(target_id)
+                if ok:
+                    refreshed += 1
+                else:
+                    errors[target_id] = "external_server_discovery_failed"
+
+            return {
+                "ok": not errors,
+                "reason_code": "external_server_reconciled",
+                "server_id": server_id,
+                "started_servers": started,
+                "stopped_servers": stopped,
+                "restarted_servers": restarted,
+                "refreshed_servers": refreshed,
+                "total_servers": len(target_ids),
+                "errors": errors,
             }
 
     async def list_runtime_servers(self) -> dict[str, Any]:
@@ -228,6 +309,99 @@ class GatewayExternalRuntimeManager:
             target_id=server_id,
         )
 
+    async def _start_server_unlocked(
+        self,
+        server: ExternalServerDefinition,
+    ) -> dict[str, Any]:
+        transport = self._transport_factory(server.model_copy(deep=True))
+        try:
+            await transport.connect()
+            tools = await transport.list_tools()
+        except Exception as exc:  # noqa: BLE001 - transport adapters define their own errors.
+            self._last_errors[server.id] = self._exception_summary(exc)
+            await self._close_best_effort(transport)
+            await self._audit_best_effort(
+                "external_server.lifecycle",
+                payload={
+                    "reason_code": "external_server_start_failed",
+                    "server_id": server.id,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+                target_type="external_server",
+                target_id=server.id,
+            )
+            raise GatewayExternalRuntimeError(
+                f"External server '{server.id}' failed to start",
+                reason_code="external_server_start_failed",
+                server_id=server.id,
+            ) from exc
+
+        self._servers[server.id] = server.model_copy(deep=True)
+        self._transports[server.id] = transport
+        self._last_errors[server.id] = None
+        self._replace_server_tools(server.id, tools)
+        await self._audit(
+            "external_server.lifecycle",
+            payload={
+                "reason_code": "external_server_started",
+                "server_id": server.id,
+                "transport": server.transport,
+            },
+            target_type="external_server",
+            target_id=server.id,
+        )
+        await self._audit(
+            "external_server.discovery",
+            payload={
+                "reason_code": "external_server_discovered",
+                "server_id": server.id,
+                "tool_count": len(tools),
+            },
+            target_type="external_server",
+            target_id=server.id,
+        )
+        return {
+            "ok": True,
+            "reason_code": "external_server_started",
+            "server_id": server.id,
+            "tool_count": len(tools),
+        }
+
+    async def _refresh_server_tools_unlocked(self, server_id: str) -> bool:
+        transport = self._transports[server_id]
+        try:
+            tools = await transport.list_tools()
+        except Exception as exc:  # noqa: BLE001 - discovery adapters define their own errors.
+            self._last_errors[server_id] = self._exception_summary(exc)
+            self._clear_server_tools(server_id)
+            await self._audit_best_effort(
+                "external_server.discovery",
+                payload={
+                    "reason_code": "external_server_discovery_failed",
+                    "server_id": server_id,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+                target_type="external_server",
+                target_id=server_id,
+            )
+            return False
+
+        self._last_errors[server_id] = None
+        self._replace_server_tools(server_id, tools)
+        await self._audit(
+            "external_server.discovery",
+            payload={
+                "reason_code": "external_server_discovered",
+                "server_id": server_id,
+                "tool_count": len(tools),
+            },
+            target_type="external_server",
+            target_id=server_id,
+        )
+        return True
+
     async def _load_server(self, server_id: str) -> ExternalServerDefinition:
         server = await self._find_server(server_id)
         if server is None:
@@ -302,6 +476,25 @@ class GatewayExternalRuntimeManager:
 
     def _count_tools_for_server(self, server_id: str) -> int:
         return sum(1 for tool in self._virtual_tools.values() if tool.server_id == server_id)
+
+    @classmethod
+    def _definition_changed(
+        cls,
+        current: ExternalServerDefinition,
+        latest: ExternalServerDefinition,
+    ) -> bool:
+        return cls._runtime_signature(current) != cls._runtime_signature(latest)
+
+    @staticmethod
+    def _runtime_signature(server: ExternalServerDefinition) -> tuple[Any, ...]:
+        return (
+            server.transport,
+            tuple(server.command),
+            server.url,
+            server.cwd,
+            tuple(server.env_allowlist),
+            tuple(server.credential_slots),
+        )
 
     async def _audit(
         self,
