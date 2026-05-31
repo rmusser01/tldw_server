@@ -1428,6 +1428,37 @@ def test_gateway_config_builds_sqlite_external_registry_storage(tmp_path: Path) 
         asyncio.run(bundle.external_registry_store.aclose())
 
 
+def test_gateway_config_external_registry_storage_reuses_injected_sqlite_store_capabilities(
+    tmp_path: Path,
+) -> None:
+    """Reuse external registry, grant, and audit capabilities from SQLite stores."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_external_registry_storage,
+    )
+    from mcp_unified.storage.sqlite import SQLiteMCPStore
+
+    sqlite_path = tmp_path / "gateway.db"
+    store = SQLiteMCPStore(sqlite_path)
+
+    try:
+        bundle = build_gateway_external_registry_storage(
+            GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+            external_registry_store=store,
+        )
+
+        assert bundle.external_registry_store is store
+        assert bundle.credential_grant_store is store
+        assert bundle.audit_store is store
+        assert bundle.metadata.to_payload() == {
+            "kind": "sqlite",
+            "persistent": True,
+        }
+    finally:
+        asyncio.run(store.aclose())
+
+
 def test_gateway_config_external_registry_storage_manager_from_storage_uses_bundle(
     tmp_path: Path,
 ) -> None:

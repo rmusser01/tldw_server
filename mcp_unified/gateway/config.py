@@ -206,7 +206,13 @@ def build_gateway_external_registry_storage(
     if external_registry_store is not None:
         return GatewayExternalRegistryStorageBundle(
             external_registry_store=external_registry_store,
-            credential_grant_store=credential_grant_store,
+            credential_grant_store=credential_grant_store
+            if credential_grant_store is not None
+            else (
+                cast(CredentialGrantStore, external_registry_store)
+                if _supports_credential_grant_store(external_registry_store)
+                else None
+            ),
             audit_store=audit_store
             if audit_store is not None
             else (
@@ -238,7 +244,7 @@ def build_gateway_external_registry_storage(
         )
 
     raise ValueError(
-        f"Unsupported gateway profile store kind: {store_config.kind!r}"
+        f"Unsupported gateway external registry store kind: {store_config.kind!r}"
     )
 
 
@@ -326,6 +332,20 @@ def _supports_audit_store(candidate: object) -> bool:
     return all(
         callable(getattr(candidate, method_name, None))
         for method_name in ("append_event", "query_events")
+    )
+
+
+def _supports_credential_grant_store(candidate: object) -> bool:
+    """Return whether an object provides the credential-grant store API."""
+
+    return all(
+        callable(getattr(candidate, method_name, None))
+        for method_name in (
+            "get_grant",
+            "list_grants",
+            "upsert_grant",
+            "delete_grant",
+        )
     )
 
 
@@ -442,7 +462,9 @@ def _build_external_registry_store(
 
         sqlite_path = store_config.sqlite_path
         if sqlite_path is None:
-            raise ValueError("sqlite_path is required for sqlite profile store")
+            raise ValueError(
+                "sqlite_path is required for sqlite external registry store"
+            )
         return SQLiteMCPStore(sqlite_path)
     raise ValueError(
         "external registry management requires sqlite or an injected equivalent "
