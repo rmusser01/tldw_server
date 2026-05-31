@@ -189,7 +189,7 @@ class FirstRunSkipRequest(BaseModel):
 class FirstChatVerifyRequest(BaseModel):
     provider: str = Field(..., min_length=1)
     model: str = Field(..., min_length=1)
-    prompt: str = Field(DEFAULT_FIRST_CHAT_PROMPT, min_length=1)
+    prompt: str = Field(DEFAULT_FIRST_CHAT_PROMPT, min_length=1, max_length=1000)
 
 
 class FirstChatVerifyResponse(BaseModel):
@@ -208,13 +208,13 @@ class FirstRunCompleteRequest(BaseModel):
 
 class IngestDefaultsRequest(BaseModel):
     allow_local_file_ingest: bool = False
-    chunking_profile: str = Field("default", min_length=1)
-    metadata_mode: str = Field("basic", min_length=1)
+    chunking_profile: str = Field("balanced", min_length=1)
+    metadata_mode: str = Field("automatic", min_length=1)
     allowed_local_roots: list[str] = Field(default_factory=list)
 
 
 class AudioDefaultsRequest(BaseModel):
-    mode: str = Field("defaults", pattern="^(defaults|configure|skip)$")
+    mode: str = Field("skip", pattern="^(defaults|configure|skip)$")
     stt_provider: str | None = None
     tts_provider: str | None = None
     tts_voice: str | None = None

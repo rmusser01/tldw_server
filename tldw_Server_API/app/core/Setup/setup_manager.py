@@ -412,6 +412,11 @@ def _validate_ingestion_source_allowed_roots_update(new_value: Any) -> None:
             raise ValueError("Ingestion source allowed roots must not contain empty entries")
 
 
+def validate_ingestion_source_allowed_roots(value: Any) -> None:
+    """Validate a proposed local-ingestion roots value without writing config."""
+    _validate_ingestion_source_allowed_roots_update(value)
+
+
 def _setup_provider_catalog_update_fields() -> set[tuple[str, str]]:
     """Return setup provider catalog fields that may be added to existing sections."""
     global _provider_catalog_update_fields

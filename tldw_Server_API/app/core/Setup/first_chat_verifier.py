@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +20,28 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 
 DEFAULT_FIRST_CHAT_PROMPT = "Please reply with a short hello so setup can confirm chat works."
+FIRST_CHAT_RESPONSE_TEXT_MAX_LENGTH = 500
+_SECRET_LIKE_TEXT_RE = re.compile(
+    r"(?i)(?:"
+    r"sk-[A-Za-z0-9_-]{3,}|"
+    r"xox[baprs]-[A-Za-z0-9-]{6,}|"
+    r"gh[pousr]_[A-Za-z0-9_]{6,}|"
+    r"github_pat_[A-Za-z0-9_]{6,}|"
+    r"hf_[A-Za-z0-9]{6,}|"
+    r"gsk_[A-Za-z0-9]{6,}|"
+    r"pplx-[A-Za-z0-9_-]{6,}|"
+    r"AIza[0-9A-Za-z_-]{6,}|"
+    r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}|"
+    r"bearer\s+\S{6,}|"
+    r"(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S{3,}"
+    r")"
+)
+_LOCAL_PATH_TEXT_RE = re.compile(
+    r"(?:"
+    r"(?:/Users|/home|/private|/var|/tmp|/etc)/[^\s,;\"']+|"
+    r"[A-Za-z]:\\[^\s,;\"']+"
+    r")"
+)
 
 
 @dataclass(frozen=True)
@@ -88,7 +111,7 @@ async def verify_first_chat(
         provider=provider,
         model=model,
         response_id=_extract_response_id(response),
-        response_text=response_text,
+        response_text=_sanitize_response_text(response_text),
     )
 
 
@@ -138,6 +161,14 @@ def _normalize_content(content: Any) -> str | None:
         text = "".join(parts).strip()
         return text or None
     return None
+
+
+def _sanitize_response_text(text: str) -> str:
+    sanitized = _SECRET_LIKE_TEXT_RE.sub("[redacted-secret]", text)
+    sanitized = _LOCAL_PATH_TEXT_RE.sub("[redacted-path]", sanitized).strip()
+    if len(sanitized) <= FIRST_CHAT_RESPONSE_TEXT_MAX_LENGTH:
+        return sanitized
+    return sanitized[: FIRST_CHAT_RESPONSE_TEXT_MAX_LENGTH - 1].rstrip() + "..."
 
 
 def _classify_failure(exc: Exception) -> tuple[str, str]:

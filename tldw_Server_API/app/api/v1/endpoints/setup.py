@@ -265,6 +265,10 @@ def _is_unsafe_public_step_data_key(key: object) -> bool:
     )
 
 
+def _is_explicitly_allowed_unsafe_named_step_key(step: str, key: object) -> bool:
+    return step == "optional_advanced" and key == "values"
+
+
 def _is_unsafe_public_step_data_value(value: object) -> bool:
     if not isinstance(value, str):
         return False
@@ -298,7 +302,13 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
         )
 
     unsupported_keys = set(data) - allowed_keys
-    if unsupported_keys or any(_is_unsafe_public_step_data_key(key) for key in data):
+    unsafe_keys = [
+        key
+        for key in data
+        if _is_unsafe_public_step_data_key(key)
+        and not _is_explicitly_allowed_unsafe_named_step_key(step, key)
+    ]
+    if unsupported_keys or unsafe_keys:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
@@ -325,7 +335,11 @@ def _public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, An
 
     public_data: dict[str, Any] = {}
     for key, value in data.items():
-        if key not in allowed_keys or _is_unsafe_public_step_data_key(key):
+        if key not in allowed_keys:
+            continue
+        if _is_unsafe_public_step_data_key(key) and not _is_explicitly_allowed_unsafe_named_step_key(
+            step, key
+        ):
             continue
         if _is_public_first_run_step_value(value):
             public_data[key] = value
@@ -639,6 +653,23 @@ def _step_payload(payload: BaseModel) -> dict[str, Any]:
     data = model_dump_compat(payload, exclude_none=True)
     data["acknowledged"] = True
     return data
+
+
+def _safe_step_payload(step: str, payload: BaseModel) -> dict[str, Any]:
+    return _validated_public_first_run_step_data(step, _step_payload(payload))
+
+
+def _safe_ingest_defaults_payload(payload: IngestDefaultsRequest) -> dict[str, Any]:
+    data = _step_payload(payload)
+    try:
+        for root in data.get("allowed_local_roots", []):
+            setup_manager.validate_ingestion_source_allowed_roots(root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_allowed_local_roots",
+        ) from exc
+    return _validated_public_first_run_step_data("ingest_defaults", data)
 
 
 async def _complete_setup_flow(
@@ -988,7 +1019,7 @@ async def save_first_run_ingest_defaults(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> FirstRunStepSaveResponse:
     try:
-        _first_run_store().update_step("ingest_defaults", _step_payload(payload))
+        _first_run_store().update_step("ingest_defaults", _safe_ingest_defaults_payload(payload))
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _first_run_step_saved("ingest_defaults")
@@ -1004,7 +1035,7 @@ async def save_first_run_audio_defaults(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> FirstRunStepSaveResponse:
     try:
-        _first_run_store().update_step("audio_defaults", _step_payload(payload))
+        _first_run_store().update_step("audio_defaults", _safe_step_payload("audio_defaults", payload))
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _first_run_step_saved("audio_defaults")
@@ -1020,7 +1051,10 @@ async def save_first_run_optional_advanced(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> FirstRunStepSaveResponse:
     try:
-        _first_run_store().update_step("optional_advanced", _step_payload(payload))
+        _first_run_store().update_step(
+            "optional_advanced",
+            _safe_step_payload("optional_advanced", payload),
+        )
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _first_run_step_saved("optional_advanced")
