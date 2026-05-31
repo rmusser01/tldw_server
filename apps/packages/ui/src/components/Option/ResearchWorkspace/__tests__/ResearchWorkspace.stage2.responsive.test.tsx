@@ -318,6 +318,24 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     expect(screen.queryByTestId("workspace-chat-pane")).not.toBeInTheDocument()
   })
 
+  it("opens Studio from HashRouter mobile ?tab=studio route state", () => {
+    testState.isMobile = true
+    window.history.replaceState(
+      null,
+      "",
+      "/options.html#/research-workspace?tab=studio"
+    )
+
+    render(<ResearchWorkspace />)
+
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
+      "data-active-key",
+      "studio"
+    )
+    expect(screen.getByTestId("workspace-studio-pane")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-chat-pane")).not.toBeInTheDocument()
+  })
+
   it("falls back to Chat for invalid mobile tab route state", () => {
     testState.isMobile = true
     window.history.replaceState(null, "", "/research-workspace?tab=banana")
@@ -431,6 +449,60 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       "data-active-key",
       "studio"
     )
+  })
+
+  it("surfaces matching Deep Research return context and focuses Studio", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?source_workspace_id=workspace-1&source_artifact_id=gap-artifact&source_artifact_template=corpus_gap_finder&source_artifact_title=Corpus%20Gap%20Finder&research_run_id=research-run-7"
+    )
+
+    render(<ResearchWorkspace />)
+
+    const handoff = screen.getByTestId("workspace-deep-research-return-handoff")
+    expect(handoff).toHaveTextContent("Deep Research return ready")
+    expect(handoff).toHaveTextContent("Corpus Gap Finder")
+    expect(handoff).toHaveTextContent("research-run-7")
+    await waitFor(() => {
+      expect(testState.setRightPaneCollapsed).toHaveBeenCalledWith(false)
+    })
+    expect(
+      screen.getByRole("complementary", { name: "Studio panel" })
+    ).toBeInTheDocument()
+  })
+
+  it("surfaces matching Deep Research return context from HashRouter search params", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/options.html#/research-workspace?source_workspace_id=workspace-1&source_artifact_id=gap-artifact&source_artifact_template=corpus_gap_finder&source_artifact_title=Corpus%20Gap%20Finder&research_run_id=research-run-7"
+    )
+
+    render(<ResearchWorkspace />)
+
+    const handoff = screen.getByTestId("workspace-deep-research-return-handoff")
+    expect(handoff).toHaveTextContent("Deep Research return ready")
+    expect(handoff).toHaveTextContent("Corpus Gap Finder")
+    expect(handoff).toHaveTextContent("research-run-7")
+    await waitFor(() => {
+      expect(testState.setRightPaneCollapsed).toHaveBeenCalledWith(false)
+    })
+  })
+
+  it("ignores Deep Research return context for a different workspace", () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?source_workspace_id=workspace-2&source_artifact_id=gap-artifact&source_artifact_template=corpus_gap_finder&source_artifact_title=Corpus%20Gap%20Finder&research_run_id=research-run-7"
+    )
+
+    render(<ResearchWorkspace />)
+
+    expect(
+      screen.queryByTestId("workspace-deep-research-return-handoff")
+    ).not.toBeInTheDocument()
+    expect(testState.setRightPaneCollapsed).not.toHaveBeenCalledWith(false)
   })
 
   it("opens Sources from the mobile Studio source-readiness CTA", async () => {
