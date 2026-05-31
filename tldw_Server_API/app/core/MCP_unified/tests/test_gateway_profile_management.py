@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from mcp_unified.gateway.profiles import (
@@ -17,6 +18,7 @@ from mcp_unified.profiles.store import (
     InMemoryProfileStore,
 )
 from mcp_unified.storage.models import AuditEvent, ProfileAssignment
+from mcp_unified.storage.sqlite import SQLiteMCPStore
 
 UTC = timezone.utc
 
@@ -201,6 +203,109 @@ async def test_duplicate_preset_rejects_profile_id_collision() -> None:
 
     assert exc_info.value.reason_code == "profile_already_exists"
     assert exc_info.value.to_payload()["profile_id"] == "project-researcher"
+
+
+@pytest.mark.asyncio
+async def test_create_profile_persists_valid_profile_and_audits_success() -> None:
+    created_at = datetime(2020, 1, 1, 12, 0, tzinfo=UTC)
+    audit_store = InMemoryAuditStore()
+    store = InMemoryProfileStore()
+    manager = _manager(store, audit_store=audit_store)
+
+    payload = await manager.create_profile(
+        {
+            "id": "custom-reviewer",
+            "name": "Custom Reviewer",
+            "metadata": {"owner": "qa"},
+            "created_at": created_at.isoformat(),
+            "updated_at": created_at.isoformat(),
+        }
+    )
+
+    assert payload["ok"] is True
+    assert payload["store"] == {"kind": "memory", "persistent": False}
+    assert payload["profile"]["id"] == "custom-reviewer"
+    assert payload["profile"]["metadata"] == {"owner": "qa"}
+    assert payload["profile"]["created_at"] == created_at.isoformat()
+    assert payload["profile"]["updated_at"] != created_at.isoformat()
+    stored = await store.get_profile("custom-reviewer")
+    assert stored is not None
+    assert stored.name == "Custom Reviewer"
+    assert stored.metadata == {"owner": "qa"}
+    assert stored.created_at == created_at
+    assert stored.updated_at > created_at
+    assert stored.updated_at.isoformat() == payload["profile"]["updated_at"]
+    assert stored.enabled is True
+    assert [event.event_type for event in audit_store.events] == ["profile.created"]
+
+
+@pytest.mark.asyncio
+async def test_create_profile_rejects_duplicate_id() -> None:
+    store = InMemoryProfileStore(
+        [MCPProfile(id="existing", name="Existing", metadata={"owner": "original"})]
+    )
+    manager = _manager(store)
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.create_profile({"id": "existing", "name": "Duplicate"})
+
+    assert exc_info.value.reason_code == "profile_already_exists"
+    assert exc_info.value.to_payload()["profile_id"] == "existing"
+    stored = await store.get_profile("existing")
+    assert stored is not None
+    assert stored.name == "Existing"
+    assert stored.metadata == {"owner": "original"}
+
+
+@pytest.mark.asyncio
+async def test_create_profile_rejects_disabled_effective_default_assignment_id() -> None:
+    assignment_store = InMemoryProfileAssignmentStore(
+        [ProfileAssignment(id="gateway-default", profile_id="default", is_default=True)]
+    )
+    store = InMemoryProfileStore()
+    manager = _manager(store, assignment_store)
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.create_profile({"id": "default", "name": "Default", "enabled": False})
+
+    assert exc_info.value.reason_code == "profile_is_default"
+    assert await store.get_profile("default") is None
+
+
+@pytest.mark.asyncio
+async def test_create_profile_allows_disabled_fallback_id_when_assignment_overrides_it() -> None:
+    assignment_store = InMemoryProfileAssignmentStore(
+        [ProfileAssignment(id="gateway-default", profile_id="assigned", is_default=True)]
+    )
+    manager = _manager(
+        InMemoryProfileStore([MCPProfile(id="assigned", name="Assigned")]),
+        assignment_store,
+        fallback_default_profile_id="fallback",
+    )
+
+    payload = await manager.create_profile(
+        {"id": "fallback", "name": "Fallback", "enabled": False}
+    )
+
+    assert payload["profile"]["id"] == "fallback"
+    assert payload["profile"]["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_profile_rejects_disabled_fallback_default_without_assignment() -> None:
+    store = InMemoryProfileStore()
+    manager = _manager(
+        store,
+        fallback_default_profile_id="fallback",
+    )
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.create_profile(
+            {"id": "fallback", "name": "Fallback", "enabled": False}
+        )
+
+    assert exc_info.value.reason_code == "profile_is_default"
+    assert await store.get_profile("fallback") is None
 
 
 @pytest.mark.asyncio
@@ -486,6 +591,441 @@ async def test_get_default_profile_chooses_newest_legacy_default_with_id_tie_bre
 
     assert payload["profile"]["id"] == "new-a"
     assert payload["assignment"]["id"] == "a-new"
+
+
+@pytest.mark.asyncio
+async def test_patch_profile_replaces_all_allowed_policy_fields() -> None:
+    original_updated_at = datetime(2020, 1, 1, 12, 0, tzinfo=UTC)
+    original = MCPProfile(
+        id="reviewer",
+        name="Reviewer",
+        description="old",
+        enabled=True,
+        metadata={"old": True},
+        policy_document={
+            "allowed_tools": ["old.tool"],
+            "denied_tools": ["old.deny"],
+            "capabilities": ["old-capability"],
+            "denied_capabilities": ["old-denied-capability"],
+            "tool_patterns": ["old.*"],
+            "module_patterns": ["old.module.*"],
+            "risk_classes": ["old-risk"],
+            "resource_constraints": {"max_runtime_seconds": 30},
+        },
+        updated_at=original_updated_at,
+    )
+    store = InMemoryProfileStore([original])
+    manager = _manager(store)
+
+    stored_before = await store.get_profile("reviewer")
+    assert stored_before is not None
+    before_updated_at = stored_before.updated_at
+
+    payload = await manager.patch_profile(
+        "reviewer",
+        {
+            "name": "Senior Reviewer",
+            "description": "new",
+            "enabled": False,
+            "metadata": {"new": True},
+            "policy_document": {
+                "allowed_tools": ["new.tool"],
+                "denied_tools": ["new.deny"],
+                "capabilities": ["new-capability"],
+                "denied_capabilities": ["new-denied-capability"],
+                "tool_patterns": ["new.*"],
+                "module_patterns": ["new.module.*"],
+                "risk_classes": ["new-risk"],
+                "resource_constraints": {"max_runtime_seconds": 120},
+            },
+        },
+    )
+
+    profile = payload["profile"]
+    assert payload["ok"] is True
+    assert payload["store"] == {"kind": "memory", "persistent": False}
+    assert profile["name"] == "Senior Reviewer"
+    assert profile["description"] == "new"
+    assert profile["enabled"] is False
+    assert profile["metadata"] == {"new": True}
+    assert profile["policy_document"]["allowed_tools"] == ["new.tool"]
+    assert profile["policy_document"]["denied_tools"] == ["new.deny"]
+    assert profile["policy_document"]["capabilities"] == ["new-capability"]
+    assert profile["policy_document"]["denied_capabilities"] == ["new-denied-capability"]
+    assert profile["policy_document"]["tool_patterns"] == ["new.*"]
+    assert profile["policy_document"]["module_patterns"] == ["new.module.*"]
+    assert profile["policy_document"]["risk_classes"] == ["new-risk"]
+    assert profile["policy_document"]["resource_constraints"] == {"max_runtime_seconds": 120}
+
+    stored = await store.get_profile("reviewer")
+    assert stored is not None
+    assert stored.name == "Senior Reviewer"
+    assert stored.description == "new"
+    assert stored.enabled is False
+    assert stored.metadata == {"new": True}
+    assert stored.policy_document.allowed_tools == ["new.tool"]
+    assert stored.policy_document.denied_tools == ["new.deny"]
+    assert stored.policy_document.capabilities == ["new-capability"]
+    assert stored.policy_document.denied_capabilities == ["new-denied-capability"]
+    assert stored.policy_document.tool_patterns == ["new.*"]
+    assert stored.policy_document.module_patterns == ["new.module.*"]
+    assert stored.policy_document.risk_classes == ["new-risk"]
+    assert stored.policy_document.resource_constraints == {"max_runtime_seconds": 120}
+    assert stored.updated_at > before_updated_at
+    assert stored.updated_at.isoformat() == payload["profile"]["updated_at"]
+
+
+@pytest.mark.asyncio
+async def test_patch_profile_preserves_omitted_policy_document_field() -> None:
+    original_updated_at = datetime(2020, 1, 1, 12, 0, tzinfo=UTC)
+    original = MCPProfile(
+        id="reviewer",
+        name="Reviewer",
+        policy_document={
+            "allowed_tools": ["old.tool"],
+            "denied_tools": ["old.deny"],
+        },
+        updated_at=original_updated_at,
+    )
+    store = InMemoryProfileStore([original])
+    manager = _manager(store)
+
+    stored_before = await store.get_profile("reviewer")
+    assert stored_before is not None
+    before_updated_at = stored_before.updated_at
+
+    payload = await manager.patch_profile(
+        "reviewer",
+        {"policy_document": {"allowed_tools": ["new.tool"]}},
+    )
+
+    profile = payload["profile"]
+    assert payload["ok"] is True
+    assert payload["store"] == {"kind": "memory", "persistent": False}
+    assert profile["policy_document"]["allowed_tools"] == ["new.tool"]
+    assert profile["policy_document"]["denied_tools"] == ["old.deny"]
+
+    stored = await store.get_profile("reviewer")
+    assert stored is not None
+    assert stored.policy_document.allowed_tools == ["new.tool"]
+    assert stored.policy_document.denied_tools == ["old.deny"]
+    assert stored.updated_at > before_updated_at
+    assert stored.updated_at.isoformat() == payload["profile"]["updated_at"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "patch_document",
+    [
+        {"id": "renamed"},
+        {"schema_version": "2026-05-31"},
+        {"preset_id": "code-reviewer"},
+        {"preset_version": "2026.05.27"},
+        {"approval_policy": {"mode": "auto"}},
+        {"path_scopes": [{"path": "/tmp"}]},
+        {"external_server_grants": [{"server_id": "external"}]},
+        {"credential_grants": [{"credential_id": "credential"}]},
+        {"provenance": {"source": "manual"}},
+        {"created_at": "2026-05-31T12:00:00+00:00"},
+        {"updated_at": "2026-05-31T12:00:00+00:00"},
+        {"policy_document": {"unknown_policy_field": True}},
+        {},
+        {"policy_document": {}},
+    ],
+)
+async def test_patch_profile_rejects_invalid_patch_shapes(
+    patch_document: dict[str, object],
+) -> None:
+    created_at = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
+    updated_at = datetime(2026, 5, 31, 12, 30, tzinfo=UTC)
+    store = InMemoryProfileStore(
+        [
+            MCPProfile(
+                id="reviewer",
+                name="Reviewer",
+                schema_version=7,
+                preset_id="preset-original",
+                preset_version="v-original",
+                approval_policy={"mode": "manual"},
+                path_scopes=[{"path": "/allowed"}],
+                external_server_grants=[{"server_id": "existing"}],
+                credential_grants=[{"slot": "existing"}],
+                provenance={"source": "original"},
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+        ]
+    )
+    manager = _manager(store)
+
+    stored_before = await store.get_profile("reviewer")
+    assert stored_before is not None
+    before_dump = stored_before.model_dump(mode="json")
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.patch_profile("reviewer", patch_document)
+
+    stored_after = await store.get_profile("reviewer")
+    assert stored_after is not None
+    assert exc_info.value.reason_code == "invalid_profile_patch"
+    assert stored_after.model_dump(mode="json") == before_dump
+
+
+@pytest.mark.asyncio
+async def test_patch_profile_rejects_semantic_noop_without_touching_updated_at() -> None:
+    created_at = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
+    updated_at = datetime(2026, 5, 31, 12, 30, tzinfo=UTC)
+    store = InMemoryProfileStore(
+        [
+            MCPProfile(
+                id="reviewer",
+                name="Reviewer",
+                schema_version=7,
+                preset_id="preset-original",
+                preset_version="v-original",
+                approval_policy={"mode": "manual"},
+                path_scopes=[{"path": "/allowed"}],
+                external_server_grants=[{"server_id": "existing"}],
+                credential_grants=[{"slot": "existing"}],
+                provenance={"source": "original"},
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+        ]
+    )
+    manager = _manager(store)
+
+    stored_before = await store.get_profile("reviewer")
+    assert stored_before is not None
+    before_dump = stored_before.model_dump(mode="json")
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.patch_profile("reviewer", {"name": "Reviewer"})
+
+    stored_after = await store.get_profile("reviewer")
+    assert stored_after is not None
+    assert exc_info.value.reason_code == "invalid_profile_patch"
+    assert stored_after.model_dump(mode="json") == before_dump
+
+
+@pytest.mark.asyncio
+async def test_patch_profile_rejects_default_profile_disable() -> None:
+    assignment_store = InMemoryProfileAssignmentStore(
+        [ProfileAssignment(id="gateway-default", profile_id="reviewer", is_default=True)]
+    )
+    created_at = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
+    updated_at = datetime(2026, 5, 31, 12, 30, tzinfo=UTC)
+    store = InMemoryProfileStore(
+        [
+            MCPProfile(
+                id="reviewer",
+                name="Reviewer",
+                schema_version=7,
+                preset_id="preset-original",
+                preset_version="v-original",
+                enabled=True,
+                approval_policy={"mode": "manual"},
+                path_scopes=[{"path": "/allowed"}],
+                external_server_grants=[{"server_id": "existing"}],
+                credential_grants=[{"slot": "existing"}],
+                provenance={"source": "original"},
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+        ]
+    )
+    manager = _manager(
+        store,
+        assignment_store,
+    )
+
+    stored_before = await store.get_profile("reviewer")
+    assert stored_before is not None
+    before_dump = stored_before.model_dump(mode="json")
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.patch_profile("reviewer", {"enabled": False})
+
+    assert exc_info.value.reason_code == "profile_is_default"
+    stored = await store.get_profile("reviewer")
+    assert stored is not None
+    assert stored.enabled is True
+    assert stored.model_dump(mode="json") == before_dump
+
+
+@pytest.mark.asyncio
+async def test_delete_profile_removes_unassigned_non_default_profile() -> None:
+    store = InMemoryProfileStore([MCPProfile(id="temporary", name="Temporary")])
+    manager = _manager(store)
+
+    payload = await manager.delete_profile("temporary")
+
+    assert payload == {
+        "ok": True,
+        "profile_id": "temporary",
+        "store": {"kind": "memory", "persistent": False},
+    }
+    assert await store.get_profile("temporary") is None
+
+
+@pytest.mark.asyncio
+async def test_delete_profile_rejects_missing_profile() -> None:
+    manager = _manager(InMemoryProfileStore())
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.delete_profile("missing")
+
+    assert exc_info.value.reason_code == "profile_not_found"
+    assert exc_info.value.to_payload()["profile_id"] == "missing"
+
+
+@pytest.mark.asyncio
+async def test_delete_profile_rejects_effective_default_profile() -> None:
+    assignment_store = InMemoryProfileAssignmentStore(
+        [ProfileAssignment(id="gateway-default", profile_id="default", is_default=True)]
+    )
+    store = InMemoryProfileStore([MCPProfile(id="default", name="Default")])
+    manager = _manager(
+        store,
+        assignment_store,
+    )
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.delete_profile("default")
+
+    assert exc_info.value.reason_code == "profile_is_default"
+    assert await store.get_profile("default") is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_profile_rejects_assigned_profile() -> None:
+    assignment_store = InMemoryProfileAssignmentStore(
+        [ProfileAssignment(id="workspace-assignment", profile_id="assigned", workspace_id="ws")]
+    )
+    store = InMemoryProfileStore([MCPProfile(id="assigned", name="Assigned")])
+    manager = _manager(
+        store,
+        assignment_store,
+    )
+
+    with pytest.raises(GatewayProfileManagementError) as exc_info:
+        await manager.delete_profile("assigned")
+
+    assert exc_info.value.reason_code == "profile_has_assignments"
+    assert await store.get_profile("assigned") is not None
+    assert await assignment_store.get_assignment("workspace-assignment") is not None
+
+
+@pytest.mark.asyncio
+async def test_profile_crud_failure_audits_are_compact_and_expected() -> None:
+    audit_store = InMemoryAuditStore()
+    assignment_store = InMemoryProfileAssignmentStore(
+        [
+            ProfileAssignment(id="gateway-default", profile_id="default", is_default=True),
+            ProfileAssignment(
+                id="workspace-assignment",
+                profile_id="assigned",
+                workspace_id="ws",
+            ),
+        ]
+    )
+    manager = _manager(
+        InMemoryProfileStore(
+            [
+                MCPProfile(id="reviewer", name="Reviewer"),
+                MCPProfile(id="default", name="Default"),
+                MCPProfile(id="assigned", name="Assigned"),
+            ]
+        ),
+        assignment_store,
+        audit_store=audit_store,
+    )
+
+    future_owned_invalid_patches = [
+        {"approval_policy": {"mode": "auto"}},
+        {"path_scopes": [{"path": "/tmp"}]},
+        {"external_server_grants": [{"server_id": "external"}]},
+        {"credential_grants": [{"slot": "token"}]},
+        {"provenance": {"source": "bad"}},
+        {"created_at": "2026-05-31T12:00:00+00:00"},
+        {"updated_at": "2026-05-31T12:00:00+00:00"},
+    ]
+    for patch_document in future_owned_invalid_patches:
+        with pytest.raises(GatewayProfileManagementError):
+            await manager.patch_profile("reviewer", patch_document)
+
+    with pytest.raises(GatewayProfileManagementError):
+        await manager.patch_profile("reviewer", {"name": "Reviewer"})
+    with pytest.raises(GatewayProfileManagementError):
+        await manager.patch_profile("default", {"enabled": False})
+    with pytest.raises(GatewayProfileManagementError):
+        await manager.delete_profile("default")
+    with pytest.raises(GatewayProfileManagementError):
+        await manager.delete_profile("assigned")
+
+    assert [event.event_type for event in audit_store.events] == [
+        "profile.patch_failed",
+        "profile.patch_failed",
+        "profile.patch_failed",
+        "profile.patch_failed",
+        "profile.patch_failed",
+        "profile.patch_failed",
+        "profile.patch_failed",
+        "profile.patch_failed",
+        "profile.patch_failed",
+        "profile.delete_failed",
+        "profile.delete_failed",
+    ]
+    assert [event.payload["reason_code"] for event in audit_store.events] == [
+        "invalid_profile_patch",
+        "invalid_profile_patch",
+        "invalid_profile_patch",
+        "invalid_profile_patch",
+        "invalid_profile_patch",
+        "invalid_profile_patch",
+        "invalid_profile_patch",
+        "invalid_profile_patch",
+        "profile_is_default",
+        "profile_is_default",
+        "profile_has_assignments",
+    ]
+
+    serialized_payloads = json.dumps(
+        [event.payload for event in audit_store.events],
+        sort_keys=True,
+    )
+    assert "policy_document" not in serialized_payloads
+    assert "approval_policy" not in serialized_payloads
+    assert "path_scopes" not in serialized_payloads
+    assert "external_server_grants" not in serialized_payloads
+    assert "credential_grants" not in serialized_payloads
+    assert "provenance" not in serialized_payloads
+    assert "created_at" not in serialized_payloads
+    assert "updated_at" not in serialized_payloads
+
+
+@pytest.mark.asyncio
+async def test_delete_profile_sqlite_guard_preserves_assigned_profile(tmp_path: Path) -> None:
+    store = SQLiteMCPStore(tmp_path / "mcp.db")
+    try:
+        await store.upsert_profile(MCPProfile(id="assigned", name="Assigned"))
+        await store.upsert_assignment(
+            ProfileAssignment(id="workspace-assignment", profile_id="assigned", workspace_id="ws")
+        )
+        manager = GatewayProfileManager(
+            profile_store=store,
+            assignment_store=store,
+            store_metadata=GatewayProfileStoreMetadata(kind="sqlite", persistent=True),
+        )
+
+        with pytest.raises(GatewayProfileManagementError) as exc_info:
+            await manager.delete_profile("assigned")
+
+        assert exc_info.value.reason_code == "profile_has_assignments"
+        assert await store.get_profile("assigned") is not None
+        assert await store.get_assignment("workspace-assignment") is not None
+    finally:
+        await store.aclose()
 
 
 @pytest.mark.asyncio
