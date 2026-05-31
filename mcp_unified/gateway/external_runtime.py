@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+import inspect
+from collections.abc import Callable, Iterable
 from copy import deepcopy
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from mcp_unified.federation.models import (
+    BrokeredExternalCredential,
+    ExternalToolCallResult,
     ExternalToolDefinition,
+    FederatedToolResult,
+    FederationPolicyDenied,
     VirtualExternalTool,
 )
 from mcp_unified.federation.transports import ExternalFederationTransport
@@ -44,6 +49,23 @@ class GatewayExternalRuntimeError(RuntimeError):
         return payload
 
 
+class ExternalCredentialBroker(Protocol):
+    """Resolve ephemeral credential material for one external tool call."""
+
+    async def resolve_external_credential(
+        self,
+        *,
+        server: ExternalServerDefinition,
+        virtual_tool: VirtualExternalTool,
+        credential_slots: list[str],
+        effective_policy: Any = None,
+        actor_id: str | None = None,
+        context: Any = None,
+    ) -> BrokeredExternalCredential | dict[str, Any] | None:
+        """Return per-call credential material or None when no grant applies."""
+        ...
+
+
 class GatewayExternalRuntimeManager:
     """Manage active external server transports for one in-process gateway."""
 
@@ -53,10 +75,12 @@ class GatewayExternalRuntimeManager:
         external_registry_store: ExternalRegistryStore,
         transport_factory: Callable[[ExternalServerDefinition], ExternalFederationTransport],
         audit_store: AuditStore | None = None,
+        credential_broker: ExternalCredentialBroker | Callable[..., Any] | None = None,
     ) -> None:
         self._external_registry_store = external_registry_store
         self._transport_factory = transport_factory
         self._audit_store = audit_store
+        self._credential_broker = credential_broker
         self._servers: dict[str, ExternalServerDefinition] = {}
         self._transports: dict[str, ExternalFederationTransport] = {}
         self._virtual_tools: dict[str, VirtualExternalTool] = {}
@@ -285,6 +309,67 @@ class GatewayExternalRuntimeManager:
                 for name in sorted(self._virtual_tools)
             ]
 
+    async def execute_virtual_tool(
+        self,
+        virtual_tool_name: str,
+        arguments: dict[str, Any] | None,
+        *,
+        effective_policy: Any = None,
+        actor_id: str | None = None,
+        context: Any = None,
+    ) -> FederatedToolResult:
+        """Execute one virtual external tool with per-call credential brokering."""
+        async with self._lock:
+            virtual_tool = self._virtual_tools.get(virtual_tool_name)
+            if virtual_tool is None:
+                raise GatewayExternalRuntimeError(
+                    f"External virtual tool '{virtual_tool_name}' was not found",
+                    reason_code="external_server_transport_unavailable",
+                )
+            server = self._servers.get(virtual_tool.server_id)
+            transport = self._transports.get(virtual_tool.server_id)
+            if server is None or transport is None:
+                raise GatewayExternalRuntimeError(
+                    f"External server '{virtual_tool.server_id}' is not active",
+                    reason_code="external_server_transport_unavailable",
+                    server_id=virtual_tool.server_id,
+                )
+            runtime_auth = await self._resolve_runtime_auth(
+                server=server,
+                virtual_tool=virtual_tool,
+                effective_policy=effective_policy,
+                actor_id=actor_id,
+                context=context,
+            )
+            result = await transport.call_tool(
+                virtual_tool.upstream_tool_name,
+                deepcopy(arguments or {}),
+                context=context,
+                runtime_auth=runtime_auth,
+            )
+            if runtime_auth is not None:
+                metadata = deepcopy(result.metadata or {})
+                metadata.update(self._public_runtime_auth_metadata(runtime_auth))
+                metadata["credential_injection"] = self._summarize_runtime_auth(runtime_auth)
+                result = ExternalToolCallResult(
+                    content=deepcopy(result.content),
+                    is_error=result.is_error,
+                    metadata=metadata,
+                )
+            await self._audit_execution(
+                event_type="external_tool.allowed",
+                reason_code="allowed",
+                virtual_tool=virtual_tool,
+                actor_id=actor_id,
+                profile_id=self._policy_profile_id(effective_policy),
+                credential_injection=(
+                    self._summarize_runtime_auth(runtime_auth)
+                    if runtime_auth is not None
+                    else None
+                ),
+            )
+            return self._federated_result(virtual_tool, result)
+
     async def _stop_server_unlocked(self, server_id: str) -> None:
         transport = self._transports.pop(server_id, None)
         close_error: str | None = None
@@ -476,6 +561,244 @@ class GatewayExternalRuntimeManager:
 
     def _count_tools_for_server(self, server_id: str) -> int:
         return sum(1 for tool in self._virtual_tools.values() if tool.server_id == server_id)
+
+    async def _resolve_runtime_auth(
+        self,
+        *,
+        server: ExternalServerDefinition,
+        virtual_tool: VirtualExternalTool,
+        effective_policy: Any,
+        actor_id: str | None,
+        context: Any,
+    ) -> BrokeredExternalCredential | None:
+        required_slots = self._required_credential_slots(server)
+        if not required_slots:
+            return None
+        if self._credential_broker is None:
+            raise GatewayExternalRuntimeError(
+                f"Credential broker is unavailable for external server '{server.id}'",
+                reason_code="credential_broker_unavailable",
+                server_id=server.id,
+            )
+        missing_slots = self._missing_credential_slots(
+            server=server,
+            effective_policy=effective_policy,
+        )
+        if missing_slots:
+            raise FederationPolicyDenied(
+                "required_credential_grant_missing",
+                (
+                    f"External server '{server.id}' requires credential grants for "
+                    f"{', '.join(missing_slots)}"
+                ),
+                payload={
+                    "reason_code": "required_credential_grant_missing",
+                    "server_id": server.id,
+                    "credential_slots": list(missing_slots),
+                },
+            )
+        broker_result = await self._call_credential_broker(
+            server=server,
+            virtual_tool=virtual_tool,
+            credential_slots=required_slots,
+            effective_policy=effective_policy,
+            actor_id=actor_id,
+            context=context,
+        )
+        if broker_result is None:
+            raise FederationPolicyDenied(
+                "required_credential_grant_missing",
+                f"Credential broker returned no grant for external server '{server.id}'",
+                payload={
+                    "reason_code": "required_credential_grant_missing",
+                    "server_id": server.id,
+                    "credential_slots": list(required_slots),
+                },
+            )
+        return broker_result
+
+    async def _call_credential_broker(
+        self,
+        *,
+        server: ExternalServerDefinition,
+        virtual_tool: VirtualExternalTool,
+        credential_slots: list[str],
+        effective_policy: Any,
+        actor_id: str | None,
+        context: Any,
+    ) -> BrokeredExternalCredential | None:
+        broker = self._credential_broker
+        if broker is None:
+            return None
+        kwargs = {
+            "server": server.model_copy(deep=True),
+            "virtual_tool": virtual_tool.copy(),
+            "credential_slots": list(credential_slots),
+            "effective_policy": deepcopy(effective_policy),
+            "actor_id": actor_id,
+            "context": deepcopy(context),
+        }
+        if hasattr(broker, "resolve_external_credential"):
+            result = broker.resolve_external_credential(**kwargs)
+        else:
+            result = broker(**kwargs)
+        resolved = await result if inspect.isawaitable(result) else result
+        if resolved is None:
+            return None
+        if isinstance(resolved, BrokeredExternalCredential):
+            return resolved.copy()
+        if isinstance(resolved, dict):
+            return BrokeredExternalCredential(
+                headers=dict(resolved.get("headers") or {}),
+                env=dict(resolved.get("env") or {}),
+                metadata=deepcopy(resolved.get("metadata") or {}),
+            )
+        raise TypeError("credential broker must return BrokeredExternalCredential, dict, or None")
+
+    @staticmethod
+    def _required_credential_slots(server: ExternalServerDefinition) -> list[str]:
+        return sorted(
+            {
+                str(slot).strip()
+                for slot in server.credential_slots
+                if str(slot).strip()
+            }
+        )
+
+    def _missing_credential_slots(
+        self,
+        *,
+        server: ExternalServerDefinition,
+        effective_policy: Any,
+    ) -> list[str]:
+        required_slots = set(self._required_credential_slots(server))
+        if not required_slots:
+            return []
+        granted_slots: set[str] = set()
+        for grant in self._policy_dicts(effective_policy, "credential_grants"):
+            if not self._grant_matches_server(grant, server.id):
+                continue
+            granted_slots.update(self._credential_slots_for_grant(grant))
+        return sorted(required_slots - granted_slots)
+
+    @staticmethod
+    def _credential_slots_for_grant(grant: dict[str, Any]) -> set[str]:
+        slots: set[str] = set()
+        for key in ("credential_slot", "slot"):
+            value = str(grant.get(key) or "").strip()
+            if value:
+                slots.add(value)
+        for key in ("credential_slots", "slots"):
+            raw = grant.get(key)
+            if isinstance(raw, str):
+                values: Iterable[Any] = [raw]
+            elif isinstance(raw, Iterable) and not isinstance(raw, (bytes, dict)):
+                values = raw
+            else:
+                values = []
+            slots.update(str(value).strip() for value in values if str(value).strip())
+        return slots
+
+    @staticmethod
+    def _grant_matches_server(grant: dict[str, Any], server_id: str) -> bool:
+        if grant.get("enabled") is False:
+            return False
+        raw_server_id = (
+            grant.get("server_id")
+            or grant.get("external_server_id")
+            or grant.get("id")
+        )
+        return str(raw_server_id or "").strip() == server_id
+
+    @staticmethod
+    def _policy_dicts(effective_policy: Any, field_name: str) -> list[dict[str, Any]]:
+        values = GatewayExternalRuntimeManager._policy_value(effective_policy, field_name, [])
+        if isinstance(values, dict):
+            return [deepcopy(values)]
+        if not isinstance(values, Iterable) or isinstance(values, (str, bytes)):
+            return []
+        return [
+            deepcopy(value)
+            for value in values
+            if isinstance(value, dict)
+        ]
+
+    @staticmethod
+    def _policy_profile_id(effective_policy: Any) -> str | None:
+        value = GatewayExternalRuntimeManager._policy_value(
+            effective_policy,
+            "profile_id",
+            None,
+        )
+        return str(value) if value is not None else None
+
+    @staticmethod
+    def _policy_value(effective_policy: Any, field_name: str, default: Any) -> Any:
+        if isinstance(effective_policy, dict):
+            return effective_policy.get(field_name, default)
+        return getattr(effective_policy, field_name, default)
+
+    async def _audit_execution(
+        self,
+        *,
+        event_type: str,
+        reason_code: str,
+        virtual_tool: VirtualExternalTool,
+        actor_id: str | None,
+        profile_id: str | None,
+        credential_injection: dict[str, Any] | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "reason_code": reason_code,
+            "server_id": virtual_tool.server_id,
+            "virtual_tool_name": virtual_tool.virtual_name,
+            "upstream_tool_name": virtual_tool.upstream_tool_name,
+        }
+        if credential_injection is not None:
+            payload["credential_injection"] = deepcopy(credential_injection)
+        await self._audit(
+            event_type,
+            actor_id=actor_id,
+            profile_id=profile_id,
+            target_type="external_tool",
+            target_id=virtual_tool.virtual_name,
+            payload=payload,
+        )
+
+    @staticmethod
+    def _public_runtime_auth_metadata(
+        runtime_auth: BrokeredExternalCredential,
+    ) -> dict[str, Any]:
+        metadata = runtime_auth.metadata or {}
+        if not isinstance(metadata, dict):
+            return {}
+        public: dict[str, Any] = {}
+        for key in ("credential_mode", "credential_source"):
+            value = metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                public[key] = value
+        return public
+
+    @staticmethod
+    def _summarize_runtime_auth(runtime_auth: BrokeredExternalCredential) -> dict[str, Any]:
+        return {
+            "headers": sorted(str(name) for name in (runtime_auth.headers or {})),
+            "env": sorted(str(name) for name in (runtime_auth.env or {})),
+        }
+
+    @staticmethod
+    def _federated_result(
+        virtual_tool: VirtualExternalTool,
+        result: ExternalToolCallResult,
+    ) -> FederatedToolResult:
+        return FederatedToolResult(
+            content=deepcopy(result.content),
+            server_id=virtual_tool.server_id,
+            upstream_tool_name=virtual_tool.upstream_tool_name,
+            virtual_tool_name=virtual_tool.virtual_name,
+            is_error=result.is_error,
+            metadata=deepcopy(result.metadata),
+        )
 
     @classmethod
     def _definition_changed(

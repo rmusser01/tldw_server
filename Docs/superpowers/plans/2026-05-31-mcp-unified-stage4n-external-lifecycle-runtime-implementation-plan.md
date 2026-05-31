@@ -265,7 +265,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_externa
 
 Expected: all runtime manager lifecycle/reconcile tests pass.
 
-- [ ] **Step 6: Commit refresh/reconcile**
+- [x] **Step 6: Commit refresh/reconcile**
 
 ```bash
 git add mcp_unified/gateway/external_runtime.py tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime.py
@@ -279,7 +279,7 @@ git commit -m "feat: reconcile external runtime lifecycle"
 - Modify: `mcp_unified/federation/transports.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime.py`
 
-- [ ] **Step 1: Add red credential-injection test**
+- [x] **Step 1: Add red credential-injection test**
 
 Use sentinel values:
 
@@ -309,14 +309,14 @@ Assert:
 - result metadata and audit payload do not contain sentinel secret values
 - active server definitions are unchanged
 
-- [ ] **Step 2: Add red missing credential tests**
+- [x] **Step 2: Add red missing credential tests**
 
 For a server with `credential_slots=["api_key"]`:
 
 - no broker and no effective grant denies with `credential_broker_unavailable`
 - broker returns `None` denies with `required_credential_grant_missing`
 
-- [ ] **Step 3: Implement credential broker protocol and summary helpers**
+- [x] **Step 3: Implement credential broker protocol and summary helpers**
 
 Define a local protocol in `external_runtime.py` unless it is clearer to add
 `mcp_unified/interfaces/credentials.py`:
@@ -329,14 +329,14 @@ class ExternalCredentialBroker(Protocol):
 Implement `_public_runtime_auth_metadata()` and `_summarize_runtime_auth()` so
 only key names are exposed.
 
-- [ ] **Step 4: Pass runtime_auth through fake transport**
+- [x] **Step 4: Pass runtime_auth through fake transport**
 
 Update `ExternalFederationTransport` and `FakeExternalTransport.call_tool()` to
 accept `runtime_auth: BrokeredExternalCredential | None = None`. Store a copied
 credential in the fake for assertions; never include secret values in default
 metadata.
 
-- [ ] **Step 5: Run credential tests**
+- [x] **Step 5: Run credential tests**
 
 Run:
 

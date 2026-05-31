@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -8,8 +9,12 @@ from mcp_unified.federation.models import (
     BrokeredExternalCredential,
     ExternalToolCallResult,
     ExternalToolDefinition,
+    FederationPolicyDenied,
 )
-from mcp_unified.gateway.external_runtime import GatewayExternalRuntimeManager
+from mcp_unified.gateway.external_runtime import (
+    GatewayExternalRuntimeError,
+    GatewayExternalRuntimeManager,
+)
 from mcp_unified.storage.models import AuditEvent, ExternalServerDefinition
 
 
@@ -153,6 +158,25 @@ class RecordingExternalTransport:
         self.calls.append((tool_name, dict(arguments or {})))
         self.runtime_auth_seen = None if runtime_auth is None else runtime_auth.copy()
         return self.result.copy()
+
+
+class RecordingCredentialBroker:
+    """Credential broker fake that records resolution requests."""
+
+    def __init__(
+        self,
+        result: BrokeredExternalCredential | None,
+    ) -> None:
+        self.result = result
+        self.calls: list[dict[str, Any]] = []
+
+    async def resolve_external_credential(
+        self,
+        **kwargs: Any,
+    ) -> BrokeredExternalCredential | None:
+        """Record one broker request and return the configured result."""
+        self.calls.append(dict(kwargs))
+        return None if self.result is None else self.result.copy()
 
 
 def _server(**overrides: Any) -> ExternalServerDefinition:
@@ -386,3 +410,143 @@ async def test_external_runtime_reconcile_starts_stops_restarts_and_refreshes() 
         "ext.changed.new",
         "ext.unchanged.read_again",
     ]
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_execution_uses_brokered_credentials_without_leaking_secrets() -> None:
+    secret_header = "Bearer do-not-leak-header"
+    secret_env = "do-not-leak-env"
+    audit = RecordingAuditStore()
+    store = InMemoryExternalRegistryStore([_server(credential_slots=["api_key"])])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+        result=ExternalToolCallResult(
+            content={"matches": ["paper-1"]},
+            metadata={"adapter": "fake"},
+        ),
+    )
+    broker = RecordingCredentialBroker(
+        BrokeredExternalCredential(
+            headers={"Authorization": secret_header},
+            env={"TOKEN": secret_env},
+            metadata={
+                "credential_mode": "brokered_ephemeral",
+                "credential_source": "test",
+                "unsafe_note": secret_env,
+            },
+        )
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+        audit_store=audit,
+        credential_broker=broker,
+    )
+    await manager.start_server("research")
+
+    result = await manager.execute_virtual_tool(
+        "ext.research.search",
+        {"query": "MCP"},
+        effective_policy={
+            "external_server_grants": [{"server_id": "research"}],
+            "credential_grants": [
+                {
+                    "external_server_id": "research",
+                    "credential_slot": "api_key",
+                }
+            ],
+        },
+        actor_id="user-1",
+        context={"request_id": "r1"},
+    )
+
+    assert transport.runtime_auth_seen is not None
+    assert transport.runtime_auth_seen.headers == {"Authorization": secret_header}
+    assert transport.runtime_auth_seen.env == {"TOKEN": secret_env}
+    assert result.content == {"matches": ["paper-1"]}
+    assert result.metadata["adapter"] == "fake"
+    assert result.metadata["credential_mode"] == "brokered_ephemeral"
+    assert result.metadata["credential_source"] == "test"
+    assert result.metadata["credential_injection"] == {
+        "headers": ["Authorization"],
+        "env": ["TOKEN"],
+    }
+    assert "unsafe_note" not in result.metadata
+    serialized_public_data = json.dumps(
+        {
+            "result_metadata": result.metadata,
+            "audit_payloads": [event.payload for event in audit.events],
+        },
+        sort_keys=True,
+    )
+    assert secret_header not in serialized_public_data
+    assert secret_env not in serialized_public_data
+    assert (await store.get_server("research")).credential_slots == ["api_key"]
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_required_credentials_fail_closed_without_broker() -> None:
+    store = InMemoryExternalRegistryStore([_server(credential_slots=["api_key"])])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+    await manager.start_server("research")
+
+    with pytest.raises(GatewayExternalRuntimeError) as exc_info:
+        await manager.execute_virtual_tool(
+            "ext.research.search",
+            {"query": "MCP"},
+            effective_policy={
+                "external_server_grants": [{"server_id": "research"}],
+                "credential_grants": [
+                    {
+                        "external_server_id": "research",
+                        "credential_slot": "api_key",
+                    }
+                ],
+            },
+        )
+
+    assert exc_info.value.reason_code == "credential_broker_unavailable"
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_required_credentials_fail_closed_when_broker_returns_none() -> None:
+    store = InMemoryExternalRegistryStore([_server(credential_slots=["api_key"])])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        tools=[ExternalToolDefinition(name="search")],
+    )
+    broker = RecordingCredentialBroker(None)
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+        credential_broker=broker,
+    )
+    await manager.start_server("research")
+
+    with pytest.raises(FederationPolicyDenied) as exc_info:
+        await manager.execute_virtual_tool(
+            "ext.research.search",
+            {"query": "MCP"},
+            effective_policy={
+                "external_server_grants": [{"server_id": "research"}],
+                "credential_grants": [
+                    {
+                        "external_server_id": "research",
+                        "credential_slot": "api_key",
+                    }
+                ],
+            },
+        )
+
+    assert exc_info.value.reason_code == "required_credential_grant_missing"
+    assert broker.calls
+    assert transport.calls == []
