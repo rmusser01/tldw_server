@@ -390,8 +390,21 @@ def _first_forwarded_for_ip(request: Request) -> str | None:
     raw = request.headers.get("x-forwarded-for")
     if not raw:
         return None
-    first = raw.split(",", 1)[0].strip()
-    return _parse_forwarded_client_ip(first)
+    parsed_candidates: list[str] = []
+    for candidate in raw.split(","):
+        if not candidate.strip():
+            return None
+        parsed_candidate = _parse_forwarded_client_ip(candidate)
+        if not parsed_candidate:
+            return None
+        parsed_candidates.append(parsed_candidate)
+    if not parsed_candidates:
+        return None
+
+    for parsed_candidate in parsed_candidates:
+        if not _is_local_host(parsed_candidate):
+            return parsed_candidate
+    return parsed_candidates[0]
 
 
 def _forwarded_header_for_ip(request: Request) -> str | None:
@@ -413,10 +426,10 @@ def _real_ip_header_ip(request: Request) -> str | None:
 
 
 def _effective_forwarded_client_ip(request: Request) -> str | None:
+    if request.headers.get("x-forwarded-for"):
+        return _first_forwarded_for_ip(request)
     return (
-        _first_forwarded_for_ip(request)
-        or _forwarded_header_for_ip(request)
-        or _real_ip_header_ip(request)
+        _forwarded_header_for_ip(request) or _real_ip_header_ip(request)
     )
 
 

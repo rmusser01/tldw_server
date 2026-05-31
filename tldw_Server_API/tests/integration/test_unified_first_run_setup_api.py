@@ -155,6 +155,21 @@ def test_first_run_metadata_ignores_spoofed_local_forwarded_for_from_remote_clie
     assert metadata.manual_auth_required is True
 
 
+def test_first_run_metadata_rejects_mixed_forwarded_for_chain_from_trusted_local_proxy(monkeypatch):
+    _setup_needs_setup(monkeypatch)
+    request = _make_setup_metadata_request(
+        client_host="127.0.0.1",
+        host="localhost",
+        forwarded_for="127.0.0.1, 203.0.113.10",
+    )
+
+    metadata = setup_endpoint.build_first_run_metadata(request)
+
+    assert metadata.connection.browser_access == "remote"
+    assert metadata.bundled_single_user_auth_available is False
+    assert metadata.manual_auth_required is True
+
+
 def test_first_run_metadata_classifies_x_real_ip_from_trusted_local_proxy_as_remote(monkeypatch):
     _setup_needs_setup(monkeypatch)
     request = _make_setup_metadata_request(
