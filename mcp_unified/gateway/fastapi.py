@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
+from .bootstrap import GatewayProfileBootstrap
 from .jsonrpc import (
     GATEWAY_RESPONSE_TYPES as _GATEWAY_RESPONSE_TYPES,
 )
@@ -33,10 +37,35 @@ from .jsonrpc import (
 from .jsonrpc import (
     runtime_version as _runtime_version,
 )
+from .profiles import GatewayProfileManagementError, GatewayProfileManager
 from .runtime import GatewayRuntime
 
 _PROFILE_HEADER_NAMES = ("x-mcp-profile", "x-mcp-profile-id")
 _PROFILE_QUERY_NAMES = ("profile_id", "profileId")
+_PROFILE_MANAGEMENT_STATUS_CODES = {
+    "profile_not_found": 404,
+    "preset_not_found": 404,
+    "default_profile_not_configured": 404,
+    "profile_disabled": 409,
+    "profile_already_exists": 409,
+    "invalid_profile_request": 422,
+    "profile_store_unavailable": 503,
+    "assignment_store_unavailable": 503,
+}
+
+
+class DuplicatePresetRequest(BaseModel):
+    """Request body for duplicating a built-in gateway profile preset."""
+
+    preset_id: str
+    profile_id: str | None = None
+    name: str | None = None
+
+
+class SetDefaultProfileRequest(BaseModel):
+    """Request body for changing the gateway default profile."""
+
+    profile_id: str
 
 
 async def _parse_json_body(request: Request) -> Any:
@@ -121,10 +150,118 @@ def _to_http_response(response: GatewayJSONRPCResult) -> GatewayJSONRPCResponse 
     return response
 
 
-def create_gateway_router(runtime: GatewayRuntime) -> APIRouter:
+def _profile_management_error_response(exc: GatewayProfileManagementError) -> JSONResponse:
+    """Translate expected profile-management errors into HTTP JSON responses."""
+
+    return JSONResponse(
+        status_code=_PROFILE_MANAGEMENT_STATUS_CODES.get(exc.reason_code, 500),
+        content=exc.to_payload(),
+    )
+
+
+def _normalize_duplicate_preset_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Expose duplicated preset metadata at the top level for HTTP clients."""
+
+    profile = payload.get("profile")
+    if not isinstance(profile, Mapping):
+        return payload
+    if profile.get("preset_id") is None and profile.get("preset_version") is None:
+        return payload
+
+    normalized = dict(payload)
+    if profile.get("preset_id") is not None:
+        normalized["preset_id"] = profile["preset_id"]
+    if profile.get("preset_version") is not None:
+        normalized["preset_version"] = profile["preset_version"]
+    return normalized
+
+
+def _resolve_profile_manager(
+    *,
+    profile_manager: GatewayProfileManager | None,
+    profile_bootstrap: GatewayProfileBootstrap | None,
+    enable_profile_management: bool,
+) -> GatewayProfileManager | None:
+    """Return the configured profile manager or reject invalid explicit gating."""
+
+    resolved_manager = profile_manager
+    if resolved_manager is None and profile_bootstrap is not None:
+        resolved_manager = profile_bootstrap.profile_manager
+    if enable_profile_management and resolved_manager is None:
+        raise ValueError(
+            "profile management requires profile_manager or profile_bootstrap"
+        )
+    return resolved_manager
+
+
+def _mount_profile_management_routes(
+    router: APIRouter,
+    manager: GatewayProfileManager,
+) -> None:
+    """Mount profile-management endpoints on the package gateway router."""
+
+    @router.get("/profiles", response_model=None)
+    async def list_profiles() -> dict[str, Any] | JSONResponse:
+        try:
+            return await manager.list_profiles()
+        except GatewayProfileManagementError as exc:
+            return _profile_management_error_response(exc)
+
+    @router.post("/profiles/from-preset", response_model=None)
+    async def duplicate_preset(
+        request: DuplicatePresetRequest,
+    ) -> dict[str, Any] | JSONResponse:
+        try:
+            payload = await manager.duplicate_preset(
+                request.preset_id,
+                profile_id=request.profile_id,
+                name=request.name,
+            )
+        except GatewayProfileManagementError as exc:
+            return _profile_management_error_response(exc)
+        return _normalize_duplicate_preset_payload(payload)
+
+    @router.get("/profiles/default", response_model=None)
+    async def get_default_profile() -> dict[str, Any] | JSONResponse:
+        try:
+            return await manager.get_default_profile()
+        except GatewayProfileManagementError as exc:
+            return _profile_management_error_response(exc)
+
+    @router.put("/profiles/default", response_model=None)
+    async def set_default_profile(
+        request: SetDefaultProfileRequest,
+    ) -> dict[str, Any] | JSONResponse:
+        try:
+            return await manager.set_default_profile(request.profile_id)
+        except GatewayProfileManagementError as exc:
+            return _profile_management_error_response(exc)
+
+    @router.get("/profiles/{profile_id}", response_model=None)
+    async def show_profile(profile_id: str) -> dict[str, Any] | JSONResponse:
+        try:
+            return await manager.show_profile(profile_id)
+        except GatewayProfileManagementError as exc:
+            return _profile_management_error_response(exc)
+
+
+def create_gateway_router(
+    runtime: GatewayRuntime,
+    *,
+    profile_manager: GatewayProfileManager | None = None,
+    profile_bootstrap: GatewayProfileBootstrap | None = None,
+    enable_profile_management: bool = False,
+) -> APIRouter:
     """Create a package-owned FastAPI router for a standalone MCP runtime."""
 
     router = APIRouter()
+    resolved_profile_manager = _resolve_profile_manager(
+        profile_manager=profile_manager,
+        profile_bootstrap=profile_bootstrap,
+        enable_profile_management=enable_profile_management,
+    )
+    if resolved_profile_manager is not None:
+        _mount_profile_management_routes(router, resolved_profile_manager)
 
     @router.get("/status")
     async def gateway_status() -> dict[str, str]:
@@ -187,9 +324,24 @@ def create_gateway_router(runtime: GatewayRuntime) -> APIRouter:
     return router
 
 
-def create_gateway_app(runtime: GatewayRuntime, *, prefix: str = "/mcp") -> FastAPI:
+def create_gateway_app(
+    runtime: GatewayRuntime,
+    *,
+    prefix: str = "/mcp",
+    profile_manager: GatewayProfileManager | None = None,
+    profile_bootstrap: GatewayProfileBootstrap | None = None,
+    enable_profile_management: bool = False,
+) -> FastAPI:
     """Create a minimal FastAPI app exposing the standalone MCP gateway router."""
 
     app = FastAPI(title="MCP Unified Gateway", version=_runtime_version(runtime))
-    app.include_router(create_gateway_router(runtime), prefix=prefix)
+    app.include_router(
+        create_gateway_router(
+            runtime,
+            profile_manager=profile_manager,
+            profile_bootstrap=profile_bootstrap,
+            enable_profile_management=enable_profile_management,
+        ),
+        prefix=prefix,
+    )
     return app
