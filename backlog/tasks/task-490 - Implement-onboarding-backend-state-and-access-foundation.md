@@ -15,6 +15,7 @@ documentation:
 - Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md#task-2-setup-access-boundary-and-first-run-state-endpoints
 modified_files:
 - tldw_Server_API/app/core/Setup/first_run_state.py
+- tldw_Server_API/app/core/Setup/first_run_models.py
 - tldw_Server_API/app/api/v1/schemas/setup_schemas.py
 - tldw_Server_API/tests/Setup/test_first_run_state.py
 ---
@@ -41,7 +42,7 @@ Started Task 1 subagent-driven slice: backend first-run state store and setup sc
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 1 slice only: added durable JSON first-run state store, setup state response schemas, and regression coverage for defaults, step persistence, completion guards, skip state, and first-chat completion. TASK-490 remains In Progress because Task 2 endpoint/access-boundary work is intentionally not implemented in this slice. Verification: tldw_Server_API/tests/Setup/test_first_run_state.py - 6 passed; tldw_Server_API/tests/Setup/test_setup_manager_masking.py - 1 passed; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings.
+Task 1 review fix slice: hardened first-run state persistence with atomic writes, corrupt/schema-invalid state quarantine, persisted BLOCKED recovery state context, current-state acknowledgement revocation, and core-owned first-run domain models re-exported by setup_schemas. TASK-490 remains In Progress because Task 2 endpoint/access-boundary work is intentionally not implemented. Red phase captured 3 expected failures in tldw_Server_API/tests/Setup/test_first_run_state.py before production changes. Verification after fix: test_first_run_state.py - 9 passed; test_setup_manager_masking.py - 1 passed; Ruff touched-file check passed; Bandit touched production-file scan reported 0 findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 <!-- SECTION:FINAL_SUMMARY:END -->
 

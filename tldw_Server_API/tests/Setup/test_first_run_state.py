@@ -56,6 +56,58 @@ def test_complete_requires_required_step_acknowledgements(tmp_path: Path):
     assert "required_steps_missing" in str(excinfo.value)
 
 
+def test_later_unacknowledged_step_blocks_completion(tmp_path: Path):
+    store = FirstRunStateStore(tmp_path / "first_run_state.json")
+
+    for step in REQUIRED_FIRST_RUN_STEPS:
+        store.update_step(step, {"acknowledged": True})
+    store.update_step("providers", {"acknowledged": False})
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+
+    with pytest.raises(InvalidFirstRunTransition) as excinfo:
+        store.mark_completed()
+
+    assert "required_steps_missing:providers" in str(excinfo.value)
+
+
+def test_corrupt_state_file_is_quarantined_and_loads_blocked_recovery_state(tmp_path: Path):
+    path = tmp_path / "first_run_state.json"
+    path.write_text("{invalid-json", encoding="utf-8")
+    store = FirstRunStateStore(path)
+
+    state = store.load()
+
+    assert state.status == FirstRunStatus.BLOCKED
+    assert state.current_step == "state_recovery"
+    assert state.skip_reason == "state_file_recovery"
+    assert state.step_data["state_recovery"]["reason"] == "invalid_json"
+    assert state.step_data["state_recovery"]["quarantined"] is True
+    assert path.exists()
+    assert list(tmp_path.glob("first_run_state.json.corrupt-*"))
+
+
+def test_invalid_state_schema_is_quarantined_and_loads_blocked_recovery_state(tmp_path: Path):
+    path = tmp_path / "first_run_state.json"
+    path.write_text(
+        '{"status":"unknown","created_at":"2026-05-31T00:00:00Z","updated_at":"2026-05-31T00:00:00Z"}',
+        encoding="utf-8",
+    )
+    store = FirstRunStateStore(path)
+
+    state = store.load()
+
+    assert state.status == FirstRunStatus.BLOCKED
+    assert state.current_step == "state_recovery"
+    assert state.step_data["state_recovery"]["reason"] == "invalid_schema"
+    assert state.step_data["state_recovery"]["quarantined"] is True
+    assert path.exists()
+    assert list(tmp_path.glob("first_run_state.json.corrupt-*"))
+
+
 def test_skip_records_skipped_not_completed(tmp_path: Path):
     store = FirstRunStateStore(tmp_path / "first_run_state.json")
 
