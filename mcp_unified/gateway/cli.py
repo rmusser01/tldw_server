@@ -198,7 +198,7 @@ def _add_profile_config_argument(parser: argparse.ArgumentParser) -> None:
         type=Path,
         help=(
             "Path to a JSON or TOML gateway config file. "
-            "Falls back to MCP_UNIFIED_GATEWAY_CONFIG."
+            "Falls back to MCP_UNIFIED_GATEWAY_CONFIG or MCP_GATEWAY_CONFIG."
         ),
     )
 
@@ -350,11 +350,14 @@ def _config_path_from_args(args: argparse.Namespace) -> Path:
 
     if args.config is not None:
         return args.config
-    env_value = os.environ.get("MCP_UNIFIED_GATEWAY_CONFIG")
+    env_value = os.environ.get("MCP_UNIFIED_GATEWAY_CONFIG") or os.environ.get(
+        "MCP_GATEWAY_CONFIG"
+    )
     if env_value and env_value.strip():
         return Path(env_value)
     raise _CliArgumentError(
-        "--config is required unless MCP_UNIFIED_GATEWAY_CONFIG is set"
+        "--config is required unless MCP_UNIFIED_GATEWAY_CONFIG or "
+        "MCP_GATEWAY_CONFIG is set"
     )
 
 

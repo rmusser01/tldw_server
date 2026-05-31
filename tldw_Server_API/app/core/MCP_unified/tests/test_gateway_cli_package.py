@@ -207,6 +207,7 @@ def test_gateway_cli_profile_management_commands_require_config_or_env(
     """Require an explicit or environment-provided config for store-backed commands."""
 
     monkeypatch.delenv("MCP_UNIFIED_GATEWAY_CONFIG", raising=False)
+    monkeypatch.delenv("MCP_GATEWAY_CONFIG", raising=False)
 
     exit_code = gateway_cli.main(argv)
 
@@ -215,7 +216,10 @@ def test_gateway_cli_profile_management_commands_require_config_or_env(
     assert exit_code == 2
     assert captured.out == ""
     assert payload == {
-        "error": "--config is required unless MCP_UNIFIED_GATEWAY_CONFIG is set",
+        "error": (
+            "--config is required unless MCP_UNIFIED_GATEWAY_CONFIG or "
+            "MCP_GATEWAY_CONFIG is set"
+        ),
         "ok": False,
     }
     assert "Traceback" not in captured.err
@@ -249,6 +253,66 @@ def test_gateway_cli_profile_management_uses_env_config_fallback(
         "profile": profile,
         "store": {"kind": "memory", "persistent": False},
     }
+
+
+def test_gateway_cli_profile_management_uses_env_config_alias(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Load profile-management config from MCP_GATEWAY_CONFIG when needed."""
+
+    profile = _profile_payload("alias-profile", "Alias Profile")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "store": {"kind": "memory"},
+            "profiles": [profile],
+        },
+    )
+    monkeypatch.delenv("MCP_UNIFIED_GATEWAY_CONFIG", raising=False)
+    monkeypatch.setenv("MCP_GATEWAY_CONFIG", str(config_path))
+
+    exit_code = gateway_cli.main(["show-profile", "alias-profile"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "ok": True,
+        "profile": profile,
+        "store": {"kind": "memory", "persistent": False},
+    }
+
+
+def test_gateway_cli_profile_management_unified_env_wins_over_alias(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prefer MCP_UNIFIED_GATEWAY_CONFIG when both env aliases are present."""
+
+    alias_config = tmp_path / "invalid-alias.json"
+    alias_config.write_text("{", encoding="utf-8")
+    unified_config = _write_gateway_config(
+        tmp_path,
+        {
+            "store": {"kind": "memory"},
+            "profiles": [_profile_payload("unified-profile", "Unified Profile")],
+        },
+        name="unified.json",
+    )
+    monkeypatch.setenv("MCP_UNIFIED_GATEWAY_CONFIG", str(unified_config))
+    monkeypatch.setenv("MCP_GATEWAY_CONFIG", str(alias_config))
+
+    exit_code = gateway_cli.main(["show-profile", "unified-profile"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["profile"]["id"] == "unified-profile"
 
 
 def test_gateway_cli_profile_management_explicit_config_wins_over_env(
@@ -607,10 +671,16 @@ def _seed_sqlite_profile(sqlite_path: Path, profile_id: str, name: str) -> None:
     bundle = build_gateway_profile_storage(
         {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
     )
-    try:
-        asyncio.run(bundle.profile_store.upsert_profile(MCPProfile(id=profile_id, name=name)))
-    finally:
-        asyncio.run(bundle.profile_store.aclose())
+
+    async def _seed() -> None:
+        try:
+            await bundle.profile_store.upsert_profile(
+                MCPProfile(id=profile_id, name=name)
+            )
+        finally:
+            await bundle.profile_store.aclose()
+
+    asyncio.run(_seed())
 
 
 def _seed_sqlite_default_profile(sqlite_path: Path, preset_id: str) -> None:
@@ -623,8 +693,12 @@ def _seed_sqlite_default_profile(sqlite_path: Path, preset_id: str) -> None:
         audit_store=bundle.audit_store,
         store_metadata=bundle.metadata,
     )
-    try:
-        asyncio.run(manager.duplicate_preset(preset_id))
-        asyncio.run(manager.set_default_profile(preset_id))
-    finally:
-        asyncio.run(bundle.profile_store.aclose())
+
+    async def _seed_default() -> None:
+        try:
+            await manager.duplicate_preset(preset_id)
+            await manager.set_default_profile(preset_id)
+        finally:
+            await bundle.profile_store.aclose()
+
+    asyncio.run(_seed_default())

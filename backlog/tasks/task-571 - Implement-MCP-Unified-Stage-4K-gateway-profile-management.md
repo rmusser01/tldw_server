@@ -15,9 +15,11 @@ documentation:
 - Docs/superpowers/plans/2026-05-31-mcp-unified-stage4k-gateway-profile-management-implementation-plan.md
 modified_files:
 - mcp_unified/gateway/config.py
+- mcp_unified/gateway/cli.py
 - mcp_unified/gateway/fastapi.py
 - mcp_unified/gateway/profiles.py
 - mcp_unified/profiles/resolver.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_profile_registry_resolver.py
@@ -26,7 +28,7 @@ modified_files:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-
+Implement MCP Unified Stage 4K gateway profile management for standalone package users. The work adds stored profile inspection, preset duplication, default-profile assignment, shared runtime resolution, CLI commands, FastAPI endpoints, and review hardening.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -47,13 +49,16 @@ Docs/superpowers/plans/2026-05-31-mcp-unified-stage4k-gateway-profile-management
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+- Added GatewayProfileManager, assignment-aware profile resolution, shared assignment storage, and config/bootstrap wiring.
+- Added CLI and FastAPI profile-management surfaces with deterministic JSON envelopes and reason-coded error mapping.
+- Addressed PR review feedback covering response models, Loguru logging, injected store persistence semantics, best-effort audit logging, documented CLI env aliases, and task metadata consistency.
+- Validated with focused pytest, Ruff, Bandit touched-scope scan, and git diff --check.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented MCP Unified Stage 4K gateway profile management and addressed PR #2184 review feedback after rebasing onto latest dev. Added Pydantic response models for FastAPI profile-management success responses, switched profile resolver logging to Loguru, reused assignment/audit capabilities from injected persistent stores, rejected divergent sqlite injected-store wiring without explicit assignment/audit support, and made gateway profile audit appends best-effort. Validation recorded: focused profile-management pytest 116 passed, final MCP Unified slice 210 passed, Ruff touched-scope check passed, Bandit /tmp/bandit_mcp_stage4k_pr2184_qodo.json reported no findings/errors, and git diff --check passed. Known non-code issue: git commands continue to report the pre-existing worktree gc.log/unreachable-loose-objects warning.
+Implemented MCP Unified Stage 4K gateway profile management and addressed PR #2184 review feedback after rebasing onto latest dev. Added Pydantic response models for FastAPI profile-management success responses, switched profile resolver logging to Loguru, reused assignment/audit capabilities from injected persistent stores, rejected divergent sqlite injected-store wiring without explicit assignment/audit support, made gateway profile audit appends best-effort, added the documented MCP_GATEWAY_CONFIG CLI alias, and completed Backlog task metadata. Validation recorded: CLI package pytest 28 passed, final MCP Unified slice 212 passed, Ruff touched-scope check passed, Bandit /tmp/bandit_mcp_stage4k_pr2184_qodo.json reported no findings/errors, and git diff --check passed. Known non-code issue: git commands continue to report the pre-existing worktree gc.log/unreachable-loose-objects warning.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
