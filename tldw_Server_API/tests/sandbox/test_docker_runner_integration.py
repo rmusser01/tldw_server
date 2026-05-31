@@ -113,7 +113,7 @@ def test_full_lifecycle(sandbox_client):
         if r.status_code == 200:
             data = r.json()
             phase = data.get("phase", "")
-            if phase in ("finished", "failed", "cancelled"):
+            if phase in ("completed", "finished", "failed", "killed", "timed_out", "cancelled"):
                 final_status = data
                 break
         time.sleep(1)
