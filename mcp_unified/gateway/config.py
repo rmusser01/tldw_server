@@ -140,7 +140,11 @@ def build_gateway_profile_storage(
                 profile_store,
                 assignment_store,
             ),
-            audit_store=_resolve_injected_audit_store(profile_store, audit_store),
+            audit_store=_resolve_injected_audit_store(
+                store_config,
+                profile_store,
+                audit_store,
+            ),
             metadata=_metadata_for_store_config(store_config),
         )
 
@@ -202,6 +206,7 @@ def _resolve_injected_assignment_store(
 
 
 def _resolve_injected_audit_store(
+    store_config: GatewayProfileStoreConfig,
     profile_store: ProfileStore,
     audit_store: AuditStore | None,
 ) -> AuditStore | None:
@@ -211,6 +216,12 @@ def _resolve_injected_audit_store(
         return audit_store
     if _supports_audit_store(profile_store):
         return cast(AuditStore, profile_store)
+    if store_config.kind == "sqlite":
+        raise ValueError(
+            "audit_store is required when injecting a profile_store for "
+            "sqlite gateway profile storage unless profile_store implements "
+            "audit methods"
+        )
     return None
 
 

@@ -1286,6 +1286,40 @@ def test_gateway_config_rejects_sqlite_injected_store_without_assignment_store(
         )
 
 
+def test_gateway_config_rejects_sqlite_injected_store_without_audit_store(
+    tmp_path: Path,
+) -> None:
+    """Reject divergent injected SQLite profile stores without audit support."""
+
+    from mcp_unified.gateway.config import (
+        GatewayProfileStoreConfig,
+        build_gateway_profile_storage,
+    )
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    class AssignmentOnlyProfileStore(InMemoryProfileStore):
+        async def get_assignment(self, *_: object, **__: object) -> None:
+            return None
+
+        async def list_assignments(self, *_: object, **__: object) -> list[object]:
+            return []
+
+        async def upsert_assignment(self, assignment: object) -> object:
+            return assignment
+
+        async def delete_assignment(self, *_: object, **__: object) -> bool:
+            return False
+
+    with pytest.raises(ValueError, match="audit_store"):
+        build_gateway_profile_storage(
+            GatewayProfileStoreConfig(
+                kind="sqlite",
+                sqlite_path=tmp_path / "gateway.db",
+            ),
+            profile_store=AssignmentOnlyProfileStore(),
+        )
+
+
 def test_gateway_config_rejects_invalid_store_kind() -> None:
     """Reject unsupported profile-store kinds during config construction."""
 
