@@ -37,6 +37,7 @@ Follow-up after the Research Workspace literature work-products MVP. Display Dee
 - Added `proposal-deep-research-verification.ts` to split proposal markdown sections, find compatible completed Deep Research bundle imports, and normalize bounded bundle-level verification metadata.
 - Added a proposal-specific modal viewer that renders proposal sections with compact Deep Research verification companions beside Literature Overview, Proposed Hypothesis, Methodology, and Source Audit. Source Audit carries the detailed unresolved-question/source-trust summary to avoid repeating long bundle-level detail beside every section.
 - Wired StudioPane artifact View handling to use the proposal verification viewer only when a matching Deep Research import exists; other artifact viewers remain unchanged.
+- PR review follow-up preserved proposal content that appears before the first markdown heading under an Overview section, rendered proposal section bodies through the shared MarkdownPreview component, and made unresolved-question list keys unique when duplicate question text appears.
 - Bandit skipped: touched implementation files are frontend TypeScript/TSX plus docs/backlog only, with no Python execution path changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
@@ -46,9 +47,10 @@ Follow-up after the Research Workspace literature work-products MVP. Display Dee
 Implemented TASK-571 by showing imported Deep Research verification beside compatible Research Proposal Pack sections. The matching contract is strict and local to imported bundle artifacts: completed `deep_research_bundle_import` artifacts must point back to the proposal artifact through `data.deepResearch.sourceArtifact.id`. The modal display keeps proposal markdown, source coverage, and review checklist data unchanged while surfacing run ID, supported/unsupported claim counts, contradiction count, source trust count, and unresolved questions from the imported bundle.
 
 Verification:
-- `bunx vitest run src/components/Option/ResearchWorkspace/__tests__/deep-research-bundle-import.test.ts src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 2 files / 36 tests.
+- `bunx vitest run src/components/Option/ResearchWorkspace/__tests__/deep-research-bundle-import.test.ts src/components/Option/ResearchWorkspace/__tests__/StudioPane.literature-workproducts.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 2 files / 37 tests after review follow-up.
 - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit -p tsconfig.json` passed in `apps/packages/ui`.
 - `bun run verify:design-system-state` passed with allowed legacy product-state exceptions only.
+- `TLDW_E2E_EXTENSION_LAUNCH_TIMEOUT_MS=90000 TLDW_E2E_EXTENSION_TARGET_WAIT_MS=90000 bun run test:e2e:workspace-parity` built the extension locally and exited 0 with the parity test skipped because extension launch is unavailable in this local environment; the prior CI failure was a Playwright timeout on the pre-rebase commit.
 - `git diff --check` passed.
 - Bandit skipped because this slice touched frontend TypeScript/TSX, docs, and Backlog only.
 <!-- SECTION:FINAL_SUMMARY:END -->

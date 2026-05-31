@@ -209,6 +209,12 @@ vi.mock("../StudioPane/QuickNotesSection", () => ({
   )
 }))
 
+vi.mock("@/components/Common/MarkdownPreview", () => ({
+  MarkdownPreview: ({ content }: { content: string }) => (
+    <div data-testid="proposal-section-markdown">{content}</div>
+  )
+}))
+
 vi.mock("../source-location-copy", () => ({
   getWorkspaceStudioNoSourcesHint: () => "Select sources to start generating outputs"
 }))
@@ -360,7 +366,8 @@ const proposalArtifact = {
     "## Research Question",
     "How should rural clinics adapt transfer coaching?",
     "## Literature Overview",
-    "Paper A supports timely coaching. Paper B warns rural clinics differ.",
+    "- Paper A **supports** timely coaching.",
+    "- Paper B warns rural clinics differ.",
     "## Proposed Hypothesis",
     "Rural clinics need a lower-touch coaching protocol.",
     "## Methodology",
@@ -515,6 +522,34 @@ describe("StudioPane literature work products", () => {
       expect(verification?.contradictionCount).toBe(1)
       expect(verification?.sourceTrustCount).toBe(2)
     }
+  })
+
+  it("preserves proposal content before the first markdown heading", () => {
+    const sections = buildProposalDeepResearchVerificationSections(
+      {
+        ...proposalArtifact,
+        content: [
+          "Prepared for the rural care review board.",
+          "",
+          "Use this proposal alongside the source audit.",
+          "",
+          "## Literature Overview",
+          "Paper A supports timely coaching."
+        ].join("\n")
+      },
+      matchingDeepResearchImport
+    )
+
+    expect(sections[0]).toMatchObject({
+      heading: "Overview",
+      level: 1,
+      body: [
+        "Prepared for the rural care review board.",
+        "",
+        "Use this proposal alongside the source audit."
+      ].join("\n")
+    })
+    expect(sections[1]?.heading).toBe("Literature Overview")
   })
 
   it("rejects array rows instead of treating them as literature matrix records", () => {
@@ -2000,6 +2035,9 @@ Proposal
     ).toBeGreaterThan(0)
     expect(
       screen.getAllByText(/Which rural clinic constraints/i).length
+    ).toBeGreaterThan(0)
+    expect(
+      screen.getAllByTestId("proposal-section-markdown").length
     ).toBeGreaterThan(0)
     expect(proposalArtifact.sourceCoverage).toBe(originalSourceCoverage)
     expect(proposalArtifact.reviewChecklist).toBe(originalReviewChecklist)

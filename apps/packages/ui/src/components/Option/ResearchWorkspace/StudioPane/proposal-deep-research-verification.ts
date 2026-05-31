@@ -135,20 +135,23 @@ const parseProposalSections = (
 ): ProposalDeepResearchVerificationSection[] => {
   const lines = content.split(/\r?\n/)
   const sections: ProposalDeepResearchVerificationSection[] = []
-  let current:
-    | {
-        heading: string
-        level: number
-        body: string[]
-      }
-    | null = null
+  let current: {
+    heading: string
+    level: number
+    body: string[]
+  } = {
+    heading: "",
+    level: 1,
+    body: []
+  }
 
   const flush = () => {
-    if (!current) return
+    const body = current.body.join("\n").trim()
+    if (!current.heading && !body) return
     sections.push({
-      heading: current.heading,
+      heading: current.heading || "Overview",
       level: current.level,
-      body: current.body.join("\n").trim()
+      body
     })
   }
 
@@ -164,9 +167,7 @@ const parseProposalSections = (
       continue
     }
 
-    if (current) {
-      current.body.push(line)
-    }
+    current.body.push(line)
   }
 
   flush()

@@ -9,6 +9,7 @@ import {
   ZoomOut,
 } from "lucide-react"
 
+import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
 import Mermaid from "@/components/Common/Mermaid"
 import type { GeneratedArtifact } from "@/types/workspace"
 
@@ -259,9 +260,11 @@ export const ProposalDeepResearchVerificationViewer: React.FC<{
                 {section.heading}
               </h3>
               {section.body ? (
-                <div className="mt-2 whitespace-pre-wrap text-sm text-text">
-                  {section.body}
-                </div>
+                <MarkdownPreview
+                  className="mt-2 text-text"
+                  content={section.body}
+                  size="sm"
+                />
               ) : (
                 <p className="mt-2 text-sm text-text-muted">No section body.</p>
               )}
@@ -305,8 +308,10 @@ export const ProposalDeepResearchVerificationViewer: React.FC<{
                       <ul className="mt-1 list-disc space-y-1 pl-4 text-text-muted">
                         {section.verification.unresolvedQuestions
                           .slice(0, 3)
-                          .map((question) => (
-                            <li key={question}>{question}</li>
+                          .map((question, questionIndex) => (
+                            <li key={`${question}-${questionIndex}`}>
+                              {question}
+                            </li>
                           ))}
                       </ul>
                     </div>
