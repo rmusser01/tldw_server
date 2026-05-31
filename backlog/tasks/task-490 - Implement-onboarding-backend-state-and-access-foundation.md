@@ -1,27 +1,30 @@
 ---
 id: TASK-490
 title: Implement onboarding backend state and access foundation
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-05-31 06:15
+updated_date: '2026-05-31 09:54'
 labels: []
 dependencies: []
 references:
-- TASK-489
-- Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md
+  - TASK-489
+  - >-
+    Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md
 documentation:
-- Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md#task-1-backend-first-run-state-store
-- Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md#task-2-setup-access-boundary-and-first-run-state-endpoints
+  - >-
+    Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md#task-1-backend-first-run-state-store
+  - >-
+    Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md#task-2-setup-access-boundary-and-first-run-state-endpoints
 modified_files:
-- tldw_Server_API/app/core/Setup/first_run_state.py
-- tldw_Server_API/app/core/Setup/first_run_models.py
-- tldw_Server_API/app/api/v1/API_Deps/setup_deps.py
-- tldw_Server_API/app/api/v1/endpoints/setup.py
-- tldw_Server_API/app/api/v1/schemas/setup_schemas.py
-- tldw_Server_API/tests/Setup/test_first_run_state.py
-- tldw_Server_API/tests/Setup/test_setup_deps_remote_admin.py
-- tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
+  - tldw_Server_API/app/core/Setup/first_run_state.py
+  - tldw_Server_API/app/core/Setup/first_run_models.py
+  - tldw_Server_API/app/api/v1/API_Deps/setup_deps.py
+  - tldw_Server_API/app/api/v1/endpoints/setup.py
+  - tldw_Server_API/app/api/v1/schemas/setup_schemas.py
+  - tldw_Server_API/tests/Setup/test_first_run_state.py
+  - tldw_Server_API/tests/Setup/test_setup_deps_remote_admin.py
+  - tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
 ---
 
 ## Description
@@ -32,9 +35,9 @@ Task 1-2 slice from the unified onboarding plan. Add durable first-run state, re
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 First-run state store persists state and enforces first chat plus acknowledged required steps before completion
-- [ ] #2 First-run metadata endpoint returns auth/setup-path/origin diagnostics without secrets
-- [ ] #3 First-run write endpoints are blocked when setup is disabled or already completed
+- [x] #1 First-run state store persists state and enforces first chat plus acknowledged required steps before completion
+- [x] #2 First-run metadata endpoint returns auth/setup-path/origin diagnostics without secrets
+- [x] #3 First-run write endpoints are blocked when setup is disabled or already completed
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -57,20 +60,22 @@ Task 2 final review fix: first-run metadata now only honors `X-Forwarded-For` wh
 Task 2 final metadata/state constraint fix: metadata browser classification now uses the same setup proxy evidence boundary for XFF, RFC Forwarded, X-Real-IP, and proxy evidence without a client IP; the public generic first-run state endpoint now rejects unsupported step data keys before persistence. Red phase captured 4 expected failures and 1 passing allowed-payload control; verification after fix passed the required pytest suites, Ruff, Bandit, and `git diff --check`.
 
 Task 2 final proxy-chain/state-read fix: local-only setup access now rejects mixed X-Forwarded-For chains unless every parsed forwarded client is loopback, and first-run state GET/update/skip responses now project stored state through the public step-data allowlist without mutating persisted files. Red phase captured the mixed-chain write bypass and raw persisted secret exposure; verification after fix passed the required pytest suites, Ruff, Bandit, and `git diff --check`.
+
+Task 2 closeout after review gates: final code-quality review at HEAD 3bd11d4e3f805cce849759319c0407c8711fb7dd reported no Critical, Important, or Minor findings and assessed Task 2 ready to merge. Final verification recorded by controller and reviewer: setup access/API pytest slice passed 42 tests; first-run state/masking pytest slice passed 20 tests; touched-file Ruff passed; Bandit touched setup scope reported 0 findings; git diff --check passed. Final hardening filters whole public first-run state projection including current_step, completed_steps, acknowledged_steps, skipped_steps, skip_reason, and step_data; proxy client evidence is centralized across metadata and write guards.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 1 delivered the durable first-run state store and setup schema re-exports, including secret redaction for private_key, access_key, and auth_key normalized variants. Task 2 delivered setup access-boundary coverage, first-run state/metadata/update/skip endpoints, setup-completed write rejection, terminal first-run state write rejection, and first-run metadata for auth/setup path/connection guidance. TASK-490 remains In Progress because later review gates still run here.
+Task 1 delivered the durable first-run state store and setup schema re-exports, including required-step acknowledgement semantics, first-chat completion gates, atomic persistence, corrupt-state recovery, stale lock handling, and secret redaction. Task 2 delivered setup access-boundary coverage, first-run state/metadata/update/skip endpoints, backend-authoritative write gating, completed/disabled/terminal state rejection, conservative proxy evidence handling across XFF/Forwarded/X-Real-IP, public response projection for all first-run state fields, and first-run metadata for auth/setup path/connection guidance. Verification passed targeted pytest slices, Ruff, Bandit touched-scope scan, git diff --check, spec review, and final code-quality review.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

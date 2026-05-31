@@ -1,21 +1,28 @@
 ---
 id: TASK-491
 title: Implement onboarding provider catalog and validation
-status: To Do
+status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-05-31 09:54'
+labels: []
+dependencies: []
 references:
-- TASK-489
-- Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md
+  - TASK-489
+  - >-
+    Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md
 documentation:
-- Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md#task-3-provider-catalog-config-writes-and-validation
+  - >-
+    Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md#task-3-provider-catalog-config-writes-and-validation
 modified_files:
-- tldw_Server_API/app/core/Setup/provider_catalog.py
-- tldw_Server_API/app/core/Setup/provider_validation.py
-- tldw_Server_API/app/api/v1/schemas/setup_schemas.py
-- tldw_Server_API/app/api/v1/endpoints/setup.py
-- tldw_Server_API/tests/Setup/test_setup_provider_catalog.py
-- tldw_Server_API/tests/Setup/test_setup_provider_validation.py
-- tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
-- tldw_Server_API/tests/Config/test_config_providers_endpoints.py
+  - tldw_Server_API/app/core/Setup/provider_catalog.py
+  - tldw_Server_API/app/core/Setup/provider_validation.py
+  - tldw_Server_API/app/api/v1/schemas/setup_schemas.py
+  - tldw_Server_API/app/api/v1/endpoints/setup.py
+  - tldw_Server_API/tests/Setup/test_setup_provider_catalog.py
+  - tldw_Server_API/tests/Setup/test_setup_provider_validation.py
+  - tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
+  - tldw_Server_API/tests/Config/test_config_providers_endpoints.py
 ---
 
 ## Description
@@ -33,14 +40,13 @@ Task 3 slice from the unified onboarding plan. Add backend-generated setup provi
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:BEGIN -->
+Started Task 3 subagent-driven slice after TASK-490 cleared spec and code-quality review at 3bd11d4e3f805cce849759319c0407c8711fb7dd. Scope: backend-generated setup provider catalog, provider save/validation schemas and endpoints, local OpenAI-compatible endpoint diagnostics, and regression coverage. Task 3 must reuse `_require_first_run_write_access` from Task 2 for setup writes.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
