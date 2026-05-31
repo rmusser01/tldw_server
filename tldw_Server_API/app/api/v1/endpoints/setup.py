@@ -217,8 +217,8 @@ _SECRET_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
 )
 _LOCAL_PATH_LIKE_FIRST_RUN_STEP_VALUE_RE = re.compile(
     r"(?:"
-    r"^(?:/Users|/home|/private|/var|/tmp|/etc)/[^\s,;\"']*$|"
-    r"^[A-Za-z]:\\[^\s,;\"']*$"
+    r"(?:/Users|/home|/private|/var|/tmp|/etc)/[^\s,;\"']+|"
+    r"[A-Za-z]:\\[^\s,;\"']+"
     r")"
 )
 _SETUP_DEFAULT_PROVIDER_KEYS = {
@@ -311,6 +311,25 @@ def _is_public_first_run_step_value(value: Any, *, allow_path_like: bool = False
     return False
 
 
+def _validate_ingest_allowed_local_roots(data: dict[str, Any]) -> None:
+    if "allowed_local_roots" not in data:
+        return
+    roots = data["allowed_local_roots"]
+    if not isinstance(roots, list) or any(not isinstance(root, str) for root in roots):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_allowed_local_roots",
+        )
+    try:
+        for root in roots:
+            setup_manager.validate_ingestion_source_allowed_roots(root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_allowed_local_roots",
+        ) from exc
+
+
 def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, Any]:
     allowed_keys = _FIRST_RUN_STEP_DATA_ALLOWED_KEYS.get(step)
     if allowed_keys is None:
@@ -336,6 +355,8 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
         )
+    if step == "ingest_defaults":
+        _validate_ingest_allowed_local_roots(data)
     if not all(
         _is_public_first_run_step_value(
             value,
@@ -687,16 +708,7 @@ def _safe_step_payload(step: str, payload: BaseModel) -> dict[str, Any]:
 
 
 def _safe_ingest_defaults_payload(payload: IngestDefaultsRequest) -> dict[str, Any]:
-    data = _step_payload(payload)
-    try:
-        for root in data.get("allowed_local_roots", []):
-            setup_manager.validate_ingestion_source_allowed_roots(root)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid_allowed_local_roots",
-        ) from exc
-    return _validated_public_first_run_step_data("ingest_defaults", data)
+    return _validated_public_first_run_step_data("ingest_defaults", _step_payload(payload))
 
 
 async def _complete_setup_flow(

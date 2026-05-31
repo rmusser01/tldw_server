@@ -655,6 +655,55 @@ def test_first_run_optional_advanced_rejects_nested_path_like_values(
     assert not state_path.exists()
 
 
+def test_first_run_optional_advanced_rejects_embedded_path_like_values(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/optional-advanced",
+        json={
+            "rag": "defer",
+            "storage_paths": "defer",
+            "values": {"notes": "debug file is /Users/me/.env"},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == setup_endpoint.UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL
+    assert not state_path.exists()
+
+
+def test_generic_first_run_state_rejects_invalid_ingest_roots(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={
+            "step": "ingest_defaults",
+            "data": {
+                "acknowledged": True,
+                "allow_local_file_ingest": True,
+                "allowed_local_roots": ["../outside"],
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid_allowed_local_roots"
+    assert not state_path.exists()
+
+
 def test_first_run_provider_validate_returns_typed_response_without_token_echo(
     monkeypatch,
     tmp_path,

@@ -107,6 +107,29 @@ async def test_first_chat_verifier_sanitizes_success_response_text(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_first_chat_verifier_sanitizes_success_response_id(monkeypatch):
+    from tldw_Server_API.app.core.Setup import first_chat_verifier
+
+    async def _fake_call_chat_completion(**_kwargs):
+        return {
+            "id": "chatcmpl-/Users/local/private/sk-secret-token",
+            "choices": [{"message": {"content": "Hello."}}],
+        }
+
+    monkeypatch.setattr(first_chat_verifier, "_call_chat_completion", _fake_call_chat_completion)
+
+    result = await first_chat_verifier.verify_first_chat(
+        provider="openai",
+        model="gpt-4.1-mini",
+    )
+
+    assert result.status == "ready"
+    assert result.response_id is not None
+    assert "sk-secret-token" not in result.response_id
+    assert "/Users/local/private" not in result.response_id
+
+
+@pytest.mark.asyncio
 async def test_first_chat_verifier_maps_auth_failures_without_raw_detail(monkeypatch):
     from tldw_Server_API.app.core.Setup import first_chat_verifier
 

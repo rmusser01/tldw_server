@@ -117,7 +117,9 @@ async def verify_first_chat(
 
 def _extract_response_id(response: Any) -> str | None:
     response_id = _get_value(response, "id")
-    return response_id if isinstance(response_id, str) and response_id.strip() else None
+    if not isinstance(response_id, str) or not response_id.strip():
+        return None
+    return _sanitize_response_text(response_id)
 
 
 def _extract_response_text(response: Any) -> str | None:
