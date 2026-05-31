@@ -36,6 +36,8 @@ Design addendum 2026-05-31: collapsed /chat siderails must disappear from layout
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design spec committed and reviewed through the brainstorming spec-review loop. Initial review flagged ambiguous 768-1023px behavior and shared OptionLayout scope. Spec was updated to scope edge-mounted expand buttons to lg-and-wider /chat side-rail behavior, preserve md/tablet behavior, and require /chat/Playground-scoped layout changes. Re-review status: Approved.
+
+Follow-up spec review clarified two planning details before implementation: the right-edge expand button is only visible when an active artifact exists, and browser verification must include layout measurements for chat width, chat-shell top stability, and composer bottom docking.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
