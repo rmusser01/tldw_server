@@ -227,6 +227,39 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
     return dict(data)
 
 
+def _public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, Any]:
+    allowed_keys = _FIRST_RUN_STEP_DATA_ALLOWED_KEYS.get(step)
+    if step == "state_recovery":
+        allowed_keys = frozenset({"reason", "quarantined", "message"})
+    if allowed_keys is None:
+        return {}
+
+    public_data: dict[str, Any] = {}
+    for key, value in data.items():
+        if key not in allowed_keys or _is_unsafe_public_step_data_key(key):
+            continue
+        if _is_public_first_run_step_value(value):
+            public_data[key] = value
+    return public_data
+
+
+def _public_first_run_state(state: FirstRunStateResponse) -> FirstRunStateResponse:
+    payload = model_dump_compat(state)
+    step_data = payload.get("step_data")
+    if isinstance(step_data, dict):
+        payload["step_data"] = {
+            step: public_data
+            for step, data in step_data.items()
+            if isinstance(step, str)
+            if isinstance(data, dict)
+            for public_data in [_public_first_run_step_data(step, data)]
+            if public_data
+        }
+    else:
+        payload["step_data"] = {}
+    return FirstRunStateResponse.model_validate(payload)
+
+
 async def _require_first_run_write_access(request: Request) -> None:
     await require_local_setup_access(request)
     status_snapshot = setup_manager.get_status_snapshot()
@@ -604,7 +637,7 @@ async def get_setup_status(_guard: None = Depends(require_local_setup_access)) -
 
 @router.get("/first-run/state", openapi_extra={"security": []}, response_model=FirstRunStateResponse)
 async def get_first_run_state(_guard: None = Depends(require_local_setup_access)) -> FirstRunStateResponse:
-    return _first_run_store().load()
+    return _public_first_run_state(_first_run_store().load())
 
 
 @router.get("/first-run/metadata", openapi_extra={"security": []}, response_model=FirstRunMetadataResponse)
@@ -622,7 +655,7 @@ async def update_first_run_state(
 ) -> FirstRunStateResponse:
     validated_data = _validated_public_first_run_step_data(payload.step, payload.data)
     try:
-        return _first_run_store().update_step(payload.step, validated_data)
+        return _public_first_run_state(_first_run_store().update_step(payload.step, validated_data))
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -633,7 +666,7 @@ async def skip_first_run(
     _guard: None = Depends(_require_first_run_write_access),
 ) -> FirstRunStateResponse:
     try:
-        return _first_run_store().mark_skipped(reason=payload.reason)
+        return _public_first_run_state(_first_run_store().mark_skipped(reason=payload.reason))
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 

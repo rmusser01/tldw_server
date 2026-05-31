@@ -126,7 +126,7 @@ def _should_trust_proxy() -> bool:
 
 
 def _first_forwarded_ip(request: Request) -> str | None:
-    """Return the left-most IP from X-Forwarded-For when proxy trust enabled."""
+    """Return a loopback forwarded IP only when the complete XFF chain is local."""
 
     if not _should_trust_proxy():
         return None
@@ -134,11 +134,25 @@ def _first_forwarded_ip(request: Request) -> str | None:
     if not raw:
         return None
     try:
-        # header can be comma-separated list of IPs; take the first hop
-        first = raw.split(",", 1)[0].strip()
+        candidates = [
+            candidate.strip().lower().strip("[]").split("%", 1)[0]
+            for candidate in raw.split(",")
+            if candidate.strip()
+        ]
     except Exception:  # noqa: BLE001
         return None
-    return first or None
+    if not candidates:
+        return None
+
+    parsed = []
+    for candidate in candidates:
+        try:
+            parsed.append(ipaddress.ip_address(candidate))
+        except ValueError:
+            return None
+    if not all(candidate.is_loopback for candidate in parsed):
+        return None
+    return str(parsed[0])
 
 
 def should_trust_setup_proxy_headers(request: Request) -> bool:

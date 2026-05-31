@@ -28,6 +28,20 @@ def _make_remote_post_request(path="/api/v1/setup/first-run/state") -> Request:
     return Request(scope)
 
 
+def _make_local_proxied_post_request(forwarded_for: str) -> Request:
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/setup/first-run/state",
+        "headers": [
+            (b"host", b"localhost"),
+            (b"x-forwarded-for", forwarded_for.encode("ascii")),
+        ],
+        "client": ("127.0.0.1", 4444),
+    }
+    return Request(scope)
+
+
 def _capture_setup_deps_records() -> tuple[list[dict], int]:
     records: list[dict] = []
     sink_id = setup_deps.logger.add(
@@ -160,6 +174,32 @@ async def test_remote_setup_write_requires_admin_guard_when_remote_override_enab
     await setup_deps.require_local_setup_access(_make_remote_post_request())
 
     assert called["value"] is True
+
+
+@pytest.mark.asyncio
+async def test_local_setup_write_rejects_mixed_forwarded_for_chain(monkeypatch):
+    monkeypatch.delenv("TLDW_SETUP_ALLOW_REMOTE", raising=False)
+    monkeypatch.setattr(setup_deps, "_config_allows_remote", lambda: False)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await setup_deps.require_local_setup_access(
+            _make_local_proxied_post_request("127.0.0.1, 203.0.113.10")
+        )
+
+    rendered_detail = str(excinfo.value.detail)
+    assert excinfo.value.status_code == 403
+    assert "203.0.113.10" not in rendered_detail
+    assert "127.0.0.1" not in rendered_detail
+
+
+@pytest.mark.asyncio
+async def test_local_setup_write_allows_loopback_forwarded_for_chain(monkeypatch):
+    monkeypatch.delenv("TLDW_SETUP_ALLOW_REMOTE", raising=False)
+    monkeypatch.setattr(setup_deps, "_config_allows_remote", lambda: False)
+
+    await setup_deps.require_local_setup_access(
+        _make_local_proxied_post_request("127.0.0.1, ::1")
+    )
 
 
 @pytest.mark.asyncio

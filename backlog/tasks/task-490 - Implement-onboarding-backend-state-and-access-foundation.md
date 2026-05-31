@@ -55,6 +55,8 @@ Task 2 coverage-only spec re-review fix: added direct integration coverage for e
 Task 2 final review fix: first-run metadata now only honors `X-Forwarded-For` when proxy trust is enabled and the immediate setup client is loopback, and it validates the forwarded value as an IP before classification. Red phase captured spoofed `X-Forwarded-For: 127.0.0.1` from a remote immediate client reporting local bundled auth; verification after fix passed the required pytest suites, Ruff, Bandit, and `git diff --check`.
 
 Task 2 final metadata/state constraint fix: metadata browser classification now uses the same setup proxy evidence boundary for XFF, RFC Forwarded, X-Real-IP, and proxy evidence without a client IP; the public generic first-run state endpoint now rejects unsupported step data keys before persistence. Red phase captured 4 expected failures and 1 passing allowed-payload control; verification after fix passed the required pytest suites, Ruff, Bandit, and `git diff --check`.
+
+Task 2 final proxy-chain/state-read fix: local-only setup access now rejects mixed X-Forwarded-For chains unless every parsed forwarded client is loopback, and first-run state GET/update/skip responses now project stored state through the public step-data allowlist without mutating persisted files. Red phase captured the mixed-chain write bypass and raw persisted secret exposure; verification after fix passed the required pytest suites, Ruff, Bandit, and `git diff --check`.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

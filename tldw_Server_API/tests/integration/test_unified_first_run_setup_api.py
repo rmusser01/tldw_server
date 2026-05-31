@@ -401,6 +401,43 @@ def test_first_run_state_persists_allowed_public_step_data(
     assert providers_data["default_provider"] == "openai"
 
 
+def test_first_run_state_get_projects_only_public_step_data(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    state = FirstRunStateStore(state_path).update_step(
+        "providers",
+        {
+            "acknowledged": True,
+            "default_provider": "openai",
+        },
+    )
+    payload = setup_endpoint.json.loads(state.model_dump_json())
+    payload["step_data"]["providers"].update(
+        {
+            "api_key": "sk-raw",
+            "nested": {"token": "secret-token"},
+        }
+    )
+    state_path.write_text(setup_endpoint.json.dumps(payload), encoding="utf-8")
+
+    response = setup_client.get("/api/v1/setup/first-run/state")
+
+    assert response.status_code == 200
+    body = response.json()
+    providers_data = body["step_data"]["providers"]
+    assert providers_data == {
+        "acknowledged": True,
+        "default_provider": "openai",
+    }
+    rendered_body = str(body)
+    assert "sk-raw" not in rendered_body
+    assert "secret-token" not in rendered_body
+
+
 def test_skipped_first_run_state_rejected_by_shared_write_guard(
     monkeypatch,
     tmp_path,
