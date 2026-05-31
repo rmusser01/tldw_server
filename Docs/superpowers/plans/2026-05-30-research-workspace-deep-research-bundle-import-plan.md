@@ -34,7 +34,7 @@
 - Modify `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage2.responsive.test.tsx`
   - Mock bundle fetch and artifact insertion.
   - Cover successful import and failed/malformed bundle handling.
-- Modify `backlog/tasks/task-570 - Implement-Deep-Research-bundle-import-into-Research-Workspace-artifacts.md`
+- Modify `backlog/tasks/task-573 - Implement-Deep-Research-bundle-import-into-Research-Workspace-artifacts.md`
   - Record implementation notes, verification, and final status at closeout.
 
 ## Task 1: Add Bundle Import Adapter Tests
