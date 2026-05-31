@@ -36,7 +36,7 @@ Design-only task. After human and reviewer approval, invoke the writing-plans sk
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Spec drafted at Docs/superpowers/specs/2026-05-31-mcp-unified-stage4l-editable-profile-crud-design.md. Spec reviewer approved with no blocking issues; advisory clarifications for disabled default create, scoped delete guards, malformed JSON tests, and the disabled-default-create manager test were incorporated.
+Spec drafted at Docs/superpowers/specs/2026-05-31-mcp-unified-stage4l-editable-profile-crud-design.md. Spec reviewer approved with no blocking issues; advisory clarifications for disabled default create, scoped delete guards, malformed JSON tests, and the disabled-default-create manager test were incorporated. A follow-up self-review tightened effective-default wording, no-op patch handling, nested policy patch rejection, reason-code specificity, and persistent-store guarded delete requirements.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

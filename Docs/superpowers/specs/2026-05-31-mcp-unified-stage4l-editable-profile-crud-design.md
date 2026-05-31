@@ -82,9 +82,14 @@ The manager continues to depend on the same package-owned protocols:
 - `ProfileAssignmentStore` for gateway default and future assignment lookup.
 - Optional `AuditStore` for profile lifecycle audit events.
 
-No new storage protocol is required. `ProfileStore` already exposes
+No storage schema migration is required. `ProfileStore` already exposes
 `get_profile`, `list_profiles`, `upsert_profile`, and `delete_profile`.
 `ProfileAssignmentStore` already supports listing assignments by `profile_id`.
+Because guarded deletion must not race assignment creation in persistent stores,
+Stage 4L may add a narrow package-owned guarded-delete capability for stores
+that can perform the assignment check and profile delete atomically. Generic
+check-then-delete fallback is acceptable only for nonpersistent in-memory stores
+used by tests and local development.
 
 ## Manager Contract
 
@@ -98,8 +103,9 @@ compact audit event.
 Create is not an upsert. If a profile with the requested ID already exists, the
 operation fails with a deterministic `profile_already_exists` reason.
 
-Creating disabled profiles is allowed except when the new profile ID is already
-selected by the current gateway default assignment or bootstrap fallback default.
+Creating disabled profiles is allowed except when the new profile ID matches the
+effective gateway default profile ID. Effective default resolution is
+assignment-first, then bootstrap fallback only when no assignment is configured.
 In that case, creating the disabled profile would make the effective gateway
 default disabled, so the manager must reject it. Callers should either create an
 enabled profile for that ID or move the default first.
@@ -135,10 +141,16 @@ Omitted fields are preserved. Provided list and dict fields replace that
 specific field; they are not merged. Providing `metadata` replaces the entire
 metadata object.
 
+Patch bodies must contain at least one supported change. Empty patch documents,
+empty `policy_document` objects with no other changes, and requests that would
+only refresh `updated_at` fail with `invalid_profile_patch`.
+
 Out-of-scope fields must be rejected rather than silently ignored. This includes
 `id`, `schema_version`, `preset_id`, `preset_version`, `approval_policy`,
 `path_scopes`, `external_server_grants`, `credential_grants`, `provenance`,
-`created_at`, and `updated_at`.
+`created_at`, and `updated_at`. Unknown nested `policy_document` keys are also
+rejected even though `ProfilePolicy` accepts extension fields in full profile
+documents.
 
 If the patch sets `enabled=false` for the current gateway default profile, the
 operation fails. Callers must move the default first.
@@ -160,7 +172,11 @@ Delete fails when:
 
 The manager should not rely on SQLite foreign-key cascade behavior for safety.
 The user-visible contract is that the control plane refuses unsafe deletion
-before storage mutation.
+before storage mutation. For persistent stores, the assignment check and profile
+delete must be serialized or atomic at the storage capability used by the
+manager. This prevents a concurrent default or assignment write from slipping
+between the guard and the delete. The nonpersistent in-memory fallback may use a
+manager-level lock because it is process-local and development-only.
 
 Deletion safety is scoped to the current Stage 4L ownership boundary: default
 profile resolution and profile assignments. SQLite may cascade future-owned rows
@@ -228,6 +244,12 @@ New reason codes should extend Stage 4K's deterministic mapping:
 - `profile_is_default`
 - `profile_has_assignments`
 - `invalid_profile_patch`
+
+Use `profile_is_default` for any create, patch, or delete operation blocked
+because it would make the effective gateway default missing or disabled. Use
+`profile_has_assignments` only when deletion is blocked by non-default
+assignments. Use `invalid_profile_patch` for unsupported patch fields,
+malformed patch shape after JSON parsing, and no-op patch documents.
 
 Existing reason codes should be reused where they already fit, including
 `profile_not_found`, `profile_already_exists`, `invalid_profile_request`,
@@ -313,6 +335,8 @@ Expected failure audit examples:
 
 - Duplicate ID during create.
 - Unsupported patch field.
+- No-op patch document.
+- Disabled profile create for the effective default ID.
 - Default-profile disable protection.
 - Default-profile delete protection.
 - Assignment delete protection.
@@ -331,10 +355,13 @@ Manager tests should cover:
 - Patching allowed fields and preserving omitted fields.
 - Replacing `metadata` and individual policy fields rather than merging them.
 - Rejecting unsupported patch fields.
+- Rejecting unknown nested `policy_document` patch fields.
+- Rejecting empty or no-op patch documents.
 - Rejecting `enabled=false` when the profile is the current gateway default.
 - Deleting a non-default unassigned profile.
 - Rejecting deletion of the current default profile.
 - Rejecting deletion of a profile with assignments.
+- Using an atomic or serialized guarded delete path for persistent stores.
 - Compact audit events for expected failures.
 
 FastAPI tests should cover:
@@ -343,6 +370,8 @@ FastAPI tests should cover:
 - Malformed JSON or invalid Pydantic body handling for `POST /profiles`.
 - `PATCH /profiles/{profile_id}` success.
 - Blocked default disable through `PATCH /profiles/{profile_id}`.
+- Empty patch and unsupported nested policy-key handling for
+  `PATCH /profiles/{profile_id}`.
 - `DELETE /profiles/{profile_id}` success.
 - Blocked delete for default and assigned profiles.
 - Deterministic reason-code to HTTP-status mapping.
@@ -354,6 +383,8 @@ CLI tests should cover:
 - Malformed JSON handling for `--profile-file` and `--patch-file` input.
 - `patch-profile <profile_id> --patch-file`.
 - `patch-profile <profile_id> --patch-file -`.
+- Empty patch and unsupported nested policy-key handling through
+  `patch-profile`.
 - `delete-profile <profile_id>`.
 - Guarded delete and default-disable domain errors.
 - Persistent-store requirement for all mutating commands.
@@ -370,8 +401,9 @@ Implementation should stay close to the Stage 4K patterns:
 - Prefer manager-level helper methods for default detection and assignment
   checks so FastAPI and CLI do not duplicate safety rules.
 - Preserve copy isolation when returning profile documents.
-- Avoid storage-layer migrations unless tests reveal a current store contract
-  mismatch.
+- Avoid storage-layer migrations. A narrow guarded-delete storage capability is
+  acceptable if needed to make persistent-store deletion atomic without changing
+  table shape.
 
 ## Acceptance Criteria
 
