@@ -8,6 +8,7 @@ import type { ResearchWorkspaceDeepResearchReturnContext } from "./research-work
 
 const IMPORTED_REPORT_LIMIT = 7_600
 const PREVIEW_LIMIT = 280
+export const MAX_IMPORT_LIST_ITEMS = 50
 const IMPORT_TRUNCATION_SUFFIX =
   "\n\n[Deep Research report truncated for workspace import.]"
 
@@ -35,11 +36,14 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 const readString = (value: unknown): string =>
   typeof value === "string" ? value.trim() : ""
 
+const capImportList = <T,>(items: T[]): T[] =>
+  items.slice(0, MAX_IMPORT_LIST_ITEMS)
+
 const readRecordList = (value: unknown): Array<Record<string, unknown>> =>
-  Array.isArray(value) ? value.filter(isRecord) : []
+  Array.isArray(value) ? capImportList(value.filter(isRecord)) : []
 
 const readStringList = (value: unknown): string[] =>
-  Array.isArray(value) ? value.map(readString).filter(Boolean) : []
+  Array.isArray(value) ? capImportList(value.map(readString).filter(Boolean)) : []
 
 const readQuestion = (bundle: Record<string, unknown>): string => {
   const directQuestion = readString(bundle.question)

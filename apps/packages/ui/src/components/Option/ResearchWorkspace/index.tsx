@@ -1288,6 +1288,8 @@ const ResearchWorkspaceBody: React.FC = () => {
   const workspaceStatusRequestSeqRef = React.useRef(0)
   const workspaceStatusInFlightRef = React.useRef(false)
   const workspaceServerReconcileSignatureRef = React.useRef<string | null>(null)
+  const isMountedRef = React.useRef(false)
+  const deepResearchBundleImportRequestSeqRef = React.useRef(0)
   const [deepResearchBundleImportState, setDeepResearchBundleImportState] =
     React.useState<DeepResearchBundleImportState | null>(null)
   const activeDeepResearchReturnKey = activeDeepResearchReturnContext
@@ -1330,6 +1332,14 @@ const ResearchWorkspaceBody: React.FC = () => {
     [selectedSourceIds]
   )
   const workspaceServerSourcesRef = React.useRef(sources)
+  React.useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      deepResearchBundleImportRequestSeqRef.current += 1
+    }
+  }, [])
+
   React.useEffect(() => {
     workspaceServerSourcesRef.current = sources
   }, [sources])
@@ -2261,30 +2271,45 @@ const ResearchWorkspaceBody: React.FC = () => {
   const handleImportDeepResearchBundle = React.useCallback(async () => {
     if (!activeDeepResearchReturnContext || !activeDeepResearchReturnKey) return
 
+    const importRequestId = deepResearchBundleImportRequestSeqRef.current + 1
+    deepResearchBundleImportRequestSeqRef.current = importRequestId
+    const returnContext = activeDeepResearchReturnContext
+    const returnContextKey = activeDeepResearchReturnKey
+    const originWorkspaceId = returnContext.sourceWorkspaceId
+    const canContinueImport = () =>
+      isMountedRef.current &&
+      deepResearchBundleImportRequestSeqRef.current === importRequestId &&
+      useWorkspaceStore.getState().workspaceId === originWorkspaceId
+
     setDeepResearchBundleImportState({
-      contextKey: activeDeepResearchReturnKey,
+      contextKey: returnContextKey,
       status: "importing"
     })
 
     try {
       const bundle = await tldwClient.getResearchBundle(
-        activeDeepResearchReturnContext.researchRunId
+        returnContext.researchRunId
       )
-      const sourceArtifact = activeDeepResearchReturnContext.sourceArtifactId
-        ? (generatedArtifacts.find(
+      if (!canContinueImport()) return
+
+      const currentArtifacts = useWorkspaceStore.getState().generatedArtifacts
+      const sourceArtifact = returnContext.sourceArtifactId
+        ? (currentArtifacts.find(
             (artifact: GeneratedArtifact) =>
-              artifact.id === activeDeepResearchReturnContext.sourceArtifactId
+              artifact.id === returnContext.sourceArtifactId
           ) ?? null)
         : null
       const artifactPayload = buildDeepResearchBundleArtifactPayload({
         bundle,
-        returnContext: activeDeepResearchReturnContext,
+        returnContext,
         sourceArtifact
       })
 
+      if (!canContinueImport()) return
       addArtifact(artifactPayload)
+      if (!canContinueImport()) return
       setDeepResearchBundleImportState({
-        contextKey: activeDeepResearchReturnKey,
+        contextKey: returnContextKey,
         status: "imported",
         message: t(
           "playground:studio.deepResearchBundleImported",
@@ -2293,6 +2318,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       })
       focusWorkspacePane("studio")
     } catch (error) {
+      if (!canContinueImport()) return
       const message =
         error instanceof DeepResearchBundleImportError || error instanceof Error
           ? error.message
@@ -2301,7 +2327,7 @@ const ResearchWorkspaceBody: React.FC = () => {
               "Deep Research bundle could not be imported."
             )
       setDeepResearchBundleImportState({
-        contextKey: activeDeepResearchReturnKey,
+        contextKey: returnContextKey,
         status: "failed",
         message
       })
@@ -2311,7 +2337,6 @@ const ResearchWorkspaceBody: React.FC = () => {
     activeDeepResearchReturnKey,
     addArtifact,
     focusWorkspacePane,
-    generatedArtifacts,
     t
   ])
 

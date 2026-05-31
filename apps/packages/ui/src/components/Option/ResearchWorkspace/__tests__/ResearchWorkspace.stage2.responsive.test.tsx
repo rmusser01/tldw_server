@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchWorkspace } from "../index"
 import { RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY } from "../research-workspace-route-state"
@@ -103,26 +110,30 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => testState.isMobile
 }))
 
-vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
-    selector: (state: typeof testState) => unknown
-  ) => selector(testState),
-  createWorkspaceStorage: () => ({
-    getItem: (key: string) => {
-      mockWorkspaceStorageGetItem.mockImplementationOnce(async (requestedKey: string) =>
-        requestedKey === ONBOARDING_KEY ? onboardingStorageState.value ?? null : null
-      )
-      return mockWorkspaceStorageGetItem(key)
-    },
-    setItem: (key: string, value: string) => {
-      if (key === ONBOARDING_KEY) {
-        onboardingStorageState.value = value
-      }
-      return mockWorkspaceStorageSetItem(key, value)
-    },
-    removeItem: vi.fn()
-  })
-}))
+vi.mock("@/store/workspace", () => {
+  const useWorkspaceStore = (selector: (state: typeof testState) => unknown) =>
+    selector(testState)
+  useWorkspaceStore.getState = () => testState
+
+  return {
+    useWorkspaceStore,
+    createWorkspaceStorage: () => ({
+      getItem: (key: string) => {
+        mockWorkspaceStorageGetItem.mockImplementationOnce(async (requestedKey: string) =>
+          requestedKey === ONBOARDING_KEY ? onboardingStorageState.value ?? null : null
+        )
+        return mockWorkspaceStorageGetItem(key)
+      },
+      setItem: (key: string, value: string) => {
+        if (key === ONBOARDING_KEY) {
+          onboardingStorageState.value = value
+        }
+        return mockWorkspaceStorageSetItem(key, value)
+      },
+      removeItem: vi.fn()
+    })
+  }
+})
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -230,6 +241,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     testState.storeHydrated = true
     testState.leftPaneCollapsed = false
     testState.rightPaneCollapsed = false
+    testState.workspaceId = "workspace-1"
     testState.workspaceTag = ""
     testState.selectedSourceIds = []
     testState.generatedArtifacts = []
@@ -244,6 +256,23 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     mockStudioPaneProps.length = 0
     window.localStorage.removeItem(RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY)
     window.history.replaceState(null, "", "/research-workspace")
+  })
+
+  const createCompletedDeepResearchBundle = () => ({
+    question: "Which intervention gaps remain?",
+    report_markdown: "# Deep Report\n\nThe evidence supports follow-up work.",
+    claims: [
+      {
+        text: "Claim one",
+        citations: [{ source_id: "src_1", title: "Paper A" }]
+      }
+    ],
+    source_inventory: [{ source_id: "src_1", title: "Paper A" }],
+    verification_summary: {
+      supported_claim_count: 1,
+      unsupported_claim_count: 0
+    },
+    source_trust: [{ source_id: "src_1", snapshot_policy: "full_artifact" }]
   })
 
   it("uses non-masked tablet drawers so chat remains visible", () => {
@@ -503,22 +532,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
         createdAt: new Date()
       }
     ] as any[]
-    mockGetResearchBundle.mockResolvedValueOnce({
-      question: "Which intervention gaps remain?",
-      report_markdown: "# Deep Report\n\nThe evidence supports follow-up work.",
-      claims: [
-        {
-          text: "Claim one",
-          citations: [{ source_id: "src_1", title: "Paper A" }]
-        }
-      ],
-      source_inventory: [{ source_id: "src_1", title: "Paper A" }],
-      verification_summary: {
-        supported_claim_count: 1,
-        unsupported_claim_count: 0
-      },
-      source_trust: [{ source_id: "src_1", snapshot_policy: "full_artifact" }]
-    })
+    mockGetResearchBundle.mockResolvedValueOnce(createCompletedDeepResearchBundle())
     window.history.replaceState(
       null,
       "",
@@ -552,6 +566,67 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     expect(
       screen.getByTestId("workspace-deep-research-return-handoff")
     ).toHaveTextContent("Bundle imported")
+  })
+
+  it("cancels a bundle import when the active workspace changes during fetch", async () => {
+    let resolveBundle!: (bundle: unknown) => void
+    const bundlePromise = new Promise<unknown>((resolve) => {
+      resolveBundle = resolve
+    })
+    mockGetResearchBundle.mockReturnValueOnce(bundlePromise)
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?source_workspace_id=workspace-1&source_artifact_id=gap-artifact&source_artifact_template=corpus_gap_finder&source_artifact_title=Corpus%20Gap%20Finder&research_run_id=research-run-7"
+    )
+
+    render(<ResearchWorkspace />)
+
+    fireEvent.click(screen.getByRole("button", { name: /import bundle/i }))
+
+    await waitFor(() => {
+      expect(mockGetResearchBundle).toHaveBeenCalledWith("research-run-7")
+    })
+    testState.workspaceId = "workspace-2"
+
+    await act(async () => {
+      resolveBundle(createCompletedDeepResearchBundle())
+      await bundlePromise
+    })
+
+    expect(testState.addArtifact).not.toHaveBeenCalled()
+    expect(
+      screen.getByTestId("workspace-deep-research-return-handoff")
+    ).not.toHaveTextContent("Bundle imported")
+  })
+
+  it("cancels a bundle import after the Research Workspace unmounts", async () => {
+    let resolveBundle!: (bundle: unknown) => void
+    const bundlePromise = new Promise<unknown>((resolve) => {
+      resolveBundle = resolve
+    })
+    mockGetResearchBundle.mockReturnValueOnce(bundlePromise)
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?source_workspace_id=workspace-1&source_artifact_id=gap-artifact&source_artifact_template=corpus_gap_finder&source_artifact_title=Corpus%20Gap%20Finder&research_run_id=research-run-7"
+    )
+
+    const { unmount } = render(<ResearchWorkspace />)
+
+    fireEvent.click(screen.getByRole("button", { name: /import bundle/i }))
+
+    await waitFor(() => {
+      expect(mockGetResearchBundle).toHaveBeenCalledWith("research-run-7")
+    })
+    unmount()
+
+    await act(async () => {
+      resolveBundle(createCompletedDeepResearchBundle())
+      await bundlePromise
+    })
+
+    expect(testState.addArtifact).not.toHaveBeenCalled()
   })
 
   it("shows a bundle import error without adding an artifact", async () => {

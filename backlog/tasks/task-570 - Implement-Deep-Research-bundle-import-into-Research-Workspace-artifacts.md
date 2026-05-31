@@ -44,8 +44,10 @@ Docs/superpowers/plans/2026-05-30-research-workspace-deep-research-bundle-import
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented TASK-570 by adding a frontend-only Deep Research bundle import path for Research Workspace return handoffs. A matching returned run can now fetch the existing `/api/v1/research/runs/{id}/bundle` response through `tldwClient.getResearchBundle`, normalize it into a completed Research Workspace report artifact, preserve source artifact provenance in producer metadata and `data.deepResearch`, carry source lineage/source coverage from the source artifact or fallback bundle source inventory, and show explicit importing/imported/error states in the handoff banner. Imported artifacts intentionally do not set a literature `templateId`, so they are not mistaken for launchable literature work products.
 
+PR #2181 review remediation also now cancels in-flight imports if the user switches workspaces or unmounts Research Workspace before the bundle fetch completes, and caps imported bundle lists before they are used for source coverage, source lineage, readable content, or persisted Deep Research metadata.
+
 Verification:
-- `bun run test -- src/components/Option/ResearchWorkspace/__tests__/deep-research-bundle-import.test.ts src/components/Option/ResearchWorkspace/__tests__/research-workspace-route-state.test.ts src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage2.responsive.test.tsx` passed with 31 tests.
+- `bunx vitest run src/components/Option/ResearchWorkspace/__tests__/deep-research-bundle-import.test.ts src/components/Option/ResearchWorkspace/__tests__/research-workspace-route-state.test.ts src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage2.responsive.test.tsx --maxWorkers=1 --no-file-parallelism` passed with 34 tests.
 - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit -p tsconfig.json` passed.
 - `git diff --check` passed.
 - Bandit skipped because this slice changed frontend TypeScript/TSX, docs, and Backlog only.

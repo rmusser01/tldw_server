@@ -5,6 +5,7 @@ import type {
 } from "@/types/workspace"
 import {
   DeepResearchBundleImportError,
+  MAX_IMPORT_LIST_ITEMS,
   buildDeepResearchBundleArtifactPayload
 } from "../deep-research-bundle-import"
 
@@ -151,5 +152,50 @@ describe("Deep Research bundle import", () => {
     expect(artifact.content).toContain(
       "[Deep Research report truncated for workspace import.]"
     )
+  })
+
+  it("bounds imported bundle lists before persisting artifact metadata", () => {
+    const unboundedList = Array.from({ length: MAX_IMPORT_LIST_ITEMS + 10 }, (_, index) => ({
+      source_id: `src_${index}`,
+      title: `Paper ${index}`,
+      citations: [{ source_id: `src_${index}` }]
+    }))
+    const longBundle = {
+      ...bundle,
+      claims: unboundedList,
+      source_inventory: unboundedList,
+      unresolved_questions: Array.from(
+        { length: MAX_IMPORT_LIST_ITEMS + 10 },
+        (_, index) => `Question ${index}`
+      ),
+      unsupported_claims: unboundedList,
+      contradictions: unboundedList,
+      source_trust: unboundedList
+    }
+
+    const artifact = buildDeepResearchBundleArtifactPayload({
+      bundle: longBundle,
+      returnContext
+    })
+    const deepResearch = artifact.data?.deepResearch as {
+      claims: unknown[]
+      sourceInventory: unknown[]
+      unresolvedQuestions: unknown[]
+      unsupportedClaims: unknown[]
+      contradictions: unknown[]
+      sourceTrust: unknown[]
+    }
+
+    expect(deepResearch.claims).toHaveLength(MAX_IMPORT_LIST_ITEMS)
+    expect(deepResearch.sourceInventory).toHaveLength(MAX_IMPORT_LIST_ITEMS)
+    expect(deepResearch.unresolvedQuestions).toHaveLength(MAX_IMPORT_LIST_ITEMS)
+    expect(deepResearch.unsupportedClaims).toHaveLength(MAX_IMPORT_LIST_ITEMS)
+    expect(deepResearch.contradictions).toHaveLength(MAX_IMPORT_LIST_ITEMS)
+    expect(deepResearch.sourceTrust).toHaveLength(MAX_IMPORT_LIST_ITEMS)
+    expect(artifact.sourceCoverage.selectedSourceIds).toHaveLength(
+      MAX_IMPORT_LIST_ITEMS
+    )
+    expect(artifact.sourceLineage).toHaveLength(MAX_IMPORT_LIST_ITEMS)
+    expect(artifact.content).toContain(`Source inventory: ${MAX_IMPORT_LIST_ITEMS}`)
   })
 })
