@@ -37,6 +37,7 @@ _PATCH_FIELDS = frozenset(
         "auto_start",
     }
 )
+_TEXT_LIST_FIELDS = ("command", "env_allowlist", "credential_slots")
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,9 +381,11 @@ class GatewayExternalRegistryManager:
                 reason_code="invalid_external_server_request",
                 server_id=normalized_server_id,
             )
-            return server.model_copy(
-                update={"id": normalized_server_id, "name": normalized_name},
-                deep=True,
+            return self._normalize_server_lists(
+                server.model_copy(
+                    update={"id": normalized_server_id, "name": normalized_name},
+                    deep=True,
+                )
             )
         except GatewayExternalRegistryManagementError:
             raise
@@ -428,7 +431,7 @@ class GatewayExternalRegistryManager:
                 reason_code="invalid_external_server_patch",
                 server_id=server.id,
             ) from exc
-        return updated, tuple(sorted(patch))
+        return self._normalize_server_lists(updated), tuple(sorted(patch))
 
     async def _validate_credential_slot_patch(
         self,
@@ -438,8 +441,8 @@ class GatewayExternalRegistryManager:
     ) -> None:
         if "credential_slots" not in patch:
             return
-        current_slots = set(current.credential_slots)
-        updated_slots = set(updated.credential_slots)
+        current_slots = set(self._normalize_text_list(current.credential_slots))
+        updated_slots = set(self._normalize_text_list(updated.credential_slots))
         if current_slots.issubset(updated_slots):
             return
         if updated.enabled:
@@ -490,6 +493,20 @@ class GatewayExternalRegistryManager:
                 reason_code=reason_code,
                 server_id=server.id,
             )
+
+    def _normalize_server_lists(
+        self,
+        server: ExternalServerDefinition,
+    ) -> ExternalServerDefinition:
+        updates = {
+            field: self._normalize_text_list(getattr(server, field))
+            for field in _TEXT_LIST_FIELDS
+        }
+        return server.model_copy(update=updates, deep=True)
+
+    @staticmethod
+    def _normalize_text_list(values: list[str]) -> list[str]:
+        return [item.strip() for item in values if item.strip()]
 
     async def _get_server(
         self,

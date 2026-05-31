@@ -292,6 +292,30 @@ async def test_gateway_external_registry_create_normalizes_id_and_name_and_audit
 
 
 @pytest.mark.asyncio
+async def test_gateway_external_registry_create_normalizes_list_fields() -> None:
+    store = InMemoryExternalRegistryStore()
+    manager = _manager(store)
+
+    payload = await manager.create_server(
+        {
+            "id": "search",
+            "name": "Search",
+            "transport": "websocket",
+            "url": "wss://search.example.test/mcp",
+            "env_allowlist": [" SEARCH_TOKEN ", "", "  ", "OTHER_TOKEN"],
+            "credential_slots": [" api_key ", "", " oauth_token "],
+        }
+    )
+
+    assert payload["server"]["env_allowlist"] == ["SEARCH_TOKEN", "OTHER_TOKEN"]
+    assert payload["server"]["credential_slots"] == ["api_key", "oauth_token"]
+    stored = await store.get_server("search")
+    assert stored is not None
+    assert stored.env_allowlist == ["SEARCH_TOKEN", "OTHER_TOKEN"]
+    assert stored.credential_slots == ["api_key", "oauth_token"]
+
+
+@pytest.mark.asyncio
 async def test_gateway_external_registry_create_validates_slug_server_ids() -> None:
     manager = _manager(InMemoryExternalRegistryStore())
 
@@ -429,6 +453,27 @@ async def test_gateway_external_registry_patch_replaces_allowed_fields_and_audit
 
 
 @pytest.mark.asyncio
+async def test_gateway_external_registry_patch_normalizes_list_fields() -> None:
+    store = InMemoryExternalRegistryStore([_server()])
+    manager = _manager(store)
+
+    payload = await manager.patch_server(
+        "search",
+        {
+            "env_allowlist": [" SEARCH_TOKEN ", "", "  ", "OTHER_TOKEN"],
+            "credential_slots": [" api_key ", "", " oauth_token "],
+        },
+    )
+
+    assert payload["server"]["env_allowlist"] == ["SEARCH_TOKEN", "OTHER_TOKEN"]
+    assert payload["server"]["credential_slots"] == ["api_key", "oauth_token"]
+    stored = await store.get_server("search")
+    assert stored is not None
+    assert stored.env_allowlist == ["SEARCH_TOKEN", "OTHER_TOKEN"]
+    assert stored.credential_slots == ["api_key", "oauth_token"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("patch_document", [{}, {"created_at": "2026-05-31"}])
 async def test_gateway_external_registry_rejects_empty_and_unsupported_patch_fields(
     patch_document: dict[str, object],
@@ -455,6 +500,25 @@ async def test_gateway_external_registry_enabled_server_credential_slot_addition
 
     assert payload["server"]["enabled"] is True
     assert payload["server"]["credential_slots"] == ["api_key", "oauth_token"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_external_registry_credential_slot_whitespace_patch_does_not_trigger_removal_guard() -> None:
+    store = InMemoryExternalRegistryStore(
+        [_server(credential_slots=["api_key"], enabled=True)]
+    )
+    manager = _manager(store)
+
+    payload = await manager.patch_server(
+        "search",
+        {"credential_slots": [" api_key ", ""]},
+    )
+
+    assert payload["server"]["enabled"] is True
+    assert payload["server"]["credential_slots"] == ["api_key"]
+    stored = await store.get_server("search")
+    assert stored is not None
+    assert stored.credential_slots == ["api_key"]
 
 
 @pytest.mark.asyncio
