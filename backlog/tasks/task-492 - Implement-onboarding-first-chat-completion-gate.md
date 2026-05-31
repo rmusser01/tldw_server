@@ -1,7 +1,7 @@
 ---
 id: TASK-492
 title: Implement onboarding first-chat completion gate
-status: To Do
+status: In Progress
 references:
 - TASK-489
 - Docs/superpowers/plans/2026-05-31-first-time-solo-user-onboarding-implementation-plan.md
