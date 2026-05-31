@@ -748,23 +748,18 @@ async def _complete_setup_flow(
 ) -> SetupCompleteResponse:
     first_run_store = _first_run_store()
     try:
-        first_run_store.validate_completion_ready()
+        first_run_store.mark_completed_with_legacy_flag(
+            mark_legacy_complete=lambda: setup_manager.mark_setup_completed(True),
+            rollback_legacy_complete=lambda: setup_manager.mark_setup_completed(False),
+        )
     except InvalidFirstRunTransition as exc:
         raise _completion_conflict(str(exc)) from exc
-
-    try:
-        setup_manager.mark_setup_completed(True)
     except Exception as exc:  # noqa: BLE001 - public response must stay sanitized
-        logger.exception("Failed to persist legacy setup completion flag")
+        logger.exception("Failed to persist setup completion")
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to persist setup completion.",
         ) from exc
-
-    try:
-        first_run_store.mark_completed()
-    except InvalidFirstRunTransition as exc:
-        raise _completion_conflict(str(exc)) from exc
 
     _refresh_runtime_config_cache("setup completion")
 

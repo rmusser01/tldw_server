@@ -1358,6 +1358,46 @@ def test_setup_complete_does_not_persist_first_run_completion_when_legacy_write_
     assert state.completed_at is None
 
 
+def test_setup_complete_rolls_back_legacy_flag_when_first_run_completion_write_fails(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    _persist_required_first_run_step_data(store)
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    completion_calls: list[bool] = []
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "mark_setup_completed",
+        lambda completed: completion_calls.append(completed),
+    )
+    original_save_unlocked = FirstRunStateStore._save_unlocked
+
+    def _fail_completed_state_save(self, state):
+        if state.status == FirstRunStatus.COMPLETED:
+            raise OSError("raw state path /tmp/first-run-state")
+        return original_save_unlocked(self, state)
+
+    monkeypatch.setattr(FirstRunStateStore, "_save_unlocked", _fail_completed_state_save)
+
+    response = setup_client.post("/api/v1/setup/complete", json={})
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Failed to persist setup completion."}
+    assert completion_calls == [True, False]
+    state = FirstRunStateStore(state_path).load()
+    assert state.status == FirstRunStatus.FIRST_CHAT_COMPLETE
+    assert state.completed_at is None
+
+
 def test_legacy_completed_setup_rejects_first_run_writes_without_state_file(
     monkeypatch,
     tmp_path,
