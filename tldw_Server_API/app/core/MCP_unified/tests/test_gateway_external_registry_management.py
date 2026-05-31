@@ -71,6 +71,14 @@ class InMemoryExternalRegistryStore:
         return self.servers.pop(server_id, None) is not None
 
 
+class StaleDeleteExternalRegistryStore(InMemoryExternalRegistryStore):
+    """Registry store double that preloads a server but reports stale delete."""
+
+    async def delete_server(self, server_id: str) -> bool:
+        del server_id
+        return False
+
+
 class InMemoryCredentialGrantStore:
     """Small copy-isolated credential grant store test double."""
 
@@ -519,6 +527,20 @@ async def test_gateway_external_registry_delete_missing_server_raises_not_found(
         await manager.delete_server("missing")
 
     assert exc_info.value.reason_code == "external_server_not_found"
+
+
+@pytest.mark.asyncio
+async def test_gateway_external_registry_delete_stale_false_result_raises_not_found() -> None:
+    manager = _manager(
+        StaleDeleteExternalRegistryStore([_server()]),
+        credential_grant_store=InMemoryCredentialGrantStore(),
+    )
+
+    with pytest.raises(GatewayExternalRegistryManagementError) as exc_info:
+        await manager.delete_server("search")
+
+    assert exc_info.value.reason_code == "external_server_not_found"
+    assert exc_info.value.to_payload()["server_id"] == "search"
 
 
 @pytest.mark.asyncio
