@@ -29,6 +29,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 from tldw_Server_API.app.api.v1.API_Deps.setup_deps import (
     require_local_setup_access,
     require_shared_audio_installer_access,
+    should_trust_setup_proxy_headers,
 )
 from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
     AudioBundleOperationResponse,
@@ -237,7 +238,12 @@ def _first_forwarded_host(request: Request) -> str | None:
     if not raw:
         return None
     first = raw.split(",", 1)[0].strip()
-    return first or None
+    if not first:
+        return None
+    try:
+        return str(ipaddress.ip_address(first.lower().strip("[]").split("%", 1)[0]))
+    except ValueError:
+        return None
 
 
 def _classify_source_host(host: str | None) -> str:
@@ -251,12 +257,15 @@ def _classify_source_host(host: str | None) -> str:
 
 
 def _classify_browser_access(request: Request) -> str:
-    forwarded_host = _first_forwarded_host(request)
-    if forwarded_host:
-        return _classify_source_host(forwarded_host)
-
     client_host = request.client.host if request.client else None
-    return _classify_source_host(client_host)
+    client_access = _classify_source_host(client_host)
+    if "x-forwarded-for" not in request.headers or not should_trust_setup_proxy_headers(request):
+        return client_access
+
+    forwarded_host = _first_forwarded_host(request)
+    if not forwarded_host:
+        return "unknown"
+    return _classify_source_host(forwarded_host)
 
 
 def build_first_run_metadata(request: Request) -> FirstRunMetadataResponse:

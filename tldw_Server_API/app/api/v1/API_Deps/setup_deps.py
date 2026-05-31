@@ -134,6 +134,13 @@ def _first_forwarded_ip(request: Request) -> str | None:
     return first or None
 
 
+def should_trust_setup_proxy_headers(request: Request) -> bool:
+    """Return True when setup code may honor proxy-supplied client headers."""
+
+    client_host = request.client.host if request.client else None
+    return _should_trust_proxy() and _is_loopback_host(client_host)
+
+
 def _is_loopback_host(host: str | None) -> bool:
     """Return True if the provided hostname/IP represents a local loopback address."""
     if not host:

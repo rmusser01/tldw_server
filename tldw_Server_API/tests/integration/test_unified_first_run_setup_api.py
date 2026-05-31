@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.endpoints import setup as setup_endpoint
 from tldw_Server_API.app.core.Setup.first_run_state import (
@@ -39,6 +40,28 @@ def _setup_needs_setup(monkeypatch):
 
 def _fail_if_state_update_reaches_endpoint(*_args, **_kwargs):
     pytest.fail("terminal first-run state should be rejected by the shared write guard")
+
+
+def _make_setup_metadata_request(
+    *,
+    client_host: str,
+    host: str,
+    forwarded_for: str | None = None,
+) -> Request:
+    headers = [(b"host", host.encode("ascii"))]
+    if forwarded_for is not None:
+        headers.append((b"x-forwarded-for", forwarded_for.encode("ascii")))
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/setup/first-run/metadata",
+            "headers": headers,
+            "client": (client_host, 4444),
+            "scheme": "http",
+            "server": (host, 80),
+        }
+    )
 
 
 def test_first_run_state_endpoint_returns_backend_state(monkeypatch, tmp_path, setup_client):
@@ -112,6 +135,21 @@ def test_first_run_metadata_classifies_forwarded_remote_browser_as_remote(
     assert body["connection"]["browser_access"] == "remote"
     assert body["bundled_single_user_auth_available"] is False
     assert body["manual_auth_required"] is True
+
+
+def test_first_run_metadata_ignores_spoofed_local_forwarded_for_from_remote_client(monkeypatch):
+    _setup_needs_setup(monkeypatch)
+    request = _make_setup_metadata_request(
+        client_host="203.0.113.10",
+        host="example.test",
+        forwarded_for="127.0.0.1",
+    )
+
+    metadata = setup_endpoint.build_first_run_metadata(request)
+
+    assert metadata.connection.browser_access == "remote"
+    assert metadata.bundled_single_user_auth_available is False
+    assert metadata.manual_auth_required is True
 
 
 def test_completed_setup_rejects_first_run_writes(monkeypatch, tmp_path, setup_client):

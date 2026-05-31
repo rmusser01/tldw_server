@@ -51,6 +51,8 @@ Task 2 review-fix slice: hardened `_require_first_run_write_access` so completed
 Task 2 spec re-review fix: reordered `_require_first_run_write_access` so explicit completion still returns `409 setup_already_completed`, disabled incomplete setup returns `404 setup_disabled`, and only enabled legacy/inconsistent `needs_setup=False` statuses return the completed conflict. Red phase captured the new disabled-incomplete regression failing with `409` instead of `404`; verification after fix passed the first-run setup API slice, first-run state/masking slice, Ruff, Bandit, and `git diff --check`.
 
 Task 2 coverage-only spec re-review fix: added direct integration coverage for enabled but inconsistent `needs_setup=False` setup status returning `409 setup_already_completed`. The branch already existed, so no red phase was expected; the focused test passed immediately, and requested verification passed.
+
+Task 2 final review fix: first-run metadata now only honors `X-Forwarded-For` when proxy trust is enabled and the immediate setup client is loopback, and it validates the forwarded value as an IP before classification. Red phase captured spoofed `X-Forwarded-For: 127.0.0.1` from a remote immediate client reporting local bundled auth; verification after fix passed the required pytest suites, Ruff, Bandit, and `git diff --check`.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
