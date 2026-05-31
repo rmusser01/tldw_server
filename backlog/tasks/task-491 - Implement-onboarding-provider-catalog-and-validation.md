@@ -1,7 +1,7 @@
 ---
 id: TASK-491
 title: Implement onboarding provider catalog and validation
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
 updated_date: 2026-05-31 09:54
@@ -16,11 +16,13 @@ modified_files:
 - tldw_Server_API/app/core/Setup/provider_catalog.py
 - tldw_Server_API/app/core/Setup/provider_validation.py
 - tldw_Server_API/app/core/Setup/setup_manager.py
+- tldw_Server_API/app/core/config.py
 - tldw_Server_API/app/api/v1/schemas/setup_schemas.py
 - tldw_Server_API/app/api/v1/endpoints/setup.py
 - tldw_Server_API/tests/Setup/test_setup_provider_catalog.py
 - tldw_Server_API/tests/Setup/test_setup_provider_validation.py
 - tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
+- tldw_Server_API/tests/Config/test_config_providers_endpoints.py
 ---
 
 ## Description

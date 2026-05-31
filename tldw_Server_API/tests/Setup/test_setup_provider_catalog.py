@@ -26,6 +26,16 @@ def test_catalog_marks_local_providers_as_endpoint_based():
     assert providers["custom_openai"].provider_type is SetupProviderType.LOCAL_ENDPOINT
 
 
+def test_catalog_defaults_align_with_runtime_adapter_defaults():
+    catalog = get_setup_provider_catalog()
+    providers = {provider.provider_key: provider for provider in catalog.providers}
+
+    assert providers["moonshot"].base_url_field == "moonshot_api_base_url"
+    assert providers["moonshot"].default_base_url == "https://api.moonshot.cn/v1"
+    assert providers["zai"].base_url_field == "zai_api_base_url"
+    assert providers["zai"].default_base_url == "https://api.z.ai/api/paas/v4"
+
+
 def test_mask_secret_never_returns_raw_value():
     assert mask_secret("sk-abcdefghijklmnopqrstuvwxyz") == "sk-...wxyz"
     assert mask_secret("tiny") == "****ny"

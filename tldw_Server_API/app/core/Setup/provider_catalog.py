@@ -145,8 +145,9 @@ _HOSTED_PROVIDERS: tuple[SetupProviderCatalogEntry, ...] = (
         provider_type=SetupProviderType.HOSTED_API_KEY,
         config_section="API",
         api_key_field="moonshot_api_key",
+        base_url_field="moonshot_api_base_url",
         model_field="moonshot_model",
-        default_base_url="https://api.moonshot.ai/v1",
+        default_base_url="https://api.moonshot.cn/v1",
     ),
     SetupProviderCatalogEntry(
         provider_key="zai",

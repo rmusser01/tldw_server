@@ -3628,6 +3628,10 @@ def load_and_log_configs():
         # logging.debug(
         #     f"Loaded OpenRouter API Key: {openrouter_api_key[:5]}...{openrouter_api_key[-5:] if openrouter_api_key else None}")
 
+        moonshot_api_key = os.getenv('MOONSHOT_API_KEY') or config_parser_object.get('API', 'moonshot_api_key', fallback=None)
+
+        zai_api_key = os.getenv('ZAI_API_KEY') or config_parser_object.get('API', 'zai_api_key', fallback=None)
+
         deepseek_api_key = os.getenv('DEEPSEEK_API_KEY') or config_parser_object.get('API', 'deepseek_api_key', fallback=None)
         # logging.debug(
         #     f"Loaded DeepSeek API Key: {deepseek_api_key[:5]}...{deepseek_api_key[-5:] if deepseek_api_key else None}")
@@ -3763,6 +3767,28 @@ def load_and_log_configs():
         openrouter_api_timeout = config_parser_object.get('API', 'openrouter_api_timeout', fallback='90')
         openrouter_api_retries = config_parser_object.get('API', 'openrouter_api_retry', fallback='3')
         openrouter_api_retry_delay = config_parser_object.get('API', 'openrouter_api_retry_delay', fallback='5')
+
+        # Moonshot
+        moonshot_model = config_parser_object.get('API', 'moonshot_model', fallback='moonshot-v1-8k')
+        moonshot_api_base_url = config_parser_object.get('API', 'moonshot_api_base_url', fallback='https://api.moonshot.cn/v1')
+        moonshot_streaming = config_parser_object.get('API', 'moonshot_streaming', fallback='False')
+        moonshot_temperature = config_parser_object.get('API', 'moonshot_temperature', fallback='0.7')
+        moonshot_top_p = config_parser_object.get('API', 'moonshot_top_p', fallback='0.95')
+        moonshot_max_tokens = config_parser_object.get('API', 'moonshot_max_tokens', fallback='')
+        moonshot_api_timeout = config_parser_object.get('API', 'moonshot_api_timeout', fallback='90')
+        moonshot_api_retries = config_parser_object.get('API', 'moonshot_api_retry', fallback='3')
+        moonshot_api_retry_delay = config_parser_object.get('API', 'moonshot_api_retry_delay', fallback='1')
+
+        # Z.AI
+        zai_model = config_parser_object.get('API', 'zai_model', fallback='glm-4.5-flash')
+        zai_api_base_url = config_parser_object.get('API', 'zai_api_base_url', fallback='https://api.z.ai/api/paas/v4')
+        zai_streaming = config_parser_object.get('API', 'zai_streaming', fallback='False')
+        zai_temperature = config_parser_object.get('API', 'zai_temperature', fallback='0.7')
+        zai_top_p = config_parser_object.get('API', 'zai_top_p', fallback='0.95')
+        zai_max_tokens = config_parser_object.get('API', 'zai_max_tokens', fallback='4096')
+        zai_api_timeout = config_parser_object.get('API', 'zai_api_timeout', fallback='90')
+        zai_api_retries = config_parser_object.get('API', 'zai_api_retry', fallback='3')
+        zai_api_retry_delay = config_parser_object.get('API', 'zai_api_retry_delay', fallback='1')
 
         # Bedrock
         bedrock_api_key = os.getenv('BEDROCK_API_KEY') or os.getenv('AWS_BEARER_TOKEN_BEDROCK') or config_parser_object.get('API', 'bedrock_api_key', fallback=None)
@@ -4881,6 +4907,30 @@ def load_and_log_configs():
                 'api_timeout': openrouter_api_timeout,
                 'api_retries': openrouter_api_retries,
                 'api_retry_delay': openrouter_api_retry_delay
+            },
+            'moonshot_api': {
+                'api_key': moonshot_api_key,
+                'model': moonshot_model,
+                'api_base_url': moonshot_api_base_url,
+                'streaming': moonshot_streaming,
+                'temperature': moonshot_temperature,
+                'top_p': moonshot_top_p,
+                'max_tokens': moonshot_max_tokens,
+                'api_timeout': moonshot_api_timeout,
+                'api_retries': moonshot_api_retries,
+                'api_retry_delay': moonshot_api_retry_delay
+            },
+            'zai_api': {
+                'api_key': zai_api_key,
+                'model': zai_model,
+                'api_base_url': zai_api_base_url,
+                'streaming': zai_streaming,
+                'temperature': zai_temperature,
+                'top_p': zai_top_p,
+                'max_tokens': zai_max_tokens,
+                'api_timeout': zai_api_timeout,
+                'api_retries': zai_api_retries,
+                'api_retry_delay': zai_api_retry_delay
             },
             'bedrock_api': {
                 'api_key': bedrock_api_key,
