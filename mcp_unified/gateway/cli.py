@@ -18,6 +18,7 @@ from mcp_unified.profiles.presets import (
 )
 
 from .config import (
+    ExternalRegistryStorageConfigurationError,
     GatewayConfigFormat,
     GatewayExternalRegistryStorageBundle,
     GatewayProfileBootstrapConfig,
@@ -601,6 +602,13 @@ def _handle_external_registry_command(
         except GatewayExternalRegistryManagementError as exc:
             _emit_json(exc.to_payload(), sys.stderr)
             return 1
+        except Exception:  # noqa: BLE001
+            unavailable_error = GatewayExternalRegistryManagementError(
+                "External registry store unavailable",
+                reason_code="external_registry_store_unavailable",
+            )
+            _emit_json(unavailable_error.to_payload(), sys.stderr)
+            return 1
 
         _emit_json(_cli_payload(payload), sys.stdout)
         return 0
@@ -614,13 +622,7 @@ def _external_registry_storage_unavailable_error(
 ) -> GatewayExternalRegistryManagementError | None:
     """Map expected unavailable external-registry storage build failures."""
 
-    if not isinstance(exc, ValueError):
-        return None
-    if (
-        str(exc)
-        != "external registry management requires sqlite or an injected "
-        "equivalent external registry store"
-    ):
+    if not isinstance(exc, ExternalRegistryStorageConfigurationError):
         return None
     return GatewayExternalRegistryManagementError(
         str(exc),

@@ -468,6 +468,44 @@ async def test_sqlite_store_update_server_does_not_create_missing_server(
 
 
 @pytest.mark.asyncio
+async def test_sqlite_external_registry_methods_wrap_db_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from mcp_unified.interfaces.storage import ExternalRegistryStoreUnavailableError
+    from mcp_unified.storage import ExternalServerDefinition, SQLiteMCPStore
+
+    store = SQLiteMCPStore(tmp_path / "mcp.sqlite")
+    server = ExternalServerDefinition(
+        id="search",
+        name="Search",
+        transport="websocket",
+        url="wss://example.test/mcp",
+    )
+
+    async def _raise_db_failure(*args: object, **kwargs: object) -> object:
+        raise SQLAlchemyError("database unavailable")
+
+    monkeypatch.setattr(store, "_run_db", _raise_db_failure)
+
+    calls = (
+        lambda: store.get_server("search"),
+        lambda: store.list_server_definitions(),
+        lambda: store.upsert_server(server),
+        lambda: store.update_server(server),
+        lambda: store.create_server(server),
+        lambda: store.delete_server("search"),
+    )
+    for call in calls:
+        with pytest.raises(ExternalRegistryStoreUnavailableError):
+            await call()
+
+    store.close()
+
+
+@pytest.mark.asyncio
 async def test_sqlite_store_appends_and_queries_audit_events(tmp_path: Path) -> None:
     from mcp_unified.storage import AuditEvent, SQLiteMCPStore
 

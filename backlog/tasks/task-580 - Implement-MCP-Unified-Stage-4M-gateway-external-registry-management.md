@@ -4,18 +4,16 @@ title: Implement MCP Unified Stage 4M gateway external registry management
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-31 21:07'
+updated_date: 2026-05-31 21:07
 labels:
-  - mcp-unified
-  - stage-4m
-  - implementation
-  - standalone
+- mcp-unified
+- stage-4m
+- implementation
+- standalone
 dependencies: []
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-05-31-mcp-unified-stage4m-gateway-external-registry-management-design.md
-  - >-
-    Docs/superpowers/plans/2026-05-31-mcp-unified-stage4m-gateway-external-registry-management-implementation-plan.md
+- Docs/superpowers/specs/2026-05-31-mcp-unified-stage4m-gateway-external-registry-management-design.md
+- Docs/superpowers/plans/2026-05-31-mcp-unified-stage4m-gateway-external-registry-management-implementation-plan.md
 ---
 
 ## Description
@@ -26,7 +24,7 @@ Implement the reviewed and planned MCP Unified Stage 4M gateway external registr
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 Storage contract exposes atomic external server create and SQLite rejects duplicate ids without replacing existing definitions.
+- [x] #1 Storage contract exposes atomic external server create and SQLite rejects duplicate IDs without replacing existing definitions.
 - [x] #2 GatewayExternalRegistryManager owns external server validation, audit, patch guards, credential-slot relaxation guards, and delete guards.
 - [x] #3 Gateway config/bootstrap, FastAPI, and CLI surfaces use the same package-owned manager and storage bundle semantics.
 - [x] #4 Implementation does not add real external process lifecycle, credential secret handling, UI, or host-package imports into mcp_unified.
@@ -52,11 +50,13 @@ Final review fixes complete in commit 77741b9ac7: real SQLite profile bootstraps
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented MCP Unified Stage 4M gateway external registry management.
+Implemented MCP Unified Stage 4M gateway external registry management and completed the PR #2199 review-fix pass.
 
 Delivered storage atomic create/update semantics, GatewayExternalRegistryManager validation/audit/guard behavior, config storage bundle and manager factory, FastAPI /external-servers management routes, and CLI list/show/create/patch/delete commands.
 
-Verification: focused Stage 4M suite passed with 218 tests; package boundary was included in that suite; Bandit touched package scope reported 0 results and 0 errors; git diff --check passed. Final code review found no blocking issues after commit 77741b9ac7.
+Review fixes: strong external-server Pydantic request/response schemas, structured external registry store-unavailable handling for SQLite/FastAPI/CLI boundaries, exception-type based CLI storage mapping, CodeRabbit Backlog marker/text cleanup, and explicit skip of the route naming suggestion because standalone gateway routes are package-local and mounted under the caller-provided prefix.
+
+Verification: focused Stage 4M suite passed with 222 tests; package boundary was included in that suite; Bandit touched package scope reported 0 results and 0 errors; git diff --check passed.
 
 Known residual: the ExternalRegistryStore protocol now requires update_server, so external/custom store implementations outside this repo need to add that method.
 <!-- SECTION:FINAL_SUMMARY:END -->

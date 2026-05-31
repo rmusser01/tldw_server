@@ -14,6 +14,7 @@ import mcp_unified.gateway.jsonrpc as gateway_jsonrpc
 import pytest
 from fastapi.testclient import TestClient
 from mcp_unified.gateway import create_gateway_app
+from mcp_unified.storage.models import ExternalServerDefinition
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 GATEWAY_ROOT = REPO_ROOT / "mcp_unified" / "gateway"
@@ -420,6 +421,26 @@ class _ProfileManagementErrorManagerDouble(_ProfileManagementManagerDouble):
         return await super().delete_profile(profile_id)
 
 
+def _external_server_response_payload(
+    server_id: str,
+    server_name: str,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Return a complete external server response payload for schema validation."""
+
+    timestamp = datetime(2026, 5, 31, tzinfo=timezone.utc)
+    payload: dict[str, Any] = {
+        "id": server_id,
+        "name": server_name,
+        "transport": "websocket",
+        "url": "wss://example.test/mcp",
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    payload.update(overrides)
+    return ExternalServerDefinition(**payload).model_dump(mode="json")
+
+
 class _ExternalRegistryManagerDouble:
     """Small manager double that returns deterministic external registry payloads."""
 
@@ -432,11 +453,10 @@ class _ExternalRegistryManagerDouble:
         return {
             "ok": True,
             "servers": [
-                {
-                    "id": self.marker,
-                    "name": f"External {self.marker}",
-                    "enabled": True,
-                }
+                _external_server_response_payload(
+                    self.marker,
+                    f"External {self.marker}",
+                )
             ],
             "store": {"kind": "memory", "persistent": False},
         }
@@ -445,11 +465,10 @@ class _ExternalRegistryManagerDouble:
         self.calls.append(("show_server", (server_id,), {}))
         return {
             "ok": True,
-            "server": {
-                "id": server_id,
-                "name": f"External {server_id}",
-                "enabled": True,
-            },
+            "server": _external_server_response_payload(
+                server_id,
+                f"External {server_id}",
+            ),
             "store": {"kind": "memory", "persistent": False},
         }
 
@@ -457,7 +476,15 @@ class _ExternalRegistryManagerDouble:
         self.calls.append(("create_server", (server_payload,), {}))
         return {
             "ok": True,
-            "server": server_payload,
+            "server": _external_server_response_payload(
+                str(server_payload["id"]),
+                str(server_payload["name"]),
+                **{
+                    key: value
+                    for key, value in server_payload.items()
+                    if key not in {"id", "name"}
+                },
+            ),
             "store": {"kind": "memory", "persistent": False},
         }
 
@@ -469,11 +496,11 @@ class _ExternalRegistryManagerDouble:
         self.calls.append(("patch_server", (server_id, patch_payload), {}))
         return {
             "ok": True,
-            "server": {
-                "id": server_id,
-                "name": f"External {server_id}",
+            "server": _external_server_response_payload(
+                server_id,
+                f"External {server_id}",
                 **patch_payload,
-            },
+            ),
             "store": {"kind": "memory", "persistent": False},
         }
 
@@ -856,7 +883,6 @@ def test_gateway_profile_management_routes_have_pydantic_response_models() -> No
         schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
         assert schema == {"$ref": expected_ref}
 
-
 @pytest.mark.parametrize(
     ("method", "path", "json_body", "manager_method", "reason_code", "status_code"),
     [
@@ -1014,11 +1040,7 @@ def test_gateway_external_registry_management_routes_mount_with_manager() -> Non
     assert response.json() == {
         "ok": True,
         "servers": [
-            {
-                "id": "direct",
-                "name": "External direct",
-                "enabled": True,
-            }
+            _external_server_response_payload("direct", "External direct")
         ],
         "store": {"kind": "memory", "persistent": False},
     }
@@ -1043,7 +1065,7 @@ def test_gateway_external_registry_management_routes_mount_when_enabled_with_man
 
     assert response.status_code == 200
     assert response.json()["servers"] == [
-        {"id": "enabled", "name": "External enabled", "enabled": True}
+        _external_server_response_payload("enabled", "External enabled")
     ]
 
 
@@ -1079,7 +1101,7 @@ def test_gateway_external_registry_management_explicit_manager_precedes_bootstra
 
     assert response.status_code == 200
     assert response.json()["servers"] == [
-        {"id": "direct", "name": "External direct", "enabled": True}
+        _external_server_response_payload("direct", "External direct")
     ]
     assert direct.calls == [("list_servers", (), {"enabled": None})]
     assert bootstrap.external_registry_manager.calls == []
@@ -1119,36 +1141,34 @@ def test_gateway_external_registry_management_success_envelopes() -> None:
     assert listed.json() == {
         "ok": True,
         "servers": [
-            {"id": "default", "name": "External default", "enabled": True},
+            _external_server_response_payload("default", "External default"),
         ],
         "store": {"kind": "memory", "persistent": False},
     }
     assert listed_enabled.json()["servers"] == [
-        {"id": "default", "name": "External default", "enabled": True},
+        _external_server_response_payload("default", "External default"),
     ]
     assert shown.json() == {
         "ok": True,
-        "server": {"id": "search", "name": "External search", "enabled": True},
+        "server": _external_server_response_payload("search", "External search"),
         "store": {"kind": "memory", "persistent": False},
     }
     assert created.json() == {
         "ok": True,
-        "server": {
-            "id": "search",
-            "name": "Search",
-            "transport": "websocket",
-            "url": "wss://example.test/mcp",
-            "metadata": {"tier": "test"},
-        },
+        "server": _external_server_response_payload(
+            "search",
+            "Search",
+            metadata={"tier": "test"},
+        ),
         "store": {"kind": "memory", "persistent": False},
     }
     assert patched.json() == {
         "ok": True,
-        "server": {
-            "id": "search",
-            "name": "Search v2",
-            "enabled": False,
-        },
+        "server": _external_server_response_payload(
+            "search",
+            "Search v2",
+            enabled=False,
+        ),
         "store": {"kind": "memory", "persistent": False},
     }
     assert deleted.json() == {
@@ -1167,6 +1187,7 @@ def test_gateway_external_registry_management_success_envelopes() -> None:
                     "id": "search",
                     "name": "Search",
                     "transport": "websocket",
+                    "command": [],
                     "url": "wss://example.test/mcp",
                     "metadata": {"tier": "test"},
                 },
@@ -1211,6 +1232,14 @@ def test_gateway_external_registry_management_routes_have_pydantic_response_mode
         schema = paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"]
         assert schema == {"$ref": expected_ref}
 
+    schemas = app.openapi()["components"]["schemas"]
+    assert schemas["ExternalServerResponse"]["properties"]["server"] == {
+        "$ref": "#/components/schemas/ExternalServerDefinition"
+    }
+    assert schemas["ExternalServerListResponse"]["properties"]["servers"]["items"] == {
+        "$ref": "#/components/schemas/ExternalServerDefinition"
+    }
+
 
 @pytest.mark.parametrize(
     ("method", "path", "json_body", "manager_method", "reason_code", "status_code"),
@@ -1226,7 +1255,12 @@ def test_gateway_external_registry_management_routes_have_pydantic_response_mode
         (
             "POST",
             "/mcp/external-servers",
-            {"id": "search", "name": "Search"},
+            {
+                "id": "search",
+                "name": "Search",
+                "transport": "websocket",
+                "url": "wss://example.test/mcp",
+            },
             "create_server",
             "external_server_already_exists",
             409,
@@ -1266,7 +1300,12 @@ def test_gateway_external_registry_management_routes_have_pydantic_response_mode
         (
             "POST",
             "/mcp/external-servers",
-            {"id": "search", "name": "Search"},
+            {
+                "id": "search",
+                "name": "Search",
+                "transport": "websocket",
+                "url": "wss://example.test/mcp",
+            },
             "create_server",
             "invalid_external_server_request",
             422,
@@ -1325,6 +1364,28 @@ def test_gateway_external_registry_management_error_status_mapping(
     assert body["server_id"] == "external-search"
 
 
+def test_gateway_external_registry_management_raw_failures_return_structured_503() -> None:
+    class _FailingExternalRegistryManager:
+        async def list_servers(self, enabled: bool | None = None) -> dict[str, Any]:
+            raise RuntimeError("raw store failure")
+
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        prefix="/mcp",
+        external_registry_manager=_FailingExternalRegistryManager(),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/external-servers")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": "External registry store unavailable",
+        "ok": False,
+        "reason_code": "external_registry_store_unavailable",
+    }
+
+
 def test_gateway_external_registry_management_malformed_or_missing_bodies_return_422() -> None:
     app = create_gateway_app(
         _FakeGatewayRuntime(),
@@ -1345,11 +1406,27 @@ def test_gateway_external_registry_management_malformed_or_missing_bodies_return
             content="{",
             headers={"content-type": "application/json"},
         )
+        extra_create = client.post(
+            "/mcp/external-servers",
+            json={
+                "id": "search",
+                "name": "Search",
+                "transport": "websocket",
+                "url": "wss://example.test/mcp",
+                "unsupported": True,
+            },
+        )
+        extra_patch = client.patch(
+            "/mcp/external-servers/search",
+            json={"name": "Search", "unsupported": True},
+        )
 
     assert missing_create.status_code == 422
     assert malformed_create.status_code == 422
     assert missing_patch.status_code == 422
     assert malformed_patch.status_code == 422
+    assert extra_create.status_code == 422
+    assert extra_patch.status_code == 422
 
 
 def test_gateway_profile_runtime_requires_profile_for_tool_execution() -> None:

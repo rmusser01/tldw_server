@@ -31,10 +31,13 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.pool import StaticPool
 
-from mcp_unified.interfaces.storage import ExternalServerAlreadyExistsError
+from mcp_unified.interfaces.storage import (
+    ExternalRegistryStoreUnavailableError,
+    ExternalServerAlreadyExistsError,
+)
 from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.profiles.store import ProfileAlreadyExistsError
 from mcp_unified.storage.models import (
@@ -210,7 +213,7 @@ class SQLiteMCPStore:
 
     async def get_server(self, server_id: str) -> ExternalServerDefinition | None:
         """Return an external server definition by id."""
-        return await self._run_db(self._get_server_sync, server_id)
+        return await self._run_external_registry_db(self._get_server_sync, server_id)
 
     async def list_servers(self) -> list[ExternalServerDefinition]:
         """Return all external server definitions sorted by id."""
@@ -222,32 +225,35 @@ class SQLiteMCPStore:
         enabled: bool | None = None,
     ) -> list[ExternalServerDefinition]:
         """Return external server definitions matching optional enabled state."""
-        return await self._run_db(self._list_server_definitions_sync, enabled=enabled)
+        return await self._run_external_registry_db(
+            self._list_server_definitions_sync,
+            enabled=enabled,
+        )
 
     async def upsert_server(
         self,
         server: ExternalServerDefinition,
     ) -> ExternalServerDefinition:
         """Store an external server definition and return the persisted model."""
-        return await self._run_db(self._upsert_server_sync, server)
+        return await self._run_external_registry_db(self._upsert_server_sync, server)
 
     async def update_server(
         self,
         server: ExternalServerDefinition,
     ) -> ExternalServerDefinition | None:
         """Update an existing external server definition without creating it."""
-        return await self._run_db(self._update_server_sync, server)
+        return await self._run_external_registry_db(self._update_server_sync, server)
 
     async def create_server(
         self,
         server: ExternalServerDefinition,
     ) -> ExternalServerDefinition:
         """Create an external server definition only when its id is absent."""
-        return await self._run_db(self._create_server_sync, server)
+        return await self._run_external_registry_db(self._create_server_sync, server)
 
     async def delete_server(self, server_id: str) -> bool:
         """Delete an external server definition by id and return whether it existed."""
-        return await self._run_db(self._delete_server_sync, server_id)
+        return await self._run_external_registry_db(self._delete_server_sync, server_id)
 
     async def append_event(self, event: AuditEvent) -> AuditEvent:
         """Append an audit event and return the persisted event."""
@@ -277,6 +283,23 @@ class SQLiteMCPStore:
         **kwargs: ParamsT.kwargs,
     ) -> ReturnT:
         return await asyncio.to_thread(operation, *args, **kwargs)
+
+    async def _run_external_registry_db(
+        self,
+        operation: Callable[ParamsT, ReturnT],
+        *args: ParamsT.args,
+        **kwargs: ParamsT.kwargs,
+    ) -> ReturnT:
+        """Run external-registry DB work and normalize store outage errors."""
+
+        try:
+            return await self._run_db(operation, *args, **kwargs)
+        except ExternalServerAlreadyExistsError:
+            raise
+        except (OSError, SQLAlchemyError) as exc:
+            raise ExternalRegistryStoreUnavailableError(
+                "External registry store unavailable"
+            ) from exc
 
     def _close_sync(self) -> None:
         self._engine.dispose()

@@ -9,6 +9,8 @@ from fastapi import APIRouter, FastAPI, Request, Response, WebSocket, WebSocketD
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
+from mcp_unified.storage.models import ExternalServerDefinition
+
 from .bootstrap import GatewayProfileBootstrap
 from .external_registry import (
     GatewayExternalRegistryManagementError,
@@ -102,19 +104,26 @@ class PatchProfileRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-class CreateExternalServerRequest(BaseModel):
+class CreateExternalServerRequest(ExternalServerDefinition):
     """Request body for creating a stored external MCP server definition."""
-
-    model_config = ConfigDict(extra="allow")
-
-    id: str
-    name: str
 
 
 class PatchExternalServerRequest(BaseModel):
     """Request body for patching a stored external MCP server definition."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    transport: Literal["stdio", "websocket"] | None = None
+    command: list[str] | None = None
+    url: str | None = None
+    cwd: str | None = None
+    env_allowlist: list[str] | None = None
+    credential_slots: list[str] | None = None
+    metadata: dict[str, Any] | None = None
+    provenance: dict[str, Any] | None = None
+    enabled: bool | None = None
+    auto_start: bool | None = None
 
 
 class StoreMetadataResponse(BaseModel):
@@ -172,7 +181,7 @@ class ExternalServerListResponse(BaseModel):
     """Response body for listing stored external MCP servers."""
 
     ok: bool
-    servers: list[dict[str, Any]]
+    servers: list[ExternalServerDefinition]
     store: StoreMetadataResponse
 
 
@@ -180,7 +189,7 @@ class ExternalServerResponse(BaseModel):
     """Response body for returning one stored external MCP server."""
 
     ok: bool
-    server: dict[str, Any]
+    server: ExternalServerDefinition
     store: StoreMetadataResponse
 
 
@@ -291,6 +300,21 @@ def _external_registry_error_response(
     return JSONResponse(
         status_code=_EXTERNAL_REGISTRY_STATUS_CODES.get(exc.reason_code, 500),
         content=exc.to_payload(),
+    )
+
+
+def _external_registry_store_unavailable_response(
+    *,
+    server_id: str | None = None,
+) -> JSONResponse:
+    """Return a deterministic response for unexpected registry store failures."""
+
+    return _external_registry_error_response(
+        GatewayExternalRegistryManagementError(
+            "External registry store unavailable",
+            reason_code="external_registry_store_unavailable",
+            server_id=server_id,
+        )
     )
 
 
@@ -450,6 +474,8 @@ def _mount_external_registry_routes(
             return await manager.list_servers(enabled=enabled)
         except GatewayExternalRegistryManagementError as exc:
             return _external_registry_error_response(exc)
+        except Exception:  # noqa: BLE001
+            return _external_registry_store_unavailable_response()
 
     @router.get("/external-servers/{server_id}", response_model=ExternalServerResponse)
     async def show_external_server(
@@ -460,6 +486,8 @@ def _mount_external_registry_routes(
             return await manager.show_server(server_id)
         except GatewayExternalRegistryManagementError as exc:
             return _external_registry_error_response(exc)
+        except Exception:  # noqa: BLE001
+            return _external_registry_store_unavailable_response(server_id=server_id)
 
     @router.post("/external-servers", response_model=ExternalServerResponse)
     async def create_external_server(
@@ -467,9 +495,13 @@ def _mount_external_registry_routes(
     ) -> ExternalServerResponse | JSONResponse:
         """Create a stored external MCP server definition."""
         try:
-            return await manager.create_server(request.model_dump(mode="json"))
+            return await manager.create_server(
+                request.model_dump(mode="json", exclude_unset=True)
+            )
         except GatewayExternalRegistryManagementError as exc:
             return _external_registry_error_response(exc)
+        except Exception:  # noqa: BLE001
+            return _external_registry_store_unavailable_response(server_id=request.id)
 
     @router.patch("/external-servers/{server_id}", response_model=ExternalServerResponse)
     async def patch_external_server(
@@ -484,6 +516,8 @@ def _mount_external_registry_routes(
             )
         except GatewayExternalRegistryManagementError as exc:
             return _external_registry_error_response(exc)
+        except Exception:  # noqa: BLE001
+            return _external_registry_store_unavailable_response(server_id=server_id)
 
     @router.delete(
         "/external-servers/{server_id}",
@@ -497,6 +531,8 @@ def _mount_external_registry_routes(
             return await manager.delete_server(server_id)
         except GatewayExternalRegistryManagementError as exc:
             return _external_registry_error_response(exc)
+        except Exception:  # noqa: BLE001
+            return _external_registry_store_unavailable_response(server_id=server_id)
 
 
 def create_gateway_router(

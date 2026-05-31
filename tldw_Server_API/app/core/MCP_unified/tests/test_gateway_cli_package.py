@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from mcp_unified.gateway import cli as gateway_cli
 from mcp_unified.gateway.config import (
+    ExternalRegistryStorageConfigurationError,
     build_gateway_external_registry_storage,
     build_gateway_profile_storage,
 )
@@ -1116,6 +1117,80 @@ def test_gateway_cli_external_registry_memory_config_reports_json_error(
     assert payload["ok"] is False
     assert payload["reason_code"] == "external_registry_store_unavailable"
     assert "external registry management requires" in payload["error"]
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_external_registry_storage_unavailable_uses_exception_type(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Map external-registry storage config failures by exception type."""
+
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / "mcp.sqlite")}},
+    )
+
+    def _raise_storage_error(*args: object, **kwargs: object) -> object:
+        raise ExternalRegistryStorageConfigurationError("custom store unavailable")
+
+    monkeypatch.setattr(
+        gateway_cli,
+        "build_gateway_external_registry_storage",
+        _raise_storage_error,
+    )
+
+    exit_code = gateway_cli.main(
+        ["list-external-servers", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload == {
+        "error": "custom store unavailable",
+        "ok": False,
+        "reason_code": "external_registry_store_unavailable",
+    }
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_external_registry_runtime_failures_are_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Convert raw external-registry operation failures into JSON errors."""
+
+    class _FailingExternalRegistryManager:
+        async def list_servers(self, enabled: bool | None = None) -> dict[str, Any]:
+            raise RuntimeError("raw store failure")
+
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / "mcp.sqlite")}},
+    )
+    monkeypatch.setattr(
+        gateway_cli,
+        "external_registry_manager_from_storage",
+        lambda bundle: _FailingExternalRegistryManager(),
+    )
+
+    exit_code = gateway_cli.main(
+        ["list-external-servers", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload == {
+        "error": "External registry store unavailable",
+        "ok": False,
+        "reason_code": "external_registry_store_unavailable",
+    }
     assert "Traceback" not in captured.err
 
 

@@ -107,6 +107,12 @@ class GatewayExternalRegistryStorageBundle:
     metadata: GatewayStoreMetadata
 
 
+class ExternalRegistryStorageConfigurationError(ValueError):
+    """Raised when configured storage cannot support external registry management."""
+
+    reason_code = "external_registry_store_unavailable"
+
+
 async def bootstrap_profile_gateway_from_config(
     backend: GatewayRuntime,
     config: GatewayProfileBootstrapConfig | Mapping[str, Any] | None = None,
@@ -238,7 +244,7 @@ def build_gateway_external_registry_storage(
         )
 
     if store_config.kind == "memory":
-        raise ValueError(
+        raise ExternalRegistryStorageConfigurationError(
             "external registry management requires sqlite or an injected "
             "equivalent external registry store"
         )

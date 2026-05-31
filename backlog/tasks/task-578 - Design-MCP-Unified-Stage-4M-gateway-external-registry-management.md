@@ -49,10 +49,6 @@ Incorporated the requested review pass before implementation planning: added gra
 Created and revised the Stage 4M gateway external registry management design spec at Docs/superpowers/specs/2026-05-31-mcp-unified-stage4m-gateway-external-registry-management-design.md. The reviewed spec defines manager-first CLI/FastAPI scope for external server definition list/show/create/patch/delete, persistent SQLite-backed registry behavior, deterministic store/domain errors, grant-aware credential-slot safeguards, explicit external-registry storage/bootstrap wiring, audit posture, server-id and transport validation, concurrency/runtime-state boundaries, and focused implementation verification. Bandit skipped because this task only adds documentation and Backlog tracking; marker scan, ASCII scan, and git diff --check were clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
