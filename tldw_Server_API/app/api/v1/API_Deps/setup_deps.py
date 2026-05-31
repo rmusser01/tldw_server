@@ -32,6 +32,13 @@ _CONFIG_REMOTE_CACHE_TTL = 30.0  # seconds
 _config_remote_cached: bool | None = None
 _config_remote_cached_at = 0.0
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_SETUP_PROXY_HEADERS = (
+    "x-forwarded-for",
+    "forwarded",
+    "x-real-ip",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+)
 _REMOTE_SETUP_WRITE_DENIED_DETAIL = (
     "Setup writes are only available from localhost unless remote setup access is explicitly enabled."
 )
@@ -141,6 +148,13 @@ def should_trust_setup_proxy_headers(request: Request) -> bool:
     return _should_trust_proxy() and _is_loopback_host(client_host)
 
 
+def has_setup_proxy_headers(request: Request) -> bool:
+    """Return True when a request includes setup-relevant proxy headers."""
+
+    headers = request.headers
+    return any(key in headers for key in _SETUP_PROXY_HEADERS)
+
+
 def _is_loopback_host(host: str | None) -> bool:
     """Return True if the provided hostname/IP represents a local loopback address."""
     if not host:
@@ -163,15 +177,7 @@ def _is_loopback_host(host: str | None) -> bool:
 
 def _has_proxy_headers(request: Request) -> bool:
     # Treat any of these headers as evidence of a proxy hop; block by default.
-    proxy_headers = (
-        "x-forwarded-for",
-        "forwarded",
-        "x-real-ip",
-        "x-forwarded-host",
-        "x-forwarded-proto",
-    )
-    headers = request.headers
-    return any(key in headers for key in proxy_headers)
+    return has_setup_proxy_headers(request)
 
 
 def _host_header_is_local(request: Request) -> bool:

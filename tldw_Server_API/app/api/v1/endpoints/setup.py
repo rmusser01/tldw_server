@@ -27,6 +27,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_db_transaction,
 )
 from tldw_Server_API.app.api.v1.API_Deps.setup_deps import (
+    has_setup_proxy_headers,
     require_local_setup_access,
     require_shared_audio_installer_access,
     should_trust_setup_proxy_headers,
@@ -95,6 +96,49 @@ _SUSPICIOUS_SETUP_DETAIL_RE = re.compile(
     re.IGNORECASE,
 )
 _SANITIZED_SETUP_DETAIL_MESSAGE = "Internal setup diagnostics were suppressed."
+UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL = "unsupported_first_run_step_data"
+_FIRST_RUN_STEP_DATA_ALLOWED_KEYS = {
+    "setup_path": frozenset(
+        {
+            "acknowledged",
+            "selected_path",
+            "setup_path",
+            "setup_path_key",
+            "install_method",
+            "deployment_mode",
+            "selected_options",
+        }
+    ),
+    "privacy_security": frozenset(
+        {
+            "acknowledged",
+            "local_only",
+            "allow_remote_setup_access",
+            "selected_options",
+        }
+    ),
+    "providers": frozenset({"acknowledged", "default_provider"}),
+    "ingest_defaults": frozenset({"acknowledged", "selected_options"}),
+    "audio_defaults": frozenset({"acknowledged", "selected_options"}),
+    "optional_advanced": frozenset({"acknowledged", "selected_options"}),
+}
+_UNSAFE_FIRST_RUN_STEP_DATA_KEY_MARKERS = (
+    "api_key",
+    "apikey",
+    "private_key",
+    "access_key",
+    "auth_key",
+    "secret",
+    "token",
+    "password",
+    "credential",
+    "authorization",
+    "bearer",
+    "endpoint_config",
+    "base_url",
+    "value",
+    "input",
+)
 
 
 class ConfigUpdates(BaseModel):
@@ -125,6 +169,62 @@ def _legacy_pack_name(path_value: str) -> str:
 
 def _first_run_store() -> FirstRunStateStore:
     return FirstRunStateStore(FIRST_RUN_STATE_PATH)
+
+
+def _normalized_public_step_data_key(key: object) -> str:
+    return "".join(character for character in str(key).lower() if character.isalnum())
+
+
+def _is_unsafe_public_step_data_key(key: object) -> bool:
+    normalized = _normalized_public_step_data_key(key)
+    return any(
+        _normalized_public_step_data_key(marker) in normalized
+        for marker in _UNSAFE_FIRST_RUN_STEP_DATA_KEY_MARKERS
+    )
+
+
+def _is_public_first_run_step_value(value: Any) -> bool:
+    if value is None or isinstance(value, str | int | float | bool):
+        return True
+    if isinstance(value, list):
+        return all(_is_public_first_run_step_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(key, str)
+            and not _is_unsafe_public_step_data_key(key)
+            and _is_public_first_run_step_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, Any]:
+    allowed_keys = _FIRST_RUN_STEP_DATA_ALLOWED_KEYS.get(step)
+    if allowed_keys is None:
+        if data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
+            )
+        return {}
+
+    unsupported_keys = set(data) - allowed_keys
+    if unsupported_keys or any(_is_unsafe_public_step_data_key(key) for key in data):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
+        )
+    if "acknowledged" in data and not isinstance(data["acknowledged"], bool):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
+        )
+    if not all(_is_public_first_run_step_value(value) for value in data.values()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL,
+        )
+    return dict(data)
 
 
 async def _require_first_run_write_access(request: Request) -> None:
@@ -233,17 +333,58 @@ def _is_lan_host(host: str | None) -> bool:
     return address.is_private or address.is_link_local
 
 
-def _first_forwarded_host(request: Request) -> str | None:
+def _parse_forwarded_client_ip(value: str | None) -> str | None:
+    if not value:
+        return None
+    candidate = value.strip().strip('"')
+    if not candidate:
+        return None
+    if candidate.startswith("["):
+        end = candidate.find("]")
+        if end == -1:
+            return None
+        candidate = candidate[1:end]
+    elif candidate.count(":") == 1 and "." in candidate:
+        candidate = candidate.rsplit(":", 1)[0]
+    candidate = candidate.lower().strip("[]").split("%", 1)[0]
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return None
+
+
+def _first_forwarded_for_ip(request: Request) -> str | None:
     raw = request.headers.get("x-forwarded-for")
     if not raw:
         return None
     first = raw.split(",", 1)[0].strip()
-    if not first:
+    return _parse_forwarded_client_ip(first)
+
+
+def _forwarded_header_for_ip(request: Request) -> str | None:
+    raw = request.headers.get("forwarded")
+    if not raw:
         return None
-    try:
-        return str(ipaddress.ip_address(first.lower().strip("[]").split("%", 1)[0]))
-    except ValueError:
-        return None
+    for forwarded_entry in raw.split(","):
+        for parameter in forwarded_entry.split(";"):
+            if "=" not in parameter:
+                continue
+            key, value = parameter.split("=", 1)
+            if key.strip().lower() == "for":
+                return _parse_forwarded_client_ip(value)
+    return None
+
+
+def _real_ip_header_ip(request: Request) -> str | None:
+    return _parse_forwarded_client_ip(request.headers.get("x-real-ip"))
+
+
+def _effective_forwarded_client_ip(request: Request) -> str | None:
+    return (
+        _first_forwarded_for_ip(request)
+        or _forwarded_header_for_ip(request)
+        or _real_ip_header_ip(request)
+    )
 
 
 def _classify_source_host(host: str | None) -> str:
@@ -259,10 +400,10 @@ def _classify_source_host(host: str | None) -> str:
 def _classify_browser_access(request: Request) -> str:
     client_host = request.client.host if request.client else None
     client_access = _classify_source_host(client_host)
-    if "x-forwarded-for" not in request.headers or not should_trust_setup_proxy_headers(request):
+    if not has_setup_proxy_headers(request) or not should_trust_setup_proxy_headers(request):
         return client_access
 
-    forwarded_host = _first_forwarded_host(request)
+    forwarded_host = _effective_forwarded_client_ip(request)
     if not forwarded_host:
         return "unknown"
     return _classify_source_host(forwarded_host)
@@ -479,8 +620,9 @@ async def update_first_run_state(
     payload: FirstRunStepUpdateRequest,
     _guard: None = Depends(_require_first_run_write_access),
 ) -> FirstRunStateResponse:
+    validated_data = _validated_public_first_run_step_data(payload.step, payload.data)
     try:
-        return _first_run_store().update_step(payload.step, payload.data)
+        return _first_run_store().update_step(payload.step, validated_data)
     except InvalidFirstRunTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 

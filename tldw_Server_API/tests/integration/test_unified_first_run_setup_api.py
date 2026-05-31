@@ -47,10 +47,13 @@ def _make_setup_metadata_request(
     client_host: str,
     host: str,
     forwarded_for: str | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> Request:
     headers = [(b"host", host.encode("ascii"))]
     if forwarded_for is not None:
         headers.append((b"x-forwarded-for", forwarded_for.encode("ascii")))
+    for key, value in (extra_headers or {}).items():
+        headers.append((key.encode("ascii"), value.encode("ascii")))
     return Request(
         {
             "type": "http",
@@ -148,6 +151,51 @@ def test_first_run_metadata_ignores_spoofed_local_forwarded_for_from_remote_clie
     metadata = setup_endpoint.build_first_run_metadata(request)
 
     assert metadata.connection.browser_access == "remote"
+    assert metadata.bundled_single_user_auth_available is False
+    assert metadata.manual_auth_required is True
+
+
+def test_first_run_metadata_classifies_x_real_ip_from_trusted_local_proxy_as_remote(monkeypatch):
+    _setup_needs_setup(monkeypatch)
+    request = _make_setup_metadata_request(
+        client_host="127.0.0.1",
+        host="localhost",
+        extra_headers={"x-real-ip": "203.0.113.10"},
+    )
+
+    metadata = setup_endpoint.build_first_run_metadata(request)
+
+    assert metadata.connection.browser_access == "remote"
+    assert metadata.bundled_single_user_auth_available is False
+    assert metadata.manual_auth_required is True
+
+
+def test_first_run_metadata_classifies_forwarded_for_from_trusted_local_proxy_as_remote(monkeypatch):
+    _setup_needs_setup(monkeypatch)
+    request = _make_setup_metadata_request(
+        client_host="127.0.0.1",
+        host="localhost",
+        extra_headers={"forwarded": "for=203.0.113.10;proto=https"},
+    )
+
+    metadata = setup_endpoint.build_first_run_metadata(request)
+
+    assert metadata.connection.browser_access == "remote"
+    assert metadata.bundled_single_user_auth_available is False
+    assert metadata.manual_auth_required is True
+
+
+def test_first_run_metadata_proxy_evidence_without_client_ip_is_not_local(monkeypatch):
+    _setup_needs_setup(monkeypatch)
+    request = _make_setup_metadata_request(
+        client_host="127.0.0.1",
+        host="localhost",
+        extra_headers={"x-forwarded-proto": "https"},
+    )
+
+    metadata = setup_endpoint.build_first_run_metadata(request)
+
+    assert metadata.connection.browser_access == "unknown"
     assert metadata.bundled_single_user_auth_available is False
     assert metadata.manual_auth_required is True
 
@@ -297,6 +345,60 @@ def test_enabled_inconsistent_not_needed_setup_rejects_first_run_writes_without_
 
     assert response.status_code == 409
     assert response.json()["detail"] == "setup_already_completed"
+
+
+def test_first_run_state_rejects_unsupported_public_step_data(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={
+            "step": "providers",
+            "data": {
+                "value": "sk-raw",
+                "endpoint_config": {"url": "http://localhost:11434"},
+                "acknowledged": True,
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unsupported_first_run_step_data"
+    state_response = setup_client.get("/api/v1/setup/first-run/state")
+    assert state_response.status_code == 200
+    assert "sk-raw" not in str(state_response.json())
+
+
+def test_first_run_state_persists_allowed_public_step_data(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={
+            "step": "providers",
+            "data": {
+                "acknowledged": True,
+                "default_provider": "openai",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    providers_data = response.json()["step_data"]["providers"]
+    assert providers_data["acknowledged"] is True
+    assert providers_data["default_provider"] == "openai"
 
 
 def test_skipped_first_run_state_rejected_by_shared_write_guard(
