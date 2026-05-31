@@ -169,6 +169,47 @@ def _build_parser() -> _JsonArgumentParser:
     _add_profile_config_argument(duplicate_preset)
     duplicate_preset.set_defaults(handler=_handle_duplicate_preset)
 
+    create_profile = subparsers.add_parser(
+        "create-profile",
+        help="Create a user-editable profile in a persistent gateway store.",
+    )
+    create_profile.add_argument(
+        "--profile-file",
+        type=Path,
+        required=True,
+        help="Path to a JSON profile object, or '-' to read from stdin.",
+    )
+    _add_profile_config_argument(create_profile)
+    create_profile.set_defaults(handler=_handle_create_profile)
+
+    patch_profile = subparsers.add_parser(
+        "patch-profile",
+        help="Patch a stored profile in a persistent gateway store.",
+    )
+    patch_profile.add_argument(
+        "profile_id",
+        help="Profile id to patch.",
+    )
+    patch_profile.add_argument(
+        "--patch-file",
+        type=Path,
+        required=True,
+        help="Path to a JSON patch object, or '-' to read from stdin.",
+    )
+    _add_profile_config_argument(patch_profile)
+    patch_profile.set_defaults(handler=_handle_patch_profile)
+
+    delete_profile = subparsers.add_parser(
+        "delete-profile",
+        help="Delete an unassigned non-default profile in a persistent gateway store.",
+    )
+    delete_profile.add_argument(
+        "profile_id",
+        help="Profile id to delete.",
+    )
+    _add_profile_config_argument(delete_profile)
+    delete_profile.set_defaults(handler=_handle_delete_profile)
+
     get_default_profile = subparsers.add_parser(
         "get-default-profile",
         help="Show the active gateway default profile.",
@@ -264,6 +305,43 @@ def _handle_duplicate_preset(args: argparse.Namespace) -> int:
             profile_id=profile_id,
             name=name,
         ),
+        require_persistent=True,
+    )
+
+
+def _handle_create_profile(args: argparse.Namespace) -> int:
+    """Create one user-editable profile from a JSON file or stdin payload."""
+
+    return _handle_profile_management_command(
+        args,
+        lambda manager: manager.create_profile(
+            _load_json_argument_file(args.profile_file, label="profile"),
+        ),
+        require_persistent=True,
+    )
+
+
+def _handle_patch_profile(args: argparse.Namespace) -> int:
+    """Patch one stored profile using a JSON file or stdin payload."""
+
+    profile_id = _require_cli_text(args.profile_id, field="profile_id")
+    return _handle_profile_management_command(
+        args,
+        lambda manager: manager.patch_profile(
+            profile_id,
+            _load_json_argument_file(args.patch_file, label="patch"),
+        ),
+        require_persistent=True,
+    )
+
+
+def _handle_delete_profile(args: argparse.Namespace) -> int:
+    """Delete one stored profile from a persistent gateway store."""
+
+    profile_id = _require_cli_text(args.profile_id, field="profile_id")
+    return _handle_profile_management_command(
+        args,
+        lambda manager: manager.delete_profile(profile_id),
         require_persistent=True,
     )
 
@@ -503,6 +581,27 @@ def _optional_cli_text(value: str | None, *, field: str) -> str | None:
     if not normalized:
         raise _CliArgumentError(f"{field} cannot be empty")
     return normalized
+
+
+def _load_json_argument_file(path: Path, *, label: str) -> dict[str, Any]:
+    """Load one JSON object payload from a file path or stdin marker '-'."""
+
+    try:
+        if str(path) == "-":
+            payload_text = sys.stdin.read()
+        else:
+            payload_text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise _CliArgumentError(f"Unable to read {label} JSON: {exc}") from exc
+
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError as exc:
+        raise _CliArgumentError(f"Invalid {label} JSON: {exc.msg}") from exc
+
+    if not isinstance(payload, dict):
+        raise _CliArgumentError(f"{label} JSON must be an object")
+    return payload
 
 
 def _handle_list_presets(_args: argparse.Namespace) -> int:

@@ -11,7 +11,9 @@ modified_files:
 - mcp_unified/gateway/profiles.py
 - mcp_unified/storage/sqlite.py
 - mcp_unified/gateway/fastapi.py
+- mcp_unified/gateway/cli.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py
 ---
 
 ## Description
