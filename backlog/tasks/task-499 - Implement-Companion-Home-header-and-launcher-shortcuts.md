@@ -11,6 +11,8 @@ modified_files:
 - apps/packages/ui/src/services/__tests__/ui-settings.header-shortcuts.test.ts
 - apps/packages/ui/src/components/Layouts/__tests__/header-shortcut-items.hosted.test.ts
 - apps/packages/ui/src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts
+- apps/packages/ui/src/components/Layouts/HeaderShortcuts.tsx
+- apps/packages/ui/src/components/Layouts/__tests__/HeaderShortcuts.test.tsx
 ---
 
 ## Description
@@ -50,6 +52,26 @@ Verification:
 - `bunx vitest run src/components/Layouts/__tests__/ChatHeader.test.tsx` from `apps/packages/ui`: 11 tests passed.
 - `git diff --check`: passed with no output.
 - Bandit: not applicable for this Task 1 frontend-only TypeScript/TSX touched scope.
+
+Task 2 (Shortcut Metadata And Persisted Selection) complete:
+- Added Companion Home shortcut metadata with id `companion-home`, target `/`, House icon, Start group placement, and hosted-mode visibility.
+- Added `companion-home` to header shortcut ids, required shortcut ids, and persona shortcut expectations so persisted filtered selections still expose it.
+- Added focused coverage for default/coerced shortcut selection, hosted shortcut visibility, and persona defaults.
+
+Verification:
+- `bunx vitest run src/services/__tests__/ui-settings.header-shortcuts.test.ts src/components/Layouts/__tests__/header-shortcut-items.hosted.test.ts src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts` from `apps/packages/ui`: 18 tests passed.
+- Bandit: not applicable for this Task 2 frontend-only TypeScript/TS touched scope.
+
+Task 3 (Launcher Rendering And Active Route Behavior) complete:
+- Derived HeaderShortcuts test selection from shared `HEADER_SHORTCUT_IDS` so launcher tests include `companion-home`.
+- Added current launcher coverage for Companion Home listing, home target, `/chat` non-current state, Chat current state, and `/` current state.
+- Added legacy sheet coverage for Companion Home listing, `/chat` non-current state after moving selection away from Companion Home, and `/` current state.
+- Replaced the duplicated `/` to `/chat` active alias with a shared exact-route helper used by both launcher rendering branches.
+
+Verification:
+- Red check: `bunx vitest run src/components/Layouts/__tests__/HeaderShortcuts.test.tsx` from `apps/packages/ui` failed before production changes with 2 expected active-state failures.
+- Green check: `bunx vitest run src/components/Layouts/__tests__/HeaderShortcuts.test.tsx` from `apps/packages/ui`: 30 tests passed.
+- Bandit: not applicable for this Task 3 frontend-only TypeScript/TSX touched scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

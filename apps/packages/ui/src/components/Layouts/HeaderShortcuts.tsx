@@ -26,6 +26,9 @@ import { useConnectionActions } from "@/hooks/useConnectionState"
 const ALL_CATEGORY = "__all__"
 const META_LABEL = isMac ? "\u2318" : "Ctrl+"
 
+const isCurrentShortcutRoute = (pathname: string, item: HeaderShortcutItem) =>
+  pathname === item.to
+
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
@@ -477,9 +480,10 @@ export function HeaderShortcuts({
                       const globalIdx = flatItems.indexOf(ri)
                       const isSelected = globalIdx === selectedIndex
                       const Icon = ri.item.icon
-                      const isCurrentRoute =
-                        location.pathname === ri.item.to ||
-                        (ri.item.to === "/" && location.pathname === "/chat")
+                      const isCurrentRoute = isCurrentShortcutRoute(
+                        location.pathname,
+                        ri.item
+                      )
 
                       return (
                         <NavLink
@@ -559,9 +563,10 @@ export function HeaderShortcuts({
                         const globalIdx = flatItems.indexOf(ri)
                         const isSelected = globalIdx === selectedIndex
                         const Icon = ri.item.icon
-                        const isCurrentRoute =
-                          location.pathname === ri.item.to ||
-                          (ri.item.to === "/" && location.pathname === "/chat")
+                        const isCurrentRoute = isCurrentShortcutRoute(
+                          location.pathname,
+                          ri.item
+                        )
 
                         return (
                           <NavLink
