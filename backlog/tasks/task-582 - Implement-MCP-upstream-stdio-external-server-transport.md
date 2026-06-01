@@ -1,7 +1,7 @@
 ---
 id: TASK-582
 title: Implement MCP upstream stdio external server transport
-status: Done
+status: In Progress
 labels:
 - mcp-unified
 - external-servers
@@ -45,6 +45,7 @@ Docs/superpowers/plans/2026-06-01-mcp-upstream-stdio-transport-implementation-pl
 - Added `mcp_unified.federation.stdio_transport.StdioExternalTransport` with shell-free `asyncio.create_subprocess_exec` argv launch, cwd validation, environment allowlisting, JSON-RPC initialize/list/call/ping handling, deterministic timeouts, safe structured errors, and idempotent subprocess cleanup.
 - Added package factory/export helpers so gateway runtime callers can inject the package-owned stdio transport without host `tldw_Server_API` dependencies.
 - Added subprocess-backed tests for validation, package boundary import behavior, env allowlisting, discovery normalization, tool success/error calls, runtime auth `_meta` forwarding, timeout redaction, and exited-process health.
+- Reopened for PR review remediation and rebase onto latest `origin/dev`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
