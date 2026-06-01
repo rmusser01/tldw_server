@@ -1,5 +1,9 @@
 import React from "react"
 import { toBase64 } from "~/libs/to-base64"
+import {
+  inferImageAttachmentMimeType,
+  normalizeImageDataUrlMime
+} from "@/utils/image-utils"
 import { otherUnsupportedTypes } from "@/components/Option/Knowledge/utils/unsupported-types"
 
 /**
@@ -104,20 +108,21 @@ export function useComposerAttachments(
 
   const processFile = React.useCallback(
     async (file: File) => {
-      if (otherUnsupportedTypes.includes(file.type)) {
+      const imageMimeType = inferImageAttachmentMimeType(file)
+
+      if (!imageMimeType && otherUnsupportedTypes.includes(file.type)) {
         onUnsupportedType?.(file)
         return
       }
 
-      const isImage = file.type.startsWith("image/")
-      if (isImage) {
+      if (imageMimeType) {
         if (ragBlocksImages && chatMode === "rag") {
           onImageBlockedInRagMode?.()
           return
         }
         try {
           const base64 = await toBase64(file)
-          setImageField(base64)
+          setImageField(normalizeImageDataUrlMime(base64, imageMimeType))
           onImageAccepted?.(file)
         } catch (error) {
           onImageReadError?.(error)

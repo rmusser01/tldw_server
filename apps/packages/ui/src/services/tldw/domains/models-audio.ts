@@ -1,5 +1,6 @@
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "../client-utils"
+import { getNormalizedTldwModels } from "../model-normalization"
 import { appendPathQuery } from "../path-utils"
 import type {
   TldwModel,
@@ -18,6 +19,7 @@ import type {
  */
 export interface TldwApiClientCore {
   getModelsMetadata(options?: { refreshOpenRouter?: boolean }): Promise<any>
+  getProviders(): Promise<any>
   createImageArtifact(request: any): Promise<any>
   ensureConfigForRequest(requireAuth: boolean): Promise<any>
   request<T>(init: any, requireAuth?: boolean): Promise<T>
@@ -33,100 +35,7 @@ export const modelsAudioMethods = {
       refreshOpenRouter?: boolean
     }
   ): Promise<TldwModel[]> {
-    const meta = await this.getModelsMetadata(options)
-    const list =
-      Array.isArray(meta) && meta.length > 0
-        ? meta
-        : meta && typeof meta === "object" && Array.isArray((meta as any).models)
-          ? (meta as any).models
-          : []
-
-    const toNonEmptyString = (value: unknown): string | null => {
-      if (typeof value !== "string") return null
-      const trimmed = value.trim()
-      return trimmed.length > 0 ? trimmed : null
-    }
-    const isLikelyModelId = (value: string): boolean => {
-      if (/\s/.test(value)) return false
-      return /[/:._-]/.test(value)
-    }
-
-    return list.map((m: any) => {
-      const rawModel =
-        toNonEmptyString(m.model) || toNonEmptyString(m.model_id)
-      const rawName = toNonEmptyString(m.name)
-      const rawId = toNonEmptyString(m.id)
-      const canonicalModelId =
-        rawModel ||
-        (rawName && isLikelyModelId(rawName) ? rawName : null) ||
-        rawId ||
-        rawName ||
-        "unknown-model"
-      const displayName =
-        rawName && !isLikelyModelId(rawName) && rawName !== canonicalModelId
-          ? `${rawName} (${canonicalModelId})`
-          : canonicalModelId
-
-      return {
-        id: canonicalModelId,
-        name: displayName,
-        provider: String(m.provider || "default"),
-        description: m.description,
-        capabilities: Array.isArray(m.capabilities)
-          ? m.capabilities
-          : Array.isArray(m.features)
-            ? m.features
-            : typeof m.capabilities === "object"
-              ? m.capabilities
-              : undefined,
-        context_length:
-          typeof m.context_length === "number"
-            ? m.context_length
-            : typeof m.context_window === "number"
-              ? m.context_window
-              : typeof m.contextLength === "number"
-                ? m.contextLength
-                : undefined,
-        vision: Boolean(
-          (m.capabilities && m.capabilities.vision) ?? m.vision
-        ),
-        function_calling: Boolean(
-          (m.capabilities &&
-            (m.capabilities.function_calling || m.capabilities.tool_use)) ??
-            m.function_calling
-        ),
-        json_output: Boolean(
-          (m.capabilities && m.capabilities.json_mode) ?? m.json_output
-        ),
-        type: typeof m.type === "string" ? m.type : undefined,
-        modalities:
-          m.modalities && typeof m.modalities === "object"
-            ? {
-                input: Array.isArray(m.modalities.input)
-                  ? m.modalities.input.map((v: any) => String(v))
-                  : undefined,
-                output: Array.isArray(m.modalities.output)
-                  ? m.modalities.output.map((v: any) => String(v))
-                  : undefined
-              }
-            : {
-                input: Array.isArray(m.input_modality)
-                  ? m.input_modality.map((v: any) => String(v))
-                  : Array.isArray(m.input_modalities)
-                    ? m.input_modalities.map((v: any) => String(v))
-                    : typeof m.input_modality === "string"
-                      ? [String(m.input_modality)]
-                      : undefined,
-                output: Array.isArray(m.output_modality)
-                  ? m.output_modality.map((v: any) => String(v))
-                  : Array.isArray(m.output_modalities)
-                    ? m.output_modalities.map((v: any) => String(v))
-                    : typeof m.output_modality === "string"
-                      ? [String(m.output_modality)]
-                      : undefined
-              }
-      }
-    })
+    return await getNormalizedTldwModels(this, options)
   },
 
   async getProviders(): Promise<any> {
