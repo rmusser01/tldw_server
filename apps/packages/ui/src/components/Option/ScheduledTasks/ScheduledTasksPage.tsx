@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { Spin, Typography, message } from "antd"
+import { Alert, Button, Empty, Space, Spin, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
@@ -16,8 +16,18 @@ import {
 } from "@/services/scheduled-tasks-control-plane"
 import { ScheduledTaskTable } from "./ScheduledTaskTable"
 import { ReminderTaskEditor } from "./ReminderTaskEditor"
+import { ScheduledTaskOverview } from "./ScheduledTaskOverview"
 
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
+
+const LoadingState: React.FC = () => (
+  <div role="status" aria-live="polite">
+    <Space>
+      <Spin size="small" />
+      <Typography.Text type="secondary">Loading tasks and latest run state</Typography.Text>
+    </Space>
+  </div>
+)
 
 export const ScheduledTasksPage: React.FC = () => {
   const navigate = useNavigate()
@@ -82,6 +92,14 @@ export const ScheduledTasksPage: React.FC = () => {
   })
 
   const tasks = tasksQuery.data?.items ?? []
+  const hasLoadedTasks = Boolean(tasksQuery.data)
+  const hasWatchlistJob = tasks.some((task) => task.primitive === "watchlist_job")
+  const isLoadingTasks =
+    connectionConfigLoading ||
+    scheduledTasksSupported === null ||
+    (scheduledTasksSupported === true && tasksQuery.isLoading)
+  const canShowScheduledTasksWorkbench =
+    scheduledTasksSupported !== false && !isLoadingTasks && !tasksQuery.isError
 
   const openCreateReminder = () => {
     setEditingTask(null)
@@ -162,7 +180,8 @@ export const ScheduledTasksPage: React.FC = () => {
         method: "GET",
         serverUrl: connectionConfig?.serverUrl,
         reason: "partial",
-        partialErrors
+        partialErrors,
+        message: "Some scheduled-task data loaded while one dependency could not be reached."
       })
     : null
   const scheduledTasksFeatureName = t("scheduledTasks:title", "Scheduled tasks")
@@ -176,12 +195,12 @@ export const ScheduledTasksPage: React.FC = () => {
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
           {t(
             "scheduledTasks:description",
-            "Review reminder tasks here. Watchlist jobs remain managed from Watchlists."
+            "Track reminders, Watchlist monitors, and recurring automation from one place. Use domain workspaces like Watchlists for deep source and output configuration."
           )}
         </Typography.Paragraph>
       </div>
 
-      {connectionConfigLoading || scheduledTasksSupported === null ? <Spin /> : null}
+      {isLoadingTasks ? <LoadingState /> : null}
       {scheduledTasksSupported === false ? (
         <RecoveryCallout
           state={unsupportedState?.state ?? "unavailable"}
@@ -197,7 +216,6 @@ export const ScheduledTasksPage: React.FC = () => {
           }}
         />
       ) : null}
-      {tasksQuery.isLoading ? <Spin /> : null}
       {tasksQuery.isError ? (
         <RecoveryCallout
           state={loadErrorState?.state ?? "error"}
@@ -239,8 +257,42 @@ export const ScheduledTasksPage: React.FC = () => {
         />
       ) : null}
 
-      {scheduledTasksSupported === false ? null : (
+      {canShowScheduledTasksWorkbench ? (
         <>
+          {hasLoadedTasks ? (
+            <ScheduledTaskOverview
+              tasks={tasks}
+              partial={Boolean(tasksQuery.data?.partial)}
+            />
+          ) : null}
+
+          {hasLoadedTasks && hasWatchlistJob ? (
+            <Alert
+              type="info"
+              showIcon
+              title="Watchlists remains the full workspace for monitor setup, source tuning, run activity, and reports."
+            />
+          ) : null}
+
+          {hasLoadedTasks && tasks.length === 0 ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <Typography.Text strong>No scheduled tasks yet.</Typography.Text>
+                  <Typography.Text type="secondary">
+                    Create a reminder now. Automation templates for GitHub, YouTube, RAG, and
+                    agents are planned follow-up phases.
+                  </Typography.Text>
+                </div>
+              }
+            >
+              <Button type="primary" onClick={openCreateReminder}>
+                Create scheduled task
+              </Button>
+            </Empty>
+          ) : null}
+
           <ScheduledTaskTable
             tasks={tasks}
             onCreateReminder={openCreateReminder}
@@ -256,7 +308,7 @@ export const ScheduledTasksPage: React.FC = () => {
             onSubmit={handleSubmit}
           />
         </>
-      )}
+      ) : null}
     </div>
   )
 }

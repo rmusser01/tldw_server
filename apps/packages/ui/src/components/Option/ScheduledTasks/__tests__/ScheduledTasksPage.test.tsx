@@ -100,6 +100,7 @@ describe("ScheduledTasksPage", () => {
       screen.getByText("The connected server does not advertise scheduled task management.")
     ).toBeInTheDocument()
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("/api/v1/scheduled-tasks")
+    expect(screen.getByRole("button", { name: "Health & diagnostics" })).toBeInTheDocument()
     expect(mocks.listScheduledTasks).not.toHaveBeenCalled()
   })
 
@@ -125,12 +126,30 @@ describe("ScheduledTasksPage", () => {
     expect(
       within(diagnostics).getByText("Request failed: 401 (GET /api/v1/scheduled-tasks)")
     ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Health & diagnostics" })).toBeInTheDocument()
   })
 
-  it("keeps partial scheduled task errors behind diagnostics", async () => {
+  it("keeps loaded rows visible when one scheduled task dependency fails", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
-      items: [],
-      total: 0,
+      items: [
+        {
+          id: "reminder_task:partial",
+          primitive: "reminder_task",
+          title: "Loaded reminder",
+          description: "This row still rendered",
+          status: "scheduled",
+          enabled: true,
+          schedule_summary: "Every weekday",
+          timezone: "UTC",
+          next_run_at: "2030-01-02T09:00:00+00:00",
+          last_run_at: null,
+          edit_mode: "native",
+          manage_url: null,
+          source_ref: { task_id: "partial" }
+        }
+      ],
+      total: 1,
       partial: true,
       errors: ["Watchlist jobs failed at /api/v1/watchlists/jobs"]
     })
@@ -143,14 +162,15 @@ describe("ScheduledTasksPage", () => {
       })
     ).toBeInTheDocument()
     expect(
-      screen.getByText("Some scheduled task data loaded, but one dependency could not be reached.")
+      screen.getByText("Some scheduled-task data loaded while one dependency could not be reached.")
     ).toBeInTheDocument()
+    expect(await screen.findByText("Loaded reminder")).toBeInTheDocument()
 
     const diagnostics = screen.getByLabelText("Diagnostics")
     expect(within(diagnostics).getByText("Watchlist jobs failed at /api/v1/watchlists/jobs")).toBeInTheDocument()
   })
 
-  it("renders reminder rows as native CRUD and watchlist rows as external-managed", async () => {
+  it("renders the workbench overview, rows, and Watchlists preservation copy", async () => {
     mocks.listScheduledTasks.mockResolvedValue({
       items: [
         {
@@ -158,11 +178,11 @@ describe("ScheduledTasksPage", () => {
           primitive: "reminder_task",
           title: "Review notes",
           description: "Check the backlog",
-          status: "scheduled",
+          status: "failed with results",
           enabled: true,
           schedule_summary: "2026-03-21T09:00:00+00:00",
           timezone: "UTC",
-          next_run_at: "2026-03-21T09:00:00+00:00",
+          next_run_at: "2030-04-05T12:30:00+00:00",
           last_run_at: null,
           edit_mode: "native",
           manage_url: null,
@@ -173,11 +193,11 @@ describe("ScheduledTasksPage", () => {
           primitive: "watchlist_job",
           title: "Morning digest",
           description: "Watchlist run",
-          status: "scheduled",
+          status: "running",
           enabled: true,
           schedule_summary: "0 9 * * *",
           timezone: "UTC",
-          next_run_at: "2026-03-21T09:00:00+00:00",
+          next_run_at: "2030-04-06T09:00:00+00:00",
           last_run_at: null,
           edit_mode: "external",
           manage_url: "/watchlists?tab=jobs",
@@ -192,6 +212,15 @@ describe("ScheduledTasksPage", () => {
     renderWithQueryClient(<ScheduledTasksPage />)
 
     expect(await screen.findByRole("heading", { level: 2, name: "Scheduled tasks" })).toBeInTheDocument()
+    expect(
+      screen.getByText("Track reminders, Watchlist monitors, and recurring automation from one place.")
+    ).toBeInTheDocument()
+    expect(await screen.findByText("2 scheduled tasks")).toBeInTheDocument()
+    expect(screen.getByText("1 needs attention")).toBeInTheDocument()
+    expect(screen.getByText("1 running now")).toBeInTheDocument()
+    expect(screen.getByText("Next upcoming run")).toBeInTheDocument()
+    expect(screen.getByText(/2030/)).toBeInTheDocument()
+    expect(screen.getByText(/Watchlists remains the full workspace/)).toBeInTheDocument()
     expect(await screen.findByText("Review notes")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Create Reminder Task" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Edit" })).toBeInTheDocument()
@@ -202,6 +231,33 @@ describe("ScheduledTasksPage", () => {
       "/watchlists?tab=jobs"
     )
     expect(screen.queryByRole("button", { name: "Edit watchlist job" })).not.toBeInTheDocument()
+  })
+
+  it("shows a clear loading state while scheduled task data loads", async () => {
+    mocks.listScheduledTasks.mockReturnValue(new Promise(() => undefined))
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    expect(await screen.findByText("Loading tasks and latest run state")).toBeInTheDocument()
+  })
+
+  it("shows an actionable empty state when no scheduled tasks exist", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />)
+
+    expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create scheduled task" })).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Create a reminder now. Automation templates for GitHub, YouTube, RAG, and agents are planned follow-up phases."
+      )
+    ).toBeInTheDocument()
   })
 
   it("creates a reminder task from the editor and refreshes the list", async () => {
