@@ -3,6 +3,8 @@ import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { FirstRunState } from "@/types/setup-onboarding";
+
 const setupHookMocks = vi.hoisted(() => ({
   saveStep: vi.fn(),
   skip: vi.fn(),
@@ -17,6 +19,38 @@ const setupHookMocks = vi.hoisted(() => ({
   complete: vi.fn(),
   refresh: vi.fn(),
 }));
+
+const readinessHookMocks = vi.hoisted(() => ({
+  refresh: vi.fn(),
+}));
+
+const createDeferred = <T,>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
+
+const initialStateForCompletedSteps = (
+  completedSteps: string[],
+): FirstRunState => ({
+  status: "in_progress",
+  completed_steps: completedSteps,
+  skipped_steps: [],
+  step_data: {
+    providers: {
+      acknowledged: true,
+      default_provider: "openai",
+      default_model: "gpt-4.1-mini",
+      default_provider_credential_configured: true,
+    },
+  },
+  acknowledged_steps: [],
+  first_chat: { completed: false },
+});
 
 vi.mock("@/hooks/useSetupOnboarding", () => ({
   useSetupOnboarding: () => ({
@@ -67,6 +101,28 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
     saveOptionalAdvanced: setupHookMocks.saveOptionalAdvanced,
     verifyFirstChat: setupHookMocks.verifyFirstChat,
     complete: setupHookMocks.complete,
+  }),
+}));
+
+vi.mock("@/hooks/useSetupReadinessSummary", () => ({
+  useSetupReadinessSummary: () => ({
+    status: {
+      readiness_status: "ready_with_warnings",
+      lanes: [
+        { lane_id: "chat", label: "Chat", status: "ready" },
+        {
+          lane_id: "embeddings_rag",
+          label: "Embeddings/RAG",
+          status: "not_configured",
+        },
+        { lane_id: "speech", label: "Speech", status: "skipped" },
+      ],
+      active_overlays: [],
+      overlays: [],
+    },
+    loading: false,
+    error: null,
+    refresh: readinessHookMocks.refresh,
   }),
 }));
 
@@ -138,6 +194,12 @@ describe("UnifiedSetupWizard", () => {
       acknowledged_steps: [],
       first_chat: { completed: false },
     });
+    readinessHookMocks.refresh.mockReset().mockResolvedValue({
+      readiness_status: "ready_with_warnings",
+      lanes: [],
+      active_overlays: [],
+      overlays: [],
+    });
   });
 
   afterEach(() => {
@@ -149,6 +211,8 @@ describe("UnifiedSetupWizard", () => {
 
     render(<UnifiedSetupWizard />);
 
+    expect(screen.getByTestId("setup-readiness-panel")).toBeInTheDocument();
+    expect(screen.getByText("Embeddings/RAG")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: /first-time setup/i }),
     ).toBeInTheDocument();
@@ -363,9 +427,15 @@ describe("UnifiedSetupWizard", () => {
         }),
       );
     });
+    await waitFor(() => {
+      expect(readinessHookMocks.refresh).toHaveBeenCalledTimes(1);
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /save provider/i }));
     await screen.findByText(/saved as saved-key-present/i);
+    await waitFor(() => {
+      expect(readinessHookMocks.refresh).toHaveBeenCalledTimes(2);
+    });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
     await waitFor(() => {
@@ -379,6 +449,215 @@ describe("UnifiedSetupWizard", () => {
         },
       });
     });
+  });
+
+  it("does not keep provider validation or save pending while readiness refresh is unresolved", async () => {
+    const readinessRefreshes: Array<
+      ReturnType<typeof createDeferred<Record<string, unknown>>>
+    > = [];
+    readinessHookMocks.refresh.mockImplementation(() => {
+      const deferred = createDeferred<Record<string, unknown>>();
+      readinessRefreshes.push(deferred);
+      return deferred.promise;
+    });
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: ["setup_path", "privacy_security"],
+          skipped_steps: [],
+          step_data: {},
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText(/select openai/i));
+    fireEvent.change(screen.getByLabelText(/openai api key/i), {
+      target: { value: "test-api-key-value" },
+    });
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "gpt-4.1-mini" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /validate openai/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /validate openai/i }))
+        .toBeEnabled();
+    });
+    expect(screen.getByText(/first chat verifies/i)).toBeInTheDocument();
+    expect(readinessRefreshes).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /save provider/i }));
+
+    await screen.findByText(/saved as saved-key-present/i);
+    expect(screen.getByRole("button", { name: /save provider/i })).toBeEnabled();
+    expect(readinessRefreshes).toHaveLength(2);
+
+    for (const deferred of readinessRefreshes) {
+      deferred.resolve({
+        readiness_status: "ready_with_warnings",
+        lanes: [],
+        active_overlays: [],
+        overlays: [],
+      });
+    }
+  });
+
+  it("refreshes readiness after ingest defaults are saved", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={initialStateForCompletedSteps([
+          "setup_path",
+          "privacy_security",
+          "providers",
+        ])}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: /ingest defaults/i }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(setupHookMocks.saveIngestDefaults).toHaveBeenCalledWith(
+        expect.objectContaining({
+          allow_local_file_ingest: false,
+          chunking_profile: "balanced",
+          metadata_mode: "automatic",
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(readinessHookMocks.refresh).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("refreshes readiness after audio defaults are saved", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={initialStateForCompletedSteps([
+          "setup_path",
+          "privacy_security",
+          "providers",
+          "ingest_defaults",
+        ])}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: /audio, stt, and tts/i }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(setupHookMocks.saveAudioDefaults).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "skip",
+          stt_provider: null,
+          tts_provider: null,
+          tts_voice: null,
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(readinessHookMocks.refresh).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("refreshes readiness after optional advanced choices are saved", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={initialStateForCompletedSteps([
+          "setup_path",
+          "privacy_security",
+          "providers",
+          "ingest_defaults",
+          "audio_defaults",
+        ])}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: /optional advanced setup/i }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(setupHookMocks.saveOptionalAdvanced).toHaveBeenCalledWith({
+        rag: "defer",
+        storage_paths: "defer",
+      });
+    });
+    await waitFor(() => {
+      expect(readinessHookMocks.refresh).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("does not refresh readiness after first chat completion", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={initialStateForCompletedSteps([
+          "setup_path",
+          "privacy_security",
+          "providers",
+          "ingest_defaults",
+          "audio_defaults",
+          "optional_advanced",
+        ])}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: /first chat/i }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
+
+    await waitFor(() => {
+      expect(setupHookMocks.complete).toHaveBeenCalledWith({
+        acknowledged_steps: ["first_chat"],
+      });
+    });
+    await waitFor(() => {
+      expect(setupHookMocks.refresh).toHaveBeenCalledTimes(2);
+    });
+    expect(readinessHookMocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it("refreshes readiness after a failed skip attempt", async () => {
+    setupHookMocks.skip.mockRejectedValueOnce(new Error("skip failed"));
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(<UnifiedSetupWizard />);
+    fireEvent.click(screen.getByRole("button", { name: /skip for now/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /setup skip could not be saved/i,
+      );
+    });
+    expect(readinessHookMocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("wires the panel retry action to readiness refresh", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(<UnifiedSetupWizard />);
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(readinessHookMocks.refresh).toHaveBeenCalledTimes(1);
   });
 
   it("keeps validated provider gate available after back navigation", async () => {

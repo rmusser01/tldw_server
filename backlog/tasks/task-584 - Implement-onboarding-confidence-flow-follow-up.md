@@ -2,29 +2,23 @@
 id: TASK-584
 title: Implement onboarding confidence flow follow-up
 status: In Progress
+assignee: []
+created_date: ''
+updated_date: 2026-06-01 06:14
 labels:
 - onboarding
 - webui
 - setup
-priority: High
+dependencies: []
 documentation:
 - Docs/superpowers/specs/2026-06-01-onboarding-confidence-flow-design.md
 - Docs/superpowers/plans/2026-06-01-onboarding-confidence-flow-implementation-plan.md
+priority: high
 modified_files:
-- tldw_Server_API/app/api/v1/endpoints/setup.py
-- tldw_Server_API/app/api/v1/schemas/setup_schemas.py
-- tldw_Server_API/app/core/Setup/first_run_state.py
-- tldw_Server_API/app/core/Setup/setup_manager.py
-- tldw_Server_API/app/core/Setup/provider_validation.py
-- tldw_Server_API/tests/Setup/test_first_run_state.py
-- tldw_Server_API/tests/Setup/test_setup_provider_validation.py
-- tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
-- apps/packages/ui/src/types/setup-onboarding.ts
-- apps/packages/ui/src/components/Option/Onboarding/steps/ProviderSetupStep.tsx
+- apps/packages/ui/src/hooks/useSetupReadinessSummary.ts
+- apps/packages/ui/src/hooks/__tests__/useSetupReadinessSummary.test.tsx
 - apps/packages/ui/src/components/Option/Onboarding/UnifiedSetupWizard.tsx
-- apps/packages/ui/src/components/Option/Onboarding/__tests__/ProviderSetupStep.test.tsx
 - apps/packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx
-- backlog/tasks/task-584 - Implement-onboarding-confidence-flow-follow-up.md
 ---
 
 ## Description
@@ -36,7 +30,7 @@ Implement the approved onboarding confidence flow plan as one PR with four stage
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Default first-chat provider requires manual validation and save before continuing; non-default providers can be saved unverified.
-- [ ] #2 Setup readiness panel uses existing readiness APIs/types and remains non-blocking for optional lanes.
+- [x] #2 Setup readiness panel uses existing readiness APIs/types and remains non-blocking for optional lanes.
 - [ ] #3 First-chat failures render inline recovery actions: retry, edit provider, switch provider, skip setup, and endpoint recovery where relevant.
 - [ ] #4 Post-onboarding first-source milestone offers Web URL, File upload, and Paste text, and only offers grounded chat after source readiness is confirmed.
 - [ ] #5 Focused backend, frontend, E2E, Bandit, and diff verification are recorded before PR closeout.
@@ -44,6 +38,7 @@ Implement the approved onboarding confidence flow plan as one PR with four stage
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Implementation task opened before code edits per AGENTS.md. Controller will dispatch Task 1 provider validation gate implementer first, then run spec and code-quality reviews before moving to Task 2.
 - Task 1 provider validation gate implemented:
@@ -156,11 +151,37 @@ Implement the approved onboarding confidence flow plan as one PR with four stage
 - Task 1 final backend test expectation fix:
   - Updated `test_first_run_provider_validate_returns_typed_response_without_token_echo` to assert the full provider validation response schema, including `validation_level` and `can_gate_first_chat`, after the final spec review found the stale exact response assertion.
   - Focused backend suite: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Setup/test_first_run_state.py tldw_Server_API/tests/Setup/test_setup_provider_validation.py tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py` passed, `134 passed, 5 warnings`.
+- Task 2 setup readiness panel implemented:
+  - Added `useSetupReadinessSummary` as a thin first-run wrapper around `getSetupReadinessStatus({ mode: "first-run" })`.
+  - The hook loads on mount, exposes `status`, `loading`, sanitized fallback `error`, and `refresh`, and ignores stale refresh results when a newer request has already resolved.
+  - Added `SetupReadinessPanel` for the wizard shell using existing readiness response/lane types and backend lane labels/statuses.
+  - The panel renders compact Chat, Embeddings/RAG, and Speech lanes, readable overlay labels, collapsed warnings/blockers/effects details, and retry/loading/error states.
+  - Chat failed/blocked state is presented as first-chat blocking; Embeddings/RAG and Speech remain visibly deferrable for not configured, skipped, and overlay-blocked optional states.
+  - `UnifiedSetupWizard` now renders the readiness panel below the shell header and above the active step card.
+  - Wizard setup-changing actions refresh the readiness summary after provider validation/save, ingest defaults save, audio defaults save, optional advanced save, setup completion, and skip attempts.
+  - Backend files were not touched, so Bandit was not rerun for Task 2.
+- Task 2 verification:
+  - RED frontend: `bun run test:run ../packages/ui/src/hooks/__tests__/useSetupReadinessSummary.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/SetupReadinessPanel.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx --reporter=dot` from `apps/tldw-frontend` failed on missing hook/panel modules and missing wizard readiness rendering/refresh wiring.
+  - GREEN frontend: same focused command passed, `25 passed`.
+  - Post-cleanup frontend: same focused command passed, `25 passed`.
+  - `git diff --check` passed.
+  - `git diff --cached --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Task 2 spec-fix worker: useSetupReadinessSummary now fetches first-run status and profiles together, preserving status fields while filling missing lanes, lane ids, supported metadata, profiles, and active/other overlays from profiles when the status payload is empty. Added hook regression coverage for status-without-lanes plus profiles-with-lanes producing panel-ready lanes.
+
+Task 2 spec-fix worker: added wizard readiness refresh wiring coverage for ingest defaults save, audio defaults save, optional advanced save, first-chat completion, failed skip attempts, and the SetupReadinessPanel retry button. No backend files changed; Bandit not required.
+
+Task 2 spec-fix verification: RED hook focused run failed before implementation because getSetupReadinessProfiles was not called and status-without-lanes left lanes undefined. GREEN hook focused run passed, 5 passed. Requested focused frontend run from apps/tldw-frontend passed: 3 files, 32 tests.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
@@ -173,3 +194,31 @@ Implement the approved onboarding confidence flow plan as one PR with four stage
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 2 code-quality fix:
+- useSetupReadinessSummary now treats first-run readiness status as authoritative and only fails when the status request fails; profile enrichment is best-effort and profile failures keep the successful status visible with no hook error.
+- UnifiedSetupWizard no longer refreshes first-run readiness after terminal setup completion, avoiding a transient readiness error during route handoff; parent first-run state refresh/onComplete behavior remains covered.
+- Added regressions for status-success/profile-failure and completion without readiness refresh.
+- Focused frontend verification: `bun run test:run ../packages/ui/src/hooks/__tests__/useSetupReadinessSummary.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/SetupReadinessPanel.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx --reporter=dot` from `apps/tldw-frontend` passed, 3 files / 33 tests.
+- Backend files were not touched; Bandit not required.
+
+Task 2 quality fix:
+- Made UnifiedSetupWizard readiness refresh fire-and-forget after setup-changing provider validate/save, ingest defaults save, audio defaults save, optional advanced save, and skip attempts so primary button promises settle from their own action results instead of waiting for readiness status/profile requests.
+- Kept SetupReadinessPanel retry explicitly wired to the readiness refresh action and preserved no readiness refresh after terminal first-chat completion.
+- Added a deferred-readiness regression proving provider validation and provider save UI settle while readiness refresh promises remain unresolved.
+- RED frontend: `bun run test:run ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx -t "does not keep provider validation or save pending while readiness refresh is unresolved" --reporter=dot` from `apps/tldw-frontend` failed because the Validate button remained pending on unresolved readiness.
+- GREEN frontend: same targeted regression command passed, 1 passed / 20 skipped.
+- Focused frontend verification: `bun run test:run ../packages/ui/src/hooks/__tests__/useSetupReadinessSummary.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/SetupReadinessPanel.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx --reporter=dot` from `apps/tldw-frontend` passed, 3 files / 34 tests.
+- `git diff --check` passed before staging. `git diff --cached --check` passed after staging. Backend files were not touched; Bandit not required.
+Task 2 StrictMode quality fix:
+- Reset the `useSetupReadinessSummary` mounted guard during effect setup so React StrictMode setup-cleanup-setup cycles do not leave the hook permanently unmounted.
+- Added hook regression coverage rendering under `<React.StrictMode>` and asserting readiness reaches loaded state.
+- Preserved request-id stale result handling, best-effort profile fallback, and status-authoritative error semantics.
+- RED frontend: `bun run test:run ../packages/ui/src/hooks/__tests__/useSetupReadinessSummary.test.tsx --reporter=dot` from `apps/tldw-frontend` failed on the StrictMode regression with loading stuck true after an initial test-wrapper import fix.
+- GREEN focused frontend: same hook command passed, 1 file / 7 tests.
+- Required frontend suite: `bun run test:run ../packages/ui/src/hooks/__tests__/useSetupReadinessSummary.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/SetupReadinessPanel.test.tsx ../packages/ui/src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx --reporter=dot` from `apps/tldw-frontend` passed, 3 files / 35 tests.
+- Backend files were not touched; Bandit not required.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

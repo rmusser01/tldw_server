@@ -1,6 +1,7 @@
 import React from "react";
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader";
+import { useSetupReadinessSummary } from "@/hooks/useSetupReadinessSummary";
 import { useSetupOnboarding } from "@/hooks/useSetupOnboarding";
 import type {
   FirstRunMetadata,
@@ -21,6 +22,7 @@ import { IngestDefaultsStep } from "./steps/IngestDefaultsStep";
 import { AudioSetupStep } from "./steps/AudioSetupStep";
 import { OptionalAdvancedStep } from "./steps/OptionalAdvancedStep";
 import { FirstChatStep } from "./steps/FirstChatStep";
+import { SetupReadinessPanel } from "./SetupReadinessPanel";
 
 type WizardStep =
   | "setup_path"
@@ -106,6 +108,12 @@ export function UnifiedSetupWizard({
     initialMetadata,
     autoLoad: !initialState || !initialMetadata,
   });
+  const {
+    status: setupReadinessStatus,
+    loading: setupReadinessLoading,
+    error: setupReadinessError,
+    refresh: refreshSetupReadinessStatus,
+  } = useSetupReadinessSummary();
   const [step, setStep] = React.useState<WizardStep>(() =>
     stepFromState(initialState),
   );
@@ -183,6 +191,12 @@ export function UnifiedSetupWizard({
     return nextState;
   }, [onStateChange, refresh]);
 
+  const refreshSetupReadiness = React.useCallback(() => {
+    void refreshSetupReadinessStatus().catch((err) => {
+      console.warn("Setup readiness summary could not be refreshed", err);
+    });
+  }, [refreshSetupReadinessStatus]);
+
   const handlePathSelect = React.useCallback(
     (path: "docker" | "local" | "multi_user") => {
       if (path === "multi_user") {
@@ -249,28 +263,31 @@ export function UnifiedSetupWizard({
   const saveIngestAndPublish = React.useCallback(
     async (...args: Parameters<typeof saveIngestDefaults>) => {
       const response = await saveIngestDefaults(...args);
+      refreshSetupReadiness();
       await refreshParentState();
       return response;
     },
-    [refreshParentState, saveIngestDefaults],
+    [refreshParentState, refreshSetupReadiness, saveIngestDefaults],
   );
 
   const saveAudioAndPublish = React.useCallback(
     async (...args: Parameters<typeof saveAudioDefaults>) => {
       const response = await saveAudioDefaults(...args);
+      refreshSetupReadiness();
       await refreshParentState();
       return response;
     },
-    [refreshParentState, saveAudioDefaults],
+    [refreshParentState, refreshSetupReadiness, saveAudioDefaults],
   );
 
   const saveAdvancedAndPublish = React.useCallback(
     async (...args: Parameters<typeof saveOptionalAdvanced>) => {
       const response = await saveOptionalAdvanced(...args);
+      refreshSetupReadiness();
       await refreshParentState();
       return response;
     },
-    [refreshParentState, saveOptionalAdvanced],
+    [refreshParentState, refreshSetupReadiness, saveOptionalAdvanced],
   );
 
   const completeAndPublish = React.useCallback(
@@ -282,6 +299,28 @@ export function UnifiedSetupWizard({
     [complete, refreshParentState],
   );
 
+  const saveProviderAndRefreshReadiness = React.useCallback(
+    async (...args: Parameters<typeof saveProvider>) => {
+      try {
+        return await saveProvider(...args);
+      } finally {
+        refreshSetupReadiness();
+      }
+    },
+    [refreshSetupReadiness, saveProvider],
+  );
+
+  const validateProviderAndRefreshReadiness = React.useCallback(
+    async (...args: Parameters<typeof validateProvider>) => {
+      try {
+        return await validateProvider(...args);
+      } finally {
+        refreshSetupReadiness();
+      }
+    },
+    [refreshSetupReadiness, validateProvider],
+  );
+
   const handleSkip = React.useCallback(() => {
     setStepError(null);
     void skip({ reason: "user_skip" })
@@ -291,8 +330,11 @@ export function UnifiedSetupWizard({
       .catch((err) => {
         console.error("Setup skip could not be saved", err);
         setStepError("Setup skip could not be saved. Try again.");
+      })
+      .finally(() => {
+        void refreshSetupReadiness();
       });
-  }, [onStateChange, skip]);
+  }, [onStateChange, refreshSetupReadiness, skip]);
 
   if (loading && !state && !metadata) {
     return (
@@ -350,6 +392,13 @@ export function UnifiedSetupWizard({
         </div>
       ) : null}
 
+      <SetupReadinessPanel
+        status={setupReadinessStatus}
+        loading={setupReadinessLoading}
+        error={setupReadinessError}
+        onRetry={refreshSetupReadinessStatus}
+      />
+
       <div className="rounded-md border border-border bg-bg px-4 py-5 shadow-sm md:px-6">
         {step === "setup_path" ? (
           <SetupPathStep onSelect={handlePathSelect} />
@@ -377,8 +426,8 @@ export function UnifiedSetupWizard({
             savedDefaultProvider={providerSavedDefaultProvider}
             validationState={providerValidationState}
             providerEditRevisions={providerEditRevisions}
-            onSaveProvider={saveProvider}
-            onValidateProvider={validateProvider}
+            onSaveProvider={saveProviderAndRefreshReadiness}
+            onValidateProvider={validateProviderAndRefreshReadiness}
             onSavedProvidersChange={setProviderSavedProviders}
             onSavedPayloadFingerprintsChange={
               setProviderSavedPayloadFingerprints
