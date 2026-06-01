@@ -25,6 +25,11 @@ This section is organized by product surface so you can quickly find the right d
 - [Backups using Litestream](Server/Backups_Using_Litestream.md)
 - [CLI Reference](Server/CLI_Reference.md)
 
+### Chat and Characters
+
+- [Character Cards and Character Chat](Server/Character_Cards_User_Guide.md)
+- [Personas](Server/Personas_User_Guide.md)
+
 ### Ingestion, RAG, and Evaluations
 
 - [Media→Embeddings→RAG→Evals Workflow](Server/Media_to_RAG_Evals_Workflow.md)
