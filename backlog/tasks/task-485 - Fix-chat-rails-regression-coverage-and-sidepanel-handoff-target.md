@@ -1,7 +1,7 @@
 ---
 id: TASK-485
 title: Fix /chat rails regression coverage and sidepanel handoff target
-status: In Progress
+status: Done
 labels:
 - webui
 - chat
@@ -72,7 +72,10 @@ User rejected the closeout screenshots and validation because they did not show 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR: https://github.com/rmusser01/tldw_server/pull/2208
+
 Implemented same-side desktop edge expand affordances for collapsed /chat rails across the shared layout, artifact panel, and Next WebUI shell. Added focused Playwright coverage for left and right rail collapse/expand behavior, chat width release, vertical stability, composer docking, and no desktop edge buttons below the lg breakpoint.
+
 2026-06-01 sidepanel handoff slice: visible sidepanel chat actions now open real WebUI `/chat` with encoded handoff draft/context and WebUI `/chat` restores that handoff. Focused unit coverage and rail-collapse Playwright verification pass; extension handoff e2e is updated but remains blocked by the existing WXT production build hang before test execution.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
