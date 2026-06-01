@@ -6,7 +6,7 @@ import type {
 } from "@/types/dynamic-ui"
 
 const SUPPORTED_RENDERERS = new Set<DynamicUIRendererId>(["openui"])
-const SENSITIVE_KEY_PATTERN = /(password|token|secret|credential|api[_-]?key|auth)/i
+const SENSITIVE_KEY_SEGMENTS = new Set(["password", "token", "secret", "credential", "key", "auth"])
 const MAX_ACTION_STRING_LENGTH = 128
 const MAX_ACTION_VALUES_BYTES = 16_384
 const MAX_JSON_DEPTH = 8
@@ -50,6 +50,20 @@ const getSerializedByteLength = (value: string): number => {
   }
   return value.length
 }
+
+const keySegments = (key: string): string[] =>
+  key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .flatMap((segment) => {
+      const normalized = segment.toLowerCase()
+      return normalized === "apikey" ? ["api", "key"] : [normalized]
+    })
+    .filter(Boolean)
+
+const isSensitiveActionValueKey = (key: string): boolean =>
+  keySegments(key).some((segment) => SENSITIVE_KEY_SEGMENTS.has(segment))
 
 export const preflightOpenUISource = (source: unknown): { ok: boolean; reason?: string } => {
   if (typeof source !== "string") return { ok: false, reason: "source_not_string" }
@@ -126,7 +140,7 @@ export const shouldBlockDynamicUIActionValues = (value: unknown, depth = 0): boo
   if (!isRecord(value)) return false
   return Object.entries(value).some(
     ([key, entry]) =>
-      SENSITIVE_KEY_PATTERN.test(key) ||
+      isSensitiveActionValueKey(key) ||
       shouldBlockDynamicUIActionValues(entry, depth + 1)
   )
 }

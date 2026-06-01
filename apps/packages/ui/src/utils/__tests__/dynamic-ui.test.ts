@@ -73,6 +73,19 @@ describe("dynamic UI utilities", () => {
     expect(shouldBlockDynamicUIActionValues([{ settings: { authToken: "abc123" } }])).toBe(true)
   })
 
+  it("blocks top-level sensitive key variants", () => {
+    expect(shouldBlockDynamicUIActionValues({ key: "abc123" })).toBe(true)
+    expect(shouldBlockDynamicUIActionValues({ privateKey: "abc123" })).toBe(true)
+    expect(shouldBlockDynamicUIActionValues({ access_key: "abc123" })).toBe(true)
+    expect(shouldBlockDynamicUIActionValues({ "public-key": "abc123" })).toBe(true)
+  })
+
+  it("blocks nested sensitive key variants", () => {
+    expect(shouldBlockDynamicUIActionValues({ settings: { privateKey: "abc123" } })).toBe(true)
+    expect(shouldBlockDynamicUIActionValues([{ config: { access_key: "abc123" } }])).toBe(true)
+    expect(shouldBlockDynamicUIActionValues({ auth: { keys: [{ key: "abc123" }] } })).toBe(true)
+  })
+
   it("rejects non-serializable action values without throwing", () => {
     const circular: Record<string, unknown> = {}
     circular.self = circular
