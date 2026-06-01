@@ -175,6 +175,10 @@ git commit -m "fix: add chat left rail edge expand affordance"
 In `Playground.search.integration.test.tsx`, extend the `useMediaQuery` mock so tests can control both mobile and desktop:
 
 ```ts
+const mobileViewportState = vi.hoisted(() => ({
+  value: false
+}))
+
 const desktopViewportState = vi.hoisted(() => ({
   value: true
 }))

@@ -430,7 +430,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
               aria-hidden="true"
               className="rotate-180 text-[10px] font-semibold uppercase tracking-[0.16em] [writing-mode:vertical-rl]"
             >
-              Chats
+              {t("common:chatSidebar.title", "Chats") as string}
             </span>
           </button>
         )}

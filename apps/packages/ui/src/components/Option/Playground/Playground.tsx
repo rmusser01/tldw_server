@@ -139,6 +139,20 @@ import {
 import type { Character } from "@/types/character";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
 
+const readSidepanelChatWebUiHandoffFromLocation = () => {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(
+    window.location.hash.startsWith("#")
+      ? window.location.hash.slice(1)
+      : window.location.hash,
+  );
+  return decodeSidepanelChatWebUiHandoff(
+    hashParams.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM) ??
+      params.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM),
+  );
+};
+
 type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
 
 const getAssistantMessageRouteLabel = (
@@ -1284,6 +1298,9 @@ export const Playground = () => {
     if (routeCharacterIntentId) {
       return;
     }
+    if (readSidepanelChatWebUiHandoffFromLocation()) {
+      return;
+    }
 
     // 2. Fall back to existing webUIResumeLastChat behavior
     const isEnabled = await webUIResumeLastChat();
@@ -1405,9 +1422,7 @@ export const Playground = () => {
       params.get(SETTINGS_SERVER_CHAT_ID_PARAM)?.trim() || null;
     const researchReturnRunId =
       params.get(RESEARCH_RETURN_RUN_ID_PARAM)?.trim() || null;
-    const sidepanelHandoff = decodeSidepanelChatWebUiHandoff(
-      params.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM),
-    );
+    const sidepanelHandoff = readSidepanelChatWebUiHandoffFromLocation();
     return { historyId, serverChatId, researchReturnRunId, sidepanelHandoff };
   }, []);
 
@@ -1498,7 +1513,6 @@ export const Playground = () => {
 
   React.useEffect(() => {
     if (
-      !playgroundReady ||
       !sidepanelChatHandoff ||
       sidepanelHandoffAppliedRef.current
     ) {
@@ -1506,84 +1520,118 @@ export const Playground = () => {
     }
     sidepanelHandoffAppliedRef.current = true;
 
-    if (
-      sidepanelChatHandoff.serverChatId &&
-      sidepanelChatHandoff.serverChatId !== serverChatId
-    ) {
-      setServerChatId(sidepanelChatHandoff.serverChatId);
-    }
-    if (
-      sidepanelChatHandoff.selectedModel &&
-      sidepanelChatHandoff.selectedModel !== selectedModel
-    ) {
-      setSelectedModel(sidepanelChatHandoff.selectedModel);
-    }
-    if (
-      sidepanelChatHandoff.selectedSystemPrompt &&
-      sidepanelChatHandoff.selectedSystemPrompt !== selectedSystemPrompt
-    ) {
-      setSelectedSystemPrompt(sidepanelChatHandoff.selectedSystemPrompt);
-    }
-    if (
-      sidepanelChatHandoff.selectedQuickPrompt &&
-      sidepanelChatHandoff.selectedQuickPrompt !== selectedQuickPrompt
-    ) {
-      setSelectedQuickPrompt(sidepanelChatHandoff.selectedQuickPrompt);
-    }
-    if (
-      sidepanelChatHandoff.chatMode &&
-      sidepanelChatHandoff.chatMode !== chatMode
-    ) {
-      setChatMode(sidepanelChatHandoff.chatMode);
-    }
-    if (
-      typeof sidepanelChatHandoff.webSearch === "boolean" &&
-      sidepanelChatHandoff.webSearch !== webSearch
-    ) {
-      setWebSearch(sidepanelChatHandoff.webSearch);
-    }
-    if (
-      sidepanelChatHandoff.toolChoice &&
-      sidepanelChatHandoff.toolChoice !== toolChoice
-    ) {
-      setToolChoice(sidepanelChatHandoff.toolChoice);
-    }
-    if (
-      typeof sidepanelChatHandoff.temporaryChat === "boolean" &&
-      sidepanelChatHandoff.temporaryChat !== temporaryChat
-    ) {
-      setTemporaryChat(sidepanelChatHandoff.temporaryChat);
-    }
-    if (
-      typeof sidepanelChatHandoff.useOCR === "boolean" &&
-      sidepanelChatHandoff.useOCR !== useOCR
-    ) {
-      setUseOCR(sidepanelChatHandoff.useOCR);
-    }
+    let cancelled = false;
+    const applySidepanelHandoff = async () => {
+      if (
+        sidepanelChatHandoff.historyId &&
+        sidepanelChatHandoff.historyId !== historyId
+      ) {
+        await loadLocalConversation(sidepanelChatHandoff.historyId);
+      }
+      if (cancelled) return;
 
-    if (sidepanelChatHandoff.draft?.trim()) {
-      requestAnimationFrame(() => {
-        window.dispatchEvent(
-          new CustomEvent("tldw:set-composer-message", {
-            detail: {
-              message: sidepanelChatHandoff.draft,
-              ifEmptyOnly: true,
-            },
-          }),
+      if (
+        sidepanelChatHandoff.serverChatId &&
+        sidepanelChatHandoff.serverChatId !== serverChatId
+      ) {
+        setServerChatId(sidepanelChatHandoff.serverChatId);
+      }
+      if (
+        sidepanelChatHandoff.selectedModel &&
+        sidepanelChatHandoff.selectedModel !== selectedModel
+      ) {
+        setSelectedModel(sidepanelChatHandoff.selectedModel);
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(
+          sidepanelChatHandoff,
+          "selectedSystemPrompt",
+        )
+      ) {
+        const nextSystemPrompt =
+          sidepanelChatHandoff.selectedSystemPrompt ?? null;
+        if (nextSystemPrompt !== selectedSystemPrompt) {
+          setSelectedSystemPrompt(nextSystemPrompt);
+        }
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(
+          sidepanelChatHandoff,
+          "selectedQuickPrompt",
+        )
+      ) {
+        const nextQuickPrompt = sidepanelChatHandoff.selectedQuickPrompt ?? null;
+        if (nextQuickPrompt !== selectedQuickPrompt) {
+          setSelectedQuickPrompt(nextQuickPrompt);
+        }
+      }
+      if (
+        sidepanelChatHandoff.chatMode &&
+        sidepanelChatHandoff.chatMode !== chatMode
+      ) {
+        setChatMode(sidepanelChatHandoff.chatMode);
+      }
+      if (
+        typeof sidepanelChatHandoff.webSearch === "boolean" &&
+        sidepanelChatHandoff.webSearch !== webSearch
+      ) {
+        setWebSearch(sidepanelChatHandoff.webSearch);
+      }
+      if (
+        sidepanelChatHandoff.toolChoice &&
+        sidepanelChatHandoff.toolChoice !== toolChoice
+      ) {
+        setToolChoice(sidepanelChatHandoff.toolChoice);
+      }
+      if (
+        typeof sidepanelChatHandoff.temporaryChat === "boolean" &&
+        sidepanelChatHandoff.temporaryChat !== temporaryChat
+      ) {
+        setTemporaryChat(sidepanelChatHandoff.temporaryChat);
+      }
+      if (
+        typeof sidepanelChatHandoff.useOCR === "boolean" &&
+        sidepanelChatHandoff.useOCR !== useOCR
+      ) {
+        setUseOCR(sidepanelChatHandoff.useOCR);
+      }
+
+      if (sidepanelChatHandoff.draft?.trim()) {
+        requestAnimationFrame(() => {
+          window.dispatchEvent(
+            new CustomEvent("tldw:set-composer-message", {
+              detail: {
+                message: sidepanelChatHandoff.draft,
+                ifEmptyOnly: true,
+              },
+            }),
+          );
+        });
+      }
+
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
+        const hashParams = new URLSearchParams(
+          url.hash.startsWith("#") ? url.hash.slice(1) : url.hash,
         );
-      });
-    }
+        hashParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
+        const nextQuery = url.searchParams.toString();
+        const nextHash = hashParams.toString();
+        const nextPath = `${url.pathname}${nextQuery ? `?${nextQuery}` : ""}${nextHash ? `#${nextHash}` : ""}`;
+        window.history.replaceState(window.history.state, "", nextPath);
+      }
+    };
 
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href);
-      url.searchParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
-      const nextQuery = url.searchParams.toString();
-      const nextPath = `${url.pathname}${nextQuery ? `?${nextQuery}` : ""}${url.hash}`;
-      window.history.replaceState(window.history.state, "", nextPath);
-    }
+    void applySidepanelHandoff();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     chatMode,
-    playgroundReady,
+    historyId,
+    loadLocalConversation,
     selectedModel,
     selectedQuickPrompt,
     selectedSystemPrompt,

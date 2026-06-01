@@ -1,8 +1,9 @@
-import { SETTINGS_SERVER_CHAT_ID_PARAM } from "@/utils/settings-return"
 import type { ToolChoice } from "@/store/option"
 
 export const SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM = "handoff"
 export const SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE = "sidepanel-chat"
+export const SIDEPANEL_CHAT_WEBUI_HANDOFF_MAX_AGE_MS = 10 * 60 * 1000
+const SIDEPANEL_CHAT_WEBUI_HANDOFF_MAX_CLOCK_SKEW_MS = 60 * 1000
 const DEFAULT_WEBUI_URL = "http://127.0.0.1:8080"
 
 export type SidepanelChatWebUiConfig = {
@@ -46,12 +47,45 @@ const isToolChoice = (
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "")
 
-const normalizeBaseUrl = (value: string | null | undefined): string | null => {
+const hasOwn = (record: Record<string, unknown>, key: string) =>
+  Object.prototype.hasOwnProperty.call(record, key)
+
+const isHttpUrl = (url: URL) =>
+  url.protocol === "http:" || url.protocol === "https:"
+
+const normalizeNullableStringField = (
+  record: Record<string, unknown>,
+  key: string
+): string | null | undefined => {
+  if (!hasOwn(record, key)) return undefined
+  const raw = record[key]
+  if (raw == null) return null
+  if (typeof raw !== "string") return undefined
+  const trimmed = raw.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+const normalizeWebUiBaseUrl = (
+  value: string | null | undefined
+): string | null => {
   const trimmed = normalizeOptionalString(value)
   if (!trimmed) return null
   try {
     const url = new URL(trimmed)
-    return trimTrailingSlash(url.origin)
+    if (!isHttpUrl(url)) return null
+    const pathname = trimTrailingSlash(url.pathname)
+    return trimTrailingSlash(`${url.origin}${pathname === "/" ? "" : pathname}`)
+  } catch {
+    return null
+  }
+}
+
+const normalizeOriginBaseUrl = (value: string | null | undefined): URL | null => {
+  const trimmed = normalizeOptionalString(value)
+  if (!trimmed) return null
+  try {
+    const url = new URL(trimmed)
+    return isHttpUrl(url) ? url : null
   } catch {
     return null
   }
@@ -61,20 +95,16 @@ export const resolveSidepanelChatWebUiBaseUrl = (
   config: SidepanelChatWebUiConfig = {}
 ) => {
   const explicitWebUiUrl =
-    normalizeBaseUrl(config.webUiUrl) ?? normalizeBaseUrl(config.webuiUrl)
+    normalizeWebUiBaseUrl(config.webUiUrl) ??
+    normalizeWebUiBaseUrl(config.webuiUrl)
   if (explicitWebUiUrl) return explicitWebUiUrl
 
-  const serverUrl = normalizeOptionalString(config.serverUrl)
+  const serverUrl = normalizeOriginBaseUrl(config.serverUrl)
   if (serverUrl) {
-    try {
-      const url = new URL(serverUrl)
-      if (url.port === "8000") {
-        url.port = "8080"
-      }
-      return trimTrailingSlash(url.origin)
-    } catch {
-      // Fall through to the browser origin/default below.
+    if (serverUrl.port === "8000") {
+      serverUrl.port = "8080"
     }
+    return trimTrailingSlash(serverUrl.origin)
   }
 
   if (typeof window !== "undefined" && window.location?.origin) {
@@ -110,6 +140,15 @@ const decodeBase64Url = (value: string) => {
   return new TextDecoder().decode(bytes)
 }
 
+const isFreshHandoffCreatedAt = (createdAt: number) => {
+  if (!Number.isFinite(createdAt)) return false
+  const ageMs = Date.now() - createdAt
+  return (
+    ageMs <= SIDEPANEL_CHAT_WEBUI_HANDOFF_MAX_AGE_MS &&
+    ageMs >= -SIDEPANEL_CHAT_WEBUI_HANDOFF_MAX_CLOCK_SKEW_MS
+  )
+}
+
 export const encodeSidepanelChatWebUiHandoff = (
   payload: SidepanelChatWebUiHandoffPayload
 ) => encodeBase64Url(JSON.stringify(payload))
@@ -125,7 +164,8 @@ export const decodeSidepanelChatWebUiHandoff = (
     if (
       !parsed ||
       parsed.source !== SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE ||
-      typeof parsed.createdAt !== "number"
+      typeof parsed.createdAt !== "number" ||
+      !isFreshHandoffCreatedAt(parsed.createdAt)
     ) {
       return null
     }
@@ -134,24 +174,40 @@ export const decodeSidepanelChatWebUiHandoff = (
       source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
       createdAt: parsed.createdAt,
       draft: normalizeOptionalString(parsed.draft) ?? undefined,
-      historyId: normalizeOptionalString(parsed.historyId),
-      serverChatId: normalizeOptionalString(parsed.serverChatId),
+      historyId: normalizeNullableStringField(parsed, "historyId"),
+      serverChatId: normalizeNullableStringField(parsed, "serverChatId"),
       chatMode: isChatMode(parsed.chatMode) ? parsed.chatMode : undefined,
       webSearch:
         typeof parsed.webSearch === "boolean" ? parsed.webSearch : undefined,
       toolChoice: isToolChoice(parsed.toolChoice)
         ? parsed.toolChoice
         : undefined,
-      selectedModel: normalizeOptionalString(parsed.selectedModel),
-      selectedSystemPrompt: normalizeOptionalString(parsed.selectedSystemPrompt),
-      selectedQuickPrompt: normalizeOptionalString(parsed.selectedQuickPrompt),
+      selectedModel: normalizeNullableStringField(parsed, "selectedModel"),
+      selectedSystemPrompt: normalizeNullableStringField(
+        parsed,
+        "selectedSystemPrompt"
+      ),
+      selectedQuickPrompt: normalizeNullableStringField(
+        parsed,
+        "selectedQuickPrompt"
+      ),
       temporaryChat:
         typeof parsed.temporaryChat === "boolean"
           ? parsed.temporaryChat
           : undefined,
       useOCR: typeof parsed.useOCR === "boolean" ? parsed.useOCR : undefined,
-      title: normalizeOptionalString(parsed.title)
+      title: normalizeNullableStringField(parsed, "title")
     }
+  } catch {
+    return null
+  }
+}
+
+const buildWebUiChatUrl = (baseUrl: string): URL | null => {
+  try {
+    const base = new URL(`${baseUrl}/`)
+    if (!isHttpUrl(base)) return null
+    return new URL("chat", base)
   } catch {
     return null
   }
@@ -165,16 +221,16 @@ export const buildSidepanelChatWebUiHandoffUrl = ({
   payload: SidepanelChatWebUiHandoffPayload
 }) => {
   const webUiBaseUrl = resolveSidepanelChatWebUiBaseUrl(config)
-  const url = new URL("/chat", `${webUiBaseUrl}/`)
-  url.searchParams.set(
+  const url =
+    buildWebUiChatUrl(webUiBaseUrl) ??
+    buildWebUiChatUrl(DEFAULT_WEBUI_URL) ??
+    new URL("/chat", DEFAULT_WEBUI_URL)
+  const fragmentParams = new URLSearchParams()
+  fragmentParams.set(
     SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM,
     encodeSidepanelChatWebUiHandoff(payload)
   )
-
-  const serverChatId = normalizeOptionalString(payload.serverChatId)
-  if (serverChatId) {
-    url.searchParams.set(SETTINGS_SERVER_CHAT_ID_PARAM, serverChatId)
-  }
+  url.hash = fragmentParams.toString()
 
   return url.toString()
 }

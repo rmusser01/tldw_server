@@ -49,8 +49,11 @@ test.describe("Sidepanel / Options page handoff", () => {
       const openedUrl = new URL(newPage.url())
       expect(openedUrl.pathname).toBe("/chat")
       expect(openedUrl.href).not.toContain("/options.html")
+      expect(openedUrl.searchParams.has("handoff")).toBe(false)
 
-      const encodedHandoff = openedUrl.searchParams.get("handoff")
+      const encodedHandoff = new URLSearchParams(
+        openedUrl.hash.slice(1)
+      ).get("handoff")
       expect(encodedHandoff).toBeTruthy()
       const decodedHandoff = JSON.parse(
         Buffer.from(
