@@ -574,23 +574,9 @@ export const Playground = () => {
     : "max-w-[64rem]";
   const handleChatLayoutModeChange = React.useCallback(
     (mode: PlaygroundCockpitMode) => {
-      if (
-        mode === "cockpit" &&
-        !normalizedCockpitContextRailVisible &&
-        !normalizedCockpitRuntimeRailVisible
-      ) {
-        void setCockpitContextRailVisible(true);
-        void setCockpitRuntimeRailVisible(true);
-      }
       void setChatLayoutMode(mode);
     },
-    [
-      normalizedCockpitContextRailVisible,
-      normalizedCockpitRuntimeRailVisible,
-      setChatLayoutMode,
-      setCockpitContextRailVisible,
-      setCockpitRuntimeRailVisible,
-    ],
+    [setChatLayoutMode],
   );
 
   React.useEffect(() => {

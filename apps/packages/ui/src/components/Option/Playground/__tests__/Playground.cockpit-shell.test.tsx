@@ -1084,6 +1084,62 @@ describe("Playground cockpit shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("preserves both intentionally collapsed rails across focus and cockpit mode toggles", async () => {
+    render(<Playground />);
+
+    expect(
+      await screen.findByTestId("playground-cockpit-shell"),
+    ).toHaveAttribute("data-mode", "cockpit");
+
+    fireEvent.click(screen.getByRole("button", { name: /hide context rail/i }));
+    fireEvent.click(screen.getByRole("button", { name: /hide runtime rail/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
+      expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
+    });
+    expect(storageState.values.get("playgroundChatContextRailVisible")).toBe(
+      false,
+    );
+    expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
+      false,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /enter focus chat/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("playground-cockpit-shell")).toHaveAttribute(
+        "data-mode",
+        "focus",
+      );
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /show cockpit panels/i }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("playground-cockpit-shell")).toHaveAttribute(
+        "data-mode",
+        "cockpit",
+      );
+    });
+    expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
+    expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
+    expect(
+      screen.getByTestId("playground-cockpit-left-rail-restore"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("playground-cockpit-right-rail-restore"),
+    ).toBeInTheDocument();
+    expect(storageState.values.get("playgroundChatContextRailVisible")).toBe(
+      false,
+    );
+    expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
+      false,
+    );
+  });
+
   it("persists independent context and runtime rail visibility in cockpit mode", async () => {
     render(<Playground />);
 
