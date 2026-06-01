@@ -67,7 +67,7 @@ POST   /api/v1/characters
 GET    /api/v1/characters
 GET    /api/v1/characters/query
 GET    /api/v1/characters/filter
-GET    /api/v1/characters/search/
+GET    /api/v1/characters/search
 GET    /api/v1/characters/{character_id}
 PUT    /api/v1/characters/{character_id}
 DELETE /api/v1/characters/{character_id}
