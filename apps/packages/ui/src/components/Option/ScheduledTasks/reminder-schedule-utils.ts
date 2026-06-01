@@ -171,10 +171,10 @@ const validateCronFieldBase = (
     if (!weekdayResult.valid) return weekdayResult
 
     const nthNumber = Number(nth)
-    if (!Number.isInteger(nthNumber) || nthNumber < 1 || nthNumber > 5) {
+    if (!Number.isInteger(nthNumber) || nthNumber < 0 || nthNumber > 6) {
       return {
         valid: false,
-        error: "Cron day of week nth-weekday value must be between 1 and 5."
+        error: "Cron day of week nth-weekday value must be between 0 and 6."
       }
     }
     return { valid: true, error: null }
@@ -182,7 +182,7 @@ const validateCronFieldBase = (
 
   if (base.includes("-")) {
     const [start, end, extra] = base.split("-")
-    if (extra !== undefined || !start || !end) {
+    if (extra !== undefined || !start) {
       return {
         valid: false,
         error: `Cron ${options.label} range must look like ${options.min}-${options.max}.`
@@ -191,6 +191,17 @@ const validateCronFieldBase = (
 
     const startResult = parseCronFieldValue(start, options)
     if (!startResult.valid) return startResult
+
+    if (!end) {
+      if (isNamedCronFieldValue(start, options)) {
+        return { valid: true, error: null }
+      }
+      return {
+        valid: false,
+        error: `Cron ${options.label} range must look like ${options.min}-${options.max}.`
+      }
+    }
+
     const endResult = parseCronFieldValue(end, options)
     if (!endResult.valid) return endResult
 
@@ -203,7 +214,8 @@ const validateCronFieldBase = (
 
     const startOrder = getCronFieldOrderValue(start, options)
     const endOrder = getCronFieldOrderValue(end, options)
-    if (startOrder !== null && endOrder !== null && startOrder > endOrder) {
+    const isNameToNumericRange = isNamedCronFieldValue(start, options) && /^\d+$/.test(end)
+    if (!isNameToNumericRange && startOrder !== null && endOrder !== null && startOrder > endOrder) {
       return {
         valid: false,
         error: `Cron ${options.label} range start must be less than or equal to the end.`

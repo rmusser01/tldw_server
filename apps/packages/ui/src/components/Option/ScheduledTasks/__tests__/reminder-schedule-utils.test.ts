@@ -94,6 +94,36 @@ describe("reminder schedule utilities", () => {
     })
   })
 
+  it("allows APScheduler-valid name-to-numeric and open named ranges", () => {
+    expect(validateCronExpression("0 9 * dec-1 mon")).toEqual({
+      valid: true,
+      error: null
+    })
+    expect(validateCronExpression("0 9 * * sun-0")).toEqual({
+      valid: true,
+      error: null
+    })
+    expect(validateCronExpression("0 9 * jan- mon")).toEqual({
+      valid: true,
+      error: null
+    })
+    expect(validateCronExpression("0 9 * * mon-")).toEqual({
+      valid: true,
+      error: null
+    })
+  })
+
+  it("allows APScheduler-valid nth weekday bounds", () => {
+    expect(validateCronExpression("0 9 * * mon#0")).toEqual({
+      valid: true,
+      error: null
+    })
+    expect(validateCronExpression("0 9 * * mon#6")).toEqual({
+      valid: true,
+      error: null
+    })
+  })
+
   it("rejects scheduler-invalid cron ranges", () => {
     expect(validateCronExpression("99 99 * * *")).toEqual({
       valid: false,

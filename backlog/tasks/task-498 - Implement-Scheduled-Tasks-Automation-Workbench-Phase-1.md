@@ -38,6 +38,8 @@ documentation:
   month ranges; focused utility/page Vitest passed 37 tests.'
 - 'Final review follow-up: rejected APScheduler-invalid numeric-to-name month and
   weekday ranges; focused utility/page Vitest passed 38 tests.'
+- 'Final review follow-up: allowed APScheduler-valid name-to-number and open named
+  ranges plus nth weekday bounds; focused utility/page Vitest passed 40 tests.'
 priority: high
 modified_files:
 - apps/packages/ui/src/components/Option/ScheduledTasks/ReminderScheduleControls.tsx
