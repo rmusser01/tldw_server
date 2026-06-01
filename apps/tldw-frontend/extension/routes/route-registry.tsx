@@ -133,6 +133,10 @@ const OptionTldwSettings = createSettingsRoute(
   () => import("~/components/Option/Settings/tldw"),
   "TldwSettings"
 )
+const OptionProviderKeysSettings = createSettingsRoute(
+  () => import("~/components/Option/Settings/ProviderKeysSettings"),
+  "ProviderKeysSettings"
+)
 const OptionMedia = lazy(() => import("./option-media"))
 const OptionMediaCollection = lazy(() => import("./option-media-collection"))
 const OptionMediaMulti = lazy(() => import("./option-media-multi"))
@@ -274,6 +278,17 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       labelToken: "settings:tldw.serverNav",
       icon: ServerIcon,
       order: 1
+    }
+  },
+  {
+    kind: "options",
+    path: "/settings/provider-keys",
+    element: <OptionProviderKeysSettings />,
+    nav: {
+      group: "server",
+      labelToken: "settings:providerKeys.navTitle",
+      icon: ServerIcon,
+      order: 1.5
     }
   },
   {
