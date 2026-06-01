@@ -93,6 +93,7 @@ What changed:
 - Added `companion-home` as the first shared header shortcut ID and as a required ID so old persisted filtered selections are coerced forward.
 - Added Companion Home to shortcut metadata with `/` target, Start group placement, House icon, hosted-mode visibility, and persona/default coverage.
 - Updated current launcher and legacy sheet active-state logic to use exact route matching, including `NavLink end`, so `/chat` and nested chat routes do not mark Companion Home or Chat incorrectly.
+- Made legacy sheet keyboard-selection styling distinct from route-current styling so the initially selected Companion Home row does not visually read as current on `/chat`.
 
 Verification:
 - `bunx vitest run src/components/Layouts/__tests__/ChatHeader.test.tsx src/components/Layouts/__tests__/HeaderShortcuts.test.tsx src/components/Layouts/__tests__/header-shortcut-items.hosted.test.ts src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts src/services/__tests__/ui-settings.header-shortcuts.test.ts` from `apps/packages/ui`: 5 files passed, 61 tests passed.

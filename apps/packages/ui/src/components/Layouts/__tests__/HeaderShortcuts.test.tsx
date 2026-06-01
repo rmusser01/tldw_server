@@ -436,8 +436,6 @@ describe("HeaderShortcuts launcher modal", () => {
     const companionHome = getShortcutLink(legacySheet, "Companion Home")
     const chat = getShortcutLink(legacySheet, "Chat")
 
-    fireEvent.mouseEnter(chat)
-
     expect(companionHome).not.toHaveClass("border-border")
     expect(companionHome).not.toHaveAttribute("aria-current")
     expect(chat).toHaveClass("border-border")
@@ -456,9 +454,9 @@ describe("HeaderShortcuts launcher modal", () => {
     const companionHome = getShortcutLink(legacySheet, "Companion Home")
     const chat = getShortcutLink(legacySheet, "Chat")
 
-    fireEvent.mouseEnter(chat)
-
+    expect(companionHome).not.toHaveClass("border-border")
     expect(companionHome).not.toHaveAttribute("aria-current")
+    expect(chat).not.toHaveClass("border-border")
     expect(chat).not.toHaveAttribute("aria-current")
   })
 

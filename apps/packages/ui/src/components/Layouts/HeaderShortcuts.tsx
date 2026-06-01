@@ -584,10 +584,11 @@ export function HeaderShortcuts({
                             aria-selected={isSelected}
                             className={cn(
                               "flex w-full items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs transition-colors sm:w-auto sm:text-sm",
-                              isCurrentRoute && "border-border bg-surface text-text",
-                              isSelected
+                              isCurrentRoute
                                 ? "border-border bg-surface text-text"
-                                : "border-transparent text-text-muted hover:border-border hover:bg-surface"
+                                : isSelected
+                                  ? "border-focus/60 bg-surface2 text-text"
+                                  : "border-transparent text-text-muted hover:border-border hover:bg-surface"
                             )}
                           >
                             <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
