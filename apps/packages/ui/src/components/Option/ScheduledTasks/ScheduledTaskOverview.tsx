@@ -1,7 +1,10 @@
 import React from "react"
 import { Card, Col, Row, Tag, Typography } from "antd"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
-import { getScheduledTaskProductStatus } from "./scheduled-task-status"
+import {
+  SCHEDULED_TASK_ATTENTION_STATUS_KEYS,
+  getScheduledTaskProductStatus
+} from "./scheduled-task-status"
 
 export interface ScheduledTaskOverviewProps {
   tasks: ScheduledTask[]
@@ -12,6 +15,7 @@ const countLabel = (count: number, singular: string, plural = `${singular}s`): s
   `${count} ${count === 1 ? singular : plural}`
 
 const getTimestamp = (task: ScheduledTask): number | null => {
+  if (!task.enabled) return null
   if (!task.next_run_at) return null
 
   const timestamp = new Date(task.next_run_at).getTime()
@@ -69,10 +73,10 @@ export const ScheduledTaskOverview: React.FC<ScheduledTaskOverviewProps> = ({
 }) => {
   const statuses = tasks.map(getScheduledTaskProductStatus)
   const needsAttentionCount = statuses.filter(
-    (status) => status.label === "Needs attention"
+    (status) => SCHEDULED_TASK_ATTENTION_STATUS_KEYS.includes(status.key)
   ).length
   const runningNowCount = statuses.filter(
-    (status) => status.label === "Running now"
+    (status) => status.key === "running"
   ).length
   const nextRunTimestamp = findNextRunTimestamp(tasks)
 

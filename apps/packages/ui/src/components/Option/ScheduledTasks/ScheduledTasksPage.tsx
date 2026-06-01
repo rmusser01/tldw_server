@@ -293,12 +293,14 @@ export const ScheduledTasksPage: React.FC = () => {
             </Empty>
           ) : null}
 
-          <ScheduledTaskTable
-            tasks={tasks}
-            onCreateReminder={openCreateReminder}
-            onEditReminder={openEditReminder}
-            onDeleteReminder={handleDeleteReminder}
-          />
+          {hasLoadedTasks && tasks.length > 0 ? (
+            <ScheduledTaskTable
+              tasks={tasks}
+              onCreateReminder={openCreateReminder}
+              onEditReminder={openEditReminder}
+              onDeleteReminder={handleDeleteReminder}
+            />
+          ) : null}
 
           <ReminderTaskEditor
             open={editorOpen}

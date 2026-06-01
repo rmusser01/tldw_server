@@ -7,7 +7,19 @@ export type ScheduledTaskStatusTone =
   | "error"
   | "default"
 
+export type ScheduledTaskStatusKey =
+  | "needs_attention"
+  | "blocked"
+  | "running"
+  | "waiting"
+  | "found_results"
+  | "paused"
+  | "disabled"
+  | "draft"
+  | "completed"
+
 export interface ScheduledTaskProductStatus {
+  key: ScheduledTaskStatusKey
   label: string
   tone: ScheduledTaskStatusTone
   description: string
@@ -64,6 +76,11 @@ const RESULT_COUNT_KEYS = [
   "results_count",
   "output_count",
   "outputs_count"
+] as const
+
+export const SCHEDULED_TASK_ATTENTION_STATUS_KEYS: readonly ScheduledTaskStatusKey[] = [
+  "needs_attention",
+  "blocked"
 ] as const
 
 const emptyWatchlistTaskLinks = (settingsUrl: string | null): WatchlistTaskLinks => ({
@@ -123,6 +140,7 @@ export const getScheduledTaskProductStatus = (
 ): ScheduledTaskProductStatus => {
   if (!task.enabled) {
     return {
+      key: "disabled",
       label: "Disabled",
       tone: "default",
       description: "This task is turned off and will not run until enabled."
@@ -134,6 +152,7 @@ export const getScheduledTaskProductStatus = (
 
   if (statusIncludes(status, ["draft"])) {
     return {
+      key: "draft",
       label: "Draft",
       tone: "default",
       description: "This task is saved as a draft and is not ready to run."
@@ -142,6 +161,7 @@ export const getScheduledTaskProductStatus = (
 
   if (statusIncludes(status, ["running", "active", "processing", "in_progress"])) {
     return {
+      key: "running",
       label: "Running now",
       tone: "processing",
       description: "This task is currently running."
@@ -152,6 +172,7 @@ export const getScheduledTaskProductStatus = (
     statusIncludes(status, ["blocked", "auth", "permission", "unavailable", "dependency"])
   ) {
     return {
+      key: "blocked",
       label: "Blocked",
       tone: "warning",
       description: "This task cannot run until a required dependency is fixed."
@@ -162,6 +183,7 @@ export const getScheduledTaskProductStatus = (
     statusIncludes(status, ["fail", "failed", "failing", "failure", "error", "missed"])
   ) {
     return {
+      key: "needs_attention",
       label: "Needs attention",
       tone: "error",
       description: "This task hit a problem during its latest run."
@@ -183,6 +205,7 @@ export const getScheduledTaskProductStatus = (
     hasPositiveResultSignal(sourceRef)
   ) {
     return {
+      key: "found_results",
       label: "Found results",
       tone: "success",
       description: "This task has produced results that are ready to review."
@@ -191,6 +214,7 @@ export const getScheduledTaskProductStatus = (
 
   if (statusIncludes(status, ["paused"])) {
     return {
+      key: "paused",
       label: "Paused",
       tone: "warning",
       description: "This task is paused and will not run again until resumed."
@@ -201,6 +225,7 @@ export const getScheduledTaskProductStatus = (
     statusIncludes(status, ["complete", "completed", "success", "done", "finished"])
   ) {
     return {
+      key: "completed",
       label: "Completed last run",
       tone: "success",
       description: "This task completed its latest run successfully."
@@ -208,6 +233,7 @@ export const getScheduledTaskProductStatus = (
   }
 
   return {
+    key: "waiting",
     label: "Waiting for next run",
     tone: "processing",
     description: "This task is enabled and waiting for its next scheduled run."

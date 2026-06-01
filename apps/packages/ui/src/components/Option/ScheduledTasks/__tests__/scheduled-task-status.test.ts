@@ -19,6 +19,7 @@ describe("scheduled task status helpers", () => {
         source_ref: { job_id: 1 }
       })
     ).toMatchObject({
+      key: "disabled",
       label: "Disabled",
       tone: "default"
     })
@@ -36,9 +37,44 @@ describe("scheduled task status helpers", () => {
         source_ref: {}
       })
     ).toMatchObject({
+      key: "needs_attention",
       label: "Needs attention",
       tone: "error"
     })
+  })
+
+  it("exposes stable status keys for overview metrics and filters", () => {
+    const baseTask = {
+      id: "watchlist_job:status-key",
+      primitive: "watchlist_job" as const,
+      title: "Status key monitor",
+      enabled: true,
+      edit_mode: "external" as const,
+      source_ref: {}
+    }
+
+    expect(getScheduledTaskProductStatus({ ...baseTask, status: "blocked" }).key).toBe(
+      "blocked"
+    )
+    expect(getScheduledTaskProductStatus({ ...baseTask, status: "running" }).key).toBe(
+      "running"
+    )
+    expect(
+      getScheduledTaskProductStatus({
+        ...baseTask,
+        status: "scheduled",
+        source_ref: { result_count: 2 }
+      }).key
+    ).toBe("found_results")
+    expect(getScheduledTaskProductStatus({ ...baseTask, status: "paused" }).key).toBe(
+      "paused"
+    )
+    expect(getScheduledTaskProductStatus({ ...baseTask, status: "completed" }).key).toBe(
+      "completed"
+    )
+    expect(getScheduledTaskProductStatus({ ...baseTask, status: "scheduled" }).key).toBe(
+      "waiting"
+    )
   })
 
   it("distinguishes blocked, found-results, and draft states", () => {

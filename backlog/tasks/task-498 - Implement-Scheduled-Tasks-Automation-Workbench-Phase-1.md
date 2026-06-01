@@ -4,25 +4,23 @@ title: Implement Scheduled Tasks Automation Workbench Phase 1
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-01 19:33'
+updated_date: 2026-06-01 19:33
 labels:
-  - scheduled-tasks
-  - webui
-  - ux
-  - phase-1
+- scheduled-tasks
+- webui
+- ux
+- phase-1
 dependencies: []
 references:
-  - TASK-496
-  - TASK-494
-  - >-
-    Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
-  - >-
-    Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
+- TASK-496
+- TASK-494
+- Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
+- Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
-  - >-
-    Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
+- Docs/superpowers/specs/2026-06-01-scheduled-tasks-automation-workbench-prd-design.md
+- Docs/superpowers/plans/2026-06-01-scheduled-tasks-automation-workbench-phase1-implementation-plan.md
+- 'Task 2 follow-up: stable status keys; disabled next-run filtering; empty state
+  table suppression.'
 priority: high
 ---
 
@@ -53,6 +51,7 @@ Task 1 review clarification: failure-like status tokens (fail, error, missed) ta
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Task 2 code-quality follow-up: added stable product status keys for overview and future filters, counted blocked tasks as needing attention, ignored disabled tasks when selecting the next upcoming run, and suppressed the table on the empty state. Verification: scheduled-task-status.test.ts passed 10 tests; ScheduledTasksPage.test.tsx passed 14 tests; git diff --check passed. Bandit skipped because the touched implementation scope is TypeScript/TSX plus Backlog metadata only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
