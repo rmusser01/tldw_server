@@ -29,7 +29,7 @@ Write and review the design spec for Codex support in the ACP/agent orchestratio
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-['Draft spec written at Docs/superpowers/specs/2026-06-01-acp-codex-orchestration-design.md. Next step is spec review loop before user review gate.']
+['Spec review completed. Status: Approved. Blocking issues: none. Advisory recommendations: implementation plan should explicitly target the First Implementation Slice and defer Stage 3-5; planning should clarify native_acp launch-field resolution so existing profiles are not regressed; open questions 1-2 affect certification/setup docs while 3-5 belong to later app-server/event-model stages.']
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

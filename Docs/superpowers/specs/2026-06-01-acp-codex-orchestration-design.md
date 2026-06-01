@@ -1,7 +1,7 @@
 # Codex ACP Adapter and App-Server Orchestration Design
 
 Date: 2026-06-01
-Status: Draft for spec review
+Status: Spec review approved; awaiting user review
 Tracking: TASK-582
 
 ## Summary
