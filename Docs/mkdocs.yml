@@ -68,26 +68,54 @@ copyright: |
   © 2024-2025 tldw_Server - v0.1.31 - <a href="https://github.com/rmusser01/tldw_server">GitHub</a>
 
 nav:
-  - Home: Getting_Started/README.md
-  - Overview: Overview/Feature_Status.md
+  - Home: User_Guides/index.md
   - Getting Started: Getting_Started/README.md
+  - Feature Status: Overview/Feature_Status.md
+  - User Guides:
+      - Documentation Map: User_Guides/index.md
+      - Feature Map: User_Guides/Feature_Map.md
+      - WebUI and Extension:
+          - WebUI User Guide: User_Guides/WebUI_Extension/User_Guide.md
+          - Chat Pages: User_Guides/WebUI_Extension/Chat_Pages.md
+          - STT and TTS Quickstart: User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md
+          - Chatbooks: User_Guides/WebUI_Extension/Chatbook_User_Guide.md
+          - Flashcards: User_Guides/WebUI_Extension/Flashcards_Study_Guide.md
+      - Server:
+          - Authentication Setup: User_Guides/Server/Authentication_Setup.md
+          - Production Hardening: User_Guides/Server/Production_Hardening_Checklist.md
+          - Organizations and Sharing: User_Guides/Server/Organizations_and_Sharing.md
+          - BYOK User Guide: User_Guides/Server/BYOK_User_Guide.md
+          - Usage Module: User_Guides/Server/Usage_Module.md
+      - Integrations and Experiments:
+          - Getting Started with ACP: User_Guides/Integrations_Experiments/Getting_Started_with_ACP.md
+          - Local LLM Setup: User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md
   - API:
+      - API Documentation Index: API-related/API_README.md
+      - API Tag Index: API-related/API_Tags_Index.md
+      - Chat API: API-related/Chat_API_Documentation.md
+      - RAG API: API-related/RAG-API-Guide.md
+      - Embeddings API: API-related/Embeddings_API_Documentation.md
+      - Audio Transcription API: API-related/Audio_Transcription_API.md
+      - TTS API: API-related/TTS_API.md
+      - Evaluations API: API-related/Evaluations_API_Unified_Reference.md
+      - Media Ingest Jobs API: API-related/Media_Ingest_Jobs_API.md
       - Chat Workflows API: API-related/Chat_Workflows_API.md
       - Collections Feeds API: API-related/Collections_Feeds_API.md
       - Ingestion Sources API: API-related/Ingestion_Sources_API.md
       - Prompt Studio API: API-related/Prompt_Studio_API.md
+  - Deployment:
+      - First-Time Production Setup: Deployment/First_Time_Production_Setup.md
+      - Long-Term Admin Guide: Deployment/Long_Term_Admin_Guide.md
+      - Sidecar Workers: Deployment/Sidecar_Workers.md
+      - Resource Requirements: Deployment/resource-requirements.md
+  - Monitoring:
+      - Metrics Cheatsheet: Monitoring/Metrics_Cheatsheet.md
+      - Alerts: Monitoring/Alerts/README.md
   - Code:
+      - Code Documentation Index: Code_Documentation/index.md
       - Embeddings Documentation: Code_Documentation/Embeddings-Documentation.md
       - Tutorial System Developer Guide: Code_Documentation/Tutorial_System_Developer_Guide.md
       - Documentation Site Guide: Code_Documentation/Docs_Site_Guide.md
       - AuthNZ Code Guide: Code_Documentation/Guides/AuthNZ_Code_Guide.md
-  - Deployment:
-      - First-Time Production Setup: Deployment/First_Time_Production_Setup.md
-      - Long-Term Admin Guide: Deployment/Long_Term_Admin_Guide.md
   - Environment Variables: Env_Vars.md
-  - Monitoring:
-      - Metrics Cheatsheet: Monitoring/Metrics_Cheatsheet.md
-      - Alerts: Monitoring/Alerts/README.md
-  - User Guides:
-      - Authentication Setup: User_Guides/Server/Authentication_Setup.md
   - Release Notes: RELEASE_NOTES.md
